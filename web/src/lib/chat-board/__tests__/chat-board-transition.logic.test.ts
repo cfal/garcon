@@ -39,7 +39,7 @@ describe('Chat Board transition projection', () => {
 		const preview = projectChatBoardTransition({
 			board,
 			source: board.columns[0],
-			target: board.columns[1],
+			target: { kind: 'column', column: board.columns[1] },
 			currentTags: ['frontend', 'project-x', 'ready', 'shared'],
 			selectedTargetTags: ['review', 'shared'],
 		});
@@ -48,6 +48,23 @@ describe('Chat Board transition projection', () => {
 		expect(preview.addedTags).toEqual(['review']);
 		expect(preview.resultingTags).toEqual(['frontend', 'review', 'shared']);
 		expect(preview.matchingColumnIds).toEqual([board.columns[1].id, board.columns[2].id]);
+		expect(preview.sourceStillMatches).toBe(false);
+		expect(preview.isNoop).toBe(false);
+	});
+
+	it('applies no destination tags for None and preserves unrelated tags', () => {
+		const preview = projectChatBoardTransition({
+			board,
+			source: board.columns[0],
+			target: { kind: 'none' },
+			currentTags: ['frontend', 'project-x', 'ready'],
+			selectedTargetTags: [],
+		});
+
+		expect(preview.removedTags).toEqual(['project-x', 'ready']);
+		expect(preview.addedTags).toEqual([]);
+		expect(preview.resultingTags).toEqual(['frontend']);
+		expect(preview.matchingColumnIds).toEqual([board.columns[2].id]);
 		expect(preview.sourceStillMatches).toBe(false);
 		expect(preview.isNoop).toBe(false);
 	});

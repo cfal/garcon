@@ -55,9 +55,9 @@ function chat(): ChatSessionRecord {
 	};
 }
 
-async function controller() {
+async function controller(selectedBoard: ChatBoard = board) {
 	const api = {
-		load: vi.fn(async () => ({ revision: 4, boards: [board] })),
+		load: vi.fn(async () => ({ revision: 4, boards: [selectedBoard] })),
 		create: vi.fn(),
 		update: vi.fn(),
 		remove: vi.fn(),
@@ -68,7 +68,7 @@ async function controller() {
 		invalidations: new ChatBoardInvalidationHub(),
 		preferences: {
 			get selectedBoardId() {
-				return board.id;
+				return selectedBoard.id;
 			},
 			setSelectedBoardId() {},
 			get itemLayout() {
@@ -122,15 +122,110 @@ describe('ChatBoardTransitionDialog', () => {
 		expect(screen.getAllByText('ready')).toHaveLength(2);
 		await fireEvent.click(apply);
 
-		await waitFor(() => expect(onApplied).toHaveBeenCalledWith('chat-1', target.id));
+		await waitFor(() =>
+			expect(onApplied).toHaveBeenCalledWith('chat-1', {
+				kind: 'column',
+				columnId: target.id,
+				selectedTargetTags: ['review'],
+			}),
+		);
 		expect(transition).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			boardId: board.id,
 			sourceColumnId: source.id,
-			targetColumnId: target.id,
+			target: {
+				kind: 'column',
+				columnId: target.id,
+				selectedTargetTags: ['review'],
+			},
 			expectedCatalogRevision: 4,
 			expectedTags: ['context', 'ready'],
-			selectedTargetTags: ['review'],
+		});
+	});
+
+	it('offers None explicitly on a one-column board and preserves unrelated tags', async () => {
+		const sourceOnlyBoard = { ...board, columns: [source] };
+		const transition = vi.fn(async (_request: TransitionChatTagsRequest) => ({
+			success: true as const,
+			chatId: 'chat-1',
+			tags: ['context'],
+			addedTags: [],
+			removedTags: ['ready'],
+		}));
+		const sessions = new ChatSessionsStore({ transitionChatTags: transition });
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		const onApplied = vi.fn();
+		render(ChatBoardTransitionDialog, {
+			open: true,
+			controller: await controller(sourceOnlyBoard),
+			sessions,
+			board: sourceOnlyBoard,
+			occurrence: { key: `${source.id}:chat-1`, columnId: source.id, chat: chat() },
+			onClose: vi.fn(),
+			onApplied,
+		});
+
+		const destination = screen.getByRole('combobox', { name: 'Choose a destination' });
+		const apply = screen.getByRole('button', { name: 'Apply tag changes' });
+		expect((destination as HTMLSelectElement).value).toBe('');
+		expect(apply.hasAttribute('disabled')).toBe(true);
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.getByText('Choose an action', { selector: 'p' })).toBeTruthy();
+
+		await fireEvent.change(destination, { target: { value: 'none' } });
+		expect(
+			screen.getByText(
+				'None applies no destination tags. Tags unrelated to the source column remain.',
+			),
+		).toBeTruthy();
+		expect(apply.hasAttribute('disabled')).toBe(false);
+		await fireEvent.click(apply);
+
+		const expectedTarget = { kind: 'none' as const };
+		await waitFor(() => expect(onApplied).toHaveBeenCalledWith('chat-1', expectedTarget));
+		expect(transition).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			boardId: board.id,
+			sourceColumnId: source.id,
+			target: expectedTarget,
+			expectedCatalogRevision: 4,
+			expectedTags: ['context', 'ready'],
+		});
+	});
+
+	it('keeps an explicit None target while reviewing newer tags', async () => {
+		const transition = vi.fn(async (_request: TransitionChatTagsRequest) => ({
+			success: true as const,
+			chatId: 'chat-1',
+			tags: ['context', 'extra'],
+			addedTags: [],
+			removedTags: ['ready'],
+		}));
+		const sessions = new ChatSessionsStore({ transitionChatTags: transition });
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		render(ChatBoardTransitionDialog, {
+			open: true,
+			controller: await controller(),
+			sessions,
+			board,
+			occurrence: { key: `${source.id}:chat-1`, columnId: source.id, chat: chat() },
+			onClose: vi.fn(),
+			onApplied: vi.fn(),
+		});
+
+		const destination = screen.getByRole('combobox', { name: 'Choose a destination' });
+		await fireEvent.change(destination, { target: { value: 'none' } });
+		sessions.patchChat('chat-1', { tags: ['context', 'extra', 'ready'] });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Review latest changes' }));
+		expect((destination as HTMLSelectElement).value).toBe('none');
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply tag changes' }));
+
+		await waitFor(() => expect(transition).toHaveBeenCalledOnce());
+		expect(transition.mock.calls[0]?.[0]).toMatchObject({
+			target: { kind: 'none' },
+			expectedTags: ['context', 'extra', 'ready'],
 		});
 	});
 
@@ -176,7 +271,7 @@ describe('ChatBoardTransitionDialog', () => {
 		expect(transition.mock.calls[0]?.[0]).toMatchObject({
 			expectedCatalogRevision: 4,
 			expectedTags: ['context', 'extra', 'ready'],
-			selectedTargetTags: ['review'],
+			target: { selectedTargetTags: ['review'] },
 		});
 	});
 

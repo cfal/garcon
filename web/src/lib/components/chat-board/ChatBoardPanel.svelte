@@ -17,6 +17,7 @@
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import type { ChatBoard } from '$shared/chat-boards';
+	import type { ChatTagTransitionTarget } from '$shared/chat-tag-mutations';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatBoardEmptyState from './ChatBoardEmptyState.svelte';
 	import ChatBoardLane from './ChatBoardLane.svelte';
@@ -427,16 +428,32 @@
 		transitionInvoker = invoker;
 	}
 
-	async function handleTransitionApplied(chatId: string, targetColumnId: string): Promise<void> {
+	function focusAfterNoneTransition(sourceColumnId: string | null): void {
+		if (sourceColumnId && focusController.focusLane(sourceColumnId)) return;
+		if (activeColumnId && focusController.focusLane(activeColumnId)) return;
+		focusController.focusToolbar();
+	}
+
+	async function handleTransitionApplied(
+		chatId: string,
+		target: ChatTagTransitionTarget,
+	): Promise<void> {
+		const sourceColumnId = transitionOccurrence?.columnId ?? null;
 		transitionOccurrence = null;
 		transitionTargetColumnId = null;
 		transitionInvoker = null;
-		if (presentationBand === 'narrow') controller.selectColumn(targetColumnId);
-		await tick();
-		laneScrollers.get(targetColumnId)?.(`${targetColumnId}:${chatId}`);
-		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-		if (!focusController.focusOccurrence(targetColumnId, chatId))
-			focusController.focusLane(targetColumnId);
+		if (target.kind === 'none') {
+			await tick();
+			focusAfterNoneTransition(sourceColumnId);
+		} else {
+			const targetColumnId = target.columnId;
+			if (presentationBand === 'narrow') controller.selectColumn(targetColumnId);
+			await tick();
+			laneScrollers.get(targetColumnId)?.(`${targetColumnId}:${chatId}`);
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			if (!focusController.focusOccurrence(targetColumnId, chatId))
+				focusController.focusLane(targetColumnId);
+		}
 		announcement = m.chat_board_transition_applied();
 	}
 
@@ -667,7 +684,6 @@
 							isDropTarget={false}
 							pendingChatIds={sessions.pendingTagMutationChatIds}
 							tagReconciliationKind={(chatId) => sessions.tagReconciliationKind(chatId)}
-							canTransition={selectedBoard.columns.length > 1}
 							onOpen={onOpenChat}
 							onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
 							onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
@@ -698,7 +714,6 @@
 						isDropTarget={dropTargetColumnId === lane.column.id}
 						pendingChatIds={sessions.pendingTagMutationChatIds}
 						tagReconciliationKind={(chatId) => sessions.tagReconciliationKind(chatId)}
-						canTransition={selectedBoard.columns.length > 1}
 						onOpen={onOpenChat}
 						onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
 						onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
@@ -734,8 +749,8 @@
 			occurrence={transitionOccurrence}
 			initialTargetColumnId={transitionTargetColumnId}
 			onClose={() => void closeTransition()}
-			onApplied={(chatId: string, targetColumnId: string) =>
-				void handleTransitionApplied(chatId, targetColumnId)}
+			onApplied={(chatId: string, target: ChatTagTransitionTarget) =>
+				void handleTransitionApplied(chatId, target)}
 		/>
 	{/if}
 </section>

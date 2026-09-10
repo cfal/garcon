@@ -67,6 +67,25 @@ describe("Lightpanda Chat Board", () => {
       ]);
 
       const chatId = fixture.integration.newChatId();
+      const openTransitionDialog = async () => {
+        await fixture.page.evaluate((id) => {
+          const card = document.querySelector<HTMLElement>(
+            `[data-chat-board-chat-id="${id}"]`,
+          );
+          const transition = card
+            ? [...card.querySelectorAll<HTMLButtonElement>("button")].find(
+                (button) => button.getAttribute("aria-label") === "Transition…",
+              )
+            : null;
+          if (!transition) throw new Error(`Missing transition action for ${id}`);
+          transition.click();
+        }, chatId);
+        await fixture.page.waitForFunction(() =>
+          document
+            .querySelector('[role="dialog"]')
+            ?.textContent?.includes("Transition Chat"),
+        );
+      };
       const started = await fixture.integration.client.startDirectChat({
         chatId,
         content: "Synthetic Chat Board task",
@@ -85,23 +104,7 @@ describe("Lightpanda Chat Board", () => {
         `[data-chat-board-chat-id="${chatId}"]`,
       );
 
-      await fixture.page.evaluate((id) => {
-        const card = document.querySelector<HTMLElement>(
-          `[data-chat-board-chat-id="${id}"]`,
-        );
-        const transition = card
-          ? [...card.querySelectorAll<HTMLButtonElement>("button")].find(
-              (button) => button.getAttribute("aria-label") === "Transition…",
-            )
-          : null;
-        if (!transition) throw new Error(`Missing transition action for ${id}`);
-        transition.click();
-      }, chatId);
-      await fixture.page.waitForFunction(() =>
-        document
-          .querySelector('[role="dialog"]')
-          ?.textContent?.includes("Transition Chat"),
-      );
+      await openTransitionDialog();
       await app.clickDialogButton("Apply tag changes");
       await fixture.page.waitForFunction(
         async (id) => {
@@ -136,6 +139,60 @@ describe("Lightpanda Chat Board", () => {
       await app.waitForText("Delivery");
       await fixture.page.waitForSelector(
         `[data-chat-board-chat-id="${chatId}"]`,
+      );
+
+      await fixture.integration.client.patch<ChatTagsMutationResponse>(
+        "/api/v1/chats/tags/delta",
+        { chatId, addTags: ["context"] },
+      );
+      await fixture.page.waitForFunction(
+        (id) =>
+          document
+            .querySelector(`[data-chat-board-chat-id="${id}"]`)
+            ?.textContent?.includes("context"),
+        {},
+        chatId,
+      );
+      await openTransitionDialog();
+      await fixture.page.evaluate(() => {
+        const select = document.querySelector<HTMLSelectElement>(
+          '[role="dialog"] select',
+        );
+        const option = select?.querySelector<HTMLOptionElement>(
+          'option[value="none"]',
+        );
+        if (!select || !option || option.disabled) {
+          throw new Error("Missing enabled None action");
+        }
+        select.value = option.value;
+        if (select.value !== option.value) {
+          // Lightpanda 0.3.5 omits optgroup descendants from native select accessors.
+          Object.defineProperty(select, "value", {
+            configurable: true,
+            writable: true,
+            value: option.value,
+          });
+        }
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await app.waitForDialogButtonEnabled("Apply tag changes");
+      await app.clickDialogButton("Apply tag changes");
+      await fixture.page.waitForFunction(
+        async (id) => {
+          const response = await fetch("/api/v1/chats");
+          const body = (await response.json()) as {
+            sessions?: { id: string; tags: string[] }[];
+          };
+          const tags = body.sessions?.find((chat) => chat.id === id)?.tags;
+          return tags?.length === 1 && tags[0] === "context";
+        },
+        { timeout: 20_000 },
+        chatId,
+      );
+      await fixture.page.waitForFunction(
+        (id) => !document.querySelector(`[data-chat-board-chat-id="${id}"]`),
+        {},
+        chatId,
       );
       fixture.assertNoBrowserErrors();
     });

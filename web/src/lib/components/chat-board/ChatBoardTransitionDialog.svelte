@@ -11,6 +11,7 @@
 	import {
 		initialTargetTags,
 		projectChatBoardTransition,
+		type ChatBoardTransitionDestination,
 	} from '$lib/chat-board/transition/chat-board-transition.js';
 	import {
 		isChatTagRefreshRequired,
@@ -19,7 +20,10 @@
 	import { chatMatchesBoardColumn, type ChatBoard } from '$shared/chat-boards';
 	import { ApiError } from '$lib/api/client.js';
 	import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
+	import type { ChatTagTransitionTarget } from '$shared/chat-tag-mutations';
 	import * as m from '$lib/paraglide/messages.js';
+
+	const NONE_TARGET_VALUE = 'none';
 
 	let {
 		open,
@@ -38,7 +42,7 @@
 		occurrence: ChatBoardOccurrence;
 		initialTargetColumnId?: string | null;
 		onClose: () => void;
-		onApplied: (chatId: string, targetColumnId: string) => void;
+		onApplied: (chatId: string, target: ChatTagTransitionTarget) => void;
 	} = $props();
 
 	const initial = untrack(() => ({
@@ -64,8 +68,12 @@
 		: (initialDestinations[0]?.id ?? '');
 	const initialDestination =
 		initialDestinations.find((column) => column.id === initialDestinationId) ?? null;
-	let targetColumnId = $state(initialDestinationId);
-	let target = $derived(destinations.find((column) => column.id === targetColumnId) ?? null);
+	let targetValue = $state(initialDestinationId);
+	let target = $derived.by((): ChatBoardTransitionDestination | null => {
+		if (targetValue === NONE_TARGET_VALUE) return { kind: 'none' };
+		const column = destinations.find((candidate) => candidate.id === targetValue);
+		return column ? { kind: 'column', column } : null;
+	});
 	let selectedTargetTags = $state<string[]>(
 		initialDestination ? [...initialTargetTags(initial.tags, initialDestination)] : [],
 	);
@@ -95,14 +103,10 @@
 	let reconciliationKind = $derived(sessions.tagReconciliationKind(occurrence.chat.id));
 	let refreshRequired = $derived(isChatTagRefreshRequired(reconciliationKind));
 	let reconciliationProgressLabel = $derived(
-		refreshRequired
-			? m.chat_board_refreshing_tags()
-			: m.chat_board_confirming_tags(),
+		refreshRequired ? m.chat_board_refreshing_tags() : m.chat_board_confirming_tags(),
 	);
 	let reconciliationRetryLabel = $derived(
-		refreshRequired
-			? m.chat_tags_retry_refresh()
-			: m.chat_tags_retry_confirmation(),
+		refreshRequired ? m.chat_tags_retry_refresh() : m.chat_tags_retry_confirmation(),
 	);
 	let canSubmit = $derived(
 		Boolean(
@@ -114,15 +118,17 @@
 			sourceMatches &&
 			!outdated &&
 			!preview.isNoop &&
-			(target.match === 'all' || preview.appliedTargetTags.length > 0) &&
+			(target.kind === 'none' ||
+				target.column.match === 'all' ||
+				preview.appliedTargetTags.length > 0) &&
 			reconciliationKind === null,
 		),
 	);
 	let title = $derived(occurrence.chat.title || m.sidebar_chats_unnamed());
 
-	function chooseTarget(columnId: string): void {
-		targetColumnId = columnId;
-		const next = destinations.find((column) => column.id === columnId);
+	function chooseTarget(value: string): void {
+		targetValue = value;
+		const next = destinations.find((column) => column.id === value);
 		selectedTargetTags = next ? [...initialTargetTags(baseTags, next)] : [];
 		submitError = null;
 	}
@@ -147,14 +153,16 @@
 			(column) => column.id !== occurrence.columnId,
 		);
 		const latestTarget =
-			latestDestinations.find((column) => column.id === targetColumnId) ??
+			latestDestinations.find((column) => column.id === targetValue) ??
 			latestDestinations[0] ??
 			null;
 		baseBoard = copyChatBoard(latestBoard);
 		baseRevision = controller.catalog.revision;
 		baseTags = [...latestChat.tags];
-		targetColumnId = latestTarget?.id ?? '';
-		selectedTargetTags = latestTarget ? [...initialTargetTags(baseTags, latestTarget)] : [];
+		const reviewingNone = targetValue === NONE_TARGET_VALUE;
+		targetValue = reviewingNone ? NONE_TARGET_VALUE : (latestTarget?.id ?? '');
+		selectedTargetTags =
+			!reviewingNone && latestTarget ? [...initialTargetTags(baseTags, latestTarget)] : [];
 		forcedOutdated = false;
 		submitError = null;
 	}
@@ -166,8 +174,24 @@
 			.join(', ');
 	}
 
+	function toRequestTarget(
+		target: ChatBoardTransitionDestination,
+		appliedTargetTags: readonly string[],
+	): ChatTagTransitionTarget {
+		if (target.kind === 'none') return { kind: 'none' };
+		if (target.column.match === 'any') {
+			return {
+				kind: 'column',
+				columnId: target.column.id,
+				selectedTargetTags: appliedTargetTags,
+			};
+		}
+		return { kind: 'column', columnId: target.column.id };
+	}
+
 	async function confirm(): Promise<void> {
 		if (!canSubmit || !source || !target || !preview || submitting) return;
+		const requestedTarget = toRequestTarget(target, preview.appliedTargetTags);
 		submitting = true;
 		submitError = null;
 		try {
@@ -175,12 +199,11 @@
 				chatId: occurrence.chat.id,
 				boardId: baseBoard.id,
 				sourceColumnId: source.id,
-				targetColumnId: target.id,
+				target: requestedTarget,
 				expectedCatalogRevision: baseRevision,
 				expectedTags: baseTags,
-				...(target.match === 'any' ? { selectedTargetTags: preview.appliedTargetTags } : {}),
 			});
-			onApplied(occurrence.chat.id, target.id);
+			onApplied(occurrence.chat.id, requestedTarget);
 		} catch (value) {
 			const currentReconciliation = sessions.tagReconciliationKind(occurrence.chat.id);
 			if (value instanceof ChatTagMutationBlockedError) {
@@ -199,9 +222,10 @@
 				await sessions.quietRefreshChats();
 			} else if (isChatTagRefreshRequired(currentReconciliation)) {
 				forcedOutdated = true;
-				submitError = currentReconciliation === 'committed-refresh'
-					? m.chat_tags_refresh_required()
-					: m.chat_tags_conflict_refresh_required();
+				submitError =
+					currentReconciliation === 'committed-refresh'
+						? m.chat_tags_refresh_required()
+						: m.chat_tags_conflict_refresh_required();
 			} else {
 				submitError =
 					value instanceof Error && value.message
@@ -232,10 +256,6 @@
 		}
 	}
 
-	function tagGroup(tags: readonly string[]): readonly string[] {
-		return tags.length > 0 ? tags : ['—'];
-	}
-
 	function transitionErrorMessage(): string {
 		if (currentChat?.isArchived) return m.chat_board_transition_missing();
 		if (outdated) return m.chat_board_transition_outdated();
@@ -261,29 +281,41 @@
 		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
 			<h3 class="truncate text-base font-semibold">“{title}”</h3>
 			<div class="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-				<span>{source?.name ?? '—'}</span>
+				<span>{source?.name ?? m.chat_board_transition_none()}</span>
 				<ArrowRight class="size-4" aria-hidden="true" />
 				<label class="min-w-0 flex-1">
 					<span class="sr-only">{m.chat_board_transition_choose_target()}</span>
 					<select
 						class="h-9 w-full rounded-md border border-input bg-background px-3 text-base font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-						value={targetColumnId}
+						value={targetValue}
 						disabled={submitting}
 						onchange={(event) => chooseTarget(event.currentTarget.value)}
 					>
-						{#each destinations as column (column.id)}
-							<option value={column.id}>{column.name}</option>
-						{/each}
+						<option value="" disabled>{m.chat_board_transition_choose_action()}</option>
+						{#if destinations.length > 0}
+							<optgroup label={m.chat_board_transition_columns()}>
+								{#each destinations as column (column.id)}
+									<option value={column.id}>{column.name}</option>
+								{/each}
+							</optgroup>
+						{/if}
+						<optgroup label={m.chat_board_transition_actions()}>
+							<option value={NONE_TARGET_VALUE}>{m.chat_board_transition_none()}</option>
+						</optgroup>
 					</select>
 				</label>
 			</div>
 
-			{#if !source || !target || !currentChat}
+			{#if !source || !currentChat}
 				<p
 					class="mt-4 rounded-lg border border-status-warning-border bg-status-warning/10 p-3 text-sm text-status-warning-muted-foreground"
 					role="alert"
 				>
 					{m.chat_board_transition_missing()}
+				</p>
+			{:else if !target}
+				<p class="mt-4 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+					{m.chat_board_transition_choose_action()}
 				</p>
 			{:else}
 				<div class="mt-5 grid gap-4">
@@ -292,20 +324,23 @@
 							{m.chat_board_transition_current_tags()}
 						</h4>
 						<div class="mt-2 flex flex-wrap gap-1.5">
-							{#each tagGroup(baseTags) as tag (tag)}
-								{#if tag === '—'}<span class="text-sm text-muted-foreground">—</span
-									>{:else}<ColoredTag label={tag} autoColor />{/if}
-							{/each}
+							{#if baseTags.length > 0}
+								{#each baseTags as tag (tag)}
+									<ColoredTag label={tag} autoColor />
+								{/each}
+							{:else}
+								<span class="text-sm text-muted-foreground">{m.chat_board_transition_none()}</span>
+							{/if}
 						</div>
 					</section>
 
-					{#if target.match === 'any'}
+					{#if target.kind === 'column' && target.column.match === 'any'}
 						<fieldset>
 							<legend class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
 								>{m.chat_board_transition_apply_tags()}</legend
 							>
 							<div class="mt-2 flex flex-wrap gap-2">
-								{#each target.tags as tag (tag)}
+								{#each target.column.tags as tag (tag)}
 									<label
 										class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border bg-background px-2.5 text-sm hover:bg-accent"
 									>
@@ -333,7 +368,7 @@
 									{m.chat_board_transition_remove()}
 								</h4>
 								<p class="mt-1.5 text-sm text-status-error-foreground">
-									{tagGroup(preview.removedTags).join(', ')}
+									{preview.removedTags.join(', ') || m.chat_board_transition_none()}
 								</p>
 							</section>
 							<section class="rounded-lg border border-status-success-border bg-status-success p-3">
@@ -343,7 +378,7 @@
 									{m.chat_board_transition_add()}
 								</h4>
 								<p class="mt-1.5 text-sm text-status-success-foreground">
-									{tagGroup(preview.addedTags).join(', ')}
+									{preview.addedTags.join(', ') || m.chat_board_transition_none()}
 								</p>
 							</section>
 						</div>
@@ -353,10 +388,14 @@
 								{m.chat_board_transition_result()}
 							</h4>
 							<div class="mt-2 flex flex-wrap gap-1.5">
-								{#each tagGroup(preview.resultingTags) as tag (tag)}
-									{#if tag === '—'}<span class="text-sm text-muted-foreground">—</span
-										>{:else}<ColoredTag label={tag} autoColor />{/if}
-								{/each}
+								{#if preview.resultingTags.length > 0}
+									{#each preview.resultingTags as tag (tag)}
+										<ColoredTag label={tag} autoColor />
+									{/each}
+								{:else}
+									<span class="text-sm text-muted-foreground">{m.chat_board_transition_none()}</span
+									>
+								{/if}
 							</div>
 						</section>
 
@@ -365,7 +404,7 @@
 								{m.chat_board_transition_membership()}
 							</h4>
 							<p class="mt-1 text-sm font-medium">
-								{columnNames(preview.matchingColumnIds) || '—'}
+								{columnNames(preview.matchingColumnIds) || m.chat_board_transition_none()}
 							</p>
 							{#if preview.sourceStillMatches}<p
 									class="mt-2 text-xs text-status-warning-muted-foreground"
@@ -382,6 +421,9 @@
 						<div>
 							<p>{m.chat_board_transition_global_warning()}</p>
 							<p class="mt-1">{m.chat_board_source_removal_note()}</p>
+							{#if target.kind === 'none'}
+								<p class="mt-1">{m.chat_board_transition_none_explanation()}</p>
+							{/if}
 						</div>
 					</div>
 					{#if outdated || submitError || currentChat.isArchived || !sourceMatches || preview?.isNoop}

@@ -13,14 +13,21 @@ export interface ApplyChatTagDeltaRequest {
   readonly removeTags?: readonly string[];
 }
 
+export type ChatTagTransitionTarget =
+  | {
+      readonly kind: 'column';
+      readonly columnId: ChatBoardColumnId;
+      readonly selectedTargetTags?: readonly string[];
+    }
+  | { readonly kind: 'none' };
+
 export interface TransitionChatTagsRequest {
   readonly chatId: string;
   readonly boardId: ChatBoardId;
   readonly sourceColumnId: ChatBoardColumnId;
-  readonly targetColumnId: ChatBoardColumnId;
+  readonly target: ChatTagTransitionTarget;
   readonly expectedCatalogRevision: number;
   readonly expectedTags: readonly string[];
-  readonly selectedTargetTags?: readonly string[];
 }
 
 export interface ChatTagsMutationResponse {

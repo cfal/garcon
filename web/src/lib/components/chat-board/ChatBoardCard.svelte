@@ -22,7 +22,6 @@
 		canDrag,
 		pending,
 		reconciliationKind,
-		canTransition,
 		occurrenceIndex,
 		onOpen,
 		onTransition,
@@ -35,7 +34,6 @@
 		canDrag: boolean;
 		pending: boolean;
 		reconciliationKind: ChatTagReconciliationKind;
-		canTransition: boolean;
 		occurrenceIndex: number;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
@@ -137,7 +135,7 @@
 				class="grid min-h-9 flex-1 place-items-center text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-35"
 				aria-label={m.chat_board_transition()}
 				title={m.chat_board_transition()}
-				disabled={!canTransition || pending || reconciliationKind !== null}
+				disabled={pending || reconciliationKind !== null}
 				onclick={(event) => onTransition(occurrence, event.currentTarget)}
 				data-chat-board-focus-target="transition"
 			>

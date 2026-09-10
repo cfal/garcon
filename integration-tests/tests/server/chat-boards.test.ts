@@ -112,10 +112,13 @@ describe("Chat Board server integration", () => {
           chatId,
           boardId: delivery.boardId,
           sourceColumnId: SOURCE_COLUMN_ID,
-          targetColumnId: TARGET_COLUMN_ID,
+          target: {
+            kind: "column",
+            columnId: TARGET_COLUMN_ID,
+            selectedTargetTags: ["review"],
+          },
           expectedCatalogRevision: updated.catalog.revision,
           expectedTags: ["ready"],
-          selectedTargetTags: ["review"],
         },
       );
       expect(transitioned).toMatchObject({
@@ -137,6 +140,50 @@ describe("Chat Board server integration", () => {
         )?.tags,
       ).toEqual(["review"]);
 
+      const contextCursor = observer.markEvents();
+      await fixture.client.patch<ChatTagsMutationResponse>(
+        "/api/v1/chats/tags/delta",
+        { chatId, addTags: ["context"] },
+      );
+      await observer.waitForEvent(
+        (event): event is ChatListRefreshRequestedMessage =>
+          event.type === "chat-list-refresh-requested" &&
+          event.reason === "tags-updated" &&
+          event.chatId === chatId,
+        "Chat Board context tag invalidation",
+        { afterIndex: contextCursor },
+      );
+      const noneCursor = observer.markEvents();
+      const transitionedToNone = await fixture.client.post<ChatTagsMutationResponse>(
+        "/api/v1/chats/tag-transition",
+        {
+          chatId,
+          boardId: delivery.boardId,
+          sourceColumnId: TARGET_COLUMN_ID,
+          target: { kind: "none" },
+          expectedCatalogRevision: updated.catalog.revision,
+          expectedTags: ["context", "review"],
+        },
+      );
+      expect(transitionedToNone).toMatchObject({
+        tags: ["context"],
+        addedTags: [],
+        removedTags: ["review"],
+      });
+      await observer.waitForEvent(
+        (event): event is ChatListRefreshRequestedMessage =>
+          event.type === "chat-list-refresh-requested" &&
+          event.reason === "tags-updated" &&
+          event.chatId === chatId,
+        "Chat Board None transition invalidation",
+        { afterIndex: noneCursor },
+      );
+      expect(
+        (await fixture.client.listChats()).sessions.find(
+          (chat) => chat.id === chatId,
+        )?.tags,
+      ).toEqual(["context"]);
+
       await fixture.restartGarcon();
       const restored = await fixture.client.get<ChatBoardCatalog>(
         "/api/v1/chat-boards",
@@ -150,7 +197,7 @@ describe("Chat Board server integration", () => {
         (await fixture.client.listChats()).sessions.find(
           (chat) => chat.id === chatId,
         )?.tags,
-      ).toEqual(["review"]);
+      ).toEqual(["context"]);
 
       const removed = await fixture.client.delete<ChatBoardMutationResponse>(
         "/api/v1/chat-boards",
@@ -163,7 +210,7 @@ describe("Chat Board server integration", () => {
         (await fixture.client.listChats()).sessions.find(
           (chat) => chat.id === chatId,
         )?.tags,
-      ).toEqual(["review"]);
+      ).toEqual(["context"]);
     });
   }, 60_000);
 });

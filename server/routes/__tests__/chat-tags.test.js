@@ -58,20 +58,61 @@ describe('chat tag routes', () => {
       chatId: 'chat-1',
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
-      targetColumnId: TARGET_ID,
+      target: {
+        kind: 'column',
+        columnId: TARGET_ID,
+        selectedTargetTags: ['Review'],
+      },
       expectedCatalogRevision: 4,
       expectedTags: ['ready'],
-      selectedTargetTags: ['Review'],
     }, 'POST');
     expect(tags.transition).toHaveBeenCalledWith({
       chatId: 'chat-1',
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
-      targetColumnId: TARGET_ID,
+      target: {
+        kind: 'column',
+        columnId: TARGET_ID,
+        selectedTargetTags: ['review'],
+      },
       expectedCatalogRevision: 4,
       expectedTags: ['ready'],
-      selectedTargetTags: ['review'],
     });
+  });
+
+  it('forwards the explicit None target and rejects mixed target intent', async () => {
+    const tags = service();
+    const handler = createChatTagRoutes(tags)['/api/v1/chats/tag-transition'].POST;
+    const input = {
+      chatId: 'chat-1',
+      boardId: BOARD_ID,
+      sourceColumnId: SOURCE_ID,
+      expectedCatalogRevision: 4,
+      expectedTags: ['ready'],
+    };
+
+    const accepted = await call(handler, { ...input, target: { kind: 'none' } }, 'POST');
+    expect(accepted.response.status).toBe(200);
+    expect(tags.transition).toHaveBeenCalledWith({ ...input, target: { kind: 'none' } });
+
+    const mixedColumn = await call(handler, {
+      ...input,
+      target: { kind: 'none', columnId: TARGET_ID },
+    }, 'POST');
+    expect(mixedColumn.response.status).toBe(400);
+
+    const unknown = await call(handler, {
+      ...input,
+      target: { kind: 'unknown' },
+    }, 'POST');
+    expect(unknown.response.status).toBe(400);
+
+    const mixedSelection = await call(handler, {
+      ...input,
+      target: { kind: 'none', selectedTargetTags: [] },
+    }, 'POST');
+    expect(mixedSelection.response.status).toBe(400);
+    expect(tags.transition).toHaveBeenCalledTimes(1);
   });
 
   it('rejects empty deltas and preserves unknown-durability recovery metadata', async () => {

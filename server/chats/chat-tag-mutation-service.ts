@@ -2,10 +2,12 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   calculateChatTagTransition,
   chatMatchesBoardColumn,
+  type ChatBoardColumn,
   type ChatBoardCatalog,
 } from '../../common/chat-boards.js';
 import type {
   ApplyChatTagDeltaRequest,
+  ChatTagTransitionTarget,
   ChatTagsMutationResponse,
   RecoverChatTagsResponse,
   ReplaceChatTagsRequest,
@@ -127,22 +129,19 @@ export class ChatTagMutationService {
       }
       throw error;
     }
-    if (input.sourceColumnId === input.targetColumnId) {
+    if (input.target.kind === 'column' && input.sourceColumnId === input.target.columnId) {
       throw this.#invalidTransition('Source and target columns must differ');
     }
     const board = catalog.boards.find((candidate) => candidate.id === input.boardId);
     if (!board) throw new ChatBoardDomainError('CHAT_BOARD_NOT_FOUND', 'Chat board not found', 404);
     const source = board.columns.find((column) => column.id === input.sourceColumnId);
-    const target = board.columns.find((column) => column.id === input.targetColumnId);
-    if (!source || !target) {
+    if (!source) {
       throw new ChatBoardDomainError('CHAT_BOARD_NOT_FOUND', 'Chat board column not found', 404);
     }
     if (!chatMatchesBoardColumn(current.tags, source)) {
       throw this.#invalidTransition('Chat no longer matches the source column');
     }
-    const appliedTargetTags = target.match === 'all'
-      ? target.tags
-      : this.#selectedAnyTags(target.tags, input.selectedTargetTags);
+    const appliedTargetTags = this.#resolveAppliedTargetTags(board.columns, input.target);
     const preview = calculateChatTagTransition({
       currentTags: current.tags,
       sourceTags: source.tags,
@@ -156,6 +155,20 @@ export class ChatTagMutationService {
       );
     }
     return this.#persistLocked(input.chatId, current.tags, preview.resultingTags);
+  }
+
+  #resolveAppliedTargetTags(
+    columns: readonly ChatBoardColumn[],
+    target: ChatTagTransitionTarget,
+  ): readonly string[] {
+    if (target.kind === 'none') return [];
+    const destination = columns.find((column) => column.id === target.columnId);
+    if (!destination) {
+      throw new ChatBoardDomainError('CHAT_BOARD_NOT_FOUND', 'Chat board column not found', 404);
+    }
+    return destination.match === 'all'
+      ? destination.tags
+      : this.#selectedAnyTags(destination.tags, target.selectedTargetTags);
   }
 
   #selectedAnyTags(
