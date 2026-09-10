@@ -346,7 +346,7 @@ describe('forkChatFileCopy', () => {
       signal: controller.signal,
     })).rejects.toBe(reason);
 
-    expect(discardForkedAgentSession).toHaveBeenCalledWith('test', expect.objectContaining({
+    expect(discardForkedAgentSession).toHaveBeenCalledWith(deps.sessions.get('source-chat'), expect.objectContaining({
       agentSessionId: 'cancelled-native',
     }));
     expect(deps.ledger.initializeChat).not.toHaveBeenCalled();

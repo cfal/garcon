@@ -25,6 +25,7 @@ import {
   type NativeSeedReceipt,
 } from '../../common/transcript-seed.js';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import { parseExecutionLocation, type ExecutionLocation } from '../../common/execution-location.js';
 import type { AgentName } from '../agents/session-types.js';
 import { createLogger } from '../lib/log.js';
 import { isCarryOverSegmentId } from './carryover-segment-types.js';
@@ -117,6 +118,22 @@ export function normalizeChatRegistryEntry(
   rawEntry: Record<string, unknown>,
   chatId: string,
 ): ChatRegistryEntry {
+  return {
+    ...normalizeLegacyChatRegistryEntry(rawEntry, chatId),
+    executionLocation: requireExecutionLocation(rawEntry.executionLocation, chatId),
+  };
+}
+
+export function requireExecutionLocation(value: unknown, chatId?: string): ExecutionLocation {
+  const location = parseExecutionLocation(value);
+  if (!location) throw new Error(`Invalid execution location${chatId ? ` for chat ${chatId}` : ''}`);
+  return location;
+}
+
+export function normalizeLegacyChatRegistryEntry(
+  rawEntry: Record<string, unknown>,
+  chatId: string,
+): Omit<ChatRegistryEntry, 'executionLocation'> {
   const agentId = normalizeAgentId(rawEntry);
   const nativeSession = normalizeNativeSession(rawEntry.nativeSession, agentId);
   const agentSettingsById = parseAgentSettingsById(rawEntry.agentSettingsById);

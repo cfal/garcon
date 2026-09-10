@@ -54,4 +54,41 @@ describe('instance-qualified executable directory', () => {
     returned[0].removedAt = null;
     expect(directory.configurations('node-a')[0].removedAt).not.toBeNull();
   });
+
+  test('checks the exact chat owner instead of resolving by its provider type', () => {
+    const work = instance('node-a', 'work', true);
+    const personal = instance('node-a', 'personal');
+    const directory = new AgentInstanceDirectory([work, personal]);
+    const owner = { agentId: 'synthetic-provider', executionLocation: {
+      nodeId: 'node-a', instanceId: 'personal', workspaceId: 'workspace-a',
+    } };
+    expect(directory.requireFor(owner)).toBe(personal.integration);
+    expect(() => directory.requireFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
+    expect(() => directory.requireFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
+      .toThrow('unavailable');
+  });
+
+  test('binds configuration services to exact instances and caches only that binding', async () => {
+    const work = instance('node-a', 'work', true);
+    const personal = instance('node-a', 'personal');
+    for (const entry of [work, personal]) {
+      entry.integration.descriptor.supportedPermissionModes = ['default'];
+      entry.integration.descriptor.supportedThinkingModes = ['none'];
+      entry.integration.settings = {
+        defaults: () => ({ ownerId: 'synthetic-provider', schemaVersion: 1, values: { profile: entry.configuration.id } }),
+        parse: (value) => value,
+      };
+    }
+    const directory = new AgentInstanceDirectory([work, personal]);
+    const owner = { agentId: 'synthetic-provider', executionLocation: {
+      nodeId: 'node-a', instanceId: 'personal', workspaceId: 'workspace-a',
+    } };
+    const configuration = directory.configurationFor(owner);
+    expect(directory.configurationFor(owner)).toBe(configuration);
+    const result = await configuration.resolve({ model: 'synthetic-model', settings: null, endpoint: null }, new AbortController().signal);
+    expect(result.settings.values).toEqual({ profile: 'personal' });
+    expect(() => directory.configurationFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
+    expect(() => directory.configurationFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
+      .toThrow('unavailable');
+  });
 });

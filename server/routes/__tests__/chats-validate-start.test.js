@@ -54,7 +54,7 @@ const chatViews = {
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
-  isAgentSessionRunning: mock(() => false),
+  isChatRunning: mock(() => false),
 };
 
 const commandLedger = createRouteCommandLedger('chats-validate-start');

@@ -81,7 +81,7 @@ const agents = {
   supportsFork: mock(() => true),
   supportsForkAtMessage: mock(() => true),
   supportsForkWhileRunning: mock(() => false),
-  isAgentSessionRunning: mock(() => false),
+  isChatRunning: mock(() => false),
   forkAgentSession: mock(() => Promise.resolve({
     kind: 'materialized',
     session: { agentSessionId: 'forked-session', nativeSession: null },

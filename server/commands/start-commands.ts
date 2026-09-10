@@ -53,6 +53,7 @@ export class StartCommands {
     signal?.throwIfAborted();
     const replay = await this.replayStart(input, chatId);
     if (replay) return replay;
+    this.support.assertChatCreationAvailable(chatId);
     const normalized = await this.normalizeStart(input, chatId);
     signal?.throwIfAborted();
     return this.submitNormalizedStart(normalized, signal);
@@ -220,7 +221,7 @@ export class StartCommands {
       preparation: {
         operation: 'chat-start',
         prepare: async () => {
-          signal?.throwIfAborted();
+          const executionLocation = await this.deps.placements.prepare(input.agentId, input.projectPath, signal);
           if (input.transcriptSnapshot) {
             if (this.deps.chats.getChat(input.chatId) || this.deps.transcripts.existingCurrentView(input.chatId)) {
               throw new CommandValidationError('CHAT_ID_COLLISION', 'Snapshot target already exists', 409);
@@ -237,6 +238,7 @@ export class StartCommands {
             ...createPreambleBoundaryBinding(input.transcriptSnapshot ? 'fork' : 'new-chat'),
             nativeSession: null,
             projectPath: input.projectPath,
+            executionLocation,
             tags: input.tags,
             agentSessionId: null,
             model: input.model,

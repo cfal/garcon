@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { runCarryOverMigrationAtStartup } from '../server.ts';
+import { runCarryOverMigrationAtStartup } from '../migrations/startup-progress.ts';
 
 const originalDateNow = Date.now;
 const originalSetInterval = globalThis.setInterval;

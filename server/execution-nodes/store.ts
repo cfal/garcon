@@ -10,6 +10,7 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { DomainError } from '../lib/domain-error.js';
 
 export interface LocalExecutionTarget {
+  readonly chatId?: string;
   readonly agentId: string;
   readonly projectPath: string;
 }
@@ -75,10 +76,26 @@ export class ExecutionNodesStore {
     return this.#snapshot.localNodeId;
   }
 
+  async registerLocalDefaults(agentIds: readonly string[]): Promise<readonly ConfiguredAgentInstance[]> {
+    const providers = [...new Set(agentIds)];
+    if (!providers.every(isProviderType)) throw new TypeError('Invalid local provider type');
+    return this.#lock.runExclusive(this.#filePath, async () => {
+      this.#assertWritable();
+      const candidate = this.snapshot();
+      if (candidate.nodes.find((node) => node.id === candidate.localNodeId)?.removedAt) {
+        throw new DomainError('NODE_REMOVED', 'The local execution node was removed', 409);
+      }
+      const instances = [...candidate.instances];
+      const defaults = prepareLocalDefaults(instances, candidate.localNodeId, providers);
+      if (instances.length !== candidate.instances.length) await this.#commit({ ...candidate, instances });
+      return providers.map((agentId) => ({ ...defaults.get(agentId)! }));
+    });
+  }
+
   async prepareLocalTargets(targets: readonly LocalExecutionTarget[]): Promise<readonly ExecutionLocation[]> {
     const captured = targets.map((target) => {
       if (!isProviderType(target.agentId) || !isStoredProjectPath(target.projectPath)) {
-        throw new TypeError('Invalid local execution target');
+        throw new TypeError(`Invalid local execution target${target.chatId ? ` for chat ${target.chatId}` : ''}`);
       }
       return { agentId: target.agentId, projectPath: target.projectPath };
     });
@@ -91,21 +108,11 @@ export class ExecutionNodesStore {
       if (candidate.nodes.find((node) => node.id === nodeId)?.removedAt) {
         throw new DomainError('NODE_REMOVED', 'The local execution node was removed', 409);
       }
-      const defaultsByAgent = new Map(instances.filter((entry) => entry.nodeId === nodeId && entry.default)
-        .map((entry) => [entry.agentId, entry]));
+      const defaultsByAgent = prepareLocalDefaults(instances, nodeId, captured.map((target) => target.agentId));
       const workspacesByPath = new Map(workspaces.filter((entry) => entry.nodeId === nodeId && entry.removedAt === null)
         .map((entry) => [entry.projectPath, entry]));
       const locations = captured.map((target): ExecutionLocation => {
-        let instance = defaultsByAgent.get(target.agentId);
-        if (instance?.removedAt) throw new DomainError('NODE_REMOVED', 'The default local instance was removed', 409);
-        if (!instance) {
-          instance = {
-            id: randomUUID(), nodeId, agentId: target.agentId, label: target.agentId,
-            storageNamespace: target.agentId, default: true, removedAt: null,
-          };
-          instances.push(instance);
-          defaultsByAgent.set(target.agentId, instance);
-        }
+        const instance = defaultsByAgent.get(target.agentId)!;
         let workspace = workspacesByPath.get(target.projectPath);
         if (!workspace) {
           workspace = { id: randomUUID(), nodeId, projectPath: target.projectPath, removedAt: null };
@@ -175,4 +182,26 @@ export class ExecutionNodesStore {
       throw error;
     }
   }
+}
+
+function prepareLocalDefaults(
+  instances: ConfiguredAgentInstance[],
+  nodeId: string,
+  agentIds: readonly string[],
+): ReadonlyMap<string, ConfiguredAgentInstance> {
+  const defaults = new Map(instances.filter((entry) => entry.nodeId === nodeId && entry.default)
+    .map((entry) => [entry.agentId, entry]));
+  for (const agentId of agentIds) {
+    if (defaults.get(agentId)?.removedAt) {
+      throw new DomainError('NODE_REMOVED', 'The default local instance was removed', 409);
+    }
+    if (defaults.has(agentId)) continue;
+    const instance: ConfiguredAgentInstance = {
+      id: randomUUID(), nodeId, agentId, label: agentId,
+      storageNamespace: agentId, default: true, removedAt: null,
+    };
+    instances.push(instance);
+    defaults.set(agentId, instance);
+  }
+  return defaults;
 }

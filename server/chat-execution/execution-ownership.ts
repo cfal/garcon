@@ -16,6 +16,7 @@ import { executionTurnIdentity } from './types.ts';
 
 // Exactly one of these owns a chat at a time, which the reserve methods enforce. Handles that
 // only mean something during a drain live inside that variant so they cannot outlast it.
+// Ownership is chat-qualified; provider-native session IDs can collide across instances.
 type ChatOwner =
   | { readonly kind: 'idle' }
   | { readonly kind: 'direct'; readonly reservationId: string }

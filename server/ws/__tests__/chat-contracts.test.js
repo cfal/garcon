@@ -8,6 +8,9 @@ import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 import { ChatRunningError, TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import { StaleTranscriptViewError } from '../../ledger/errors.js';
+import { DomainError } from '../../lib/domain-error.js';
+import { NODE_ERROR_CODES } from '../../../common/node-operation.js';
+import { parseServerWsMessage } from '../../../common/ws-events.js';
 
 const chatViewMessage = {
   ordinal: 1,
@@ -692,6 +695,26 @@ describe('chat WebSocket handler', () => {
       retryable: true,
     });
   });
+
+  for (const code of NODE_ERROR_CODES) {
+    it(`preserves ${code} through the native reload WebSocket contract`, async () => {
+      for (const retryable of [false, true]) {
+        mockTranscriptReload.mockRejectedValueOnce(
+          new DomainError(code, 'Native execution owner is unavailable', 409, retryable),
+        );
+        await chatHandler.message(ws, {
+          type: 'chat-reload', chatId: '123', clientRequestId: 'req-reload-node',
+        });
+        const expected = {
+          type: 'client-request-error', clientRequestId: 'req-reload-node',
+          requestType: 'chat-reload', chatId: '123', code,
+          message: 'Native execution owner is unavailable', retryable,
+        };
+        expect(lastSentPayload()).toEqual(expected);
+        expect(parseServerWsMessage(JSON.parse(JSON.stringify(lastSentPayload())))).toEqual(expected);
+      }
+    });
+  }
 
   it('returns retryable HISTORY_LOAD_FAILED when native history is not present yet', async () => {
     mockTranscriptReload.mockRejectedValueOnce(

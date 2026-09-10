@@ -256,7 +256,7 @@ async function withFixture(run, options = {}) {
         return { id: 'chat-1', ...entry };
       },
     },
-    integrations: { require: () => integration },
+    instances: { requireFor: () => integration },
     getCarryOverRevision: () => 'carryover-1',
     async loadFrozenPrefix() {
       loadCounts.prefix += 1;

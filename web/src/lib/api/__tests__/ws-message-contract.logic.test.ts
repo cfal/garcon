@@ -33,6 +33,7 @@ import {
 } from '$shared/ws-requests';
 import { CHAT_STOP_OUTCOMES, ErrorMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import { NODE_ERROR_CODES } from '$shared/node-operation';
 
 const chatViewMessage = {
 	ordinal: 1,
@@ -606,6 +607,13 @@ describe('parseServerWsMessage', () => {
 		]) {
 			expect(parseServerWsMessage({ ...validError, ...patch })).toBeNull();
 		}
+	});
+
+	it.each(NODE_ERROR_CODES)('preserves %s in native reload failures', (code) => {
+		const error = new ClientRequestErrorMessage(
+			'req-reload-node', 'chat-reload', code, 'Native execution owner is unavailable', false, 'c-1',
+		);
+		expect(parseServerWsMessage(JSON.parse(JSON.stringify(error)))).toEqual(error);
 	});
 
 	it('strictly parses shared reconnect and pong processing outcomes', () => {

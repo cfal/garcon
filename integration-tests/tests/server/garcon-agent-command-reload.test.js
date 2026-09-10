@@ -34,6 +34,7 @@ async function withReload(run) {
   const nativeSession = { ownerId: 'test', schemaVersion: 1, value: { id: 'synthetic-native' } };
   await registry.init();
   registry.addChat({ id: CHAT, agentId: 'test', agentOwnershipEpoch: 'synthetic-epoch',
+    executionLocation: testExecutionLocation('test', root),
     nativeSession, nativeSeedReceipt: null, agentSessionId: 'synthetic-session', projectPath: root,
     model: 'synthetic-model', permissionMode: 'default', thinkingMode: 'none', tags: [],
     agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } },
@@ -69,13 +70,13 @@ async function withReload(run) {
     nativeHistoryImport: { async *load() { yield [{ message: new AssistantMessage(AT, 'Imported reply.') }]; } },
     nativeActivity: { lastActivity: async () => ({ kind: 'ready', value: { lastEntryAt: RESULT_AT } }) },
   };
-  const integrations = { get: () => integration, require: () => integration };
-  const adoption = new TranscriptAdoptionService({ ledger, registry, integrations,
+  const instances = { requireFor: () => integration };
+  const adoption = new TranscriptAdoptionService({ ledger, registry, instances,
     getCarryOverRevision: () => 'synthetic-carry', loadFrozenPrefix: async () => [] });
-  const reload = new TranscriptReloadService({ ledger, registry, integrations, adoption, execution,
+  const reload = new TranscriptReloadService({ ledger, registry, instances, adoption, execution,
     getCarryOverRevision: () => 'synthetic-carry', chatMutationLock: new KeyedPromiseLock(),
     reopenProducer: () => { ledger.openProducer(CHAT, 'test'); } });
-  try { await run({ ledger, store, registry, view, lease, execution, reload, integration, integrations, request, dispatched, appendReceipt }); }
+  try { await run({ ledger, store, registry, view, lease, execution, reload, integration, instances, request, dispatched, appendReceipt }); }
   finally {
     execution.beginShutdown();
     await execution.waitForDispatches();
@@ -120,7 +121,7 @@ describe('agent command reply reload boundaries', () => {
   }
 
   test('reload preserves original request addresses and trailing result native evidence without redispatch', async () => {
-    await withReload(async ({ ledger, store, registry, view, lease, reload, integration, integrations, request }) => {
+    await withReload(async ({ ledger, store, registry, view, lease, reload, integration, instances, request }) => {
       const command = '<garcon-start-agent ref="task" agent="test" model="synthetic-model">Task.</garcon-start-agent>\n<garcon-schedule every="5m" />\n<garcon-resume-agent ref="followup" chat-id="2222222222222222">Follow up.</garcon-resume-agent>';
       ledger.appendNotice(CHAT, view.viewId, { title: 'Local-only', content: 'Local-only notice.', detail: {}, at: AT });
       lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, command) }] });
@@ -155,7 +156,7 @@ describe('agent command reply reload boundaries', () => {
         expect(ledger.nativeActivityState(CHAT).providerWatermark.at).toBe(RESULT_AT);
         const warnings = [];
         let completed = deferred();
-        const activity = new NativeTranscriptActivityService({ ledger, registry, integrations,
+        const activity = new NativeTranscriptActivityService({ ledger, registry, instances,
           ownsExecution: () => false, notifyOperationalNotice: (...args) => warnings.push(args),
           scheduleTimeout: () => ({ cancel: () => completed.resolve() }) });
         integration.nativeActivity.lastActivity = async () => ({ kind: 'ready', value: { lastEntryAt: RESULT_AT } });
@@ -171,3 +172,4 @@ describe('agent command reply reload boundaries', () => {
     });
   });
 });
+import { testExecutionLocation } from '../../../server/execution-nodes/testing/placement.js';

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 
-export const CURRENT_WORKSPACE_VERSION = 7;
+export const CURRENT_WORKSPACE_VERSION = 8;
 
 const WORKSPACE_VERSION_FILE = 'workspace-version.json';
 const FRESH_WORKSPACE_IGNORED_FILES = new Set([
@@ -18,6 +18,7 @@ const MIGRATIONS = [
   { name: 'carryover-segment-migration', version: 5 },
   { name: 'agent-integration-settings-refresh', version: 6 },
   { name: 'agent-execution-mode-refresh', version: 7 },
+  { name: 'execution-location-migration', version: 8 },
 ] as const;
 
 export type WorkspaceMigrationName = typeof MIGRATIONS[number]['name'];
@@ -31,11 +32,13 @@ export class WorkspaceMigrationRunner {
   readonly #initialVersion: number;
   readonly #skipLadder: boolean;
   #nextEntry = 0;
+  #persistedVersion: number;
 
   private constructor(workspaceDir: string, initialVersion: number, skipLadder: boolean) {
     this.#workspaceDir = workspaceDir;
     this.#initialVersion = initialVersion;
     this.#skipLadder = skipLadder;
+    this.#persistedVersion = initialVersion;
   }
 
   get initialVersion(): number {
@@ -63,18 +66,24 @@ export class WorkspaceMigrationRunner {
     if (!entry || entry.name !== name) {
       throw new Error(`Workspace migration order violation: expected ${entry?.name ?? 'completion'}, got ${name}`);
     }
-    this.#nextEntry += 1;
     if (!this.#skipLadder && this.#initialVersion < entry.version) await migrate();
+    this.#nextEntry += 1;
   }
 
   async finish(): Promise<void> {
     if (this.#nextEntry !== MIGRATIONS.length) {
       throw new Error(`Workspace migration ladder stopped before ${MIGRATIONS[this.#nextEntry].name}`);
     }
-    if (this.#initialVersion === CURRENT_WORKSPACE_VERSION) return;
+    await this.checkpoint();
+  }
+
+  async checkpoint(): Promise<void> {
+    const version = MIGRATIONS[this.#nextEntry - 1]?.version;
+    if (version === undefined || version <= this.#persistedVersion) return;
     await writeJsonFileAtomic(path.join(this.#workspaceDir, WORKSPACE_VERSION_FILE), {
-      version: CURRENT_WORKSPACE_VERSION,
+      version,
     } satisfies WorkspaceVersionFile);
+    this.#persistedVersion = version;
   }
 }
 

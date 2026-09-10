@@ -23,6 +23,8 @@ import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { PreparedCarryover } from '../chats/prepared-carryover.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
 import { isThinkingModeSupported } from '../../common/execution-defaults.js';
+import { sameExecutionOwner, type ExecutionLocation } from '../../common/execution-location.js';
+import type { LocalExecutionPlacement } from '../execution-nodes/local-placement.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -60,6 +62,7 @@ export class AgentHandoffService {
 
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
+    readonly placements: Pick<LocalExecutionPlacement, 'prepareHandoff'>;
     readonly integrations: IntegrationRegistry;
     readonly endpointResolver: ApiProviderEndpointResolver;
     readonly catalog: {
@@ -216,6 +219,8 @@ export class AgentHandoffService {
     }
     return {
       agentId: requested.agentId,
+      executionLocation: await this.deps.placements.prepareHandoff(input.chat, requested.agentId),
+      projectPath: input.chat.projectPath,
       model: selection.model,
       apiProviderId: selection.apiProviderId,
       modelEndpointId: selection.endpointId,
@@ -383,7 +388,8 @@ export class AgentHandoffService {
     }
   }
 
-  #applyLedgerBoundary(intent: AgentHandoffIntent): void {
+  async #applyLedgerBoundary(intent: AgentHandoffIntent): Promise<void> {
+    await this.deps.ownership.reconcileDurability();
     const markers = this.deps.ledger.rowsAfter(
       intent.chatId,
       intent.watermark.viewId,
@@ -451,7 +457,7 @@ export class AgentHandoffService {
         switch (recovery.step) {
           case 'ledger-boundary':
             this.deps.ledger.closeProducer(intent.chatId);
-            this.#applyLedgerBoundary(intent);
+            await this.#applyLedgerBoundary(intent);
             recovery.step = 'registry';
             break;
           case 'registry':
@@ -655,12 +661,14 @@ function waitForHandoffRetry(delay: number, signal: AbortSignal): Promise<void> 
 interface OwnershipFence {
   readonly agentId: string;
   readonly agentOwnershipEpoch: string;
+  readonly executionLocation: ExecutionLocation;
 }
 
 function ownershipFence(entry: ChatRegistryEntry): OwnershipFence {
   return {
     agentId: entry.agentId,
     agentOwnershipEpoch: entry.agentOwnershipEpoch,
+    executionLocation: { ...entry.executionLocation },
   };
 }
 
@@ -668,7 +676,7 @@ function matchesOwnershipFence(
   entry: ChatRegistryEntry | null,
   expected: OwnershipFence,
 ): boolean {
-  return entry?.agentId === expected.agentId
+  return entry !== null && sameExecutionOwner(entry, expected)
     && entry.agentOwnershipEpoch === expected.agentOwnershipEpoch;
 }
 

@@ -19,7 +19,7 @@ export async function resolveAccessibleProjectPath(
   const resolution = await inspect(projectPath);
   return resolution.kind === 'available'
     ? { projectPath: resolution.effectiveProjectKey }
-    : { error: unavailableResponse(projectPath, resolution.reason) };
+    : { error: projectUnavailableResponse(projectPath, resolution.reason) };
 }
 
 function projectPathNotFoundResponse(projectPath: string): Response {
@@ -29,7 +29,7 @@ function projectPathNotFoundResponse(projectPath: string): Response {
   );
 }
 
-function unavailableResponse(projectPath: string, reason: ProjectUnavailableReason): Response {
+export function projectUnavailableResponse(projectPath: string, reason: ProjectUnavailableReason): Response {
   if (reason === 'not-found') return projectPathNotFoundResponse(projectPath);
   if (reason === 'outside-base') return projectBoundaryErrorResponse();
   if (reason === 'not-a-directory') {

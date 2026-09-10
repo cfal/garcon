@@ -68,6 +68,39 @@ describe('execution resource identity persistence', () => {
     expect(store.snapshot().instances[0].storageNamespace).toBe('synthetic-provider');
   });
 
+  test('registers all local provider defaults before any chat without registering a fictitious project', async () => {
+    const { directory, store, file } = await fixture();
+    const providers = ['synthetic-provider', 'second-provider', 'synthetic-provider'];
+    const instances = await store.registerLocalDefaults(providers);
+    expect(instances.map((instance) => instance.agentId)).toEqual(['synthetic-provider', 'second-provider']);
+    expect(instances.map((instance) => instance.storageNamespace)).toEqual(['synthetic-provider', 'second-provider']);
+    expect(store.snapshot().workspaces).toEqual([]);
+    expect(JSON.parse(await readFile(file, 'utf8')).instances).toEqual(instances);
+    const restarted = new ExecutionNodesStore(directory);
+    await restarted.init();
+    expect(await restarted.registerLocalDefaults(providers)).toEqual(instances);
+    const [location] = await restarted.prepareLocalTargets([{ agentId: providers[0], projectPath: '/synthetic/project' }]);
+    expect(location.instanceId).toBe(instances[0].id);
+    instances[0].label = 'caller mutation';
+    expect(restarted.snapshot().instances[0].label).toBe('synthetic-provider');
+  });
+
+  test('rejects a removed local default without registering replacements or partial defaults', async () => {
+    const { directory, store, file } = await fixture();
+    await store.registerLocalDefaults(['synthetic-provider']);
+    const removed = store.snapshot();
+    removed.instances[0].removedAt = '2026-09-10T00:00:00.000Z';
+    await writeJsonFileAtomic(file, removed);
+    const restarted = new ExecutionNodesStore(directory);
+    await restarted.init();
+    await expect(restarted.registerLocalDefaults(['second-provider', 'synthetic-provider']))
+      .rejects.toMatchObject({ code: 'NODE_REMOVED' });
+    await expect(restarted.prepareLocalTargets([{ agentId: 'synthetic-provider', projectPath: '/synthetic/project' }]))
+      .rejects.toMatchObject({ code: 'NODE_REMOVED' });
+    expect(restarted.snapshot()).toEqual(removed);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(removed);
+  });
+
   test('preserves pre-rename state and fences post-rename ambiguity without publishing a successful reference', async () => {
     let failure = null;
     const { directory, store, file } = await fixture({ write: async (...args) => {

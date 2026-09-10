@@ -263,10 +263,11 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       const dropLogLines = fixture.garcon.logs.slice(dropLogCursor);
       const dropLogs = dropLogLines.join('\n');
       expect(dropLogLines.flatMap((line, index) => line.includes(
-        '[agent-integration:opencode] Dropped a provider event for an unavailable transcript sink',
+        '[agent-integration:opencode] Dropped a provider event for an unavailable output',
       ) ? [dropLogLines.slice(index, index + 6).join('\n')] : []).filter((block) => (
         block.includes(`chatId: "${staleChatId}"`)
         && block.includes('eventType: "rows"')
+        && block.includes('reason: "Transcript producer sink is closed"')
       ))).toHaveLength(1);
       expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
       expect(dropLogs).toContain('eventType: "rows"');

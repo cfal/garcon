@@ -184,6 +184,7 @@ export class ForkCommands {
   ): Promise<ForkContext> {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
+    this.support.assertChatCreationAvailable(targetChatId);
     const upToOrdinal = input.upToOrdinal;
 
     if (
@@ -289,7 +290,7 @@ export class ForkCommands {
     }
     if (target?.agentSessionId) {
       try {
-        await this.deps.agents.discardForkedAgentSession(target.agentId, {
+        await this.deps.agents.discardForkedAgentSession(target, {
           agentSessionId: target.agentSessionId,
           nativeSession: target.nativeSession,
           nativeSeedReceipt: target.nativeSeedReceipt,

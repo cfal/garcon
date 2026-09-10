@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(compaction, options = {}) {
@@ -42,6 +43,7 @@ function makeRouter(compaction, options = {}) {
       updateChat: mock(async () => entry),
     },
     directory,
+    instances: { requireFor: directory.require, configurationFor: () => new LocalProviderConfigurationService(integration) },
     endpointResolver: {
       resolveSelection: mock(() => ({
         model: 'model-a',

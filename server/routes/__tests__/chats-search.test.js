@@ -103,7 +103,7 @@ function createRoutesFixture({
     hasAgent: mock(() => true),
     supportsFork: mock(() => true),
     supportsImages: mock(() => true),
-    isAgentSessionRunning: mock(() => false),
+    isChatRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [] })),
     startSession: mock(async () => undefined),
     modelSupportsImages: mock(async () => true),

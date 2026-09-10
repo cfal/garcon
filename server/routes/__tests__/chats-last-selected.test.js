@@ -51,7 +51,7 @@ function createFixture() {
   };
   const agents = {
     startSession: mock(() => undefined),
-    isAgentSessionRunning: mock(() => false),
+    isChatRunning: mock(() => false),
   };
   const lastSelectedChat = new InMemoryLastSelectedChatState();
   const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });

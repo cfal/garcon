@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { AgentInstanceDirectory } from '../instance-directory.js';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
@@ -11,6 +12,7 @@ function makeRouter(overrides = {}) {
   const integration = {
     descriptor: {
       id: 'test',
+      supportedPermissionModes: ['default'],
       supportedThinkingModes: overrides.supportedThinkingModes ?? ['none', 'xhigh'],
     },
     settings: {
@@ -33,8 +35,17 @@ function makeRouter(overrides = {}) {
       endpoint: { id: selection.endpointId, baseUrl: 'https://example.test/v1' },
     }) : null),
   };
+  const instances = new AgentInstanceDirectory([{
+    configuration: {
+      nodeId: 'local-node', id: 'configured-default', agentId: 'test', label: 'Synthetic profile',
+      storageNamespace: 'synthetic', default: true, removedAt: null,
+    },
+    integration,
+  }]);
   const router = new AgentRuntimeRouter({
     registry: { getChat: mock(() => null) },
+    localNodeId: 'local-node',
+    instances,
     directory: {
       require: mock((id) => {
         if (id !== 'test') throw new Error(`Unknown integration: ${id}`);
@@ -52,7 +63,7 @@ function makeRouter(overrides = {}) {
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
-  return { router, integration, endpointResolver, run };
+  return { router, integration, endpointResolver, run, instances };
 }
 
 describe('AgentRuntimeRouter.runSingleQuery', () => {
@@ -155,5 +166,40 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
 
     await expect(router.runSingleQuery('prompt', { agentId: 'test' }))
       .rejects.toThrow('Single query unsupported for agent: test');
+  });
+
+  it('does not borrow a provider-type default when the configured local instance is unavailable', async () => {
+    const { router, instances, run } = makeRouter();
+    instances.defaultFor = () => null;
+    await expect(router.runSingleQuery('prompt', { agentId: 'test', model: 'model-a' }))
+      .rejects.toMatchObject({ code: 'NODE_UNAVAILABLE' });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('executes the endpoint and settings snapshot that was validated', async () => {
+    const { router, integration, endpointResolver, run } = makeRouter();
+    const gate = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    integration.endpoints.validate = mock(() => { entered.resolve(); return gate.promise; });
+    const reference = {
+      apiProvider: { label: 'Synthetic API' },
+      endpoint: { baseUrl: 'https://original.invalid/v1', headers: { 'x-synthetic': 'original' } },
+    };
+    endpointResolver.resolveEndpointReference.mockImplementation(() => reference);
+    const settings = envelope('test', { option: 'original' });
+    const pending = router.runSingleQuery('prompt', {
+      agentId: 'test', model: 'model-a', apiProviderId: 'synthetic-api', modelEndpointId: 'synthetic-endpoint',
+      agentSettings: settings,
+    });
+    await Promise.race([entered.promise, pending]);
+    reference.endpoint.baseUrl = 'https://changed.invalid/v1';
+    settings.values.option = 'changed';
+    gate.resolve();
+    await pending;
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      settings: envelope('test', { option: 'original' }),
+      endpoint: expect.objectContaining({ baseUrl: 'https://original.invalid/v1' }),
+    }));
+    expect(endpointResolver.resolveEndpointReference).toHaveBeenCalledTimes(1);
   });
 });

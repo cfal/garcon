@@ -9,6 +9,7 @@ import {
 } from '../native-activity.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
+import { testExecutionLocation } from '../../execution-nodes/testing/placement.ts';
 
 const CHAT_ID = 'synthetic-chat';
 const SESSION_AT = '2026-08-12T00:00:01.000Z';
@@ -30,9 +31,9 @@ describe('NativeTranscriptActivityService', () => {
       }));
       const options = {
         ledger,
-        registry: { getChat: () => ({ agentId: 'test-a' }) },
-        integrations: {
-          get: () => ({ nativeActivity: { lastActivity } }),
+        registry: { getChat: () => ({ agentId: 'test-a', executionLocation: testExecutionLocation('test-a') }) },
+        instances: {
+          requireFor: () => ({ nativeActivity: { lastActivity } }),
         },
         ownsExecution: () => false,
         notifyOperationalNotice: (chatId, noticeType, content) => {
@@ -395,12 +396,17 @@ function eligibilityChanges() {
         providerWatermark: { ...current.providerWatermark, at: EXTERNAL_AT },
       })),
     },
+    {
+      name: 'same-provider instance with the same native session',
+      mutate: (fixture) => fixture.setLocation({ ...testExecutionLocation('test-a'), instanceId: 'other-instance' }),
+    },
   ];
 }
 
 function serviceFixture() {
   let currentState = syntheticActivityState();
   let agentId = 'test-a';
+  let executionLocation = testExecutionLocation('test-a');
   let owned = false;
   let chatExists = true;
   let integrationAvailable = true;
@@ -415,9 +421,12 @@ function serviceFixture() {
   });
   const activity = new NativeTranscriptActivityService({
     ledger: { nativeActivityState: () => currentState },
-    registry: { getChat: () => chatExists ? { agentId } : null },
-    integrations: {
-      get: () => integrationAvailable ? { nativeActivity: { lastActivity } } : null,
+    registry: { getChat: () => chatExists ? { agentId, executionLocation } : null },
+    instances: {
+      requireFor: () => {
+        if (!integrationAvailable) throw new Error('Synthetic instance unavailable');
+        return { nativeActivity: { lastActivity } };
+      },
     },
     ownsExecution: () => owned,
     notifyOperationalNotice: (chatId, noticeType, content) => {
@@ -443,6 +452,7 @@ function serviceFixture() {
     timers,
     enqueueProbe(...results) { queuedProbeResults.push(...results); },
     setAgentId(value) { agentId = value; },
+    setLocation(value) { executionLocation = value; },
     setOwned(value) { owned = value; },
     setChatExists(value) { chatExists = value; },
     setIntegrationAvailable(value) { integrationAvailable = value; },

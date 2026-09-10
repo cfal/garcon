@@ -103,7 +103,6 @@ export type AgentRegistryDep = Pick<
   | 'supportsForkWhileRunning'
   | 'supportsUpdateProjectPath'
   | 'requiresNativePathForProjectPathUpdate'
-  | 'isAgentSessionRunning'
   | 'currentTranscriptViewId'
   | 'publishSessionFact'
   | 'forkAgentSession'
@@ -141,7 +140,7 @@ export type ForkChatFileCopyDep = (args: {
     providerMeta?: JsonObject | null;
     signal: AbortSignal;
   }) => Promise<ForkedAgentSessionOutcome | null>;
-  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
+  discardForkedAgentSession: AgentRegistryServiceContract['discardForkedAgentSession'];
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
 }) => Promise<ForkChatFileCopyResult>;
 
@@ -151,6 +150,7 @@ export interface FileMentionResolverDep {
 
 export interface ChatCommandServiceDeps {
   chats: IChatRegistry;
+  placements: Pick<import('../execution-nodes/local-placement.js').LocalExecutionPlacement, 'prepare' | 'prepareRelocation'>;
   queue: ChatExecutionCommands;
   ledger: CommandLedger;
   settings: SettingsDep;
@@ -162,7 +162,7 @@ export interface ChatCommandServiceDeps {
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
-  ownership: Pick<AgentOwnershipJournal, 'delete'>;
+  ownership: Pick<AgentOwnershipJournal, 'delete' | 'hasPending' | 'pendingKind'>;
   handoffs: Pick<
     AgentHandoffService,
     | 'resolveTarget'
@@ -351,9 +351,17 @@ export class CommandSupport {
     );
   }
 
-  requireChat(chatId: string, message = 'Session not found'): void {
-    if (!this.deps.chats.getChat(chatId)) {
+  requireChat(chatId: string, message = 'Session not found'): ChatRegistryEntry {
+    const chat = this.deps.chats.getChat(chatId);
+    if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', message, 404);
+    }
+    return chat;
+  }
+
+  assertChatCreationAvailable(chatId: string): void {
+    if (this.deps.ownership.hasPending(chatId)) {
+      throw new CommandValidationError('OWNERSHIP_TRANSFER_PENDING', 'Chat identity is reserved by pending ownership cleanup', 409, true);
     }
   }
 

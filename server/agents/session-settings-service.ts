@@ -1,15 +1,12 @@
-import { normalizePermissionMode } from '../../common/chat-modes.js';
+import { isDeepStrictEqual } from 'node:util';
+import { sameExecutionOwner } from '../../common/execution-location.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { AgentChatEntry, AgentSessionSettingsPatch } from './session-types.js';
-import type { AgentDirectory } from './directory.js';
+import type { AgentInstanceDirectory } from './instance-directory.js';
 import { toAgentEndpointSelection } from './execution-planning.js';
-import {
-  isThinkingModeSupported,
-  normalizeSupportedThinkingMode,
-} from '../../common/execution-defaults.js';
 import { DomainError } from '../lib/domain-error.js';
 
 export class AgentSessionSettingsService {
@@ -17,7 +14,7 @@ export class AgentSessionSettingsService {
 
   constructor(private readonly deps: {
     registry: IChatRegistry;
-    directory: AgentDirectory;
+    instances: Pick<AgentInstanceDirectory, 'requireFor' | 'configurationFor'>;
     endpointResolver: ApiProviderEndpointResolver;
     chatMutationLock?: KeyedPromiseLock;
   }) {
@@ -26,12 +23,13 @@ export class AgentSessionSettingsService {
 
   updateSessionSettings(
     chatId: string,
-    patch: AgentSessionSettingsPatch,
+    input: AgentSessionSettingsPatch,
   ): Promise<AgentChatEntry> {
+    const patch = structuredClone(input);
     return this.#lock.runExclusive(`chat:${chatId}`, async () => {
-      const entry = this.deps.registry.getChat(chatId);
+      const entry = structuredClone(this.deps.registry.getChat(chatId));
       if (!entry) throw new Error(`Session not found: ${chatId}`);
-      const integration = this.deps.directory.require(entry.agentId);
+      const integration = this.deps.instances.requireFor(entry);
       const previous = this.deps.endpointResolver.resolveSelection({
         agentId: entry.agentId,
         model: entry.model,
@@ -46,64 +44,34 @@ export class AgentSessionSettingsService {
           ? patch.modelEndpointId
           : entry.modelEndpointId,
       });
-      const endpoint = toAgentEndpointSelection(this.deps.endpointResolver, next);
-      if (endpoint) {
-        if (!integration.endpoints) {
-          throw new Error(`Agent integration ${entry.agentId} does not accept API provider endpoints`);
-        }
-        await integration.endpoints.validate(endpoint);
-      }
       assertSameApiProviderBoundary(previous, next);
-
-      const permissionMode = normalizePermissionMode(patch.permissionMode ?? entry.permissionMode);
-      if (
-        patch.thinkingMode !== undefined
-        && !isThinkingModeSupported(
-          patch.thinkingMode,
-          integration.descriptor.supportedThinkingModes,
-        )
-      ) {
-        throw new DomainError(
-          'VALIDATION_FAILED',
-          `Thinking mode ${patch.thinkingMode} is not supported by ${entry.agentId}`,
-          422,
-        );
-      }
-      const thinkingMode = normalizeSupportedThinkingMode(
-        patch.thinkingMode ?? entry.thinkingMode,
-        integration.descriptor.supportedThinkingModes,
-      );
-      const currentSettings = integration.settings.parse(
-        entry.agentSettingsById[entry.agentId] ?? integration.settings.defaults(),
-      );
-      const settings = patch.agentSettingsPatch
-        ? integration.settings.applyPatch(currentSettings, patch.agentSettingsPatch)
-        : currentSettings;
+      const configuration = await this.deps.instances.configurationFor(entry).prepareUpdate({
+        previous: {
+          model: previous.model,
+          permissionMode: entry.permissionMode,
+          thinkingMode: entry.thinkingMode,
+          settings: entry.agentSettingsById[entry.agentId] ?? null,
+          endpoint: toAgentEndpointSelection(this.deps.endpointResolver, previous),
+        },
+        next: { model: next.model, endpoint: toAgentEndpointSelection(this.deps.endpointResolver, next) },
+        patch: {
+          permissionMode: patch.permissionMode,
+          thinkingMode: patch.thinkingMode,
+          settings: patch.agentSettingsPatch,
+        },
+      }, new AbortController().signal);
+      this.#assertCurrentTarget(chatId, entry);
 
       if (entry.agentSessionId && integration.sessionConfiguration) {
-        const configuration = {
-          model: next.model,
-          permissionMode,
-          thinkingMode,
-          settings,
-          endpoint,
-        };
         await integration.sessionConfiguration.apply(
           entry.agentSessionId,
-          configuration,
-          {
-            model: previous.model,
-            permissionMode: normalizePermissionMode(entry.permissionMode),
-            thinkingMode: normalizeSupportedThinkingMode(
-              entry.thinkingMode,
-              integration.descriptor.supportedThinkingModes,
-            ),
-            settings: currentSettings,
-            endpoint: toAgentEndpointSelection(this.deps.endpointResolver, previous),
-          },
+          structuredClone(configuration.next),
+          structuredClone(configuration.previous),
         );
+        this.#assertCurrentTarget(chatId, entry);
       }
 
+      const { permissionMode, thinkingMode, settings } = configuration.next;
       const updated = await this.deps.registry.updateChat(chatId, {
         model: next.model,
         apiProviderId: next.apiProviderId,
@@ -119,5 +87,17 @@ export class AgentSessionSettingsService {
       if (!updated) throw new Error(`Session not found: ${chatId}`);
       return updated;
     });
+  }
+
+  #assertCurrentTarget(chatId: string, expected: AgentChatEntry): void {
+    const current = this.deps.registry.getChat(chatId);
+    if (!current || !sameExecutionOwner(current, expected)
+      || current.agentOwnershipEpoch !== expected.agentOwnershipEpoch
+      || current.agentSessionId !== expected.agentSessionId
+      || current.projectPath !== expected.projectPath
+      || !isDeepStrictEqual(current.nativeSession, expected.nativeSession)) {
+      throw new DomainError('SOURCE_REVISION_CHANGED', 'Session changed while updating settings', 409);
+    }
+    this.deps.instances.requireFor(current);
   }
 }

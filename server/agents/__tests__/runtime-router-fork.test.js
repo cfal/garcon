@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(fork) {
@@ -64,6 +65,7 @@ function makeRouter(fork) {
   };
   const router = new AgentRuntimeRouter({
     registry,
+    instances: { requireFor: mock(() => integration), configurationFor: () => new LocalProviderConfigurationService(integration) },
     directory: {
       require: mock(() => integration),
       list: mock(() => [integration]),

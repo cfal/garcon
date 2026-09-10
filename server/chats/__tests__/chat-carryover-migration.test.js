@@ -14,6 +14,7 @@ import {
 import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts';
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
 import { ChatRegistry } from '../store.ts';
+import { migrateTestWorkspaceLocations } from '../../execution-nodes/testing/placement.js';
 
 const CHAT_ID = '1786077000000001';
 const POST_MIGRATION_CHAT_ID = '1786077000000002';
@@ -667,9 +668,11 @@ describe('legacy carryover migration', () => {
     });
     await migrateLegacyCarryOverWorkspace(workspaceDir);
     await writeWorkspaceVersion(5);
+    const placements = await migrateTestWorkspaceLocations(workspaceDir);
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
     registry.addChat({
+      executionLocation: await placements.prepare('claude', '/workspace/project'),
       id: POST_MIGRATION_CHAT_ID,
       agentId: 'claude',
       model: 'opus',
@@ -687,7 +690,7 @@ describe('legacy carryover migration', () => {
     expect((await readJson('chats.json')).sessions).toHaveProperty(POST_MIGRATION_CHAT_ID);
   });
 
-  it('allows rollback after a semantics-preserving registry rewrite', async () => {
+  it.each([false, true])('allows rollback after a semantics-preserving registry rewrite with colliding remote ids: %s', async (collidingRemoteIds) => {
     await writeLegacyWorkspace({
       segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
       currentAgentId: 'claude',
@@ -698,15 +701,48 @@ describe('legacy carryover migration', () => {
     await writeWorkspaceVersion(5);
     const registryPath = path.join(workspaceDir, 'chats.json');
     const migratedBytes = await fs.readFile(registryPath);
+    await migrateTestWorkspaceLocations(workspaceDir);
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
     await registry.flush();
     const rewrittenBytes = await fs.readFile(registryPath);
     expect(rewrittenBytes.equals(migratedBytes)).toBe(false);
+    if (collidingRemoteIds) {
+      const nodes = await readJson('execution-nodes.json');
+      const nodeId = 'synthetic-remote-node';
+      nodes.nodes.push({ id: nodeId, kind: 'remote', label: 'Synthetic remote', removedAt: null });
+      nodes.instances.unshift(...nodes.instances.map((instance) => ({ ...instance, nodeId })));
+      nodes.workspaces.unshift(...nodes.workspaces.map((workspace) => ({ ...workspace, nodeId })));
+      await fs.writeFile(path.join(workspaceDir, 'execution-nodes.json'), JSON.stringify(nodes));
+    }
 
     expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('restored');
 
     expect(await readJson('chats.json')).toEqual(legacyRegistry);
+  });
+
+  it.each(['missing', 'malformed', 'invalid'])('reports unsafe rollback when execution placement is %s', async (fault) => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'synthetic input')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+    await writeWorkspaceVersion(5);
+    await migrateTestWorkspaceLocations(workspaceDir);
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const registryBefore = await fs.readFile(registryPath);
+    const journalBefore = await readJson('agent-ownership-journal.json');
+    const markerBefore = await readJson('carryover-transcripts/migration-v2.json');
+    const nodesPath = path.join(workspaceDir, 'execution-nodes.json');
+    if (fault === 'missing') await fs.rm(nodesPath);
+    else await fs.writeFile(nodesPath, fault === 'malformed' ? '{' : '{}');
+
+    await expect(rollbackLegacyCarryOverMigration(workspaceDir))
+      .rejects.toThrow('Carryover migration rollback is unsafe after execution placement changed');
+    expect(await fs.readFile(registryPath)).toEqual(registryBefore);
+    expect(await readJson('agent-ownership-journal.json')).toEqual(journalBefore);
+    expect(await readJson('carryover-transcripts/migration-v2.json')).toEqual(markerBefore);
   });
 
   it('removes rollback artifacts after a validated subsequent restart', async () => {

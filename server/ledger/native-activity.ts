@@ -1,10 +1,11 @@
 import type {
-  AgentIntegration,
   AgentNativeActivityProbe,
   AgentNativeActivityResult,
   AgentNativeSessionRef,
 } from '@garcon/server-agent-interface';
 import { isDeepStrictEqual } from 'node:util';
+import { sameExecutionOwner, type LocatedChatOwner } from '../../common/execution-location.js';
+import type { AgentInstanceDirectory } from '../agents/instance-directory.js';
 import type { ChatOperationalNoticeMessage } from '../../common/ws-events.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
@@ -14,16 +15,12 @@ import type { TranscriptLedgerService } from './service.js';
 export const NATIVE_TRANSCRIPT_DRIFT_NOTICE =
   'The transcript may have changed outside Garcon. Consider reloading from native history.';
 
-interface NativeActivityIntegrationDirectory {
-  get(agentId: string): AgentIntegration | null;
-}
-
 interface ScheduledTimeout {
   cancel(): void;
 }
 
-interface NativeActivityEligibilityKey {
-  readonly agentId: string;
+interface NativeActivityEligibilityKey extends LocatedChatOwner {
+  readonly agentOwnershipEpoch: string | undefined;
   readonly transcriptViewId: string;
   readonly sessionOrdinal: number;
   readonly nativeSession: AgentNativeSessionRef;
@@ -44,7 +41,7 @@ interface PendingNativeActivityCheck {
 export interface NativeTranscriptActivityServiceOptions {
   readonly ledger: Pick<TranscriptLedgerService, 'nativeActivityState'>;
   readonly registry: Pick<IChatRegistry, 'getChat'>;
-  readonly integrations: NativeActivityIntegrationDirectory;
+  readonly instances: Pick<AgentInstanceDirectory, 'requireFor'>;
   readonly ownsExecution: (chatId: string) => boolean;
   readonly notifyOperationalNotice: (
     chatId: string,
@@ -165,8 +162,8 @@ export class NativeTranscriptActivityService {
   #eligibility(chatId: string): EligibleNativeActivityCheck | null {
     const entry = this.options.registry.getChat(chatId);
     if (!entry) return null;
-    const integration = this.options.integrations.get(entry.agentId);
-    if (!integration?.nativeActivity) return null;
+    const integration = this.options.instances.requireFor(entry);
+    if (!integration.nativeActivity) return null;
     const activity = this.options.ledger.nativeActivityState(chatId);
     const session = activity.session;
     const nativeSession = session?.detail.nativeSession ?? null;
@@ -175,6 +172,8 @@ export class NativeTranscriptActivityService {
     return {
       key: {
         agentId: entry.agentId,
+        executionLocation: { ...entry.executionLocation },
+        agentOwnershipEpoch: entry.agentOwnershipEpoch,
         transcriptViewId: activity.viewId,
         sessionOrdinal: session.ordinal,
         nativeSession,
@@ -199,7 +198,8 @@ function eligibilityKeysEqual(
   left: NativeActivityEligibilityKey,
   right: NativeActivityEligibilityKey,
 ): boolean {
-  return left.agentId === right.agentId
+  return sameExecutionOwner(left, right)
+    && left.agentOwnershipEpoch === right.agentOwnershipEpoch
     && left.transcriptViewId === right.transcriptViewId
     && left.sessionOrdinal === right.sessionOrdinal
     && left.providerWatermark.ordinal === right.providerWatermark.ordinal

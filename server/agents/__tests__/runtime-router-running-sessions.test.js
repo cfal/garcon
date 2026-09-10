@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { resetServerConfigForTests } from '../../config.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
@@ -42,8 +43,8 @@ function makeRouter(execution) {
     registry: {
       getChat: mock(() => entry),
       updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),
-      getChatByAgentSessionId: mock(() => null),
     },
+    instances: { requireFor: mock(() => integration), configurationFor: () => new LocalProviderConfigurationService(integration) },
     directory: {
       require: mock(() => integration),
       get: mock(() => integration),

@@ -6,6 +6,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { writePersistedChatRegistry } from '../../support/chat-registry.js';
 import {
   assistantContents,
   userContents,
@@ -362,31 +363,28 @@ async function prepareEmptyChat(
     join(directories.workspace, 'workspace-version.json'),
     JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
   );
-  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-    version: 5,
-    sessions: {
-      [chatId]: {
-        agentId,
-        nativeSession: null,
-        agentOwnershipEpoch: crypto.randomUUID(),
-        agentSettingsById: {},
-        projectPath: directories.project,
-        tags: [],
-        agentSessionId: null,
-        nextForkOrdinal: 1,
-        model,
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-        lastReadAt: null,
-        permissionMode: 'bypassPermissions',
-        thinkingMode: 'low',
-        carryOverSegments: [],
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: null,
-      },
+  await writePersistedChatRegistry(directories.workspace, {
+    [chatId]: {
+      agentId,
+      nativeSession: null,
+      agentOwnershipEpoch: crypto.randomUUID(),
+      agentSettingsById: {},
+      projectPath: directories.project,
+      tags: [],
+      agentSessionId: null,
+      nextForkOrdinal: 1,
+      model,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      lastReadAt: null,
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'low',
+      carryOverSegments: [],
+      nativeSeedReceipt: null,
+      carryOverMigrationQuarantine: null,
     },
-  }));
+  });
 }
 
 async function waitForFile(path: string): Promise<void> {

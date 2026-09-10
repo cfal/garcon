@@ -25,6 +25,7 @@ import {
 } from './chat-execution-control';
 import type { RemoteSettingsSnapshot } from './settings';
 import type { ErrorCode } from './error-codes';
+import { NODE_ERROR_CODES, type NodeErrorCode } from './node-operation';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
@@ -337,6 +338,7 @@ export class ChatPreamblesInvalidatedMessage {
 
 export type ClientRequestErrorCode = Extract<
   ErrorCode,
+  | NodeErrorCode
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
@@ -349,6 +351,7 @@ export type ClientRequestErrorCode = Extract<
 >;
 
 const CLIENT_REQUEST_ERROR_CODES: readonly ClientRequestErrorCode[] = [
+  ...NODE_ERROR_CODES,
   'MISSING_CHAT_ID',
   'REQUEST_VALIDATION_FAILED',
   'SESSION_NOT_FOUND',

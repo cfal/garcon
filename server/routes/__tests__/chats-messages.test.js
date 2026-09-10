@@ -107,7 +107,7 @@ function createRoutesFixture(overrides = {}) {
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => true),
     supportsImages: mock(() => true),
-    isAgentSessionRunning: mock(() => false),
+    isChatRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [] })),
     startSession: mock(async () => undefined),
     modelSupportsImages: mock(async () => true),
@@ -442,8 +442,8 @@ describe('GET /api/v1/chats/messages', () => {
         getChat: (chatId) => chatId === CHAT_ID ? entry : null,
         updateChat: () => entry,
       },
-      integrations: {
-        require: () => ({
+      instances: {
+        requireFor: () => ({
           descriptor: { id: 'test-provider' },
           settings: {
             defaults: () => entry.agentSettingsById['test-provider'],

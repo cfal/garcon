@@ -3,6 +3,7 @@
 
 import path from 'path';
 import { initializeServerConfig } from './config.js';
+import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
@@ -59,6 +60,7 @@ import { AgentStartSelectionService } from './agents/agent-start-selection-servi
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { loadServerTls } from './lib/controller-tls.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
+import { AgentInstanceDirectory } from './agents/instance-directory.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
 import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
 import {
@@ -90,6 +92,10 @@ import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
+import { ExecutionNodesStore } from './execution-nodes/store.js';
+import { LocalExecutionPlacement } from './execution-nodes/local-placement.js';
+import { resolveLocalNativeIntegration } from './execution-nodes/local-native-integration.js';
+import { migrateWorkspaceExecutionLocations } from './execution-nodes/workspace-migration.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
 import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
@@ -123,7 +129,7 @@ import {
 // Route factory
 import createAllRoutes from './routes/index.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
-import { createLogger, type Logger } from './lib/log.js';
+import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
@@ -143,33 +149,6 @@ import {
 } from './lib/http-route-types.js';
 
 const logger = createLogger('server');
-const CARRY_OVER_MIGRATION_LOG_INTERVAL_MS = 10_000;
-
-export async function runCarryOverMigrationAtStartup(
-  migrate: () => Promise<void>,
-  progressLogger: Pick<Logger, 'info'>,
-): Promise<void> {
-  const startedAt = Date.now();
-  const elapsedSeconds = () => Math.floor((Date.now() - startedAt) / 1_000);
-
-  progressLogger.info(
-    'Workspace history migration started. This one-time upgrade may take several minutes.',
-  );
-  const heartbeat = setInterval(() => {
-    progressLogger.info(
-      `Workspace history migration is still running (${elapsedSeconds()}s elapsed).`,
-    );
-  }, CARRY_OVER_MIGRATION_LOG_INTERVAL_MS);
-
-  try {
-    await migrate();
-  } finally {
-    clearInterval(heartbeat);
-  }
-  progressLogger.info(
-    `Workspace history migration completed (${elapsedSeconds()}s elapsed).`,
-  );
-}
 
 interface WsConnectionData {
   connectionId: string;
@@ -262,7 +241,7 @@ export async function startServer(): Promise<void> {
     });
     const endpointResolver = new ApiProviderEndpointResolver(
       () => apiProviderStore.list(),
-      (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],
+      (agentId) => integrationRegistry.types.get(agentId)?.supportedEndpointProtocols ?? [],
     );
     await workspaceMigrations.run('core-record-migration', () => (
       migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
@@ -287,6 +266,21 @@ export async function startServer(): Promise<void> {
     await workspaceMigrations.run('agent-execution-mode-refresh', () => (
       refreshAgentExecutionModeCoreRecords({ workspaceDir, integrations: integrationRegistry })
     ));
+    // Earlier carryover migrations cannot read the located registry after an interrupted upgrade.
+    await workspaceMigrations.checkpoint();
+    const executionNodes = new ExecutionNodesStore(workspaceDir);
+    await executionNodes.init();
+    await workspaceMigrations.run('execution-location-migration', () => (
+      migrateWorkspaceExecutionLocations(workspaceDir, executionNodes)
+    ));
+    const placements = new LocalExecutionPlacement(executionNodes);
+    const localInstances = await executionNodes.registerLocalDefaults(
+      integrationRegistry.types.list().map((descriptor) => descriptor.id),
+    );
+    const instances = new AgentInstanceDirectory(localInstances.map((configuration) => ({
+      configuration,
+      integration: integrationRegistry.require(configuration.agentId),
+    })));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
@@ -322,7 +316,9 @@ export async function startServer(): Promise<void> {
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      resolveNativeIntegration(reference) {
+        return resolveLocalNativeIntegration(reference, placements, instances);
+      },
       ledger: transcriptLedger,
     });
     // Persists the version before ownership recovery can remove chats and rewrite the migrated registry.
@@ -368,7 +364,7 @@ export async function startServer(): Promise<void> {
     const transcriptAdoption = new TranscriptAdoptionService({
       ledger: transcriptLedger,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      instances,
       logger,
       getCarryOverRevision: (entry) => carryOver.revision(
         entry.carryOverSegments ?? [],
@@ -384,7 +380,7 @@ export async function startServer(): Promise<void> {
     const nativeTranscriptActivity = new NativeTranscriptActivityService({
       ledger: transcriptLedger,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      instances,
       ownsExecution(chatId) {
         if (!executionQueries) throw new Error('Chat execution coordinator is not initialized');
         return executionQueries.ownsExecution(chatId);
@@ -411,8 +407,10 @@ export async function startServer(): Promise<void> {
     });
 
     agentRegistry = new AgentRegistry({
+      localNodeId: executionNodes.localNodeId,
       registry: chatRegistry,
       integrations: integrationRegistry,
+      instances,
       endpointResolver,
       getCarryOverRevision: (entry) => carryOver.revision(
         entry.carryOverSegments ?? [],
@@ -514,6 +512,7 @@ export async function startServer(): Promise<void> {
     );
     const handoffs = new AgentHandoffService({
       registry: chatRegistry,
+      placements,
       integrations: integrationRegistry,
       endpointResolver,
       catalog: agentRegistry,
@@ -534,7 +533,7 @@ export async function startServer(): Promise<void> {
     await shareStore.init();
 
     const commandLedger = new CommandLedger(workspaceDir);
-    const projectAdmission = new ProjectAdmission(chatRegistry);
+    const projectAdmission = new ProjectAdmission(chatRegistry, placements);
     queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
@@ -556,7 +555,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      instances,
       execution: queue,
       reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       getCarryOverRevision: (entry) => carryOver.revision(
@@ -585,7 +584,7 @@ export async function startServer(): Promise<void> {
         return Boolean(
           session.agentSessionId
           && session.nativeSession
-          && integrationRegistry.get(session.agentId)?.nativeHistoryImport,
+          && instances.get(session.executionLocation)?.nativeHistoryImport,
         );
       },
     });
@@ -599,6 +598,7 @@ export async function startServer(): Promise<void> {
     });
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
+      placements,
       queue,
       ledger: commandLedger,
       settings,
@@ -608,7 +608,7 @@ export async function startServer(): Promise<void> {
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
       readForkedNativeHistory: createForkNativeHistoryReader({
-        integrations: integrationRegistry,
+        instances,
         carryOver,
       }),
       transcripts: transcriptLedger,

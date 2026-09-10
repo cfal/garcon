@@ -23,6 +23,7 @@ import {
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { writePersistedChatRegistry } from '../../support/chat-registry.js';
 
 // Fork matrix against the real binary: a fork taken while the first model
 // request is still held seeds only the committed prefix, a never-run chat
@@ -248,31 +249,28 @@ async function prepareEmptyChat(
     join(directories.workspace, 'workspace-version.json'),
     JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
   );
-  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-    version: 5,
-    sessions: {
-      [chatId]: {
-        agentId: 'opencode',
-        nativeSession: null,
-        agentOwnershipEpoch: crypto.randomUUID(),
-        agentSettingsById: {},
-        projectPath: directories.project,
-        tags: [],
-        agentSessionId: null,
-        nextForkOrdinal: 1,
-        model: OPENCODE_TEST_MODEL,
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-        lastReadAt: null,
-        permissionMode: 'bypassPermissions',
-        thinkingMode: 'none',
-        carryOverSegments: [],
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: null,
-      },
+  await writePersistedChatRegistry(directories.workspace, {
+    [chatId]: {
+      agentId: 'opencode',
+      nativeSession: null,
+      agentOwnershipEpoch: crypto.randomUUID(),
+      agentSettingsById: {},
+      projectPath: directories.project,
+      tags: [],
+      agentSessionId: null,
+      nextForkOrdinal: 1,
+      model: OPENCODE_TEST_MODEL,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      lastReadAt: null,
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'none',
+      carryOverSegments: [],
+      nativeSeedReceipt: null,
+      carryOverMigrationQuarantine: null,
     },
-  }));
+  });
 }
 
 function marker(label: string): string {

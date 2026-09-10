@@ -1,4 +1,4 @@
-import type { IntegrationRegistry } from '../agents/integration-registry.js';
+import type { AgentInstanceDirectory } from '../agents/instance-directory.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
@@ -26,7 +26,7 @@ export interface TranscriptReloadServiceOptions {
   readonly ledger: TranscriptLedgerService;
   readonly adoption: TranscriptAdoptionService;
   readonly registry: IChatRegistry;
-  readonly integrations: IntegrationRegistry;
+  readonly instances: Pick<AgentInstanceDirectory, 'requireFor'>;
   readonly execution: ReloadExecutionPort;
   readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -84,7 +84,7 @@ export class TranscriptReloadService {
     if (!entry || !current) {
       throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
     }
-    const integration = this.options.integrations.require(entry.agentId);
+    const integration = this.options.instances.requireFor(entry);
     if (!session || !integration.nativeHistoryImport) {
       throw new DomainError(
         'HISTORY_LOAD_FAILED',

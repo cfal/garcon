@@ -13,6 +13,7 @@ import {
 import { encodeCarryOverPages } from '../../../server/chats/carryover-page-codec.js';
 import { rollbackLegacyCarryOverMigration } from '../../../server/chats/chat-carryover-rollback.js';
 import { ChatRegistry } from '../../../server/chats/store.js';
+import { migrateTestWorkspaceLocations } from '../../../server/execution-nodes/testing/placement.js';
 import { transcriptViewId } from '../../../server/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
@@ -39,7 +40,7 @@ describe('carryover bootstrap migration', () => {
         expect(firstEntry.carryOverSegments).toHaveLength(2);
         const migratedSegments = firstEntry.carryOverSegments;
 
-        expect(firstRegistry.version).toBe(5);
+        expect(firstRegistry.version).toBe(6);
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
           version: CURRENT_WORKSPACE_VERSION,
         });
@@ -47,7 +48,7 @@ describe('carryover bootstrap migration', () => {
           version: number;
           ownershipIntents: unknown[];
         }>(fixture, 'agent-ownership-journal.json')).toEqual({
-          version: 5,
+          version: 6,
           ownershipIntents: [],
         });
         const firstMarker = await readJson<MigrationMarker>(
@@ -124,9 +125,9 @@ describe('carryover bootstrap migration', () => {
         });
 
         // The rollback finished from its marker, then the boot re-migrated.
-        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 5 });
+        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 6 });
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
-          .toMatchObject({ version: 5 });
+          .toMatchObject({ version: 6 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
           version: CURRENT_WORKSPACE_VERSION,
         });
@@ -145,8 +146,10 @@ describe('carryover bootstrap migration', () => {
         await fixture.restartGarcon({
           beforeStart: async () => {
             const registry = new ChatRegistry(fixture.dirs.workspace);
+            const placements = await migrateTestWorkspaceLocations(fixture.dirs.workspace);
             await registry.init();
             registry.addChat({
+              executionLocation: await placements.prepare(DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID, fixture.dirs.project),
               id: POST_MIGRATION_CHAT_ID,
               agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
               model: 'post-migration-model',
@@ -176,7 +179,7 @@ describe('carryover bootstrap migration', () => {
       'carryover-missing-linked-manifest',
       async (fixture) => {
         const registry = await readJson<RegistryFile>(fixture, 'chats.json');
-        expect(registry.version).toBe(5);
+        expect(registry.version).toBe(6);
         expect(registry.sessions[CHAT_ID]).toMatchObject({
           carryOverSegments: [],
           carryOverMigrationQuarantine: {

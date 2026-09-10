@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { testExecutionLocation, testPlacements } from '../../execution-nodes/testing/placement.js';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
 import {
@@ -238,6 +239,7 @@ function executionModeMethods({
 
 function makeService(overrides = {}) {
   const session = {
+    executionLocation: testExecutionLocation(overrides.session?.agentId ?? 'claude'),
     id: SOURCE_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-1',
@@ -273,6 +275,7 @@ function makeService(overrides = {}) {
       const next = {
         ...current,
         projectPath: update.projectPath,
+        executionLocation: update.executionLocation,
         ...('nativeSession' in update ? { nativeSession: update.nativeSession } : {}),
       };
       sessions.set(chatId, next);
@@ -479,11 +482,7 @@ function makeService(overrides = {}) {
     recoverQueueEntrySteer: mock((chatId) => queue.readChatExecutionControl(chatId)),
     admitUserInput: mock(() => Promise.resolve(undefined)),
     reserveTranscriptSnapshot: mock((chatId) => {
-      const source = sessions.get(chatId);
-      if (
-        queue.ownsExecution(chatId)
-        || agents.isAgentSessionRunning(source?.agentId, source?.agentSessionId)
-      ) {
+      if (queue.ownsExecution(chatId)) {
         throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
       }
       return { chatId, reservationId: `snapshot-${chatId}` };
@@ -506,7 +505,7 @@ function makeService(overrides = {}) {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
-    ownsExecution: mock(() => false),
+    ownsExecution: mock((chatId) => agents.isChatRunning(chatId)),
     readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -580,8 +579,8 @@ function makeService(overrides = {}) {
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
-    requiresNativePathForProjectPathUpdate: mock((agentId) => agentId === 'pi'),
-    isAgentSessionRunning: mock(() => false),
+    requiresNativePathForProjectPathUpdate: mock((owner) => owner.agentId === 'pi'),
+    isChatRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
     discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
     compactSession: mock(() => Promise.resolve(undefined)),
@@ -616,10 +615,14 @@ function makeService(overrides = {}) {
     promoteStaged: mock(() => Promise.resolve()),
     discardStaged: mock(() => Promise.resolve()),
   };
-  const ownership = overrides.ownership ?? {
+  const ownership = {
+    hasPending: mock(() => false),
+    pendingKind: mock(() => null),
     delete: mock(async (chatId) => {
       sessions.delete(chatId);
+      return { kind: 'ledger-removed' };
     }),
+    ...overrides.ownership,
   };
   const handoffPreparations = [];
   const defaultHandoffs = {
@@ -730,6 +733,7 @@ function makeService(overrides = {}) {
   };
   const dependencies = {
     chats,
+    placements: overrides.placements ?? testPlacements,
     queue,
     ledger,
     settings,
@@ -1334,7 +1338,7 @@ describe('ChatCommandService', () => {
         parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
       const loading = deferred();
       const adoption = new TranscriptAdoptionService({ ledger: transcripts, registry: f.chats,
-        integrations: { require: () => ({ legacyHistoryImport: null }) },
+        instances: { requireFor: () => ({ legacyHistoryImport: null }) },
         getCarryOverRevision: () => 'synthetic',
         loadFrozenPrefix: (_id, _entry, signal) => {
           loading.resolve(signal);
@@ -3518,7 +3522,7 @@ describe('ChatCommandService', () => {
 
   it('copies from the serving ledger while the native source is running', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
-    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.isChatRunning.mockReturnValue(true);
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -3851,6 +3855,187 @@ describe('ChatCommandService', () => {
     expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
   });
 
+  it('rejects deletion behind a handoff fence before suppressing execution or terminal receipts', async () => {
+    const { service, ownership, queue, ledger } = makeService({
+      ownership: { hasPending: mock(() => true), pendingKind: mock(() => 'handoff') },
+    });
+    const begin = spyOn(ledger, 'beginChatDeletion');
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toMatchObject({
+      code: 'OWNERSHIP_TRANSFER_PENDING', status: 409,
+    });
+    expect(begin).not.toHaveBeenCalled();
+    expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
+    expect(ownership.delete).not.toHaveBeenCalled();
+  });
+
+  it.each(['handoff', 'delete'])('retains deletion suppression only when the failed mutation leaves a %s intent', async (kind) => {
+    const { service, ownership, queue, ledger } = makeService();
+    const cancel = spyOn(ledger, 'cancelChatDeletion');
+    ownership.delete.mockImplementationOnce(async () => {
+      ownership.hasPending.mockReturnValue(true);
+      ownership.pendingKind.mockReturnValue(kind);
+      throw new Error('synthetic ownership mutation failure');
+    });
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toThrow('synthetic ownership mutation failure');
+    expect(queue.rollbackChatDeletion).toHaveBeenCalledTimes(kind === 'handoff' ? 1 : 0);
+    expect(cancel).toHaveBeenCalledTimes(kind === 'handoff' ? 1 : 0);
+  });
+
+  it('reports deletion failure after registry removal and retries the retained intent', async () => {
+    const { service, ownership, sessions, queue, settings, ledger } = makeService();
+    const source = sessions.get(SOURCE_CHAT_ID);
+    ownership.delete.mockImplementationOnce(async (chatId) => {
+      sessions.delete(chatId);
+      ownership.hasPending.mockReturnValue(true);
+      ownership.pendingKind.mockReturnValue('delete');
+      throw new Error('synthetic ledger removal failure');
+    });
+
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toThrow('synthetic ledger removal failure');
+    expect(sessions.has(SOURCE_CHAT_ID)).toBeFalse();
+    expect(queue.rollbackChatDeletion).not.toHaveBeenCalled();
+    expect(settings.removeFromAllOrderLists).not.toHaveBeenCalled();
+    await ledger.markChatInterrupted(SOURCE_CHAT_ID, 'chat-deleted');
+    ownership.delete.mockResolvedValueOnce({ kind: 'ledger-removed' });
+
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).resolves.toEqual({ success: true, chatId: SOURCE_CHAT_ID });
+    expect(ownership.delete).toHaveBeenCalledTimes(2);
+    expect(queue.abortForChatDeletion).toHaveBeenCalledTimes(1);
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledTimes(1);
+    ownership.hasPending.mockReturnValue(false);
+    ownership.pendingKind.mockReturnValue(null);
+    sessions.set(SOURCE_CHAT_ID, source);
+    const accepted = await ledger.accept({
+      commandType: 'agent-run', chatId: SOURCE_CHAT_ID, clientRequestId: 'replacement-request',
+      turnId: 'replacement-turn', payload: { command: 'synthetic replacement' },
+    });
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    await ledger.markPublicTerminal(SOURCE_CHAT_ID, 'replacement-turn');
+    expect(projectAgentTurnReceipt(await ledger.getTurnRecord(SOURCE_CHAT_ID, 'replacement-turn')))
+      .toMatchObject({ receipt: { state: 'completed' } });
+  });
+
+  it('completes an admitted delete retry when detached cleanup discharges its intent', async () => {
+    const entered = deferred();
+    const release = deferred();
+    const { service, ownership, sessions, queue, settings, ledger } = makeService();
+    sessions.delete(SOURCE_CHAT_ID);
+    ownership.hasPending.mockReturnValue(true);
+    ownership.pendingKind.mockReturnValue('delete');
+    ownership.delete.mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return { kind: 'not-found' };
+    });
+    const begin = spyOn(ledger, 'beginChatDeletion');
+    const deletion = service.deleteChat({ chatId: SOURCE_CHAT_ID });
+    await entered.promise;
+    ownership.hasPending.mockReturnValue(false);
+    ownership.pendingKind.mockReturnValue(null);
+    release.resolve();
+
+    await expect(deletion).resolves.toEqual({ success: true, chatId: SOURCE_CHAT_ID });
+    expect(begin).not.toHaveBeenCalled();
+    expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
+    expect(queue.rollbackChatDeletion).not.toHaveBeenCalled();
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+  });
+
+  it('settles a live-entry delete retry before same-ID replacement receipts', async () => {
+    const entered = deferred();
+    const release = deferred();
+    const { service, ownership, sessions, ledger } = makeService();
+    const source = sessions.get(SOURCE_CHAT_ID);
+    ownership.pendingKind.mockReturnValue('delete');
+    ownership.delete.mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return { kind: 'not-found' };
+    });
+    const begin = spyOn(ledger, 'beginChatDeletion');
+    const deletion = service.deleteChat({ chatId: SOURCE_CHAT_ID });
+    await entered.promise;
+    expect(begin).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    sessions.delete(SOURCE_CHAT_ID);
+    await ledger.markChatInterrupted(SOURCE_CHAT_ID, 'chat-deleted');
+    ownership.pendingKind.mockReturnValue(null);
+    release.resolve();
+    await expect(deletion).resolves.toEqual({ success: true, chatId: SOURCE_CHAT_ID });
+
+    sessions.set(SOURCE_CHAT_ID, source);
+    const accepted = await ledger.accept({
+      commandType: 'agent-run', chatId: SOURCE_CHAT_ID, clientRequestId: 'replacement-request',
+      turnId: 'replacement-turn', payload: { command: 'synthetic replacement' },
+    });
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    await ledger.markPublicTerminal(SOURCE_CHAT_ID, 'replacement-turn');
+    expect(projectAgentTurnReceipt(await ledger.getTurnRecord(SOURCE_CHAT_ID, 'replacement-turn')))
+      .toMatchObject({ receipt: { state: 'completed' } });
+  });
+
+  it('does not recreate deletion suppression for a missing-entry retry that fails after cleanup', async () => {
+    const { service, ownership, sessions, queue, ledger } = makeService();
+    sessions.delete(SOURCE_CHAT_ID);
+    ownership.pendingKind.mockReturnValue('delete');
+    ownership.delete.mockImplementationOnce(async () => {
+      ownership.pendingKind.mockReturnValue(null);
+      throw new Error('synthetic post-cleanup failure');
+    });
+    const cancel = spyOn(ledger, 'cancelChatDeletion');
+
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toThrow('synthetic post-cleanup failure');
+    expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
+    expect(queue.rollbackChatDeletion).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('releases deletion suppression after a genuine not-found result so a replacement can complete', async () => {
+    const { service, ownership, sessions, queue, ledger } = makeService();
+    const source = sessions.get(SOURCE_CHAT_ID);
+    const cancel = spyOn(ledger, 'cancelChatDeletion');
+    ownership.delete.mockImplementationOnce(async () => {
+      sessions.delete(SOURCE_CHAT_ID);
+      return { kind: 'not-found' };
+    });
+
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND', status: 404,
+    });
+    expect(queue.rollbackChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(cancel).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    sessions.set(SOURCE_CHAT_ID, source);
+    const accepted = await ledger.accept({
+      commandType: 'agent-run', chatId: SOURCE_CHAT_ID, clientRequestId: 'replacement-request',
+      turnId: 'replacement-turn', payload: { command: 'synthetic replacement' },
+    });
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    await ledger.markPublicTerminal(SOURCE_CHAT_ID, 'replacement-turn');
+    expect(projectAgentTurnReceipt(await ledger.getTurnRecord(SOURCE_CHAT_ID, 'replacement-turn')))
+      .toMatchObject({ receipt: { state: 'completed' } });
+  });
+
+  it.each(['start', 'fork', 'continuation'])('rejects %s creation into a pending delete target before seeding or dispatch', async (operation) => {
+    const { service, ownership, chats, transcripts, agents, handoffs, forkChatFileCopy } = makeService({
+      handoffs: { seedContinuationLedger: mock(() => ({ viewId: 'view-1', ordinal: 0 })) },
+    });
+    ownership.hasPending.mockImplementation((chatId) => chatId === TARGET_CHAT_ID);
+    const input = {
+      sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'synthetic replacement',
+      clientRequestId: 'replacement-request', clientMessageId: 'replacement-message', images: [],
+    };
+    const request = operation === 'start'
+      ? service.submitStart({ ...input, origin: 'ui', agentId: 'claude', model: 'opus',
+        projectPath: projectBaseDir, agentSettings: agentSettings(), permissionMode: 'default', thinkingMode: 'none' })
+      : operation === 'fork' ? service.forkChat(input) : service.submitSelfHandoffRun(input);
+
+    await expect(request).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING', status: 409 });
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(transcripts.initializeChat).not.toHaveBeenCalled();
+    expect(handoffs.seedContinuationLedger).not.toHaveBeenCalled();
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
   it('rejects malformed message-point fork sequence values at the request boundary', async () => {
     const { forkChatFileCopy } = makeService();
 
@@ -3918,7 +4103,7 @@ describe('ChatCommandService', () => {
 
   it('copies a whole-head fork from the ledger regardless of native fork support', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
-    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.isChatRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(false);
 
     await service.forkChat({
@@ -3932,7 +4117,7 @@ describe('ChatCommandService', () => {
   it('copies the transcript for a whole-head fork while the source is running', async () => {
     const { service, agents, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
-    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.isChatRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
     await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
@@ -3959,7 +4144,7 @@ describe('ChatCommandService', () => {
   it('forks a committed ledger point without consulting native coverage', async () => {
     const { service, agents, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
-    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.isChatRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
     await service.forkChat({
@@ -4039,7 +4224,7 @@ describe('ChatCommandService', () => {
   it('allows a fork point that native history already covers', async () => {
     const { service, agents, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
-    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.isChatRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -4074,7 +4259,7 @@ describe('ChatCommandService', () => {
 
   it('allows message-point forks while the source is processing when the agent supports running forks', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
-    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.isChatRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
     await service.forkChat({
@@ -4358,14 +4543,14 @@ describe('ChatCommandService', () => {
       agentId: 'claude',
       agentSessionId: 'agent-1',
     });
-    agents.isAgentSessionRunning = mock(() => true);
+    agents.isChatRunning = mock(() => true);
 
     await expect(
       service.submitCompact({
         chatId: SOURCE_CHAT_ID,
         clientRequestId: 'req-compact-2',
       }),
-    ).rejects.toThrow(/Cannot compact while a turn is running/);
+    ).rejects.toThrow(/Cannot compact while another chat operation owns execution/);
     expect(agents.compactSession).not.toHaveBeenCalled();
   });
 
@@ -6340,11 +6525,74 @@ describe('ChatCommandService', () => {
     expect(fixture.agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects project relocation before native or placement preparation while ownership is pending', async () => {
+    const placements = { ...testPlacements, prepareRelocation: mock(testPlacements.prepareRelocation) };
+    const { service, agents, chats, ownership, queue } = makeService({ placements });
+    const nextPath = path.join(projectBaseDir, 'pending-handoff-destination');
+    await fs.mkdir(nextPath, { recursive: true });
+    ownership.hasPending.mockReturnValue(true);
+    const before = structuredClone(chats.getChat(SOURCE_CHAT_ID));
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING', status: 409, retryable: true });
+
+    expect(ownership.hasPending).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(placements.prepareRelocation).not.toHaveBeenCalled();
+    expect(agents.currentTranscriptViewId).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(chats.updateProjectPath).not.toHaveBeenCalled();
+    expect(chats.getChat(SOURCE_CHAT_ID)).toEqual(before);
+    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['unsupported', 'already-relocated', 'running'])('refreshes the %s owner after asynchronous path resolution', async (outcome) => {
+    const { service, agents, chats, ownership, sessions } = makeService();
+    const nextPath = path.join(projectBaseDir, 'owner-recovery-destination');
+    await fs.mkdir(nextPath);
+    const accessStarted = deferred();
+    const resumeAccess = deferred();
+    const originalAccess = fs.access.bind(fs);
+    const access = spyOn(fs, 'access').mockImplementation(async (...args) => {
+      if (args[0] === nextPath) {
+        accessStarted.resolve();
+        await resumeAccess.promise;
+      }
+      return originalAccess(...args);
+    });
+    ownership.hasPending.mockReturnValue(true);
+    const relocation = service.updateProjectPath({ chatId: SOURCE_CHAT_ID, projectPath: nextPath });
+    try {
+      await waitForCheckpoint(accessStarted.promise, relocation, 'project path resolution');
+      sessions.set(SOURCE_CHAT_ID, { ...sessions.get(SOURCE_CHAT_ID), agentId: 'target-agent',
+        agentOwnershipEpoch: 'target-epoch', agentSessionId: 'target-session',
+        projectPath: outcome === 'already-relocated' ? nextPath : '/synthetic/target-project' });
+      ownership.hasPending.mockReturnValue(false);
+      agents.supportsUpdateProjectPath.mockImplementation((owner) => owner.agentId !== 'target-agent' || outcome !== 'unsupported');
+      agents.isChatRunning.mockImplementation((chatId) => chatId === SOURCE_CHAT_ID && outcome === 'running');
+      resumeAccess.resolve();
+      if (outcome === 'already-relocated') {
+        await expect(relocation).resolves.toMatchObject({ success: true, previousProjectPath: nextPath });
+      } else {
+        await expect(relocation).rejects.toMatchObject({
+          code: outcome === 'unsupported' ? 'PROJECT_PATH_UPDATE_UNSUPPORTED' : 'CHAT_NOT_IDLE',
+        });
+      }
+      expect(agents.currentTranscriptViewId).not.toHaveBeenCalled();
+      expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+      expect(chats.updateProjectPath).not.toHaveBeenCalled();
+    } finally {
+      resumeAccess.resolve();
+      access.mockRestore();
+    }
+  });
+
   it('rejects project path updates while a turn is running', async () => {
     const { service, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-    agents.isAgentSessionRunning.mockReturnValueOnce(true);
+    agents.isChatRunning.mockReturnValueOnce(true);
 
     await expect(
       service.updateProjectPath({
@@ -6472,9 +6720,10 @@ describe('ChatCommandService', () => {
   });
 
   it('preserves pending work when an unchanged project path is submitted', async () => {
-    const { service, queue, agents } = makeService({
+    const { service, queue, agents, ownership } = makeService({
       session: { projectPath: projectBaseDir },
     });
+    ownership.hasPending.mockReturnValue(true);
 
     await expect(service.updateProjectPath({
       chatId: SOURCE_CHAT_ID,
@@ -6574,7 +6823,7 @@ describe('ChatCommandService', () => {
     const { service, agents } = makeService({
       queueService,
       agents: {
-        isAgentSessionRunning: mock(() => runtimeRunning),
+        isChatRunning: mock(() => runtimeRunning),
         compactSession: mock(async (_chatId, options) => {
           compactTurn = {
             clientRequestId: options.clientRequestId,

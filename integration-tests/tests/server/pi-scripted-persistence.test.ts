@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { writePersistedChatRegistry } from '../../support/chat-registry.js';
 import {
   assistantContents,
   userContents,
@@ -437,34 +438,31 @@ async function writeLegacyPiSession(input: {
     join(input.workspace, 'workspace-version.json'),
     JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
   );
-  await writeFile(join(input.workspace, 'chats.json'), JSON.stringify({
-    version: 5,
-    sessions: {
-      [input.chatId]: {
-        agentId: 'pi',
-        nativeSession: {
-          ownerId: 'pi',
-          schemaVersion: 1,
-          value: { path: nativePath, agentSessionId: input.agentSessionId, modelEndpointId: null },
-        },
-        agentOwnershipEpoch: crypto.randomUUID(),
-        agentSettingsById: {},
-        projectPath: input.projectPath,
-        tags: [],
-        agentSessionId: input.agentSessionId,
-        nextForkOrdinal: 1,
-        model: PI_TEST_MODEL,
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-        lastReadAt: null,
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        carryOverSegments: [],
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: null,
+  await writePersistedChatRegistry(input.workspace, {
+    [input.chatId]: {
+      agentId: 'pi',
+      nativeSession: {
+        ownerId: 'pi',
+        schemaVersion: 1,
+        value: { path: nativePath, agentSessionId: input.agentSessionId, modelEndpointId: null },
       },
+      agentOwnershipEpoch: crypto.randomUUID(),
+      agentSettingsById: {},
+      projectPath: input.projectPath,
+      tags: [],
+      agentSessionId: input.agentSessionId,
+      nextForkOrdinal: 1,
+      model: PI_TEST_MODEL,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      lastReadAt: null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      carryOverSegments: [],
+      nativeSeedReceipt: null,
+      carryOverMigrationQuarantine: null,
     },
-  }));
+  });
   return nativePath;
 }

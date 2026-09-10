@@ -600,6 +600,7 @@ describe('agent integration core-record migration', () => {
         },
       })}\n`);
 
+      await migrateTestWorkspaceLocations(workspaceDir);
       const registry = await new ChatRegistry(workspaceDir).init();
       expect(registry.sessions[chatId]).toMatchObject({
         agentId: 'removed-agent',
@@ -746,3 +747,4 @@ describe('agent integration core-record migration', () => {
     })).rejects.toThrow('Invalid core migration path');
   });
 });
+import { migrateTestWorkspaceLocations } from '../../execution-nodes/testing/placement.js';

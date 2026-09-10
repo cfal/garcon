@@ -1,6 +1,9 @@
 import type { AgentIntegration } from '@garcon/server-agent-interface';
-import { executionInstanceKey, type ExecutionInstanceRef } from '../../common/execution-location.js';
+import { executionInstanceKey, type ExecutionInstanceRef, type LocatedChatOwner } from '../../common/execution-location.js';
 import type { ConfiguredAgentInstance } from '../../common/execution-nodes.js';
+import { DomainError } from '../lib/domain-error.js';
+import { LocalProviderConfigurationService } from '../execution-node/local-provider-configuration.js';
+import type { ProviderConfigurationService } from '../execution-nodes/provider-configuration.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -11,6 +14,7 @@ export interface ExecutableAgentInstance {
 export class AgentInstanceDirectory {
   readonly #instances = new Map<string, ExecutableAgentInstance>();
   readonly #defaults = new Map<string, ExecutionInstanceRef>();
+  readonly #configurationServices = new WeakMap<AgentIntegration, ProviderConfigurationService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -41,8 +45,33 @@ export class AgentInstanceDirectory {
 
   require(ref: ExecutionInstanceRef): AgentIntegration {
     const integration = this.get(ref);
-    if (!integration) throw new Error(`Execution instance unavailable: ${ref.nodeId}/${ref.instanceId}`);
+    if (!integration) throw new DomainError('NODE_UNAVAILABLE', `Execution instance unavailable: ${ref.nodeId}/${ref.instanceId}`, 409);
     return integration;
+  }
+
+  requireFor(owner: LocatedChatOwner): AgentIntegration {
+    const integration = this.require(owner.executionLocation);
+    if (integration.descriptor.id !== owner.agentId) {
+      throw new DomainError('NODE_UNAVAILABLE', 'Execution instance does not match the chat provider', 409);
+    }
+    return integration;
+  }
+
+  configurationFor(owner: LocatedChatOwner): ProviderConfigurationService {
+    return this.#configurationService(this.requireFor(owner));
+  }
+
+  configurationForInstance(ref: ExecutionInstanceRef): ProviderConfigurationService {
+    return this.#configurationService(this.require(ref));
+  }
+
+  #configurationService(integration: AgentIntegration): ProviderConfigurationService {
+    let service = this.#configurationServices.get(integration);
+    if (!service) {
+      service = new LocalProviderConfigurationService(integration);
+      this.#configurationServices.set(integration, service);
+    }
+    return service;
   }
 
   defaultFor(nodeId: string, agentId: string): ExecutionInstanceRef | null {

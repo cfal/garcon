@@ -25,6 +25,7 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
     registry: {
       getChat: mock(() => ({ agentId: 'test' })),
     },
+    instances: { requireFor: () => { throw new Error('Unexpected instance lookup'); } },
     directory: {
       get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
     },

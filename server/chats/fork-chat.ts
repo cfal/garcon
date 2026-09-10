@@ -1,5 +1,6 @@
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type {
+  AgentChatEntry,
   ForkedAgentSessionOutcome,
   StartedAgentSession,
 } from '../agents/session-types.js';
@@ -82,7 +83,7 @@ interface ForkChatInput {
     providerMeta?: JsonObject | null;
     signal: AbortSignal;
   }) => Promise<ForkedAgentSessionOutcome | null>;
-  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
+  discardForkedAgentSession: (owner: AgentChatEntry, session: StartedAgentSession) => Promise<void>;
   // Reads the forked session's own history so the target feed matches the session it resumes
   // from. Answers null when the provider offers no import, which keeps the frozen projection.
   readForkedNativeHistory: (args: {
@@ -211,7 +212,7 @@ export async function forkChatFileCopy({
   await throwIfForkCancelled(
     signal,
     nativeFork,
-    sourceSession.agentId,
+    sourceSession,
     discardForkedAgentSession,
   );
   if (forkOutcome?.kind === 'unmaterialized' && !allowHandoffFork) {
@@ -227,7 +228,7 @@ export async function forkChatFileCopy({
   } catch (error) {
     const cleanupErrors = await discardForkResources(
       nativeFork,
-      sourceSession.agentId,
+      sourceSession,
       discardForkedAgentSession,
     );
     if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors]);
@@ -238,7 +239,7 @@ export async function forkChatFileCopy({
     const error = new Error(`Chat ID collision: ${targetChatId}`);
     const cleanupErrors = await discardForkResources(
       nativeFork,
-      sourceSession.agentId,
+      sourceSession,
       discardForkedAgentSession,
     );
     if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], error.message);
@@ -265,7 +266,7 @@ export async function forkChatFileCopy({
     } catch (error) {
       const cleanupErrors = await discardForkResources(
         nativeFork,
-        sourceSession.agentId,
+        sourceSession,
         discardForkedAgentSession,
       );
       throwForkFailureAfterCleanup(signal, error, cleanupErrors);
@@ -295,7 +296,7 @@ export async function forkChatFileCopy({
   } catch (error) {
     const cleanupErrors = await discardForkResources(
       nativeFork,
-      sourceSession.agentId,
+      sourceSession,
       discardForkedAgentSession,
     );
     if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors]);
@@ -315,6 +316,7 @@ export async function forkChatFileCopy({
       modelEndpointId: sourceSession.modelEndpointId ?? null,
       modelProtocol: sourceSession.modelProtocol ?? null,
       projectPath: sourceSession.projectPath,
+      executionLocation: sourceSession.executionLocation,
       nativeSession: nativeFork?.nativeSession ?? null,
       ...createPreambleBoundaryBinding('fork'),
       tags: [...sourceSession.tags],
@@ -344,7 +346,7 @@ export async function forkChatFileCopy({
     ledger.deleteChat(targetChatId);
     const cleanupErrors = await discardForkResources(
       nativeFork,
-      sourceSession.agentId,
+      sourceSession,
       discardForkedAgentSession,
     );
     if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors]);
@@ -355,7 +357,7 @@ export async function forkChatFileCopy({
     ledger.deleteChat(targetChatId);
     const cleanupErrors = await discardForkResources(
       nativeFork,
-      sourceSession.agentId,
+      sourceSession,
       discardForkedAgentSession,
     );
     if (cleanupErrors.length > 0) {
@@ -382,7 +384,7 @@ export async function forkChatFileCopy({
     }
     if (nativeFork) {
       try {
-        await discardForkedAgentSession(sourceSession.agentId, nativeFork);
+        await discardForkedAgentSession(sourceSession, nativeFork);
       } catch (error) {
         cleanupErrors.push(error);
       }
@@ -447,11 +449,11 @@ export async function forkChatFileCopy({
 
 async function discardForkResources(
   nativeFork: StartedAgentSession | null,
-  agentId: string,
-  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>,
+  owner: AgentChatEntry,
+  discardForkedAgentSession: ForkChatInput['discardForkedAgentSession'],
 ): Promise<unknown[]> {
   const cleanups: Promise<void>[] = [];
-  if (nativeFork) cleanups.push(discardForkedAgentSession(agentId, nativeFork));
+  if (nativeFork) cleanups.push(discardForkedAgentSession(owner, nativeFork));
   return (await Promise.allSettled(cleanups)).flatMap((result) => (
     result.status === 'rejected' ? [result.reason] : []
   ));
@@ -460,13 +462,13 @@ async function discardForkResources(
 async function throwIfForkCancelled(
   signal: AbortSignal,
   nativeFork: StartedAgentSession | null,
-  agentId: string,
-  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>,
+  owner: AgentChatEntry,
+  discardForkedAgentSession: ForkChatInput['discardForkedAgentSession'],
 ): Promise<void> {
   if (!signal.aborted) return;
   const cleanupErrors = await discardForkResources(
     nativeFork,
-    agentId,
+    owner,
     discardForkedAgentSession,
   );
   try {

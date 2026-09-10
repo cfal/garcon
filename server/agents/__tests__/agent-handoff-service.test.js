@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import crypto from 'node:crypto';
 import { AgentHandoffService } from '../agent-handoff-service.ts';
+import { testExecutionLocation, testPlacements } from '../../execution-nodes/testing/placement.js';
 import { LedgerFencedError } from '../../ledger/errors.ts';
 
 function envelope(ownerId) {
@@ -9,6 +10,7 @@ function envelope(ownerId) {
 
 function sourceChat() {
   return {
+    executionLocation: testExecutionLocation('source-agent', '/workspace/project'),
     agentId: 'source-agent',
     agentSessionId: 'source-session',
     nativeSession: null,
@@ -30,6 +32,8 @@ function sourceChat() {
 
 function target() {
   return {
+    executionLocation: testExecutionLocation('target-agent', '/workspace/project'),
+    projectPath: '/workspace/project',
     agentId: 'target-agent',
     model: 'target-model',
     apiProviderId: null,
@@ -644,6 +648,7 @@ describe('AgentHandoffService', () => {
     const current = {
       ...sourceChat(),
       agentId: intent.target.execution.agentId,
+      executionLocation: intent.target.execution.executionLocation,
       agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
     };
     const ownership = {
@@ -1140,9 +1145,12 @@ function createService(overrides = {}) {
     ['source-agent', integration('source-agent')],
     ['target-agent', integration('target-agent')],
   ]);
+  const ownership = overrides.ownership ?? handoffState(sourceChat(), []).ownership;
+  ownership.reconcileDurability ??= mock(async () => {});
   return new AgentHandoffService({
+    placements: testPlacements,
     registry: overrides.registry ?? { getChat: () => sourceChat() },
-    ownership: overrides.ownership ?? handoffState(sourceChat(), []).ownership,
+    ownership,
     ledger: overrides.ledger ?? ledgerState([]),
     carryover: overrides.carryover ?? {
       planFor: mock(async () => ({ kind: 'no-history' })),
@@ -1171,7 +1179,7 @@ function handoffState(current, calls) {
     decideHandoff: mock(async (input) => {
       calls.push('decision');
       intent = {
-        version: 5,
+        version: 6,
         operationId: input.operationId,
         clientRequestId: input.clientRequestId,
         submittedTargetHash: input.submittedTargetHash,
@@ -1180,6 +1188,7 @@ function handoffState(current, calls) {
         phase: 'commit-decided',
         source: {
           agentId: input.source.agentId,
+          executionLocation: input.source.executionLocation,
           agentOwnershipEpoch: input.source.agentOwnershipEpoch,
         },
         target: {
@@ -1196,6 +1205,8 @@ function handoffState(current, calls) {
       calls.push('registry');
       Object.assign(current, {
         agentId: intent.target.execution.agentId,
+        executionLocation: intent.target.execution.executionLocation,
+        projectPath: intent.target.execution.projectPath,
         agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
         pendingPreambleBoundary: {
           kind: 'agent-switch',
@@ -1248,14 +1259,14 @@ function ledgerState(calls) {
 
 function persistedIntent() {
   return {
-    version: 5,
+    version: 6,
     operationId: 'agent-handoff:existing',
     clientRequestId: 'request-1',
     submittedTargetHash: hashTarget(handoff()),
     kind: 'handoff',
     chatId: 'chat',
     phase: 'commit-decided',
-    source: { agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' },
+    source: { agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch', executionLocation: sourceChat().executionLocation },
     target: { execution: target(), agentOwnershipEpoch: 'target-epoch' },
     watermark: { viewId: 'view-1', ordinal: 7 },
     createdAt: '2026-01-01T00:00:00.000Z',

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +6,8 @@ import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { renderCarriedContext } from '../../../common/transcript-seed.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { AgentInstanceDirectory } from '../instance-directory.ts';
+import { testExecutionLocation } from '../../execution-nodes/testing/placement.ts';
 import { DomainError } from '../../lib/domain-error.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
@@ -16,6 +18,7 @@ function makeRouter(overrides = {}) {
   const entry = {
     id: 'chat-1',
     agentId: 'test',
+    executionLocation: testExecutionLocation(),
     agentSessionId: null,
     nativeSession: null,
     nativeSeedReceipt: null,
@@ -79,7 +82,6 @@ function makeRouter(overrides = {}) {
   const registry = {
     getChat: mock(() => entry),
     updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),
-    getChatByAgentSessionId: mock(() => null),
   };
   let activeTurn = overrides.activeTurn;
   const events = {
@@ -112,9 +114,14 @@ function makeRouter(overrides = {}) {
     get: mock(() => integration),
     list: mock(() => [integration]),
   };
+  const instances = overrides.instances?.(integration) ?? new AgentInstanceDirectory([
+    { configuration: instanceConfiguration('test-test', true), integration },
+  ]);
   const router = new AgentRuntimeRouter({
     registry,
     directory,
+    localNodeId: testExecutionLocation().nodeId,
+    instances,
     endpointResolver,
     events,
     getCarryOverRevision: () => 'carry-1',
@@ -141,6 +148,7 @@ function makeRouter(overrides = {}) {
     transcript,
     integration,
     directory,
+    instances,
   };
 }
 
@@ -155,31 +163,137 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   for (const operation of ['start', 'resume']) {
+    it(`uses the validated configuration snapshot for ${operation}`, async () => {
+      const fixture = makeRouter({
+        entry: { agentSessionId: operation === 'resume' ? 'native-1' : null },
+      });
+      const validation = Promise.withResolvers();
+      const entered = Promise.withResolvers();
+      fixture.integration.descriptor.supportedPermissionModes = ['default', 'manualBypass'];
+      fixture.integration.descriptor.supportedThinkingModes = ['none', 'low'];
+      fixture.integration.endpoints = { validate: mock(() => { entered.resolve(); return validation.promise; }) };
+      fixture.integration.settings.parse = mock((value) => value);
+      const reference = {
+        apiProvider: { label: 'Synthetic endpoint' },
+        endpoint: { baseUrl: 'https://original.invalid/v1', headers: { 'x-synthetic': 'original' } },
+      };
+      fixture.endpointResolver.resolveEndpointReference.mockImplementation(() => reference);
+      const options = {
+        apiProviderId: 'synthetic-api', modelEndpointId: 'synthetic-endpoint',
+        permissionMode: 'manualBypass', thinkingMode: 'low',
+        agentSettings: { ownerId: 'test', schemaVersion: 1, values: { option: 'original' } },
+      };
+      const pending = fixture.router.runAgentTurn('chat-1', 'synthetic prompt', options);
+      await Promise.race([entered.promise, pending]);
+      reference.endpoint.baseUrl = 'https://changed.invalid/v1';
+      reference.endpoint.headers['x-synthetic'] = 'changed';
+      options.permissionMode = 'default';
+      options.thinkingMode = 'none';
+      options.agentSettings.values.option = 'changed';
+      validation.resolve();
+      await pending;
+      expect(fixture[operation]).toHaveBeenCalledWith(expect.objectContaining({
+        permissionMode: 'manualBypass', thinkingMode: 'low',
+        settings: { ownerId: 'test', schemaVersion: 1, values: { option: 'original' } },
+        endpoint: expect.objectContaining({
+          baseUrl: 'https://original.invalid/v1', headers: { 'x-synthetic': 'original' },
+        }),
+      }));
+      expect(fixture.endpointResolver.resolveEndpointReference).toHaveBeenCalledTimes(1);
+      expect(fixture.integration.settings.parse).toHaveBeenCalledTimes(1);
+    });
+
+    it(`cancels ${operation} during configuration validation without creating a run`, async () => {
+      const fixture = makeRouter({ entry: { agentSessionId: operation === 'resume' ? 'native-1' : null } });
+      const validation = Promise.withResolvers();
+      const entered = Promise.withResolvers();
+      fixture.integration.endpoints = { validate: mock(() => { entered.resolve(); return validation.promise; }) };
+      fixture.endpointResolver.resolveEndpointReference.mockImplementation(() => ({
+        apiProvider: { label: 'Synthetic API' }, endpoint: { baseUrl: 'https://synthetic.invalid/v1' },
+      }));
+      const abort = new AbortController();
+      const pending = fixture.router.runAgentTurn('chat-1', 'synthetic prompt', {
+        apiProviderId: 'synthetic-api', modelEndpointId: 'synthetic-endpoint',
+        executionAdmission: { signal: abort.signal, markStarted: async () => {} },
+      });
+      await Promise.race([entered.promise, pending]);
+      const reason = new Error('Synthetic admission closed');
+      abort.abort(reason);
+      validation.resolve();
+      await expect(pending).rejects.toBe(reason);
+      expect(fixture[operation]).not.toHaveBeenCalled();
+      expect(fixture.events.trackTurn).not.toHaveBeenCalled();
+    });
+
+    it(`routes ${operation} and settings to the selected same-provider instance`, async () => {
+      const location = { ...testExecutionLocation(), instanceId: 'secondary-test' };
+      const execute = mock(async () => ({ id: 'secondary-handle' }));
+      const parse = mock((value) => value);
+      const fixture = makeRouter({
+        entry: {
+          executionLocation: location,
+          agentSessionId: operation === 'resume' ? 'same-native-id' : null,
+        },
+        instances: (integration) => new AgentInstanceDirectory([
+          {
+            configuration: instanceConfiguration('test-test', true),
+            integration,
+          },
+          {
+            configuration: instanceConfiguration(location.instanceId, false),
+            integration: {
+              ...integration,
+              execution: { ...integration.execution, [operation]: execute },
+              settings: { ...integration.settings, parse },
+            },
+          },
+        ]),
+      });
+
+      await fixture.router.runAgentTurn('chat-1', 'synthetic input', { turnId: 'synthetic-turn' });
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(parse).toHaveBeenCalledTimes(1);
+      expect(fixture[operation]).not.toHaveBeenCalled();
+      expect(fixture.directory.require).not.toHaveBeenCalled();
+    });
+
+    it(`rejects ${operation} for an unavailable instance without using the provider default`, async () => {
+      const fixture = makeRouter({
+        entry: { agentSessionId: operation === 'resume' ? 'same-native-id' : null },
+        instances: () => new AgentInstanceDirectory([]),
+      });
+
+      await expect(fixture.router.runAgentTurn('chat-1', 'synthetic input'))
+        .rejects.toMatchObject({ code: 'NODE_UNAVAILABLE' });
+      expect(fixture[operation]).not.toHaveBeenCalled();
+      expect(fixture.directory.require).not.toHaveBeenCalled();
+    });
+
     it(`aborts a retained ${operation} handle through its captured execution owner`, async () => {
       const handle = { id: 'synthetic-handle' };
-      const { router, integration, directory } = makeRouter({
+      const { router, integration, instances } = makeRouter({
         entry: { agentSessionId: operation === 'resume' ? 'synthetic-session' : null },
         [operation]: mock(async () => handle),
       });
       await router.runAgentTurn('chat-1', 'synthetic input', { turnId: 'synthetic-turn' });
       const replacementAbort = mock(async () => true);
-      directory.require.mockImplementation(() => ({
+      const lookup = spyOn(instances, 'get').mockImplementation(() => ({
         ...integration, execution: { ...integration.execution, abort: replacementAbort },
       }));
-      const lookups = directory.require.mock.calls.length;
 
       expect(await router.abortSession('chat-1')).toBe(true);
 
       expect(integration.execution.abort).toHaveBeenCalledWith(handle);
       expect(replacementAbort).not.toHaveBeenCalled();
-      expect(directory.require).toHaveBeenCalledTimes(lookups);
+      expect(lookup).not.toHaveBeenCalled();
     });
 
     it(`keeps a delayed ${operation} handle owned by its interrupted launch`, async () => {
       const launched = Promise.withResolvers();
       const completed = Promise.withResolvers();
       const handle = { id: 'synthetic-delayed-handle' };
-      const { router, integration, directory } = makeRouter({
+      const { router, integration, instances } = makeRouter({
         entry: { agentSessionId: operation === 'resume' ? 'synthetic-session' : null },
         [operation]: mock(() => {
           launched.resolve();
@@ -190,7 +304,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
       await launched.promise;
       expect(await router.abortSession('chat-1')).toBe(true);
       const replacementAbort = mock(async () => true);
-      directory.require.mockImplementation(() => ({
+      const lookup = spyOn(instances, 'get').mockImplementation(() => ({
         ...integration, execution: { ...integration.execution, abort: replacementAbort },
       }));
       completed.resolve(handle);
@@ -198,6 +312,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
       expect(integration.execution.abort).toHaveBeenCalledWith(handle);
       expect(replacementAbort).not.toHaveBeenCalled();
+      expect(lookup).not.toHaveBeenCalled();
     });
   }
 
@@ -753,6 +868,18 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(sinks[1]).not.toBe(sinks[0]);
   });
 });
+
+function instanceConfiguration(id, isDefault) {
+  return {
+    id,
+    nodeId: 'test-local-node',
+    agentId: 'test',
+    label: id,
+    storageNamespace: id,
+    default: isDefault,
+    removedAt: null,
+  };
+}
 
 function inputRow(ordinal, content) {
   const message = new UserMessage('2026-08-12T00:00:00.000Z', content);

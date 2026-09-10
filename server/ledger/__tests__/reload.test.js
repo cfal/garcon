@@ -833,14 +833,13 @@ async function withReload(run, options = {}) {
     },
     flush: async () => options.flushRegistry?.(),
   };
-  const integrations = {
-    get: () => integration,
-    require: () => integration,
+  const instances = {
+    requireFor: () => integration,
   };
   const adoption = new TranscriptAdoptionService({
     ledger,
     registry,
-    integrations,
+    instances,
     getCarryOverRevision: () => 'carry-v1:0',
     loadFrozenPrefix: async () => [],
     loadLegacyCurrent: async () => [],
@@ -851,7 +850,7 @@ async function withReload(run, options = {}) {
     ledger,
     adoption,
     registry,
-    integrations,
+    instances,
     execution,
     reopenProducer: () => {
       replacementLease.current = ledger.openProducer('chat-1', 'test');

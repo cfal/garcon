@@ -22,6 +22,10 @@ export const NODE_ERROR_CODES = [
 ] as const;
 export type NodeErrorCode = typeof NODE_ERROR_CODES[number];
 
+export function isNodeErrorCode(value: unknown): value is NodeErrorCode {
+  return typeof value === 'string' && (NODE_ERROR_CODES as readonly string[]).includes(value);
+}
+
 export function parseNodeSessionIdentity(value: unknown): NodeSessionIdentity | null {
   if (!isRecord(value) || Object.keys(value).length !== 3
     || !isExecutionIdentity(value.controllerBootId) || !isExecutionIdentity(value.nodeBootId)

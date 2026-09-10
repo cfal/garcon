@@ -7,7 +7,7 @@ import {
 import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
-import type { IntegrationRegistry } from '../agents/integration-registry.js';
+import type { AgentInstanceDirectory } from '../agents/instance-directory.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -18,7 +18,7 @@ import { TranscriptLedgerService } from './service.js';
 export interface TranscriptAdoptionOptions {
   readonly ledger: TranscriptLedgerService;
   readonly registry: IChatRegistry;
-  readonly integrations: IntegrationRegistry;
+  readonly instances: Pick<AgentInstanceDirectory, 'requireFor'>;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly loadFrozenPrefix: (
     chatId: string,
@@ -57,7 +57,7 @@ export class TranscriptAdoptionService {
         return reopened;
       }
       signal.throwIfAborted();
-      const integration = this.options.integrations.require(entry.agentId);
+      const integration = this.options.instances.requireFor(entry);
       const prefix = entry.carryOverMigrationQuarantine
         ? []
         : await this.#loadPrefix(chatId, entry, signal);

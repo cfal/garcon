@@ -48,6 +48,7 @@ function makeRouter(overrides = {}) {
     registry: {
       getChat: mock(() => entry),
     },
+    instances: { requireFor: mock(() => integration) },
     directory: {
       require: mock(() => integration),
     },

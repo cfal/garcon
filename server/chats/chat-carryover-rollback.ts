@@ -5,6 +5,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isRecord } from '../../common/json.js';
+import { parseExecutionLocation } from '../../common/execution-location.js';
+import { parseExecutionNodesSnapshot } from '../../common/execution-nodes.js';
 import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import {
   LEGACY_CARRYOVER_FILE,
@@ -92,7 +94,7 @@ async function restoreLegacyCarryOverState(
   const currentRegistry = await fs.readFile(registryPath);
   const currentRegistryDigest = digest(currentRegistry);
   if (currentRegistryDigest !== marker.sourceRegistrySha256) {
-    const sessions = parseMigratedRegistrySessions(currentRegistry);
+    const sessions = await parseMigratedRegistrySessions(currentRegistry, workspaceDir);
     if (
       marker.phase === 'complete'
       && currentRegistryDigest !== marker.targetRegistrySha256
@@ -122,16 +124,17 @@ async function restoreLegacyCarryOverState(
   return currentRegistryDigest === marker.sourceRegistrySha256 ? 'already-restored' : 'restored';
 }
 
-function parseMigratedRegistrySessions(
+async function parseMigratedRegistrySessions(
   bytes: Buffer,
-): Record<string, Readonly<Record<string, unknown>>> {
+  workspaceDir: string,
+): Promise<Record<string, Readonly<Record<string, unknown>>>> {
   let value: unknown;
   try {
     value = JSON.parse(bytes.toString('utf8'));
   } catch {
     throw new Error('Current chat registry does not match the migration or its backup');
   }
-  if (!isRecord(value) || value.version !== CHAT_REGISTRY_VERSION || !isRecord(value.sessions)) {
+  if (!isRecord(value) || (value.version !== 5 && value.version !== CHAT_REGISTRY_VERSION) || !isRecord(value.sessions)) {
     throw new Error('Current chat registry does not match the migration or its backup');
   }
   const sessions: Record<string, Readonly<Record<string, unknown>>> = {};
@@ -140,6 +143,26 @@ function parseMigratedRegistrySessions(
       throw new Error('Current chat registry does not match the migration or its backup');
     }
     sessions[chatId] = entry;
+  }
+  if (value.version === 6) {
+    let nodes: ReturnType<typeof parseExecutionNodesSnapshot>;
+    try {
+      nodes = parseExecutionNodesSnapshot(JSON.parse(await fs.readFile(path.join(workspaceDir, 'execution-nodes.json'), 'utf8')));
+    } catch (error) {
+      throw new Error('Carryover migration rollback is unsafe after execution placement changed', { cause: error });
+    }
+    if (!nodes) throw new Error('Carryover migration rollback is unsafe after execution placement changed');
+    for (const entry of Object.values(sessions)) {
+      const location = parseExecutionLocation(entry.executionLocation);
+      const instance = nodes.instances.find((candidate) => candidate.nodeId === location?.nodeId && candidate.id === location.instanceId);
+      const workspace = nodes.workspaces.find((candidate) => candidate.nodeId === location?.nodeId && candidate.id === location.workspaceId);
+      if (!location || location.nodeId !== nodes.localNodeId
+        || !instance?.default || instance.nodeId !== nodes.localNodeId || instance.agentId !== entry.agentId
+        || !workspace || workspace.nodeId !== nodes.localNodeId || workspace.projectPath !== entry.projectPath
+        || instance.removedAt !== null || workspace.removedAt !== null) {
+        throw new Error('Carryover migration rollback is unsafe after execution placement changed');
+      }
+    }
   }
   return sessions;
 }

@@ -9,17 +9,16 @@ import {
   type AgentExecutionV5,
   type AgentEstablishedSession,
   type AgentEmissionSink,
+  type AgentIntegration,
+  type AgentSessionConfiguration,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import type { LocatedChatOwner } from '@garcon/common/execution-location';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
-import {
-  normalizePermissionMode,
-  type ThinkingMode,
-} from '../../common/chat-modes.js';
-import { normalizeSupportedThinkingMode } from '../../common/execution-defaults.js';
+import type { ThinkingMode } from '../../common/chat-modes.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
@@ -27,10 +26,12 @@ import { getMaxSessions } from '../config.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
 import type { TurnReceiptOwner } from '../lib/turn-identity.js';
-import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
+import { DomainError, ProjectUnavailableError, transcriptUnavailableMessage } from '../lib/domain-error.js';
+import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import { localEmissionSink } from './local-emission.js';
 import type { AgentDirectory } from './directory.js';
+import type { AgentInstanceDirectory } from './instance-directory.js';
 import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
   AgentChatEntry,
@@ -70,6 +71,9 @@ interface LocalProducerBinding {
 export interface AgentRuntimeRouterOptions {
   registry: IChatRegistry;
   directory: AgentDirectory;
+  localNodeId: string;
+  instances: Pick<AgentInstanceDirectory,
+    'get' | 'require' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'configurationForInstance'>;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
@@ -117,6 +121,8 @@ type PreparedPrompt =
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
+  readonly #instances: AgentRuntimeRouterOptions['instances'];
+  readonly #localNodeId: string;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -135,6 +141,8 @@ export class AgentRuntimeRouter {
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
     this.#directory = options.directory;
+    this.#instances = options.instances;
+    this.#localNodeId = options.localNodeId;
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
@@ -176,9 +184,9 @@ export class AgentRuntimeRouter {
     await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
     const persistedEntry = this.#registry.getChat(chatId);
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#instances.requireFor(entry);
     const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
-    await this.#validateEndpoint(integration, selection);
+    const configuration = await this.#resolveConfiguration(entry, selection, opts);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
@@ -203,7 +211,7 @@ export class AgentRuntimeRouter {
       }
       const execution = integration.execution;
       const handle = await execution.start({
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(chatId, entry, configuration, runId, opts),
         output: producer.output,
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
@@ -242,8 +250,8 @@ export class AgentRuntimeRouter {
       return;
     }
     const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
-    const integration = this.#directory.require(entry.agentId);
-    await this.#validateEndpoint(integration, selection);
+    const integration = this.#instances.requireFor(entry);
+    const configuration = await this.#resolveConfiguration(entry, selection, opts);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
@@ -254,7 +262,7 @@ export class AgentRuntimeRouter {
     try {
       const execution = integration.execution;
       const handle = await execution.resume({
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(chatId, entry, configuration, runId, opts),
         output: producer.output,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
@@ -284,7 +292,7 @@ export class AgentRuntimeRouter {
         message: 'No active agent session',
       };
     }
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#instances.requireFor(entry);
     if (!integration.steering) {
       throw new DomainError(
         'OPERATION_UNSUPPORTED',
@@ -310,7 +318,9 @@ export class AgentRuntimeRouter {
   captureSteerTarget(chatId: string): AgentSteerTarget | null {
     const entry = this.#registry.getChat(chatId);
     if (!entry?.agentSessionId) return null;
-    const steering = this.#directory.get(entry.agentId)?.steering;
+    const integration = this.#instances.get(entry.executionLocation);
+    if (integration?.descriptor.id !== entry.agentId) return null;
+    const steering = integration.steering;
     if (!steering) return null;
     return steering.captureTarget({
       chatId,
@@ -327,7 +337,7 @@ export class AgentRuntimeRouter {
   ): Promise<boolean> {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) return false;
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#instances.requireFor(entry);
     if (!integration.goals) return false;
     const selection = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
@@ -336,14 +346,14 @@ export class AgentRuntimeRouter {
       modelEndpointId:
         opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
-    await this.#validateEndpoint(integration, selection);
+    const configuration = await this.#resolveConfiguration(entry, selection, opts);
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     const previousTurn = this.#events.getActiveTurn(chatId);
     const previousRunId = this.#ledger.activeRunId(chatId);
     if (!previousRunId) return false;
     const producer = this.#producer(chatId);
     return integration.goals.submitControl({
-      ...this.#executionContextV5(chatId, entry, selection, operation.turnId, opts),
+      ...this.#executionContextV5(chatId, entry, configuration, operation.turnId, opts),
       output: producer.output,
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
@@ -372,14 +382,14 @@ export class AgentRuntimeRouter {
     assertExecutionAdmissionOpen(opts);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#instances.requireFor(entry);
     const selection = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
       model: entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
-    await this.#validateEndpoint(integration, selection);
+    const configuration = await this.#resolveConfiguration(entry, selection, opts);
     // Without the facet there is nothing to call. Sending the literal text
     // `/compact` as a prompt used to look like success while leaving the context
     // untouched and a stray message in the transcript.
@@ -398,7 +408,7 @@ export class AgentRuntimeRouter {
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
       const request = {
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(chatId, entry, configuration, runId, opts),
         output: producer.output,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
@@ -419,8 +429,6 @@ export class AgentRuntimeRouter {
     agentId: string,
     request: PrepareProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void> {
-    const integration = this.#directory.require(agentId);
-    if (!integration.projectPathUpdates) return;
     const entry = this.#registry.getChat(request.chatId);
     if (!entry) throw new Error(`Session not found: ${request.chatId}`);
     if (
@@ -430,12 +438,14 @@ export class AgentRuntimeRouter {
     ) {
       throw new Error(`Session changed while preparing project path: ${request.chatId}`);
     }
+    const integration = this.#instances.requireFor(entry);
+    if (!integration.projectPathUpdates) return;
     return integration.projectPathUpdates.prepare({
       chat: toAgentChatReference(
         integration,
         request.chatId,
         { ...entry, nativeSession: request.nativeSession },
-          this.#getCarryOverRevision(entry),
+        this.#getCarryOverRevision(entry),
       ),
       nextProjectPath: request.nextProjectPath,
       signal: new AbortController().signal,
@@ -458,12 +468,6 @@ export class AgentRuntimeRouter {
 
   isChatRunning(chatId: string): boolean {
     return this.#ledger.isRunActive(chatId);
-  }
-
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
-    if (!agentSessionId) return false;
-    const match = this.#registry.getChatByAgentSessionId(agentSessionId);
-    return Boolean(match && match[1].agentId === agentId && this.#ledger.isRunActive(match[0]));
   }
 
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>> {
@@ -524,7 +528,7 @@ export class AgentRuntimeRouter {
     }
     try {
       const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
-      const integration = this.#directory.require(source.agentId);
+      const integration = this.#instances.requireFor(source);
       if (!integration.forking) return null;
       const selection = this.#endpointResolver.resolveSelection({
         agentId: source.agentId,
@@ -532,7 +536,8 @@ export class AgentRuntimeRouter {
         apiProviderId: source.apiProviderId,
         modelEndpointId: source.modelEndpointId,
       });
-      await this.#validateEndpoint(integration, selection);
+      const admission = { signal: args.signal, markStarted: async () => {} };
+      const configuration = await this.#resolveConfiguration(source, selection, { executionAdmission: admission });
       const operation = operationIdentity(source, {}, 'fork-run');
       const sourceReference = toAgentChatReference(
         integration,
@@ -543,13 +548,10 @@ export class AgentRuntimeRouter {
       const context = this.#executionContextV5(
         args.targetChatId,
         source,
-        selection,
+        configuration,
         operation.turnId,
         {
-          executionAdmission: {
-            signal: args.signal,
-            markStarted: async () => {},
-          },
+          executionAdmission: admission,
         },
       );
       const result = await integration.forking.fork({
@@ -611,8 +613,8 @@ export class AgentRuntimeRouter {
     }
   }
 
-  async discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
-    const forking = this.#directory.require(agentId).forking;
+  async discardForkedAgentSession(owner: LocatedChatOwner, session: StartedAgentSession): Promise<void> {
+    const forking = this.#instances.requireFor(owner).forking;
     if (!forking) return;
     await forking.discard(session, new AbortController().signal);
   }
@@ -622,7 +624,9 @@ export class AgentRuntimeRouter {
     options: RunSingleQueryOptions,
   ): Promise<string> {
     const { agentId } = options;
-    const integration = this.#directory.require(agentId);
+    const target = this.#instances.defaultFor(this.#localNodeId, agentId);
+    if (!target) throw new DomainError('NODE_UNAVAILABLE', 'The default local provider instance is unavailable.', 409);
+    const integration = this.#instances.require(target);
     if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
     const model = typeof options.model === 'string' ? options.model : '';
     const selection = model ? this.#endpointResolver.resolveSelection({
@@ -631,39 +635,60 @@ export class AgentRuntimeRouter {
       apiProviderId: typeof options.apiProviderId === 'string' ? options.apiProviderId : null,
       modelEndpointId: typeof options.modelEndpointId === 'string' ? options.modelEndpointId : null,
     }) : null;
-    if (selection) await this.#validateEndpoint(integration, selection);
+    const signal = options.signal instanceof AbortSignal ? options.signal : new AbortController().signal;
+    const projectPath = typeof options.projectPath === 'string'
+      ? options.projectPath
+      : typeof options.cwd === 'string' ? options.cwd : process.cwd();
     const timeoutMs = typeof options.timeoutMs === 'number'
       && Number.isFinite(options.timeoutMs)
       && options.timeoutMs > 0
       ? options.timeoutMs
       : undefined;
+    const configuration = await this.#instances.configurationForInstance(target).resolve({
+      model: selection?.model ?? model,
+      thinkingMode: options.thinkingMode,
+      settings: isAgentSettingsEnvelope(options.agentSettings) ? options.agentSettings : null,
+      endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
+    }, signal);
     return integration.singleQuery.run({
       prompt,
-      projectPath: typeof options.projectPath === 'string'
-        ? options.projectPath
-        : typeof options.cwd === 'string'
-          ? options.cwd
-          : process.cwd(),
-      model: selection?.model ?? model,
-      thinkingMode: normalizeSupportedThinkingMode(
-        options.thinkingMode,
-        integration.descriptor.supportedThinkingModes,
-      ),
+      projectPath,
+      model: configuration.model,
+      thinkingMode: configuration.thinkingMode,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      settings: integration.settings.parse(
-        isAgentSettingsEnvelope(options.agentSettings)
-          ? options.agentSettings
-          : integration.settings.defaults(),
-      ),
-      endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
-      signal: options.signal instanceof AbortSignal ? options.signal : new AbortController().signal,
+      settings: configuration.settings,
+      endpoint: configuration.endpoint,
+      signal,
     });
   }
 
-  async discoverSlashCommands(agentId: string, projectPath: string) {
-    const commands = this.#directory.get(agentId)?.commands;
+  async discoverChatSlashCommands(chat: AgentChatEntry, agentId: string, signal: AbortSignal) {
+    let integration = this.#instances.requireFor(chat);
+    if (agentId !== chat.agentId) {
+      // A staged provider change selects its default on the same node, never another machine.
+      const target = this.#instances.defaultFor(chat.executionLocation.nodeId, agentId);
+      if (!target) throw new DomainError('NODE_UNAVAILABLE', 'The selected provider is unavailable on this chat node.', 409);
+      integration = this.#instances.requireFor({
+        agentId, executionLocation: { ...chat.executionLocation, instanceId: target.instanceId },
+      });
+    }
+    return this.#discoverCommands(integration, chat.projectPath, signal);
+  }
+
+  async discoverDefaultSlashCommands(nodeId: string, agentId: string, projectPath: string, signal: AbortSignal) {
+    const target = this.#instances.defaultFor(nodeId, agentId);
+    if (!target) throw new DomainError('NODE_UNAVAILABLE', 'The default local provider instance is unavailable.', 409);
+    return this.#discoverCommands(this.#instances.require(target), projectPath, signal);
+  }
+
+  async #discoverCommands(integration: AgentIntegration | null, projectPath: string, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const project = await inspectProjectDirectory(projectPath);
+    signal.throwIfAborted();
+    if (project.kind === 'unavailable') throw new ProjectUnavailableError(projectPath, project.reason);
+    const commands = integration?.commands;
     return commands
-      ? [...(await commands.discover(projectPath, new AbortController().signal))]
+      ? [...(await commands.discover(project.effectiveProjectKey, signal))]
       : [];
   }
 
@@ -689,18 +714,18 @@ export class AgentRuntimeRouter {
     return selection;
   }
 
-  async #validateEndpoint(
-    integration: ReturnType<AgentDirectory['require']>,
+  #resolveConfiguration(
+    entry: ReturnType<typeof requireAgentChatEntry>,
     selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
-  ): Promise<void> {
-    const endpoint = toAgentEndpointSelection(this.#endpointResolver, selection);
-    if (!endpoint) return;
-    if (!integration.endpoints) {
-      throw new Error(
-        `Agent integration ${integration.descriptor.id} does not accept API provider endpoints`,
-      );
-    }
-    await integration.endpoints.validate(endpoint);
+    opts: Pick<RunAgentTurnOptions, 'permissionMode' | 'thinkingMode' | 'agentSettings' | 'executionAdmission'>,
+  ): Promise<AgentSessionConfiguration> {
+    return this.#instances.configurationFor(entry).resolve({
+      model: selection.model,
+      permissionMode: opts.permissionMode ?? entry.permissionMode,
+      thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+      settings: opts.agentSettings ?? entry.agentSettingsById?.[entry.agentId] ?? null,
+      endpoint: toAgentEndpointSelection(this.#endpointResolver, selection),
+    }, opts.executionAdmission?.signal ?? new AbortController().signal);
   }
 
   async #preparePrompt(
@@ -830,38 +855,16 @@ export class AgentRuntimeRouter {
   #executionContextV5(
     chatId: string,
     entry: ReturnType<typeof requireAgentChatEntry>,
-    selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
+    configuration: AgentSessionConfiguration,
     runId: string,
     opts: {
-      permissionMode?: RunAgentTurnOptions['permissionMode'];
-      thinkingMode?: RunAgentTurnOptions['thinkingMode'];
-      agentSettings?: RunAgentTurnOptions['agentSettings'];
       executionAdmission?: AgentExecutionAdmission;
     },
   ) {
-    const integration = this.#directory.require(entry.agentId);
-    const permissionMode = supportedValue(
-      integration.descriptor.supportedPermissionModes,
-      normalizePermissionMode(opts.permissionMode ?? entry.permissionMode),
-      'default',
-    );
-    const thinkingMode = normalizeSupportedThinkingMode(
-      opts.thinkingMode ?? entry.thinkingMode,
-      integration.descriptor.supportedThinkingModes,
-    );
-    const settings = integration.settings.parse(
-      opts.agentSettings
-        ?? entry.agentSettingsById?.[entry.agentId]
-        ?? integration.settings.defaults(),
-    );
     return {
+      ...configuration,
       chatId,
       projectPath: entry.projectPath,
-      model: selection.model,
-      permissionMode,
-      thinkingMode,
-      settings,
-      endpoint: toAgentEndpointSelection(this.#endpointResolver, selection),
       runId,
       admission: {
         signal: opts.executionAdmission?.signal ?? new AbortController().signal,
@@ -926,10 +929,6 @@ function attachments(images: RunAgentTurnOptions['images'] = []) {
     name: image.name ?? null,
     mimeType: image.mimeType ?? 'application/octet-stream',
   }));
-}
-
-function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
-  return values.includes(value) ? value : fallback;
 }
 
 function runKey(chatId: string, runId: string): string {

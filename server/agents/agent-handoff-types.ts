@@ -1,9 +1,12 @@
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { ExecutionLocation } from '../../common/execution-location.js';
 
 export interface ResolvedAgentHandoffTarget {
   readonly agentId: string;
+  readonly executionLocation: ExecutionLocation;
+  readonly projectPath: string;
   readonly model: string;
   readonly apiProviderId: string | null;
   readonly modelEndpointId: string | null;

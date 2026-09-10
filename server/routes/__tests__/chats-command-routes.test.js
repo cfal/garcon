@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { testExecutionLocation } from '../../execution-nodes/testing/placement.js';
 
 let testBasePath;
 let workspaceDir;
@@ -106,6 +107,7 @@ function createSession(overrides = {}) {
   return {
     id: CHAT_ID,
     agentId: 'claude',
+    executionLocation: testExecutionLocation(overrides.agentId ?? 'claude', overrides.projectPath ?? '/workspace/project'),
     agentSessionId: 'provider-session-123',
     nativeSession: {
       ownerId: 'claude',
@@ -151,6 +153,7 @@ function createRouteAgent(sessionOverrides = {}) {
       const next = {
         ...current,
         projectPath: update.projectPath,
+        executionLocation: update.executionLocation,
         ...('nativeSession' in update ? { nativeSession: update.nativeSession } : {}),
       };
       sessions.set(chatId, next);
@@ -348,10 +351,9 @@ function createRouteAgent(sessionOverrides = {}) {
     interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
-    ownsExecution: mock(() => false),
+    ownsExecution: mock((chatId) => agents.isChatRunning(chatId)),
     reserveTranscriptSnapshot: mock((chatId) => {
-      const source = registry.getChat(chatId);
-      if (agents.isAgentSessionRunning(source?.agentId, source?.agentSessionId)) {
+      if (queue.ownsExecution(chatId)) {
         throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
       }
       return { chatId, reservationId: 'snapshot-reservation' };
@@ -437,7 +439,7 @@ function createRouteAgent(sessionOverrides = {}) {
     supportsForkWhileRunning: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
     supportsImages: mock(() => true),
-    isAgentSessionRunning: mock(() => false),
+    isChatRunning: mock(() => false),
     currentTranscriptViewId: mock(() => Promise.resolve('view-current')),
     getRunningSessions: mock(() => ({ claude: [{ id: CHAT_ID }] })),
     startSession: mock(() => Promise.resolve(undefined)),
@@ -872,7 +874,7 @@ describe('REST chat command routes', () => {
 
   it('POST /fork-run copies committed source rows while the source is running', async () => {
     const agent = createRouteAgent();
-    agent.agents.isAgentSessionRunning.mockReturnValue(true);
+    agent.agents.isChatRunning.mockReturnValue(true);
 
     const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
       ...agentRunBody({

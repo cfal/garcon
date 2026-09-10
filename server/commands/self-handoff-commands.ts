@@ -85,6 +85,7 @@ export class SelfHandoffCommands {
     // refused. Both chat mutation locks are held for the whole method, so
     // reading the registry here is safe.
     const targetExists = this.deps.chats.getChat(input.chatId) !== null;
+    if (!targetExists) this.support.assertChatCreationAvailable(input.chatId);
     if (targetExists && (!priorRecord || retryingPreScheduleFailure)) {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
@@ -189,6 +190,7 @@ export class SelfHandoffCommands {
         modelEndpointId: source.modelEndpointId ?? null,
         modelProtocol: source.modelProtocol ?? null,
         projectPath: source.projectPath,
+        executionLocation: source.executionLocation,
         nativeSession: null,
         ...createPreambleBoundaryBinding('continuation'),
         tags: [...source.tags],

@@ -45,4 +45,12 @@ describe('chat execution predicate surface', () => {
     const inlineUnions = coordinator.match(/hasOwner\([^)]*\)\s*\|\|\s*this\.#turnRunner\.isChatRunning/g);
     expect(inlineUnions ?? []).toHaveLength(1);
   });
+
+  it('keeps native-session IDs out of core execution ownership lookups', () => {
+    for (const file of ['server/agents/runtime-router.ts', 'server/agents/registry.ts', 'server/chats/store.ts', 'server/commands/session-commands.ts']) {
+      const source = readFileSync(file, 'utf8');
+      expect(source).not.toContain('getChatByAgentSessionId');
+      expect(source).not.toContain('isAgentSessionRunning');
+    }
+  });
 });

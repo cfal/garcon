@@ -1,12 +1,13 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { ProjectAdmission } from '../project-admission.ts';
+import { testPlacements } from '../../execution-nodes/testing/placement.js';
 
 describe('ProjectAdmission', () => {
   it('checks the registered path freshly for each admission', async () => {
     const inspect = mock(async () => ({ kind: 'available', effectiveProjectKey: '/real/project' }));
     const admission = new ProjectAdmission({
       getChat: () => ({ projectPath: '/workspace/project' }),
-    }, inspect);
+    }, testPlacements, inspect);
 
     await admission.assertAvailable('1783725900000800');
     await admission.assertAvailable('1783725900000800');
@@ -16,13 +17,14 @@ describe('ProjectAdmission', () => {
   });
 
   it('preserves typed missing-chat and unavailable-project errors', async () => {
-    const missing = new ProjectAdmission({ getChat: () => null });
+    const missing = new ProjectAdmission({ getChat: () => null }, testPlacements);
     await expect(missing.assertAvailable('1783725900000800')).rejects.toMatchObject({
       code: 'SESSION_NOT_FOUND', status: 404,
     });
 
     const unavailable = new ProjectAdmission(
       { getChat: () => ({ projectPath: '/workspace/missing' }) },
+      testPlacements,
       async () => ({ kind: 'unavailable', reason: 'not-found' }),
     );
     await expect(unavailable.assertAvailable('1783725900000800')).rejects.toMatchObject({
@@ -38,9 +40,22 @@ describe('ProjectAdmission', () => {
     const failure = new Error('device failed');
     const admission = new ProjectAdmission(
       { getChat: () => ({ projectPath: '/workspace/project' }) },
+      testPlacements,
       async () => { throw failure; },
     );
 
     await expect(admission.assertAvailable('1783725900000800')).rejects.toBe(failure);
+  });
+
+  it('rejects unavailable placement before inspecting a same-named controller path', async () => {
+    const inspect = mock(async () => ({ kind: 'available', effectiveProjectKey: '/workspace/project' }));
+    const failure = new Error('remote unavailable');
+    const admission = new ProjectAdmission(
+      { getChat: () => ({ projectPath: '/workspace/project' }) },
+      { assertAvailable: () => { throw failure; } },
+      inspect,
+    );
+    await expect(admission.assertAvailable('1783725900000800')).rejects.toBe(failure);
+    expect(inspect).not.toHaveBeenCalled();
   });
 });

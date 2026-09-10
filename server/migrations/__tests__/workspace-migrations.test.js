@@ -36,6 +36,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', migrate);
     await runner.run('agent-integration-settings-refresh', migrate);
     await runner.run('agent-execution-mode-refresh', migrate);
+    await runner.run('execution-location-migration', migrate);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -69,6 +70,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', async () => { events.push('carryover-segment'); });
     await runner.run('agent-integration-settings-refresh', async () => { events.push('settings-refresh'); });
     await runner.run('agent-execution-mode-refresh', async () => { events.push('execution-mode-refresh'); });
+    await runner.run('execution-location-migration', async () => { events.push('execution-location'); });
     await runner.finish();
 
     expect(events).toEqual([
@@ -79,6 +81,7 @@ describe('WorkspaceMigrationRunner', () => {
       'carryover-segment',
       'settings-refresh',
       'execution-mode-refresh',
+      'execution-location',
     ]);
     await expect(fs.stat(queuesDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(workspaceDir, 'pending-user-inputs.json'))).rejects.toMatchObject({
@@ -109,10 +112,11 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', cleanup);
     await runner.run('agent-integration-settings-refresh', cleanup);
     await runner.run('agent-execution-mode-refresh', cleanup);
+    await runner.run('execution-location-migration', cleanup);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledTimes(5);
+    expect(cleanup).toHaveBeenCalledTimes(6);
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 
@@ -133,6 +137,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', previous);
     await runner.run('agent-integration-settings-refresh', previous);
     await runner.run('agent-execution-mode-refresh', executionModeRefresh);
+    await runner.run('execution-location-migration', async () => undefined);
     await runner.finish();
 
     expect(previous).not.toHaveBeenCalled();
@@ -157,5 +162,30 @@ describe('WorkspaceMigrationRunner', () => {
     await expect(runner.run('core-record-migration', async () => undefined)).rejects.toThrow(
       'expected chat-id-migration',
     );
+  });
+
+  it('checkpoints earlier formats before a restartable location migration and never stamps a failed step', async () => {
+    await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'), JSON.stringify({ version: 5 }));
+    const previousNames = [
+      'chat-id-migration', 'core-record-migration', 'ephemeral-queue-state-cleanup',
+      'carryover-node-migration', 'carryover-segment-migration', 'agent-integration-settings-refresh',
+      'agent-execution-mode-refresh',
+    ];
+    const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+    for (const name of previousNames) await runner.run(name, async () => {});
+    await runner.checkpoint();
+    expect(await readVersion()).toEqual({ version: 7 });
+    await expect(runner.run('execution-location-migration', async () => { throw new Error('injected crash'); })).rejects.toThrow('injected crash');
+    await runner.checkpoint();
+    expect(await readVersion()).toEqual({ version: 7 });
+    const restarted = await WorkspaceMigrationRunner.open(workspaceDir);
+    const previous = mock(async () => {});
+    const placement = mock(async () => {});
+    for (const name of previousNames) await restarted.run(name, previous);
+    await restarted.run('execution-location-migration', placement);
+    await restarted.finish();
+    expect(previous).not.toHaveBeenCalled();
+    expect(placement).toHaveBeenCalledOnce();
+    expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 });

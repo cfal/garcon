@@ -25,6 +25,7 @@ import {
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import { isDomainError } from '../lib/domain-error.js';
+import { isNodeErrorCode } from '../../common/node-operation.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import type {
   ResendCandidate,
@@ -193,7 +194,9 @@ interface RequestErrorParams {
 }
 
 function reloadErrorCode(error: unknown): ClientRequestErrorCode {
-  if (isDomainError(error) && (error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED')) {
+  if (isDomainError(error) && (
+    error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED' || isNodeErrorCode(error.code)
+  )) {
     return error.code;
   }
   return 'HISTORY_LOAD_FAILED';

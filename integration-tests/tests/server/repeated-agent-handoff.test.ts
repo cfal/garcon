@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
+import { parseExecutionLocation, type ExecutionLocation } from '../../../common/execution-location.js';
 import { isRecord } from '../../../common/json.js';
+import { ExecutionNodesStore } from '../../../server/execution-nodes/store.js';
+import type { AgentHandoffIntent, AgentOwnershipJournalFile } from '../../../server/chats/agent-ownership-journal.js';
+import { transcriptViewId } from '../../../server/ledger/contracts.js';
 import {
   assistantContents,
   userContents,
@@ -72,19 +76,41 @@ describe('repeated agent handoff lifecycle', () => {
         throw new Error('Handoff recovery sources were not registered.');
       }
       const recoverableTargetEpoch = crypto.randomUUID();
+      const [blockedLocation, recoverableLocation] = await Promise.all(
+        [blockedChatId, recoverableChatId].map((chatId) => waitForPersistedChat({
+          directories: fixture.dirs, chatId,
+          select: (chat) => {
+            const location = parseExecutionLocation(chat.executionLocation);
+            if (!location) throw new Error('Handoff source has no execution location');
+            return location;
+          },
+          timeoutMessage: 'Handoff source was not persisted',
+        })),
+      );
+      if (!blockedLocation || !recoverableLocation) throw new Error('Handoff sources are missing');
 
       await fixture.restartGarcon({
         beforeStart: async () => {
+          const nodes = new ExecutionNodesStore(fixture.dirs.workspace);
+          await nodes.init();
+          const [targetLocation] = await nodes.prepareLocalTargets([
+            { agentId: targetAgent.agentId, projectPath: recoverableSource.projectPath },
+          ]);
+          if (!targetLocation) throw new Error('Handoff target was not persisted');
+          expect(blockedSource.projectPath).toBe(recoverableSource.projectPath);
           await writeFile(
             join(fixture.dirs.workspace, 'agent-ownership-journal.json'),
             `${JSON.stringify({
-              version: 5,
+              version: 6,
               ownershipIntents: [
                 recoveryIntent({
                   chatId: blockedChatId,
                   sourceAgentId: blockedSource.agentId,
                   sourceEpoch: blockedSource.agentOwnershipEpoch,
+                  sourceLocation: blockedLocation,
                   targetAgent,
+                  targetLocation,
+                  projectPath: blockedSource.projectPath,
                   targetEpoch: crypto.randomUUID(),
                   watermark: {
                     viewId: `unrecoverable-${crypto.randomUUID()}`,
@@ -95,7 +121,10 @@ describe('repeated agent handoff lifecycle', () => {
                   chatId: recoverableChatId,
                   sourceAgentId: recoverableSource.agentId,
                   sourceEpoch: recoverableSource.agentOwnershipEpoch,
+                  sourceLocation: recoverableLocation,
                   targetAgent,
+                  targetLocation,
+                  projectPath: recoverableSource.projectPath,
                   targetEpoch: recoverableTargetEpoch,
                   watermark: {
                     viewId: histories[1].transcriptViewId,
@@ -103,7 +132,7 @@ describe('repeated agent handoff lifecycle', () => {
                   },
                 }),
               ],
-            })}\n`,
+            } satisfies AgentOwnershipJournalFile)}\n`,
           );
         },
       });
@@ -399,12 +428,15 @@ function recoveryIntent(input: {
   chatId: string;
   sourceAgentId: string;
   sourceEpoch: string;
+  sourceLocation: ExecutionLocation;
   targetAgent: ConfiguredDirectTestAgent;
+  targetLocation: ExecutionLocation;
+  projectPath: string;
   targetEpoch: string;
   watermark: { viewId: string; ordinal: number };
-}) {
+}): AgentHandoffIntent {
   return {
-    version: 5,
+    version: 6,
     operationId: `agent-handoff:${crypto.randomUUID()}`,
     clientRequestId: crypto.randomUUID(),
     submittedTargetHash: 'a'.repeat(64),
@@ -414,10 +446,13 @@ function recoveryIntent(input: {
     source: {
       agentId: input.sourceAgentId,
       agentOwnershipEpoch: input.sourceEpoch,
+      executionLocation: input.sourceLocation,
     },
     target: {
       execution: {
         agentId: input.targetAgent.agentId,
+        executionLocation: input.targetLocation,
+        projectPath: input.projectPath,
         model: input.targetAgent.provider.model,
         apiProviderId: input.targetAgent.provider.providerId,
         modelEndpointId: input.targetAgent.provider.endpointId,
@@ -428,7 +463,7 @@ function recoveryIntent(input: {
       },
       agentOwnershipEpoch: input.targetEpoch,
     },
-    watermark: input.watermark,
+    watermark: { ...input.watermark, viewId: transcriptViewId(input.watermark.viewId) },
     createdAt: new Date().toISOString(),
   };
 }

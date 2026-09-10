@@ -78,6 +78,7 @@ function harness({ source = sourceChat() } = {}) {
       },
     },
     assertContent: mock(() => undefined),
+    assertChatCreationAvailable: mock(() => undefined),
     requireChatId: (value) => value,
     requireClientRequestId: (value) => value,
     withChatMutationLocks: (_ids, fn) => fn(),

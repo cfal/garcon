@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { writePersistedChatRegistry } from '../../support/chat-registry.js';
 import { createCodexRolloutFileName } from '../../support/codex-rollout-filename.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -108,35 +109,32 @@ describe('Codex history modes', () => {
           join(directories.workspace, 'workspace-version.json'),
           JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
         );
-        await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 5,
-          sessions: {
-            [sourceChatId]: {
-              agentId: 'codex',
-              nativeSession: {
-                ownerId: 'codex',
-                schemaVersion: 1,
-                value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId },
-              },
-              agentOwnershipEpoch: randomUUID(),
-              agentSettingsById: {},
-              projectPath: directories.project,
-              tags: [],
-              agentSessionId: sourceAgentSessionId,
-              nextForkOrdinal: 1,
-              model: 'gpt-5.6-sol',
-              apiProviderId: null,
-              modelEndpointId: null,
-              modelProtocol: null,
-              lastReadAt: null,
-              permissionMode: 'default',
-              thinkingMode: 'none',
-              carryOverSegments: [],
-              nativeSeedReceipt: null,
-              carryOverMigrationQuarantine: null,
+        await writePersistedChatRegistry(directories.workspace, {
+          [sourceChatId]: {
+            agentId: 'codex',
+            nativeSession: {
+              ownerId: 'codex',
+              schemaVersion: 1,
+              value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId },
             },
+            agentOwnershipEpoch: randomUUID(),
+            agentSettingsById: {},
+            projectPath: directories.project,
+            tags: [],
+            agentSessionId: sourceAgentSessionId,
+            nextForkOrdinal: 1,
+            model: 'gpt-5.6-sol',
+            apiProviderId: null,
+            modelEndpointId: null,
+            modelProtocol: null,
+            lastReadAt: null,
+            permissionMode: 'default',
+            thinkingMode: 'none',
+            carryOverSegments: [],
+            nativeSeedReceipt: null,
+            carryOverMigrationQuarantine: null,
           },
-        }));
+        });
       },
     });
   });
@@ -279,35 +277,32 @@ describe('Codex history modes', () => {
           join(directories.workspace, 'workspace-version.json'),
           JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
         );
-        await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 5,
-          sessions: {
-            [sourceChatId]: {
-              agentId: 'codex',
-              nativeSession: {
-                ownerId: 'codex',
-                schemaVersion: 1,
-                value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId },
-              },
-              agentOwnershipEpoch: randomUUID(),
-              agentSettingsById: {},
-              projectPath: directories.project,
-              tags: [],
-              agentSessionId: sourceAgentSessionId,
-              nextForkOrdinal: 1,
-              model: 'gpt-5.6-sol',
-              apiProviderId: null,
-              modelEndpointId: null,
-              modelProtocol: null,
-              lastReadAt: null,
-              permissionMode: 'default',
-              thinkingMode: 'none',
-              carryOverSegments: [],
-              nativeSeedReceipt: null,
-              carryOverMigrationQuarantine: null,
+        await writePersistedChatRegistry(directories.workspace, {
+          [sourceChatId]: {
+            agentId: 'codex',
+            nativeSession: {
+              ownerId: 'codex',
+              schemaVersion: 1,
+              value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId },
             },
+            agentOwnershipEpoch: randomUUID(),
+            agentSettingsById: {},
+            projectPath: directories.project,
+            tags: [],
+            agentSessionId: sourceAgentSessionId,
+            nextForkOrdinal: 1,
+            model: 'gpt-5.6-sol',
+            apiProviderId: null,
+            modelEndpointId: null,
+            modelProtocol: null,
+            lastReadAt: null,
+            permissionMode: 'default',
+            thinkingMode: 'none',
+            carryOverSegments: [],
+            nativeSeedReceipt: null,
+            carryOverMigrationQuarantine: null,
           },
-        }));
+        });
       },
     });
   });

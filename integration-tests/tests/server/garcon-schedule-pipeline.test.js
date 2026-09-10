@@ -45,6 +45,7 @@ async function withPipeline(run) {
   });
   await registry.init();
   registry.addChat({ id: CHAT, agentId: 'test', agentOwnershipEpoch: 'synthetic-epoch',
+    executionLocation: testExecutionLocation('test', root),
     nativeSession: null, nativeSeedReceipt: null, agentSessionId: '', projectPath: root,
     model: 'initial-model', permissionMode: 'default', thinkingMode: 'none', tags: [],
     agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } },
@@ -211,3 +212,4 @@ describe('composed assistant schedule pipeline', () => {
     });
   }
 });
+import { testExecutionLocation } from '../../../server/execution-nodes/testing/placement.js';

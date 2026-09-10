@@ -99,6 +99,7 @@ describe('ChatPreambleSelectionService', () => {
     chats = new ChatRegistry(root);
     await chats.init();
     chats.addChat({
+      executionLocation: testExecutionLocation(),
       id: CHAT_ID,
       agentId: 'test',
       model: 'model-a',
@@ -545,3 +546,4 @@ describe('ChatPreambleSelectionService', () => {
     expect(order.slice(0, 3)).toEqual(['mutation:enter', 'selection:enter', 'mutation:exit']);
   });
 });
+import { testExecutionLocation } from '../../execution-nodes/testing/placement.js';

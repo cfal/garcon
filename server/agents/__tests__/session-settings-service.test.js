@@ -1,11 +1,16 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentSessionSettingsService } from '../session-settings-service.ts';
+import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 
 function makeService(thinkingMode = 'high') {
   const entry = {
     agentId: 'amp',
+    agentOwnershipEpoch: 'original-owner',
+    executionLocation: { nodeId: 'local', instanceId: 'primary', workspaceId: 'project' },
     agentSessionId: null,
+    nativeSession: null,
+    projectPath: '/synthetic-project',
     model: 'medium',
     apiProviderId: null,
     modelEndpointId: null,
@@ -19,6 +24,8 @@ function makeService(thinkingMode = 'high') {
   const updateChat = mock(async (_chatId, patch) => ({ ...entry, ...patch }));
   const integration = {
     descriptor: {
+      id: 'amp',
+      supportedPermissionModes: ['default', 'bypassPermissions', 'manualBypass'],
       supportedThinkingModes: [],
     },
     endpoints: null,
@@ -39,15 +46,15 @@ function makeService(thinkingMode = 'high') {
     }),
     resolveEndpointReference: () => null,
   };
+  const configuration = new LocalProviderConfigurationService(integration);
+  const instances = { requireFor: () => integration, configurationFor: mock(() => configuration) };
+  const registry = { getChat: () => entry, updateChat };
   const service = new AgentSessionSettingsService({
-    registry: {
-      getChat: () => entry,
-      updateChat,
-    },
-    directory: { require: () => integration },
+    registry,
+    instances,
     endpointResolver,
   });
-  return { service, updateChat, entry, integration };
+  return { service, updateChat, entry, integration, configuration, instances, registry };
 }
 
 describe('AgentSessionSettingsService', () => {
@@ -133,4 +140,72 @@ describe('AgentSessionSettingsService', () => {
     })).rejects.toThrow('provider rejected settings');
     expect(updateChat).not.toHaveBeenCalled();
   });
+
+  it('uses the bound async configuration service before applying or persisting', async () => {
+    const { service, instances, integration, entry, updateChat } = makeService('none');
+    entry.agentSessionId = 'original-session';
+    integration.settings.parse = () => { throw new Error('Controller called the provider validator'); };
+    const gate = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    const prepareUpdate = mock((request) => {
+      entered.resolve();
+      return gate.promise.then(() => ({
+        previous: request.previous,
+        next: { ...request.previous, ...request.next,
+          settings: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } } },
+      }));
+    });
+    instances.configurationFor = mock(() => ({ prepareUpdate }));
+    const apply = mock(async () => {});
+    integration.sessionConfiguration = { apply };
+    const pending = service.updateSessionSettings('chat-1', { model: 'changed-model' });
+    await Promise.race([entered.promise, pending]);
+    expect(instances.configurationFor).toHaveBeenCalledWith(entry);
+    expect(apply).not.toHaveBeenCalled();
+    expect(updateChat).not.toHaveBeenCalled();
+    gate.resolve();
+    await pending;
+    expect(apply).toHaveBeenCalledWith('original-session', expect.objectContaining({
+      model: 'changed-model', settings: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } },
+    }), expect.objectContaining({ model: 'medium' }));
+    expect(updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+      agentSettingsById: { amp: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } } },
+    }), { flush: true });
+  });
+
+  const changes = [
+    ['owner epoch', (entry) => { entry.agentOwnershipEpoch = 'replacement-owner'; }],
+    ['node', (entry) => { entry.executionLocation.nodeId = 'replacement-node'; }],
+    ['instance', (entry) => { entry.executionLocation.instanceId = 'replacement-instance'; }],
+    ['workspace', (entry) => { entry.executionLocation.workspaceId = 'replacement-workspace'; }],
+    ['session', (entry) => { entry.agentSessionId = 'replacement-session'; }],
+    ['native reference', (entry) => { entry.nativeSession.value.id = 'replacement-native'; }],
+    ['project path', (entry) => { entry.projectPath = '/replacement-project'; }],
+  ];
+  for (const phase of ['validation', 'live application']) {
+    it.each(changes)(`rejects a changed %s during ${phase} without persisting`, async (_label, change) => {
+      const { service, configuration, integration, entry, updateChat } = makeService('none');
+      entry.agentSessionId = 'original-session';
+      entry.nativeSession = { ownerId: 'amp', schemaVersion: 1, value: { id: 'original-native' } };
+      const entered = Promise.withResolvers();
+      const gate = Promise.withResolvers();
+      const prepareUpdate = configuration.prepareUpdate.bind(configuration);
+      configuration.prepareUpdate = async (...args) => {
+        const result = await prepareUpdate(...args);
+        if (phase === 'validation') { entered.resolve(); await gate.promise; }
+        return result;
+      };
+      const apply = mock(async () => {
+        if (phase === 'live application') { entered.resolve(); await gate.promise; }
+      });
+      integration.sessionConfiguration = { apply };
+      const pending = service.updateSessionSettings('chat-1', { model: 'changed-model' });
+      await Promise.race([entered.promise, pending]);
+      change(entry);
+      gate.resolve();
+      await expect(pending).rejects.toMatchObject({ code: 'SOURCE_REVISION_CHANGED' });
+      expect(updateChat).not.toHaveBeenCalled();
+      expect(apply).toHaveBeenCalledTimes(phase === 'validation' ? 0 : 1);
+    });
+  }
 });

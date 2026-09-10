@@ -3,7 +3,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatRegistry } from '../store.ts';
+import { ChatRegistry, CHAT_REGISTRY_VERSION } from '../store.ts';
+import { testExecutionLocation } from '../../execution-nodes/testing/placement.js';
 
 const CHAT_ID = '1783725900000200';
 const SECOND_CHAT_ID = '1783725900000201';
@@ -21,6 +22,7 @@ let registry;
 
 function newChat(overrides = {}) {
   return {
+    executionLocation: testExecutionLocation(overrides.agentId),
     id: CHAT_ID,
     agentId: 'test',
     model: 'model-a',
@@ -33,6 +35,7 @@ function newChat(overrides = {}) {
 
 function persistedEntry(overrides = {}) {
   return {
+    executionLocation: testExecutionLocation(overrides.agentId),
     agentId: 'test',
     agentSessionId: 'native-1',
     nativeSession: nativeSession('test'),
@@ -65,7 +68,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function writeRegistry(sessions, version = 5) {
+async function writeRegistry(sessions, version = CHAT_REGISTRY_VERSION) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
 
@@ -77,6 +80,7 @@ describe('ChatRegistry phased updates', () => {
     const registry = new ChatRegistry(tempDir);
     await registry.init();
     registry.addChat({
+      executionLocation: testExecutionLocation(),
       id: CHAT_ID,
       agentId: 'test',
       model: 'model-a',
@@ -264,7 +268,7 @@ describe('ChatRegistry', () => {
   it('repairs permissions on an existing registry during init', async () => {
     if (process.platform === 'win32') return;
     const registryPath = path.join(tempDir, 'chats.json');
-    await fs.writeFile(registryPath, JSON.stringify({ version: 5, sessions: {} }), { mode: 0o644 });
+    await fs.writeFile(registryPath, JSON.stringify({ version: CHAT_REGISTRY_VERSION, sessions: {} }), { mode: 0o644 });
 
     registry = new ChatRegistry(tempDir);
     await registry.init();
@@ -275,11 +279,11 @@ describe('ChatRegistry', () => {
   it('loads an existing registry when permission repair fails', async () => {
     if (process.platform === 'win32') return;
     const registryPath = path.join(tempDir, 'chats.json');
-    await fs.writeFile(registryPath, JSON.stringify({ version: 5, sessions: {} }), { mode: 0o644 });
+    await fs.writeFile(registryPath, JSON.stringify({ version: CHAT_REGISTRY_VERSION, sessions: {} }), { mode: 0o644 });
     const chmod = spyOn(fs, 'chmod').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EPERM' }));
     try {
       registry = new ChatRegistry(tempDir);
-      await expect(registry.init()).resolves.toEqual({ version: 5, sessions: {} });
+      await expect(registry.init()).resolves.toEqual({ version: CHAT_REGISTRY_VERSION, sessions: {} });
     } finally {
       chmod.mockRestore();
     }
@@ -323,12 +327,12 @@ describe('ChatRegistry', () => {
     const updated = registry.updateChat(CHAT_ID, {
       model: 'model-b',
       agentSessionId: 'native-2',
-      projectPath: '/ignored',
+      unsupportedField: '/ignored',
     });
 
     expect(updated).toMatchObject({ model: 'model-b', projectPath: '/repo' });
-    expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
-    expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
+    expect(registry.lookupNativeSession('native-1')).toEqual({ status: 'not-found' });
+    expect(registry.lookupNativeSession('native-2').chatId).toBe(CHAT_ID);
   });
 
   it('looks up one exact current native session binding globally', () => {
@@ -341,6 +345,41 @@ describe('ChatRegistry', () => {
     expect(registry.lookupNativeSession('SES_session-123')).toEqual({ status: 'not-found' });
     expect(registry.lookupNativeSession('ses_session')).toEqual({ status: 'not-found' });
     expect(registry.lookupNativeSession('missing')).toEqual({ status: 'not-found' });
+  });
+
+  it('requires paired placement updates and validates relocation before changing memory', async () => {
+    registry.addChat(newChat());
+    const before = registry.getChat(CHAT_ID);
+    expect(() => registry.updateChat(CHAT_ID, { projectPath: '/other' })).toThrow('updated together');
+    expect(() => registry.updateChat(CHAT_ID, { executionLocation: testExecutionLocation('test', '/other') })).toThrow('updated together');
+    for (const update of [
+      { nativeSession: nativeSession('other-provider') },
+      { executionLocation: testExecutionLocation('other-provider') },
+      { projectPath: '  ' },
+    ]) {
+      await expect(registry.updateProjectPath(CHAT_ID, {
+        chatId: CHAT_ID, projectPath: '/other', previousProjectPath: '/repo', effectiveProjectKey: '/other',
+        executionLocation: testExecutionLocation('test', '/other'), ...update,
+      }, { flush: true })).rejects.toThrow();
+      expect(registry.getChat(CHAT_ID)).toEqual(before);
+    }
+  });
+
+  it('clones location on creation, patch, and reads and qualifies native lookup by instance', () => {
+    const location = testExecutionLocation();
+    registry.addChat(newChat({ executionLocation: location, agentSessionId: 'same-native-id' }));
+    location.nodeId = 'mutated-node';
+    expect(registry.getChat(CHAT_ID).executionLocation).toEqual(testExecutionLocation());
+    const other = { ...testExecutionLocation(), instanceId: 'second-instance' };
+    registry.addChat(newChat({ id: SECOND_CHAT_ID, executionLocation: other, agentSessionId: 'same-native-id' }));
+    expect(registry.lookupNativeSession('same-native-id', 'test')).toEqual({ status: 'ambiguous' });
+    expect(registry.lookupNativeSession('same-native-id', 'test', other)).toEqual({ status: 'found', chatId: SECOND_CHAT_ID });
+    const target = testExecutionLocation('test', '/other');
+    const updated = registry.updateChat(CHAT_ID, { projectPath: '/other', executionLocation: target });
+    target.workspaceId = 'caller-mutation';
+    updated.executionLocation.workspaceId = 'result-mutation';
+    registry.getChat(CHAT_ID).executionLocation.nodeId = 'read-mutation';
+    expect(registry.getChat(CHAT_ID).executionLocation).toEqual(testExecutionLocation('test', '/other'));
   });
 
   it('reports duplicate bindings within one agent as ambiguous', () => {
@@ -463,7 +502,7 @@ describe('ChatRegistry', () => {
     }, { flush: true });
 
     const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
-    expect(persisted.version).toBe(5);
+    expect(persisted.version).toBe(CHAT_REGISTRY_VERSION);
     expect(persisted.sessions[CHAT_ID]).toMatchObject({
       agentSessionId: 'native-1',
       nativeSession: nativeSession('test', { id: 'native-1' }),
@@ -526,8 +565,8 @@ describe('ChatRegistry', () => {
       tags: ['source'],
       lastReadAt: '2026-08-09T09:00:00.000Z',
     });
-    expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
-    expect(registry.getChatByAgentSessionId('native-2')).toBeNull();
+    expect(registry.lookupNativeSession('native-1').chatId).toBe(CHAT_ID);
+    expect(registry.lookupNativeSession('native-2')).toEqual({ status: 'not-found' });
     expect(readUpdated).not.toHaveBeenCalled();
     expect(tagsUpdated).not.toHaveBeenCalled();
 
@@ -540,8 +579,8 @@ describe('ChatRegistry', () => {
       tags: ['source'],
       lastReadAt: '2026-08-09T09:00:00.000Z',
     });
-    expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
-    expect(registry.getChatByAgentSessionId('native-2')).toBeNull();
+    expect(registry.lookupNativeSession('native-1').chatId).toBe(CHAT_ID);
+    expect(registry.lookupNativeSession('native-2')).toEqual({ status: 'not-found' });
   });
 
   it('does not roll back a newer patch when an earlier save fails', async () => {
@@ -734,6 +773,7 @@ describe('ChatRegistry', () => {
     const callerSession = nativeSession('test', { path: '/tmp/next.jsonl' });
 
     const result = await registry.updateProjectPath(CHAT_ID, {
+      executionLocation: testExecutionLocation('test', '/next'),
       chatId: CHAT_ID,
       projectPath: '/next',
       effectiveProjectKey: '/real/next',
@@ -764,8 +804,9 @@ describe('ChatRegistry', () => {
       preambleSelection: { revision: 1, orderedPreambleIds: [PREAMBLE_ID] },
     }));
 
-    const result = registry.getChatByAgentSessionId('native-1');
-    result[1].preambleSelection.orderedPreambleIds.length = 0;
+    const result = registry.lookupNativeSession('native-1');
+    expect(result.status).toBe('found');
+    registry.getChat(result.chatId).preambleSelection.orderedPreambleIds.length = 0;
 
     expect(registry.getChat(CHAT_ID).preambleSelection).toEqual({
       revision: 1,
@@ -780,6 +821,7 @@ describe('ChatRegistry', () => {
     });
 
     await expect(registry.updateProjectPath(CHAT_ID, {
+      executionLocation: testExecutionLocation('test', '/next'),
       chatId: CHAT_ID,
       projectPath: '/next',
       effectiveProjectKey: '/real/next',
@@ -796,6 +838,7 @@ describe('ChatRegistry', () => {
     registry.saveRegistry = mock(() => Promise.reject(new Error('disk full')));
 
     await expect(registry.updateProjectPath(CHAT_ID, {
+      executionLocation: testExecutionLocation('test', '/next'),
       chatId: CHAT_ID,
       projectPath: '/next',
       effectiveProjectKey: '/next',
@@ -818,7 +861,7 @@ describe('ChatRegistry', () => {
 
     expect(registry.removeChat(CHAT_ID)).toBe(true);
     expect(registry.removeChat(CHAT_ID)).toBe(false);
-    expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
+    expect(registry.lookupNativeSession('native-1')).toEqual({ status: 'not-found' });
     expect(removed).toHaveBeenCalledWith(CHAT_ID, 'user-deletion');
   });
 
@@ -892,6 +935,7 @@ describe('ChatRegistry', () => {
     const phasedRegistry = new ChatRegistry(phasedDir);
     await phasedRegistry.init();
     phasedRegistry.addChat({
+      executionLocation: testExecutionLocation(),
       id: CHAT_ID,
       agentId: 'test',
       model: 'model-a',
@@ -948,7 +992,7 @@ describe('ChatRegistry', () => {
     await fs.rm(phasedDir, { recursive: true, force: true });
   });
 
-  it('loads a strict version-five registry and rebuilds its native ID index', async () => {
+  it('loads the current registry format and rebuilds its native ID index', async () => {
     await registry.flush();
     await writeRegistry({ [CHAT_ID]: persistedEntry() });
     registry = new ChatRegistry(tempDir);
@@ -956,7 +1000,7 @@ describe('ChatRegistry', () => {
     await registry.init();
 
     expect(registry.getChat(CHAT_ID)).toEqual(persistedEntry());
-    expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+    expect(registry.lookupNativeSession('native-1').chatId).toBe(CHAT_ID);
   });
 
   it('preserves duplicate binding ambiguity after persisted registry reload', async () => {

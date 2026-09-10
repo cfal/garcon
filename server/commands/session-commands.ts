@@ -217,7 +217,6 @@ export class SessionCommands {
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
     const chatId = input.chatId.trim();
     if (!chatId) throw new CommandValidationError('VALIDATION_FAILED', 'chatId is required');
-    this.support.requireChat(chatId);
     this.deps.handoffs.cancelPreparation(chatId);
     return this.support.withChatMutationLock(chatId, () => this.deleteChatLocked(chatId));
   }
@@ -349,23 +348,22 @@ export class SessionCommands {
   }
 
   private async deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
-    this.support.requireChat(chatId);
-    this.deps.ledger.beginChatDeletion(chatId);
+    const pending = this.deps.ownership.pendingKind(chatId);
+    if (pending === 'handoff') {
+      throw new CommandValidationError('OWNERSHIP_TRANSFER_PENDING', 'Agent ownership change is pending', 409, true);
+    }
+    const chat = this.deps.chats.getChat(chatId);
+    if (!chat && pending !== 'delete') this.support.requireChat(chatId);
+    // A missing-registry retry cannot emit another removal event to settle this hold.
+    if (chat) this.deps.ledger.beginChatDeletion(chatId);
 
-    let retired: boolean;
+    let retired = false;
     try {
-      retired = await this.deps.queue.abortForChatDeletion(chatId);
+      retired = !chat || await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
-      await this.deps.ledger.cancelChatDeletion(chatId);
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
         error instanceof Error ? error.message : String(error),
-      );
-      throw new CommandValidationError(
-        'SESSION_BUSY',
-        'The active agent session could not be retired for deletion',
-        409,
-        true,
       );
     }
     if (!retired) {
@@ -380,17 +378,16 @@ export class SessionCommands {
 
     // Removes registry state after abort because abortSession resolves the owning agent through the chat entry.
     try {
-      await this.deps.ownership.delete(chatId);
+      const result = await this.deps.ownership.delete(chatId);
+      if (result.kind !== 'ledger-removed' && pending !== 'delete') {
+        throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      }
     } catch (error) {
-      if (this.deps.chats.getChat(chatId)) {
+      if (chat && this.deps.ownership.pendingKind(chatId) !== 'delete') {
         this.deps.queue.rollbackChatDeletion(chatId);
         await this.deps.ledger.cancelChatDeletion(chatId);
-        throw error;
       }
-      logger.warn(
-        `sessions: deletion cleanup for ${chatId} will resume from the ownership journal:`,
-        error instanceof Error ? error.message : String(error),
-      );
+      throw error;
     }
     await Promise.all([
       this.deps.queue.deleteChatQueueFile(chatId).catch(() => {
@@ -484,10 +481,8 @@ export class SessionCommands {
   }
 
   private async submitCompactLocked(input: CompactInput): Promise<CommandAcceptedResponse> {
-    // Compaction starts its own turn and cannot share its agent session with an active turn.
-    const chat = this.deps.chats.getChat(input.chatId);
-    if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while a turn is running', 409);
+    if (this.deps.queue.ownsExecution(input.chatId)) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while another chat operation owns execution', 409);
     }
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const turnId = crypto.randomUUID();
@@ -536,11 +531,11 @@ export class SessionCommands {
   }
 
   private async updateProjectPathLocked(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
-    const chat = this.deps.chats.getChat(input.chatId);
-    if (!chat) {
-      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
-    }
-    if (!this.deps.agents.supportsUpdateProjectPath(chat.agentId)) {
+    this.support.requireChat(input.chatId);
+    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath);
+    const effectiveProjectKey = nextProjectPath;
+    const chat = this.support.requireChat(input.chatId);
+    if (!this.deps.agents.supportsUpdateProjectPath(chat)) {
       throw new CommandValidationError(
         'PROJECT_PATH_UPDATE_UNSUPPORTED',
         `Project path updates are not supported for agent: ${chat.agentId}`,
@@ -548,8 +543,6 @@ export class SessionCommands {
       );
     }
 
-    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath);
-    const effectiveProjectKey = nextProjectPath;
     if (nextProjectPath === chat.projectPath) {
       return {
         success: true,
@@ -562,13 +555,12 @@ export class SessionCommands {
 
     const reservation = this.reserveProjectPathUpdate(input.chatId);
     try {
-      await this.assertChatIdleForProjectPathUpdate(chat);
-      await this.deps.agents.currentTranscriptViewId(input.chatId);
-      const refreshedChat = this.deps.chats.getChat(input.chatId);
-      if (!refreshedChat) {
-        throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      if (this.deps.ownership.hasPending(input.chatId)) {
+        throw new CommandValidationError('OWNERSHIP_TRANSFER_PENDING', 'Agent ownership change is pending', 409, true);
       }
-      const activeChat = refreshedChat;
+      await this.deps.agents.currentTranscriptViewId(input.chatId);
+      const activeChat = this.support.requireChat(input.chatId);
+      const executionLocation = await this.deps.placements.prepareRelocation(activeChat, nextProjectPath);
       const nativeSession = await this.nativeSessionForProjectPathUpdate(input.chatId, activeChat);
 
       const event = {
@@ -595,6 +587,7 @@ export class SessionCommands {
             input.chatId,
             {
               ...event,
+              executionLocation,
               ...(nextNativeSession !== undefined
                 ? { nativeSession: nextNativeSession }
                 : {}),
@@ -631,18 +624,6 @@ export class SessionCommands {
     }
   }
 
-  private async assertChatIdleForProjectPathUpdate(chat: ChatRegistryEntry): Promise<void> {
-    if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        'Cannot update project path while a turn is running',
-        409,
-        true,
-      );
-    }
-
-  }
-
   private reserveProjectPathUpdate(chatId: string): TranscriptSnapshotReservation {
     try {
       return this.deps.queue.reserveTranscriptSnapshot(chatId);
@@ -666,7 +647,7 @@ export class SessionCommands {
     const resolved = await this.deps.agents.resolveNativeSession(chat, chatId);
     if (resolved) return resolved;
 
-    if (this.deps.agents.requiresNativePathForProjectPathUpdate(chat.agentId)) {
+    if (this.deps.agents.requiresNativePathForProjectPathUpdate(chat)) {
       throw new CommandValidationError(
         'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
         'Cannot update the project path until the native session can be resolved',

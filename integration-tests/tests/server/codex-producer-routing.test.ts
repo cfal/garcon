@@ -491,10 +491,11 @@ describe('Codex producer routing', () => {
       const dropLogLines = fixture.garcon.logs.slice(dropLogCursor);
       const dropLogs = dropLogLines.join('\n');
       expect(dropLogLines.filter((line) => line.includes(
-        '[agent-integration:codex] Dropped a provider event for an unavailable transcript sink',
+        '[agent-integration:codex] Dropped a provider event for an unavailable output',
       ))).toHaveLength(1);
       expect(dropLogs).toContain(`chatId: "${staleChatId}"`);
       expect(dropLogs).toContain('eventType: "rows"');
+      expect(dropLogs).toContain('reason: "Transcript producer sink is closed"');
       expect(dropLogs).not.toContain(staleContent);
 
       await writeFile(turnReleasePath, 'release');

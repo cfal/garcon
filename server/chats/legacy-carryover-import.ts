@@ -9,7 +9,7 @@ import {
   emptyOwnershipJournalV5,
   type AgentOwnershipJournalFileV5,
   type DeleteIntentV2,
-} from './agent-ownership-journal.js';
+} from './legacy-ownership-journal-v5.js';
 import type { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { decodeCarryOverPage } from './carryover-page-codec.js';
 import {

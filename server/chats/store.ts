@@ -18,6 +18,8 @@ import {
 } from '../../common/agent-integration.js';
 import type { JsonObject, JsonValue } from '../../common/json.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import type { ExecutionInstanceRef, ExecutionLocation } from '../../common/execution-location.js';
+import { isStoredProjectPath } from '../../common/execution-nodes.js';
 import { parseChatId, type ChatId } from '../../common/chat-id.js';
 import {
   parseParentChatRef,
@@ -39,6 +41,7 @@ import {
   parseCarryOverSegmentRefs,
   parsePendingPreambleBoundary,
   requireNewParentChat,
+  requireExecutionLocation,
 } from './registry-entry-codec.js';
 import { writeJsonFileAtomic, AtomicJsonWriteError } from '../lib/json-file-store.js';
 import { errorMessage } from '../lib/errors.js';
@@ -60,7 +63,7 @@ import {
 
 const logger = createLogger('chats:store');
 
-export const CHAT_REGISTRY_VERSION = 5;
+export const CHAT_REGISTRY_VERSION = 6;
 
 export { parseCarryOverSegmentRefs } from './registry-entry-codec.js';
 // Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
@@ -71,6 +74,8 @@ interface ChatRegistryOptions {
 }
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
+  'executionLocation',
+  'projectPath',
   'nativeSession',
   'agentOwnershipEpoch',
   'agentSettingsById',
@@ -113,6 +118,7 @@ export interface CarryOverSegmentRef {
 
 export interface ChatRegistryEntry {
   agentId: AgentName;
+  executionLocation: ExecutionLocation;
   nativeSession: AgentNativeSessionRef | null;
   agentOwnershipEpoch: string;
   agentSettingsById: Record<string, AgentSettingsEnvelope>;
@@ -168,6 +174,7 @@ export interface NewChatRegistryEntry {
   agentId: AgentName;
   model: string;
   projectPath: string;
+  executionLocation: ExecutionLocation;
   nativeSession?: AgentNativeSessionRef | null;
   agentOwnershipEpoch?: string;
   agentSettingsById?: Record<string, AgentSettingsEnvelope>;
@@ -219,6 +226,7 @@ interface ChatRegistryEvents {
 
 export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
   nativeSession?: AgentNativeSessionRef | null;
+  executionLocation: ExecutionLocation;
 }
 export type ResolveNativeSession = (
   session: ChatRegistryEntry,
@@ -245,8 +253,7 @@ export interface IChatRegistry {
     options: { flush: true },
   ): Promise<ChatRegistryResolvedEntry | null>;
   removeChat(id: string, reason?: ChatRemovalReason): boolean;
-  getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
-  lookupNativeSession(agentSessionId: string, agentId?: AgentName): NativeSessionLookupResult;
+  lookupNativeSession(agentSessionId: string, agentId?: AgentName, instance?: ExecutionInstanceRef): NativeSessionLookupResult;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
   flush(): Promise<void>;
   onChatAdded(cb: ChatAddedCallback): void;
@@ -265,7 +272,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   #chatMutationRevisions = new Map<string, number>();
   #nextChatMutationRevision = 0;
   #registryDirty = false;
-  #agentSessionIdIndex = new Map<string, string>();
   #unknownDurabilityChats = new Set<string>();
   #workspaceDir: string;
   #saveDelayMs: number;
@@ -336,13 +342,11 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         version: CHAT_REGISTRY_VERSION,
         sessions,
       };
-      this.#rebuildAgentSessionIdIndex();
       return this.#registry;
     } catch (error: unknown) {
       const errno = error as NodeJS.ErrnoException;
       if (errno.code === 'ENOENT') {
         this.#registry = createEmptyRegistry();
-        this.#rebuildAgentSessionIdIndex();
         return this.#registry;
       }
       throw error;
@@ -436,6 +440,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     agentId,
     model,
     projectPath,
+    executionLocation,
     nativeSession = null,
     agentOwnershipEpoch = crypto.randomUUID(),
     agentSettingsById = {},
@@ -466,6 +471,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       throw new Error(`Native session owner mismatch for ${chatId}`);
     }
     const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode });
+    const normalizedLocation = requireExecutionLocation(executionLocation);
     const normalizedSegments = parseCarryOverSegmentRefs(carryOverSegments);
     const normalizedReceipt = normalizeNativeSeedReceipt(nativeSeedReceipt);
     const normalizedQuarantine = normalizeMigrationQuarantine(carryOverMigrationQuarantine);
@@ -487,6 +493,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       agentOwnershipEpoch,
       agentSettingsById: structuredClone(agentSettingsById),
       projectPath,
+      executionLocation: normalizedLocation,
       tags: [...tags],
       agentSessionId,
       nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
@@ -506,7 +513,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       parentChat: normalizedParentChat,
     };
     this.#advanceChatMutationRevision(chatId);
-    this.#setAgentSessionIdIndex(chatId, agentSessionId);
     this.#emitChatAdded(chatId);
     this.#scheduleRegistrySave();
     return true;
@@ -530,14 +536,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     assertPreambleBoundaryBinding(candidate);
     assertSeedReceiptBinding(candidate);
     const previous = { ...existing };
-    const previousAgentSessionId = existing.agentSessionId;
     const previousTags = existing.tags;
     Object.assign(existing, normalizedPatch);
     const mutationRevision = this.#advanceChatMutationRevision(id);
-    if ('agentSessionId' in normalizedPatch && existing.agentSessionId !== previousAgentSessionId) {
-      this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
-      this.#setAgentSessionIdIndex(id, existing.agentSessionId);
-    }
     const emitUpdateEvents = (): void => {
       if ('lastReadAt' in normalizedPatch) {
         this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
@@ -552,7 +553,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
         registry.sessions[id] = previous;
         this.#advanceChatMutationRevision(id);
-        this.#rebuildAgentSessionIdIndex();
         this.#scheduleRegistrySave();
       };
       return this.#flushRegistrySave(restoreIfCurrent).then(
@@ -577,6 +577,14 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     patch: ChatRegistryPatch,
   ): ChatRegistryPatch {
     const normalizedPatch = pickAllowedPatch(patch);
+    if ('projectPath' in normalizedPatch || 'executionLocation' in normalizedPatch) {
+      if (!isStoredProjectPath(normalizedPatch.projectPath) || !('executionLocation' in normalizedPatch)) {
+        throw new Error('Project path and execution location must be updated together');
+      }
+    }
+    if ('executionLocation' in normalizedPatch) {
+      normalizedPatch.executionLocation = requireExecutionLocation(normalizedPatch.executionLocation);
+    }
     if ('permissionMode' in normalizedPatch) {
       normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
     }
@@ -676,7 +684,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
       const current = this.getRegistry().sessions[id];
       if (!current) return null;
-      const previousAgentSessionId = current.agentSessionId;
       const previousTags = current.tags;
       if (changed) Object.assign(current, normalizedPatch);
       assertPreambleBoundaryBinding(current);
@@ -689,11 +696,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         && appliedRevision === candidateBaseRevision + (changed ? 1 : 0)
       ) {
         this.#registryDirty = false;
-      }
-      if ('agentSessionId' in normalizedPatch
-        && current.agentSessionId !== previousAgentSessionId) {
-        this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
-        this.#setAgentSessionIdIndex(id, current.agentSessionId);
       }
       if (changed && 'lastReadAt' in normalizedPatch) {
         this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
@@ -727,8 +729,14 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       throw new Error(`Project path update identity mismatch: ${id}`);
     }
     const previousProjectPath = existing.projectPath;
+    const previousLocation = existing.executionLocation;
     const previousNativeSession = existing.nativeSession;
-    existing.projectPath = update.projectPath;
+    const location = requireExecutionLocation(update.executionLocation);
+    if (!isStoredProjectPath(update.projectPath)) throw new Error('Invalid project path');
+    if (location.nodeId !== previousLocation.nodeId || location.instanceId !== previousLocation.instanceId) {
+      throw new Error('Project relocation cannot change the execution instance');
+    }
+    let nativeSession = previousNativeSession;
     if ('nativeSession' in update) {
       if (update.nativeSession?.ownerId !== existing.agentId && update.nativeSession !== null) {
         throw new Error(`Native session owner mismatch for ${id}`);
@@ -736,14 +744,18 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       // Update-supplied refs stay reachable to the caller (the command layer
       // retains one for its published session fact); clone on ingest to match
       // addChat/updateChat aliasing protection.
-      existing.nativeSession = update.nativeSession
+      nativeSession = update.nativeSession
         ? structuredClone(update.nativeSession)
         : null;
     }
+    existing.executionLocation = location;
+    existing.projectPath = update.projectPath;
+    existing.nativeSession = nativeSession;
     const mutationRevision = this.#advanceChatMutationRevision(id);
     const restoreIfCurrent = (): void => {
       if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
       existing.projectPath = previousProjectPath;
+      existing.executionLocation = previousLocation;
       existing.nativeSession = previousNativeSession;
       this.#advanceChatMutationRevision(id);
       this.#scheduleRegistrySave();
@@ -774,7 +786,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const registry = this.getRegistry();
     const entry = registry.sessions[id];
     if (!entry) return false;
-    this.#unsetAgentSessionIdIndex(id, entry.agentSessionId);
     delete registry.sessions[id];
     this.#chatMutationRevisions.delete(id);
     this.#markRegistryDirty();
@@ -783,27 +794,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return true;
   }
 
-  getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null {
-    const registry = this.#registry;
-    if (!registry) {
-      throw new Error('Registry cache not initialized. Call init() during startup.');
-    }
-    if (!agentSessionId) return null;
-    const chatId = this.#agentSessionIdIndex.get(agentSessionId);
-    if (!chatId) return null;
-    const entry = registry.sessions[chatId];
-    if (!entry || entry.agentSessionId !== agentSessionId) {
-      this.#agentSessionIdIndex.delete(agentSessionId);
-      return null;
-    }
-    return [chatId, cloneRegistryEntry(entry)];
-  }
-
-  lookupNativeSession(agentSessionId: string, agentId?: AgentName): NativeSessionLookupResult {
+  lookupNativeSession(agentSessionId: string, agentId?: AgentName, instance?: ExecutionInstanceRef): NativeSessionLookupResult {
     let matchedChatId: ChatId | null = null;
     for (const [chatId, entry] of Object.entries(this.getRegistry().sessions)) {
       if (entry.agentSessionId !== agentSessionId) continue;
       if (agentId !== undefined && entry.agentId !== agentId) continue;
+      if (instance && (entry.executionLocation.nodeId !== instance.nodeId || entry.executionLocation.instanceId !== instance.instanceId)) continue;
       if (matchedChatId !== null) return { status: 'ambiguous' };
       matchedChatId = parseChatId(chatId);
     }
@@ -833,7 +829,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       },
     );
     this.#registry = registry;
-    this.#rebuildAgentSessionIdIndex();
     // A confirmed flush proves every previously unknown-durability candidate.
     this.#unknownDurabilityChats.clear();
   }
@@ -895,39 +890,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return ++this.#nextChatMutationRevision;
   }
 
-  #rebuildAgentSessionIdIndex(): void {
-    this.#agentSessionIdIndex.clear();
-    const sessions = this.#registry?.sessions;
-    if (!sessions) return;
-    for (const [chatId, entry] of Object.entries(sessions)) {
-      this.#setAgentSessionIdIndex(chatId, entry.agentSessionId);
-    }
-  }
-
-  #setAgentSessionIdIndex(chatId: string, agentSessionId: string | null | undefined): void {
-    if (!agentSessionId) return;
-    if (!this.#agentSessionIdIndex.has(agentSessionId)) {
-      this.#agentSessionIdIndex.set(agentSessionId, chatId);
-    }
-  }
-
-  #unsetAgentSessionIdIndex(chatId: string, agentSessionId: string | null | undefined): void {
-    if (!agentSessionId) return;
-    if (this.#agentSessionIdIndex.get(agentSessionId) === chatId) {
-      this.#agentSessionIdIndex.delete(agentSessionId);
-      for (const [candidateChatId, entry] of Object.entries(this.#registry?.sessions ?? {})) {
-        if (candidateChatId !== chatId && entry.agentSessionId === agentSessionId) {
-          this.#agentSessionIdIndex.set(agentSessionId, candidateChatId);
-          break;
-        }
-      }
-    }
-  }
 }
 
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
   return {
     ...entry,
+    executionLocation: { ...entry.executionLocation },
     // Deeply frozen fields (parentChat, carryOverSegments) are safe to share; every
     // other nested field must be copied here so callers cannot mutate registry
     // state through a handed-out entry. New entry fields declare themselves by

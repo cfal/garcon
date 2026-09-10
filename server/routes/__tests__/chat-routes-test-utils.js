@@ -5,6 +5,7 @@ import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
+import { testPlacements } from '../../execution-nodes/testing/placement.js';
 
 export function createRouteCommandLedger(label = 'chat-routes') {
   return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
@@ -14,7 +15,7 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
   const processing = {
     phase(chatId) {
       const session = registry.getChat(chatId);
-      return session && agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
+      return session && agents.isChatRunning(chatId)
         ? 'running'
         : null;
     },
@@ -50,6 +51,7 @@ export function createRouteCommandService({
   };
   return new ChatCommandService({
     chats: registry,
+    placements: testPlacements,
     queue,
     transcripts,
     settings,
@@ -90,10 +92,12 @@ export function createRouteCommandService({
 	},
     fileMentions: { resolve: async (command) => command },
     ownership: ownership ?? {
+      hasPending: () => false,
+      pendingKind: () => null,
       delete: async (chatId) => {
-        if (!registry.getChat(chatId)) return false;
+        if (!registry.getChat(chatId)) return { kind: 'not-found' };
         registry.removeChat(chatId);
-        return true;
+        return { kind: 'ledger-removed' };
       },
     },
 	chatListProjector: chatListProjector ?? {

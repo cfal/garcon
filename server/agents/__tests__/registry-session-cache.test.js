@@ -31,6 +31,7 @@ describe('AgentRegistry session cache', () => {
     chats = new ChatRegistry(root);
     await chats.init();
     chats.addChat({
+      executionLocation: testExecutionLocation(),
       id: CHAT_ID,
       agentId: 'test',
       model: 'model-a',
@@ -65,8 +66,10 @@ describe('AgentRegistry session cache', () => {
     },
   ) {
     return new AgentRegistry({
+      localNodeId: 'local-node',
       registry: chats,
       integrations,
+      instances: { requireFor: (owner) => integrations.require(owner.agentId) },
       endpointResolver: {},
       getCarryOverRevision: () => 'carry-1',
       ledger,
@@ -566,7 +569,7 @@ describe('AgentRegistry session cache', () => {
         value: { path: '/tmp/native.jsonl' },
       },
     });
-    expect(chats.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+    expect(chats.lookupNativeSession('native-1').chatId).toBe(CHAT_ID);
   });
 
   it('caches a session fact that arrives after interruption for future resume', async () => {
@@ -601,6 +604,7 @@ describe('AgentRegistry session cache', () => {
         value: { path: '/tmp/native-late.jsonl' },
       },
     });
-    expect(chats.getChatByAgentSessionId('native-late')?.[0]).toBe(CHAT_ID);
+    expect(chats.lookupNativeSession('native-late').chatId).toBe(CHAT_ID);
   });
 });
+import { testExecutionLocation } from '../../execution-nodes/testing/placement.js';

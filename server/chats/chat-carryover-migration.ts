@@ -10,7 +10,7 @@ import {
 } from '../../common/transcript-seed.js';
 import { isRecord } from '../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
-import type { AgentOwnershipJournalFileV5 } from './agent-ownership-journal.js';
+import type { AgentOwnershipJournalFileV5 } from './legacy-ownership-journal-v5.js';
 import { assertMigrationCapacity } from './carryover-migration-budget.js';
 import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
@@ -497,8 +497,13 @@ async function directorySize(directory: string): Promise<number> {
 }
 
 async function targetRegistryHasQuarantine(workspaceDir: string): Promise<boolean> {
-  const registry = parseTargetRegistry(await fs.readFile(path.join(workspaceDir, 'chats.json')));
-  return Object.values(registry.sessions).some((entry) => (
+  const value: unknown = JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+  if (!isRecord(value) || (value.version !== 5 && value.version !== 6) || !isRecord(value.sessions)) {
+    throw new Error('Invalid current chat registry during carryover validation');
+  }
+  const sessions = Object.values(value.sessions);
+  if (!sessions.every(isRecord)) throw new Error('Invalid current chat registry entries during carryover validation');
+  return sessions.some((entry) => (
     entry.carryOverMigrationQuarantine !== null
     && entry.carryOverMigrationQuarantine !== undefined
   ));

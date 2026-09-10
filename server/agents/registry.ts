@@ -8,6 +8,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { LocatedChatOwner } from '@garcon/common/execution-location';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -39,6 +40,7 @@ import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import {
   AgentRuntimeRouter,
+  type AgentRuntimeRouterOptions,
   type CreateCarriedContextInput,
   type RunSingleQueryOptions,
 } from './runtime-router.js';
@@ -78,12 +80,11 @@ export interface AgentRegistryServiceContract {
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
   supportsForkAtMessage(agentId: string): boolean;
   supportsForkWhileRunning(agentId: string): boolean;
-  supportsUpdateProjectPath(agentId: string): boolean;
-  requiresNativePathForProjectPathUpdate(agentId: string): boolean;
+  supportsUpdateProjectPath(owner: LocatedChatOwner): boolean;
+  requiresNativePathForProjectPathUpdate(owner: LocatedChatOwner): boolean;
   supportsImages(agentId: string): boolean;
   supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string>;
   hasMatchingInput(
     chatId: string,
@@ -116,7 +117,7 @@ export interface AgentRegistryServiceContract {
     messageOrdinal?: number;
     signal: AbortSignal;
   }): Promise<ForkedAgentSessionOutcome | null>;
-  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
+  discardForkedAgentSession(owner: LocatedChatOwner, session: StartedAgentSession): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -138,7 +139,8 @@ export interface AgentRegistryServiceContract {
     modelEndpointId?: string | null;
   }): Promise<boolean>;
   runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
-  getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
+  getChatSlashCommands(chat: AgentChatEntry, agentId: string, signal: AbortSignal): Promise<SlashCommand[]>;
+  getDefaultSlashCommands(agentId: string, projectPath: string, signal: AbortSignal): Promise<SlashCommand[]>;
   resolvePermission(
     chatId: string,
     permissionOccurrenceId: string,
@@ -181,6 +183,8 @@ interface CompactSessionOptions {
 export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
+  readonly #instances: AgentRuntimeRouterOptions['instances'];
+  readonly #localNodeId: string;
   readonly #catalog: AgentCatalogService;
   readonly #events: AgentEventBus;
   readonly #runtime: AgentRuntimeRouter;
@@ -202,6 +206,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
+    instances: AgentRuntimeRouterOptions['instances'];
+    localNodeId: string;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
@@ -218,6 +224,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#ledger = args.ledger;
     this.#adoption = args.adoption;
     this.#directory = new AgentDirectory(args.integrations);
+    this.#instances = args.instances;
+    this.#localNodeId = args.localNodeId;
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
@@ -225,9 +233,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#events = new AgentEventBus();
     this.#runtime = new AgentRuntimeRouter({
       registry: this.#registry,
+      localNodeId: this.#localNodeId,
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       events: this.#events,
+      instances: this.#instances,
       getCarryOverRevision: args.getCarryOverRevision,
       createCarriedContext: args.createCarriedContext,
       ledger: this.#ledger,
@@ -239,7 +249,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#selectionAdmissionLock = args.selectionAdmissionLock;
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
-      directory: this.#directory,
+      instances: this.#instances,
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
     });
@@ -291,13 +301,16 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
   supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
-    return this.#directory.get(agentId)?.singleQuery?.runsToolsWithoutPermission ?? false;
+    const instance = this.#instances.defaultFor(this.#localNodeId, agentId);
+    return instance ? this.#instances.get(instance)?.singleQuery?.runsToolsWithoutPermission ?? false : false;
   }
   supportsForkAtMessage(agentId: string): boolean { return this.#directory.has(agentId); }
   supportsForkWhileRunning(agentId: string): boolean { return this.#directory.has(agentId); }
-  supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
-  requiresNativePathForProjectPathUpdate(agentId: string): boolean {
-    return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
+  supportsUpdateProjectPath(owner: LocatedChatOwner): boolean {
+    return this.#instances.requireFor(owner).descriptor.supportsProjectPathUpdate;
+  }
+  requiresNativePathForProjectPathUpdate(owner: LocatedChatOwner): boolean {
+    return this.#instances.requireFor(owner).descriptor.requiresNativePathForProjectPathUpdate;
   }
   supportsImages(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsImages ?? false; }
   supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean {
@@ -337,9 +350,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
   compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
   isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
-    return this.#runtime.isAgentSessionRunning(agentId, agentSessionId);
-  }
   getRunningSessions() { return this.#runtime.getRunningSessions(); }
   getRunningChatIdsSnapshot(): string[] { return this.#runtime.getRunningChatIdsSnapshot(); }
   getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
@@ -366,8 +376,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }) {
     return this.#runtime.forkAgentSession(args);
   }
-  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
-    return this.#runtime.discardForkedAgentSession(agentId, session);
+  discardForkedAgentSession(owner: LocatedChatOwner, session: StartedAgentSession): Promise<void> {
+    return this.#runtime.discardForkedAgentSession(owner, session);
   }
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
     return this.#settings.updateSessionSettings(chatId, patch);
@@ -375,8 +385,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);
   }
-  getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
-    return this.#runtime.discoverSlashCommands(agentId, projectPath);
+  getChatSlashCommands(chat: AgentChatEntry, agentId: string, signal: AbortSignal): Promise<SlashCommand[]> {
+    return this.#runtime.discoverChatSlashCommands(chat, agentId, signal);
+  }
+
+  getDefaultSlashCommands(agentId: string, projectPath: string, signal: AbortSignal): Promise<SlashCommand[]> {
+    return this.#runtime.discoverDefaultSlashCommands(this.#localNodeId, agentId, projectPath, signal);
   }
 
   // Returns the preview from the authoritative conversational ledger fold.
@@ -408,8 +422,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   async resolveNativeSession(session: AgentChatEntry, chatId = ''): Promise<AgentNativeSessionRef | null> {
     if (!session.agentSessionId) return null;
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return null;
+    const integration = this.#instances.requireFor(session);
     const nativeSessions = integration.nativeSessions;
     if (!nativeSessions) return null;
     const reference = await nativeSessions.resolveNativeSession({
@@ -426,9 +439,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     session: AgentChatEntry,
     chatId: string,
   ): Promise<AgentTranscriptSourceLocation | null> {
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return null;
     try {
+      const integration = this.#instances.requireFor(session);
       const nativeSessions = integration.nativeSessions;
       if (!nativeSessions) return null;
       const source = await nativeSessions.describeSource({

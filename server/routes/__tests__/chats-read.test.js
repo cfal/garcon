@@ -92,7 +92,7 @@ const chatViews = {
 };
 const agents = {
   startSession: mock(() => undefined),
-  isAgentSessionRunning: mock(() => false),
+  isChatRunning: mock(() => false),
   describeTranscriptSource: mock(async () => null),
 };
 
