@@ -1,9 +1,21 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { AssistantMessage } from '../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { ProjectUnavailableError } from '../lib/domain-error.ts';
 import { wireServerEvents } from '../server-event-wiring.js';
+import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../chat-execution/chat-execution-control-repository.js';
+import { CommandLedger } from '../commands/command-ledger.js';
+import { ChatCommandSettlement } from '../commands/chat-command-settlement.js';
+import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.js';
+import { AgentRegistry } from '../agents/registry.js';
+import { TranscriptLedgerService } from '../ledger/service.js';
+import { TranscriptLedgerStore } from '../ledger/store.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
@@ -34,7 +46,7 @@ function createFixture(overrides = {}) {
     discardTurn: mock(() => undefined),
     ...overrides.agentRegistry,
   };
-  const queueService = {
+  const queueService = overrides.queueService ?? {
     onExecutionControlUpdated: mock((callback) => { queue.control = callback; }),
     onProcessingInvalidated: mock((callback) => { queue.processing = callback; }),
     onSessionStopped: mock((callback) => { queue.stopped = callback; }),
@@ -67,13 +79,14 @@ function createFixture(overrides = {}) {
     replaceFromTranscriptView: mock(() => undefined),
     ...overrides.metadata,
   };
-  const commandLedger = {
+  const commandLedger = overrides.commandLedgerInstance ?? {
     getTurnRecord: mock(async (_chatId, turnId) => (
       turnId === 'turn-1' ? { payload: { clientMessageId: 'message-1' } } : null
     )),
     setTurnResult: mock(async () => undefined),
     settleTerminal: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
+    markInterruptedWithoutRunTerminal: mock(async () => undefined),
     markChatInterrupted: mock(async () => undefined),
     ...overrides.commandLedger,
   };
@@ -190,7 +203,219 @@ const turn = {
   turnId: 'turn-1',
 };
 
+function createExecutionFixture(directory, ensureAdopted) {
+  const store = new TranscriptLedgerStore(directory);
+  const transcripts = new TranscriptLedgerService(store);
+  const view = transcripts.initializeChat('chat-1');
+  const agentSettings = { ownerId: 'test', schemaVersion: 1, values: {} };
+  const entry = {
+    id: 'chat-1', agentId: 'test', agentSessionId: null, nativeSession: null,
+    nativeSeedReceipt: null, agentOwnershipEpoch: 'epoch-1', projectPath: directory,
+    model: 'model-a', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+    permissionMode: 'default', thinkingMode: 'none', tags: [],
+    agentSettingsById: { test: agentSettings },
+  };
+  let sink;
+  const integration = {
+    descriptor: { id: 'test', supportedPermissionModes: ['default'], supportedThinkingModes: ['none'] },
+    settings: { defaults: () => agentSettings, parse: (input) => input },
+    execution: {
+      start: async (request) => {
+        sink = request.sink;
+        await request.admission.markStarted();
+        return { id: 'synthetic-handle' };
+      },
+      abort: async () => undefined,
+    },
+  };
+  const agents = new AgentRegistry({
+    registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
+    integrations: { require: () => integration, get: () => integration, list: () => [integration] },
+    endpointResolver: {
+      resolveSelection: () => ({ model: 'model-a', apiProviderId: null, endpointId: null, protocol: null, isLocal: false }),
+      resolveEndpointReference: () => null,
+    },
+    getCarryOverRevision: () => '', createCarriedContext: async () => ({ kind: 'no-history' }),
+    ledger: transcripts, adoption: { ensure: ensureAdopted ?? (async () => view) },
+    hasPendingOwnershipTransfer: () => false, preambles: {}, selectionAdmissionLock: new KeyedPromiseLock(),
+  });
+  const execution = new ChatExecutionCoordinator(directory, agents, {
+    admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
+    admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
+  }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+    projectAdmission: { assertAvailable: async () => undefined }, isControlInputViewCurrent: () => true,
+  });
+  const ledger = new CommandLedger();
+  const fixture = createFixture({
+    commandLedgerInstance: ledger, queueService: execution,
+    agentRegistry: {
+      onTranscriptCommitted: (callback) => agents.onTranscriptCommitted(callback),
+      onSessionCreated: (callback) => agents.onSessionCreated(callback),
+      onFinished: (callback) => agents.onFinished(callback),
+      onFailed: (callback) => agents.onFailed(callback),
+      settleTurn: (...args) => agents.settleTurn(...args),
+    },
+  });
+  return { ...fixture, store, transcripts, agents, execution, ledger, get sink() { return sink; } };
+}
+
 describe('server event wiring', () => {
+  for (const method of ['stopActiveTurn', 'interruptActiveTurn']) {
+    it(`settles ${method} during pre-run failure settlement and fences its successor`, async () => {
+      const directory = await mkdtemp(path.join(tmpdir(), 'prerun-failure-stop-wiring-'));
+      const fixture = createExecutionFixture(directory, async () => { throw new Error('Synthetic adoption failure'); });
+      const { execution, agents, ledger, transcripts, store } = fixture;
+      const failed = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      const cancellation = new AbortController();
+      const settlement = new ChatCommandSettlement(ledger);
+      const settleFailure = settlement.settleOperationFailure.bind(settlement);
+      settlement.settleOperationFailure = async (...args) => {
+        await settleFailure(...args);
+        failed.resolve();
+        await release.promise;
+      };
+      const startedTurn = { turnId: 'turn-1', commandType: 'chat-start', clientRequestId: 'request-1' };
+      let successor;
+      try {
+        const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+        const receipt = ledger.waitForTurnTerminal('chat-1', 'turn-1', cancellation.signal).catch(() => null);
+        await execution.scheduleDirectInput({
+          command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+          content: 'Synthetic task', options: startedTurn, settlement,
+          dispatch: (executionAdmission) => agents.startSession('chat-1', 'Synthetic task', { ...startedTurn, executionAdmission }),
+        });
+        await failed.promise;
+        expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+          status: 'failed', turnResult: { availability: 'unavailable', reason: 'no-final-response' },
+        });
+        expect(transcripts.currentRows('chat-1')).toEqual([]);
+        await execution[method]('chat-1');
+        await fixture.wiring.waitForIdle();
+        expect((await ledger.getTurnRecord('chat-1', 'turn-1')).publicTerminalAt).toEqual(expect.any(String));
+        expect(await receipt).toMatchObject({ status: 'finished', interruptionReason: 'user-stop' });
+
+        successor = execution.reserveDirectTurn('chat-1', { turnId: 'successor-turn', clientRequestId: 'successor-request' });
+        release.resolve();
+        await execution.waitForDispatches();
+        await fixture.wiring.waitForIdle();
+        expect(execution.ownsExecution('chat-1')).toBe(true);
+        expect(successor.executionAdmission.signal.aborted).toBe(false);
+        expect(fixture.sink).toBeUndefined();
+        expect(transcripts.currentRows('chat-1')).toEqual([]);
+        expect(fixture.published.filter((event) => event.type === 'agent-run-failed')).toEqual([]);
+      } finally {
+        cancellation.abort();
+        release.resolve();
+        if (successor) await execution.releaseDirectTurn(successor);
+        await execution.waitForDispatches();
+        await fixture.wiring.waitForIdle();
+        store.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      ['finished', { type: 'text', text: 'Synthetic completed output' }],
+      ['finished', null],
+      ['failed', null],
+    ])(`preserves a committed %s receipt when ${method} precedes terminal publication`, async (outcome, finalResponse) => {
+      const directory = await mkdtemp(path.join(tmpdir(), 'terminal-stop-wiring-'));
+      const fixture = createExecutionFixture(directory);
+      const { store, transcripts, execution, ledger } = fixture;
+      const startedTurn = { turnId: 'turn-1', commandType: 'chat-start', clientRequestId: 'request-1' };
+      try {
+        await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+        const receipt = ledger.waitForTurnTerminal('chat-1', 'turn-1', new AbortController().signal);
+        const reservation = execution.reserveDirectTurn('chat-1', startedTurn);
+        await execution.runReservedTurn(reservation, 'Synthetic task', startedTurn);
+        await fixture.wiring.waitForIdle();
+
+        fixture.sink.publish({ type: 'run-ended', runId: 'turn-1', outcome, finalResponse });
+        expect(transcripts.currentRows('chat-1').at(-1)).toMatchObject({ kind: 'run-ended', outcome });
+        expect(execution.ownsExecution('chat-1')).toBe(true);
+        const stopping = execution[method]('chat-1');
+        expect((await ledger.getTurnRecord('chat-1', 'turn-1')).publicTerminalAt).toBeUndefined();
+        await stopping;
+        await fixture.wiring.waitForIdle();
+
+        const record = await receipt;
+        expect(record.interruptionReason).toBeUndefined();
+        expect(projectAgentTurnReceipt(record)).toMatchObject({ kind: 'found', receipt: {
+          state: outcome === 'finished' ? 'completed' : 'failed',
+          output: finalResponse
+            ? { availability: 'available', text: finalResponse.text }
+            : { availability: 'unavailable', reason: 'no-final-response' },
+        } });
+        expect(execution.ownsExecution('chat-1')).toBe(false);
+        expect(transcripts.currentRows('chat-1').filter((row) => row.kind === 'run-ended'))
+          .toMatchObject([{ outcome }]);
+      } finally {
+        await execution.waitForDispatches();
+        await fixture.wiring.waitForIdle();
+        store.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it('settles Stop before a run exists and fences delayed startup from its successor', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'startup-stop-wiring-'));
+    const ledger = new CommandLedger();
+    const prepared = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const delivered = mock();
+    const execution = new ChatExecutionCoordinator(directory, {
+      runAgentTurn: mock(), captureSteerTarget: () => null,
+      abortSession: async () => false, isChatRunning: () => false,
+    }, {
+      admitInput: async () => ({ inserted: true }),
+      hasMatchingInput: async () => false,
+      admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
+    }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+      projectAdmission: { assertAvailable: async () => undefined },
+      isControlInputViewCurrent: () => true,
+    });
+    const fixture = createFixture({ queueService: execution, commandLedgerInstance: ledger });
+    let successor;
+    try {
+      const accepted = await ledger.accept({ commandType: 'chat-start', chatId: 'chat-1',
+        clientRequestId: 'startup-request', turnId: 'startup-turn', payload: {} });
+      const receipt = ledger.waitForTurnTerminal('chat-1', 'startup-turn', new AbortController().signal);
+      await execution.scheduleDirectInput({
+        command: { key: accepted.record.key, chatId: 'chat-1', clientRequestId: 'startup-request', turnId: 'startup-turn' },
+        content: 'Synthetic task', options: { commandType: 'chat-start', clientRequestId: 'startup-request', turnId: 'startup-turn' },
+        settlement: new ChatCommandSettlement(ledger),
+        dispatch: async (admission) => {
+          prepared.resolve();
+          await release.promise;
+          admission.signal.throwIfAborted();
+          delivered();
+        },
+      });
+      await prepared.promise;
+      expect(execution.ownsExecution('chat-1')).toBe(true);
+      expect(await execution.interruptActiveTurn('chat-1')).toBe('interrupt-requested');
+      await fixture.wiring.waitForIdle();
+      expect(await receipt).toMatchObject({ turnId: 'startup-turn', interruptionReason: 'user-stop', status: 'finished' });
+      successor = execution.reserveDirectTurn('chat-1', { turnId: 'successor-turn', clientRequestId: 'successor-request' });
+      release.resolve();
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      expect(delivered).not.toHaveBeenCalled();
+      expect(execution.ownsExecution('chat-1')).toBe(true);
+      expect(successor.executionAdmission.signal.aborted).toBe(false);
+      expect(await ledger.getTurnRecord('chat-1', 'startup-turn')).toMatchObject({ interruptionReason: 'user-stop', status: 'finished' });
+      expect(fixture.published.filter((event) => event.type === 'agent-run-failed')).toEqual([]);
+    } finally {
+      release.resolve();
+      if (successor) await execution.releaseDirectTurn(successor);
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('broadcasts revisioned Chat Board invalidations without catalog content', () => {
     const fixture = createFixture();
 
@@ -489,6 +714,16 @@ describe('server event wiring', () => {
       },
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'stopping' },
     ]);
+  });
+
+  it('settles the captured reservation-only turn after transcript rows and before Stop publication', async () => {
+    const fixture = createFixture();
+    fixture.agent.transcript(providerCommit());
+    fixture.queue.stopped('chat-1', 'interrupt-requested', 'stop', { turnId: 'reserved-start' });
+    await fixture.wiring.waitForIdle();
+    expect(fixture.commandLedger.markInterruptedWithoutRunTerminal).toHaveBeenCalledWith('chat-1', 'reserved-start', 'user-stop');
+    expect(fixture.published.map((event) => event.type))
+      .toEqual(['chat-messages', 'chat-session-stopped', 'chat-processing-updated']);
   });
 
   it('repairs an idle processing phase before publishing an already-idle Stop', async () => {

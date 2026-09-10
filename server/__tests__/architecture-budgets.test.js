@@ -17,7 +17,8 @@ const MAX_LINES = 1000;
 // admission with compensation. Structured permission decisions validate answers
 // against the exact pending question before ledger acceptance. Reply orchestration
 // stays in chats; control view fencing remains independent of receipt creation.
-const EXECUTION_FOOTPRINT_BUDGET = 8640;
+// Includes noncompensating dispatch failure settlement and exact-turn interruption.
+const EXECUTION_FOOTPRINT_BUDGET = 8655;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

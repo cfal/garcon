@@ -172,6 +172,68 @@ describe('CommandLedger', () => {
     });
   });
 
+  it('settles an interrupted reservation without touching another turn', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept(acceptedInput({ turnId: 'reserved-turn' }));
+    await ledger.accept(acceptedInput({ turnId: 'other-turn', clientRequestId: 'other-request' }));
+    const terminal = ledger.waitForTurnTerminal('chat-1', 'reserved-turn', new AbortController().signal);
+
+    await ledger.markInterruptedWithoutRunTerminal('chat-1', 'reserved-turn', 'user-stop');
+
+    expect(await terminal).toMatchObject({
+      status: 'finished', interruptionReason: 'user-stop', publicTerminalAt: expect.any(String),
+      turnResult: { availability: 'unavailable', reason: 'no-final-response' },
+    });
+    expect((await ledger.getTurnRecord('chat-1', 'other-turn')).publicTerminalAt).toBeUndefined();
+  });
+
+  it.each([null, { type: 'text', text: 'Synthetic final output' }])(
+    'leaves a captured run result to its terminal pipeline: %j', async (response) => {
+      const ledger = new CommandLedger();
+      const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+      // Neither call yields before inspecting the captured terminal result.
+      const capture = ledger.setTurnResult('chat-1', 'turn-1', response);
+      const stop = ledger.markInterruptedWithoutRunTerminal('chat-1', 'turn-1', 'user-stop');
+      const captured = await capture;
+      expect(await stop).toEqual(captured);
+      expect(captured.publicTerminalAt).toBeUndefined();
+      expect(captured.interruptionReason).toBeUndefined();
+
+      await ledger.settleTerminal(accepted.record.key, 'finished');
+      const terminal = await ledger.markPublicTerminal('chat-1', 'turn-1');
+      expect(terminal.turnResult).toEqual(captured.turnResult);
+      expect(terminal.interruptionReason).toBeUndefined();
+      expect(terminal.publicTerminalAt).toEqual(expect.any(String));
+    },
+  );
+
+  it('distinguishes failure settlement from an observed run terminal', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+    const failed = await ledger.settleTerminal(accepted.record.key, 'failed');
+    expect(failed.record.turnResult).toEqual({ availability: 'unavailable', reason: 'no-final-response' });
+    expect(failed.record.runTerminalObserved).toBeUndefined();
+
+    expect(await ledger.markInterruptedWithoutRunTerminal('chat-1', 'turn-1', 'user-stop')).toMatchObject({
+      interruptionReason: 'user-stop', publicTerminalAt: expect.any(String),
+    });
+  });
+
+  it('captures a run terminal after failure settlement without publishing it early', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+    await ledger.settleTerminal(accepted.record.key, 'failed');
+    await ledger.setTurnResult('chat-1', 'turn-1', null);
+
+    const stopped = await ledger.markInterruptedWithoutRunTerminal('chat-1', 'turn-1', 'user-stop');
+    expect(stopped.runTerminalObserved).toBe(true);
+    expect(stopped.publicTerminalAt).toBeUndefined();
+    expect(stopped.interruptionReason).toBeUndefined();
+    expect(await ledger.markPublicTerminal('chat-1', 'turn-1')).toMatchObject({
+      status: 'failed', publicTerminalAt: expect.any(String),
+    });
+  });
+
   it('publishes an acknowledged stop as user-stop when deletion is rolled back', async () => {
     const ledger = new CommandLedger();
     await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
