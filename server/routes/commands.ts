@@ -7,7 +7,7 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { ProjectUnavailableError } from '../lib/domain-error.js';
-import { jsonErrorFromUnknown } from '../lib/http-error.js';
+import { cancelledRequestResponse, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { SlashCommandsResponse } from '../../common/slash-commands.js';
 
 interface CommandsRouteDeps {
@@ -27,6 +27,7 @@ export default function createCommandsRoutes({ registry, agents }: CommandsRoute
           return Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 });
         }
         const commands = await agents.getChatSlashCommands(chat, agent, request.signal);
+        request.signal.throwIfAborted();
         return Response.json({ commands } satisfies SlashCommandsResponse);
       }
       const projectPath = url.searchParams.get('projectPath');
@@ -34,9 +35,11 @@ export default function createCommandsRoutes({ registry, agents }: CommandsRoute
         return Response.json({ error: 'chatId or projectPath is required' }, { status: 400 });
       }
       const commands = await agents.getDefaultSlashCommands(agent, projectPath, request.signal);
-
+      request.signal.throwIfAborted();
       return Response.json({ commands } satisfies SlashCommandsResponse);
     } catch (error) {
+      const cancelled = cancelledRequestResponse(request, error);
+      if (cancelled) return cancelled;
       if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
       return jsonErrorFromUnknown(error);
     }

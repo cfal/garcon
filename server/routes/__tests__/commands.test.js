@@ -125,6 +125,24 @@ describe('slash-command owner routing', () => {
     expect(signal.aborted).toBeTrue();
   });
 
+  test.each(['chat', 'default'])('%s command cancellation returns 499 without a provider error body', async (target) => {
+    const f = await fixture();
+    const controller = new AbortController();
+    const called = Promise.withResolvers();
+    const reply = Promise.withResolvers();
+    const integration = target === 'chat' ? f.secondary.integration : f.primary.integration;
+    integration.commands.discover.mockImplementation(() => { called.resolve(); return reply.promise; });
+    const query = target === 'chat' ? { chatId: LOCATED_CHATS.secondary, agent: 'test' }
+      : { projectPath: f.root, agent: 'test' };
+    const pending = f.request(query, controller.signal);
+    await called.promise;
+    controller.abort(new Error('Synthetic command cancellation'));
+    reply.resolve([]);
+    const response = await pending;
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+  });
+
   test('rejects missing chats and project inputs without discovery', async () => {
     const f = await fixture();
     expect((await f.request({ agent: 'test', chatId: '1000000000000099', projectPath: f.root })).status).toBe(404);

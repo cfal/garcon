@@ -6,6 +6,10 @@ import { LocalProviderConfigurationService } from '../execution-node/local-provi
 import type { ProviderConfigurationService } from '../execution-nodes/provider-configuration.js';
 import { LocalProviderCatalogService } from '../execution-node/local-provider-catalog.js';
 import type { ProviderCatalogService } from '../execution-nodes/provider-catalog.js';
+import { LocalProviderAuthService } from '../execution-node/local-provider-auth.js';
+import type { ProviderAuthService } from '../execution-nodes/provider-auth.js';
+import { LocalProviderCommandsService } from '../execution-node/local-provider-commands.js';
+import type { ProviderCommandsService } from '../execution-nodes/provider-commands.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -18,6 +22,8 @@ export class AgentInstanceDirectory {
   readonly #defaults = new Map<string, ExecutionInstanceRef>();
   readonly #configurationServices = new WeakMap<AgentIntegration, ProviderConfigurationService>();
   readonly #catalogServices = new Map<string, ProviderCatalogService>();
+  readonly #authServices = new Map<string, ProviderAuthService>();
+  readonly #commandsServices = new Map<string, ProviderCommandsService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -75,6 +81,28 @@ export class AgentInstanceDirectory {
     if (!service) {
       service = new LocalProviderCatalogService(integration);
       this.#catalogServices.set(key, service);
+    }
+    return service;
+  }
+
+  authForInstance(ref: ExecutionInstanceRef): ProviderAuthService {
+    const integration = this.require(ref);
+    const key = executionInstanceKey(ref);
+    let service = this.#authServices.get(key);
+    if (!service) {
+      service = new LocalProviderAuthService(integration);
+      this.#authServices.set(key, service);
+    }
+    return service;
+  }
+
+  commandsForInstance(ref: ExecutionInstanceRef): ProviderCommandsService {
+    const integration = this.require(ref);
+    const key = executionInstanceKey(ref);
+    let service = this.#commandsServices.get(key);
+    if (!service) {
+      service = new LocalProviderCommandsService(integration);
+      this.#commandsServices.set(key, service);
     }
     return service;
   }

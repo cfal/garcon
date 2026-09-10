@@ -102,7 +102,7 @@ describe('agent auth login routes', () => {
       sessionId: 'session-a',
       deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
     });
-    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a');
+    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a', request.signal);
   });
 
   it('validates the missing agent query for login status', async () => {

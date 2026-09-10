@@ -8,6 +8,13 @@ const logger = createLogger('http:error');
 export const DEFAULT_VALIDATION_ERROR_CODE = 'VALIDATION_FAILED';
 export const DEFAULT_INTERNAL_ERROR_CODE = 'INTERNAL_ERROR';
 const DEFAULT_INTERNAL_ERROR_MESSAGE = 'Internal server error';
+const CLIENT_CLOSED_REQUEST_STATUS = 499;
+
+export function cancelledRequestResponse(request: Request, error: unknown): Response | null {
+  return request.signal.aborted && (
+    error === request.signal.reason || (error instanceof Error && error.name === 'AbortError')
+  ) ? new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS }) : null;
+}
 
 export function defaultErrorCodeForStatus(status: number): string {
   return status >= 500 ? DEFAULT_INTERNAL_ERROR_CODE : DEFAULT_VALIDATION_ERROR_CODE;

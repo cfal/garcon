@@ -13,6 +13,7 @@ import type { ChatTransientControlAction } from '../../common/chat-transient-fee
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
+import type { AgentAuthStatus, AgentReadiness } from '../../common/agent-execution.js';
 import type { SlashCommand } from '../../common/slash-commands.js';
 import type {
   AgentAuthLoginCompleteResult,
@@ -36,6 +37,7 @@ import type {
   StartedAgentSession,
 } from './session-types.js';
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
+import { AgentAuthService } from './auth-service.js';
 import type { AgentInstanceDirectory } from './instance-directory.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
@@ -120,9 +122,9 @@ export interface AgentRegistryServiceContract {
   }): Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession(owner: LocatedChatOwner, session: StartedAgentSession): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
-  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  getAgentAuthStatus(agentId: string): Promise<unknown | null>;
+  getAgentAuthStatusMap(signal?: AbortSignal): Promise<Record<string, AgentAuthStatus>>;
+  getAgentReadinessMap(authByAgent?: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, AgentReadiness>>;
+  getAgentAuthStatus(agentId: string, signal?: AbortSignal): Promise<AgentAuthStatus | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
@@ -132,7 +134,7 @@ export interface AgentRegistryServiceContract {
   normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode;
   launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult>;
   completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
-  getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
+  getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string, signal?: AbortSignal): Promise<AgentAuthLoginStatus>;
   modelSupportsImages(input: {
     agentId: string;
     model: string;
@@ -181,12 +183,16 @@ interface CompactSessionOptions {
   executionAdmission?: AgentExecutionAdmission;
 }
 
+type RegistryInstances = AgentRuntimeRouterOptions['instances']
+  & Pick<AgentInstanceDirectory, 'catalogForInstance' | 'authForInstance'>;
+
 export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
-  readonly #instances: AgentRuntimeRouterOptions['instances'] & Pick<AgentInstanceDirectory, 'catalogForInstance'>;
+  readonly #instances: RegistryInstances;
   readonly #localNodeId: string;
   readonly #catalog: AgentCatalogService;
+  readonly #auth: AgentAuthService;
   readonly #events: AgentEventBus;
   readonly #runtime: AgentRuntimeRouter;
   readonly #settings: AgentSessionSettingsService;
@@ -207,7 +213,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
-    instances: AgentRuntimeRouterOptions['instances'] & Pick<AgentInstanceDirectory, 'catalogForInstance'>;
+    instances: RegistryInstances;
     localNodeId: string;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
@@ -227,11 +233,18 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#directory = new AgentDirectory(args.integrations);
     this.#instances = args.instances;
     this.#localNodeId = args.localNodeId;
+    const defaultAgentIds = this.#directory.list().map((integration) => integration.descriptor.id);
     this.#catalog = new AgentCatalogService({
       instances: this.#instances,
       localNodeId: this.#localNodeId,
-      defaultAgentIds: this.#directory.list().map((integration) => integration.descriptor.id),
+      defaultAgentIds,
       endpointResolver: args.endpointResolver,
+    });
+    this.#auth = new AgentAuthService({
+      instances: this.#instances,
+      localNodeId: this.#localNodeId,
+      defaultAgentIds,
+      hasEndpointModels: (agentId) => this.#catalog.hasEndpointModels(agentId),
     });
     this.#events = new AgentEventBus();
     this.#runtime = new AgentRuntimeRouter({
@@ -300,8 +313,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       this.#directory.require(agentId).descriptor.supportedThinkingModes,
     );
   }
-  supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
-  supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
+  supportsAuthLogin(agentId: string): boolean { return this.#auth.supportsLogin(agentId); }
+  supportsAuthLoginCompletion(agentId: string): boolean { return this.#auth.supportsLoginCompletion(agentId); }
   supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
     const instance = this.#instances.defaultFor(this.#localNodeId, agentId);
@@ -465,50 +478,23 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }
   }
 
-  async launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
-    const auth = this.#directory.require(agentId).auth;
-    if (!auth?.launchLogin) throw new Error(`Auth login is not supported for agent: ${agentId}`);
-    return auth.launchLogin();
+  launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
+    return this.#auth.launchLogin(agentId);
   }
-  async completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult> {
-    const complete = this.#directory.require(agentId).auth?.completeLogin;
-    if (!complete) throw new Error(`Auth login completion is not supported for agent: ${agentId}`);
-    return complete(sessionId, code);
+  completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult> {
+    return this.#auth.completeLogin(agentId, sessionId, code);
   }
-  async getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus> {
-    return this.#directory.require(agentId).auth?.loginStatus?.(expectedSessionId)
-      ?? { state: 'idle', running: false };
+  getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string, signal = new AbortController().signal): Promise<AgentAuthLoginStatus> {
+    return this.#auth.loginStatus(agentId, expectedSessionId ?? null, signal);
   }
-  async getAgentAuthStatus(agentId: string): Promise<unknown | null> {
-    const auth = this.#directory.get(agentId)?.auth;
-    return auth ? auth.status(new AbortController().signal) : null;
+  getAgentAuthStatus(agentId: string, signal = new AbortController().signal): Promise<AgentAuthStatus | null> {
+    return this.#auth.status(agentId, signal);
   }
-  async getAgentAuthStatusMap(): Promise<Record<string, unknown>> {
-    return Object.fromEntries(await Promise.all(this.#directory.list().map(async (integration) => [
-      integration.descriptor.id,
-      integration.auth
-        ? await integration.auth.status(new AbortController().signal)
-        : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' },
-    ])));
+  getAgentAuthStatusMap(signal = new AbortController().signal): Promise<Record<string, AgentAuthStatus>> {
+    return this.#auth.statusMap(signal);
   }
-  async getAgentReadinessMap(authByAgent?: Record<string, unknown>) {
-    const auth = authByAgent ?? await this.getAgentAuthStatusMap();
-    return Object.fromEntries(this.#directory.list().map((integration) => {
-      const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
-      const nativeReady = status?.authenticated === true;
-      const endpointReady = integration.endpoints !== null
-        && this.#catalog.hasEndpointModels(integration.descriptor.id);
-      return [integration.descriptor.id, {
-        ready: nativeReady || endpointReady,
-        nativeReady,
-        endpointReady,
-        reason: endpointReady
-          ? 'At least one compatible API provider endpoint is configured.'
-          : nativeReady
-            ? 'Native agent authentication is available.'
-            : 'No native authentication or compatible API provider endpoint is configured.',
-      }];
-    }));
+  getAgentReadinessMap(authByAgent?: Record<string, unknown>, signal = new AbortController().signal): Promise<Record<string, AgentReadiness>> {
+    return this.#auth.readinessMap(authByAgent, signal);
   }
 
   onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }

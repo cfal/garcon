@@ -9,11 +9,10 @@ import {
   type AgentExecutionV5,
   type AgentEstablishedSession,
   type AgentEmissionSink,
-  type AgentIntegration,
   type AgentSessionConfiguration,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
-import type { LocatedChatOwner } from '@garcon/common/execution-location';
+import type { ExecutionInstanceRef, LocatedChatOwner } from '@garcon/common/execution-location';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
@@ -26,8 +25,7 @@ import { getMaxSessions } from '../config.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
 import type { TurnReceiptOwner } from '../lib/turn-identity.js';
-import { DomainError, ProjectUnavailableError, transcriptUnavailableMessage } from '../lib/domain-error.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
+import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import { localEmissionSink } from './local-emission.js';
 import type { AgentDirectory } from './directory.js';
@@ -73,7 +71,7 @@ export interface AgentRuntimeRouterOptions {
   directory: AgentDirectory;
   localNodeId: string;
   instances: Pick<AgentInstanceDirectory,
-    'get' | 'require' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'configurationForInstance'>;
+    'get' | 'require' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'configurationForInstance' | 'commandsForInstance'>;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
@@ -663,33 +661,30 @@ export class AgentRuntimeRouter {
   }
 
   async discoverChatSlashCommands(chat: AgentChatEntry, agentId: string, signal: AbortSignal) {
-    let integration = this.#instances.requireFor(chat);
+    signal.throwIfAborted();
+    this.#instances.requireFor(chat);
+    let target: ExecutionInstanceRef = chat.executionLocation;
     if (agentId !== chat.agentId) {
       // A staged provider change selects its default on the same node, never another machine.
-      const target = this.#instances.defaultFor(chat.executionLocation.nodeId, agentId);
-      if (!target) throw new DomainError('NODE_UNAVAILABLE', 'The selected provider is unavailable on this chat node.', 409);
-      integration = this.#instances.requireFor({
-        agentId, executionLocation: { ...chat.executionLocation, instanceId: target.instanceId },
+      const staged = this.#instances.defaultFor(chat.executionLocation.nodeId, agentId);
+      if (!staged) throw new DomainError('NODE_UNAVAILABLE', 'The selected provider is unavailable on this chat node.', 409);
+      this.#instances.requireFor({
+        agentId, executionLocation: { ...chat.executionLocation, instanceId: staged.instanceId },
       });
+      target = staged;
     }
-    return this.#discoverCommands(integration, chat.projectPath, signal);
+    const commands = await this.#instances.commandsForInstance(target).discover({ projectPath: chat.projectPath }, signal);
+    signal.throwIfAborted();
+    return [...commands];
   }
 
   async discoverDefaultSlashCommands(nodeId: string, agentId: string, projectPath: string, signal: AbortSignal) {
+    signal.throwIfAborted();
     const target = this.#instances.defaultFor(nodeId, agentId);
     if (!target) throw new DomainError('NODE_UNAVAILABLE', 'The default local provider instance is unavailable.', 409);
-    return this.#discoverCommands(this.#instances.require(target), projectPath, signal);
-  }
-
-  async #discoverCommands(integration: AgentIntegration | null, projectPath: string, signal: AbortSignal) {
+    const commands = await this.#instances.commandsForInstance(target).discover({ projectPath }, signal);
     signal.throwIfAborted();
-    const project = await inspectProjectDirectory(projectPath);
-    signal.throwIfAborted();
-    if (project.kind === 'unavailable') throw new ProjectUnavailableError(projectPath, project.reason);
-    const commands = integration?.commands;
-    return commands
-      ? [...(await commands.discover(project.effectiveProjectKey, signal))]
-      : [];
+    return [...commands];
   }
 
   #resolveExecutionSelection(

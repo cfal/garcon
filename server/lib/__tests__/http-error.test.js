@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { jsonError, jsonErrorFromUnknown } from '../http-error.ts';
+import { cancelledRequestResponse, jsonError, jsonErrorFromUnknown } from '../http-error.ts';
 import {
   GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
   GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
@@ -29,6 +29,24 @@ describe('jsonError', () => {
       retryable: true,
       details: 'Retry after the current window.',
     });
+  });
+});
+
+describe('cancelledRequestResponse', () => {
+  it('returns a body-free 499 for the caller reason or a provider AbortError', async () => {
+    const cancellation = new Error('Synthetic cancellation');
+    const request = new Request('http://localhost/', { signal: AbortSignal.abort(cancellation) });
+    for (const error of [cancellation, new DOMException('Aborted', 'AbortError')]) {
+      const response = cancelledRequestResponse(request, error);
+      expect(response.status).toBe(499);
+      expect(await response.text()).toBe('');
+    }
+  });
+
+  it('does not disguise unrelated failures or provider aborts on a live request', () => {
+    const failure = new Error('Synthetic provider failure');
+    expect(cancelledRequestResponse(new Request('http://localhost/', { signal: AbortSignal.abort() }), failure)).toBeNull();
+    expect(cancelledRequestResponse(new Request('http://localhost/'), new DOMException('Aborted', 'AbortError'))).toBeNull();
   });
 });
 

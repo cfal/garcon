@@ -33,3 +33,10 @@ export interface AgentAuthStatus {
   readonly source: 'oauth' | 'api-key' | 'environment' | 'cli' | 'none' | 'unknown';
   readonly detail?: string;
 }
+
+export interface AgentReadiness {
+  readonly ready: boolean;
+  readonly nativeReady: boolean;
+  readonly endpointReady: boolean;
+  readonly reason: string;
+}

@@ -7,10 +7,13 @@ import type { ApiProviderService } from '../api-providers/service.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { isDomainError } from '../lib/domain-error.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { cancelledRequestResponse } from '../lib/http-error.js';
 
 interface AgentRouteDeps {
-  agents: AgentRegistryServiceContract;
-  apiProviders: ApiProviderService;
+  agents: Pick<AgentRegistryServiceContract, 'hasAgent' | 'supportsAuthLogin' | 'supportsAuthLoginCompletion'
+    | 'getAgentCatalogEntries' | 'getAgentAuthStatus' | 'getAgentAuthStatusMap' | 'getAgentReadinessMap'
+    | 'launchAgentAuthLogin' | 'completeAgentAuthLogin' | 'getAgentAuthLoginStatus'>;
+  apiProviders: Pick<ApiProviderService, 'getCatalog'>;
 }
 
 export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDeps): RouteMap {
@@ -48,27 +51,34 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     }
   }
 
-  async function getAgentAuth(_request: Request, url: URL): Promise<Response> {
+  async function getAgentAuth(request: Request, url: URL): Promise<Response> {
     const agentId = url.searchParams.get('agent');
     try {
       if (agentId) {
-        const status = await agents.getAgentAuthStatus(agentId);
+        const status = await agents.getAgentAuthStatus(agentId, request.signal);
+        request.signal.throwIfAborted();
         if (!status) {
           return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
         }
         return Response.json({ [agentId]: status });
       }
-      return Response.json(await agents.getAgentAuthStatusMap());
+      const statuses = await agents.getAgentAuthStatusMap(request.signal);
+      request.signal.throwIfAborted();
+      return Response.json(statuses);
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return cancelledRequestResponse(request, error)
+        ?? Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function getAgentReadiness(): Promise<Response> {
+  async function getAgentReadiness(request: Request): Promise<Response> {
     try {
-      return Response.json(await agents.getAgentReadinessMap());
+      const readiness = await agents.getAgentReadinessMap(undefined, request.signal);
+      request.signal.throwIfAborted();
+      return Response.json(readiness);
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return cancelledRequestResponse(request, error)
+        ?? Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
@@ -87,7 +97,7 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     }
   }
 
-  async function getAgentAuthLoginStatus(_request: Request, url: URL): Promise<Response> {
+  async function getAgentAuthLoginStatus(request: Request, url: URL): Promise<Response> {
     const agentId = url.searchParams.get('agent');
     const expectedSessionId = url.searchParams.get('session') ?? undefined;
     if (!agentId) {
@@ -96,9 +106,12 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     const invalidAgent = validateAuthLoginAgent(agentId);
     if (invalidAgent) return invalidAgent;
     try {
-      return Response.json(await agents.getAgentAuthLoginStatus(agentId, expectedSessionId));
+      const status = await agents.getAgentAuthLoginStatus(agentId, expectedSessionId, request.signal);
+      request.signal.throwIfAborted();
+      return Response.json(status);
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return cancelledRequestResponse(request, error)
+        ?? Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 

@@ -2,6 +2,7 @@
 
 import { apiGet, apiPost } from './client.js';
 import type { AgentCatalog, AgentId } from '$shared/agents';
+import type { AgentReadiness } from '$shared/agent-execution';
 import type {
 	AgentAuthLoginCompleteResult,
 	AgentAuthLoginLaunchResult,
@@ -19,12 +20,7 @@ export interface AgentAuthStatus {
 	detail?: string;
 }
 
-export interface AgentReadiness {
-	ready: boolean;
-	nativeReady: boolean;
-	endpointReady: boolean;
-	reason: string;
-}
+export type { AgentReadiness } from '$shared/agent-execution';
 
 export type DeviceAuthInfo = AgentDeviceAuthInfo;
 export type AgentAuthLoginResult = AgentAuthLoginLaunchResult;
