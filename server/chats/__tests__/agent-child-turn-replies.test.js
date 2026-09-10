@@ -181,6 +181,29 @@ for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, (
 });
 
 describe('delegated startup dispatch gate', () => {
+  it.each([false, true])('starts an accepted child after a parent view read fails (async: %s)', async (isAsync) => {
+    const f = fixture('start');
+    const original = f.admit.getMockImplementation();
+    const start = mock(() => {
+      expect(f.wait).toHaveBeenCalledTimes(isAsync ? 0 : 1);
+    });
+    f.admit.mockImplementation(async (input) => {
+      const accepted = await original(input);
+      f.context.notices.existingCurrentView = () => { throw new Error('Synthetic parent read fence'); };
+      return { ...accepted, start };
+    });
+    try {
+      f.controller.request(SOURCE, { ...START, async: isAsync });
+      await until(() => start.mock.calls.length === 1);
+      await f.context.chatMutationLock.runExclusiveMany([`chat:${PARENT}`, `chat:${CHILD}`], async () => {});
+      expect(f.notices).toEqual([]);
+      expect(f.deliveries).toEqual([]);
+      expect(f.admit).toHaveBeenCalledTimes(1);
+    } finally {
+      f.controller.shutdown();
+    }
+  });
+
   it('records acceptance, releases locks, and captures the receipt before a fast child can finish and be evicted', async () => {
     const f = fixture('start');
     const done = deferred();

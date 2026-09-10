@@ -27,7 +27,7 @@ export class AgentStartProgress {
 
   report(phase: AgentStartProgressPhase, explanation?: string): void {
     if (this.#closed || this.#lastPhase === phase) return;
-    if (this.signal.aborted && phase !== 'interrupted') return;
+    if (this.signal.aborted && phase !== 'interrupted' && phase !== 'failed') return;
     if (this.ledger.existingCurrentView(this.chatId)?.viewId !== this.#viewId) return;
     this.ledger.appendNotice(this.chatId, this.#viewId, {
       title: 'Agent startup',
@@ -39,9 +39,13 @@ export class AgentStartProgress {
   }
 
   fail(error: unknown): void {
-    const phase = this.signal.aborted ? 'interrupted' : 'failed';
     const explanation = error instanceof DomainError ? error.message : undefined;
-    this.#finishFailure(phase, explanation);
+    if (this.signal.aborted) {
+      // Gives already-committed terminal notifications precedence over the abort fallback.
+      queueMicrotask(() => this.#finishFailure('interrupted', explanation));
+      return;
+    }
+    this.#finishFailure('failed', explanation);
   }
 
   #finishFailure(phase: 'failed' | 'interrupted', explanation?: string): void {
@@ -72,7 +76,7 @@ export class AgentStartProgress {
     if (event.type !== 'run-ended' || event.viewId !== this.#viewId || event.runId !== this.turnId) return;
     switch (event.row.outcome) {
       case 'failed':
-        this.fail(undefined);
+        this.#finishFailure('failed');
         break;
       case 'interrupted':
         this.#finishFailure('interrupted');

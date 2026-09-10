@@ -97,13 +97,20 @@ export class AgentStartController {
               });
             }
           }
-          const current = this.#replies.current(source, signal);
-          if (!current && !start) return null;
           const detail: AgentStartOutcomeNoticeDetail = {
             type: 'agent-start-outcome', ref: command.ref, async: command.async, requestViewId: source.viewId,
             requestOrdinal: source.requestOrdinal, ...outcome,
           };
-          return { detail, turnId, start, recorded: current && this.#replies.record(source, detail) !== null };
+          let recorded = false;
+          try {
+            const current = this.#replies.current(source, signal);
+            if (!current && !start) return null;
+            recorded = current && this.#replies.record(source, detail) !== null;
+          } catch (error) {
+            if (!start) throw error;
+            this.#replies.report(source, 'acknowledgment', error, detail);
+          }
+          return { detail, turnId, start, recorded };
         });
         if (result !== rediscover) return result;
       }

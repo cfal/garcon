@@ -45,13 +45,37 @@ describe('delegated startup milestones', () => {
     expect(ledger.activeChatIds()).toEqual([]);
   });
 
-  it('records interruption once and rejects late phases', () => {
+  it('records interruption once and rejects late phases', async () => {
     progress.report('preparing-context');
     abort.abort();
     progress.report('starting-agent');
     progress.fail(new Error('late failure'));
+    await Promise.resolve();
     expect(ledger.currentRows('child').map((row) => row.detail.phase))
       .toEqual(['preparing-context', 'interrupted']);
+  });
+
+  it.each(['failed', 'finished'])('preserves a committed %s outcome when abort precedes notification', async (outcome) => {
+    const producer = ledger.openProducer('child', 'test');
+    ledger.beginRun('child', 'startup-turn');
+    progress.report('starting-agent');
+    producer.sink.publish({ type: 'run-ended', runId: 'startup-turn', outcome });
+    abort.abort();
+    progress.fail(new Error('Late startup rejection'));
+    await Promise.resolve();
+    const phases = ledger.currentRows('child').filter((row) => row.kind === 'notice').map((row) => row.detail.phase);
+    expect(phases).toEqual(outcome === 'failed' ? ['starting-agent', 'failed'] : ['starting-agent']);
+  });
+
+  it('keeps interruption when abort precedes a later terminal commit', async () => {
+    const producer = ledger.openProducer('child', 'test');
+    ledger.beginRun('child', 'startup-turn');
+    progress.report('starting-agent');
+    abort.abort();
+    producer.sink.publish({ type: 'run-ended', runId: 'startup-turn', outcome: 'failed' });
+    await Promise.resolve();
+    expect(ledger.currentRows('child').filter((row) => row.kind === 'notice').map((row) => row.detail.phase))
+      .toEqual(['starting-agent', 'interrupted']);
   });
 
   it('retains an actionable domain failure without leaking unknown exception details', () => {
