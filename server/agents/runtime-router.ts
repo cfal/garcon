@@ -6,6 +6,7 @@ import {
   type AgentSteerResult,
   type AgentSteerTarget,
   type AgentExecutionHandle,
+  type AgentExecutionV5,
   type AgentEstablishedSession,
   type AgentEmissionSink,
 } from '@garcon/server-agent-interface';
@@ -125,7 +126,7 @@ export class AgentRuntimeRouter {
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #producerLeases = new Map<string, LocalProducerBinding>();
   readonly #executionHandles = new Map<string, {
-    readonly agentId: string;
+    readonly execution: AgentExecutionV5;
     readonly runId: string;
     readonly handle: AgentExecutionHandle;
   }>();
@@ -200,14 +201,15 @@ export class AgentRuntimeRouter {
       if (carryover.notice) {
         this.#ledger.appendCarryoverNotice(chatId, prepared.viewId, carryover.notice);
       }
-      const handle = await integration.execution.start({
+      const execution = integration.execution;
+      const handle = await execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         output: producer.output,
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
       });
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      await this.#retainOrAbortHandle(chatId, execution, runId, handle);
       assertExecutionAdmissionOpen(opts);
       const updated = this.#registry.updateChat(chatId, {
         model: selection.model,
@@ -250,7 +252,8 @@ export class AgentRuntimeRouter {
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-      const handle = await integration.execution.resume({
+      const execution = integration.execution;
+      const handle = await execution.resume({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         output: producer.output,
         agentSessionId: entry.agentSessionId,
@@ -258,7 +261,7 @@ export class AgentRuntimeRouter {
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
       });
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      await this.#retainOrAbortHandle(chatId, execution, runId, handle);
     } catch (error) {
       this.#pendingAbortRuns.delete(runKey(chatId, runId));
       this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
@@ -402,8 +405,9 @@ export class AgentRuntimeRouter {
         prompt,
         attachments: [],
       };
+      const execution = integration.execution;
       const handle = await compaction.compact(request);
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      await this.#retainOrAbortHandle(chatId, execution, runId, handle);
     } catch (error) {
       this.#pendingAbortRuns.delete(runKey(chatId, runId));
       this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
@@ -448,7 +452,7 @@ export class AgentRuntimeRouter {
       return Promise.resolve(true);
     }
     this.#executionHandles.delete(chatId);
-    this.#abortHandleBestEffort(chatId, active.agentId, active.handle, 'accepted interruption');
+    this.#abortHandleBestEffort(chatId, active.execution, active.handle, 'accepted interruption');
     return Promise.resolve(true);
   }
 
@@ -770,22 +774,22 @@ export class AgentRuntimeRouter {
 
   async #retainOrAbortHandle(
     chatId: string,
-    agentId: string,
+    execution: AgentExecutionV5,
     runId: string,
     handle: AgentExecutionHandle,
   ): Promise<void> {
     if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
-      this.#abortHandleBestEffort(chatId, agentId, handle, 'interrupted launch');
+      this.#abortHandleBestEffort(chatId, execution, handle, 'interrupted launch');
       return;
     }
     if (this.#ledger.isRunActive(chatId, runId)) {
-      this.#executionHandles.set(chatId, { agentId, runId, handle });
+      this.#executionHandles.set(chatId, { execution, runId, handle });
     }
   }
 
   #abortHandleBestEffort(
     chatId: string,
-    agentId: string,
+    execution: AgentExecutionV5,
     handle: AgentExecutionHandle,
     context: string,
   ): void {
@@ -796,7 +800,7 @@ export class AgentRuntimeRouter {
       });
     };
     try {
-      void this.#directory.require(agentId).execution.abort(handle).catch(failed);
+      void execution.abort(handle).catch(failed);
     } catch (error) {
       failed(error);
     }

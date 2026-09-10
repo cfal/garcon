@@ -107,13 +107,14 @@ function makeRouter(overrides = {}) {
     })),
     resolveEndpointReference: mock(() => null),
   };
+  const directory = {
+    require: mock(() => integration),
+    get: mock(() => integration),
+    list: mock(() => [integration]),
+  };
   const router = new AgentRuntimeRouter({
     registry,
-    directory: {
-      require: mock(() => integration),
-      get: mock(() => integration),
-      list: mock(() => [integration]),
-    },
+    directory,
     endpointResolver,
     events,
     getCarryOverRevision: () => 'carry-1',
@@ -138,6 +139,8 @@ function makeRouter(overrides = {}) {
     conversation,
     endpointResolver,
     transcript,
+    integration,
+    directory,
   };
 }
 
@@ -150,6 +153,53 @@ describe('AgentRuntimeRouter producer boundary', () => {
   afterEach(async () => {
     await fs.rm(projectDir, { recursive: true, force: true });
   });
+
+  for (const operation of ['start', 'resume']) {
+    it(`aborts a retained ${operation} handle through its captured execution owner`, async () => {
+      const handle = { id: 'synthetic-handle' };
+      const { router, integration, directory } = makeRouter({
+        entry: { agentSessionId: operation === 'resume' ? 'synthetic-session' : null },
+        [operation]: mock(async () => handle),
+      });
+      await router.runAgentTurn('chat-1', 'synthetic input', { turnId: 'synthetic-turn' });
+      const replacementAbort = mock(async () => true);
+      directory.require.mockImplementation(() => ({
+        ...integration, execution: { ...integration.execution, abort: replacementAbort },
+      }));
+      const lookups = directory.require.mock.calls.length;
+
+      expect(await router.abortSession('chat-1')).toBe(true);
+
+      expect(integration.execution.abort).toHaveBeenCalledWith(handle);
+      expect(replacementAbort).not.toHaveBeenCalled();
+      expect(directory.require).toHaveBeenCalledTimes(lookups);
+    });
+
+    it(`keeps a delayed ${operation} handle owned by its interrupted launch`, async () => {
+      const launched = Promise.withResolvers();
+      const completed = Promise.withResolvers();
+      const handle = { id: 'synthetic-delayed-handle' };
+      const { router, integration, directory } = makeRouter({
+        entry: { agentSessionId: operation === 'resume' ? 'synthetic-session' : null },
+        [operation]: mock(() => {
+          launched.resolve();
+          return completed.promise;
+        }),
+      });
+      const dispatch = router.runAgentTurn('chat-1', 'synthetic input', { turnId: 'synthetic-turn' });
+      await launched.promise;
+      expect(await router.abortSession('chat-1')).toBe(true);
+      const replacementAbort = mock(async () => true);
+      directory.require.mockImplementation(() => ({
+        ...integration, execution: { ...integration.execution, abort: replacementAbort },
+      }));
+      completed.resolve(handle);
+      await dispatch;
+
+      expect(integration.execution.abort).toHaveBeenCalledWith(handle);
+      expect(replacementAbort).not.toHaveBeenCalled();
+    });
+  }
 
   it('resolves the prompt and derives carried context for a fresh session', async () => {
     const { router, start } = makeRouter();

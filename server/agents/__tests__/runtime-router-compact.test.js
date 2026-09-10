@@ -32,15 +32,16 @@ function makeRouter(compaction, options = {}) {
     compaction,
     forking: null,
   };
+  const directory = {
+    require: mock(() => integration),
+    list: mock(() => [integration]),
+  };
   const router = new AgentRuntimeRouter({
     registry: {
       getChat: mock(() => entry),
       updateChat: mock(async () => entry),
     },
-    directory: {
-      require: mock(() => integration),
-      list: mock(() => [integration]),
-    },
+    directory,
     endpointResolver: {
       resolveSelection: mock(() => ({
         model: 'model-a',
@@ -60,10 +61,36 @@ function makeRouter(compaction, options = {}) {
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
-  return { router, execution };
+  return { router, execution, integration, directory };
 }
 
 describe('AgentRuntimeRouter compaction', () => {
+  for (const delayed of [false, true]) {
+    it(`retains the execution owner when compaction ${delayed ? 'launch is interrupted' : 'has started'}`, async () => {
+      const launched = Promise.withResolvers();
+      const completed = Promise.withResolvers();
+      const handle = { id: 'synthetic-compaction-handle' };
+      const { router, execution, integration, directory } = makeRouter({ compact: mock(() => {
+        launched.resolve();
+        return delayed ? completed.promise : Promise.resolve(handle);
+      }) });
+      const dispatch = router.compactSession('chat-1');
+      if (delayed) await launched.promise;
+      else await dispatch;
+      const replacementAbort = mock(async () => true);
+      directory.require.mockImplementation(() => ({
+        ...integration, execution: { ...execution, abort: replacementAbort },
+      }));
+
+      expect(await router.abortSession('chat-1')).toBe(true);
+      completed.resolve(handle);
+      await dispatch;
+
+      expect(execution.abort).toHaveBeenCalledWith(handle);
+      expect(replacementAbort).not.toHaveBeenCalled();
+    });
+  }
+
   it('calls the compaction facet when the integration provides one', async () => {
     const compact = mock(async () => undefined);
     const conversationMessages = mock(() => {
