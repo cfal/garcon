@@ -40,6 +40,9 @@ export function cacheHeaders(requestPath: string): HeadersInit {
   if (requestPath.startsWith('/_app/immutable/')) {
     return { 'Cache-Control': 'public, max-age=31536000, immutable' };
   }
+  if (requestPath.startsWith('/icons/')) {
+    return { 'Cache-Control': 'public, max-age=31536000, immutable' };
+  }
   if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|map|json|webmanifest)$/.test(requestPath)) {
     return { 'Cache-Control': 'public, max-age=3600, must-revalidate' };
   }
@@ -202,13 +205,7 @@ export default function createStaticRoutes(settings: StaticSettingsDep): RouteMa
   const routes: RouteMap = {};
   routes['/'] = { GET: noauthServeSpaShell(settings) };
   routes['/index.html'] = { GET: noauthServeSpaShell(settings) };
-  routes['/favicon.ico'] = { GET: noauthServeStatic('favicon.ico') };
-  routes['/icon.svg'] = { GET: noauthServeStatic('icon.svg') };
-  routes['/favicon-16x16.png'] = { GET: noauthServeStatic('favicon-16x16.png') };
-  routes['/favicon-32x32.png'] = { GET: noauthServeStatic('favicon-32x32.png') };
-  routes['/apple-touch-icon.png'] = { GET: noauthServeStatic('apple-touch-icon.png') };
-  routes['/icon-192.png'] = { GET: noauthServeStatic('icon-192.png') };
-  routes['/icon-512.png'] = { GET: noauthServeStatic('icon-512.png') };
+  routes['/icons/*'] = { GET: noauthServeFile };
   routes['/site.webmanifest'] = { GET: noauthServeManifest(settings) };
   routes['/service-worker.js'] = { GET: noauthServeStatic('service-worker.js') };
   routes['/_app/*'] = { GET: noauthServeFile };

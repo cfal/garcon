@@ -27,9 +27,9 @@ Forest is the public brand color. Carbon is deliberately theme-independent: laun
 
 ## Repository application
 
-- `web/static/icon.svg`, favicon PNG/ICO files, touch icon, and PWA icons derive from Carbon.
-- `web/static/icon-maskable-512.png` derives from Carbon Maskable.
+- `web/static/icons/` contains checksum-addressed browser, touch, and PWA exports. All except the maskable export derive from Carbon.
+- `web/static/icons/icon-maskable-512.*.png` derives from Carbon Maskable.
 - `web/src/lib/components/shared/GarconMark.svelte` uses semantic theme tokens to render Ink on dark themes and Silver on light themes.
 - The root `README.md` and any future `website/` implementation use Phosphor Forest.
 
-Run `bun scripts/generate-brand-assets.ts` from the repository root after changing a master. The script requires `rsvg-convert` from librsvg and rewrites all committed web raster assets deterministically.
+Run `bun scripts/generate-brand-assets.ts` from the repository root after changing a master. The script requires `rsvg-convert` from librsvg, removes superseded exports, updates the app shell and manifest, and writes deterministic filenames containing the first 12 characters of each file's SHA-256 checksum. These public exports are safe to cache as immutable for one year because changed bytes always produce a new URL.
