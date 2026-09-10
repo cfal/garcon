@@ -141,6 +141,45 @@ describe('ConversationTranscriptOverlayStore', () => {
 		]);
 	});
 
+	it('suppresses only adjacent duplicate server notices', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.appendServerNotice('chat-1', 'warning', 'native history changed');
+		const revision = overlays.noticeRevisionFor('chat-1');
+		const firstNoticeId = overlays.forChat('chat-1').notices[0]?.id;
+
+		const duplicate = overlays.appendServerNotice(
+			'chat-1',
+			'warning',
+			'native history changed',
+		);
+
+		expect(duplicate.feedStructureChanged).toBe(false);
+		expect(overlays.noticeRevisionFor('chat-1')).toBe(revision);
+		expect(overlays.forChat('chat-1').notices.map((notice) => notice.content)).toEqual([
+			'native history changed',
+		]);
+
+		overlays.applyCommittedBatch({
+			chatId: 'chat-1',
+			messages: [echoed('input-1', 1)],
+			resendCandidates: [],
+			noticeRevision: revision,
+		});
+		overlays.appendServerNotice('chat-1', 'warning', 'native history changed');
+
+		expect(overlays.forChat('chat-1').notices).toHaveLength(1);
+		expect(overlays.forChat('chat-1').notices[0]?.id).not.toBe(firstNoticeId);
+
+		overlays.appendServerNotice('chat-1', 'info', 'intervening notice');
+		overlays.appendServerNotice('chat-1', 'warning', 'native history changed');
+
+		expect(overlays.forChat('chat-1').notices.map((notice) => notice.content)).toEqual([
+			'native history changed',
+			'intervening notice',
+			'native history changed',
+		]);
+	});
+
 	it('prunes only chats outside the active session set', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		overlays.appendLocalNotice('chat-1', 'progress', 'one');

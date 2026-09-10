@@ -79,6 +79,14 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		noticeType: LocalNoticeType,
 		content: string,
 	): ConversationTranscriptOverlayMutation {
+		const previous = this.#notices.at(-1);
+		if (
+			source === 'server' &&
+			previous?.noticeType === noticeType &&
+			previous.content === content
+		) {
+			return feedMutation(false);
+		}
 		const notice: OverlayNotice = {
 			kind: 'local-notice',
 			id: `${source}_${createRandomId()}`,
