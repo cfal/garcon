@@ -27,8 +27,11 @@ export const EXECUTION_NODE_STATUSES = [
 ] as const;
 export type ExecutionNodeStatus = typeof EXECUTION_NODE_STATUSES[number];
 
+export const MAX_EXECUTION_IDENTITY_LENGTH = 128;
+
 export function isExecutionIdentity(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value);
+  return typeof value === 'string' && value.length <= MAX_EXECUTION_IDENTITY_LENGTH
+    && /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value);
 }
 
 export function parseExecutionLocation(value: unknown): ExecutionLocation | null {
