@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,11 +10,49 @@ import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { LedgerFencedError } from '../errors.ts';
+import { LocalProviderHistoryImportService } from '../../execution-node/local-provider-history-import.js';
 
 const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptReloadService', () => {
+  it('rejects cancellation after native sanitation and before staging', async () => {
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic cancellation before staging');
+    await withReload(async ({ ledger, reload, lease, replacementLease, integration, oldViewId, execution }) => {
+      integration.nativeHistoryImport.load = async function* () {
+        yield [{ message: new UserMessage('', 'Synthetic timestamp-free native input') }];
+      };
+      const before = ledger.currentRows('chat-1');
+      ledger.stageView = mock(ledger.stageView.bind(ledger));
+      ledger.replaceCurrentView = mock(ledger.replaceCurrentView.bind(ledger));
+      execution.releaseTranscriptSnapshot = mock(execution.releaseTranscriptSnapshot);
+      await expect(reload.reload('chat-1', controller.signal)).rejects.toBe(cancellation);
+      expect(ledger.stageView).not.toHaveBeenCalled();
+      expect(ledger.replaceCurrentView).not.toHaveBeenCalled();
+      expect(ledger.currentView('chat-1').viewId).toBe(oldViewId);
+      expect(ledger.currentRows('chat-1')).toEqual(before);
+      expect(lease.closed).toBe(true);
+      expect(replacementLease.current.closed).toBe(false);
+      expect(execution.releaseTranscriptSnapshot).toHaveBeenCalledOnce();
+    }, { now: () => { controller.abort(cancellation); return TS; } });
+  });
+
+  it('rejects cancellation after registry flush without closing the producer', async () => {
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic cancellation after registry flush');
+    await withReload(async ({ ledger, reload, lease, replacementLease, integration, oldViewId }) => {
+      integration.nativeHistoryImport.load = mock(integration.nativeHistoryImport.load);
+      ledger.stageView = mock(ledger.stageView.bind(ledger));
+      await expect(reload.reload('chat-1', controller.signal)).rejects.toBe(cancellation);
+      expect(ledger.stageView).not.toHaveBeenCalled();
+      expect(integration.nativeHistoryImport.load).not.toHaveBeenCalled();
+      expect(ledger.currentView('chat-1').viewId).toBe(oldViewId);
+      expect(lease.closed).toBe(false);
+      expect(replacementLease.current).toBeNull();
+    }, { flushRegistry: () => { controller.abort(cancellation); } });
+  });
+
   it('[TLV5-L10.02-CORE-UNIT-01] atomically repeats replacement while preserving one frozen conversation prefix', async () => {
     await withReload(async ({ ledger, reload, lease, replacementLease, oldViewId }) => {
       const firstReplacement = await reload.reload('chat-1');
@@ -57,6 +95,32 @@ describe('TranscriptReloadService', () => {
       await expect(reload.reload('chat-1')).rejects.toMatchObject({ code: 'CHAT_RUNNING' });
       expect(lease.closed).toBe(false);
       expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
+    });
+  });
+
+  it.each([false, true])('preserves the current view when cancellation lands at native EOF (has rows: %s)', async (hasRows) => {
+    await withReload(async ({ ledger, reload, lease, replacementLease, integration, execution, oldViewId }) => {
+      const controller = new AbortController();
+      const cancellation = new Error('Synthetic reload cancelled at native EOF');
+      const before = ledger.currentRows('chat-1');
+      let releases = 0;
+      execution.releaseTranscriptSnapshot = async () => { releases += 1; };
+      integration.nativeHistoryImport.load = async function* () {
+        if (hasRows) yield [{ message: new UserMessage(TS, 'synthetic imported input') }];
+        controller.abort(cancellation);
+      };
+
+      await expect(reload.reload('chat-1', controller.signal)).rejects.toBe(cancellation);
+      expect(ledger.currentView('chat-1')?.viewId).toBe(oldViewId);
+      expect(ledger.currentRows('chat-1')).toEqual(before);
+      expect(releases).toBe(1);
+      expect(lease.closed).toBe(true);
+      expect(replacementLease.current?.closed).toBe(false);
+      replacementLease.current.sink.publish({
+        type: 'rows', rows: [{ message: new AssistantMessage(TS, 'synthetic output after cancellation') }],
+      });
+      expect(ledger.currentView('chat-1')?.viewId).toBe(oldViewId);
+      expect(ledger.conversationMessages('chat-1').at(-1)?.content).toBe('synthetic output after cancellation');
     });
   });
 
@@ -834,7 +898,10 @@ async function withReload(run, options = {}) {
     flush: async () => options.flushRegistry?.(),
   };
   const instances = {
-    requireFor: () => integration,
+    legacyHistoryImportFor: () => null,
+    nativeHistoryImportFor: () => integration.nativeHistoryImport
+      ? new LocalProviderHistoryImportService(integration, integration.nativeHistoryImport)
+      : null,
   };
   const adoption = new TranscriptAdoptionService({
     ledger,
@@ -857,7 +924,7 @@ async function withReload(run, options = {}) {
     },
     getCarryOverRevision: () => 'carry-v1:0',
     chatMutationLock,
-    now: () => TS,
+    now: options.now ?? (() => TS),
   });
   try {
     await run({

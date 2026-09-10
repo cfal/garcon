@@ -582,7 +582,7 @@ export async function startServer(): Promise<void> {
         return Boolean(
           session.agentSessionId
           && session.nativeSession
-          && instances.get(session.executionLocation)?.nativeHistoryImport,
+          && instances.hasAvailableNativeHistoryImportFor(session),
         );
       },
     });

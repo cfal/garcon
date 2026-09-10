@@ -6,12 +6,58 @@ import {
 } from '../../../common/transcript-seed.ts';
 import { createPreamblePrefix } from '../../../common/preamble-prefix.ts';
 import { importNativeHistoryDrafts } from '../native-history-seed.ts';
+import { LocalProviderHistoryImportService } from '../../execution-node/local-provider-history-import.js';
 
 const AT = '2026-08-15T00:00:00.000Z';
 const SESSION_ID = 'native-session-1';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('native history ledger seed', () => {
+  it.each([false, true])('rejects cancellation at native iterator completion (has rows: %s)', async (hasRows) => {
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic import cancelled at completion');
+    const input = seedInput({
+      receipt: null,
+      async *load() {
+        if (hasRows) yield [{ message: new UserMessage(AT, 'synthetic imported input') }];
+        controller.abort(cancellation);
+      },
+    });
+    await expect(importNativeHistoryDrafts({ ...input, signal: controller.signal })).rejects.toBe(cancellation);
+  });
+
+  it('rejects a cancelled import before calling its provider', async () => {
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic import already cancelled');
+    controller.abort(cancellation);
+    let calls = 0;
+    const input = seedInput({
+      receipt: null,
+      async *load() { calls += 1; },
+    });
+    await expect(importNativeHistoryDrafts({ ...input, signal: controller.signal })).rejects.toBe(cancellation);
+    expect(calls).toBe(0);
+  });
+
+  it('captures each delivered batch before the provider reuses its message and metadata objects', async () => {
+    const message = new UserMessage(AT, 'synthetic captured input');
+    const providerMeta = { nativeItemId: 'synthetic-captured-item' };
+    const drafts = await importNativeHistoryDrafts(seedInput({
+      receipt: null,
+      async *load() {
+        yield [{ message, providerMeta }];
+        message.content = 'synthetic later mutation';
+        providerMeta.nativeItemId = 'synthetic-later-item';
+      },
+    }));
+    expect(drafts).toMatchObject([{
+      kind: 'user-input',
+      detail: { message: new UserMessage(AT, 'synthetic captured input') },
+      providerMeta: { nativeItemId: 'synthetic-captured-item' },
+    }]);
+    expect(drafts[0].detail.message).toBeInstanceOf(UserMessage);
+  });
+
   it('strips the exact carried-context prefix without shifting provider metadata', async () => {
     const prefix = carriedContextPrefix();
     const receipt = createNativeSeedReceipt({
@@ -226,14 +272,13 @@ function seedInput({ receipt, load, preambleEvidence = [] }) {
       model: 'test-model',
       agentSettingsById: { test: settings },
     },
-    integration: {
+    nativeHistoryImport: new LocalProviderHistoryImportService({
       descriptor: { id: 'test' },
       settings: {
         defaults: () => settings,
         parse: (value) => value,
       },
-    },
-    nativeHistoryImport: { load },
+    }, { load }),
     session: {
       agentSessionId: SESSION_ID,
       nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: SESSION_ID } },

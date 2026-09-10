@@ -1338,7 +1338,7 @@ describe('ChatCommandService', () => {
         parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
       const loading = deferred();
       const adoption = new TranscriptAdoptionService({ ledger: transcripts, registry: f.chats,
-        instances: { requireFor: () => ({ legacyHistoryImport: null }) },
+        instances: { legacyHistoryImportFor: () => null },
         getCarryOverRevision: () => 'synthetic',
         loadFrozenPrefix: (_id, _entry, signal) => {
           loading.resolve(signal);

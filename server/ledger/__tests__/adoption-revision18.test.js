@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
 import { TranscriptAdoptionService } from '../adoption.ts';
+import { LocalProviderHistoryImportService } from '../../execution-node/local-provider-history-import.js';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 
@@ -199,7 +200,11 @@ async function withFixture(options, run) {
         return { id: chatId, ...entry };
       },
     },
-    instances: { requireFor: () => integration },
+    instances: {
+      legacyHistoryImportFor: () => integration.legacyHistoryImport
+        ? new LocalProviderHistoryImportService(integration, integration.legacyHistoryImport)
+        : null,
+    },
     getCarryOverRevision: () => 'carryover-1',
     loadFrozenPrefix: options.loadFrozenPrefix,
     now: () => AT,

@@ -10,4 +10,5 @@ export * from './contracts/services.js';
 export * from './contracts/transcript.js';
 export * from './errors.js';
 export * from './native-message-source.js';
+export * from './normalized-message-snapshot.js';
 export * from './node-wire.js';

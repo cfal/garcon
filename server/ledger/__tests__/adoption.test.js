@@ -9,6 +9,7 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptAdoptionService } from '../adoption.ts';
+import { LocalProviderHistoryImportService } from '../../execution-node/local-provider-history-import.js';
 import { transcriptViewId } from '../contracts.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
@@ -41,7 +42,7 @@ describe('TranscriptAdoptionService', () => {
       setCurrent([
         new PermissionRequestMessage(
           TS,
-          'incarnation-1',
+          '00000000-0000-4000-8000-000000000001',
           new BashToolUseMessage(TS, 'tool-1', 'pwd'),
         ),
         new AssistantMessage(TS, 'answer'),
@@ -256,7 +257,9 @@ async function withFixture(run, options = {}) {
         return { id: 'chat-1', ...entry };
       },
     },
-    instances: { requireFor: () => integration },
+    instances: {
+      legacyHistoryImportFor: () => new LocalProviderHistoryImportService(integration, integration.legacyHistoryImport),
+    },
     getCarryOverRevision: () => 'carryover-1',
     async loadFrozenPrefix() {
       loadCounts.prefix += 1;

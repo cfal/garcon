@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import * as messages from '@garcon/common/chat-types';
 import { encodeWireProducerEvent, decodeWireProducerEvent, parseWireProducerEvent } from '../../node-wire.js';
 import type { NodePermissionHandleRegistrar } from '../../contracts/node-wire.js';
+import { snapshotNormalizedMessage } from '../../normalized-message-snapshot.js';
 
 const at = '2026-09-09T00:00:00.000Z';
 const occurrence = '00000000-0000-4000-8000-000000000001';
@@ -66,9 +67,38 @@ const samples = {
   'agent-switch': new messages.AgentSwitchMessage(at, 'provider-a', 'provider-b', 'model-a', 'model-b'),
 } satisfies Record<messages.ChatMessage['type'], messages.ChatMessage>;
 
+describe('in-process normalized message snapshots', () => {
+  test.each(Object.values(samples))('reconstructs a private typed $type snapshot without wire framing', (message) => {
+    const snapshot = snapshotNormalizedMessage(message);
+    const canonical = messages.parseChatMessage({ ...structuredClone(message) });
+    if (!canonical) throw new Error('Invalid synthetic message');
+    expect(snapshot).not.toBe(message);
+    expect(snapshot).toBeInstanceOf(message.constructor);
+    expect(snapshot).toEqual(canonical);
+  });
+
+  test('retains nested tool classes and private data ownership', () => {
+    const requestedTool = new messages.McpToolUseMessage(at, toolId, 'synthetic-server', 'synthetic-tool', { items: ['original'] });
+    const request = new messages.PermissionRequestMessage(at, occurrence, requestedTool);
+    const snapshot = snapshotNormalizedMessage(request);
+    if (snapshot.type !== 'permission-request') throw new Error('Unexpected snapshot type');
+    expect(snapshot.requestedTool).toBeInstanceOf(messages.McpToolUseMessage);
+    expect(snapshot.requestedTool).not.toBe(requestedTool);
+    expect(snapshot).toEqual(request);
+    requestedTool.input.items = ['changed'];
+    expect(snapshot.requestedTool).toMatchObject({ input: { items: ['original'] } });
+  });
+
+  test('rejects malformed normalized message fields', () => {
+    expect(() => snapshotNormalizedMessage({ ...tool, command: 42 } as unknown as messages.ChatMessage))
+      .toThrow('Invalid normalized transcript message');
+  });
+});
+
 describe('node wire message shapes', () => {
   test.each(Object.values(samples))('normalizes and round-trips typed $type messages', (message) => {
     const canonical = messages.parseChatMessage(JSON.parse(JSON.stringify(message)));
+    if (!canonical) throw new Error('Invalid synthetic message');
     const wire = encodeWireProducerEvent({ type: 'rows', rows: [{ message }] }, noPermissions);
     expect(parseWireProducerEvent(wire)).toEqual(wire);
     expect(decodeWireProducerEvent(wire, () => { throw new Error('Unexpected permission resolution'); }))

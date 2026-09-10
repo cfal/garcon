@@ -26,7 +26,7 @@ export interface TranscriptReloadServiceOptions {
   readonly ledger: TranscriptLedgerService;
   readonly adoption: TranscriptAdoptionService;
   readonly registry: IChatRegistry;
-  readonly instances: Pick<AgentInstanceDirectory, 'requireFor'>;
+  readonly instances: Pick<AgentInstanceDirectory, 'nativeHistoryImportFor'>;
   readonly execution: ReloadExecutionPort;
   readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -84,8 +84,8 @@ export class TranscriptReloadService {
     if (!entry || !current) {
       throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
     }
-    const integration = this.options.instances.requireFor(entry);
-    if (!session || !integration.nativeHistoryImport) {
+    const nativeHistoryImport = this.options.instances.nativeHistoryImportFor(entry);
+    if (!session || !nativeHistoryImport) {
       throw new DomainError(
         'HISTORY_LOAD_FAILED',
         'This chat has no native history available to reload.',
@@ -104,6 +104,7 @@ export class TranscriptReloadService {
       entry = updated;
     }
     await this.options.registry.flush();
+    signal.throwIfAborted();
 
     this.options.ledger.closeProducer(chatId);
     let staging: TranscriptView | null = null;
@@ -122,8 +123,7 @@ export class TranscriptReloadService {
       const imported = await importNativeHistoryDrafts({
         chatId,
         entry,
-        integration,
-        nativeHistoryImport: integration.nativeHistoryImport,
+        nativeHistoryImport,
         session: session.detail,
         carryOverRevision: this.options.getCarryOverRevision(entry),
         signal,
@@ -131,6 +131,7 @@ export class TranscriptReloadService {
         preambleEvidence,
       });
       const contentStartOrdinal = prefix.length + 1;
+      signal.throwIfAborted();
       staging = this.options.ledger.stageView(
         chatId,
         [...prefix, sessionDraft, ...imported],

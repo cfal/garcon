@@ -14,6 +14,8 @@ import { LocalProviderNativeSessionService } from '../execution-node/local-provi
 import type { ProviderNativeSessionService } from '../execution-nodes/provider-native-sessions.js';
 import { LocalProviderNativeActivityService } from '../execution-node/local-provider-native-activity.js';
 import type { ProviderNativeActivityService } from '../execution-nodes/provider-native-activity.js';
+import { LocalProviderHistoryImportService } from '../execution-node/local-provider-history-import.js';
+import type { ProviderHistoryImportService } from '../execution-nodes/provider-history-import.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -30,6 +32,8 @@ export class AgentInstanceDirectory {
   readonly #commandsServices = new Map<string, ProviderCommandsService>();
   readonly #nativeSessionServices = new Map<string, ProviderNativeSessionService>();
   readonly #nativeActivityServices = new Map<string, ProviderNativeActivityService>();
+  readonly #legacyHistoryImportServices = new Map<string, ProviderHistoryImportService>();
+  readonly #nativeHistoryImportServices = new Map<string, ProviderHistoryImportService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -134,6 +138,35 @@ export class AgentInstanceDirectory {
       this.#nativeActivityServices.set(key, service);
     }
     return service;
+  }
+
+  legacyHistoryImportFor(owner: LocatedChatOwner): ProviderHistoryImportService | null {
+    const integration = this.requireFor(owner);
+    if (!integration.legacyHistoryImport) return null;
+    const key = executionInstanceKey(owner.executionLocation);
+    let service = this.#legacyHistoryImportServices.get(key);
+    if (!service) {
+      service = new LocalProviderHistoryImportService(integration, integration.legacyHistoryImport);
+      this.#legacyHistoryImportServices.set(key, service);
+    }
+    return service;
+  }
+
+  nativeHistoryImportFor(owner: LocatedChatOwner): ProviderHistoryImportService | null {
+    const integration = this.requireFor(owner);
+    if (!integration.nativeHistoryImport) return null;
+    const key = executionInstanceKey(owner.executionLocation);
+    let service = this.#nativeHistoryImportServices.get(key);
+    if (!service) {
+      service = new LocalProviderHistoryImportService(integration, integration.nativeHistoryImport);
+      this.#nativeHistoryImportServices.set(key, service);
+    }
+    return service;
+  }
+
+  hasAvailableNativeHistoryImportFor(owner: LocatedChatOwner): boolean {
+    const integration = this.get(owner.executionLocation);
+    return integration !== null && integration.descriptor.id === owner.agentId && Boolean(integration.nativeHistoryImport);
   }
 
   #configurationService(integration: AgentIntegration): ProviderConfigurationService {

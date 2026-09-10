@@ -15,6 +15,8 @@ import { InMemoryChatExecutionControlRepository } from '../../../server/chat-exe
 import { KeyedPromiseLock } from '../../../server/lib/keyed-lock.js';
 import { ChatRegistry } from '../../../server/chats/store.js';
 import { ledgerRowsToTranscriptMessages } from '../../../server/ledger/presentation.js';
+import { LocalProviderHistoryImportService } from '../../../server/execution-node/local-provider-history-import.js';
+import { LocalProviderNativeActivityService } from '../../../server/execution-node/local-provider-native-activity.js';
 
 const CHAT = '1111111111111111';
 const AT = '2030-01-01T00:00:00.000Z';
@@ -70,7 +72,11 @@ async function withReload(run) {
     nativeHistoryImport: { async *load() { yield [{ message: new AssistantMessage(AT, 'Imported reply.') }]; } },
     nativeActivity: { lastActivity: async () => ({ kind: 'ready', value: { lastEntryAt: RESULT_AT } }) },
   };
-  const instances = { requireFor: () => integration };
+  const instances = {
+    legacyHistoryImportFor: () => null,
+    nativeHistoryImportFor: () => new LocalProviderHistoryImportService(integration, integration.nativeHistoryImport),
+    nativeActivityFor: () => new LocalProviderNativeActivityService(integration),
+  };
   const adoption = new TranscriptAdoptionService({ ledger, registry, instances,
     getCarryOverRevision: () => 'synthetic-carry', loadFrozenPrefix: async () => [] });
   const reload = new TranscriptReloadService({ ledger, registry, instances, adoption, execution,

@@ -1,13 +1,13 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
   AgentIntegrationError,
-  type AgentIntegration,
   type AgentLogger,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
-import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import { toProviderNativeChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentInstanceDirectory } from '../agents/instance-directory.js';
+import type { ProviderHistoryImportService } from '../execution-nodes/provider-history-import.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -18,7 +18,7 @@ import { TranscriptLedgerService } from './service.js';
 export interface TranscriptAdoptionOptions {
   readonly ledger: TranscriptLedgerService;
   readonly registry: IChatRegistry;
-  readonly instances: Pick<AgentInstanceDirectory, 'requireFor'>;
+  readonly instances: Pick<AgentInstanceDirectory, 'legacyHistoryImportFor'>;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly loadFrozenPrefix: (
     chatId: string,
@@ -57,12 +57,12 @@ export class TranscriptAdoptionService {
         return reopened;
       }
       signal.throwIfAborted();
-      const integration = this.options.instances.requireFor(entry);
+      const legacyHistoryImport = this.options.instances.legacyHistoryImportFor(entry);
       const prefix = entry.carryOverMigrationQuarantine
         ? []
         : await this.#loadPrefix(chatId, entry, signal);
       signal.throwIfAborted();
-      const legacyRows = await this.#loadLegacy(chatId, entry, integration, signal);
+      const legacyRows = await this.#loadLegacy(chatId, entry, legacyHistoryImport, signal);
       signal.throwIfAborted();
       const latest = this.options.registry.getChat(chatId);
       if (!latest || latest.agentOwnershipEpoch !== entry.agentOwnershipEpoch) {
@@ -127,24 +127,24 @@ export class TranscriptAdoptionService {
   async #loadLegacy(
     chatId: string,
     entry: AgentChatEntry,
-    integration: AgentIntegration,
+    legacyHistoryImport: ProviderHistoryImportService | null,
     signal: AbortSignal,
   ): Promise<readonly ImportedRow[]> {
-    if (!integration.legacyHistoryImport) return [];
+    if (!legacyHistoryImport) return [];
     try {
       const rows: ImportedRow[] = [];
-      const chat = toAgentChatReference(
-        integration,
+      const chat = toProviderNativeChatReference(
         chatId,
         entry,
         this.options.getCarryOverRevision(entry),
       );
-      for await (const batch of integration.legacyHistoryImport.load({ chat, signal })) {
+      for await (const batch of legacyHistoryImport.read({ chat }, signal)) {
         signal.throwIfAborted();
         for (const row of batch) {
           rows.push({ message: row.message, providerMeta: row.providerMeta ?? null });
         }
       }
+      signal.throwIfAborted();
       return sanitizeCurrent(rows, entry);
     } catch (error) {
       this.#throwSourceFailure(chatId, entry.agentId, 'legacy-history-import', error, signal);

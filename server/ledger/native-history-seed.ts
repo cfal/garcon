@@ -1,7 +1,7 @@
-import type { AgentHistoryImport, AgentIntegration } from '@garcon/server-agent-interface';
 import { sanitizeRecordedCarriedContext } from '../../common/transcript-seed.js';
-import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import { toProviderNativeChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
+import type { ProviderHistoryImportService } from '../execution-nodes/provider-history-import.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
 import { importedDrafts, type ImportedRow } from './imported-drafts.js';
@@ -15,9 +15,7 @@ export type LedgerSessionDetail = Extract<LedgerRow, { readonly kind: 'session' 
 export interface NativeHistorySeedInput {
   readonly chatId: string;
   readonly entry: AgentChatEntry;
-  readonly integration: AgentIntegration;
-  // Taken separately so the caller's capability check, not an assertion here, proves it exists.
-  readonly nativeHistoryImport: AgentHistoryImport;
+  readonly nativeHistoryImport: ProviderHistoryImportService;
   readonly session: LedgerSessionDetail;
   readonly carryOverRevision: string;
   readonly signal: AbortSignal;
@@ -31,7 +29,6 @@ export interface NativeHistorySeedInput {
 export async function importNativeHistoryDrafts({
   chatId,
   entry,
-  integration,
   nativeHistoryImport,
   session,
   carryOverRevision,
@@ -39,9 +36,9 @@ export async function importNativeHistoryDrafts({
   now,
   preambleEvidence = [],
 }: NativeHistorySeedInput): Promise<LedgerRowDraft[]> {
+  signal.throwIfAborted();
   const imported: ImportedRow[] = [];
-  const chat = toAgentChatReference(
-    integration,
+  const chat = toProviderNativeChatReference(
     chatId,
     {
       ...entry,
@@ -51,12 +48,13 @@ export async function importNativeHistoryDrafts({
     },
     carryOverRevision,
   );
-  for await (const batch of nativeHistoryImport.load({ chat, signal })) {
+  for await (const batch of nativeHistoryImport.read({ chat }, signal)) {
     signal.throwIfAborted();
     for (const row of batch) {
       imported.push({ message: row.message, providerMeta: row.providerMeta ?? null });
     }
   }
+  signal.throwIfAborted();
   const sanitized = sanitizeRecordedCarriedContext({
     messages: imported.map((row) => row.message),
     receipt: session.nativeSeedReceipt,

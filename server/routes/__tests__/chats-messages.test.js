@@ -443,18 +443,10 @@ describe('GET /api/v1/chats/messages', () => {
         updateChat: () => entry,
       },
       instances: {
-        requireFor: () => ({
-          descriptor: { id: 'test-provider' },
-          settings: {
-            defaults: () => entry.agentSettingsById['test-provider'],
-            parse: (value) => value,
+        legacyHistoryImportFor: () => ({
+          async *read() {
+            throw sourceError;
           },
-          legacyHistoryImport: {
-            async *load() {
-              throw sourceError;
-            },
-          },
-          nativeHistoryImport: null,
         }),
       },
       getCarryOverRevision: () => 'carryover-1',
