@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Orbit Chat</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M78 90h100a17 17 0 0 1 17 17v50a17 17 0 0 1-17 17h-41l-28 23 6-23H78a17 17 0 0 1-17-17v-50a17 17 0 0 1 17-17Z" fill="none" stroke="#fff" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M52 149c-10-38 13-79 52-91 37-12 78 5 96 38" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="52" cy="149" r="13" fill="#fff"/><circle cx="200" cy="96" r="13" fill="#fff"/>
+</svg>

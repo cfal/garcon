@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Pane Bubble</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M64 58h128a20 20 0 0 1 20 20v92a20 20 0 0 1-20 20h-58l-36 25 7-25H64a20 20 0 0 1-20-20V78a20 20 0 0 1 20-20Z" fill="none" stroke="#fff" stroke-width="15" stroke-linejoin="round"/>
+  <path d="M128 66v116M52 124h152" stroke="#fff" stroke-width="13"/>
+</svg>

@@ -27,7 +27,7 @@
 	import { getAppTitle } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import GarconMark from '$lib/components/shared/GarconMark.svelte';
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -175,10 +175,10 @@
 		<div class="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
 			<a
 				href="/"
-				class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0 hover:opacity-90 transition-opacity"
+				class="size-8 flex-shrink-0 transition-opacity hover:opacity-90"
 				title={m.sidebar_app_title()}
 			>
-				<MessageSquare class="w-4 h-4 text-primary-foreground" />
+				<GarconMark class="size-8" />
 			</a>
 			<div class="min-w-0 flex-1">
 				{#if title}

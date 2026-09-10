@@ -3,8 +3,8 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import GarconMark from '$lib/components/shared/GarconMark.svelte';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
@@ -465,9 +465,7 @@
 	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="text-center">
 			<div class="flex justify-center mb-4">
-				<div class="w-16 h-16 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-					<MessageSquare class="w-8 h-8 text-primary-foreground" />
-				</div>
+				<GarconMark class="size-16 shadow-sm" />
 			</div>
 			<h1 class="text-2xl font-bold text-foreground mb-2">{m.sidebar_app_title()}</h1>
 			<div class="flex items-center justify-center space-x-2">
@@ -488,9 +486,7 @@
 	<div data-auth-recovery class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="max-w-md text-center">
 			<div class="flex justify-center mb-4">
-				<div class="w-16 h-16 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-					<MessageSquare class="w-8 h-8 text-primary-foreground" />
-				</div>
+				<GarconMark class="size-16 shadow-sm" />
 			</div>
 			<h1 class="text-2xl font-bold text-foreground mb-2">{m.auth_reconnecting_title()}</h1>
 			<p class="text-muted-foreground mb-4">

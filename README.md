@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="docs/brand/garcon-fork-tail-forest.svg" alt="" width="96" />
+</p>
 <h1 align="center">Garcon</h1>
 
 <p align="center"><strong>Run the agents. See the work. Ship the change.</strong></p>

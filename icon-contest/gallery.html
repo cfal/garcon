@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Garcon Icon Contest</title>
+  <meta name="description" content="Twenty-eight scalable icon candidates for Garcon." />
+  <link rel="stylesheet" href="gallery.css" />
+</head>
+<body>
+  <main class="page">
+    <a href="color-gallery.html" class="eyebrow">Fork Tail color study →</a>
+    <h1>One mark.<br />Every workspace.</h1>
+    <p class="lead">Twenty-eight simple SVG candidates designed to stay legible from a 16-pixel browser tab to a full-size mobile app icon—and to work unchanged in light or dark themes.</p>
+    <div class="meta"><span>28 vector masters</span><span>5 concept families</span><span>16–512 px ready</span><span>Theme-safe blue tile</span></div>
+
+    <section aria-labelledby="research-title">
+      <div class="section-head"><h2 id="research-title">Model exploration</h2><p>Two 16-concept Nano Banana Pro boards drove divergent exploration. Production candidates below are independently rebuilt as clean SVG geometry.</p></div>
+      <div class="boards">
+        <figure class="board"><img src="source-boards/google-nano-banana-pro.jpg" alt="First 4 by 4 model-generated exploration board of Garcon icon concepts" width="2048" height="2048" /><figcaption><strong>Board 01</strong><span>Chat, G, cap, workspace, lineage</span></figcaption></figure>
+        <figure class="board"><img src="source-boards/google-nano-banana-pro-02.jpg" alt="Second 4 by 4 model-generated exploration board of Garcon icon concepts" width="2048" height="2048" /><figcaption><strong>Board 02</strong><span>Negative space, control, terminal, concierge</span></figcaption></figure>
+      </div>
+    </section>
+
+    <section aria-labelledby="candidates-title">
+      <div class="section-head"><h2 id="candidates-title">Vector candidates</h2><p>Every card renders the exact same SVG on white and near-black, followed by true-size 16, 24, 32, and 44-pixel checks.</p></div>
+      <div class="grid" id="candidate-grid"></div>
+    </section>
+
+    <p class="footer-note"><strong>Recommended first round:</strong> 01 G Tail, 07 Cap Tail, 09 Cap Panes, 13 Pane Bubble, 19 Agent Hub, and 28 Chevron G. Select on silhouette and memorability first; refine optical balance only after choosing a direction.</p>
+  </main>
+  <script>
+    const candidates = [
+      ["01", "G Tail", "Chat + G"], ["02", "Bubble G", "Chat + G"], ["03", "Double Chat G", "Chat + G"], ["04", "Chat Ring", "Chat + G"],
+      ["05", "G Terminal", "Chat + G"], ["06", "G Cursor", "Chat + G"], ["07", "Cap Tail", "Cap"], ["08", "Cap Brim", "Cap"],
+      ["09", "Cap Panes", "Cap"], ["10", "Cap Terminal", "Cap"], ["11", "Cap Nodes", "Cap"], ["12", "Bellhop Bubble", "Cap"],
+      ["13", "Pane Bubble", "Workspace"], ["14", "Split Chat", "Workspace"], ["15", "Window Stack", "Workspace"], ["16", "Focus Chat", "Workspace"],
+      ["17", "Dock Corners", "Workspace"], ["18", "Workspace G", "Workspace"], ["19", "Agent Hub", "Coordination"], ["20", "Lineage", "Coordination"],
+      ["21", "Orbit Chat", "Coordination"], ["22", "Fork Tail", "Coordination"], ["23", "Agent Hex", "Coordination"], ["24", "Spark Chat", "Coordination"],
+      ["25", "Bow Tie Chat", "Concierge"], ["26", "Key Chat", "Concierge"], ["27", "Tab Cap", "Concierge"], ["28", "Chevron G", "Concierge"]
+    ];
+    const slugs = ["g-tail", "bubble-g", "double-chat-g", "chat-ring", "g-terminal", "g-cursor", "cap-tail", "cap-brim", "cap-panes", "cap-terminal", "cap-nodes", "bellhop-bubble", "pane-bubble", "split-chat", "window-stack", "focus-chat", "dock-corners", "workspace-g", "agent-hub", "lineage", "orbit-chat", "fork-tail", "agent-hex", "spark-chat", "bowtie-chat", "key-chat", "tab-cap", "chevron-g"];
+    const finalists = new Set(["01", "07", "09", "13", "19", "28"]);
+    document.querySelector("#candidate-grid").innerHTML = candidates.map(([id, name, family], index) => {
+      const src = `candidates/${id}-${slugs[index]}.svg`;
+      const images = `<img src="${src}" alt="" /><img src="${src}" alt="" /><img src="${src}" alt="" /><img src="${src}" alt="" />`;
+      return `<article class="card"><div class="stage"><div class="theme light"><img src="${src}" alt="${name} icon on a light interface" /></div><div class="theme dark"><img src="${src}" alt="${name} icon on a dark interface" /></div></div><div class="card-copy"><div class="card-title"><h3><span class="id">${id}</span> ${name}</h3>${finalists.has(id) ? '<span class="finalist">Shortlist</span>' : ''}</div><p class="family">${family}</p><div class="sizes" role="img" aria-label="${name} at 16, 24, 32, and 44 pixels">${images}</div></div></article>`;
+    }).join("");
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Spark Chat</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M57 78h142a18 18 0 0 1 18 18v73a18 18 0 0 1-18 18h-65l-38 27 8-27H57a18 18 0 0 1-18-18V96a18 18 0 0 1 18-18Z" fill="none" stroke="#fff" stroke-width="15" stroke-linejoin="round"/>
+  <path d="m130 94 8 21 21 8-21 8-8 21-8-21-21-8 21-8 8-21Z" fill="#fff"/>
+</svg>

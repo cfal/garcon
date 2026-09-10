@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Cap Tail</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M53 139c4-52 32-79 75-79s71 27 75 79c-22-11-47-16-75-16s-53 5-75 16Zm14 13c19-8 39-12 61-12 29 0 55 7 78 22-21 20-47 30-78 30-12 0-24-2-35-5l-29 16 7-27c-8-7-13-15-16-24h12Z" fill="#fff"/>
+</svg>

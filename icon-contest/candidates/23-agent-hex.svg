@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Agent Hex</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="m128 48 67 39v78l-67 39-67-39V87l67-39Z" fill="none" stroke="#fff" stroke-width="14" stroke-linejoin="round"/>
+  <path d="m88 103 40 25 40-25M128 128v43" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="88" cy="103" r="12" fill="#fff"/><circle cx="168" cy="103" r="12" fill="#fff"/><circle cx="128" cy="171" r="12" fill="#fff"/>
+  <path d="m153 188 20 20v-32" fill="#fff"/>
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Chat Ring</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M190 127a62 62 0 1 1-20-46M188 128v45l-31-18M126 128h62" fill="none" stroke="#fff" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

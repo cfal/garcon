@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Key Chat</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <circle cx="83" cy="112" r="33" fill="none" stroke="#fff" stroke-width="16"/>
+  <path d="M114 112h89M174 112v22M197 112v22" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round"/>
+  <path d="M59 160h108a17 17 0 0 1 17 17v4a17 17 0 0 1-17 17h-33l-26 19 6-19H59a17 17 0 0 1-17-17v-4a17 17 0 0 1 17-17Z" fill="#fff"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Dock Corners</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M78 53H51v27M178 53h27v27M78 203H51v-27M178 203h27v-27" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round"/>
+  <path d="M89 87h78a16 16 0 0 1 16 16v48a16 16 0 0 1-16 16h-30l-26 22 6-22H89a16 16 0 0 1-16-16v-48a16 16 0 0 1 16-16Z" fill="none" stroke="#fff" stroke-width="14" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Agent Hub</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M62 57h132a18 18 0 0 1 18 18v91a18 18 0 0 1-18 18h-59l-37 28 8-28H62a18 18 0 0 1-18-18V75a18 18 0 0 1 18-18Z" fill="none" stroke="#fff" stroke-width="14" stroke-linejoin="round"/>
+  <path d="m91 112 37-25 37 25M128 87v45" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="91" cy="112" r="11" fill="#fff"/><circle cx="128" cy="87" r="11" fill="#fff"/><circle cx="165" cy="112" r="11" fill="#fff"/><circle cx="128" cy="132" r="11" fill="#fff"/>
+</svg>

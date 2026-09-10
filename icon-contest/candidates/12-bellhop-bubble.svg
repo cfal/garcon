@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Bellhop Bubble</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M64 145c0-47 25-73 64-73s64 26 64 73H64Zm-13 17h154c-15 23-40 35-77 35-13 0-25-2-36-5l-27 16 7-25c-10-6-17-13-21-21Z" fill="#fff"/>
+  <circle cx="128" cy="66" r="11" fill="#fff"/>
+</svg>

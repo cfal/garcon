@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Garcon Fork Tail — Classic Silver</title>
+  <rect width="256" height="256" rx="52" fill="#d9d9d9"/>
+  <path d="M56 58h144a17 17 0 0 1 17 17v91a17 17 0 0 1-17 17h-60l-37 29 8-29H56a17 17 0 0 1-17-17V75a17 17 0 0 1 17-17Z" fill="none" stroke="#111" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M128 145v-29M128 116 91 91M128 116l37-25" fill="none" stroke="#111" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="91" cy="91" r="12" fill="#111"/><circle cx="165" cy="91" r="12" fill="#111"/><circle cx="128" cy="148" r="12" fill="#111"/>
+</svg>

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fork Tail Color Study · Garcon</title>
+  <meta name="description" content="Forty color directions for Garcon's Fork Tail icon, tested against Phosphor and Classic themes." />
+  <link rel="stylesheet" href="color-gallery.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <a class="back" href="gallery.html">← All icon concepts</a>
+      <p class="eyebrow">Garcon identity · Fork Tail</p>
+      <h1>Same mark.<br /><span>New signal.</span></h1>
+      <p class="lead">Forty color directions tested unchanged across Garcon’s default Phosphor and Classic themes. Theme-native options come first; expressive and cyberpunk directions follow.</p>
+      <div class="theme-key" role="list" aria-label="Preview surface key">
+        <span role="listitem"><i class="pl"></i>Phosphor light</span>
+        <span role="listitem"><i class="pd"></i>Phosphor dark</span>
+        <span role="listitem"><i class="cl"></i>Classic light</span>
+        <span role="listitem"><i class="cd"></i>Classic dark</span>
+      </div>
+    </header>
+
+    <section class="recommendation" aria-labelledby="recommendation-title">
+      <div>
+        <p class="eyebrow">Recommended first look</p>
+        <h2 id="recommendation-title">Theme-aware, not theme-bound.</h2>
+      </div>
+      <p><strong>01 Phosphor Forest</strong> is the strongest solid. <strong>16 Phosphor Core</strong> best reflects the product’s green-to-teal visual language. <strong>34 Acid Burn</strong> is the strongest overtly cyberpunk option.</p>
+    </section>
+
+    <section aria-labelledby="theme-title">
+      <div class="section-head"><div><p class="section-index">A</p><h2 id="theme-title">Theme anchors</h2></div><p>Exact Garcon theme tokens, plus the current blue as a control.</p></div>
+      <div class="grid" id="theme-grid"></div>
+    </section>
+
+    <section aria-labelledby="solid-title">
+      <div class="section-head"><div><p class="section-index">B</p><h2 id="solid-title">Independent solids</h2></div><p>Single-color identities chosen for silhouette, contrast, and small-size recognition.</p></div>
+      <div class="grid" id="solid-grid"></div>
+    </section>
+
+    <section aria-labelledby="gradient-title">
+      <div class="section-head"><div><p class="section-index">C</p><h2 id="gradient-title">Gradients and spectra</h2></div><p>Controlled movement without changing Fork Tail’s reproducible vector geometry.</p></div>
+      <div class="grid" id="gradient-grid"></div>
+    </section>
+
+    <section aria-labelledby="cyberpunk-title">
+      <div class="section-head"><div><p class="section-index">D</p><h2 id="cyberpunk-title">Cyberpunk neon</h2></div><p>Phosphor’s near-black, signal-green, and electric-cyan DNA pushed into bolder app-icon territory.</p></div>
+      <div class="grid" id="cyberpunk-grid"></div>
+    </section>
+
+    <p class="footer-note">Selection rule: choose the color that remains identifiable in the 16-pixel row—not the one that only wins at full size. Every option preserves one asset across light and dark themes.</p>
+  </main>
+
+  <script>
+    const colorways = [
+      { id: "00", group: "theme", name: "Current Blue", note: "Control · current app color", colors: ["#2563eb"], glyph: "#ffffff" },
+      { id: "01", group: "theme", name: "Phosphor Forest", note: "Phosphor light primary", colors: ["#0a714e"], glyph: "#ffffff", shortlist: true },
+      { id: "02", group: "theme", name: "Phosphor Signal", note: "Phosphor dark primary", colors: ["#14e196"], glyph: "#04110c" },
+      { id: "03", group: "theme", name: "Phosphor Teal", note: "Phosphor light interaction", colors: ["#086578"], glyph: "#ffffff", shortlist: true },
+      { id: "04", group: "theme", name: "Phosphor Cyan", note: "Phosphor dark interaction", colors: ["#3be1f7"], glyph: "#071216" },
+      { id: "05", group: "theme", name: "Classic Ink", note: "Classic light primary", colors: ["#262626"], glyph: "#ffffff" },
+      { id: "06", group: "theme", name: "Classic Silver", note: "Classic dark primary", colors: ["#d9d9d9"], glyph: "#111111" },
+
+      { id: "07", group: "solid", name: "Viridian", note: "Cool, composed green", colors: ["#008f68"], glyph: "#ffffff" },
+      { id: "08", group: "solid", name: "Jade", note: "High-energy green", colors: ["#00a86b"], glyph: "#07150f" },
+      { id: "09", group: "solid", name: "Deep Teal", note: "Technical and calm", colors: ["#0f766e"], glyph: "#ffffff" },
+      { id: "10", group: "solid", name: "Aubergine", note: "Deep creative violet", colors: ["#5b21b6"], glyph: "#ffffff" },
+      { id: "11", group: "solid", name: "Violet", note: "Bright agent identity", colors: ["#7c3aed"], glyph: "#ffffff" },
+      { id: "12", group: "solid", name: "Orchid", note: "Unexpected and vivid", colors: ["#a21caf"], glyph: "#ffffff" },
+      { id: "13", group: "solid", name: "Raspberry", note: "Warm, precise contrast", colors: ["#be123c"], glyph: "#ffffff" },
+      { id: "14", group: "solid", name: "Vermilion", note: "Confident warm signal", colors: ["#c2410c"], glyph: "#ffffff" },
+      { id: "15", group: "solid", name: "Goldenrod", note: "Concierge warmth", colors: ["#d18b05"], glyph: "#1b1100" },
+
+      { id: "16", group: "gradient", name: "Phosphor Core", note: "Forest → interaction teal", colors: ["#0a714e", "#086578"], glyph: "#ffffff", shortlist: true },
+      { id: "17", group: "gradient", name: "Phosphor Glow", note: "Signal green → cyan", colors: ["#14e196", "#3be1f7"], glyph: "#061411" },
+      { id: "18", group: "gradient", name: "Emerald Violet", note: "Product green → creative violet", colors: ["#047857", "#5b21b6"], glyph: "#ffffff", shortlist: true },
+      { id: "19", group: "gradient", name: "Deep Aurora", note: "Teal → ultraviolet", colors: ["#0f766e", "#6d28d9"], glyph: "#ffffff" },
+      { id: "20", group: "gradient", name: "Ember", note: "Crimson → vermilion", colors: ["#991b1b", "#c2410c"], glyph: "#ffffff", shortlist: true },
+      { id: "21", group: "gradient", name: "Sunset", note: "Raspberry → tangerine", colors: ["#be185d", "#c2410c"], glyph: "#ffffff" },
+      { id: "22", group: "gradient", name: "Berry", note: "Raspberry → royal violet", colors: ["#be123c", "#6d28d9"], glyph: "#ffffff" },
+      { id: "23", group: "gradient", name: "Ultraviolet", note: "Indigo → orchid", colors: ["#4338ca", "#a21caf"], glyph: "#ffffff" },
+      { id: "24", group: "gradient", name: "Acid", note: "Turquoise → chartreuse", colors: ["#14b8a6", "#84cc16"], glyph: "#0b1607" },
+      { id: "25", group: "gradient", name: "Carbon", note: "Near-black → cool slate", colors: ["#111827", "#475569"], glyph: "#ffffff" },
+      { id: "26", group: "gradient", name: "Full Spectrum", note: "Unrestrained rainbow", colors: ["#ef4444", "#f59e0b", "#84cc16", "#14b8a6", "#8b5cf6", "#ec4899"], glyph: "#ffffff" },
+      { id: "27", group: "gradient", name: "Night Spectrum", note: "Dark, legible rainbow", colors: ["#7f1d1d", "#92400e", "#3f6212", "#115e59", "#3730a3", "#701a75"], glyph: "#ffffff", shortlist: true },
+
+      { id: "28", group: "cyberpunk", name: "Terminal Black", note: "Black deck · signal-green mark", colors: ["#07110d"], glyph: "#14e196" },
+      { id: "29", group: "cyberpunk", name: "Black Ice", note: "Black deck · electric-cyan mark", colors: ["#070d14"], glyph: "#3be1f7" },
+      { id: "30", group: "cyberpunk", name: "Neon Noir", note: "Black deck · dual-neon mark", colors: ["#0b0810"], glyphColors: ["#ff2bd6", "#b6ff00"], shortlist: true },
+      { id: "31", group: "cyberpunk", name: "Radioactive", note: "Toxic lime · carbon mark", colors: ["#b6ff00"], glyph: "#101800" },
+      { id: "32", group: "cyberpunk", name: "Cyan Shock", note: "Plasma cyan · ultraviolet edge", colors: ["#00f5ff", "#7a2cff"], glyph: "#081018" },
+      { id: "33", group: "cyberpunk", name: "Laser Magenta", note: "Hot magenta · ultraviolet", colors: ["#ff2bd6", "#7a2cff"], glyph: "#ffffff" },
+      { id: "34", group: "cyberpunk", name: "Acid Burn", note: "Toxic lime · phosphor signal", colors: ["#b6ff00", "#00f5a0"], glyph: "#09150d", shortlist: true },
+      { id: "35", group: "cyberpunk", name: "Synth Sunset", note: "Laser pink · hazard orange", colors: ["#ff2bd6", "#ff7a00"], glyph: "#1b0715", shortlist: true },
+      { id: "36", group: "cyberpunk", name: "Night City", note: "Ultraviolet · electric cyan", colors: ["#5115c7", "#00d9f5"], glyph: "#ffffff" },
+      { id: "37", group: "cyberpunk", name: "Neon Circuit", note: "Carbon deck · phosphor flow", colors: ["#090b11"], glyphColors: ["#14e196", "#3be1f7"], shortlist: true },
+      { id: "38", group: "cyberpunk", name: "Chromatic Glitch", note: "Carbon deck · RGB aberration", colors: ["#0b0b12"], glyphColors: ["#00f5ff", "#ff2bd6", "#b6ff00"] },
+      { id: "39", group: "cyberpunk", name: "Cyber Spectrum", note: "Full neon city spectrum", colors: ["#ff2bd6", "#7a2cff", "#00f5ff", "#00f5a0", "#b6ff00"], glyph: "#0b1010" }
+    ];
+
+    const surfaces = [
+      ["pl", "Phosphor light"], ["pd", "Phosphor dark"],
+      ["cl", "Classic light"], ["cd", "Classic dark"]
+    ];
+
+    function icon(colorway, suffix, className = "") {
+      const paintId = `paint-${colorway.id}-${suffix}`;
+      const glyphId = `glyph-${colorway.id}-${suffix}`;
+      const stops = colorway.colors.map((color, index) => {
+        const offset = colorway.colors.length === 1 ? 0 : (index / (colorway.colors.length - 1)) * 100;
+        return `<stop offset="${offset}%" stop-color="${color}" />`;
+      }).join("");
+      const glyphStops = (colorway.glyphColors ?? []).map((color, index, colors) => `<stop offset="${(index / (colors.length - 1)) * 100}%" stop-color="${color}" />`).join("");
+      const glyph = colorway.glyphColors ? `url(#${glyphId})` : colorway.glyph;
+      return `<svg class="${className}" aria-hidden="true" viewBox="0 0 256 256"><defs><linearGradient id="${paintId}" x1="0" y1="0" x2="1" y2="1">${stops}</linearGradient>${glyphStops ? `<linearGradient id="${glyphId}" x1="0" y1="0" x2="1" y2="1">${glyphStops}</linearGradient>` : ""}</defs><rect width="256" height="256" rx="52" fill="url(#${paintId})"/><path d="M56 58h144a17 17 0 0 1 17 17v91a17 17 0 0 1-17 17h-60l-37 29 8-29H56a17 17 0 0 1-17-17V75a17 17 0 0 1 17-17Z" fill="none" stroke="${glyph}" stroke-width="14" stroke-linejoin="round"/><path d="M128 145v-29M128 116 91 91M128 116l37-25" fill="none" stroke="${glyph}" stroke-width="12" stroke-linecap="round"/><circle cx="91" cy="91" r="12" fill="${glyph}"/><circle cx="165" cy="91" r="12" fill="${glyph}"/><circle cx="128" cy="148" r="12" fill="${glyph}"/></svg>`;
+    }
+
+    function card(colorway) {
+      const preview = surfaces.map(([surface, label]) => `<div class="surface ${surface}" title="${label}">${icon(colorway, surface)}</div>`).join("");
+      const chips = [...colorway.colors, ...(colorway.glyphColors ?? [])].map((color) => `<span><i style="background:${color}"></i>${color}</span>`).join("");
+      return `<article class="card"><div class="preview" role="img" aria-label="${colorway.name} Fork Tail icon on Phosphor and Classic light and dark themes">${preview}</div><div class="card-copy"><div class="card-title"><h3><span>${colorway.id}</span> ${colorway.name}</h3>${colorway.shortlist ? '<b>Shortlist</b>' : ''}</div><p>${colorway.note}</p><div class="card-foot"><div class="chips">${chips}</div><div class="sizes" role="img" aria-label="${colorway.name} at 16, 24, and 36 pixels">${icon(colorway, "16", "s16")}${icon(colorway, "24", "s24")}${icon(colorway, "36", "s36")}</div></div></div></article>`;
+    }
+
+    for (const group of ["theme", "solid", "gradient", "cyberpunk"]) {
+      document.querySelector(`#${group}-grid`).innerHTML = colorways.filter((colorway) => colorway.group === group).map(card).join("");
+    }
+  </script>
+</body>
+</html>

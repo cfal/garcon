@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Cap Nodes</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M53 145c4-51 29-78 75-78s71 27 75 78c-50-18-100-18-150 0ZM57 164c45-17 97-17 142 0l-11 28H68l-11-28Z" fill="#fff"/>
+  <path d="m99 123 29-25 30 25M128 98v32" fill="none" stroke="#2563eb" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="99" cy="123" r="8" fill="#2563eb"/><circle cx="128" cy="98" r="8" fill="#2563eb"/><circle cx="158" cy="123" r="8" fill="#2563eb"/><circle cx="128" cy="130" r="8" fill="#2563eb"/>
+</svg>

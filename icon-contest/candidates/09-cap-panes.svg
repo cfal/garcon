@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Cap Panes</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M54 145c3-51 28-78 74-78s71 27 74 78c-49-18-99-18-148 0ZM55 164c46-18 100-18 146 0l-10 28H65l-10-28Z" fill="#fff"/>
+  <path d="M106 94h18v18h-18zm26 0h18v18h-18zm-26 26h18v18h-18zm26 0h18v18h-18z" fill="#2563eb"/>
+</svg>
