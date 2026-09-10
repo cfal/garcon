@@ -8,7 +8,7 @@ const logger = createLogger('agent-start-progress');
 
 export class AgentStartProgress {
   readonly #viewId: TranscriptViewId;
-  #finished = false;
+  #closed = false;
   #lastPhase: AgentStartProgressPhase | null = null;
   readonly #unsubscribe: () => void;
 
@@ -26,7 +26,7 @@ export class AgentStartProgress {
   }
 
   report(phase: AgentStartProgressPhase, explanation?: string): void {
-    if (this.#finished || this.#lastPhase === phase) return;
+    if (this.#closed || this.#lastPhase === phase) return;
     if (this.signal.aborted && phase !== 'interrupted') return;
     if (this.ledger.existingCurrentView(this.chatId)?.viewId !== this.#viewId) return;
     this.ledger.appendNotice(this.chatId, this.#viewId, {
@@ -39,7 +39,9 @@ export class AgentStartProgress {
   }
 
   fail(error: unknown): void {
-    this.#finishFailure(this.signal.aborted ? 'interrupted' : 'failed', error instanceof DomainError ? error.message : undefined);
+    const phase = this.signal.aborted ? 'interrupted' : 'failed';
+    const explanation = error instanceof DomainError ? error.message : undefined;
+    this.#finishFailure(phase, explanation);
   }
 
   #finishFailure(phase: 'failed' | 'interrupted', explanation?: string): void {
@@ -47,7 +49,8 @@ export class AgentStartProgress {
       this.report(phase, explanation);
     } catch (noticeError) {
       logger.warn('Startup outcome notice could not be recorded', {
-        chatId: this.chatId, errorType: noticeError instanceof Error ? noticeError.name : typeof noticeError,
+        chatId: this.chatId,
+        errorType: noticeError instanceof Error ? noticeError.name : typeof noticeError,
       });
     } finally {
       this.dispose();
@@ -55,7 +58,7 @@ export class AgentStartProgress {
   }
 
   dispose(): void {
-    this.#finished = true;
+    this.#closed = true;
     this.signal.removeEventListener('abort', this.#onAbort);
     this.#unsubscribe();
   }
@@ -64,10 +67,18 @@ export class AgentStartProgress {
     if (event.chatId !== this.chatId) return;
     if (event.type === 'view-replaced' && event.previousViewId === this.#viewId) {
       this.dispose();
-    } else if (event.type === 'run-ended' && event.viewId === this.#viewId && event.runId === this.turnId) {
-      if (event.row.outcome === 'failed') this.fail(undefined);
-      else if (event.row.outcome === 'interrupted') this.#finishFailure('interrupted');
-      else this.dispose();
+      return;
+    }
+    if (event.type !== 'run-ended' || event.viewId !== this.#viewId || event.runId !== this.turnId) return;
+    switch (event.row.outcome) {
+      case 'failed':
+        this.fail(undefined);
+        break;
+      case 'interrupted':
+        this.#finishFailure('interrupted');
+        break;
+      default:
+        this.dispose();
     }
   };
 

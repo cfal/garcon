@@ -102,13 +102,13 @@ export class StartCommands {
     }
     const normalized = await this.normalizeStart(request, chatId);
     signal.throwIfAborted();
-    const dispatch = Promise.withResolvers<void>();
+    const startupGate = Promise.withResolvers<void>();
     try {
-      const record = await this.admitStart(normalized, signal, dispatch.promise);
+      const record = await this.admitStart(normalized, signal, startupGate.promise);
       if (!record.turnId) throw new Error('Accepted start has no turn identity');
-      return { turnId: record.turnId, status: 'accepted', start: dispatch.resolve };
+      return { turnId: record.turnId, status: 'accepted', start: startupGate.resolve };
     } catch (error) {
-      dispatch.resolve();
+      startupGate.resolve();
       throw error;
     }
   }
@@ -340,10 +340,10 @@ export class StartCommands {
         }
       },
     };
-    const scheduled = input.origin === 'agent-command'
+    const admissionResult = input.origin === 'agent-command'
       ? this.deps.queue.scheduleDirectInput(admission)
       : this.deps.queue.runInitialInput(admission);
-    await scheduled.catch((error: unknown) => {
+    await admissionResult.catch((error: unknown) => {
       if (input.origin === 'agent-command' && compensated) throw new AgentStartCompensatedError(error);
       throw error;
     });
