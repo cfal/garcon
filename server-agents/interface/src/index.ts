@@ -9,6 +9,7 @@ export * from './contracts/node-wire.js';
 export * from './contracts/services.js';
 export * from './contracts/transcript.js';
 export * from './errors.js';
+export { snapshotEstablishedSession } from './established-session.js';
 export * from './native-message-source.js';
 export * from './normalized-message-snapshot.js';
 export * from './node-wire.js';

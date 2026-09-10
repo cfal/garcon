@@ -43,7 +43,7 @@ import type {
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
-import { toAgentChatReference } from './integration-chat-reference.js';
+import { toAgentChatReference, toProviderNativeChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type {
@@ -71,7 +71,7 @@ export interface AgentRuntimeRouterOptions {
   directory: AgentDirectory;
   localNodeId: string;
   instances: Pick<AgentInstanceDirectory,
-    'get' | 'require' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'configurationForInstance' | 'commandsForInstance'>;
+    'get' | 'require' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'configurationForInstance' | 'commandsForInstance' | 'nativeForkFor'>;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
@@ -518,6 +518,7 @@ export class AgentRuntimeRouter {
     providerMeta?: JsonObject | null;
     signal: AbortSignal;
   }): Promise<ForkedAgentSessionOutcome | null> {
+    args.signal.throwIfAborted();
     if (
       args.messageOrdinal !== undefined
       && (!Number.isSafeInteger(args.messageOrdinal) || args.messageOrdinal <= 0)
@@ -526,47 +527,29 @@ export class AgentRuntimeRouter {
     }
     try {
       const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
-      const integration = this.#instances.requireFor(source);
-      if (!integration.forking) return null;
+      const forking = this.#instances.nativeForkFor(source);
+      if (!forking) return null;
       const selection = this.#endpointResolver.resolveSelection({
         agentId: source.agentId,
         model: source.model,
         apiProviderId: source.apiProviderId,
         modelEndpointId: source.modelEndpointId,
       });
-      const admission = { signal: args.signal, markStarted: async () => {} };
-      const configuration = await this.#resolveConfiguration(source, selection, { executionAdmission: admission });
-      const operation = operationIdentity(source, {}, 'fork-run');
-      const sourceReference = toAgentChatReference(
-        integration,
-        args.sourceChatId,
-        source,
-        this.#getCarryOverRevision(source),
-      );
-      const context = this.#executionContextV5(
-        args.targetChatId,
-        source,
-        configuration,
-        operation.turnId,
-        {
-          executionAdmission: admission,
+      const result = await forking.fork({
+        chatId: args.targetChatId,
+        source: toProviderNativeChatReference(args.sourceChatId, source, this.#getCarryOverRevision(source)),
+        configuration: {
+          model: selection.model,
+          permissionMode: source.permissionMode,
+          thinkingMode: source.thinkingMode,
+          settings: source.agentSettingsById?.[source.agentId] ?? null,
+          endpoint: toAgentEndpointSelection(this.#endpointResolver, selection),
         },
-      );
-      const result = await integration.forking.fork({
-        chatId: context.chatId,
-        projectPath: context.projectPath,
-        model: context.model,
-        permissionMode: context.permissionMode,
-        thinkingMode: context.thinkingMode,
-        settings: context.settings,
-        endpoint: context.endpoint,
-        admission: context.admission,
-        source: sourceReference,
         // A point fork must stay distinguishable from a whole-chat fork even
         // when the anchor row carries no provider identity: an empty object
         // reaches the facet's refusal path instead of forking the tip.
         providerMeta: args.messageOrdinal === undefined ? null : args.providerMeta ?? {},
-      });
+      }, args.signal);
       if (result.kind === 'unmaterialized') return result;
       return {
         kind: 'materialized',
@@ -612,9 +595,9 @@ export class AgentRuntimeRouter {
   }
 
   async discardForkedAgentSession(owner: LocatedChatOwner, session: StartedAgentSession): Promise<void> {
-    const forking = this.#instances.requireFor(owner).forking;
+    const forking = this.#instances.nativeForkFor(owner);
     if (!forking) return;
-    await forking.discard(session, new AbortController().signal);
+    await forking.discard({ session }, new AbortController().signal);
   }
 
   async runSingleQuery(

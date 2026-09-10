@@ -3,13 +3,14 @@ import { isExecutionIdentity, MAX_EXECUTION_IDENTITY_LENGTH } from '@garcon/comm
 import { isPermissionOccurrenceId } from '@garcon/common/permission-occurrence';
 import { parseNodeSessionIdentity } from '@garcon/common/node-operation';
 import { isToolUseMessage, type ChatMessage } from '@garcon/common/chat-types';
-import { parseNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type {
   NodeOutputAck, NodeOutputFrame, NodePermissionHandleRegistrar, NodeReplayReply, ProducerStreamIdentity, WireProducerEvent,
 } from './contracts/node-wire.js';
 import type { AgentPermissionResponseCapability, AgentProducerEvent } from './contracts/producer.js';
 import { parseOwnedNodeMessage } from './node-wire-message.js';
 import { MAX_NODE_OUTPUT_BYTES, NodeWireSnapshot } from './node-wire-snapshot.js';
+import { parseOwnedEstablishedSession } from './established-session.js';
+import { isNormalizedJsonObject as jsonObject } from './normalized-json.js';
 
 export const NODE_WIRE_VERSION = 1;
 export { MAX_NODE_OUTPUT_BYTES } from './node-wire-snapshot.js';
@@ -131,22 +132,9 @@ function parseOwnedWireProducerEvent(value: unknown): WireProducerEvent | null {
       return { type: 'rows', rows };
     }
     case 'session': {
-      if (!keys(value, ['type', 'session']) || !isRecord(value.session)
-        || !keys(value.session, ['agentSessionId', 'nativeSession', 'nativeSeedReceipt'])
-        || !nonEmpty(value.session.agentSessionId)) return null;
-      const session = value.session;
-      let nativeSession = null;
-      if (session.nativeSession !== null) {
-        const native = session.nativeSession;
-        if (!isRecord(native) || !keys(native, ['ownerId', 'schemaVersion', 'value'])
-          || !isExecutionIdentity(native.ownerId) || !sequence(native.schemaVersion, 1) || !jsonObject(native.value)) return null;
-        nativeSession = { ownerId: native.ownerId, schemaVersion: native.schemaVersion, value: native.value };
-      }
-      if (session.nativeSeedReceipt !== null && (!isRecord(session.nativeSeedReceipt)
-        || !keys(session.nativeSeedReceipt, ['agentSessionId', 'placement', 'format', 'codeUnitLength', 'sha256']))) return null;
-      const nativeSeedReceipt = session.nativeSeedReceipt === null ? null : parseNativeSeedReceipt(session.nativeSeedReceipt);
-      if (session.nativeSeedReceipt !== null && (!nativeSeedReceipt || nativeSeedReceipt.agentSessionId !== session.agentSessionId)) return null;
-      return { type: 'session', session: { agentSessionId: value.session.agentSessionId, nativeSession, nativeSeedReceipt } };
+      if (!keys(value, ['type', 'session'])) return null;
+      const session = parseOwnedEstablishedSession(value.session);
+      return session ? { type: 'session', session } : null;
     }
     case 'notice': {
       if (!keys(value, ['type', 'runId', 'content'], ['title']) || !isExecutionIdentity(value.runId)
@@ -347,20 +335,4 @@ function sequence(value: unknown, minimum = 0): value is number {
 
 function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && !value.includes('\0');
-}
-
-function jsonObject(value: unknown): value is JsonObject {
-  return isRecord(value) && jsonValue(value, 0);
-}
-
-function jsonValue(value: unknown, depth: number): boolean {
-  if (depth > 100) return false;
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value !== 'object' || typeof (value as { toJSON?: unknown }).toJSON === 'function') return false;
-  if (Array.isArray(value)) return value.every((item) => jsonValue(item, depth + 1));
-  if (!isRecord(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return (prototype === Object.prototype || prototype === null)
-    && Object.values(value).every((item) => jsonValue(item, depth + 1));
 }

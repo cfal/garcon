@@ -16,6 +16,8 @@ import { LocalProviderNativeActivityService } from '../execution-node/local-prov
 import type { ProviderNativeActivityService } from '../execution-nodes/provider-native-activity.js';
 import { LocalProviderHistoryImportService } from '../execution-node/local-provider-history-import.js';
 import type { ProviderHistoryImportService } from '../execution-nodes/provider-history-import.js';
+import { LocalProviderNativeForkService } from '../execution-node/local-provider-native-fork.js';
+import type { ProviderNativeForkService } from '../execution-nodes/provider-native-fork.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -34,6 +36,7 @@ export class AgentInstanceDirectory {
   readonly #nativeActivityServices = new Map<string, ProviderNativeActivityService>();
   readonly #legacyHistoryImportServices = new Map<string, ProviderHistoryImportService>();
   readonly #nativeHistoryImportServices = new Map<string, ProviderHistoryImportService>();
+  readonly #nativeForkServices = new Map<string, ProviderNativeForkService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -167,6 +170,18 @@ export class AgentInstanceDirectory {
   hasAvailableNativeHistoryImportFor(owner: LocatedChatOwner): boolean {
     const integration = this.get(owner.executionLocation);
     return integration !== null && integration.descriptor.id === owner.agentId && Boolean(integration.nativeHistoryImport);
+  }
+
+  nativeForkFor(owner: LocatedChatOwner): ProviderNativeForkService | null {
+    const integration = this.requireFor(owner);
+    if (!integration.forking) return null;
+    const key = executionInstanceKey(owner.executionLocation);
+    let service = this.#nativeForkServices.get(key);
+    if (!service) {
+      service = new LocalProviderNativeForkService(integration, integration.forking);
+      this.#nativeForkServices.set(key, service);
+    }
+    return service;
   }
 
   #configurationService(integration: AgentIntegration): ProviderConfigurationService {

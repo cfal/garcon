@@ -1,8 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
+import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
+import { LocalProviderNativeForkService } from '../../execution-node/local-provider-native-fork.js';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(fork) {
@@ -41,11 +43,12 @@ function makeRouter(fork) {
   const integration = {
     descriptor: {
       id: 'test',
-      supportedEndpointProtocols: [],
-      supportedPermissionModes: ['default'],
-      supportedThinkingModes: ['none'],
+      supportedEndpointProtocols: ['openai-compatible'],
+      supportedPermissionModes: ['default', 'acceptEdits'],
+      supportedThinkingModes: ['none', 'low'],
     },
     settings: { parse: (value) => value },
+    endpoints: { validate: mock(async () => {}) },
     execution,
     forking: {
       fork,
@@ -63,23 +66,24 @@ function makeRouter(fork) {
       return updated;
     }),
   };
+  const endpointResolver = {
+    resolveSelection: mock(() => ({
+      model: 'model-a', apiProviderId: null, endpointId: null, protocol: null, isLocal: false,
+    })),
+    resolveEndpointReference: mock(() => null),
+  };
   const router = new AgentRuntimeRouter({
     registry,
-    instances: { requireFor: mock(() => integration), configurationFor: () => new LocalProviderConfigurationService(integration) },
+    instances: {
+      requireFor: mock(() => integration),
+      configurationFor: () => new LocalProviderConfigurationService(integration),
+      nativeForkFor: () => new LocalProviderNativeForkService(integration, integration.forking),
+    },
     directory: {
       require: mock(() => integration),
       list: mock(() => [integration]),
     },
-    endpointResolver: {
-      resolveSelection: mock(() => ({
-        model: 'model-a',
-        apiProviderId: null,
-        endpointId: null,
-        protocol: null,
-        isLocal: false,
-      })),
-      resolveEndpointReference: mock(() => null),
-    },
+    endpointResolver,
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',
     createCarriedContext: async () => ({ kind: 'no-history' }),
@@ -87,7 +91,7 @@ function makeRouter(fork) {
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
-  return { router, entry, entries, execution, messages, integration };
+  return { router, entry, entries, execution, messages, integration, endpointResolver };
 }
 
 describe('AgentRuntimeRouter forks', () => {
@@ -98,9 +102,25 @@ describe('AgentRuntimeRouter forks', () => {
       session: {
         agentSessionId: 'forked-session',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'forked-session' } },
+        nativeSeedReceipt: null,
       },
     }));
-    const { router, entry, integration } = makeRouter(fork);
+    const { router, entry, integration, endpointResolver } = makeRouter(fork);
+    Object.assign(entry, {
+      model: 'model-b', permissionMode: 'acceptEdits', thinkingMode: 'low',
+      apiProviderId: 'synthetic-api', modelEndpointId: 'synthetic-endpoint', modelProtocol: 'openai-compatible',
+      agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: { profile: 'saved' } } },
+      nativeSeedReceipt: createNativeSeedReceipt({ agentSessionId: entry.agentSessionId,
+        placement: 'user-prefix', prefix: 'Synthetic source context' }),
+    });
+    endpointResolver.resolveSelection.mockImplementation(() => ({
+      model: 'resolved-model', apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint',
+      protocol: 'openai-compatible', isLocal: false,
+    }));
+    endpointResolver.resolveEndpointReference.mockImplementation(() => ({
+      apiProvider: { label: 'Synthetic API' },
+      endpoint: { baseUrl: 'https://synthetic.invalid/v1', headers: { 'x-synthetic': 'test' } },
+    }));
 
     await router.forkAgentSession({
       sourceSession: entry,
@@ -112,10 +132,27 @@ describe('AgentRuntimeRouter forks', () => {
     });
 
     expect(fork).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'target-chat', projectPath: '/repo', model: 'resolved-model',
+      permissionMode: 'acceptEdits', thinkingMode: 'low',
+      settings: { ownerId: 'test', schemaVersion: 1, values: { profile: 'saved' } },
+      endpoint: {
+        apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
+        protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'resolved-model',
+        isLocal: false, capabilities: null, headers: { 'x-synthetic': 'test' },
+        credential: { kind: 'api-provider-endpoint', apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint' },
+      },
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
       admission: expect.objectContaining({ signal: controller.signal }),
-      source: expect.objectContaining({ chatId: 'source-chat' }),
+      source: expect.objectContaining({
+        chatId: 'source-chat', agentSessionId: entry.agentSessionId,
+        nativeSession: entry.nativeSession, nativeSeedReceipt: entry.nativeSeedReceipt,
+        projectPath: entry.projectPath, model: entry.model, settings: entry.agentSettingsById.test,
+        carryOverRevision: 'carry-1',
+      }),
     }));
+    expect(endpointResolver.resolveSelection).toHaveBeenCalledWith({
+      agentId: 'test', model: 'model-b', apiProviderId: 'synthetic-api', modelEndpointId: 'synthetic-endpoint',
+    });
     expect(integration.forking).not.toHaveProperty('resolvePoint');
   });
 
@@ -124,6 +161,7 @@ describe('AgentRuntimeRouter forks', () => {
     const { router, entry, entries, execution } = makeRouter(fork);
 
     const outcome = await router.forkAgentSession({
+      signal: new AbortController().signal,
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -158,6 +196,7 @@ describe('AgentRuntimeRouter forks', () => {
     const { router, entry } = makeRouter(fork);
 
     await expect(router.forkAgentSession({
+      signal: new AbortController().signal,
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -176,6 +215,7 @@ describe('AgentRuntimeRouter forks', () => {
     const { router, entry } = makeRouter(fork);
 
     await expect(router.forkAgentSession({
+      signal: new AbortController().signal,
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -200,6 +240,7 @@ describe('AgentRuntimeRouter forks', () => {
     const { router, entry } = makeRouter(fork);
 
     await expect(router.forkAgentSession({
+      signal: new AbortController().signal,
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -224,6 +265,7 @@ describe('AgentRuntimeRouter forks', () => {
     const { router, entry } = makeRouter(fork);
 
     await expect(router.forkAgentSession({
+      signal: new AbortController().signal,
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -245,8 +287,10 @@ describe('AgentRuntimeRouter forks', () => {
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       messageOrdinal: 1,
+      signal: new AbortController().signal,
     });
     await router.forkAgentSession({
+      signal: new AbortController().signal,
       sourceSession: entry,
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
