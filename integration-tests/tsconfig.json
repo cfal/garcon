@@ -10,6 +10,6 @@
     "types": ["@types/bun", "../web/node_modules/svelte"],
     "paths": { "$shared/*": ["../common/*"] }
   },
-  "include": ["./**/*.ts", "../common/**/*.ts"],
+  "include": ["./**/*.ts", "../common/**/*.ts", "../server/types/**/*.d.ts"],
   "exclude": ["node_modules"]
 }

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import createFilesRoutes from '../files.js';
+import { createLocalFilesRoutes as createFilesRoutes } from './files-route-fixture.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
 import { MAX_ATTACHMENT_UPLOAD_BODY_BYTES } from '../../attachments/validation.ts';
@@ -54,6 +54,30 @@ afterEach(async () => {
 });
 
 describe('files route', () => {
+  it.each([1, 2])('returns a revision conflict for a cyclic save target at resolution %i', async (attempt) => {
+    const alias = path.join(projectPath, 'cycle.ts');
+    await fs.symlink(path.join(projectPath, 'src/main.ts'), alias);
+    let resolutions = 0;
+    const routes = createFilesRoutes({ getChat: () => null }, {
+      resolveSaveTarget: async (...args) => {
+        if (++resolutions === attempt) {
+          await fs.unlink(alias);
+          await fs.symlink(alias, alias);
+        }
+        return resolveRealWithinBase(...args);
+      },
+    });
+    const url = new URL(`http://localhost/api/v1/files/text?${new URLSearchParams({ projectPath, path: 'cycle.ts' })}`);
+    const response = await routes[url.pathname].PUT(new Request(url, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'forbidden', expectedRevision: 'v1:old', conflictResolution: 'overwrite' }),
+    }), url);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ errorCode: 'FILE_REVISION_CONFLICT' });
+    expect(resolutions).toBe(attempt);
+    expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe('hello\n');
+  });
+
   it('returns a parsed base-scoped tree response', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const url = new URL('http://localhost/api/v1/files/tree');

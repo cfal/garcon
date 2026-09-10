@@ -1,26 +1,11 @@
-// Resolves a project path from a request's `chatId` or `projectPath` query
-// param, enforcing the project-base boundary. Shared by routes that operate
-// against a project directory (files, slash-command discovery).
-
 import type { ProjectUnavailableReason } from '../../common/project-resolution.js';
 import { jsonError } from '../lib/http-error.js';
 import { projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import type { IChatRegistry } from '../chats/store.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 
 export type ProjectPathResolution =
   | { projectPath: string; error?: undefined }
   | { error: Response; projectPath?: undefined };
-
-export async function resolveAccessibleProjectPath(
-  projectPath: string,
-  inspect = inspectProjectDirectory,
-): Promise<ProjectPathResolution> {
-  const resolution = await inspect(projectPath);
-  return resolution.kind === 'available'
-    ? { projectPath: resolution.effectiveProjectKey }
-    : { error: projectUnavailableResponse(projectPath, resolution.reason) };
-}
 
 function projectPathNotFoundResponse(projectPath: string): Response {
   return Response.json(
@@ -48,11 +33,11 @@ export function projectUnavailableResponse(projectPath: string, reason: ProjectU
   );
 }
 
-// Resolves the project path from either a chatId or projectPath query param.
-export async function resolveProjectPathFromUrl(
+// Selects the captured path; only the workspace service interprets it on its owner.
+export function selectProjectPathFromUrl(
   registry: IChatRegistry,
   url: URL,
-): Promise<ProjectPathResolution> {
+): ProjectPathResolution {
   const chatId = url.searchParams.get('chatId');
   if (chatId) {
     const chat = registry.getChat(chatId);
@@ -61,12 +46,12 @@ export async function resolveProjectPathFromUrl(
         error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }),
       };
     }
-    return resolveAccessibleProjectPath(chat.projectPath);
+    return { projectPath: chat.projectPath };
   }
 
   const projectPath = url.searchParams.get('projectPath');
   if (!projectPath) {
     return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
   }
-  return resolveAccessibleProjectPath(projectPath);
+  return { projectPath };
 }

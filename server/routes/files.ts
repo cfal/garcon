@@ -1,163 +1,31 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import mime from 'mime-types';
 import { withJsonBody } from '../lib/json-route.js';
-import {
-  listDirectoryNames,
-  listDirectoryStrict,
-} from './projects.utils.js';
-import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
-import {
-  assertRealWithinProjectBase,
-  isProjectBoundaryError,
-  isWithinProjectBase,
-  projectBoundaryErrorResponse,
-  resolveRealWithinCanonicalBase,
-  resolveRealWithinBase,
-} from '../lib/path-boundary.ts';
-import { mapWithConcurrencyResult } from '../lib/concurrency.js';
-import {
-  resolveProjectPathFromUrl,
-  type ProjectPathResolution,
-} from './project-path-resolver.js';
+import { isProjectBoundaryError, projectBoundaryErrorResponse } from '../lib/path-boundary.js';
+import { selectProjectPathFromUrl, projectUnavailableResponse } from './project-path-resolver.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { isDomainError } from '../lib/domain-error.js';
+import { isDomainError, ProjectUnavailableError, ValidationDomainError } from '../lib/domain-error.js';
+import { FilePathMustIdentifyFileError } from '../files/file-revision.js';
 import {
-  getFileLockKey,
-  getFileRevisionOrMissing,
-  readVersionedFile,
-  writeVersionedTextFile,
-} from '../files/file-revision.js';
+  FileRevisionConflictError,
+  FileTreeDirectoryRequiredError,
+  type WorkspaceFileService,
+} from '../execution-nodes/workspace-files.js';
 import {
   AttachmentValidationError,
   MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
   uploadedAttachmentFromFile,
   validateAttachmentUploadBatch,
 } from '../attachments/validation.js';
-import {
-  FILE_REVISION_HEADER,
-  parseSaveTextRequest,
-  type FileIdentityResponse,
-  type FileRevisionResponse,
-  type ReadTextResponse,
-  type SaveTextResponse,
-  type FileTreeBreadcrumb,
-  type FileTreeEntry,
-  type FileTreeHomeDirectory,
-  type FileTreeResponse,
-} from '../../common/file-contracts.ts';
+import { FILE_REVISION_HEADER, parseSaveTextRequest } from '../../common/file-contracts.js';
 
 const logger = createLogger('routes:files');
 
-const FILE_LIST_MAX_DEPTH = 10;
-const FILE_LIST_MAX_RESULTS = 10_000;
-const FILE_TREE_CONTAINMENT_CONCURRENCY = 16;
 const ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE = 'Upload too large. Maximum request size is 30MB.';
-const FILE_LIST_SKIP_NAMES = new Set([
-  'node_modules',
-  'dist',
-  'build',
-  '.git',
-  '.svn',
-  '.hg',
-]);
-
-interface FileListItem {
-  name: string;
-  path: string;
-  relativePath: string;
-  type: 'file';
-}
-
-interface FileListResult {
-  files: FileListItem[];
-  truncated: boolean;
-}
-
-async function listAllFiles(dirPath: string): Promise<FileListResult> {
-  const results: FileListItem[] = [];
-  const pending: Array<{ dirPath: string; depth: number }> = [
-    { dirPath, depth: 0 },
-  ];
-  let truncated = false;
-
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    let entries;
-    try {
-      entries = await fs.readdir(current.dirPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    entries.sort((left, right) => left.name.localeCompare(right.name));
-    for (let index = entries.length - 1; index >= 0; index -= 1) {
-      const entry = entries[index];
-      if (FILE_LIST_SKIP_NAMES.has(entry.name)) continue;
-      const itemPath = path.join(current.dirPath, entry.name);
-      if (entry.isDirectory()) {
-        if (current.depth < FILE_LIST_MAX_DEPTH) {
-          pending.push({ dirPath: itemPath, depth: current.depth + 1 });
-        }
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      if (results.length >= FILE_LIST_MAX_RESULTS) {
-        truncated = true;
-        pending.length = 0;
-        break;
-      }
-      results.push({
-        name: entry.name,
-        path: itemPath,
-        relativePath: path
-          .relative(dirPath, itemPath)
-          .split(path.sep)
-          .join('/'),
-        type: 'file',
-      });
-    }
-  }
-
-  return { files: results, truncated };
-}
-
-function portableRelativePath(rootPath: string, targetPath: string): string {
-  return path.relative(rootPath, targetPath).split(path.sep).join('/');
-}
-
-function buildFileTreeBreadcrumbs(
-  rootPath: string,
-  targetPath: string,
-): FileTreeBreadcrumb[] {
-  const breadcrumbs: FileTreeBreadcrumb[] = [
-    { name: path.basename(rootPath) || rootPath, path: rootPath },
-  ];
-  let currentPath = rootPath;
-  const relativePath = path.relative(rootPath, targetPath);
-  for (const segment of relativePath.split(path.sep).filter(Boolean)) {
-    currentPath = path.join(currentPath, segment);
-    breadcrumbs.push({ name: segment, path: currentPath });
-  }
-  return breadcrumbs;
-}
-
-function isOmittableFileTreeEntryError(error: unknown): boolean {
-  return (
-    isProjectBoundaryError(error) ||
-    hasNodeErrorCode(error, 'ENOENT') ||
-    hasNodeErrorCode(error, 'ENOTDIR') ||
-    hasNodeErrorCode(error, 'ELOOP') ||
-    hasNodeErrorCode(error, 'EACCES') ||
-    hasNodeErrorCode(error, 'EPERM')
-  );
-}
+const CLIENT_CLOSED_REQUEST_STATUS = 499;
 
 async function readAttachmentFormData(request: Request): Promise<FormData> {
   if (!request.body) return request.formData();
@@ -178,36 +46,6 @@ async function readAttachmentFormData(request: Request): Promise<FormData> {
   }).formData();
 }
 
-async function resolveFileTreeHomeDirectory(
-  fileRootPath: string,
-): Promise<FileTreeHomeDirectory | null> {
-  let homePath: string;
-  try {
-    homePath = await resolveRealWithinCanonicalBase(
-      fileRootPath,
-      getHomeDirectoryPath(),
-    );
-    if (!(await fs.stat(homePath)).isDirectory()) return null;
-  } catch {
-    // Optional Home discovery never discloses paths or blocks the file tree.
-    return null;
-  }
-  return {
-    path: homePath,
-    breadcrumbs: buildFileTreeBreadcrumbs(fileRootPath, homePath),
-  };
-}
-
-interface FilesRouteDependencies {
-  listTreeDirectory: typeof listDirectoryStrict;
-  resolveSaveTarget: typeof resolveRealWithinBase;
-}
-
-const defaultFilesRouteDependencies: FilesRouteDependencies = {
-  listTreeDirectory: listDirectoryStrict,
-  resolveSaveTarget: resolveRealWithinBase,
-};
-
 function fileRevisionConflictResponse(): Response {
   return jsonError(
     'File changed on disk',
@@ -220,89 +58,42 @@ function fileRevisionConflictResponse(): Response {
 function unexpectedFileOperationError(
   operation: string,
   error: unknown,
+  request: Request,
 ): Response {
+  const cancelled = cancelledFileRequestResponse(request, error);
+  if (cancelled) return cancelled;
+  if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
   if (!isDomainError(error)) {
     logger.error(`files: ${operation} error:`, errorMessage(error));
   }
   return jsonErrorFromUnknown(error);
 }
 
+function cancelledFileRequestResponse(request: Request, error: unknown): Response | null {
+  if (request.signal.aborted && (
+    error === request.signal.reason || (error instanceof Error && error.name === 'AbortError')
+  )) {
+    return new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS });
+  }
+  return null;
+}
+
 export default function createFilesRoutes(
   registry: IChatRegistry,
-  dependencyOverrides: Partial<FilesRouteDependencies> = {},
+  files: WorkspaceFileService,
 ): RouteMap {
-  const dependencies = {
-    ...defaultFilesRouteDependencies,
-    ...dependencyOverrides,
-  };
-  const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
-    resolveProjectPathFromUrl(registry, url);
-  const saveLocks = new KeyedPromiseLock();
+  const selectProject = (url: URL) => selectProjectPathFromUrl(registry, url);
 
   async function handleBaseTree(
-    _request: Request,
+    request: Request,
     url: URL,
   ): Promise<Response> {
     try {
-      const fileRootPath =
-        await assertRealWithinProjectBase(getProjectBasePath());
-      const requestedPath = url.searchParams.get('path') || fileRootPath;
-      const directoryPath = await assertRealWithinProjectBase(requestedPath);
-      const directoryStat = await fs.stat(directoryPath);
-      if (!directoryStat.isDirectory()) {
-        return jsonError(
-          'File tree path must identify a directory',
-          400,
-          'FILE_TREE_DIRECTORY_REQUIRED',
-          false,
-        );
-      }
-      const homeDirectory = await resolveFileTreeHomeDirectory(fileRootPath);
-
-      const listedEntries = await dependencies.listTreeDirectory(
-        directoryPath,
-        true,
-      );
-      const resolvedEntries = await mapWithConcurrencyResult(
-        listedEntries,
-        FILE_TREE_CONTAINMENT_CONCURRENCY,
-        async (entry): Promise<FileTreeEntry | null> => {
-          try {
-            await resolveRealWithinCanonicalBase(fileRootPath, entry.path);
-            return {
-              name: entry.name,
-              path: entry.path,
-              relativePath: portableRelativePath(fileRootPath, entry.path),
-              type: entry.type,
-              size: entry.size ?? 0,
-              modified: entry.modified ?? null,
-              permissionsRwx: entry.permissionsRwx ?? '---------',
-            };
-          } catch (error) {
-            if (isOmittableFileTreeEntryError(error)) return null;
-            throw error;
-          }
-        },
-      );
-      const entries: FileTreeEntry[] = [];
-      for (const entry of resolvedEntries) {
-        if (entry) entries.push(entry);
-      }
-
-      const response: FileTreeResponse = {
-        fileRootPath,
-        homeDirectory,
-        directory: {
-          path: directoryPath,
-          relativePath: portableRelativePath(fileRootPath, directoryPath),
-          parentPath:
-            directoryPath === fileRootPath ? null : path.dirname(directoryPath),
-          breadcrumbs: buildFileTreeBreadcrumbs(fileRootPath, directoryPath),
-        },
-        entries,
-      };
-      return Response.json(response);
+      return Response.json(await files.tree(url.searchParams.get('path'), request.signal));
     } catch (error) {
+      if (error instanceof FileTreeDirectoryRequiredError) {
+        return jsonError(error.message, 400, 'FILE_TREE_DIRECTORY_REQUIRED', false);
+      }
       if (isProjectBoundaryError(error)) return projectBoundaryErrorResponse();
       if (
         hasNodeErrorCode(error, 'ENOENT') ||
@@ -326,79 +117,40 @@ export default function createFilesRoutes(
           false,
         );
       }
-      logger.error('files: file tree error:', errorMessage(error));
-      return jsonErrorFromUnknown(error);
+      return unexpectedFileOperationError('file tree', error, request);
     }
   }
 
-  async function handleList(_request: Request, url: URL): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
+  async function handleList(request: Request, url: URL): Promise<Response> {
+    const selected = selectProject(url);
+    if (selected.error) return selected.error;
     try {
-      const { files, truncated } = await listAllFiles(projectPath);
-      return Response.json(files, {
-        headers: truncated
-          ? { 'X-Garcon-File-List-Truncated': 'true' }
-          : undefined,
+      const { files: listed, truncated } = await files.list(selected.projectPath, request.signal);
+      return Response.json(listed, {
+        headers: truncated ? { 'X-Garcon-File-List-Truncated': 'true' } : undefined,
       });
     } catch (error) {
+      const cancelled = cancelledFileRequestResponse(request, error);
+      if (cancelled) return cancelled;
+      if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function handleIdentity(
-    _request: Request,
-    url: URL,
-  ): Promise<Response> {
-    const requestedPath = url.searchParams.get('path');
-    if (!requestedPath || path.isAbsolute(requestedPath)) {
-      return Response.json(
-        { error: 'A relative file path is required' },
-        { status: 400 },
-      );
-    }
-    const normalizedInput = path.normalize(requestedPath);
-    if (
-      normalizedInput === '.' ||
-      normalizedInput.startsWith(`..${path.sep}`) ||
-      normalizedInput === '..'
-    ) {
-      return Response.json(
-        { error: 'A valid relative file path is required' },
-        { status: 400 },
-      );
-    }
-
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
+  async function handleIdentity(request: Request, url: URL): Promise<Response> {
+    const selected = selectProject(url);
+    if (selected.error) return selected.error;
     try {
-      const targetPath = await resolveRealWithinBase(
-        projectPath,
-        normalizedInput,
-      );
-      const targetStat = await fs.stat(targetPath);
-      if (!targetStat.isFile()) {
-        return Response.json(
-          { error: 'File path must identify a file' },
-          { status: 400 },
-        );
-      }
-      const normalizedRelativePath = path
-        .relative(projectPath, targetPath)
-        .split(path.sep)
-        .join('/');
-      const response: FileIdentityResponse = {
-        success: true,
-        identity: {
-          canonicalFileRootPath: projectPath,
-          normalizedRelativePath,
-        },
-      };
-      return Response.json(response);
+      return Response.json(await files.identity({
+        projectPath: selected.projectPath, filePath: url.searchParams.get('path') || '',
+      }, request.signal));
     } catch (error) {
+      const cancelled = cancelledFileRequestResponse(request, error);
+      if (cancelled) return cancelled;
+      if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
+      if (error instanceof ValidationDomainError || error instanceof FilePathMustIdentifyFileError) {
+        return Response.json({ error: error.message }, { status: 400 });
+      }
       if (isProjectBoundaryError(error)) {
         return Response.json(
           { error: 'Path must be under project root' },
@@ -416,23 +168,13 @@ export default function createFilesRoutes(
     }
   }
 
-  async function getText(_request: Request, url: URL): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
+  async function getText(request: Request, url: URL): Promise<Response> {
+    const selected = selectProject(url);
+    if (selected.error) return selected.error;
     try {
       const filePath = url.searchParams.get('path');
-      if (!filePath)
-        return Response.json({ error: 'Invalid file path' }, { status: 400 });
-      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      const { bytes, revision } = await readVersionedFile(resolvedFile);
-      const response: ReadTextResponse = {
-        content: bytes.toString('utf8'),
-        path: resolvedFile,
-        revision,
-      };
-      return Response.json(response);
+      if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
+      return Response.json(await files.readText({ projectPath: selected.projectPath, filePath }, request.signal));
     } catch (error) {
       if (isProjectBoundaryError(error))
         return Response.json(
@@ -443,34 +185,17 @@ export default function createFilesRoutes(
         return Response.json({ error: 'File not found' }, { status: 404 });
       if (hasNodeErrorCode(error, 'EACCES'))
         return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return unexpectedFileOperationError('text read', error);
+      return unexpectedFileOperationError('text read', error, request);
     }
   }
 
-  async function handleRevision(
-    _request: Request,
-    url: URL,
-  ): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
+  async function handleRevision(request: Request, url: URL): Promise<Response> {
+    const selected = selectProject(url);
+    if (selected.error) return selected.error;
     try {
       const filePath = url.searchParams.get('path');
-      if (!filePath) {
-        return jsonError(
-          'Invalid file path',
-          400,
-          'VALIDATION_FAILED',
-          false,
-        );
-      }
-      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      const revision = await getFileRevisionOrMissing(resolvedFile);
-      const response: FileRevisionResponse = revision
-        ? { status: 'ready', revision }
-        : { status: 'missing' };
-      return Response.json(response);
+      if (!filePath) return jsonError('Invalid file path', 400, 'VALIDATION_FAILED', false);
+      return Response.json(await files.revision({ projectPath: selected.projectPath, filePath }, request.signal));
     } catch (error) {
       if (isProjectBoundaryError(error)) return projectBoundaryErrorResponse();
       if (
@@ -484,68 +209,21 @@ export default function createFilesRoutes(
           false,
         );
       }
-      return unexpectedFileOperationError('revision check', error);
+      return unexpectedFileOperationError('revision check', error, request);
     }
   }
 
-  async function putText(
-    body: JsonBody,
-    _request: Request,
-    url: URL,
-  ): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
+  async function putText(body: JsonBody, request: Request, url: URL): Promise<Response> {
+    const selected = selectProject(url);
+    if (selected.error) return selected.error;
     try {
       const filePath = url.searchParams.get('path');
-      if (!filePath)
-        return jsonError('Invalid file path', 400, 'VALIDATION_FAILED', false);
+      if (!filePath) return jsonError('Invalid file path', 400, 'VALIDATION_FAILED', false);
       const saveRequest = parseSaveTextRequest(asJsonBody(body));
       if (!saveRequest) {
-        return jsonError(
-          'Content, expectedRevision, and conflictResolution are required',
-          400,
-          'VALIDATION_FAILED',
-          false,
-        );
+        return jsonError('Content, expectedRevision, and conflictResolution are required', 400, 'VALIDATION_FAILED', false);
       }
-      const resolvedFile = await dependencies.resolveSaveTarget(
-        projectPath,
-        filePath,
-      );
-      const lockKey = await getFileLockKey(resolvedFile);
-      return await saveLocks.runExclusive(lockKey, async () => {
-        const lockedResolvedFile = await dependencies.resolveSaveTarget(
-          projectPath,
-          filePath,
-        );
-        const lockedKey = await getFileLockKey(lockedResolvedFile);
-        if (lockedResolvedFile !== resolvedFile || lockedKey !== lockKey) {
-          return fileRevisionConflictResponse();
-        }
-        const currentRevision = await getFileRevisionOrMissing(resolvedFile);
-        if (
-          saveRequest.conflictResolution === 'reject' &&
-          currentRevision !== saveRequest.expectedRevision
-        ) {
-          return fileRevisionConflictResponse();
-        }
-
-        // External processes remain outside this lock, so the handle anchors the
-        // returned revision to the file Garcon opened rather than a later pathname.
-        const revision = await writeVersionedTextFile(
-          resolvedFile,
-          saveRequest.content,
-        );
-        const response: SaveTextResponse = {
-          success: true,
-          path: resolvedFile,
-          message: 'File saved successfully',
-          revision,
-        };
-        return Response.json(response);
-      });
+      return Response.json(await files.saveText({ projectPath: selected.projectPath, filePath }, saveRequest, request.signal));
     } catch (error) {
       if (isProjectBoundaryError(error))
         return Response.json(
@@ -559,35 +237,21 @@ export default function createFilesRoutes(
         );
       if (hasNodeErrorCode(error, 'EACCES'))
         return Response.json({ error: 'Permission denied' }, { status: 403 });
-      if (hasNodeErrorCode(error, 'ELOOP')) {
+      if (error instanceof FileRevisionConflictError) {
         return fileRevisionConflictResponse();
       }
-      return unexpectedFileOperationError('text save', error);
+      return unexpectedFileOperationError('text save', error, request);
     }
   }
 
-  async function handleContent(_request: Request, url: URL): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
+  async function handleContent(request: Request, url: URL): Promise<Response> {
+    const selected = selectProject(url);
+    if (selected.error) return selected.error;
     try {
       const filePath = url.searchParams.get('path');
-      if (!filePath)
-        return Response.json({ error: 'Invalid file path' }, { status: 400 });
-      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      const mimeType = mime.lookup(resolvedFile) || 'application/octet-stream';
-      const { bytes, revision } = await readVersionedFile(resolvedFile);
-      const body =
-        bytes.buffer instanceof ArrayBuffer
-          ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-          : Uint8Array.from(bytes);
-      return new Response(body, {
-        headers: {
-          'Content-Type': mimeType,
-          [FILE_REVISION_HEADER]: revision,
-        },
-      });
+      if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
+      const { bytes, mimeType, revision } = await files.content({ projectPath: selected.projectPath, filePath }, request.signal);
+      return new Response(bytes, { headers: { 'Content-Type': mimeType, [FILE_REVISION_HEADER]: revision } });
     } catch (error) {
       if (isProjectBoundaryError(error))
         return Response.json(
@@ -596,7 +260,7 @@ export default function createFilesRoutes(
         );
       if (hasNodeErrorCode(error, 'ENOENT'))
         return Response.json({ error: 'File not found' }, { status: 404 });
-      return unexpectedFileOperationError('content read', error);
+      return unexpectedFileOperationError('content read', error, request);
     }
   }
 
@@ -639,40 +303,11 @@ export default function createFilesRoutes(
     }
   }
 
-  async function handleBrowse(_request: Request, url: URL): Promise<Response> {
-    const dirPath = url.searchParams.get('path') || getProjectBasePath();
-
-    if (!isWithinProjectBase(dirPath)) {
-      return Response.json([]);
-    }
-
-    let realDirPath: string;
+  async function handleBrowse(request: Request, url: URL): Promise<Response> {
     try {
-      realDirPath = await assertRealWithinProjectBase(dirPath);
-    } catch {
-      return Response.json([]);
-    }
-
-    try {
-      await fs.access(realDirPath);
-    } catch {
-      return Response.json([]);
-    }
-
-    try {
-      const entries = await listDirectoryNames(realDirPath, true);
-      const safeEntries = [];
-      for (const entry of entries) {
-        try {
-          await assertRealWithinProjectBase(entry.path);
-          safeEntries.push(entry);
-        } catch {
-          // Drops symlinked or raced entries that no longer stay under the project base.
-        }
-      }
-      return Response.json(safeEntries);
-    } catch {
-      return Response.json([]);
+      return Response.json(await files.browse(url.searchParams.get('path'), request.signal));
+    } catch (error) {
+      return unexpectedFileOperationError('directory browse', error, request);
     }
   }
 

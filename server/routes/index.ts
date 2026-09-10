@@ -61,7 +61,9 @@ import type { PreambleService } from '../preambles/service.js';
 import type { ChatPreambleSelectionService } from '../preambles/chat-selection-service.js';
 import type { ChatBoardService } from '../chat-boards/service.js';
 import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
-import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { LocalWorkspaceFileService } from '../execution-node/local-workspace-files.js';
+import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
 
 export default function createAllRoutes(workspaceDir: string, {
   registry,
@@ -133,6 +135,10 @@ export default function createAllRoutes(workspaceDir: string, {
   handoffArtifact: HandoffArtifactService;
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
+  const workspaceFiles = new LocalWorkspaceFileService({
+    projectBasePath: getProjectBasePath(), homeDirectoryPath: getHomeDirectoryPath(),
+    saveLocks: new KeyedPromiseLock(),
+  });
   return {
     ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
@@ -170,7 +176,7 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createChatTagRoutes(chatTags),
     ...createChatBoardRoutes(chatBoards),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
-    ...createFilesRoutes(registry),
+    ...createFilesRoutes(registry, workspaceFiles),
     ...createCommandsRoutes({ registry, agents }),
     ...createWorkspaceRoutes(
       settings,

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import createFilesRoutes from '../files.ts';
+import { createLocalFilesRoutes as createFilesRoutes } from './files-route-fixture.js';
 
 let projectBase;
 let projectPath;
