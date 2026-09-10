@@ -63,7 +63,10 @@ import type { ChatBoardService } from '../chat-boards/service.js';
 import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { LocalWorkspaceFileService } from '../execution-node/local-workspace-files.js';
-import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
+import { createLocalWorkspaceGitService } from '../execution-node/local-workspace-git.js';
+import { resolveNetworkGitTimeoutMs } from '../git/status.js';
+import { assertRealWithinProjectBase } from '../lib/path-boundary.js';
+import { getHomeDirectoryPath, getHttpIdleTimeoutSeconds, getProjectBasePath } from '../config.js';
 
 export default function createAllRoutes(workspaceDir: string, {
   registry,
@@ -139,6 +142,10 @@ export default function createAllRoutes(workspaceDir: string, {
     projectBasePath: getProjectBasePath(), homeDirectoryPath: getHomeDirectoryPath(),
     saveLocks: new KeyedPromiseLock(),
   });
+  const workspaceGit = createLocalWorkspaceGitService({
+    assertProjectPathAllowed: assertRealWithinProjectBase,
+    networkTimeoutMs: resolveNetworkGitTimeoutMs(getHttpIdleTimeoutSeconds()),
+  });
   return {
     ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
@@ -190,7 +197,7 @@ export default function createAllRoutes(workspaceDir: string, {
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
     }),
-    ...createGitRoutes(agents, settings),
+    ...createGitRoutes(workspaceGit, agents, settings),
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),

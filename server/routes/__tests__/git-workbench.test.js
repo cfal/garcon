@@ -1,3 +1,5 @@
+import { createLocalWorkspaceGitService } from '../../execution-node/local-workspace-git.js';
+import { assertRealWithinProjectBase } from '../../lib/path-boundary.js';
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'path';
@@ -52,7 +54,10 @@ const ctx = {
   },
 };
 
-const routes = createGitRoutes(ctx.agents, ctx.settings);
+const routes = createGitRoutes(
+  createLocalWorkspaceGitService({ assertProjectPathAllowed: assertRealWithinProjectBase, networkTimeoutMs: 30_000 }),
+  ctx.agents, ctx.settings,
+);
 
 async function streamText(stream) {
   return stream ? new Response(stream).text() : '';

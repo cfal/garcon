@@ -1,3 +1,4 @@
+import { gitErrorResponse } from './git-http-error.js';
 import type {
   GitCommandTrace,
   GitReviewRouteMetrics,
@@ -81,4 +82,13 @@ export function traceGitJsonResponse(
       'server-timing': serverTimingHeader(durationMs, trace, phases),
     },
   });
+}
+
+export async function gitJson(action: () => unknown | Promise<unknown>): Promise<Response> {
+  try {
+    const result = await action();
+    return result instanceof Response ? result : Response.json(result);
+  } catch (error) {
+    return gitErrorResponse(error);
+  }
 }

@@ -211,23 +211,15 @@ export interface GitAgentRunner {
   runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
 }
 
-export interface ClassifiedGitError {
-  status: number;
-  message: string;
-  details?: unknown;
-}
-
-export interface CreateGitServiceOptions {
-  agents: GitAgentRunner;
-  classifyGitError(error: unknown): ClassifiedGitError;
-  assertProjectPathAllowed?(projectPath: string): Promise<string>;
-}
-
-export interface ProjectOptions {
-  projectPath: string;
+/** Carries process-local cancellation and instrumentation, not wire fields. */
+export interface GitLocalOperationContext {
   trace?: GitCommandTrace[];
   metrics?: GitReviewRouteMetrics;
   signal?: AbortSignal;
+}
+
+export interface ProjectOptions extends GitLocalOperationContext {
+  projectPath: string;
 }
 
 export type GitTreeStatsState = 'pending' | 'loaded';
@@ -914,61 +906,86 @@ export interface RevertCommitOptions extends ProjectOptions {
   commit: string;
 }
 
-export interface GitService {
-  getStatus(options: ProjectOptions): Promise<unknown>;
-  initialCommit(options: ProjectOptions): Promise<unknown>;
-  commit(options: CommitOptions): Promise<GitCommitResult>;
-  getBranches(options: ProjectOptions): Promise<unknown>;
-  getRefs(options: GitRefsOptions): Promise<GitRefsResponse>;
-  checkout(options: CheckoutOptions): Promise<unknown>;
-  createBranch(options: BranchOptions): Promise<unknown>;
-  generateCommitMessageForFiles(
-    options: CommitMessageFileOptions,
-  ): Promise<CommitMessageGenerationResult>;
-  getRemoteStatus(options: ProjectOptions): Promise<unknown>;
-  getRemotes(options: ProjectOptions): Promise<unknown>;
-  fetch(options: ProjectOptions): Promise<unknown>;
-  pull(options: ProjectOptions): Promise<unknown>;
-  push(options: PushOptions): Promise<unknown>;
-  discard(options: FileOptions): Promise<unknown>;
-  deleteUntracked(options: FileOptions): Promise<unknown>;
-  getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
-  getWorkingTreeFingerprint(
-    options: GitWorkingTreeFingerprintOptions,
-  ): Promise<GitWorkingTreeFingerprintResponse>;
-  getQuickSummary(options: GitQuickSummaryOptions): Promise<GitQuickSummaryResponse>;
-  getReviewDocumentFileBodies(
-    options: GitReviewDocumentFileBodiesOptions,
-  ): Promise<GitReviewDocumentFileBodiesResponse>;
-  getHistoryCommits(options: GitHistoryCommitListOptions): Promise<GitHistoryCommitListResponse>;
-  getCommitSnapshot(options: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse>;
-  getComparisonSnapshot(
-    options: GitComparisonSnapshotOptions,
-  ): Promise<GitComparisonSnapshotResponse>;
-  getComparisonFreshness(
-    options: GitComparisonFreshnessOptions,
-  ): Promise<GitComparisonFreshnessResponse>;
-  stageSelection(options: StageSelectionOptions): Promise<unknown>;
-  stageHunk(options: StageHunkOptions): Promise<unknown>;
-  getConflicts(options: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }>;
-  getConflictDetails(options: ConflictDetailsOptions): Promise<GitConflictDetails>;
-  acceptConflictSide(options: ConflictAcceptOptions): Promise<unknown>;
-  markConflictResolved(options: FileOptions): Promise<unknown>;
-  getStashes(options: ProjectOptions): Promise<{ stashes: GitStashEntry[] }>;
-  createStash(options: StashCreateOptions): Promise<unknown>;
-  applyStash(options: StashRefOptions): Promise<unknown>;
-  popStash(options: StashRefOptions): Promise<unknown>;
-  dropStash(options: StashRefOptions): Promise<unknown>;
-  getFileHistory(options: FileHistoryOptions): Promise<{ commits: GitFileHistoryEntry[] }>;
-  getBlame(options: BlameOptions): Promise<{ lines: GitBlameLine[]; truncated: boolean }>;
-  getGraph(options: GraphOptions): Promise<{ commits: GitGraphCommit[] }>;
-  getRepoInfo(options: ProjectOptions): Promise<RepoInfo>;
-  getWorktrees(options: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }>;
-  getTargetCandidates(options: ProjectOptions): Promise<{ targets: TargetCandidate[] }>;
-  createWorktree(options: CreateWorktreeOptions): Promise<unknown>;
-  removeWorktree(options: RemoveWorktreeOptions): Promise<unknown>;
-  commitIndex(options: CommitIndexOptions): Promise<unknown>;
-  stagePaths(options: StagePathsOptions): Promise<unknown>;
-  revertCommit(options: RevertCommitOptions): Promise<unknown>;
-  toHttpError(error: unknown): Response;
+export interface GitStatusResult {
+  branch: string;
+  hasCommits: boolean;
+  modified: string[];
+  added: string[];
+  deleted: string[];
+  untracked: string[];
 }
+
+export interface GitMutationResult {
+  success: true;
+}
+
+export interface GitCommandMutationResult extends GitMutationResult {
+  output: string;
+}
+
+export interface GitMessageMutationResult extends GitMutationResult {
+  message: string;
+}
+
+export interface GitInitialCommitResult extends GitCommandMutationResult {
+  message: string;
+}
+
+export interface GitBranchListResult {
+  branches: string[];
+}
+
+export type GitRemoteStatusResult =
+  | {
+      hasRemote: boolean;
+      hasUpstream: false;
+      branch: string;
+      remoteName: string | null;
+      message: string;
+    }
+  | {
+      hasRemote: true;
+      hasUpstream: true;
+      branch: string;
+      remoteBranch: string;
+      remoteName: string;
+      ahead: number;
+      behind: number;
+      isUpToDate: boolean;
+    };
+
+export interface GitRemoteListResult {
+  remotes: RemoteInfo[];
+}
+
+export interface GitFetchResult extends GitCommandMutationResult {
+  remoteName: string;
+}
+
+export interface GitRemoteBranchMutationResult extends GitFetchResult {
+  remoteBranch: string;
+}
+
+export interface GitWorktreeCreateResult extends GitCommandMutationResult {
+  worktreePath: string;
+}
+
+export interface CommitMessageSourceOptions extends ProjectOptions {
+  files: string[];
+}
+
+export interface CapturedCommitMessageSource {
+  readonly projectPath: string;
+  readonly files: readonly string[];
+  readonly diffContext: string;
+}
+
+export type CommitMessageErrorCode =
+  | 'COMMIT_MESSAGE_NO_STAGED_FILES'
+  | 'COMMIT_MESSAGE_AGENT_AUTH_REQUIRED'
+  | 'COMMIT_MESSAGE_RATE_LIMITED'
+  | 'COMMIT_MESSAGE_AGENT_UNAVAILABLE'
+  | 'COMMIT_MESSAGE_TIMEOUT'
+  | 'COMMIT_MESSAGE_EMPTY_RESPONSE'
+  | 'COMMIT_MESSAGE_INVALID_RESPONSE'
+  | 'COMMIT_MESSAGE_GENERATION_FAILED';

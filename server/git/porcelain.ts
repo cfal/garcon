@@ -13,12 +13,14 @@ import type {
   FileHistoryOptions,
   FileOptions,
   GitBlameLine,
+  GitCommandMutationResult,
   GitConflictContent,
   GitConflictDetails,
   GitConflictFile,
   GitConflictStatus,
   GitFileHistoryEntry,
   GitGraphCommit,
+  GitMutationResult,
   GitStashEntry,
   GraphOptions,
   ProjectOptions,
@@ -222,7 +224,7 @@ async function acceptConflictSide({
   file,
   side,
   signal,
-}: ConflictAcceptOptions): Promise<{ success: boolean }> {
+}: ConflictAcceptOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
   await runGit(projectPath, ['checkout', side === 'ours' ? '--ours' : '--theirs', '--', file], { signal });
   await runGit(projectPath, ['add', '--', file], { signal });
@@ -233,7 +235,7 @@ async function markConflictResolved({
   projectPath,
   file,
   signal,
-}: FileOptions): Promise<{ success: boolean }> {
+}: FileOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
   const workingPath = resolvePathWithinProject(projectPath, file);
   const working = await fs.readFile(workingPath, 'utf-8');
@@ -279,7 +281,7 @@ async function createStash({
   message,
   includeUntracked,
   signal,
-}: StashCreateOptions): Promise<{ success: boolean; output: string }> {
+}: StashCreateOptions): Promise<GitCommandMutationResult> {
   await assertGitRepository(projectPath);
   const args = ['stash', 'push'];
   if (includeUntracked) args.push('-u');
@@ -288,21 +290,21 @@ async function createStash({
   return { success: true, output: stdout.trim() };
 }
 
-async function applyStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
+async function applyStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<GitMutationResult> {
   assertSafeStashRef(stashRef);
   await assertGitRepository(projectPath);
   await runGit(projectPath, ['stash', 'apply', stashRef], { signal });
   return { success: true };
 }
 
-async function popStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
+async function popStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<GitMutationResult> {
   assertSafeStashRef(stashRef);
   await assertGitRepository(projectPath);
   await runGit(projectPath, ['stash', 'pop', stashRef], { signal });
   return { success: true };
 }
 
-async function dropStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
+async function dropStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<GitMutationResult> {
   assertSafeStashRef(stashRef);
   await assertGitRepository(projectPath);
   await runGit(projectPath, ['stash', 'drop', stashRef], { signal });

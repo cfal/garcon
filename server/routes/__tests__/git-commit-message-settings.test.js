@@ -1,38 +1,36 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { DomainError } from '../../lib/domain-error.js';
+import { createLocalWorkspaceGitService } from '../../execution-node/local-workspace-git.js';
+import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '../../../common/generation-prompts.js';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
 }
 
 const parseJsonBody = mock(() => Promise.resolve({}));
-const generateCommitMessageForFiles = mock(() =>
-  Promise.resolve({ message: 'feat: generated', directoryPrefix: '' }),
-);
-const assertRealWithinProjectBase = mock((targetPath) => Promise.resolve(targetPath));
-const isProjectBoundaryError = mock(() => false);
+const diffContext = 'synthetic staged diff';
+const canonicalProjectPath = '/owner/canonical-project';
+const captureCommitMessageSource = mock(async ({ files }) => ({
+  projectPath: canonicalProjectPath, files: [...files], diffContext,
+}));
+/** @satisfies {import('../../execution-nodes/workspace-git.js').WorkspaceGitService} */
+const git = {
+  ...createLocalWorkspaceGitService({
+    assertProjectPathAllowed: async () => { throw new Error('Unexpected filesystem operation'); },
+    networkTimeoutMs: 30_000,
+  }),
+  captureCommitMessageSource,
+};
 
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
   MalformedJsonError,
 }));
 
-mock.module('../../lib/path-boundary.ts', () => ({
-  assertRealWithinProjectBase,
-  isProjectBoundaryError,
-  projectBoundaryErrorResponse: mock(() => Response.json({ error: 'boundary' }, { status: 403 })),
-}));
-
-mock.module('../../git/git-service.js', () => ({
-  createGitService: mock(() => ({
-    generateCommitMessageForFiles,
-    toHttpError: (error) => Response.json({ error: error.message }, { status: error.status || 500 }),
-  })),
-}));
-
 import createGitRoutes from '../git.js';
 
 const agents = {
+  runSingleQuery: mock(async () => 'feat: generated'),
   getAgentAuthStatusMap: mock(() => Promise.resolve({
     claude: { authenticated: false },
     codex: { authenticated: false },
@@ -63,7 +61,7 @@ const settings = {
   getUiSettings: mock(() => ({})),
 };
 
-const routes = createGitRoutes(agents, settings);
+const routes = createGitRoutes(git, agents, settings);
 
 function makeRequest(body, signal) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
@@ -74,12 +72,32 @@ function makeRequest(body, signal) {
   });
 }
 
+function expectGeneration({
+  projectPath, files, agentId, model, apiProviderId, modelEndpointId, modelProtocol,
+  thinkingMode, customPrompt, signal,
+}) {
+  expect(captureCommitMessageSource).toHaveBeenCalledTimes(1);
+  expect(captureCommitMessageSource).toHaveBeenCalledWith({ projectPath, files, signal });
+  const capturedSignal = captureCommitMessageSource.mock.calls[0][0].signal;
+  const template = customPrompt?.trim() ? customPrompt : DEFAULT_COMMIT_MESSAGE_PROMPT;
+  const prompt = template.replaceAll('{{files}}', () => files.map((file) => '- ' + file).join('\n'))
+    .replaceAll('{{diff}}', () => diffContext);
+  expect(agents.runSingleQuery).toHaveBeenCalledWith(prompt, {
+    agentId, cwd: canonicalProjectPath, thinkingMode, timeoutMs: 110_000, signal: capturedSignal,
+    ...(model ? { model } : {}),
+    ...(apiProviderId ? { apiProviderId } : {}),
+    ...(modelEndpointId ? { modelEndpointId } : {}),
+    ...(modelProtocol ? { modelProtocol } : {}),
+  });
+}
+
 describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
   const handler = routes['/api/v1/git/generate-commit-message'].POST;
 
   beforeEach(() => {
     parseJsonBody.mockClear();
-    generateCommitMessageForFiles.mockClear();
+    captureCommitMessageSource.mockClear();
+    agents.runSingleQuery.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
     agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
@@ -112,10 +130,6 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     agents.normalizeThinkingModeForAgent.mockImplementation((agentId, value) => agentId === 'amp' ? 'none' : value);
     settings.getUiSettings.mockClear();
     settings.getUiSettings.mockImplementation(() => ({}));
-    assertRealWithinProjectBase.mockClear();
-    assertRealWithinProjectBase.mockImplementation((targetPath) => Promise.resolve(targetPath));
-    isProjectBoundaryError.mockClear();
-    isProjectBoundaryError.mockImplementation(() => false);
   });
 
   it('normalizes stale persisted commit message effort when the request omits it', async () => {
@@ -141,7 +155,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     expect(response.status).toBe(200);
     expect(body.message).toBe('feat: generated');
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+    expectGeneration({
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'amp',
@@ -172,7 +186,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
 
     expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+    expect(await response.json()).toEqual({ message: 'a.ts: feat: generated', directoryPrefix: 'a.ts' });
+    expectGeneration({
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'claude',
@@ -212,7 +227,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+    expectGeneration({
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'codex',
@@ -245,7 +260,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
 
     expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
+    expect(agents.runSingleQuery).toHaveBeenCalledWith(
+      expect.any(String),
       expect.objectContaining({
         agentId: 'amp',
         model: 'smart',
@@ -266,7 +282,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
 
     expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
+    expect(agents.runSingleQuery).toHaveBeenCalledWith(
+      expect.any(String),
       expect.objectContaining({ thinkingMode: 'max' }),
     );
   });
@@ -285,7 +302,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     expect(response.status).toBe(422);
     expect(body.errorCode).toBe('VALIDATION_FAILED');
-    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
+    expect(captureCommitMessageSource).not.toHaveBeenCalled();
+    expect(agents.runSingleQuery).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid explicit effort', async () => {
@@ -298,7 +316,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
 
     expect(response.status).toBe(400);
-    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
+    expect(captureCommitMessageSource).not.toHaveBeenCalled();
+    expect(agents.runSingleQuery).not.toHaveBeenCalled();
   });
 
   it('passes API provider endpoint metadata through to generation', async () => {
@@ -325,7 +344,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+    expectGeneration({
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'direct-openai-compatible',
@@ -364,7 +383,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+    expectGeneration({
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'direct-anthropic-compatible',
@@ -404,6 +423,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     const response = await generation;
     expect(response.status).toBe(500);
-    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
+    expect(captureCommitMessageSource).not.toHaveBeenCalled();
+    expect(agents.runSingleQuery).not.toHaveBeenCalled();
   });
 });

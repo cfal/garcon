@@ -8,7 +8,7 @@ import {
   resolvePathWithinProject,
   runGit,
 } from './run.js';
-import type { FileOptions } from './types.js';
+import type { FileOptions, GitMessageMutationResult } from './types.js';
 
 async function headHasPath(projectPath: string, file: string): Promise<boolean> {
   // ls-tree reports a path HEAD lacks as a successful empty result, so any
@@ -23,7 +23,7 @@ async function headHasPath(projectPath: string, file: string): Promise<boolean> 
   return stdout.length > 0;
 }
 
-export async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
+export async function discard({ projectPath, file }: FileOptions): Promise<GitMessageMutationResult> {
   await assertGitRepository(projectPath);
 
   const [rootResult, prefixResult] = await Promise.all([

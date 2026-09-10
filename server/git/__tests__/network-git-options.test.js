@@ -2,15 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createStatusOperations } from "../status.js";
-
-// The network timeout derives from the HTTP idle budget. Config re-reads the
-// environment on every call until initializeServerConfig() pins a value, so
-// setting the budget at file scope reaches the operations under test; 4s
-// yields a 2s bound (4s - 2s margin). The inherited value is captured before
-// the assignment so teardown can restore it exactly.
-const inheritedIdleTimeout = process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS;
-process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS = "4";
+import { createStatusOperations, resolveNetworkGitTimeoutMs } from "../status.js";
 
 const fakeGitScript = `#!${process.execPath}
 const argv = process.argv.slice(2);
@@ -57,17 +49,11 @@ describe("network git options wiring", () => {
     originalTerminalPrompt = process.env.GIT_TERMINAL_PROMPT ?? null;
     delete process.env.GIT_TERMINAL_PROMPT;
     process.env.PATH = `${commandDirectory}${path.delimiter}${originalPath}`;
-    operations = createStatusOperations({
-      run: () => {
-        throw new Error("agent runner must not be used by network commands");
-      },
-    });
+    operations = createStatusOperations({ networkTimeoutMs: resolveNetworkGitTimeoutMs(4) });
   });
 
   afterAll(() => {
     process.env.PATH = originalPath;
-    if (inheritedIdleTimeout === undefined) delete process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS;
-    else process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS = inheritedIdleTimeout;
     if (originalTerminalPrompt !== null) process.env.GIT_TERMINAL_PROMPT = originalTerminalPrompt;
     delete process.env.FAKE_GIT_SLEEP;
     delete process.env.FAKE_GIT_RECORD;

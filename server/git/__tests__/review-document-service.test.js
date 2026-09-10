@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createGitService } from '../git-service.js';
+import { createLocalWorkspaceGitService } from '../../execution-node/local-workspace-git.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 import { createReviewDocumentOperations } from '../review-document-service.js';
 
@@ -38,13 +38,9 @@ async function createRepository(paths = ['a.txt', 'b.txt']) {
 }
 
 function createService() {
-  return createGitService({
-    agents: { runSingleQuery: async () => 'chore: test' },
-    classifyGitError: (error) => ({
-      code: 'UNKNOWN',
-      status: 500,
-      message: error instanceof Error ? error.message : String(error),
-    }),
+  return createLocalWorkspaceGitService({
+    assertProjectPathAllowed: async (projectPath) => projectPath,
+    networkTimeoutMs: 30_000,
   });
 }
 

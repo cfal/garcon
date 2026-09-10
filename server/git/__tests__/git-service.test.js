@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
-import { createGitService as createProductionGitService } from "../git-service.js";
+import { createLocalWorkspaceGitService } from "../../execution-node/local-workspace-git.js";
 import { runGitWithStdin } from "../run.js";
 import { resolveNetworkGitTimeoutMs } from "../status.js";
-import { generateCommitMessage } from "../commit-message.js";
+import { generateCommitMessage, generateCommitMessageForFiles } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
 import { GIT_EMPTY_TREE } from "../comparison.js";
@@ -23,27 +23,14 @@ import {
   serializeWorktreeMtime,
 } from "../worktrees.js";
 
-// Minimal classifier stub for toHttpError tests
-function mockClassifyGitError(error) {
-  const msg = error?.message || "";
-  if (msg.includes("hostname")) {
-    return {
-      code: "NETWORK",
-      status: 502,
-      message: "Could not reach the remote host.",
-      details: "Verify network access.",
-    };
-  }
-  return {
-    code: "UNKNOWN",
-    status: 500,
-    message: msg || "Git operation failed.",
-  };
+/** @param {Partial<Parameters<typeof createLocalWorkspaceGitService>[0]>} options */
+function createOwnerService(options = {}) {
+  return createLocalWorkspaceGitService({
+    assertProjectPathAllowed: async (projectPath) => projectPath,
+    networkTimeoutMs: 30_000,
+    ...options,
+  });
 }
-
-const mockAgents = {
-  runSingleQuery: () => Promise.resolve("chore: stub"),
-};
 
 function materializeReviewResponse(response) {
   if (response.status !== "ready") return response;
@@ -61,7 +48,7 @@ function materializeReviewResponse(response) {
 }
 
 function createGitService(options) {
-  const service = createProductionGitService(options);
+  const service = createOwnerService(options);
   return {
     ...service,
     async getReviewFileBodies(request) {
@@ -302,10 +289,7 @@ describe("GitDomainError", () => {
 });
 
 describe("createGitService", () => {
-  const git = createProductionGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
+  const git = createOwnerService();
 
   it("returns an object with all expected service methods", () => {
     const expectedMethods = [
@@ -319,7 +303,7 @@ describe("createGitService", () => {
       "getHistoryCommits",
       "getCommitSnapshot",
       "getComparisonSnapshot",
-      "generateCommitMessageForFiles",
+      "captureCommitMessageSource",
       "getRemoteStatus",
       "getRemotes",
       "fetch",
@@ -352,11 +336,13 @@ describe("createGitService", () => {
       "getFileHistory",
       "getBlame",
       "getGraph",
-      "toHttpError",
+      "getRepoInfo",
+      "getComparisonFreshness",
     ];
     for (const method of expectedMethods) {
       expect(typeof git[method]).toBe("function");
     }
+    expect(Object.keys(git).sort()).toEqual(expectedMethods.sort());
     expect(git.stageFile).toBeUndefined();
   });
 });
@@ -366,10 +352,7 @@ describe("stage path operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-stage-paths-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -429,10 +412,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -473,10 +453,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-concurrent-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -514,10 +491,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-locked-index-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const indexLockPath = path.join(projectPath, ".git", "index.lock");
 
     try {
@@ -547,10 +521,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-stale-index-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -582,10 +553,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-failed-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -617,10 +585,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-hook-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -660,10 +625,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-hook-added-path-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -698,10 +660,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-serialized-index-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const selectedHookPath = path.join(projectPath, ".selected-hook-entered");
     const realHookPath = path.join(projectPath, ".real-hook-entered");
     const releaseHookPath = path.join(projectPath, ".release-hook");
@@ -762,10 +721,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-outside-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -781,10 +737,9 @@ describe("selected-file commits", () => {
       }
 
       expect(rejection).toBeInstanceOf(GitDomainError);
-      const response = git.toHttpError(rejection);
-      expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({
-        error: "Pathspecs must resolve inside the project root.",
+      expect(rejection).toMatchObject({
+        code: "INVALID_INPUT",
+        message: "Pathspecs must resolve inside the project root.",
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -795,10 +750,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-merge-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -832,10 +784,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-cherry-pick-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -878,10 +827,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-revert-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -921,10 +867,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rebase-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -967,10 +910,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rebase-apply-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -1014,10 +954,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rebase-edit-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -1088,10 +1025,7 @@ describe("network git timeout", () => {
 });
 
 describe("getStatus", () => {
-  const git = createProductionGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
+  const git = createOwnerService();
 
   it("classifies typechanged, unmerged, and mixed-status paths instead of dropping them", async () => {
     const projectPath = await fs.mkdtemp(
@@ -1189,10 +1123,7 @@ describe("getStatus", () => {
 });
 
 describe("discard", () => {
-  const git = createProductionGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
+  const git = createOwnerService();
   it("discards only worktree edits for staged-added files, keeping the addition", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),
@@ -1973,10 +1904,7 @@ describe("commit message generation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-commit-message-prefix-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -1999,7 +1927,7 @@ describe("commit message generation", () => {
         "feature/auth/b.txt",
       ]);
 
-      const result = await git.generateCommitMessageForFiles({
+      const result = await generateCommitMessageForFiles(git, { runSingleQuery: async () => "chore: stub" }, {
         projectPath,
         files: ["feature/auth/a.txt", "feature/auth/b.txt"],
         agentId: "claude",
@@ -2021,16 +1949,14 @@ describe("commit message generation", () => {
     );
     let capturedPrompt = "";
     let capturedOptions;
-    const git = createGitService({
-      agents: {
+    const agents = {
         runSingleQuery: (prompt, options) => {
           capturedPrompt = prompt;
           capturedOptions = options;
           return Promise.resolve("chore: stub");
         },
-      },
-      classifyGitError: mockClassifyGitError,
-    });
+    };
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2057,7 +1983,7 @@ describe("commit message generation", () => {
         "unselected.txt",
       ]);
 
-      await git.generateCommitMessageForFiles({
+      await generateCommitMessageForFiles(git, agents, {
         projectPath,
         files: ["feature/a.txt", "feature/name with space.txt"],
         agentId: "claude",
@@ -2090,15 +2016,13 @@ describe("commit message generation", () => {
       path.join(os.tmpdir(), "garcon-git-commit-message-context-"),
     );
     let capturedPrompt = "";
-    const git = createGitService({
-      agents: {
+    const agents = {
         runSingleQuery: (prompt) => {
           capturedPrompt = prompt;
           return Promise.resolve("chore: stub");
         },
-      },
-      classifyGitError: mockClassifyGitError,
-    });
+    };
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2122,7 +2046,7 @@ describe("commit message generation", () => {
       );
       await runGitCommand(projectPath, ["add", "a.txt"]);
 
-      await git.generateCommitMessageForFiles({
+      await generateCommitMessageForFiles(git, agents, {
         projectPath,
         files: ["a.txt"],
         agentId: "claude",
@@ -2146,10 +2070,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2217,10 +2138,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-root-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2253,10 +2171,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-merge-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2311,10 +2226,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-rename-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2365,10 +2277,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-literal-path-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const filePath = "wild[slug].txt";
 
     try {
@@ -2407,10 +2316,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-normalized-diff-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2460,10 +2366,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-file-to-directory-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2507,10 +2410,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-prefix-rename-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const content = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n";
     const renamedContent = "one\ntwo\nthree\nfour\nCHANGED\nsix\nseven\neight\n";
 
@@ -2602,10 +2502,7 @@ describe("commit history operations", () => {
     const submoduleSource = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-submodule-source-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2685,10 +2582,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-type-change-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2764,10 +2658,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-invalid-revision-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2804,10 +2695,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-corrupt-ref-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2843,10 +2731,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-revisions-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2906,10 +2791,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-revision-freshness-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3005,10 +2887,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-base-freshness-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3070,10 +2949,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-merge-base-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3122,10 +2998,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-empty-tree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3150,10 +3023,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-retry-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3185,10 +3055,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-changing-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3221,10 +3088,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-conflict-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3263,10 +3127,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3365,10 +3226,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-body-race-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3416,10 +3274,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-index-deleted-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3459,10 +3314,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-historical-deletion-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3504,10 +3356,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-unborn-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -3536,10 +3385,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-equal-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3564,10 +3410,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-unrelated-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3601,10 +3444,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-untracked-limits-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3653,10 +3493,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-untracked-budget-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3694,10 +3531,7 @@ describe("commit revert operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-revert-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3740,10 +3574,7 @@ describe("getTargetCandidates", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-targets-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3770,10 +3601,7 @@ describe("worktree listing metadata", () => {
     );
     const linkedPath = `${projectPath}-Zed`;
     const missingPath = `${projectPath}-apple`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3896,10 +3724,7 @@ describe("worktree listing metadata", () => {
     );
     const projectPath = path.join(fixtureRoot, "project");
     const gitDir = path.join(fixtureRoot, "repository.git");
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await fs.mkdir(projectPath);
@@ -3922,10 +3747,7 @@ describe("worktree listing metadata", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-worktree-invalid-admin-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3945,10 +3767,7 @@ describe("worktree listing metadata", () => {
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-symlink-head-")),
     );
     const linkedPath = `${projectPath}-linked`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithLinkedFeature(projectPath, linkedPath);
@@ -3983,10 +3802,7 @@ describe("worktree listing metadata", () => {
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-bare-main-")),
     );
     const linkedPath = `${projectPath}-linked`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithLinkedFeature(projectPath, linkedPath);
@@ -4016,10 +3832,7 @@ describe("worktree listing metadata", () => {
       const projectPath = await fs.mkdtemp(
         path.join(os.tmpdir(), "garcon-worktree-reftable-"),
       );
-      const git = createGitService({
-        agents: mockAgents,
-        classifyGitError: mockClassifyGitError,
-      });
+      const git = createGitService();
 
       try {
         await runGitCommand(projectPath, ["init", "--ref-format=reftable"]);
@@ -4055,10 +3868,7 @@ describe("worktree creation", () => {
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-no-track-")),
     );
     const linkedPath = `${projectPath}-feature`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4105,10 +3915,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-summary-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4157,10 +3964,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-clean-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4187,10 +3991,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-unborn-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -4213,10 +4014,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-not-repo-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       const summary = await git.getQuickSummary({ projectPath });
@@ -4236,10 +4034,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-untracked-count-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4294,10 +4089,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-snapshot-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4340,10 +4132,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tree-dir-stats-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4418,10 +4207,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-not-repo-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       const snapshot = await git.getWorkbenchSnapshot({
@@ -4448,10 +4234,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tree-tab-path-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const fileName = "a\tb.txt";
 
     try {
@@ -4494,10 +4277,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -4564,10 +4344,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-mixed-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4612,10 +4389,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-staged-text-worktree-binary-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4664,10 +4438,7 @@ describe("getWorkbenchSnapshot", () => {
   });
 
   it("uses body-compatible fingerprints for common review states", async () => {
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const cases = [
       {
         name: "modified tracked path with spaces",
@@ -4757,10 +4528,7 @@ describe("getWorkingTreeFingerprint", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-baseline-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4789,10 +4557,7 @@ describe("getWorkingTreeFingerprint", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-changes-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4857,10 +4622,7 @@ describe("getWorkingTreeFingerprint", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-not-repo-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       const result = await git.getWorkingTreeFingerprint({ projectPath });
@@ -4880,10 +4642,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rendered-row-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4921,10 +4680,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-binary-delete-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4958,10 +4714,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-batch-spaces-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4995,10 +4748,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-preview-long-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5034,10 +4784,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-review-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5092,10 +4839,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-hard-limit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5131,10 +4875,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-refs-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5198,10 +4939,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-search-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5238,10 +4976,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-sorting-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const oldTimestamp = "2024-01-01T00:00:00Z";
     const newTimestamp = "2024-03-01T00:00:00Z";
     const tagTimestamp = "2024-04-01T00:00:00Z";
@@ -5429,10 +5164,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-unborn-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -5467,10 +5199,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-detached-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5517,10 +5246,7 @@ describe("git ref checkout and branch creation", () => {
     const missingPath = path.join(fixtureRoot, "missing");
     const notRepositoryMessage =
       'Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.';
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await fs.mkdir(nonRepositoryPath);
@@ -5550,10 +5276,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-abort-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5571,10 +5294,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-commands-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5675,10 +5395,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-local-checkout-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5702,10 +5419,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-remote-checkout-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5742,10 +5456,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tag-collision-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5793,10 +5504,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-branch-base-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5846,10 +5554,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-checkout-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5875,10 +5580,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-create-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5914,10 +5616,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-worktree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5952,10 +5651,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-push-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5988,10 +5684,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-blame-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6011,10 +5704,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-compare-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6041,10 +5731,7 @@ describe("porcelain conflict and comparison robustness", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-conflict-limit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6115,10 +5802,7 @@ describe("porcelain conflict and comparison robustness", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-conflict-rename-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6150,10 +5834,7 @@ describe("porcelain conflict and comparison robustness", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-compare-z-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitService();
     const tabbedPath = "a\tb.txt";
     const renamedPath = "c\td.txt";
 
@@ -6213,75 +5894,5 @@ describe("porcelain conflict and comparison robustness", () => {
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
-  });
-});
-
-describe("toHttpError", () => {
-  const git = createGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
-
-  it("maps INVALID_INPUT GitDomainError to 400", async () => {
-    const err = new GitDomainError("INVALID_INPUT", "Missing field");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error).toBe("Missing field");
-  });
-
-  it("maps NOT_REPO GitDomainError to 400", async () => {
-    const err = new GitDomainError("NOT_REPO", "Not a repo");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(400);
-  });
-
-  it("maps AUTH_FAILED GitDomainError to 401", async () => {
-    const err = new GitDomainError("AUTH_FAILED", "Auth failed");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(401);
-  });
-
-  it("maps SERVICE_BUSY GitDomainError to a retryable 503", async () => {
-    const err = new GitDomainError("SERVICE_BUSY", "Try again shortly");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: "Try again shortly",
-      errorCode: "SERVICE_BUSY",
-      retryable: true,
-    });
-  });
-
-  it("maps unknown GitDomainError codes to 500", async () => {
-    const err = new GitDomainError("SOME_OTHER", "Other error");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(500);
-  });
-
-  it("maps commit message timeout domain code to 504 + typed errorCode", async () => {
-    const err = new GitDomainError("COMMIT_MESSAGE_TIMEOUT", "Timed out");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(504);
-    const body = await response.json();
-    expect(body.error).toBe("Timed out");
-    expect(body.errorCode).toBe("commit_message_timeout");
-  });
-
-  it("delegates non-GitDomainError to classifier", async () => {
-    const err = new Error("random failure");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(500);
-    const body = await response.json();
-    expect(body.error).toBe("random failure");
-  });
-
-  it("includes details from classifier when available", async () => {
-    const err = new Error("Could not resolve hostname github.com");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(502);
-    const body = await response.json();
-    expect(body.error).toBe("Could not reach the remote host.");
-    expect(body.details).toBe("Verify network access.");
   });
 });

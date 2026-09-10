@@ -13,6 +13,7 @@ import type {
   CompatibleTreeFields,
   DiffStats,
   GitCommandTrace,
+  GitMutationResult,
   GitReviewDocumentSummary,
   GitReviewFilePatchBody,
   GitReviewFileSummary,
@@ -1345,7 +1346,7 @@ async function stageSelection({
   mode,
   selection,
   contextLines = 5,
-}: StageSelectionOptions): Promise<unknown> {
+}: StageSelectionOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const reverse = mode === 'unstage';
@@ -1420,7 +1421,7 @@ async function stageHunk({
   mode,
   hunkIndex,
   contextLines = 5,
-}: StageHunkOptions): Promise<unknown> {
+}: StageHunkOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const isUnstage = mode === 'unstage';

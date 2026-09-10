@@ -1,8 +1,13 @@
 import { GitDomainError } from './git-types.js';
 import type { AgentId } from '../../common/agents.ts';
-import type { CommitMessageOptions, RunSingleQueryOptions } from './types.js';
+import type {
+  CommitMessageErrorCode, CommitMessageOptions, CommitMessageFileOptions,
+  CommitMessageGenerationResult, GitAgentRunner, RunSingleQueryOptions,
+} from './types.js';
+import type { WorkspaceGitService } from '../execution-nodes/workspace-git.js';
+import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.js';
 import { createLogger } from '../lib/log.js';
-import { GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
+import { createGenerationRequestSignal, GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import {
   COMMIT_MESSAGE_DIFF_TOKEN,
@@ -12,24 +17,7 @@ import {
 
 const logger = createLogger('git:commit-message');
 
-export const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
-  COMMIT_MESSAGE_NO_STAGED_FILES: { status: 400, errorCode: 'commit_message_no_staged_files' },
-  COMMIT_MESSAGE_AGENT_AUTH_REQUIRED: { status: 401, errorCode: 'commit_message_agent_auth_required' },
-  COMMIT_MESSAGE_RATE_LIMITED: { status: 429, errorCode: 'commit_message_rate_limited' },
-  COMMIT_MESSAGE_AGENT_UNAVAILABLE: { status: 503, errorCode: 'commit_message_agent_unavailable' },
-  COMMIT_MESSAGE_TIMEOUT: { status: 504, errorCode: 'commit_message_timeout' },
-  COMMIT_MESSAGE_EMPTY_RESPONSE: { status: 502, errorCode: 'commit_message_empty_response' },
-  COMMIT_MESSAGE_INVALID_RESPONSE: { status: 502, errorCode: 'commit_message_invalid_response' },
-  COMMIT_MESSAGE_GENERATION_FAILED: { status: 500, errorCode: 'commit_message_generation_failed' },
-});
-
-type CommitMessageErrorCode = keyof typeof COMMIT_MESSAGE_ERROR_MAP;
-
 const MAX_DIFF_CHARS = 80_000;
-
-export function isCommitMessageErrorCode(code: string): code is CommitMessageErrorCode {
-  return Object.prototype.hasOwnProperty.call(COMMIT_MESSAGE_ERROR_MAP, code);
-}
 
 function classifyCommitMessageAgentError(error: unknown): CommitMessageErrorCode {
   if (!(error instanceof AgentIntegrationError)) return 'COMMIT_MESSAGE_GENERATION_FAILED';
@@ -40,6 +28,29 @@ function classifyCommitMessageAgentError(error: unknown): CommitMessageErrorCode
     return 'COMMIT_MESSAGE_AGENT_UNAVAILABLE';
   }
   return 'COMMIT_MESSAGE_GENERATION_FAILED';
+}
+
+export async function generateCommitMessageForFiles(
+  git: Pick<WorkspaceGitService, 'captureCommitMessageSource'>,
+  agents: GitAgentRunner,
+  {
+    projectPath, files, agentId, model, apiProviderId, modelEndpointId, modelProtocol,
+    thinkingMode, customPrompt, useCommonDirPrefix, signal = createGenerationRequestSignal(),
+  }: CommitMessageFileOptions,
+): Promise<CommitMessageGenerationResult> {
+  const captured = await git.captureCommitMessageSource({ projectPath, files: [...files], signal });
+  signal.throwIfAborted();
+  const capturedFiles = [...captured.files];
+  const message = await generateCommitMessage(
+    capturedFiles, captured.diffContext, agentId, captured.projectPath,
+    (prompt, options) => agents.runSingleQuery(prompt, options),
+    { model, apiProviderId, modelEndpointId, modelProtocol, thinkingMode, customPrompt, signal },
+  );
+  const directoryPrefix = useCommonDirPrefix ? computeCommonDirPrefix(capturedFiles) : '';
+  return {
+    message: directoryPrefix ? applyDirPrefix(message, directoryPrefix) : message,
+    directoryPrefix,
+  };
 }
 
 // Generates a conventional commit message using the configured agent.

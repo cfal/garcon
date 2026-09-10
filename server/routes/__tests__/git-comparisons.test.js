@@ -12,6 +12,7 @@ const { createGitComparisonRoutes } = await import('../git-comparisons.js');
 
 const snapshotCalls = [];
 const freshnessCalls = [];
+/** @satisfies {Pick<import('../../execution-nodes/workspace-git.js').WorkspaceGitService, 'getComparisonSnapshot' | 'getComparisonFreshness'>} */
 const git = {
   getComparisonSnapshot: mock(async (options) => {
     snapshotCalls.push(options);
@@ -35,7 +36,6 @@ const git = {
         : { kind: 'working-tree', fingerprint: 'changed' },
     };
   }),
-  toHttpError: (error) => Response.json({ error: String(error) }, { status: 500 }),
 };
 const routes = createGitComparisonRoutes(git);
 const snapshotHandler = routes['/api/v1/git/comparisons/snapshot'].POST;

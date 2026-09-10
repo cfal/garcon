@@ -1,5 +1,5 @@
-import { createGitService } from '../git/git-service.js';
-import type { GitService } from '../git/git-service.js';
+import type { WorkspaceGitService } from '../execution-nodes/workspace-git.js';
+import { generateCommitMessageForFiles } from '../git/commit-message.js';
 import {
   GIT_DIFF_LIMITS,
   GIT_REF_RESULT_LIMITS,
@@ -8,7 +8,6 @@ import {
   type GitRefKind,
   type GitReviewRouteMetrics,
 } from '../git/types.js';
-import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
 import { isAgentId } from '../../common/agents.ts';
@@ -21,11 +20,10 @@ import { isThinkingMode } from '../../common/chat-modes.js';
 import { isRecord } from '../../common/json.js';
 import { isGitRefKind, parseGitRefSort } from '../../common/git-refs.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError, projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createGitComparisonRoutes } from './git-comparisons.js';
-import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
+import { gitJson, measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
@@ -86,31 +84,6 @@ function isValidLineIndices(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
 }
 
-async function boundaryCheckedOptions(options: unknown): Promise<unknown> {
-  if (!options || typeof options !== 'object') return options;
-  const next = { ...(options as Record<string, unknown>) };
-  if (typeof next.projectPath === 'string') {
-    next.projectPath = await assertRealWithinProjectBase(next.projectPath);
-  }
-  if (typeof next.worktreePath === 'string') {
-    next.worktreePath = await assertRealWithinProjectBase(next.worktreePath);
-  }
-  return next;
-}
-
-function createBoundaryCheckedGitService(git: GitService): GitService {
-  return new Proxy(git, {
-    get(target: GitService, prop: string | symbol, receiver: unknown): unknown {
-      const value = Reflect.get(target, prop, receiver);
-      if (prop === 'toHttpError' && typeof value === 'function') {
-        return (error: unknown) => (isProjectBoundaryError(error) ? projectBoundaryErrorResponse() : value.call(target, error));
-      }
-      if (typeof value !== 'function') return value;
-      return async (options: unknown, ...args: unknown[]) => value.call(target, await boundaryCheckedOptions(options), ...args);
-    },
-  });
-}
-
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -156,17 +129,6 @@ function validNonNegativeInteger(value: unknown, fallback: number, max: number):
   return next;
 }
 
-type GitRouteResult = Response | unknown;
-
-async function gitJson(git: GitService, action: () => Promise<GitRouteResult> | GitRouteResult): Promise<Response> {
-  try {
-    const result = await action();
-    return result instanceof Response ? result : Response.json(result);
-  } catch (error) {
-    return git.toHttpError(error);
-  }
-}
-
 function requiredQueryStrings(url: URL, names: string[], message: string): Record<string, string> | Response {
   const values: Record<string, string> = {};
   for (const name of names) {
@@ -187,29 +149,25 @@ function requiredProjectFromBody(input: Record<string, unknown>): string | Respo
   return project || gitRouteError('Missing required parameter: project.', 400);
 }
 
-export default function createGitRoutes(agents: AgentRegistryServiceContract, settings: SettingsStore): RouteMap {
-  const git = createBoundaryCheckedGitService(
-    createGitService({
-      agents,
-      classifyGitError,
-      assertProjectPathAllowed: assertRealWithinProjectBase,
-    }),
-  );
-
+export default function createGitRoutes(
+  git: WorkspaceGitService,
+  agents: AgentRegistryServiceContract,
+  settings: SettingsStore,
+): RouteMap {
   async function getStatus(_request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getStatus({ projectPath: project }));
+    return gitJson(() => git.getStatus({ projectPath: project }));
   }
 
   async function postInitialCommit(body: JsonBody): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.initialCommit({ projectPath: project }));
+    return gitJson(() => git.initialCommit({ projectPath: project }));
   }
 
   async function postCommit(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const message = nonEmptyString(input.message);
@@ -225,7 +183,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getBranches(_request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getBranches({ projectPath: project }));
+    return gitJson(() => git.getBranches({ projectPath: project }));
   }
 
   async function getRefs(request: Request, url: URL): Promise<Response> {
@@ -245,7 +203,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         400,
       );
     }
-    return gitJson(git, () =>
+    return gitJson(() =>
       git.getRefs({
         projectPath: project,
         query: url.searchParams.get('query') ?? undefined,
@@ -257,7 +215,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postCheckout(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const ref = nonEmptyString(input.ref) ?? nonEmptyString(input.branch);
@@ -271,7 +229,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postCreateBranch(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const branch = nonEmptyString(input.branch);
@@ -285,7 +243,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postHistoryCommits(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const ref = nonEmptyString(input.ref) ?? 'HEAD';
@@ -314,7 +272,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postCommitSnapshot(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const commit = nonEmptyString(input.commit);
@@ -352,7 +310,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postGenerateCommitMessage(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const files = stringArray(input.files);
@@ -398,7 +356,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         }
       }
 
-      const result = await git.generateCommitMessageForFiles({
+      const result = await generateCommitMessageForFiles(git, agents, {
         projectPath: project,
         files,
         agentId,
@@ -418,23 +376,23 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getRemoteStatus(_request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getRemoteStatus({ projectPath: project }));
+    return gitJson(() => git.getRemoteStatus({ projectPath: project }));
   }
 
   async function postFetch(body: JsonBody): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.fetch({ projectPath: project }));
+    return gitJson(() => git.fetch({ projectPath: project }));
   }
 
   async function postPull(body: JsonBody): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.pull({ projectPath: project }));
+    return gitJson(() => git.pull({ projectPath: project }));
   }
 
   async function postPush(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const remote = typeof input.remote === 'string' ? input.remote : undefined;
@@ -450,11 +408,11 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getRemotes(_request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getRemotes({ projectPath: project }));
+    return gitJson(() => git.getRemotes({ projectPath: project }));
   }
 
   async function postDiscard(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -467,7 +425,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postDeleteUntracked(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -480,7 +438,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postWorkbenchSnapshot(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const mode = validMode(input.mode);
@@ -530,7 +488,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
 
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
       const result = await git.getWorkingTreeFingerprint({
@@ -546,7 +504,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
 
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
       const result = await git.getQuickSummary({
@@ -559,7 +517,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postReviewDocumentFiles(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const documentId = nonEmptyString(input.documentId);
@@ -593,7 +551,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postStageSelection(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -625,7 +583,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postStageHunk(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -658,17 +616,17 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getWorktrees(_request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getWorktrees({ projectPath: project }));
+    return gitJson(() => git.getWorktrees({ projectPath: project }));
   }
 
   async function getTargets(_request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getTargetCandidates({ projectPath: project }));
+    return gitJson(() => git.getTargetCandidates({ projectPath: project }));
   }
 
   async function postCreateWorktree(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const baseRef = typeof input.baseRef === 'string' ? input.baseRef : undefined;
@@ -691,7 +649,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postRemoveWorktree(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const worktreePath = nonEmptyString(input.worktreePath);
@@ -706,7 +664,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postCommitIndex(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const message = nonEmptyString(input.message);
@@ -720,7 +678,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postStagePaths(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const hasPaths = hasOwn(input, 'paths');
@@ -746,7 +704,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postRevertCommit(body: JsonBody): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const commit = nonEmptyString(input.commit);
@@ -762,13 +720,13 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getConflicts(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getConflicts({ projectPath: project, signal: request.signal }));
+    return gitJson(() => git.getConflicts({ projectPath: project, signal: request.signal }));
   }
 
   async function getConflictDetails(request: Request, url: URL): Promise<Response> {
     const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
     if (input instanceof Response) return input;
-    return gitJson(git, () =>
+    return gitJson(() =>
       git.getConflictDetails({
         projectPath: input.project,
         file: input.file,
@@ -778,7 +736,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postAcceptConflictSide(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -797,7 +755,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postMarkConflictResolved(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -815,14 +773,14 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getStashes(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getStashes({ projectPath: project, signal: request.signal }));
+    return gitJson(() => git.getStashes({ projectPath: project, signal: request.signal }));
   }
 
   async function postCreateStash(body: JsonBody, request: Request): Promise<Response> {
     const input = asJsonBody(body);
     const project = requiredProjectFromBody(input);
     if (project instanceof Response) return project;
-    return gitJson(git, () =>
+    return gitJson(() =>
       git.createStash({
         projectPath: project,
         message: typeof input.message === 'string' ? input.message : undefined,
@@ -839,7 +797,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (!project || !stashRef) {
       return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
-    return gitJson(git, () =>
+    return gitJson(() =>
       git.applyStash({
         projectPath: project,
         stashRef,
@@ -855,7 +813,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (!project || !stashRef) {
       return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
-    return gitJson(git, () => git.popStash({ projectPath: project, stashRef, signal: request.signal }));
+    return gitJson(() => git.popStash({ projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function postDropStash(body: JsonBody, request: Request): Promise<Response> {
@@ -865,7 +823,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (!project || !stashRef) {
       return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
-    return gitJson(git, () => git.dropStash({ projectPath: project, stashRef, signal: request.signal }));
+    return gitJson(() => git.dropStash({ projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function getFileHistory(request: Request, url: URL): Promise<Response> {
@@ -875,7 +833,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 200.', 400);
     }
-    return gitJson(git, () =>
+    return gitJson(() =>
       git.getFileHistory({
         projectPath: input.project,
         file: input.file,
@@ -893,7 +851,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 2000.', 400);
     }
-    return gitJson(git, () =>
+    return gitJson(() =>
       git.getBlame({
         projectPath: input.project,
         file: input.file,
@@ -911,7 +869,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 500.', 400);
     }
-    return gitJson(git, () => git.getGraph({ projectPath: project, limit, signal: request.signal }));
+    return gitJson(() => git.getGraph({ projectPath: project, limit, signal: request.signal }));
   }
 
   return {

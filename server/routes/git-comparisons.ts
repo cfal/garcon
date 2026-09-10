@@ -1,5 +1,5 @@
 import { isRecord } from '../../common/json.js';
-import type { GitService } from '../git/git-service.js';
+import type { WorkspaceGitService } from '../execution-nodes/workspace-git.js';
 import {
   GIT_DIFF_LIMITS,
   GIT_REVIEW_DOCUMENT_LIMITS,
@@ -15,7 +15,7 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import { jsonError } from '../lib/http-error.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
-import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
+import { gitJson, measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -74,18 +74,11 @@ function routeError(error: string): Response {
   return jsonError(error, 400);
 }
 
-async function gitJson(git: GitService, action: () => Promise<Response | unknown>): Promise<Response> {
-  try {
-    const result = await action();
-    return result instanceof Response ? result : Response.json(result);
-  } catch (error) {
-    return git.toHttpError(error);
-  }
-}
-
-export function createGitComparisonRoutes(git: GitService): RouteMap {
+export function createGitComparisonRoutes(
+  git: Pick<WorkspaceGitService, 'getComparisonSnapshot' | 'getComparisonFreshness'>,
+): RouteMap {
   async function postSnapshot(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const from = validComparisonFrom(input.from);
@@ -131,7 +124,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
   }
 
   async function postFreshness(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
+    return gitJson(async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const from = validComparisonRevisionExpectation(input.from);
