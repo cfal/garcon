@@ -10,3 +10,8 @@ entry ends direct upgrade support for workspaces older than that entry; those
 workspaces must first upgrade through an intermediate release that still
 contains it. Keep entries idempotent because a failed startup can rerun the
 ladder before the final version stamp is written.
+
+Version 8 removes the obsolete `nextForkOrdinal` field from `chats.json` entries.
+The registry schema remains version 5; existing chat names and other fields are
+preserved. Fork and handoff names now depend on current visible titles rather
+than persisted counters.

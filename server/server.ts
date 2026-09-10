@@ -136,6 +136,7 @@ import {
   cleanupLegacyQueueState,
   WorkspaceMigrationRunner,
 } from './migrations/index.js';
+import { removeLegacyForkOrdinals } from './chats/fork-ordinal-migration.js';
 import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
@@ -285,6 +286,7 @@ export async function startServer(): Promise<void> {
     await workspaceMigrations.run('agent-execution-mode-refresh', () => (
       refreshAgentExecutionModeCoreRecords({ workspaceDir, integrations: integrationRegistry })
     ));
+    await workspaceMigrations.run('fork-ordinal-cleanup', () => removeLegacyForkOrdinals(workspaceDir));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
