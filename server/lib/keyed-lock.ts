@@ -10,7 +10,8 @@ export class KeyedPromiseLock {
     return acquire(0);
   }
 
-  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  async runExclusive<T>(key: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     const previous = this.#locks.get(key) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
@@ -19,12 +20,31 @@ export class KeyedPromiseLock {
     const chain = previous.catch(() => {}).then(() => current);
     this.#locks.set(key, chain);
 
-    await previous.catch(() => {});
     try {
+      await waitForPrevious(previous, signal);
+      signal?.throwIfAborted();
       return await fn();
     } finally {
       release();
-      if (this.#locks.get(key) === chain) this.#locks.delete(key);
+      // A cancelled tail still fences new entrants until its predecessor releases.
+      void chain.then(() => {
+        if (this.#locks.get(key) === chain) this.#locks.delete(key);
+      });
     }
+  }
+}
+
+async function waitForPrevious(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return previous.catch(() => {});
+  let abort: (() => void) | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      abort = () => reject(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      previous.then(resolve, resolve);
+      if (signal.aborted) abort();
+    });
+  } finally {
+    if (abort) signal.removeEventListener('abort', abort);
   }
 }
