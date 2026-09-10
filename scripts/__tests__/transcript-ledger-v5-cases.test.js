@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  readTranscriptConformanceSources,
   validateRepositoryTranscriptConformanceInventory,
   validateTranscriptConformanceInventory,
 } from '../validate-transcript-ledger-v5-cases.js';
@@ -64,7 +65,57 @@ describe('Transcript Ledger V5 case inventory', () => {
     ]);
   });
 
-  it('validates the repository inventory', () => {
-    expect(validateRepositoryTranscriptConformanceInventory().errors).toEqual([]);
+  it('reads sources concurrently within a fixed filesystem budget', async () => {
+    const gate = Promise.withResolvers();
+    const paths = Array.from({ length: 24 }, (_, index) => `${index}.test.js`);
+    let active = 0;
+    let maximum = 0;
+    let started = 0;
+    const reading = readTranscriptConformanceSources(paths, async (path) => {
+      started += 1;
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await gate.promise;
+      active -= 1;
+      return path;
+    });
+
+    try {
+      expect(started).toBe(8);
+    } finally {
+      gate.resolve();
+      await reading;
+    }
+    expect(maximum).toBe(8);
+    expect(started).toBe(paths.length);
+    expect(await reading).toEqual(paths.map((path) => ({ path, contents: path })));
+  });
+
+  it('preserves discovery order when reads finish out of order', async () => {
+    const first = Promise.withResolvers();
+    const second = Promise.withResolvers();
+    const reading = readTranscriptConformanceSources(['first.test.js', 'second.test.js'],
+      (path) => path === 'first.test.js' ? first.promise : second.promise);
+    second.resolve('second contents');
+    first.resolve('first contents');
+    expect(await reading).toEqual([
+      { path: 'first.test.js', contents: 'first contents' },
+      { path: 'second.test.js', contents: 'second contents' },
+    ]);
+  });
+
+  it('skips deleted test files without hiding unreadable sources', async () => {
+    expect(await readTranscriptConformanceSources(['deleted.test.js', 'present.test.js'], (path) => {
+      if (path === 'deleted.test.js') throw Object.assign(new Error('deleted'), { code: 'ENOENT' });
+      return Promise.resolve('present contents');
+    })).toEqual([{ path: 'present.test.js', contents: 'present contents' }]);
+    const failure = Object.assign(new Error('unreadable'), { code: 'EACCES' });
+    await expect(readTranscriptConformanceSources(['unreadable.test.js'], () => {
+      throw failure;
+    })).rejects.toBe(failure);
+  });
+
+  it('validates the repository inventory', async () => {
+    expect((await validateRepositoryTranscriptConformanceInventory()).errors).toEqual([]);
   });
 });

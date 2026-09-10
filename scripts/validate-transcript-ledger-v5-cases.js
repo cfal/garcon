@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const CASE_ID_PATTERN = /\[(TLV5-[A-Z0-9]+(?:[.-][A-Z0-9]+)*)\]/g;
+const MAX_SOURCE_READS = 8;
 const INVENTORY_PATH = fileURLToPath(
   new URL('./conformance/transcript-ledger-v5-cases.txt', import.meta.url),
 );
@@ -87,24 +88,39 @@ function trackedTestFiles() {
   if (result.status !== 0) {
     throw new Error(result.stderr.trim() || 'Unable to enumerate test files');
   }
-  return result.stdout
-    .split(/\r?\n/u)
-    .filter((path) => path.length > 0 && existsSync(`${repositoryRoot}/${path}`));
+  return result.stdout.split(/\r?\n/u).filter((path) => path.length > 0);
 }
 
-export function validateRepositoryTranscriptConformanceInventory() {
-  const sources = trackedTestFiles().map((path) => ({
-    path,
-    contents: readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'),
-  }));
+export async function readTranscriptConformanceSources(paths, readSource) {
+  const sources = new Array(paths.length);
+  let nextIndex = 0;
+  async function readNextSources() {
+    while (nextIndex < paths.length) {
+      const index = nextIndex++;
+      const path = paths[index];
+      try {
+        sources[index] = { path, contents: await readSource(path) };
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(MAX_SOURCE_READS, paths.length) }, readNextSources));
+  return sources.filter(Boolean);
+}
+
+export async function validateRepositoryTranscriptConformanceInventory() {
+  const sources = await readTranscriptConformanceSources(trackedTestFiles(), (path) =>
+    readFile(new URL(`../${path}`, import.meta.url), 'utf8'),
+  );
   return validateTranscriptConformanceInventory(
-    readFileSync(INVENTORY_PATH, 'utf8'),
+    await readFile(INVENTORY_PATH, 'utf8'),
     sources,
   );
 }
 
-function main() {
-  const result = validateRepositoryTranscriptConformanceInventory();
+async function main() {
+  const result = await validateRepositoryTranscriptConformanceInventory();
   if (result.errors.length > 0) {
     for (const error of result.errors) console.error(error);
     process.exitCode = 1;
@@ -119,4 +135,4 @@ function main() {
   console.log(`Validated ${result.cases.length} Transcript Ledger V5 cases`);
 }
 
-if (import.meta.main) main();
+if (import.meta.main) await main();
