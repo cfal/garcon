@@ -126,6 +126,9 @@ describe('scripted provider agent commands', () => {
   }
 
   for (const agent of ['claude', 'codex']) {
+    // Codex can acknowledge terminal-adjacent steering after its final pending-input check,
+    // then persist the input during finalization without sampling it. These gates expose the loss.
+    // Tracks https://github.com/openai/codex/issues/15842; candidate fix: https://github.com/openai/codex/pull/30341.
     test(`${agent} reports exact snapshot-child and resumed-turn results through its real binary`, async () => {
       const environment = await environmentFor(agent);
       const admitted = Promise.withResolvers<void>();
