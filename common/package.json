@@ -40,6 +40,8 @@
     "./cli-presentation": "./cli-presentation.ts",
     "./controller-tls": "./controller-tls.ts",
     "./controller-tls-node": "./controller-tls-node.ts",
+    "./execution-location": "./execution-location.ts",
+    "./node-operation": "./node-operation.ts",
     "./execution-defaults": "./execution-defaults.ts",
     "./file-contracts": "./file-contracts.ts",
     "./generation-prompts": "./generation-prompts.ts",
