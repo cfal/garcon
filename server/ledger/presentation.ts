@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from '../../common/chat-types.js';
 import { parseTranscriptNoticeDetail } from '../../common/transcript-notice-details.js';
+import { parseAgentStartProgressNotice } from '../../common/agent-start-progress.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
 import { isLedgerPrivateGarconCommandRow } from './garcon-command-request.js';
 import {
@@ -74,6 +75,12 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
           },
           undefined,
         );
+      }
+      if (row.detail.type === 'agent-start-progress') {
+        const { title, ...detail } = row.detail;
+        return new TranscriptNoticeMessage(row.at, row.message,
+          parseAgentStartProgressNotice(detail) ?? undefined,
+          typeof title === 'string' ? title : undefined);
       }
       return new TranscriptNoticeMessage(
         row.at,

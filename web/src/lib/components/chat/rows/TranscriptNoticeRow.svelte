@@ -12,6 +12,8 @@
 		isPreambleSelectionChangedNoticeDetail,
 	} from '$shared/transcript-notice-details';
 	import ChatEventCard from './ChatEventCard.svelte';
+	import ChatReference from '../ChatReference.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 	import CollapsibleBody from './CollapsibleBody.svelte';
 	import InterAgentMessageRow from './InterAgentMessageRow.svelte';
 	import PreambleApplicationRow from './PreambleApplicationRow.svelte';
@@ -40,7 +42,15 @@
 	}: Props = $props();
 
 	const isHandoffSummary = $derived(isHandoffSummaryNoticeDetail(message.detail));
+	const acceptedStart = $derived(
+		message.detail?.type === 'agent-start-outcome' && message.detail.status === 'accepted'
+			? message.detail
+			: null,
+	);
 	const isChatIdDiscoveryFailure = $derived(isChatIdDiscoveryFailureNoticeDetail(message.detail));
+	const isStartupFailure = $derived(
+		message.detail?.type === 'agent-start-progress' && message.detail.phase === 'failed',
+	);
 	const preambleApplication = $derived(
 		isPreambleApplicationNoticeDetail(message.detail) ? message.detail : null,
 	);
@@ -54,7 +64,23 @@
 	});
 </script>
 
-{#if preambleApplication}
+{#if acceptedStart}
+	<ChatEventCard variant="neutral" compact>
+		{#snippet body()}
+			<div class="flex min-w-0 items-baseline gap-2 text-sm">
+				<span class="font-medium">{m.chat_message_agent_started()}</span>
+				<ChatReference
+					chatId={acceptedStart.chatId}
+					resolution={resolveChatReference?.(acceptedStart.chatId) ?? null}
+					authoredLabelText={m.chat_message_agent_open_chat()}
+					linkClass="text-primary hover:underline"
+				>
+					{#snippet authoredLabel()}{m.chat_message_agent_open_chat()}{/snippet}
+				</ChatReference>
+			</div>
+		{/snippet}
+	</ChatEventCard>
+{:else if preambleApplication}
 	<PreambleApplicationRow detail={preambleApplication} />
 {:else if preambleSelectionChanged}
 	<PreambleSelectionChangedRow detail={preambleSelectionChanged} />
@@ -69,7 +95,7 @@
 		{disclosureState}
 	/>
 {:else}
-	<ChatEventCard variant={isChatIdDiscoveryFailure ? 'error' : 'info'}>
+	<ChatEventCard variant={isChatIdDiscoveryFailure || isStartupFailure ? 'error' : 'info'}>
 		{#snippet body()}
 			{#if message.title}
 				<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>

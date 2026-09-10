@@ -187,7 +187,11 @@ export class AcceptedInputHandler {
     const reservation = await this.#prepareDirect(input);
     if (!reservation) return 'duplicate';
     this.#coordinator.trackDispatch(
-      this.#coordinator.runDirect(reservation, input.content, input.options, input.dispatch).catch((error) => {
+      this.#coordinator.runDirect(reservation, input.content, input.options, input.dispatch, async (error) => {
+        if (!reservation.executionAdmission.signal.aborted) {
+          await input.settlement.settleOperationFailure(input.command, error);
+        }
+      }).catch((error) => {
         logger.error('commands: run failed:', error instanceof Error ? error.message : String(error));
       }),
     );

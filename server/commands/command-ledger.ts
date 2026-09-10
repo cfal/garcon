@@ -38,6 +38,7 @@ export interface CommandLedgerRecord {
   deliveryOutcome?: SteerDeliveryOutcome;
   forkPreparation?: ForkPreparationState;
   stopOutcome?: ChatStopOutcome;
+  runTerminalObserved?: true;
   turnResult?: CommandTurnResult;
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
@@ -260,9 +261,11 @@ export class CommandLedger {
     response: AgentFinalResponse | null,
   ): Promise<CommandLedgerRecord | null> {
     const record = this.#recordForTurn(chatId, turnId);
-    if (!record || record.publicTerminalAt || record.turnResult) {
+    if (!record || record.publicTerminalAt) {
       return record ? cloneRecord(record) : null;
     }
+    record.runTerminalObserved = true;
+    if (record.turnResult) return cloneRecord(record);
     const bytes = response === null ? 0 : Buffer.byteLength(response.text);
     if (response === null || record.interruptionReason || record.status === 'failed' || record.status === 'rejected') {
       record.turnResult = { availability: 'unavailable', reason: 'no-final-response' };
@@ -279,6 +282,17 @@ export class CommandLedger {
     }
     record.updatedAt = new Date().toISOString();
     return cloneRecord(record);
+  }
+
+  async markInterruptedWithoutRunTerminal(
+    chatId: string,
+    turnId: string,
+    reason: 'user-stop' | 'chat-deleted',
+  ): Promise<CommandLedgerRecord | null> {
+    const record = this.#recordForTurn(chatId, turnId);
+    // Only transcript terminal fanout supplies this evidence; failure placeholders do not.
+    if (record?.runTerminalObserved) return cloneRecord(record);
+    return this.markPublicTerminal(chatId, turnId, reason);
   }
 
   async markPublicTerminal(
@@ -407,6 +421,7 @@ export class CommandLedger {
           errorCode: undefined,
           deliveryOutcome: undefined,
           forkPreparation: undefined,
+          runTerminalObserved: undefined,
           turnResult: undefined,
           interruptionReason: undefined,
           publicTerminalAt: undefined,

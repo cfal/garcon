@@ -116,6 +116,7 @@ function run(instance, {
   signal,
   operation = 'agent-switch',
   destination = DESTINATION,
+  onCompactionStarted,
 } = {}) {
   return instance.planFor({
     operation,
@@ -123,11 +124,21 @@ function run(instance, {
     projectPath: '/workspace',
     messages,
     destination,
+    onCompactionStarted,
     ...(signal ? { signal } : {}),
   });
 }
 
 describe('carryover compaction', () => {
+  it('routes delegated compaction progress to its durable observer instead of a transient notice', async () => {
+    const f = service({ enabled: true });
+    const started = mock(() => {});
+    await run(f.instance, { onCompactionStarted: started });
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(f.onCompactionStarted).not.toHaveBeenCalled();
+    await run(f.instance, { messages: shortHistory(), onCompactionStarted: started });
+    expect(started).toHaveBeenCalledTimes(1);
+  });
   it('keeps the Direct timeout cap at least as large as a compaction attempt', () => {
     expect(MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS).toBeGreaterThanOrEqual(
       CARRYOVER_COMPACTION_TIMEOUT_MS,

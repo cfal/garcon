@@ -878,8 +878,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #requestStop(chatId: string, intent: ChatStopIntent): Promise<ChatStopOutcome> {
     const existing = this.#stopTasks.get(chatId);
     if (existing) return existing;
+    const interruptedTurn = this.#ownership.attempt(chatId)?.identity();
     const task = this.#performStop(chatId).then((outcome) => {
-      this.emit('session-stopped', chatId, outcome, intent);
+      this.emit('session-stopped', chatId, outcome, intent, interruptedTurn);
       return outcome;
     }).finally(() => {
       if (this.#stopTasks.get(chatId) === task) this.#stopTasks.delete(chatId);

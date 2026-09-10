@@ -142,6 +142,20 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter producer boundary', () => {
+  it('forwards actual compaction and context readiness in order before provider startup', async () => {
+    const observed = [];
+    const f = makeRouter({
+      createCarriedContext: async (input) => {
+        input.onCompactionStarted();
+        return { kind: 'no-history' };
+      },
+    });
+    await f.router.startSession('chat-1', 'Synthetic task', {
+      onContextPreparation: (phase) => observed.push(phase),
+    });
+    expect(observed).toEqual(['compacting-context', 'starting-agent']);
+    expect(f.start).toHaveBeenCalledTimes(1);
+  });
   beforeEach(async () => {
     projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-router-'));
     await fs.writeFile(path.join(projectDir, 'notes.txt'), 'USER FILE BODY');
@@ -645,6 +659,30 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await expect(router.startSession('chat-1', 'do not start', {
       executionAdmission: { signal: admission.signal, markStarted: mock() },
     })).rejects.toThrow('server is shutting down');
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('does not begin or track a run after Stop during preparatory adoption', async () => {
+    const admission = new AbortController();
+    const entered = Promise.withResolvers();
+    const ready = Promise.withResolvers();
+    const { router, start, events, transcript } = makeRouter();
+    transcript.adoption.ensure = async () => {
+      entered.resolve();
+      await ready.promise;
+    };
+    const beginRun = mock(transcript.ledger.beginRun.bind(transcript.ledger));
+    transcript.ledger.beginRun = beginRun;
+    const starting = router.startSession('chat-1', 'Synthetic task', {
+      turnId: 'stopped-start',
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    });
+    await entered.promise;
+    admission.abort(new Error('Synthetic stop'));
+    ready.resolve();
+    await expect(starting).rejects.toThrow('Synthetic stop');
+    expect(events.trackTurn).not.toHaveBeenCalled();
+    expect(beginRun).not.toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
   });
 

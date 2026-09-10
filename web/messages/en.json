@@ -646,6 +646,8 @@
 	"git_comment_add_old_line_to_chat": "Add old line {line} to chat",
 	"git_comment_add_new_line_to_chat": "Add new line {line} to chat",
 	"git_comment_open_chat": "Open chat",
+	"chat_message_agent_started": "Started",
+	"chat_message_agent_open_chat": "Open chat",
 	"git_comment_copy": "Copy",
 	"git_comment_copied": "Copied",
 	"git_comment_copy_failed": "Copy failed",

@@ -347,6 +347,21 @@ describe('AcceptedInputHandler', () => {
     });
   });
 
+  test('settles a detached startup failure before release without compensating accepted creation', async () => {
+    const failure = new DomainError('CARRYOVER_COMPACTION_FAILED', 'Synthetic failure', 422);
+    const settle = settlement();
+    const compensate = mock(async () => {});
+    const { handler, m } = scaffold({ runDirect: mock(async (_reservation, _content, _options, _dispatch, beforeRelease) => {
+      await beforeRelease(failure);
+      expect(settle.settleOperationFailure).toHaveBeenCalledWith(command(), failure);
+      throw failure;
+    }) });
+    await handler.schedule({ command: command(), content: 'Task', options: { turnId: 'turn-1' },
+      settlement: settle, preparation: { operation: 'chat-start', prepare: async () => {}, compensate } });
+    await m.trackDispatch.mock.calls[0][0];
+    expect(compensate).not.toHaveBeenCalled();
+  });
+
   test('rolls back preparation before releasing admission on pre-schedule failure', async () => {
     const events = [];
     const registrationError = new Error('append failed');

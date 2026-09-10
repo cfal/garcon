@@ -74,6 +74,7 @@ export interface CarryOverCompactionDeps {
 }
 
 export interface CarryOverCompactionInput {
+  readonly onCompactionStarted?: () => void;
   readonly operation: 'agent-switch' | 'fresh-start';
   readonly chatId: string;
   readonly projectPath: string;
@@ -172,7 +173,10 @@ export class CarryOverCompactionService {
         lastFailure = new Error('the reduced compaction prompt does not fit');
         break;
       }
-      if (attempt === 0) this.deps.onCompactionStarted?.(input.chatId);
+      if (attempt === 0) {
+        if (input.onCompactionStarted) input.onCompactionStarted();
+        else this.deps.onCompactionStarted?.(input.chatId);
+      }
       try {
         const raw = await this.deps.agents.runSingleQuery(fitted.value.prompt, {
           agentId: selection.agentId,

@@ -416,8 +416,13 @@ export function wireServerEvents({
     chatId: string,
     outcome: ChatStopOutcome,
     intent: ChatStopIntent,
+    interruptedTurn?: { readonly turnId?: string },
   ) => {
-    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', () => {
+    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', async () => {
+      if (outcome === 'interrupt-requested' && interruptedTurn?.turnId) {
+        await commandLedger.markInterruptedWithoutRunTerminal(chatId, interruptedTurn.turnId,
+          intent === 'chat-deletion' ? 'chat-deleted' : 'user-stop');
+      }
       if (!chatExists(chatId)) return;
       broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
     });
@@ -586,7 +591,7 @@ export function wireServerEvents({
       ),
     );
   });
-  queue.onSessionStopped((chatId, outcome, intent) => {
+  queue.onSessionStopped((chatId, outcome, intent, interruptedTurn) => {
     logger.info('queue: Stop resolved', {
       chatId,
       intent,
@@ -598,7 +603,7 @@ export function wireServerEvents({
       broadcastSessionStopped(chatId, outcome, intent);
       return;
     }
-    broadcastSessionStopped(chatId, outcome, intent);
+    broadcastSessionStopped(chatId, outcome, intent, interruptedTurn);
     publishProcessing(chatId);
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
