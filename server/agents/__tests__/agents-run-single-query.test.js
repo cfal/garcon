@@ -67,6 +67,32 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter.runSingleQuery', () => {
+  it('passes an explicit request to the configured default instance service without entering the SPI', async () => {
+    const { router, instances, integration, run } = makeRouter();
+    const signal = new AbortController().signal;
+    const settings = envelope('test', { profile: 'saved' });
+    const service = {
+      runsToolsWithoutPermission: false,
+      run: mock(async function () {
+        expect(this).toBe(service);
+        return 'Service response';
+      }),
+    };
+    instances.singleQueryForInstance = mock(() => service);
+    await expect(router.runSingleQuery('Synthetic input', {
+      agentId: 'test', model: 'model-a', projectPath: '/repo', agentSettings: settings,
+      thinkingMode: 'xhigh', timeoutMs: 4000, signal,
+    })).resolves.toBe('Service response');
+    expect(instances.singleQueryForInstance).toHaveBeenCalledWith({ nodeId: 'local-node', instanceId: 'configured-default' });
+    expect(service.run).toHaveBeenCalledWith({
+      prompt: 'Synthetic input', projectPath: '/repo', timeoutMs: 4000,
+      configuration: { model: 'model-a', settings, endpoint: null, thinkingMode: 'xhigh' },
+    }, signal);
+    expect(run).not.toHaveBeenCalled();
+    expect(integration.settings.parse).not.toHaveBeenCalled();
+    expect(integration.endpoints.validate).not.toHaveBeenCalled();
+  });
+
   it('routes through the selected integration with parsed defaults', async () => {
     const { router, integration, run } = makeRouter();
 
@@ -201,5 +227,31 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
       endpoint: expect.objectContaining({ baseUrl: 'https://original.invalid/v1' }),
     }));
     expect(endpointResolver.resolveEndpointReference).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not execute a one-shot when the selected settings parser cancels admission', async () => {
+    const { router, integration, run } = makeRouter();
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic settings cancellation');
+    integration.settings.parse.mockImplementation((input) => {
+      controller.abort(cancellation);
+      return input;
+    });
+    await expect(router.runSingleQuery('prompt', { agentId: 'test', signal: controller.signal }))
+      .rejects.toBe(cancellation);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('rejects a one-shot result returned after caller cancellation', async () => {
+    const { router, run } = makeRouter();
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic completion cancellation');
+    run.mockImplementation(async () => {
+      controller.abort(cancellation);
+      return 'Synthetic stale response';
+    });
+    await expect(router.runSingleQuery('prompt', { agentId: 'test', signal: controller.signal }))
+      .rejects.toBe(cancellation);
+    expect(run).toHaveBeenCalledOnce();
   });
 });

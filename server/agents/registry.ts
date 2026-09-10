@@ -185,7 +185,7 @@ interface CompactSessionOptions {
 }
 
 type RegistryInstances = AgentRuntimeRouterOptions['instances']
-  & Pick<AgentInstanceDirectory, 'catalogForInstance' | 'authForInstance' | 'nativeSessionsFor'>;
+  & Pick<AgentInstanceDirectory, 'require' | 'catalogForInstance' | 'authForInstance' | 'nativeSessionsFor'>;
 
 export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
@@ -319,7 +319,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
     const instance = this.#instances.defaultFor(this.#localNodeId, agentId);
-    return instance ? this.#instances.get(instance)?.singleQuery?.runsToolsWithoutPermission ?? false : false;
+    return instance ? this.#instances.singleQueryForInstance(instance)?.runsToolsWithoutPermission ?? false : false;
   }
   supportsForkAtMessage(agentId: string): boolean { return this.#directory.has(agentId); }
   supportsForkWhileRunning(agentId: string): boolean { return this.#directory.has(agentId); }

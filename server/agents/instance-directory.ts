@@ -18,6 +18,8 @@ import { LocalProviderHistoryImportService } from '../execution-node/local-provi
 import type { ProviderHistoryImportService } from '../execution-nodes/provider-history-import.js';
 import { LocalProviderNativeForkService } from '../execution-node/local-provider-native-fork.js';
 import type { ProviderNativeForkService } from '../execution-nodes/provider-native-fork.js';
+import { LocalProviderSingleQueryService } from '../execution-node/local-provider-single-query.js';
+import type { ProviderSingleQueryService } from '../execution-nodes/provider-single-query.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -37,6 +39,7 @@ export class AgentInstanceDirectory {
   readonly #legacyHistoryImportServices = new Map<string, ProviderHistoryImportService>();
   readonly #nativeHistoryImportServices = new Map<string, ProviderHistoryImportService>();
   readonly #nativeForkServices = new Map<string, ProviderNativeForkService>();
+  readonly #singleQueryServices = new Map<string, ProviderSingleQueryService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -81,10 +84,6 @@ export class AgentInstanceDirectory {
 
   configurationFor(owner: LocatedChatOwner): ProviderConfigurationService {
     return this.#configurationService(this.requireFor(owner));
-  }
-
-  configurationForInstance(ref: ExecutionInstanceRef): ProviderConfigurationService {
-    return this.#configurationService(this.require(ref));
   }
 
   catalogForInstance(ref: ExecutionInstanceRef): ProviderCatalogService {
@@ -180,6 +179,18 @@ export class AgentInstanceDirectory {
     if (!service) {
       service = new LocalProviderNativeForkService(integration, integration.forking);
       this.#nativeForkServices.set(key, service);
+    }
+    return service;
+  }
+
+  singleQueryForInstance(ref: ExecutionInstanceRef): ProviderSingleQueryService | null {
+    const integration = this.require(ref);
+    if (!integration.singleQuery) return null;
+    const key = executionInstanceKey(ref);
+    let service = this.#singleQueryServices.get(key);
+    if (!service) {
+      service = new LocalProviderSingleQueryService(integration, integration.singleQuery);
+      this.#singleQueryServices.set(key, service);
     }
     return service;
   }

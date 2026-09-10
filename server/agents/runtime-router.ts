@@ -71,7 +71,7 @@ export interface AgentRuntimeRouterOptions {
   directory: AgentDirectory;
   localNodeId: string;
   instances: Pick<AgentInstanceDirectory,
-    'get' | 'require' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'configurationForInstance' | 'commandsForInstance' | 'nativeForkFor'>;
+    'get' | 'requireFor' | 'defaultFor' | 'configurationFor' | 'commandsForInstance' | 'nativeForkFor' | 'singleQueryForInstance'>;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
@@ -607,8 +607,8 @@ export class AgentRuntimeRouter {
     const { agentId } = options;
     const target = this.#instances.defaultFor(this.#localNodeId, agentId);
     if (!target) throw new DomainError('NODE_UNAVAILABLE', 'The default local provider instance is unavailable.', 409);
-    const integration = this.#instances.require(target);
-    if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
+    const singleQuery = this.#instances.singleQueryForInstance(target);
+    if (!singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
     const model = typeof options.model === 'string' ? options.model : '';
     const selection = model ? this.#endpointResolver.resolveSelection({
       agentId,
@@ -625,22 +625,17 @@ export class AgentRuntimeRouter {
       && options.timeoutMs > 0
       ? options.timeoutMs
       : undefined;
-    const configuration = await this.#instances.configurationForInstance(target).resolve({
-      model: selection?.model ?? model,
-      thinkingMode: options.thinkingMode,
-      settings: isAgentSettingsEnvelope(options.agentSettings) ? options.agentSettings : null,
-      endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
-    }, signal);
-    return integration.singleQuery.run({
+    return singleQuery.run({
       prompt,
       projectPath,
-      model: configuration.model,
-      thinkingMode: configuration.thinkingMode,
+      configuration: {
+        model: selection?.model ?? model,
+        thinkingMode: options.thinkingMode,
+        settings: isAgentSettingsEnvelope(options.agentSettings) ? options.agentSettings : null,
+        endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
+      },
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      settings: configuration.settings,
-      endpoint: configuration.endpoint,
-      signal,
-    });
+    }, signal);
   }
 
   async discoverChatSlashCommands(chat: AgentChatEntry, agentId: string, signal: AbortSignal) {
