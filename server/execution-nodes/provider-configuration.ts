@@ -2,7 +2,7 @@ import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
-import type { AgentSessionConfiguration } from '@garcon/server-agent-interface';
+import type { AgentNativeSessionRef, AgentSessionConfiguration } from '@garcon/server-agent-interface';
 
 export interface ProviderConfigurationRequest {
   readonly model: string;
@@ -27,8 +27,26 @@ export interface ProviderConfigurationUpdate {
   readonly next: AgentSessionConfiguration;
 }
 
-/** Validates configuration on one bound instance without changing provider execution or controller state. */
+export interface ProviderSessionConfigurationRequest {
+  /** Remote owners revalidate this snapshot beside mutation; local calls share controller ownership. */
+  readonly expected: {
+    readonly agentSessionId: string;
+    readonly nativeSession: AgentNativeSessionRef | null;
+    readonly projectPath: string;
+  };
+  readonly previous: AgentSessionConfiguration;
+  readonly next: AgentSessionConfiguration;
+}
+
+export type ProviderSessionConfigurationResult =
+  | { readonly kind: 'applied' }
+  | { readonly kind: 'unsupported' }
+  | { readonly kind: 'unknown' };
+
+/** Owns configuration validation and live application on one bound instance. Preparation does not mutate execution. */
 export interface ProviderConfigurationService {
   resolve(request: ProviderConfigurationRequest, signal: AbortSignal): Promise<AgentSessionConfiguration>;
   prepareUpdate(request: ProviderConfigurationUpdateRequest, signal: AbortSignal): Promise<ProviderConfigurationUpdate>;
+  /** An unknown outcome forbids controller persistence and automatic retry. */
+  apply(request: ProviderSessionConfigurationRequest, signal: AbortSignal): Promise<ProviderSessionConfigurationResult>;
 }

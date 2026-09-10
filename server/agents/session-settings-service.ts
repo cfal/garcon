@@ -29,7 +29,7 @@ export class AgentSessionSettingsService {
     return this.#lock.runExclusive(`chat:${chatId}`, async () => {
       const entry = structuredClone(this.deps.registry.getChat(chatId));
       if (!entry) throw new Error(`Session not found: ${chatId}`);
-      const integration = this.deps.instances.requireFor(entry);
+      const configurationService = this.deps.instances.configurationFor(entry);
       const previous = this.deps.endpointResolver.resolveSelection({
         agentId: entry.agentId,
         model: entry.model,
@@ -45,7 +45,7 @@ export class AgentSessionSettingsService {
           : entry.modelEndpointId,
       });
       assertSameApiProviderBoundary(previous, next);
-      const configuration = await this.deps.instances.configurationFor(entry).prepareUpdate({
+      const configuration = await configurationService.prepareUpdate({
         previous: {
           model: previous.model,
           permissionMode: entry.permissionMode,
@@ -62,12 +62,20 @@ export class AgentSessionSettingsService {
       }, new AbortController().signal);
       this.#assertCurrentTarget(chatId, entry);
 
-      if (entry.agentSessionId && integration.sessionConfiguration) {
-        await integration.sessionConfiguration.apply(
-          entry.agentSessionId,
-          structuredClone(configuration.next),
-          structuredClone(configuration.previous),
-        );
+      if (entry.agentSessionId) {
+        const result = await configurationService.apply({
+          expected: {
+            agentSessionId: entry.agentSessionId,
+            nativeSession: entry.nativeSession ?? null,
+            projectPath: entry.projectPath,
+          },
+          next: configuration.next,
+          previous: configuration.previous,
+        }, new AbortController().signal);
+        if (result.kind !== 'applied' && result.kind !== 'unsupported') {
+          throw new DomainError('SESSION_SETTINGS_OUTCOME_UNKNOWN',
+            'The agent did not confirm the settings update; saved settings are unchanged', 504);
+        }
         this.#assertCurrentTarget(chatId, entry);
       }
 

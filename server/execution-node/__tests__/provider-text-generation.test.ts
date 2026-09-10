@@ -23,7 +23,8 @@ function fixture() {
       migrate: async (input: AgentSettingsEnvelope) => input,
     },
     endpoints: { validate: mock(async (_endpoint: AgentEndpointSelection) => {}) },
-  } satisfies Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>;
+    sessionConfiguration: null,
+  } satisfies Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>;
   const facet = { run: mock(async (_request: AgentTextGenerationRequest) => 'Synthetic text') } satisfies AgentTextGeneration;
   const request = {
     prompt: 'Synthetic prompt', timeoutMs: 4_000,

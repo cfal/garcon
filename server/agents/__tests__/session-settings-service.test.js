@@ -141,6 +141,28 @@ describe('AgentSessionSettingsService', () => {
     expect(updateChat).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('does not mask or retry an unknown configuration outcome when the target changed: %s', async (targetChanged) => {
+    const { service, configuration, entry, updateChat } = makeService('none');
+    entry.agentSessionId = 'original-session';
+    entry.nativeSession = { ownerId: 'amp', schemaVersion: 1, value: { id: 'original-native' } };
+    const expected = structuredClone({ agentSessionId: entry.agentSessionId, nativeSession: entry.nativeSession, projectPath: entry.projectPath });
+    const apply = mock(async () => {
+      if (targetChanged) entry.agentSessionId = 'replacement-session';
+      return { kind: 'unknown' };
+    });
+    configuration.apply = apply;
+    await expect(service.updateSessionSettings('chat-1', { model: 'changed-model' })).rejects.toMatchObject({
+      code: 'SESSION_SETTINGS_OUTCOME_UNKNOWN', status: 504, retryable: false,
+    });
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith({
+      expected,
+      previous: expect.objectContaining({ model: 'medium' }),
+      next: expect.objectContaining({ model: 'changed-model' }),
+    }, expect.any(AbortSignal));
+    expect(updateChat).not.toHaveBeenCalled();
+  });
+
   it('uses the bound async configuration service before applying or persisting', async () => {
     const { service, instances, integration, entry, updateChat } = makeService('none');
     entry.agentSessionId = 'original-session';
@@ -155,9 +177,15 @@ describe('AgentSessionSettingsService', () => {
           settings: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } } },
       }));
     });
-    instances.configurationFor = mock(() => ({ prepareUpdate }));
-    const apply = mock(async () => {});
-    integration.sessionConfiguration = { apply };
+    const apply = mock(async () => ({ kind: 'applied' }));
+    /** @satisfies {import('../../execution-nodes/provider-configuration.js').ProviderConfigurationService} */
+    const configurationService = {
+      resolve: async () => { throw new Error('Unexpected direct configuration resolution'); },
+      prepareUpdate,
+      apply,
+    };
+    instances.configurationFor = mock(() => configurationService);
+    integration.sessionConfiguration = { apply: () => { throw new Error('Controller called the provider directly'); } };
     const pending = service.updateSessionSettings('chat-1', { model: 'changed-model' });
     await Promise.race([entered.promise, pending]);
     expect(instances.configurationFor).toHaveBeenCalledWith(entry);
@@ -165,12 +193,28 @@ describe('AgentSessionSettingsService', () => {
     expect(updateChat).not.toHaveBeenCalled();
     gate.resolve();
     await pending;
-    expect(apply).toHaveBeenCalledWith('original-session', expect.objectContaining({
-      model: 'changed-model', settings: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } },
-    }), expect.objectContaining({ model: 'medium' }));
+    expect(apply).toHaveBeenCalledWith({
+      expected: { agentSessionId: 'original-session', nativeSession: null, projectPath: entry.projectPath },
+      next: expect.objectContaining({
+        model: 'changed-model', settings: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } },
+      }),
+      previous: expect.objectContaining({ model: 'medium' }),
+    }, expect.any(AbortSignal));
     expect(updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
       agentSettingsById: { amp: { ownerId: 'amp', schemaVersion: 2, values: { validatedBy: 'primary' } } },
     }), { flush: true });
+  });
+
+  it('skips live application without a native session and preserves unsupported-facet settings updates', async () => {
+    for (const agentSessionId of [null, 'original-session']) {
+      const { service, configuration, entry, updateChat } = makeService('none');
+      entry.agentSessionId = agentSessionId;
+      const apply = mock(configuration.apply.bind(configuration));
+      configuration.apply = apply;
+      await service.updateSessionSettings('chat-1', { model: 'changed-model' });
+      expect(apply).toHaveBeenCalledTimes(agentSessionId ? 1 : 0);
+      expect(updateChat).toHaveBeenCalledTimes(1);
+    }
   });
 
   const changes = [

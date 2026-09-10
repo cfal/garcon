@@ -7,6 +7,7 @@ import type { ExecutionSettingsPatchResponse } from '../../../common/chat-comman
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
 import { isRecord } from '../../../common/json.js';
 import type { ChatListRefreshRequestedMessage } from '../../../common/ws-events.js';
+import type { ProviderSessionConfigurationRequest, ProviderSessionConfigurationResult } from '../../../server/execution-nodes/provider-configuration.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
@@ -203,6 +204,64 @@ describe('provider configuration through HTTP', () => {
       });
     } finally { await gate.close(); }
   }, 30_000);
+
+  test('keeps settings unchanged on unknown application and persists only a confirmed instance result', async () => {
+    const gate = sessionApplicationGate();
+    try {
+      await withIntegrationFixture('configuration-application-outcome', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const started = await fixture.client.startDirectChat({
+          chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic initial input',
+        });
+        await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+        await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: agent.agentId });
+        const original = await persistedChat(fixture, chatId);
+        const history = await fixture.client.getMessages(chatId);
+        for (const kind of ['unknown', 'applied'] as const) {
+          const application = gate.holdNext();
+          const pending = fixture.client.patch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', {
+            chatId, permissionMode: 'bypassPermissions', thinkingMode: 'none', agentSettingsPatch: {},
+          });
+          void pending.catch(() => undefined);
+          try {
+            expect(await withTimeout(application.entered.promise, 5_000, () => 'Settings did not reach the instance service'))
+              .toMatchObject({
+                expected: { agentSessionId: original.agentSessionId, nativeSession: original.nativeSession, projectPath: fixture.dirs.project },
+                previous: { model: agent.provider.model, permissionMode: 'default' },
+                next: { model: agent.provider.model, permissionMode: 'bypassPermissions' },
+              });
+            expect(await persistedChat(fixture, chatId)).toEqual(original);
+            application.release.resolve({ kind });
+            if (kind === 'unknown') {
+              await expect(pending).rejects.toMatchObject({
+                status: 504, body: { errorCode: 'SESSION_SETTINGS_OUTCOME_UNKNOWN', retryable: false },
+              });
+              expect(await persistedChat(fixture, chatId)).toEqual(original);
+            } else {
+              expect(await pending).toMatchObject({ success: true, chatId, permissionMode: 'bypassPermissions' });
+            }
+          } finally {
+            application.release.resolve({ kind: 'unknown' });
+            await pending.catch(() => undefined);
+          }
+          expect(gate.calls()).toBe(kind === 'unknown' ? 1 : 2);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+          expect(await fixture.client.getMessages(chatId)).toEqual(history);
+        }
+        const saved = await persistedChat(fixture, chatId);
+        expect(saved).toMatchObject({ permissionMode: 'bypassPermissions' });
+        await fixture.restartGarcon();
+        expect(await persistedChat(fixture, chatId)).toEqual(saved);
+        expect(await fixture.client.getMessages(chatId)).toEqual(history);
+        expect(gate.calls()).toBe(2);
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-session-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_SESSION_CONFIGURATION_GATE: gate.url },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
 });
 
 async function persistedChat(fixture: IntegrationFixture, chatId: string) {
@@ -239,6 +298,40 @@ function validationGate() {
     },
     async close() {
       for (const validation of held) validation.release.resolve(false);
+      await server.stop(true);
+    },
+  };
+}
+
+function sessionApplicationGate() {
+  type HeldApplication = { entered: Deferred<ProviderSessionConfigurationRequest>; release: Deferred<ProviderSessionConfigurationResult> };
+  let next: HeldApplication | null = null;
+  let calls = 0;
+  const held = new Set<HeldApplication>();
+  const server = Bun.serve({
+    hostname: '0.0.0.0', port: 0,
+    async fetch(request) {
+      calls++;
+      const application = next;
+      next = null;
+      if (!application) return Response.json({ kind: 'unknown' } satisfies ProviderSessionConfigurationResult);
+      application.entered.resolve(await request.json());
+      const result = await application.release.promise;
+      held.delete(application);
+      return Response.json(result);
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    calls: () => calls,
+    holdNext() {
+      if (next) throw new Error('Application barrier already armed');
+      next = { entered: new Deferred<ProviderSessionConfigurationRequest>(), release: new Deferred<ProviderSessionConfigurationResult>() };
+      held.add(next);
+      return next;
+    },
+    async close() {
+      for (const application of held) application.release.resolve({ kind: 'unknown' });
       await server.stop(true);
     },
   };

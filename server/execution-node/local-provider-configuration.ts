@@ -6,11 +6,12 @@ import type { AgentIntegration, AgentSessionConfiguration } from '@garcon/server
 import type {
   ProviderConfigurationRequest, ProviderConfigurationService,
   ProviderConfigurationUpdate, ProviderConfigurationUpdateRequest,
+  ProviderSessionConfigurationRequest, ProviderSessionConfigurationResult,
 } from '../execution-nodes/provider-configuration.js';
 import { DomainError } from '../lib/domain-error.js';
 
 export class LocalProviderConfigurationService implements ProviderConfigurationService {
-  constructor(private readonly integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>) {}
+  constructor(private readonly integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>) {}
 
   async resolve(input: ProviderConfigurationRequest, signal: AbortSignal): Promise<AgentSessionConfiguration> {
     signal.throwIfAborted();
@@ -58,6 +59,16 @@ export class LocalProviderConfigurationService implements ProviderConfigurationS
         settings,
       },
     });
+  }
+
+  async apply(input: ProviderSessionConfigurationRequest, signal: AbortSignal): Promise<ProviderSessionConfigurationResult> {
+    signal.throwIfAborted();
+    const facet = this.integration.sessionConfiguration;
+    if (!facet) return { kind: 'unsupported' };
+    const request = structuredClone(input);
+    await facet.apply(request.expected.agentSessionId, request.next, request.previous);
+    // Cancellation after mutation cannot turn a confirmed local result into a non-delivery claim.
+    return { kind: 'applied' };
   }
 
   #parseSettings(settings: AgentSettingsEnvelope | null): AgentSettingsEnvelope {

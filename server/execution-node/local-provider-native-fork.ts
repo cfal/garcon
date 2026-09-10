@@ -12,7 +12,7 @@ export class LocalProviderNativeForkService implements ProviderNativeForkService
   readonly #configuration: LocalProviderConfigurationService;
 
   constructor(
-    private readonly integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>,
+    private readonly integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>,
     private readonly forking: AgentNativeFork,
   ) {
     this.#configuration = new LocalProviderConfigurationService(integration);

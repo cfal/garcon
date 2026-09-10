@@ -5,7 +5,7 @@ import { LocalProviderNativeForkService } from '../local-provider-native-fork.js
 
 function fixture() {
   const defaults = { ownerId: 'synthetic', schemaVersion: 1, values: { profile: 'secondary' } };
-  /** @satisfies {Pick<import('@garcon/server-agent-interface').AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>} */
+  /** @satisfies {Pick<import('@garcon/server-agent-interface').AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>} */
   const integration = {
     descriptor: {
       id: 'synthetic', label: 'Synthetic', icon: null,
@@ -19,6 +19,7 @@ function fixture() {
       applyPatch: (input) => input, migrate: async (input) => input,
     },
     endpoints: { validate: mock(async () => {}) },
+    sessionConfiguration: null,
   };
   /** @satisfies {import('@garcon/server-agent-interface').AgentEstablishedSession} */
   const session = {

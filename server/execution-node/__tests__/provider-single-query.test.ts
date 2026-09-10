@@ -24,7 +24,8 @@ function fixture(saved = false) {
       migrate: async (input: AgentSettingsEnvelope) => input,
     },
     endpoints: { validate: mock(async (_endpoint: AgentEndpointSelection) => {}) },
-  } satisfies Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>;
+    sessionConfiguration: null,
+  } satisfies Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>;
   const singleQuery = {
     run: mock(async (_request: AgentSingleQueryRequest) => 'Synthetic response'),
   } satisfies AgentSingleQuery;

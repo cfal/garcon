@@ -6,7 +6,7 @@ export class LocalProviderTextGenerationService implements ProviderTextGeneratio
   readonly #configuration: LocalProviderConfigurationService;
 
   constructor(
-    integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>,
+    integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>,
     private readonly textGeneration: AgentTextGeneration,
   ) {
     this.#configuration = new LocalProviderConfigurationService(integration);

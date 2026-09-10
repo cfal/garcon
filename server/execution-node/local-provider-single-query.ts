@@ -6,7 +6,7 @@ export class LocalProviderSingleQueryService implements ProviderSingleQueryServi
   readonly #configuration: LocalProviderConfigurationService;
 
   constructor(
-    integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints'>,
+    integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>,
     private readonly singleQuery: AgentSingleQuery,
   ) {
     this.#configuration = new LocalProviderConfigurationService(integration);
