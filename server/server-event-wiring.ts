@@ -86,6 +86,7 @@ export interface ServerEventWiring {
     chatId: string,
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
+    detail?: ChatOperationalNoticeMessage['detail'],
   ): void;
   // Scheduled through the per-chat task queue so the invalidation follows the
   // committed update notice's own chat-messages fanout.
@@ -185,6 +186,7 @@ export function wireServerEvents({
     chatId: string,
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
+    detail?: ChatOperationalNoticeMessage['detail'],
   ): void {
     if (!chatExists(chatId)) return;
     broadcast(new ChatOperationalNoticeMessage(
@@ -192,6 +194,7 @@ export function wireServerEvents({
       noticeType,
       content,
       new Date().toISOString(),
+      detail,
     ));
   }
 
@@ -612,7 +615,11 @@ export function wireServerEvents({
   });
   queue.onProjectUnavailable((chatId, error) => {
     scheduleChatTask(chatId, 'server-events: project unavailable notice failed', () => {
-      notifyOperationalNotice(chatId, 'warning', error.message);
+      notifyOperationalNotice(chatId, 'warning', error.message, {
+        type: 'project-unavailable',
+        projectPath: error.projectPath,
+        reason: error.reason,
+      });
     });
   });
   queue.onTurnSettled((chatId, turn) => {

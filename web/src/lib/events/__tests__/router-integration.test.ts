@@ -261,8 +261,29 @@ describe('event router integration', () => {
 					type: 'chat-operational-notice',
 					chatId: 'chat-background',
 					noticeType: 'warning',
-					content: 'background warning',
+					content: 'server fallback',
 					timestamp: TS,
+					detail: { type: 'carryover-compaction-started' },
+				},
+				{
+					type: 'chat-operational-notice',
+					chatId: 'chat-native-drift',
+					noticeType: 'warning',
+					content: 'server fallback',
+					timestamp: TS,
+					detail: { type: 'native-transcript-drift' },
+				},
+				{
+					type: 'chat-operational-notice',
+					chatId: 'chat-missing-project',
+					noticeType: 'warning',
+					content: 'server fallback',
+					timestamp: TS,
+					detail: {
+						type: 'project-unavailable',
+						projectPath: '/workspace/missing',
+						reason: 'not-found',
+					},
 				},
 			],
 			stores,
@@ -278,7 +299,19 @@ describe('event router integration', () => {
 			2,
 			'chat-background',
 			'warning',
-			'background warning',
+			'Compacting earlier chat history. This could take a while depending on the agent and model.',
+		);
+		expect(stores.chatState.appendServerNotice).toHaveBeenNthCalledWith(
+			3,
+			'chat-native-drift',
+			'warning',
+			'The transcript may have changed outside Garcon. Consider reloading from native history.',
+		);
+		expect(stores.chatState.appendServerNotice).toHaveBeenNthCalledWith(
+			4,
+			'chat-missing-project',
+			'warning',
+			'Project folder not found: /workspace/missing',
 		);
 		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});

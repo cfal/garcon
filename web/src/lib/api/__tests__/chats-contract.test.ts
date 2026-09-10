@@ -499,7 +499,7 @@ describe('chats API contract', () => {
 		});
 
 		expect(timeout).toHaveBeenNthCalledWith(1, 30_000);
-		expect(timeout).toHaveBeenNthCalledWith(2, 13 * 60_000);
+		expect(timeout).toHaveBeenNthCalledWith(2, 33 * 60_000);
 	});
 
 	it('rejects a successful handoff response without a durable chat projection', async () => {

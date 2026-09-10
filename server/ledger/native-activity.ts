@@ -50,6 +50,7 @@ export interface NativeTranscriptActivityServiceOptions {
     chatId: string,
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
+    detail?: ChatOperationalNoticeMessage['detail'],
   ) => void;
   readonly scheduleTimeout?: (callback: () => void, delay: number) => ScheduledTimeout;
 }
@@ -159,7 +160,9 @@ export class NativeTranscriptActivityService {
     const providerAt = timestamp(current.key.providerWatermark.at);
     if (providerAt === null || observedAt <= providerAt) return;
 
-    this.options.notifyOperationalNotice(chatId, 'warning', NATIVE_TRANSCRIPT_DRIFT_NOTICE);
+    this.options.notifyOperationalNotice(chatId, 'warning', NATIVE_TRANSCRIPT_DRIFT_NOTICE, {
+      type: 'native-transcript-drift',
+    });
   }
 
   #eligibility(chatId: string): EligibleNativeActivityCheck | null {

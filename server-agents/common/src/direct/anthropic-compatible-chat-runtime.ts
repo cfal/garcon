@@ -197,6 +197,7 @@ export async function runAnthropicCompatibleSingleQuery(
         ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
       }),
       signal: directSingleQuerySignal(options, controller.signal),
+      timeout: false,
     });
 
     if (!response.ok) {

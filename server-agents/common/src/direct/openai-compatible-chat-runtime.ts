@@ -164,6 +164,7 @@ export async function runOpenAiCompatibleSingleQuery(
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
       signal: directSingleQuerySignal(options, controller.signal),
+      timeout: false,
     });
 
     if (!response.ok) {

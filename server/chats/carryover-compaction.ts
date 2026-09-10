@@ -40,7 +40,9 @@ const SUMMARY_CLOSE = '</summary>';
 const utf8Encoder = new TextEncoder();
 // The Direct runtime cap in server-agents/common/src/direct/single-query-options.ts
 // must remain at least this large.
-export const CARRYOVER_COMPACTION_TIMEOUT_MS = 5 * 60_000;
+export const CARRYOVER_COMPACTION_TIMEOUT_MS = 15 * 60_000;
+export const CARRYOVER_COMPACTION_STARTED_NOTICE =
+  'Compacting earlier chat history. This could take a while depending on the agent and model.';
 
 export interface CarryOverCompactionAgents {
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
