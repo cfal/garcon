@@ -326,7 +326,6 @@ describe('Codex fork at message', () => {
               projectPath: directories.project,
               tags: [],
               agentSessionId: sourceAgentSessionId,
-              nextForkOrdinal: 1,
               model: 'gpt-5.6-sol',
               apiProviderId: null,
               modelEndpointId: null,

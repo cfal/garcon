@@ -673,7 +673,6 @@ async function prepareChatRecord(
         projectPath: directories.project,
         tags: [],
         agentSessionId: native?.agentSessionId ?? null,
-        nextForkOrdinal: 1,
         model,
         apiProviderId: null,
         modelEndpointId: null,

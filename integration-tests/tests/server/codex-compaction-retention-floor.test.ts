@@ -145,7 +145,6 @@ describe('Codex compaction interleaving', () => {
               projectPath: directories.project,
               tags: [],
               agentSessionId,
-              nextForkOrdinal: 1,
               model: 'gpt-5.6-sol',
               apiProviderId: null,
               modelEndpointId: null,

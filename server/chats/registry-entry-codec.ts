@@ -57,15 +57,6 @@ export function normalizeRegistryModes(entry: {
   };
 }
 
-export function normalizeNextForkOrdinal(value: unknown): number | undefined {
-  const parsed = typeof value === 'string'
-    ? Number.parseInt(value, 10)
-    : typeof value === 'number'
-      ? value
-      : Number.NaN;
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 function normalizeString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
@@ -144,10 +135,6 @@ export function normalizeChatRegistryEntry(
       ? rawEntry.modelProtocol
       : null,
     lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
-    ...(() => {
-      const nextForkOrdinal = normalizeNextForkOrdinal(rawEntry.nextForkOrdinal);
-      return nextForkOrdinal === undefined ? {} : { nextForkOrdinal };
-    })(),
     ...normalizeRegistryModes(rawEntry),
     carryOverSegments,
     nativeSeedReceipt,

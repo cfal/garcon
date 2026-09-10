@@ -42,6 +42,7 @@ import {
   sanitizeRecentAgentSettings,
 } from './startup-recents.js';
 import type { IChatRegistry } from '../chats/store.js';
+import type { DerivedChatNameInput } from '../chats/chat-title.js';
 import { isRecord } from '../../common/json.js';
 import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
@@ -461,6 +462,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   async setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean> {
     return this.#chatNames.setSessionNameIfAbsent(chatId, title);
+  }
+
+  async setDerivedSessionName(input: DerivedChatNameInput): Promise<string> {
+    return this.#chatNames.setDerivedSessionName(input);
   }
 
   async removeSessionName(chatId: string): Promise<void> {

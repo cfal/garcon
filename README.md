@@ -57,6 +57,8 @@ Garcon keeps the full loop together:
 - **Move context deliberately.** Fork where the provider supports it, export complete Markdown or XML transcripts, create token-budgeted handoff artifacts, or delegate into a fresh chat.
 - **Close the loop from anywhere.** Work with branches, worktrees, history, pull requests, commits, and pushes from desktop or phone, with optional Telegram alerts when attention is needed.
 
+Forks and `/handoff` continuations append the first unused numeric suffix to the source's visible title, checking all chats in the workspace, including archived chats. Deleted names can be reused. Existing suffixes remain literal: forking `Topic (1)` produces `Topic (1) (1)`, not `Topic (2)`.
+
 ## See It In Action
 
 <p align="center"><strong>Agents that can coordinate</strong></p>

@@ -3,7 +3,7 @@ import type {
   ForkedAgentSessionOutcome,
   StartedAgentSession,
 } from '../agents/session-types.js';
-import { extractFirstLine } from '../lib/text.js';
+import type { DerivedChatNameInput } from './chat-title.js';
 import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
@@ -45,9 +45,8 @@ function isUnsettledForkPoint(error: unknown): boolean {
 }
 
 interface ForkChatSettings {
-  getChatName(chatId: string): string | null | undefined;
   ensureInNormal(chatId: string): Promise<unknown>;
-  setSessionName(chatId: string, title: string): Promise<unknown>;
+  setDerivedSessionName(input: DerivedChatNameInput): Promise<string>;
   removeFromAllOrderLists(chatId: string): Promise<unknown>;
   removeSessionName(chatId: string): Promise<unknown>;
 }
@@ -99,38 +98,25 @@ export interface ForkChatFileCopyResult {
   chatId: string;
   agentId: string;
   agentSessionId: string | null;
-  sourceNextForkOrdinal: number;
   rollback(): Promise<void>;
 }
 
 export interface ForkTargetRollbackInput {
-  sourceChatId: string;
   targetChatId: string;
-  registry: IChatRegistry;
   settings: ForkChatSettings;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
-  sourceNextForkOrdinal?: number;
 }
 
 export async function rollbackForkTarget({
-  sourceChatId,
   targetChatId,
-  registry,
   settings,
   ownership,
-  sourceNextForkOrdinal,
 }: ForkTargetRollbackInput): Promise<void> {
   await Promise.all([
     settings.removeFromAllOrderLists(targetChatId),
     settings.removeSessionName(targetChatId),
   ]);
   await ownership.delete(targetChatId);
-  const source = registry.getChat(sourceChatId);
-  if (source && sourceNextForkOrdinal !== undefined) {
-    await registry.updateChat(sourceChatId, {
-      nextForkOrdinal: sourceNextForkOrdinal,
-    }, { flush: true });
-  }
 }
 
 export async function forkChatFileCopy({
@@ -302,9 +288,6 @@ export async function forkChatFileCopy({
     throw error;
   }
 
-  const sourceTitle = resolveVisibleChatTitle(sourceChatId, settings, metadata);
-  const nextForkOrdinal = normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1;
-  const forkTitle = `${sourceTitle} (${nextForkOrdinal})`;
   let created: boolean;
   try {
     created = registry.addChat({
@@ -319,7 +302,6 @@ export async function forkChatFileCopy({
       ...createPreambleBoundaryBinding('fork'),
       tags: [...sourceSession.tags],
       agentSessionId: nativeFork?.agentSessionId ?? null,
-      nextForkOrdinal: 1,
       permissionMode: sourceSession.permissionMode,
       thinkingMode: sourceSession.thinkingMode,
       agentSettingsById: { ...sourceSession.agentSettingsById },
@@ -370,12 +352,9 @@ export async function forkChatFileCopy({
     const cleanupErrors: unknown[] = [];
     try {
       await rollbackForkTarget({
-        sourceChatId,
         targetChatId,
-        registry,
         settings,
         ownership,
-        sourceNextForkOrdinal: nextForkOrdinal,
       });
     } catch (error) {
       cleanupErrors.push(error);
@@ -399,16 +378,17 @@ export async function forkChatFileCopy({
   try {
     await registry.flush();
     signal.throwIfAborted();
-    await registry.updateChat(sourceChatId, {
-      nextForkOrdinal: nextForkOrdinal + 1,
-    }, { flush: true });
-    signal.throwIfAborted();
     await settings.ensureInNormal(targetChatId);
     signal.throwIfAborted();
 
     const sourceMeta = metadata.getChatMetadata(sourceChatId);
     if (sourceMeta?.firstMessage) metadata.addNewChatMetadata(targetChatId, sourceMeta.firstMessage);
-    await settings.setSessionName(targetChatId, forkTitle);
+    await settings.setDerivedSessionName({
+      chatId: targetChatId,
+      sourceChatId,
+      registry,
+      metadata,
+    });
     signal.throwIfAborted();
   } catch (error) {
     const cleanupErrors: unknown[] = [];
@@ -440,7 +420,6 @@ export async function forkChatFileCopy({
     chatId: targetChatId,
     agentId: sourceSession.agentId,
     agentSessionId: nativeFork?.agentSessionId ?? null,
-    sourceNextForkOrdinal: nextForkOrdinal,
     rollback,
   };
 }
@@ -511,23 +490,4 @@ function validateForkedSeedReceipt(
   if (JSON.stringify(receipt) !== JSON.stringify(expected)) {
     throw new Error('Forked agent returned an invalid carried-context receipt');
   }
-}
-
-function normalizeNextForkOrdinal(value: unknown): number | null {
-  const parsed = typeof value === 'string'
-    ? Number.parseInt(value, 10)
-    : typeof value === 'number'
-      ? value
-      : Number.NaN;
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function resolveVisibleChatTitle(
-  chatId: string,
-  settings: ForkChatSettings,
-  metadata: ForkChatMetadata,
-): string {
-  const overrideTitle = settings.getChatName(chatId);
-  const fallbackTitle = metadata.getChatMetadata(chatId)?.firstMessage;
-  return extractFirstLine(overrideTitle || fallbackTitle || 'New Session') || 'New Session';
 }

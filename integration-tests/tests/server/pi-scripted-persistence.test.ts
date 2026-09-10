@@ -452,7 +452,6 @@ async function writeLegacyPiSession(input: {
         projectPath: input.projectPath,
         tags: [],
         agentSessionId: input.agentSessionId,
-        nextForkOrdinal: 1,
         model: PI_TEST_MODEL,
         apiProviderId: null,
         modelEndpointId: null,

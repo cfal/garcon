@@ -62,10 +62,11 @@ describe('Codex history modes', () => {
 
       const registry = JSON.parse(
         await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-      ) as { sessions: Record<string, { nextForkOrdinal?: number }> };
+      ) as { sessions: Record<string, unknown> };
       expect(registry.sessions[targetChatId]).toBeDefined();
       expect(registry.sessions[pointTargetChatId]).toBeDefined();
-      expect(registry.sessions[sourceChatId]?.nextForkOrdinal).toBe(3);
+      expect(registry.sessions[sourceChatId]).not.toHaveProperty('nextForkOrdinal');
+      expect(pointFork.chat.title).not.toBe(wholeFork.chat.title);
       const sessionDirectory = dirname(sourceNativePath);
       const sessionFiles = (await readdir(sessionDirectory)).filter((name) => name.endsWith('.jsonl'));
       expect(sessionFiles).toEqual([sourceNativePath.split('/').at(-1)!]);
@@ -123,7 +124,6 @@ describe('Codex history modes', () => {
               projectPath: directories.project,
               tags: [],
               agentSessionId: sourceAgentSessionId,
-              nextForkOrdinal: 1,
               model: 'gpt-5.6-sol',
               apiProviderId: null,
               modelEndpointId: null,
@@ -294,7 +294,6 @@ describe('Codex history modes', () => {
               projectPath: directories.project,
               tags: [],
               agentSessionId: sourceAgentSessionId,
-              nextForkOrdinal: 1,
               model: 'gpt-5.6-sol',
               apiProviderId: null,
               modelEndpointId: null,
