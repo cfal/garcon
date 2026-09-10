@@ -46,5 +46,6 @@ export interface AgentSessionConfigurationUpdates {
 }
 
 export interface AgentProjectPathUpdates {
+  /** Transfers a confirmed native preparation to its caller even after cancellation. */
   prepare(request: AgentProjectPathUpdateRequest): Promise<AgentProjectPathUpdatePreparation | void>;
 }

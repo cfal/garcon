@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
@@ -179,6 +180,62 @@ describeOnLinux('OpenCode project path relocation', () => {
       expect(await gitStatus(unrelated)).toBe(unrelatedStatus);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('retains rollback ownership when cancellation follows a confirmed native move', async () => {
+    const testEnvironment = requireEnvironment();
+    const firstPrompt = marker('CANCEL_FIRST_PROMPT');
+    const firstReply = marker('CANCEL_FIRST_REPLY');
+    const resumePrompt = marker('CANCEL_RESUME_PROMPT');
+    const resumeReply = marker('CANCEL_RESUME_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(firstReply)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(resumeReply)]);
+
+    await withIntegrationFixture('opencode-project-path-cancellation', async (fixture) => {
+      const repository = await createWorktreeRepository(fixture);
+      const sourceStatus = await gitStatus(repository.source);
+      const targetStatus = await gitStatus(repository.target);
+      const chatId = fixture.newChatId();
+      await runStartTurn(fixture, chatId, repository.source, firstPrompt, firstReply);
+      const native = await openCodeNativeSession(fixture, chatId);
+      const before = await fixture.client.getMessages(chatId);
+
+      await expect(fixture.client.updateProjectPath({
+        chatId, projectPath: repository.target,
+      })).rejects.toMatchObject({ status: 409, body: { errorCode: 'CHAT_NOT_IDLE' } });
+      expect(readOpenCodeSessionDirectory(native)).toBe(repository.source);
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId))
+        .toMatchObject({ projectPath: repository.source });
+      expect(await fixture.client.getMessages(chatId)).toEqual(before);
+      expect(await openCodeNativeSession(fixture, chatId)).toEqual(native);
+      const diagnostics = JSON.parse(await readFile(join(fixture.dirs.root, 'project-cancellation.json'), 'utf8'));
+      expect(diagnostics).toEqual({
+        preparations: 1, returnedPreparation: true, rollbacks: 1,
+        moves: [
+          { sessionId: native.agentSessionId, directory: repository.target, aborted: false },
+          { sessionId: native.agentSessionId, directory: repository.source, aborted: false },
+        ],
+      });
+      await expectDirtyTreesUnchanged(repository, sourceStatus, targetStatus);
+
+      await expect(fixture.client.updateProjectPath({
+        chatId, projectPath: repository.target,
+      })).resolves.toMatchObject({ projectPath: repository.target });
+      expect(readOpenCodeSessionDirectory(native)).toBe(repository.target);
+      await runExistingTurn(fixture, chatId, resumePrompt, resumeReply);
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([firstReply, resumeReply]);
+      await expectDirtyTreesUnchanged(repository, sourceStatus, targetStatus);
+      testEnvironment.model.assertSettled();
+    }, {
+      ...withScriptedOpenCode(),
+      bindAddress: '0.0.0.0',
+      authentication: 'account',
+      preloadModules: [fileURLToPath(new URL('../../support/opencode-project-cancellation-preload.ts', import.meta.url))],
+      resolveServerEnvironment: (directories) => ({
+        ...testEnvironment.resolveServerEnvironment(directories),
+        GARCON_TEST_PROJECT_CANCELLATION_DIAGNOSTICS: join(directories.root, 'project-cancellation.json'),
+      }),
+    });
   }, 120_000);
 });
 

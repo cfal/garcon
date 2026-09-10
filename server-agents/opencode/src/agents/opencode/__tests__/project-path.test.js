@@ -32,6 +32,61 @@ function operation() {
 }
 
 describe('OpenCode project path updates', () => {
+  it('transfers a confirmed move to its rollback owner despite late cancellation', async () => {
+    const controller = new AbortController();
+    const source = chat();
+    const moved = Promise.withResolvers();
+    const moveSession = mock(async (_sessionId, _directory, signal) => {
+      if (signal === controller.signal) await moved.promise;
+    });
+    const pending = createUpdates(moveSession).prepare({
+      chat: source,
+      nextProjectPath: '/repo-b',
+      signal: controller.signal,
+    });
+    source.projectPath = '/changed-source';
+    source.agentSessionId = 'changed-session';
+    controller.abort(new Error('Synthetic cancellation after confirmed move'));
+    moved.resolve();
+
+    const preparation = await pending;
+    expect(preparation).toBeDefined();
+    expect(moveSession).toHaveBeenCalledTimes(1);
+    await preparation.rollback();
+    expect(moveSession).toHaveBeenCalledTimes(2);
+    expect(moveSession.mock.calls[1].slice(0, 2)).toEqual(['session-1', '/repo-a']);
+    expect(moveSession.mock.calls[1][2]).not.toBe(controller.signal);
+    expect(moveSession.mock.calls[1][2].aborted).toBe(false);
+  });
+
+  it('rejects cancellation before preparation without moving the session', async () => {
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic cancellation before move');
+    controller.abort(cancellation);
+    const moveSession = mock(async () => {});
+    await expect(createUpdates(moveSession).prepare({
+      chat: chat(), nextProjectPath: '/repo-b', signal: controller.signal,
+    })).rejects.toBe(cancellation);
+    expect(moveSession).not.toHaveBeenCalled();
+  });
+
+  it('reports an aborted in-flight move without guessing whether to compensate', async () => {
+    const controller = new AbortController();
+    const cancellation = new Error('Synthetic cancellation during native move');
+    const moveSession = mock(async () => {
+      controller.abort(cancellation);
+      throw cancellation;
+    });
+
+    await expect(createUpdates(moveSession).prepare({
+      chat: chat(), nextProjectPath: '/repo-b', signal: controller.signal,
+    })).rejects.toMatchObject({
+      code: 'UNAVAILABLE', message: cancellation.message, retryable: true,
+    });
+    expect(moveSession).toHaveBeenCalledTimes(1);
+    expect(moveSession).toHaveBeenCalledWith('session-1', '/repo-b', controller.signal);
+  });
+
   it('moves the provider session and rolls it back without replacing the native binding', async () => {
     const moveSession = mock(() => Promise.resolve());
     const updates = createUpdates(moveSession);

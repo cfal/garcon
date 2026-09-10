@@ -26,19 +26,20 @@ export function createOpenCodeProjectPathUpdates(input: {
       request.signal.throwIfAborted();
       const sessionId = input.sessionId(request.chat);
       if (!sessionId) return;
+      const previousProjectPath = request.chat.projectPath;
 
       try {
         await input.runtime.moveSession(sessionId, request.nextProjectPath, request.signal);
       } catch (error) {
         throw projectPathUpdateError(error);
       }
-      request.signal.throwIfAborted();
 
+      // A confirmed move transfers rollback ownership even after cancellation.
       return {
         commit: async () => undefined,
         rollback: () => input.runtime.moveSession(
           sessionId,
-          request.chat.projectPath,
+          previousProjectPath,
           new AbortController().signal,
         ),
       };
