@@ -21,7 +21,6 @@ interface ForkContext {
   sourceChatId: string;
   targetChatId: string;
   sourceSession: ChatRegistryEntry;
-  sourceNextForkOrdinal: number;
   upToOrdinal?: number;
   allowHandoffFork?: boolean;
 }
@@ -114,9 +113,6 @@ export class ForkCommands {
       modelEndpointId: input.options?.modelEndpointId === undefined ? source.modelEndpointId : input.options.modelEndpointId,
       attachments: input.images ?? [],
     });
-    if (preparedFork?.sourceNextForkOrdinal !== undefined) {
-      forkContext.sourceNextForkOrdinal = preparedFork.sourceNextForkOrdinal;
-    }
 
     const submit = async () => {
       const ledger = await this.deps.ledger.accept(ledgerInput);
@@ -151,7 +147,6 @@ export class ForkCommands {
             forkPreparation: {
               phase: 'creating',
               sourceChatId: forkContext.sourceChatId,
-              sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
             },
           });
           forkResult = await this.forkChatFromContext(forkContext, signal);
@@ -159,7 +154,6 @@ export class ForkCommands {
             forkPreparation: {
               phase: 'created',
               sourceChatId: forkContext.sourceChatId,
-              sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
             },
           });
         },
@@ -266,7 +260,6 @@ export class ForkCommands {
           sourceSession.thinkingMode,
         ),
       },
-      sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToOrdinal ? { upToOrdinal } : {}),
       ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
     };
@@ -277,12 +270,9 @@ export class ForkCommands {
     const failures: unknown[] = [];
     try {
       await rollbackForkTarget({
-        sourceChatId: context.sourceChatId,
         targetChatId: context.targetChatId,
-        registry: this.deps.chats,
         settings: this.deps.settings,
         ownership: this.deps.ownership,
-        sourceNextForkOrdinal: context.sourceNextForkOrdinal,
       });
     } catch (error) {
       failures.push(error);
@@ -328,15 +318,6 @@ export class ForkCommands {
       readForkedNativeHistory: this.deps.readForkedNativeHistory,
     });
   }
-}
-
-function normalizeNextForkOrdinal(value: unknown): number | null {
-  const parsed = typeof value === 'string'
-    ? Number.parseInt(value, 10)
-    : typeof value === 'number'
-      ? value
-      : Number.NaN;
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function forkPayload(input: NormalizedSubmitForkRunInput, clientMessageId: string): Record<string, unknown> {

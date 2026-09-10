@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { DerivedChatNameInput } from '../chats/chat-title.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import {
@@ -73,6 +74,7 @@ export interface SettingsDep {
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
+  setDerivedSessionName(input: DerivedChatNameInput): Promise<string>;
   recordChatStartup(defaults: ChatStartupPreferences): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;

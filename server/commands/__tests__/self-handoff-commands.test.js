@@ -68,7 +68,7 @@ function harness({ source = sourceChat() } = {}) {
       settings: {
         ensureInNormal: mock(async () => undefined),
         getChatName: mock(() => 'the source chat'),
-        setSessionName: mock(async () => undefined),
+        setDerivedSessionName: mock(async () => 'the source chat (1)'),
         removeFromAllOrderLists: mock(async () => undefined),
         removeSessionName: mock(async () => undefined),
       },
@@ -409,7 +409,12 @@ describe('self handoff commands', () => {
     await commands.submitSelfHandoffRun(request());
 
     expect(support.deps.settings.ensureInNormal).toHaveBeenCalledWith(TARGET_ID);
-    expect(support.deps.settings.setSessionName).toHaveBeenCalledWith(TARGET_ID, 'the source chat');
+    expect(support.deps.settings.setDerivedSessionName).toHaveBeenCalledWith({
+      chatId: TARGET_ID,
+      sourceChatId: SOURCE_ID,
+      registry: support.deps.chats,
+      metadata: support.deps.metadata,
+    });
     expect(support.deps.metadata.addNewChatMetadata)
       .toHaveBeenCalledWith(TARGET_ID, 'the original ask');
   });

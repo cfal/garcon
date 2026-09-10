@@ -14,7 +14,6 @@ export type CommandLedgerStatus =
 export interface ForkPreparationState {
   phase: 'creating' | 'created';
   sourceChatId: string;
-  sourceNextForkOrdinal?: number;
 }
 
 export type CommandTurnResult =

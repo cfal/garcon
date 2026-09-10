@@ -193,7 +193,6 @@ export class SelfHandoffCommands {
         ...createPreambleBoundaryBinding('continuation'),
         tags: [...source.tags],
         agentSessionId: null,
-        nextForkOrdinal: 1,
         permissionMode: source.permissionMode,
         thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
           source.agentId,
@@ -237,8 +236,12 @@ export class SelfHandoffCommands {
       if (sourceMeta?.firstMessage) {
         this.deps.metadata.addNewChatMetadata(input.chatId, sourceMeta.firstMessage);
       }
-      const sourceName = this.deps.settings.getChatName(input.sourceChatId);
-      if (sourceName) await this.deps.settings.setSessionName(input.chatId, sourceName);
+      await this.deps.settings.setDerivedSessionName({
+        chatId: input.chatId,
+        sourceChatId: input.sourceChatId,
+        registry: this.deps.chats,
+        metadata: this.deps.metadata,
+      });
     } catch (error) {
       if (!registered) this.deps.handoffs.deleteContinuationLedger(input.chatId);
       throw error;

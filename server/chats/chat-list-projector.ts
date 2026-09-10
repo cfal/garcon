@@ -10,6 +10,7 @@ import { normalizeTags } from '../../common/tags.js';
 import type { ChatMetadata } from './metadata-store.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import { extractFirstLine } from '../lib/text.js';
+import { resolveChatTitle } from './chat-title.js';
 import { carryOverRevision } from './carryover-segments.js';
 
 interface ChatListProjectorSettings {
@@ -106,9 +107,7 @@ export class ChatListProjector {
   ): ChatSummaryProjection {
     const inferredCreatedAt = chatIdCreatedAt(chatId).toISOString();
     const overrideTitle = this.deps.settings.getChatName(chatId);
-    const title = extractFirstLine(
-      overrideTitle || metadata?.firstMessage || 'New Session',
-    ) || 'New Session';
+    const title = resolveChatTitle(overrideTitle, metadata?.firstMessage);
     return {
       chat: {
         id: chatId,
