@@ -40,12 +40,20 @@ interface PendingRequest {
 export interface PiRpcClientOptions {
   onEvent(event: Record<string, unknown>): void;
   onMalformed(line: string): void;
+  readonly maxOutputBytes?: number;
+}
+
+export interface PiRpcProcess {
+  readonly exited: Promise<number>;
+  readonly killed: boolean;
+  readonly stdin: Pick<Bun.FileSink, 'write' | 'flush'> | number | null;
+  readonly stdout: ReadableStream<Uint8Array> | number | null;
 }
 
 const DEFAULT_RESPONSE_TIMEOUT_MS = 15_000;
 
 export class PiRpcClient {
-  readonly #proc: ReturnType<typeof Bun.spawn>;
+  readonly #proc: PiRpcProcess;
   readonly #options: PiRpcClientOptions;
   readonly #pending = new Map<string, PendingRequest>();
   #writer: Promise<void> = Promise.resolve();
@@ -54,7 +62,7 @@ export class PiRpcClient {
   #buffer = '';
   readonly exited: Promise<number>;
 
-  constructor(proc: ReturnType<typeof Bun.spawn>, options: PiRpcClientOptions) {
+  constructor(proc: PiRpcProcess, options: PiRpcClientOptions) {
     this.#proc = proc;
     this.#options = options;
     this.exited = proc.exited.then((code) => {
@@ -175,11 +183,21 @@ export class PiRpcClient {
     const stdout = this.#proc.stdout;
     if (!stdout) return;
     const decoder = new TextDecoder();
+    let outputBytes = 0;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     try {
-      const reader = (stdout as ReadableStream<Uint8Array>).getReader();
+      reader = (stdout as ReadableStream<Uint8Array>).getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (this.#options.maxOutputBytes !== undefined) {
+          outputBytes += value.byteLength;
+          if (outputBytes > this.#options.maxOutputBytes) {
+            this.dispose('Pi RPC output exceeded its byte limit');
+            await reader.cancel();
+            return;
+          }
+        }
         this.#buffer += decoder.decode(value, { stream: true });
         let newline = this.#buffer.indexOf('\n');
         while (newline >= 0) {
@@ -194,6 +212,8 @@ export class PiRpcClient {
       if (tail.trim()) this.#handleLine(tail.replace(/\r$/, ''));
     } catch {
       // Stream closed; the exit handler settles pending requests.
+    } finally {
+      reader?.releaseLock();
     }
   }
 

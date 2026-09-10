@@ -1,7 +1,9 @@
 const PROCESS_EXIT_TERM_MS = 5_000;
 const PROCESS_EXIT_KILL_MS = 5_000;
 
-export async function terminatePiProcess(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+export type PiProcessLifetime = Pick<ReturnType<typeof Bun.spawn>, 'killed' | 'kill' | 'exited'>;
+
+export async function terminatePiProcess(proc: PiProcessLifetime): Promise<void> {
   if (!proc.killed) proc.kill('SIGTERM');
   if (await waitForExit(proc, PROCESS_EXIT_TERM_MS)) return;
   proc.kill('SIGKILL');
@@ -11,7 +13,7 @@ export async function terminatePiProcess(proc: ReturnType<typeof Bun.spawn>): Pr
 }
 
 async function waitForExit(
-  proc: ReturnType<typeof Bun.spawn>,
+  proc: PiProcessLifetime,
   timeoutMs: number,
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;

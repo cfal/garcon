@@ -112,7 +112,7 @@ export default class PiAgentIntegration implements AgentIntegration {
       fallbackModels: PI_MODELS.OPTIONS,
       requiresStrictModelDiscovery: true,
       generation: null,
-      discover: ({ strict }) => strict ? models.getModelsStrict() : models.getModels(),
+      discover: ({ strict, signal }) => strict ? models.getModelsStrict(signal) : models.getModels(signal),
     });
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
     this.auth = {
@@ -285,11 +285,13 @@ function createLazyPiModels(config: PiConfig) {
     return service;
   };
   return {
-    async getModels() {
-      return (await getService()).getModels();
+    async getModels(signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      return (await getService()).getModels(signal);
     },
-    async getModelsStrict() {
-      return (await getService()).getModelsStrict();
+    async getModelsStrict(signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      return (await getService()).getModelsStrict(signal);
     },
   };
 }
