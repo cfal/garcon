@@ -41,6 +41,7 @@
     "./controller-tls": "./controller-tls.ts",
     "./controller-tls-node": "./controller-tls-node.ts",
     "./execution-location": "./execution-location.ts",
+    "./execution-node-config": "./execution-node-config.ts",
     "./node-operation": "./node-operation.ts",
     "./execution-defaults": "./execution-defaults.ts",
     "./file-contracts": "./file-contracts.ts",

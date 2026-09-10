@@ -4,9 +4,11 @@
 // subsets of it (see `chat-command-contracts.ts` and `ws-events.ts`). Adding a
 // server error code means adding it here first.
 import { NODE_ERROR_CODES } from './node-operation.js';
+import { NODE_PAIRING_ERROR_CODES } from './execution-node-config.js';
 
 export const ERROR_CODES = [
   ...NODE_ERROR_CODES,
+  ...NODE_PAIRING_ERROR_CODES,
   // Generic
   'VALIDATION_FAILED',
   'INTERNAL_ERROR',
