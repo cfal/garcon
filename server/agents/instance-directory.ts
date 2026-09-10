@@ -10,6 +10,10 @@ import { LocalProviderAuthService } from '../execution-node/local-provider-auth.
 import type { ProviderAuthService } from '../execution-nodes/provider-auth.js';
 import { LocalProviderCommandsService } from '../execution-node/local-provider-commands.js';
 import type { ProviderCommandsService } from '../execution-nodes/provider-commands.js';
+import { LocalProviderNativeSessionService } from '../execution-node/local-provider-native-sessions.js';
+import type { ProviderNativeSessionService } from '../execution-nodes/provider-native-sessions.js';
+import { LocalProviderNativeActivityService } from '../execution-node/local-provider-native-activity.js';
+import type { ProviderNativeActivityService } from '../execution-nodes/provider-native-activity.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -24,6 +28,8 @@ export class AgentInstanceDirectory {
   readonly #catalogServices = new Map<string, ProviderCatalogService>();
   readonly #authServices = new Map<string, ProviderAuthService>();
   readonly #commandsServices = new Map<string, ProviderCommandsService>();
+  readonly #nativeSessionServices = new Map<string, ProviderNativeSessionService>();
+  readonly #nativeActivityServices = new Map<string, ProviderNativeActivityService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -103,6 +109,29 @@ export class AgentInstanceDirectory {
     if (!service) {
       service = new LocalProviderCommandsService(integration);
       this.#commandsServices.set(key, service);
+    }
+    return service;
+  }
+
+  nativeSessionsFor(owner: LocatedChatOwner): ProviderNativeSessionService {
+    const integration = this.requireFor(owner);
+    const key = executionInstanceKey(owner.executionLocation);
+    let service = this.#nativeSessionServices.get(key);
+    if (!service) {
+      service = new LocalProviderNativeSessionService(integration);
+      this.#nativeSessionServices.set(key, service);
+    }
+    return service;
+  }
+
+  nativeActivityFor(owner: LocatedChatOwner): ProviderNativeActivityService | null {
+    const integration = this.requireFor(owner);
+    if (!integration.nativeActivity) return null;
+    const key = executionInstanceKey(owner.executionLocation);
+    let service = this.#nativeActivityServices.get(key);
+    if (!service) {
+      service = new LocalProviderNativeActivityService(integration);
+      this.#nativeActivityServices.set(key, service);
     }
     return service;
   }

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { testExecutionLocation } from '../../execution-nodes/testing/placement.js';
+import { LocalProviderNativeSessionService } from '../../execution-node/local-provider-native-sessions.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../lib/json-file-store.js';
 import {
   AgentOwnershipJournal,
@@ -13,10 +14,11 @@ const timestamp = '2026-01-01T00:00:00.000Z';
 
 function createJournal(options) {
   return new AgentOwnershipJournal({
-    resolveNativeIntegration: ({ executionLocation, chat }) => (
-      executionLocation.nodeId === 'test-local-node' && executionLocation.instanceId === `test-${chat.agentId}`
-        ? options.integrations.get(chat.agentId) : null
-    ),
+    resolveNativeSessions: ({ executionLocation, chat }) => {
+      const integration = executionLocation.nodeId === 'test-local-node' && executionLocation.instanceId === `test-${chat.agentId}`
+        ? options.integrations.get(chat.agentId) : null;
+      return integration ? new LocalProviderNativeSessionService(integration) : null;
+    },
     ...options,
   });
 }
@@ -776,7 +778,7 @@ describe('AgentOwnershipJournal', () => {
     let available = false;
     const options = {
       workspaceDir, registry, integrations, ledger: { deleteChat: mock(() => {}) },
-      resolveNativeIntegration: () => available ? secondary : null,
+      resolveNativeSessions: () => available ? new LocalProviderNativeSessionService(secondary) : null,
     };
     const journal = createJournal(options);
     await journal.initialize();

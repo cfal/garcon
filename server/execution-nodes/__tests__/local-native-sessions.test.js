@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 import { createLocatedInstanceFixture } from '../../agents/__tests__/located-instance-fixture.js';
 import { DomainError } from '../../lib/domain-error.js';
-import { resolveLocalNativeIntegration } from '../local-native-integration.js';
+import { resolveLocalNativeSessions } from '../local-native-sessions.js';
 
 /** @satisfies {import('../../chats/agent-ownership-journal.js').LocatedNativeRelease} */
 const reference = {
@@ -18,9 +18,17 @@ test('native cleanup resolves the recorded instance only after placement validat
   /** @satisfies {Pick<import('../local-placement.js').LocalExecutionPlacement, 'assertAvailable'>} */
   const placements = { assertAvailable: mock(() => {}) };
   try {
-    expect(resolveLocalNativeIntegration(reference, placements, f.instances)).toBe(f.secondary.integration);
+    const sessions = resolveLocalNativeSessions(reference, placements, f.instances);
     expect(placements.assertAvailable).toHaveBeenCalledWith({
       ...reference.chat, executionLocation: reference.executionLocation,
+    });
+    const signal = new AbortController().signal;
+    await sessions.release({ chat: reference.chat, reason: 'deleted' }, signal);
+    expect(f.primary.integration.nativeSessions.release).not.toHaveBeenCalled();
+    expect(f.secondary.integration.nativeSessions.release).toHaveBeenCalledTimes(1);
+    expect(f.secondary.integration.nativeSessions.release).toHaveBeenCalledWith({
+      chat: { ...reference.chat, settings: { ownerId: 'test', schemaVersion: 1, values: { parsedBy: 'secondary' } } },
+      reason: 'deleted', signal,
     });
   } finally {
     await f.dispose();
@@ -34,10 +42,10 @@ test.each([
   const failure = new DomainError(code, 'Synthetic unavailable owner', 409);
   /** @satisfies {Pick<import('../local-placement.js').LocalExecutionPlacement, 'assertAvailable'>} */
   const placements = { assertAvailable: mock(() => { if (unavailable === 'placement') throw failure; }) };
-  /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'requireFor'>} */
-  const instances = { requireFor: mock(() => { throw failure; }) };
-  expect(resolveLocalNativeIntegration(reference, placements, instances)).toBeNull();
-  expect(instances.requireFor).toHaveBeenCalledTimes(unavailable === 'placement' ? 0 : 1);
+  /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'nativeSessionsFor'>} */
+  const instances = { nativeSessionsFor: mock(() => { throw failure; }) };
+  expect(resolveLocalNativeSessions(reference, placements, instances)).toBeNull();
+  expect(instances.nativeSessionsFor).toHaveBeenCalledTimes(unavailable === 'placement' ? 0 : 1);
 });
 
 test.each([
@@ -48,7 +56,7 @@ test.each([
 ])('unexpected resolution failures remain visible: %s', (failure) => {
   /** @satisfies {Pick<import('../local-placement.js').LocalExecutionPlacement, 'assertAvailable'>} */
   const placements = { assertAvailable() {} };
-  /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'requireFor'>} */
-  const instances = { requireFor() { throw failure; } };
-  expect(() => resolveLocalNativeIntegration(reference, placements, instances)).toThrow(failure);
+  /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'nativeSessionsFor'>} */
+  const instances = { nativeSessionsFor() { throw failure; } };
+  expect(() => resolveLocalNativeSessions(reference, placements, instances)).toThrow(failure);
 });

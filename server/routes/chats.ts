@@ -40,7 +40,7 @@ import type {
 } from '../../common/chat-list.js';
 import type { ParentChatRef } from '../../common/chat-parentage.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
-import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { cancelledRequestResponse, jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   GoalControlDeliveryError,
   DomainError,
@@ -614,11 +614,12 @@ export default function createChatRoutes({
     }
   }
 
-  async function getChatDetails(_request: Request, url: URL): Promise<Response> {
+  async function getChatDetails(request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
+      request.signal.throwIfAborted();
       const session = registry.getChat(chatId);
       if (!session) {
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
@@ -631,7 +632,7 @@ export default function createChatRoutes({
         createdAt: meta?.createdAt || null,
         lastActivityAt: meta?.lastActivity || null,
         agentSessionId: session.agentSessionId || null,
-        transcriptSource: await agents.describeTranscriptSource(session, chatId),
+        transcriptSource: await agents.describeTranscriptSource(session, chatId, request.signal),
         carryOver: {
           revision: carryOverRevision(
             session.carryOverSegments,
@@ -650,9 +651,10 @@ export default function createChatRoutes({
           })),
         },
       };
+      request.signal.throwIfAborted();
       return Response.json(response);
     } catch (error: unknown) {
-      return jsonErrorFromUnknown(error);
+      return cancelledRequestResponse(request, error) ?? jsonErrorFromUnknown(error);
     }
   }
 

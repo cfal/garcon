@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentChatReference, AgentIntegration } from '@garcon/server-agent-interface';
+import type { ProviderNativeChatReference, ProviderNativeReleaseRequest, ProviderNativeSessionService } from '../execution-nodes/provider-native-sessions.js';
 import type { TranscriptWatermark } from '../ledger/contracts.js';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import { isEmptyEarlierJournal, isOwnershipJournal } from './agent-ownership-journal-format.js';
@@ -48,9 +48,7 @@ export interface LocatedNativeRelease {
   readonly chat: NativeReleaseChatReference;
 }
 
-export interface NativeReleaseChatReference extends Omit<AgentChatReference, 'settings'> {
-  readonly settings: AgentChatReference['settings'] | null;
-}
+export type NativeReleaseChatReference = ProviderNativeChatReference;
 
 export interface DeleteIntent {
   readonly version: 3;
@@ -77,7 +75,7 @@ export function emptyOwnershipJournal(): AgentOwnershipJournalFile {
 export class AgentOwnershipJournal {
   readonly #filePath: string;
   readonly #registry: IChatRegistry;
-  readonly #resolveNativeIntegration: (reference: LocatedNativeRelease) => AgentIntegration | null;
+  readonly #resolveNativeSessions: (reference: LocatedNativeRelease) => ProviderNativeSessionService | null;
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   readonly #write: typeof writeJsonFileAtomic;
@@ -91,14 +89,14 @@ export class AgentOwnershipJournal {
   constructor(options: {
     workspaceDir: string;
     registry: IChatRegistry;
-    resolveNativeIntegration(reference: LocatedNativeRelease): AgentIntegration | null;
+    resolveNativeSessions(reference: LocatedNativeRelease): ProviderNativeSessionService | null;
     ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
     write?: typeof writeJsonFileAtomic;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
     this.#registry = options.registry;
-    this.#resolveNativeIntegration = options.resolveNativeIntegration;
+    this.#resolveNativeSessions = options.resolveNativeSessions;
     this.#ledger = options.ledger;
     this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
     this.#write = options.write ?? writeJsonFileAtomic;
@@ -350,17 +348,15 @@ export class AgentOwnershipJournal {
     let remaining = [...intent.releaseReferences];
     for (const reference of [...remaining]) {
       try {
-        const integration = this.#resolveNativeIntegration(reference);
-        if (!integration) {
+        const nativeSessions = this.#resolveNativeSessions(reference);
+        if (!nativeSessions) {
           logger.warn('Native cleanup owner unavailable', {
             chatId: intent.chatId, agentId: reference.chat.agentId, ...reference.executionLocation,
           });
           continue;
         }
-        if (integration.descriptor.id !== reference.chat.agentId) throw new Error('Native cleanup provider mismatch');
-        const chat = structuredClone(reference.chat);
-        await this.#releaseTranscript(integration, {
-          chat: { ...chat, settings: integration.settings.parse(chat.settings ?? integration.settings.defaults()) },
+        await this.#releaseTranscript(nativeSessions, {
+          chat: structuredClone(reference.chat),
           reason: 'deleted',
         });
       } catch (error) {
@@ -424,8 +420,8 @@ export class AgentOwnershipJournal {
   }
 
   async #releaseTranscript(
-    integration: AgentIntegration,
-    request: { readonly chat: AgentChatReference; readonly reason: 'deleted' },
+    nativeSessions: ProviderNativeSessionService,
+    request: ProviderNativeReleaseRequest,
   ): Promise<void> {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -439,11 +435,7 @@ export class AgentOwnershipJournal {
     });
     try {
       await Promise.race([
-        integration.nativeSessions?.release({
-          ...request,
-          chat: request.chat,
-          signal: controller.signal,
-        }),
+        nativeSessions.release(request, controller.signal),
         deadline,
       ]);
     } finally {

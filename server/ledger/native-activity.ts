@@ -1,11 +1,11 @@
 import type {
-  AgentNativeActivityProbe,
   AgentNativeActivityResult,
   AgentNativeSessionRef,
 } from '@garcon/server-agent-interface';
 import { isDeepStrictEqual } from 'node:util';
 import { sameExecutionOwner, type LocatedChatOwner } from '../../common/execution-location.js';
 import type { AgentInstanceDirectory } from '../agents/instance-directory.js';
+import type { ProviderNativeActivityService } from '../execution-nodes/provider-native-activity.js';
 import type { ChatOperationalNoticeMessage } from '../../common/ws-events.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
@@ -29,7 +29,7 @@ interface NativeActivityEligibilityKey extends LocatedChatOwner {
 
 interface EligibleNativeActivityCheck {
   readonly key: NativeActivityEligibilityKey;
-  readonly probe: AgentNativeActivityProbe;
+  readonly probe: ProviderNativeActivityService;
 }
 
 interface PendingNativeActivityCheck {
@@ -41,7 +41,7 @@ interface PendingNativeActivityCheck {
 export interface NativeTranscriptActivityServiceOptions {
   readonly ledger: Pick<TranscriptLedgerService, 'nativeActivityState'>;
   readonly registry: Pick<IChatRegistry, 'getChat'>;
-  readonly instances: Pick<AgentInstanceDirectory, 'requireFor'>;
+  readonly instances: Pick<AgentInstanceDirectory, 'nativeActivityFor'>;
   readonly ownsExecution: (chatId: string) => boolean;
   readonly notifyOperationalNotice: (
     chatId: string,
@@ -104,7 +104,7 @@ export class NativeTranscriptActivityService {
     chatId: string,
     reason: NativeActivityCheckReason,
     attempt: PendingNativeActivityCheck,
-    probe: AgentNativeActivityProbe,
+    probe: ProviderNativeActivityService,
   ): Promise<void> {
     const { controller, key } = attempt;
     const timeout = this.#scheduleTimeout(() => {
@@ -162,8 +162,8 @@ export class NativeTranscriptActivityService {
   #eligibility(chatId: string): EligibleNativeActivityCheck | null {
     const entry = this.options.registry.getChat(chatId);
     if (!entry) return null;
-    const integration = this.options.instances.requireFor(entry);
-    if (!integration.nativeActivity) return null;
+    const probe = this.options.instances.nativeActivityFor(entry);
+    if (!probe) return null;
     const activity = this.options.ledger.nativeActivityState(chatId);
     const session = activity.session;
     const nativeSession = session?.detail.nativeSession ?? null;
@@ -179,7 +179,7 @@ export class NativeTranscriptActivityService {
         nativeSession,
         providerWatermark,
       },
-      probe: integration.nativeActivity,
+      probe,
     };
   }
 
@@ -208,7 +208,7 @@ function eligibilityKeysEqual(
 }
 
 function probeResult(
-  probe: AgentNativeActivityProbe,
+  probe: ProviderNativeActivityService,
   nativeSession: AgentNativeSessionRef,
   signal: AbortSignal,
 ): Promise<

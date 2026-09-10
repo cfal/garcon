@@ -441,6 +441,25 @@ describe('GET /api/v1/chats/details', () => {
     agents.describeTranscriptSource.mockResolvedValue(null);
   });
 
+  it('forwards cancellation to native source discovery and rejects a late successful result', async () => {
+    registry.getChat.mockReturnValue({
+      agentId: 'test-agent', projectPath: '/synthetic/project', agentSessionId: 'synthetic-session',
+      carryOverSegments: [], carryOverMigrationQuarantine: null,
+    });
+    metadata.getChatMetadata.mockReturnValue(null);
+    const controller = new AbortController();
+    const returned = Promise.withResolvers();
+    agents.describeTranscriptSource.mockImplementation(() => returned.promise);
+    const request = new Request(`http://localhost/api/v1/chats/details?chatId=${CHAT_ID}`, { signal: controller.signal });
+    const pending = handler(request, new URL(request.url));
+    controller.abort(new Error('Synthetic native source cancellation'));
+    returned.resolve({ kind: 'provider-reference', value: 'synthetic/native' });
+    const response = await pending;
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+    expect(agents.describeTranscriptSource.mock.calls[0][2]).toBe(request.signal);
+  });
+
   it('returns provider-neutral chat metadata as a flat response', async () => {
     agents.describeTranscriptSource.mockResolvedValue({
       kind: 'filesystem-path',

@@ -48,7 +48,7 @@ import {
   type RunSingleQueryOptions,
 } from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
-import { toAgentChatReference } from './integration-chat-reference.js';
+import { toProviderNativeChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../lib/log.js';
 import type { UserMessage } from '@garcon/common/chat-types';
 import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
@@ -154,10 +154,11 @@ export interface AgentRegistryServiceContract {
     agentId: string,
     request: PrepareProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void>;
-  resolveNativeSession(session: AgentChatEntry, chatId?: string): Promise<AgentNativeSessionRef | null>;
+  resolveNativeSession(session: AgentChatEntry, chatId?: string, signal?: AbortSignal): Promise<AgentNativeSessionRef | null>;
   describeTranscriptSource(
     session: AgentChatEntry,
     chatId: string,
+    signal?: AbortSignal,
   ): Promise<AgentTranscriptSourceLocation | null>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
@@ -184,7 +185,7 @@ interface CompactSessionOptions {
 }
 
 type RegistryInstances = AgentRuntimeRouterOptions['instances']
-  & Pick<AgentInstanceDirectory, 'catalogForInstance' | 'authForInstance'>;
+  & Pick<AgentInstanceDirectory, 'catalogForInstance' | 'authForInstance' | 'nativeSessionsFor'>;
 
 export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
@@ -436,40 +437,31 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#catalog.modelSupportsImages(input);
   }
 
-  async resolveNativeSession(session: AgentChatEntry, chatId = ''): Promise<AgentNativeSessionRef | null> {
+  async resolveNativeSession(session: AgentChatEntry, chatId = '', signal = new AbortController().signal): Promise<AgentNativeSessionRef | null> {
+    signal.throwIfAborted();
     if (!session.agentSessionId) return null;
-    const integration = this.#instances.requireFor(session);
-    const nativeSessions = integration.nativeSessions;
-    if (!nativeSessions) return null;
-    const reference = await nativeSessions.resolveNativeSession({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
-      signal: new AbortController().signal,
-    });
-    if (reference?.ownerId !== session.agentId && reference !== null) {
-      throw new Error(`Native session owner mismatch for ${chatId || session.agentSessionId}`);
-    }
+    const nativeSessions = this.#instances.nativeSessionsFor(session);
+    const reference = await nativeSessions.resolve({
+      chat: toProviderNativeChatReference(chatId, session, this.#getCarryOverRevision(session)),
+    }, signal);
+    signal.throwIfAborted();
     return reference;
   }
 
   async describeTranscriptSource(
     session: AgentChatEntry,
     chatId: string,
+    signal = new AbortController().signal,
   ): Promise<AgentTranscriptSourceLocation | null> {
+    signal.throwIfAborted();
     try {
-      const integration = this.#instances.requireFor(session);
-      const nativeSessions = integration.nativeSessions;
-      if (!nativeSessions) return null;
-      const source = await nativeSessions.describeSource({
-        chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
-        signal: new AbortController().signal,
-      });
-      if (source === null) return null;
-      if ((source.kind !== 'filesystem-path' && source.kind !== 'provider-reference')
-          || typeof source.value !== 'string' || source.value.length === 0) {
-        throw new Error('INVALID_TRANSCRIPT_SOURCE_DESCRIPTION');
-      }
+      const source = await this.#instances.nativeSessionsFor(session).describe({
+        chat: toProviderNativeChatReference(chatId, session, this.#getCarryOverRevision(session)),
+      }, signal);
+      signal.throwIfAborted();
       return source;
     } catch {
+      signal.throwIfAborted();
       logger.warn('Transcript source description failed.', {
         code: 'TRANSCRIPT_SOURCE_DESCRIPTION_FAILED',
         integrationId: session.agentId,

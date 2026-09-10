@@ -33,7 +33,7 @@ describe('NativeTranscriptActivityService', () => {
         ledger,
         registry: { getChat: () => ({ agentId: 'test-a', executionLocation: testExecutionLocation('test-a') }) },
         instances: {
-          requireFor: () => ({ nativeActivity: { lastActivity } }),
+          nativeActivityFor: () => ({ lastActivity }),
         },
         ownsExecution: () => false,
         notifyOperationalNotice: (chatId, noticeType, content) => {
@@ -423,9 +423,9 @@ function serviceFixture() {
     ledger: { nativeActivityState: () => currentState },
     registry: { getChat: () => chatExists ? { agentId, executionLocation } : null },
     instances: {
-      requireFor: () => {
+      nativeActivityFor: () => {
         if (!integrationAvailable) throw new Error('Synthetic instance unavailable');
-        return { nativeActivity: { lastActivity } };
+        return { lastActivity };
       },
     },
     ownsExecution: () => owned,

@@ -93,7 +93,7 @@ import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
 import { ExecutionNodesStore } from './execution-nodes/store.js';
 import { LocalExecutionPlacement } from './execution-nodes/local-placement.js';
-import { resolveLocalNativeIntegration } from './execution-nodes/local-native-integration.js';
+import { resolveLocalNativeSessions } from './execution-nodes/local-native-sessions.js';
 import { migrateWorkspaceExecutionLocations } from './execution-nodes/workspace-migration.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
@@ -314,8 +314,8 @@ export async function startServer(): Promise<void> {
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
-      resolveNativeIntegration(reference) {
-        return resolveLocalNativeIntegration(reference, placements, instances);
+      resolveNativeSessions(reference) {
+        return resolveLocalNativeSessions(reference, placements, instances);
       },
       ledger: transcriptLedger,
     });
