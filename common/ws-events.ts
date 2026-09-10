@@ -47,6 +47,11 @@ import {
   CHAT_BOARD_INVALIDATION_REASONS,
   type ChatBoardInvalidationReason,
 } from './chat-boards';
+import {
+  isProjectUnavailableReason,
+  type ProjectUnavailableReason,
+} from './project-resolution';
+import { isRecord } from './json';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -190,10 +195,44 @@ export class ChatExecutionControlUpdatedMessage {
 
 const CHAT_OPERATIONAL_NOTICE_TYPES = ['info', 'warning', 'error'] as const;
 export type ChatOperationalNoticeType = (typeof CHAT_OPERATIONAL_NOTICE_TYPES)[number];
+export type ChatOperationalNoticeDetail =
+  | { readonly type: 'carryover-compaction-started' }
+  | { readonly type: 'native-transcript-drift' }
+  | {
+    readonly type: 'project-unavailable';
+    readonly projectPath: string;
+    readonly reason: ProjectUnavailableReason;
+  };
 
 function isChatOperationalNoticeType(value: unknown): value is ChatOperationalNoticeType {
   return typeof value === 'string'
     && (CHAT_OPERATIONAL_NOTICE_TYPES as readonly string[]).includes(value);
+}
+
+function parseChatOperationalNoticeDetail(value: unknown): ChatOperationalNoticeDetail | null {
+  if (!isRecord(value)) return null;
+
+  switch (value.type) {
+    case 'carryover-compaction-started':
+    case 'native-transcript-drift':
+      return Object.keys(value).length === 1 ? { type: value.type } : null;
+    case 'project-unavailable':
+      if (
+        Object.keys(value).length !== 3
+        || typeof value.projectPath !== 'string'
+        || !value.projectPath.trim()
+        || !isProjectUnavailableReason(value.reason)
+      ) {
+        return null;
+      }
+      return {
+        type: value.type,
+        projectPath: value.projectPath,
+        reason: value.reason,
+      };
+    default:
+      return null;
+  }
 }
 
 // Process-only advisory overlay for the chat feed. Notices never enter the
@@ -205,6 +244,7 @@ export class ChatOperationalNoticeMessage {
     public noticeType: ChatOperationalNoticeType,
     public content: string,
     public timestamp: string,
+    public detail?: ChatOperationalNoticeDetail,
   ) {}
 }
 
@@ -725,9 +765,22 @@ export function parseServerWsMessage(
       const chatId = requiredStr(data.chatId);
       const content = requiredStr(data.content);
       const noticeType = data.noticeType;
-      return chatId && content && isChatOperationalNoticeType(noticeType)
-        ? new ChatOperationalNoticeMessage(chatId, noticeType, content, str(data.timestamp))
-        : null;
+      if (!chatId || !content || !isChatOperationalNoticeType(noticeType)) return null;
+
+      let detail: ChatOperationalNoticeDetail | undefined;
+      if (data.detail !== undefined) {
+        const parsedDetail = parseChatOperationalNoticeDetail(data.detail);
+        if (!parsedDetail) return null;
+        detail = parsedDetail;
+      }
+
+      return new ChatOperationalNoticeMessage(
+        chatId,
+        noticeType,
+        content,
+        str(data.timestamp),
+        detail,
+      );
     }
     case 'reconnect-state': {
       const processing = chatProcessingSnapshotResult(data.processing);

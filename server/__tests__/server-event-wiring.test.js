@@ -793,13 +793,19 @@ describe('server event wiring', () => {
   it('broadcasts operational notices without entering transcript sequence space', () => {
     const fixture = createFixture();
 
-    fixture.wiring.notifyOperationalNotice('chat-1', 'info', 'Carryover is being compacted.');
+    fixture.wiring.notifyOperationalNotice(
+      'chat-1',
+      'info',
+      'Carryover is being compacted.',
+      { type: 'carryover-compaction-started' },
+    );
 
     expect(fixture.published).toEqual([expect.objectContaining({
       type: 'chat-operational-notice',
       chatId: 'chat-1',
       noticeType: 'info',
       content: 'Carryover is being compacted.',
+      detail: { type: 'carryover-compaction-started' },
     })]);
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
   });
@@ -816,6 +822,11 @@ describe('server event wiring', () => {
       chatId: 'chat-1',
       noticeType: 'warning',
       content: unavailable.message,
+      detail: {
+        type: 'project-unavailable',
+        projectPath: '/workspace/missing',
+        reason: 'not-found',
+      },
     })]);
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
   });
