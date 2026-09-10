@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
-import { parseGarconCommandResult } from '../../../common/garcon-command-results.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import type { StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
 import { assistantContents } from '../../support/chat-assertions.js';
+import { waitForChildReply } from '../../support/child-outcome.js';
 import { withIntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
 import { codexAssistantMessage, codexExecCommandCall } from '../../support/fake-codex-model.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
@@ -117,14 +117,16 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
           environment.script(commentary, final);
           const ack = parentModel.holdNext({ lastUserTextIncludes: 'status="accepted"' });
           const result = parentModel.holdNext({ lastUserTextIncludes: 'status="completed"' });
+          const outcomeTarget = { chatId: parent, ref: `final-${mode}`, afterIndex: fixture.client.markEvents(),
+            type: mode === 'start' ? 'agent-start-outcome' as const : 'agent-resume-outcome' as const };
           emission.releaseText(mode === 'start'
             ? `<garcon-start-agent ref="final-start" agent="${agent}" model="${escapeGarconXmlText(started.model)}" reasoning-effort="${started.thinkingMode}">Synthetic child task.</garcon-start-agent>`
             : `<garcon-resume-agent ref="final-resume" chat-id="${child}">Synthetic child follow-up.</garcon-resume-agent>`);
-          const admission = parseGarconCommandResult((await ack.received).lastUserText);
-          if (admission?.status !== 'accepted' || !('chatId' in admission)) throw new Error('Missing child admission');
+          const admission = await waitForChildReply(fixture.client, ack, { ...outcomeTarget, status: 'accepted' });
+          if (admission.status !== 'accepted') throw new Error('Missing child admission');
           child = admission.chatId;
           ack.releaseText('Synthetic acknowledgment observed.');
-          const terminal = parseGarconCommandResult((await result.received).lastUserText);
+          const terminal = await waitForChildReply(fixture.client, result, { ...outcomeTarget, status: 'completed' });
           expect(terminal).toMatchObject({ status: 'completed', chatId: child,
             output: { availability: 'available', completeness: 'complete', text: final } });
           const transcript = assistantContents((await fixture.client.getMessages(child)).messages);

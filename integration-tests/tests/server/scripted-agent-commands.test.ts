@@ -2,15 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
-import type { AgentStartOutcomeNoticeDetail } from '../../../common/garcon-agent-result.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
+import { waitForChildOutcome } from '../../support/child-outcome.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { chatCompletionsText, chatCompletionsToolUse } from '../../support/fake-chat-completions-model.js';
-import { withIntegrationFixture, type IntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
+import { withIntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
@@ -44,19 +44,6 @@ async function environmentFor(agent: string): Promise<ScriptedCommands> {
   return { fixtureOptions: environment, startRequest: scriptedPiStartRequest,
     script: (reply) => environment.model.scriptTurn(async (request) => [chatCompletionsText(await reply(request.lastUserText))]),
     settled: () => environment.model.assertSettled(), dispose: () => environment.dispose() };
-}
-
-async function childOutcome(fixture: IntegrationFixture, chatId: string, status: string, afterIndex: number): Promise<AgentStartOutcomeNoticeDetail> {
-  const event = await fixture.client.waitForEvent(
-    (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
-      && event.messages.some(({ message }) => message.type === 'transcript-notice'
-        && message.detail?.type === 'agent-start-outcome' && message.detail.status === status),
-    `child ${status} outcome`, { afterIndex, timeoutMs: 60_000 },
-  );
-  const detail = messagesOfType(event.messages, 'transcript-notice').find((notice) =>
-    notice.detail?.type === 'agent-start-outcome' && notice.detail.status === status)?.detail;
-  if (detail?.type !== 'agent-start-outcome') throw new Error('Missing child outcome');
-  return detail;
 }
 
 describe('scripted provider agent commands', () => {
@@ -93,7 +80,8 @@ describe('scripted provider agent commands', () => {
               await Bun.sleep(10);
             }
           };
-          const accepted = await childOutcome(fixture, source, 'accepted', cursor);
+          const outcomeTarget = { chatId: source, type: 'agent-start-outcome' as const, ref: 'boundary', afterIndex: cursor };
+          const accepted = await waitForChildOutcome(fixture.client, { ...outcomeTarget, status: 'accepted' });
           await child.received;
           await nativePersistence(garconCommandResultContent(accepted));
           await writeFile(paths[0]!, 'release', 'utf8');
@@ -104,7 +92,7 @@ describe('scripted provider agent commands', () => {
             await Bun.sleep(10);
           }
           child.releaseText('Synthetic child answer with <text> & values.');
-          const completed = await childOutcome(fixture, source, 'completed', cursor);
+          const completed = await waitForChildOutcome(fixture.client, { ...outcomeTarget, status: 'completed' });
           expect(completed).toMatchObject({ output: { availability: 'available', text: 'Synthetic child answer with <text> & values.' } });
           await nativePersistence(garconCommandResultContent(completed));
           await writeFile(paths[1]!, 'release', 'utf8');
