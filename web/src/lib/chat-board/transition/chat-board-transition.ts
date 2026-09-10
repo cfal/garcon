@@ -13,6 +13,9 @@ export interface ChatBoardTransitionProjection extends ChatTagTransitionPreview 
 	readonly isNoop: boolean;
 }
 
+export type ChatBoardTransitionDestination =
+	{ readonly kind: 'column'; readonly column: ChatBoardColumn } | { readonly kind: 'none' };
+
 export function initialTargetTags(
 	currentTags: readonly string[],
 	target: ChatBoardColumn,
@@ -22,17 +25,23 @@ export function initialTargetTags(
 	return target.tags.filter((tag) => current.has(tag));
 }
 
+function resolveAppliedTargetTags(
+	target: ChatBoardTransitionDestination,
+	selectedTargetTags: readonly string[],
+): readonly string[] {
+	if (target.kind === 'none') return [];
+	if (target.column.match === 'all') return target.column.tags;
+	return target.column.tags.filter((tag) => selectedTargetTags.includes(tag));
+}
+
 export function projectChatBoardTransition(input: {
 	readonly board: ChatBoard;
 	readonly source: ChatBoardColumn;
-	readonly target: ChatBoardColumn;
+	readonly target: ChatBoardTransitionDestination;
 	readonly currentTags: readonly string[];
 	readonly selectedTargetTags: readonly string[];
 }): ChatBoardTransitionProjection {
-	const appliedTargetTags =
-		input.target.match === 'all'
-			? input.target.tags
-			: input.target.tags.filter((tag) => input.selectedTargetTags.includes(tag));
+	const appliedTargetTags = resolveAppliedTargetTags(input.target, input.selectedTargetTags);
 	const preview = calculateChatTagTransition({
 		currentTags: input.currentTags,
 		sourceTags: input.source.tags,

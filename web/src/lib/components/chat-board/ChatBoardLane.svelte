@@ -22,7 +22,6 @@
 		isDropTarget,
 		pendingChatIds,
 		tagReconciliationKind,
-		canTransition,
 		onOpen,
 		onTransition,
 		onReconcileTags,
@@ -40,7 +39,6 @@
 		isDropTarget: boolean;
 		pendingChatIds: ReadonlySet<string>;
 		tagReconciliationKind: (chatId: string) => ChatTagReconciliationKind;
-		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
 		onReconcileTags: (chatId: string) => void;
@@ -146,7 +144,6 @@
 		{canDrag}
 		{pendingChatIds}
 		{tagReconciliationKind}
-		{canTransition}
 		{onOpen}
 		{onTransition}
 		{onReconcileTags}

@@ -116,10 +116,13 @@ describe('ChatTagMutationService', () => {
       chatId: CHAT_ID,
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
-      targetColumnId: TARGET_ID,
+      target: {
+        kind: 'column',
+        columnId: TARGET_ID,
+        selectedTargetTags: ['ignored'],
+      },
       expectedCatalogRevision: 4,
       expectedTags: ['project', 'ready', 'triage'],
-      selectedTargetTags: ['ignored'],
     });
     expect(result).toMatchObject({
       tags: ['project', 'review', 'shared'],
@@ -146,7 +149,7 @@ describe('ChatTagMutationService', () => {
       chatId: CHAT_ID,
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
-      targetColumnId: TARGET_ID,
+      target: { kind: 'column', columnId: TARGET_ID },
       expectedCatalogRevision: 4,
       expectedTags: ['project', 'ready'],
     };
@@ -158,9 +161,29 @@ describe('ChatTagMutationService', () => {
       confirmArchiveState: async () => true,
     }).transition({
       ...input,
-      selectedTargetTags: ['review'],
+      target: { kind: 'column', columnId: TARGET_ID, selectedTargetTags: ['review'] },
     })).rejects.toMatchObject({ code: 'CHAT_BOARD_TRANSITION_CHAT_ARCHIVED' });
     expect(current.registry.updateChatPhased).not.toHaveBeenCalled();
+  });
+
+  it('applies no destination tags for None while preserving unrelated tags', async () => {
+    const current = registryDouble(['context', 'ready', 'shared']);
+    const service = serviceWith(current.registry);
+
+    const result = await service.transition({
+      chatId: CHAT_ID,
+      boardId: BOARD_ID,
+      sourceColumnId: SOURCE_ID,
+      target: { kind: 'none' },
+      expectedCatalogRevision: 4,
+      expectedTags: ['context', 'ready', 'shared'],
+    });
+
+    expect(result).toMatchObject({
+      tags: ['context', 'shared'],
+      addedTags: [],
+      removedTags: ['ready'],
+    });
   });
 
   it('blocks transitions until an uncertain unarchive is durably confirmed', async () => {
@@ -195,7 +218,7 @@ describe('ChatTagMutationService', () => {
       chatId: CHAT_ID,
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
-      targetColumnId: TARGET_ID,
+      target: { kind: 'column', columnId: TARGET_ID },
       expectedCatalogRevision: 4,
       expectedTags: ['project', 'ready'],
     };
@@ -264,7 +287,7 @@ describe('ChatTagMutationService', () => {
       chatId: CHAT_ID,
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
-      targetColumnId: TARGET_ID,
+      target: { kind: 'column', columnId: TARGET_ID },
       expectedCatalogRevision: 2,
       expectedTags: ['project', 'ready'],
     });

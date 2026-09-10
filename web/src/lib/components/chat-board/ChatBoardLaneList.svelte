@@ -23,7 +23,6 @@
 		canDrag,
 		pendingChatIds,
 		tagReconciliationKind,
-		canTransition,
 		onOpen,
 		onTransition,
 		onReconcileTags,
@@ -40,7 +39,6 @@
 		canDrag: boolean;
 		pendingChatIds: ReadonlySet<string>;
 		tagReconciliationKind: (chatId: string) => ChatTagReconciliationKind;
-		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
 		onReconcileTags: (chatId: string) => void;
@@ -270,7 +268,6 @@
 								{canDrag}
 								pending={pendingChatIds.has(occurrence.chat.id)}
 								reconciliationKind={tagReconciliationKind(occurrence.chat.id)}
-								{canTransition}
 								occurrenceIndex={virtualItem.index}
 								{onOpen}
 								{onTransition}

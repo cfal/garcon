@@ -1,5 +1,6 @@
 import type {
   ApplyChatTagDeltaRequest,
+  ChatTagTransitionTarget,
   ReplaceChatTagsRequest,
   TransitionChatTagsRequest,
 } from '../../common/chat-tag-mutations.js';
@@ -26,6 +27,30 @@ function tags(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((tag) => typeof tag === 'string')
     ? normalizeTags(value)
     : null;
+}
+
+function transitionTarget(value: unknown): ChatTagTransitionTarget | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === 'none') {
+    const target = recordWithOnlyKeys(value, ['kind']);
+    return target ? { kind: 'none' } : null;
+  }
+  if (kind !== 'column') return null;
+  const target = recordWithOnlyKeys(value, ['kind', 'columnId', 'selectedTargetTags']);
+  if (!target || !isChatBoardId(target.columnId)) return null;
+  const selectedTargetTags = target.selectedTargetTags === undefined
+    ? undefined
+    : tags(target.selectedTargetTags);
+  if (selectedTargetTags === null) return null;
+  if (selectedTargetTags === undefined) {
+    return { kind: 'column', columnId: target.columnId };
+  }
+  return {
+    kind: 'column',
+    columnId: target.columnId,
+    selectedTargetTags,
+  };
 }
 
 function errorResponse(error: unknown): Response {
@@ -108,37 +133,32 @@ export function createChatTagRoutes(chatTags: ChatTagMutationService): RouteMap 
           'chatId',
           'boardId',
           'sourceColumnId',
-          'targetColumnId',
+          'target',
           'expectedCatalogRevision',
           'expectedTags',
-          'selectedTargetTags',
         ]);
         const id = chatId(body?.chatId);
         const revision = body?.expectedCatalogRevision;
         const expected = tags(body?.expectedTags);
-        const selected = body?.selectedTargetTags === undefined
-          ? undefined
-          : tags(body.selectedTargetTags);
+        const target = transitionTarget(body?.target);
         if (
           !id
           || !isChatBoardId(body?.boardId)
           || !isChatBoardId(body?.sourceColumnId)
-          || !isChatBoardId(body?.targetColumnId)
+          || !target
           || typeof revision !== 'number'
           || !Number.isSafeInteger(revision)
           || revision < 0
           || !expected
-          || selected === null
         ) return validationError('The chat transition request is invalid');
         try {
           return Response.json(await chatTags.transition({
             chatId: id,
             boardId: body.boardId,
             sourceColumnId: body.sourceColumnId,
-            targetColumnId: body.targetColumnId,
+            target,
             expectedCatalogRevision: revision,
             expectedTags: expected,
-            ...(selected ? { selectedTargetTags: selected } : {}),
           } satisfies TransitionChatTagsRequest));
         } catch (error) {
           return errorResponse(error);

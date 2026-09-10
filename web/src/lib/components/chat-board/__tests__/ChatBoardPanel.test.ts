@@ -186,6 +186,43 @@ describe('ChatBoardPanel', () => {
 		expect(screen.getByRole('dialog', { name: 'Transition Chat' })).toBeTruthy();
 	});
 
+	it('transitions a one-column card to None and focuses the source heading', async () => {
+		const oneColumnBoard = { ...board, columns: [column] };
+		const { controller } = createController({ revision: 1, boards: [oneColumnBoard] });
+		await controller.refresh(true);
+		const transitionChatTags = vi.fn(async () => ({
+			success: true as const,
+			chatId: 'chat-1',
+			tags: [],
+			addedTags: [],
+			removedTags: ['ready'],
+		}));
+		const sessions = new ChatSessionsStore({ transitionChatTags });
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+
+		const transition = screen.getByRole('button', { name: 'Transition…' });
+		expect(transition.hasAttribute('disabled')).toBe(false);
+		await fireEvent.click(transition);
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Choose a destination' }), {
+			target: { value: 'none' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply tag changes' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(transitionChatTags).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			boardId: board.id,
+			sourceColumnId: column.id,
+			target: { kind: 'none' },
+			expectedCatalogRevision: 1,
+			expectedTags: ['ready'],
+		});
+		expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Ready' }));
+	});
+
 	it('offers an inline retry when saved tags could not be confirmed', async () => {
 		const recoverChatTags = vi
 			.fn()

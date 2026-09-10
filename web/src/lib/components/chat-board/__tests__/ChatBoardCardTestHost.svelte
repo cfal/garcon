@@ -32,7 +32,6 @@
 	canDrag={false}
 	pending={false}
 	{reconciliationKind}
-	canTransition
 	occurrenceIndex={0}
 	onOpen={() => {}}
 	onTransition={() => {}}
