@@ -165,6 +165,7 @@ describe("Lightpanda Chat Board", () => {
         )?.set?.call(select, "none");
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
+      await app.waitForDialogButtonEnabled("Apply tag changes");
       await app.clickDialogButton("Apply tag changes");
       await fixture.page.waitForFunction(
         async (id) => {
