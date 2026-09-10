@@ -2564,7 +2564,9 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
       operation: published.operation,
     }));
-    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await expect(provider.abort('thread-1', () => {})).resolves.toBe(false);
+    expect(fake.interruptTurn).not.toHaveBeenCalled();
+    await expect(provider.abort('thread-1', published.operation.publish)).resolves.toBe(true);
 
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'interrupting' }]);
@@ -2653,7 +2655,7 @@ describe('CodexAppServerRuntime', () => {
     const terminal = published.waitForEvent(
       (event) => event.type === 'run-ended' && event.outcome === 'finished',
     );
-    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await expect(provider.abort('thread-1', published.operation.publish)).resolves.toBe(true);
     await terminal;
 
     expect(publishedMessages(published.events).filter(
@@ -2674,9 +2676,10 @@ describe('CodexAppServerRuntime', () => {
     });
     const provider = createRuntime({ createClient: () => fake });
 
-    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
+    const request = makeRequest({ agentSessionId: 'thread-1', nativePath: null });
+    await provider.runTurn(request);
 
-    await expect(provider.abort('thread-1')).resolves.toBe(false);
+    await expect(provider.abort('thread-1', request.operation.publish)).resolves.toBe(false);
     expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'running' }]);
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
@@ -4938,7 +4941,7 @@ describe('CodexAppServerRuntime', () => {
       if (termination === 'finish') {
         fake.emit('notification', { method: 'thread/goal/cleared', params: { threadId: 'thread-1' } });
       } else if (termination === 'abort') {
-        await expect(provider.abort('thread-1')).resolves.toBe(true);
+        await expect(provider.abort('thread-1', published.operation.publish)).resolves.toBe(true);
       } else {
         fake.emit('exit', 7);
       }
@@ -5354,7 +5357,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
     await provider.runTurn(makeRequest({
+      operation: published.operation,
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
@@ -5363,7 +5368,9 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
-    const queue = createActiveGoalQueue(provider, { kind: 'resume' });
+    const queue = createActiveGoalQueue(provider, { kind: 'resume' }, {
+      runId: 'goal-control-run', publish: published.operation.publish,
+    });
 
     const delivery = queue.deliverGoalControlInput('chat-1', '/goal resume', {
       clientRequestId: 'request-goal-cancelled',
@@ -5372,7 +5379,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await statusRequest;
     await Promise.resolve();
-    await provider.abort('thread-1');
+    await provider.abort('thread-1', published.operation.publish);
 
     await expect(delivery).rejects.toMatchObject({
       deliveryAccepted: true,
@@ -8028,7 +8035,7 @@ describe('CodexAppServerRuntime', () => {
     }));
     expect(firstAttachmentPath).toBeDefined();
     await expect(fs.access(firstAttachmentPath)).resolves.toBeNull();
-    const aborting = provider.abort(started.agentSessionId);
+    const aborting = provider.abort(started.agentSessionId, first.operation.publish);
     const resumed = provider.runTurn(makeRequest({
       agentSessionId: started.agentSessionId,
       nativePath,
@@ -8049,6 +8056,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     await waitForMissingPath(path.dirname(firstAttachmentPath));
 
+    await expect(provider.abort(started.agentSessionId, first.operation.publish)).resolves.toBe(false);
+    expect(fake.interruptTurn).toHaveBeenCalledTimes(1);
+    expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'running' }]);
     fake.emit('notification', {
       method: 'turn/completed',
       params: {
@@ -8104,9 +8114,10 @@ describe('CodexAppServerRuntime', () => {
     const clients = [firstClient, replacementClient];
     const createClient = mock(() => clients.shift());
     const provider = createRuntime({ createClient });
-    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+    const request = makeRequest({ thinkingMode: 'none' });
+    const started = await provider.startSession(request);
 
-    const aborting = provider.abort(started.agentSessionId);
+    const aborting = provider.abort(started.agentSessionId, request.operation.publish);
     const resumed = provider.runTurn(makeRequest({
       agentSessionId: started.agentSessionId,
       nativePath,
@@ -8201,9 +8212,10 @@ describe('CodexAppServerRuntime', () => {
     const clients = [firstClient, supersedingClient, replacementClient];
     const createClient = mock(() => clients.shift());
     const provider = createRuntime({ createClient });
-    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+    const request = makeRequest({ thinkingMode: 'none' });
+    const started = await provider.startSession(request);
 
-    const aborting = provider.abort(started.agentSessionId);
+    const aborting = provider.abort(started.agentSessionId, request.operation.publish);
     const resumed = provider.runTurn(makeRequest({
       agentSessionId: started.agentSessionId,
       nativePath: firstPath,

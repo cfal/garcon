@@ -43,13 +43,20 @@ export function runtimeOperation(
   return Object.freeze({ runId, publish });
 }
 
+export function isRuntimeAbortTarget(
+  operation: AgentRuntimeOperation | null | undefined,
+  publish: AgentRuntimePublisher,
+): boolean {
+  return typeof publish === 'function' && operation?.publish === publish;
+}
+
 export interface AgentRuntimeExecution {
   start(
     request: AgentRuntimeStartRequest,
     publish: AgentRuntimePublisher,
   ): Promise<AgentEstablishedSession>;
   resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void>;
-  abort(agentSessionId: string): Promise<boolean>;
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean>;
   runningSessions(): readonly AgentRunningSession[];
 }
 

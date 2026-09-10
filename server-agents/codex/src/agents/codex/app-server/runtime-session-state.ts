@@ -1,5 +1,6 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { isRuntimeAbortTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import type { CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { cleanupOwnedGoalAttachments } from './goal-files.js';
@@ -102,6 +103,16 @@ export function providerOwnsReasoningEffort(
   request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
 ): boolean {
   return codexThreadSettingsTarget(request).effort === null;
+}
+
+export function codexAbortOperation(
+  session: Pick<RunningCodexSession, 'activeTurnId' | 'turnRoutes' | 'sourceOperation' | 'goalOperation' | 'nextTurnOperation'>,
+): CodexOperation | null {
+  const operation = session.activeTurnId !== null
+    ? session.turnRoutes.get(session.activeTurnId)
+    : session.goalOperation ?? session.nextTurnOperation ?? session.sourceOperation;
+  // Goal handoffs change run identity while retaining the source execution occurrence.
+  return operation && isRuntimeAbortTarget(operation, session.sourceOperation.publish) ? operation : null;
 }
 
 export function recordExplicitReasoningEffort(

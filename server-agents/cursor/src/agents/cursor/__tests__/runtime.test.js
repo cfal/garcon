@@ -621,11 +621,15 @@ describe('Cursor ACP runtime', () => {
 
   it('kills the Cursor ACP process and marks the session idle immediately on abort', async () => {
     const { acp, runtime } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest());
+    const request = startRequest();
+    const started = await runtime.startSession(request);
     await acp.waitForClientMethod('session/prompt');
 
     expect(runtime.isRunning(started.agentSessionId)).toBe(true);
-    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, noopOperation().publish)).toBe(false);
+    expect(acp.killCount()).toBe(0);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, request.operation.publish)).toBe(true);
 
     expect(runtime.isRunning(started.agentSessionId)).toBe(false);
     expect(acp.killCount()).toBe(1);
@@ -635,10 +639,11 @@ describe('Cursor ACP runtime', () => {
 
   it('reconnects after abort and sends the next prompt to Cursor', async () => {
     const { acp, runtime } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest({ command: 'first message', model: 'gpt-5.5-extra-high' }));
+    const request = startRequest({ command: 'first message', model: 'gpt-5.5-extra-high' });
+    const started = await runtime.startSession(request);
     await acp.waitForClientMethod('session/prompt');
 
-    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, request.operation.publish)).toBe(true);
 
     const nextTurn = runtime.runTurn(startRequest({
       agentSessionId: started.agentSessionId,
@@ -671,7 +676,7 @@ describe('Cursor ACP runtime', () => {
     await acp.waitForClientMethod('session/prompt');
     const retired = acp.instance(0);
 
-    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, first.operation.publish)).toBe(true);
     const nextTurn = runtime.runTurn(startRequest({
       agentSessionId: started.agentSessionId,
       command: 'second message',
@@ -680,6 +685,9 @@ describe('Cursor ACP runtime', () => {
     const restarted = await acp.waitForInstance(1);
     await restarted.waitForClientMethod('session/prompt');
 
+    expect(runtime.abort(started.agentSessionId, first.operation.publish)).toBe(false);
+    expect(acp.killCount()).toBe(1);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
     retired.sessionUpdate({
       sessionUpdate: 'agent_message_chunk',
       content: { text: 'late output from A' },

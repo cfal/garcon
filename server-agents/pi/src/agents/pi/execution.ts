@@ -59,8 +59,8 @@ export class PiExecution implements AgentRuntimeExecution {
     });
   }
 
-  async abort(agentSessionId: string): Promise<boolean> {
-    return this.runtime.abort(agentSessionId);
+  async abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
+    return this.runtime.abort(agentSessionId, publish);
   }
 
   isRunning(agentSessionId: string): boolean {

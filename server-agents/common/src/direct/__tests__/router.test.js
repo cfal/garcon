@@ -138,6 +138,10 @@ describe('Direct OpenAI router runtimes', () => {
       projectPath: '/tmp',
       endpoint: endpointB,
     });
+    const publish = () => {};
+    expect(router.abort('chat_endpoint_a_session', publish)).toBe(false);
+    expect(runtimes.get('chat_endpoint_a').abort).toHaveBeenCalledWith('chat_endpoint_a_session', publish);
+    expect(runtimes.get('chat_endpoint_b').abort).not.toHaveBeenCalled();
     router.shutdown();
 
     expect(createRuntime).toHaveBeenCalledTimes(2);

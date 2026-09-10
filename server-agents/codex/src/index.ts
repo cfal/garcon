@@ -144,24 +144,20 @@ export default class CodexAgentIntegration implements AgentIntegration {
     // Codex compacts natively through its app-server; the execution object owns
     // the call, the facet advertises that it exists.
     this.compaction = {
-      compact: async (request) => (
-        await producer.runExisting(
-          request,
-          (runtimeRequest, publish) => execution.compact(runtimeRequest, publish),
-        )
-      ).handle,
+      compact: (request) => producer.compact(
+        request,
+        (runtimeRequest, publish) => execution.compact(runtimeRequest, publish),
+      ),
     };
     this.steering = {
       captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
       steer: (request) => runtime.steer(request),
     };
     this.goals = {
-      submitControl: async (request) => (
-        await producer.runExisting(
-          request,
-          (runtimeRequest, publish) => execution.submitGoalControl(runtimeRequest, publish),
-        )
-      ).value,
+      submitControl: (request) => producer.submitGoalControl(
+        request,
+        (runtimeRequest, publish) => execution.submitGoalControl(runtimeRequest, publish),
+      ),
     };
     this.catalog = createModelCatalog({
       logger: host.logger,

@@ -48,6 +48,8 @@ import { convertCodexRawCodeModeItem } from './converter.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { isRuntimeAbortTarget, type AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
+import { codexAbortOperation } from './runtime-session-state.js';
 import type {
   ErrorNotification,
   ItemCompletedNotification,
@@ -487,10 +489,10 @@ export class CodexAppServerRuntime {
     }
   }
 
-  async abort(agentSessionId: string): Promise<boolean> {
+  async abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
     const session = this.#sessions.get(agentSessionId);
     const turnId = session?.activeTurnId;
-    if (!session) return false;
+    if (!session || !isRuntimeAbortTarget(codexAbortOperation(session), publish)) return false;
     if (!turnId) {
       session.status = 'aborted';
       cancelTurnStartWaiters(session, 'Codex session aborted');

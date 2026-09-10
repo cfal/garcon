@@ -5,6 +5,8 @@ import {
   type AgentExecutionV5,
   type AgentLogger,
   type AgentEmissionSink,
+  type AgentGoalControlRequest,
+  type AgentResumeRequestV5,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type {
@@ -13,25 +15,34 @@ import type {
   AgentRuntimeExecution,
 } from './runtime-events.js';
 
-interface RuntimeHandle extends AgentExecutionHandle {
+interface RuntimeHandle {
   readonly agentSessionId: string;
+  readonly publish: AgentRuntimePublisher;
+}
+
+interface ControlOccurrence {
+  readonly chatId: string;
+  agentSessionId: string | null;
+  runId: string;
+  readonly publish: AgentRuntimePublisher;
 }
 
 interface ProducerBinding {
   readonly output: AgentEmissionSink;
   publishedSession: AgentEstablishedSession | null;
+  currentControlOccurrence: ControlOccurrence | null;
 }
 
 export interface AgentProducerAdapter {
   readonly execution: AgentExecutionV5;
-  runExisting<T extends {
-    readonly chatId: string;
-    readonly agentSessionId: string;
-    readonly output: AgentEmissionSink;
-  }, R>(
-    request: T,
-    operation: (request: Omit<T, 'output'>, publish: AgentRuntimePublisher) => Promise<R>,
-  ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }>;
+  compact(
+    request: AgentResumeRequestV5,
+    operation: (request: Omit<AgentResumeRequestV5, 'output'>, publish: AgentRuntimePublisher) => Promise<void>,
+  ): Promise<AgentExecutionHandle>;
+  submitGoalControl(
+    request: AgentGoalControlRequest,
+    operation: (request: Omit<AgentGoalControlRequest, 'output'>, publish: AgentRuntimePublisher) => Promise<boolean>,
+  ): Promise<boolean>;
 }
 
 export function createAgentProducerAdapter(
@@ -41,11 +52,18 @@ export function createAgentProducerAdapter(
   // Binding-scoped session bookkeeping is read only at publisher construction, never
   // used to route an arriving event. Publishers retain their exact output capability.
   const bindings = new WeakMap<AgentEmissionSink, ProducerBinding>();
+  const handles = new WeakMap<AgentExecutionHandle, RuntimeHandle>();
+
+  function handle(agentSessionId: string, publish: AgentRuntimePublisher): AgentExecutionHandle {
+    const value = Object.freeze({});
+    handles.set(value, { agentSessionId, publish });
+    return value;
+  }
 
   function bindingFor(output: AgentEmissionSink): ProducerBinding {
     const existing = bindings.get(output);
     if (existing) return existing;
-    const created: ProducerBinding = { output, publishedSession: null };
+    const created: ProducerBinding = { output, publishedSession: null, currentControlOccurrence: null };
     bindings.set(output, created);
     return created;
   }
@@ -53,9 +71,17 @@ export function createAgentProducerAdapter(
   // The capability a runtime publishes through. It closes over one binding, so an operation that
   // outlives its transcript keeps publishing at its own closed sink and has no way to reach a
   // replacement.
-  function publisherFor(output: AgentEmissionSink, chatId: string): AgentRuntimePublisher {
-    const binding = bindingFor(output);
-    return (event) => {
+  function occurrenceFor(
+    binding: ProducerBinding,
+    chatId: string,
+    runId: string,
+    agentSessionId: string | null,
+  ): ControlOccurrence {
+    const publish: AgentRuntimePublisher = (event) => {
+      if (event.type === 'session') occurrence.agentSessionId = event.session.agentSessionId;
+      if (event.type === 'run-ended' && event.runId === occurrence.runId) {
+        retireControlOccurrence(binding, occurrence);
+      }
       if (event.type === 'permission' && !validRunId(event.runId)) {
         logger.warn('Dropped an unnamed provider permission event', {
           chatId,
@@ -75,66 +101,105 @@ export function createAgentProducerAdapter(
         });
       }
     };
+    const occurrence: ControlOccurrence = { chatId, runId, agentSessionId, publish };
+    binding.currentControlOccurrence = occurrence;
+    return occurrence;
   }
 
   const execution: AgentExecutionV5 = {
     async start(request) {
       const binding = bindingFor(request.output);
-      const session = await runtime.start(
-        withoutOutput(request),
-        publisherFor(request.output, request.chatId),
-      );
-      if (!sameSession(binding.publishedSession, session)) {
-        binding.output.emit({ type: 'session', session });
-        binding.publishedSession = session;
+      const occurrence = occurrenceFor(binding, request.chatId, request.runId, null);
+      try {
+        const session = await runtime.start(withoutOutput(request), occurrence.publish);
+        occurrence.agentSessionId = session.agentSessionId;
+        if (!sameSession(binding.publishedSession, session)) {
+          binding.output.emit({ type: 'session', session });
+          binding.publishedSession = session;
+        }
+        return handle(session.agentSessionId, occurrence.publish);
+      } catch (error) {
+        retireControlOccurrence(binding, occurrence);
+        throw error;
       }
-      return handle(session.agentSessionId);
     },
 
     async resume(request) {
       const binding = bindingFor(request.output);
-      const completion = runtime.resume(
-        withoutOutput(request),
-        publisherFor(request.output, request.chatId),
-      );
-      void completion.catch((error) => {
-        try {
-          binding.output.emit({
+      const occurrence = occurrenceFor(binding, request.chatId, request.runId, request.agentSessionId);
+      try {
+        const completion = runtime.resume(withoutOutput(request), occurrence.publish);
+        void completion.catch((error) => {
+          occurrence.publish({
             type: 'run-ended',
-            runId: request.runId,
+            runId: occurrence.runId,
             outcome: 'failed',
             error: failureDetail(error),
           });
-        } catch {
-          // A closed or fenced sink already made the failed run historical.
-        }
-      });
-      return handle(request.agentSessionId);
+        });
+        return handle(request.agentSessionId, occurrence.publish);
+      } catch (error) {
+        retireControlOccurrence(binding, occurrence);
+        throw error;
+      }
     },
 
     abort(value) {
-      return runtime.abort(runtimeHandle(value).agentSessionId);
+      const target = handles.get(value);
+      if (!target) throw new TypeError('Agent execution handle is invalid');
+      return runtime.abort(target.agentSessionId, target.publish);
     },
 
     runningSessions: () => runtime.runningSessions(),
   };
 
-  async function runExisting<T extends {
-    readonly chatId: string;
-    readonly agentSessionId: string;
-    readonly output: AgentEmissionSink;
-  }, R>(
-    request: T,
-    operation: (request: Omit<T, 'output'>, publish: AgentRuntimePublisher) => Promise<R>,
-  ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }> {
-    const value = await operation(
-      withoutOutput(request),
-      publisherFor(request.output, request.chatId),
-    );
-    return { handle: handle(request.agentSessionId), value };
-  }
+  const compact: AgentProducerAdapter['compact'] = async (request, operation) => {
+    const binding = bindingFor(request.output);
+    const occurrence = occurrenceFor(binding, request.chatId, request.runId, request.agentSessionId);
+    try {
+      await operation(withoutOutput(request), occurrence.publish);
+      return handle(request.agentSessionId, occurrence.publish);
+    } catch (error) {
+      retireControlOccurrence(binding, occurrence);
+      throw error;
+    }
+  };
 
-  return { execution, runExisting };
+  const submitGoalControl: AgentProducerAdapter['submitGoalControl'] = async (request, operation) => {
+    const binding = bindings.get(request.output);
+    const occurrence = binding?.currentControlOccurrence;
+    if (!binding || !occurrence || occurrence.chatId !== request.chatId || occurrence.agentSessionId !== request.agentSessionId) {
+      return false;
+    }
+    let expectedRunId = occurrence.runId;
+    return operation({
+      ...withoutOutput(request),
+      beforeDelivery: async (handoff) => {
+        const validate = () => {
+          if (binding.currentControlOccurrence !== occurrence || occurrence.runId !== expectedRunId) {
+            throw new Error('Provider execution occurrence changed before goal control delivery');
+          }
+          handoff.validate();
+        };
+        validate();
+        await request.beforeDelivery({
+          validate,
+          commit: () => {
+            validate();
+            handoff.commit();
+            occurrence.runId = request.runId;
+            expectedRunId = request.runId;
+          },
+        });
+      },
+    }, occurrence.publish);
+  };
+
+  return { execution, compact, submitGoalControl };
+}
+
+function retireControlOccurrence(binding: ProducerBinding, occurrence: ControlOccurrence): void {
+  if (binding.currentControlOccurrence === occurrence) binding.currentControlOccurrence = null;
 }
 
 function validRunId(value: unknown): value is string {
@@ -160,17 +225,6 @@ function sameSession(
 function withoutOutput<T extends { readonly output: AgentEmissionSink }>(request: T): Omit<T, 'output'> {
   const { output: _output, ...runtimeRequest } = request;
   return runtimeRequest;
-}
-
-function handle(agentSessionId: string): RuntimeHandle {
-  return Object.freeze({ agentSessionId });
-}
-
-function runtimeHandle(value: AgentExecutionHandle): RuntimeHandle {
-  if (!('agentSessionId' in value) || typeof value.agentSessionId !== 'string') {
-    throw new TypeError('Agent execution handle is invalid');
-  }
-  return value as RuntimeHandle;
 }
 
 export function failureDetail(error: unknown): AgentRunFailureDetail {

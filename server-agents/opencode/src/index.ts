@@ -99,12 +99,10 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     const providerExecution = new OpenCodeExecution(runtime, nativeSessions);
     const producer = createAgentProducerAdapter(providerExecution, logger);
     this.compaction = {
-      compact: async (request) => (
-        await producer.runExisting(
-          request,
-          (runtimeRequest, publish) => providerExecution.compact(runtimeRequest, publish),
-        )
-      ).handle,
+      compact: (request) => producer.compact(
+        request,
+        (runtimeRequest, publish) => providerExecution.compact(runtimeRequest, publish),
+      ),
     };
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration) => (

@@ -360,9 +360,12 @@ describe('OpenCodeRuntime abort', () => {
     const acknowledged = deferred();
     const abort = mock(() => acknowledged.promise);
     const runtime = createRuntime(abort);
-    await start(runtime);
+    const published = await start(runtime);
 
-    const result = runtime.abort('session-1');
+    await expect(runtime.abort('session-1', collectOperation().operation.publish)).resolves.toBe(false);
+    expect(abort).not.toHaveBeenCalled();
+    expect(runtime.isRunning('session-1')).toBe(true);
+    const result = runtime.abort('session-1', published.operation.publish);
     await Promise.resolve();
 
     expect(runtime.isRunning('session-1')).toBe(true);
@@ -375,9 +378,9 @@ describe('OpenCodeRuntime abort', () => {
   it('reports a rejected provider abort without retiring the running turn', async () => {
     const abort = mock(() => Promise.resolve({ error: { message: 'abort rejected' } }));
     const runtime = createRuntime(abort);
-    await start(runtime);
+    const published = await start(runtime);
 
-    await expect(runtime.abort('session-1')).resolves.toBe(false);
+    await expect(runtime.abort('session-1', published.operation.publish)).resolves.toBe(false);
 
     expect(runtime.isRunning('session-1')).toBe(true);
     runtime.shutdown();
@@ -391,7 +394,7 @@ describe('OpenCodeRuntime abort', () => {
     );
     const published = await start(runtime);
 
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', published.operation.publish)).resolves.toBe(true);
     prompt.reject(new Error('request cancelled by abort'));
     await Promise.resolve();
     await Promise.resolve();
@@ -410,12 +413,10 @@ describe('OpenCodeRuntime abort', () => {
       secondSubmitted.resolve();
       return Promise.resolve({});
     });
-    const runtime = createRuntime(
-      mock(() => Promise.resolve({ data: true })),
-      promptAsync,
-    );
+    const abort = mock(() => Promise.resolve({ data: true }));
+    const runtime = createRuntime(abort, promptAsync);
     const firstPublished = await start(runtime);
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', firstPublished.operation.publish)).resolves.toBe(true);
 
     const successorPublished = collectOperation('run-successor');
     const successor = runtime.runTurn({
@@ -440,7 +441,10 @@ describe('OpenCodeRuntime abort', () => {
     expect(failureMessages(successorPublished.events)).toEqual([]);
     expect(runtime.isRunning('session-1')).toBe(true);
 
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', firstPublished.operation.publish)).resolves.toBe(false);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(runtime.isRunning('session-1')).toBe(true);
+    await expect(runtime.abort('session-1', successorPublished.operation.publish)).resolves.toBe(true);
     expect(await successorOutcome).toMatchObject({ message: 'OpenCode session aborted' });
     runtime.shutdown();
   });
@@ -955,6 +959,33 @@ describe('OpenCodeRuntime abort', () => {
         server: { close: mock(() => undefined) },
       };
     }
+
+    it('never initializes a replacement endpoint for an abort crossing process death', async () => {
+      const termination = deferred();
+      const original = deathInstance({
+        subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })),
+        termination,
+        close: mock(() => undefined),
+      });
+      const replacement = replacementInstance();
+      const createInstance = mock()
+        .mockResolvedValueOnce(original)
+        .mockResolvedValueOnce(replacement);
+      const runtime = new OpenCodeRuntime({ createInstance });
+      try {
+        const published = await start(runtime);
+        termination.resolve({ kind: 'exit', code: 1, signal: null });
+        // The death callback has queued its transition but has not retired the session.
+        await Promise.resolve();
+        expect(runtime.isRunning('session-1')).toBe(true);
+        expect(await runtime.abort('session-1', published.operation.publish)).toBe(false);
+        expect(replacement.client.session.abort).not.toHaveBeenCalled();
+        expect(createInstance).toHaveBeenCalledTimes(1);
+        expect(terminalEvents(published.events)).toHaveLength(1);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
 
     it('retires a dead instance and respawns on the next demand without arming the cooldown', async () => {
       const firstTermination = deferred();
@@ -1850,7 +1881,7 @@ describe('OpenCodeRuntime abort', () => {
       mock(() => Promise.resolve({ stream: eventStream.stream() })),
     );
     const published = await start(runtime);
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', published.operation.publish)).resolves.toBe(true);
     eventStream.push(envelope({
       id: 'evt_0001',
       type: 'session.error',
@@ -2082,7 +2113,7 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
     }));
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', firstPublished.operation.publish)).resolves.toBe(true);
 
     const successorPublished = collectOperation('run-b');
     const successor = runtime.runTurn({
@@ -2187,7 +2218,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
 
-    const aborting = runtime.abort('session-1');
+    const aborting = runtime.abort('session-1', published.operation.publish);
     await Promise.resolve();
     eventStream.push(completedAssistantEnvelope({
       eventId: 'evt_0002',
@@ -2243,7 +2274,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
 
-    const aborting = runtime.abort('session-1');
+    const aborting = runtime.abort('session-1', published.operation.publish);
     await Promise.resolve();
     eventStream.push(completedAssistantEnvelope({
       eventId: 'evt_0002',
@@ -2300,7 +2331,7 @@ describe('OpenCodeRuntime abort', () => {
     }));
     await Promise.resolve();
 
-    const aborting = runtime.abort('session-1');
+    const aborting = runtime.abort('session-1', published.operation.publish);
     await Promise.resolve();
     eventStream.push(completedAssistantEnvelope({
       eventId: 'evt_0002',
@@ -2348,7 +2379,7 @@ describe('OpenCodeRuntime abort', () => {
     }));
     await Promise.resolve();
 
-    const aborting = runtime.abort('session-1');
+    const aborting = runtime.abort('session-1', published.operation.publish);
     await Promise.resolve();
     eventStream.push(completedAssistantEnvelope({
       eventId: 'evt_0002',
@@ -2398,7 +2429,7 @@ describe('OpenCodeRuntime abort', () => {
         info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
     }));
-    const aborting = runtime.abort('session-1');
+    const aborting = runtime.abort('session-1', published.operation.publish);
     await Promise.resolve();
     eventStream.push(completedAssistantEnvelope({
       eventId: 'evt_0003',
@@ -2448,7 +2479,7 @@ describe('OpenCodeRuntime abort', () => {
         },
       }));
 
-      const aborting = runtime.abort('session-1');
+      const aborting = runtime.abort('session-1', published.operation.publish);
       await Promise.resolve();
       const publishAbortedTerminal = () => eventStream.push(completedAssistantEnvelope({
         eventId: 'evt_0002',
@@ -2619,7 +2650,9 @@ describe('OpenCodeRuntime abort', () => {
       operation: recovered.operation,
     });
     await waitFor(() => abort.mock.calls.length === 1);
-    const stopping = runtime.abort('session-1');
+    await expect(runtime.abort('session-1', recovered.operation.publish)).resolves.toBe(false);
+    expect(abort).toHaveBeenCalledTimes(1);
+    const stopping = runtime.abort('session-1', published.operation.publish);
     eventStream.push(completedAssistantEnvelope({
       eventId: 'evt_0002',
       messageId: 'assistant-a',

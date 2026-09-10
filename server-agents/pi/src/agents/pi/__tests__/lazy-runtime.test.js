@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { LazyPiRuntime } from '../lazy-runtime.ts';
 
+/** @implements {import('../lazy-runtime.js').PiRuntime} */
 class FakePiRuntime {
   startSession = mock(async () => ({ agentSessionId: 'pi-session', nativePath: null }));
   runTurn = mock(async () => {});
@@ -11,6 +12,19 @@ class FakePiRuntime {
   steer = mock(async () => ({ kind: 'accepted' }));
   startPurgeTimer = mock(() => {});
   shutdown = mock(async () => {});
+}
+
+/** @returns {import('../runtime-types.js').PiStartRequest} */
+function startRequest() {
+  return {
+    chatId: 'chat-1', projectPath: '/project', model: 'model',
+    permissionMode: 'default', thinkingMode: 'none', command: 'synthetic input',
+    operation: { runId: 'run-default', publish() {} },
+  };
+}
+
+function turnRequest(agentSessionId = 'pi-session') {
+  return { ...startRequest(), agentSessionId };
 }
 
 function deferred() {
@@ -30,11 +44,11 @@ describe('LazyPiRuntime', () => {
     runtime.startPurgeTimer();
     expect(runtime.isRunning('pi-session')).toBe(false);
     expect(runtime.getRunningSessions()).toEqual([]);
-    expect(runtime.abort('pi-session')).toBe(false);
+    expect(runtime.abort('pi-session', () => {})).toBe(false);
     expect(runtime.captureSteerTarget('pi-session')).toBeNull();
     expect(loadRuntime).not.toHaveBeenCalled();
 
-    await runtime.startSession({});
+    await runtime.startSession(startRequest());
 
     expect(loadRuntime).toHaveBeenCalledTimes(1);
     expect(loaded.startSession).toHaveBeenCalledTimes(1);
@@ -61,38 +75,46 @@ describe('LazyPiRuntime', () => {
     const runtime = new LazyPiRuntime(loadRuntime);
     const startOperation = { runId: 'run-start', publish: mock(() => {}) };
     const turnOperation = { runId: 'run-turn', publish: mock(() => {}) };
-    const startRequest = { operation: startOperation };
-    const turnRequest = { agentSessionId: 'pi-session', operation: turnOperation };
+    const startInput = { ...startRequest(), operation: startOperation };
+    const turnInput = { ...turnRequest(), operation: turnOperation };
 
-    await Promise.all([runtime.startSession(startRequest), runtime.runTurn(turnRequest)]);
+    await Promise.all([runtime.startSession(startInput), runtime.runTurn(turnInput)]);
 
     expect(loadRuntime).toHaveBeenCalledTimes(1);
-    expect(loaded.startSession).toHaveBeenCalledWith(startRequest);
-    expect(loaded.runTurn).toHaveBeenCalledWith(turnRequest);
+    expect(loaded.startSession).toHaveBeenCalledWith(startInput);
+    expect(loaded.runTurn).toHaveBeenCalledWith(turnInput);
   });
 
   it('cancels only the matching queued turn when aborted during loading', async () => {
     const loaded = new FakePiRuntime();
     const loader = deferred();
     const runtime = new LazyPiRuntime(() => loader.promise);
-    const start = runtime.startSession({});
-    const turn = runtime.runTurn({ agentSessionId: 'pi-session' });
-    const unrelatedTurn = runtime.runTurn({ agentSessionId: 'other-session' });
+    const startInput = startRequest();
+    const target = turnRequest();
+    const successor = turnRequest();
+    const unrelated = turnRequest('other-session');
+    const start = runtime.startSession(startInput);
+    const turn = runtime.runTurn(target);
+    const sameSession = runtime.runTurn(successor);
+    const unrelatedTurn = runtime.runTurn(unrelated);
 
-    expect(runtime.abort('pi-session')).toBe(true);
-    expect(runtime.abort('missing-session')).toBe(false);
+    expect(runtime.abort('pi-session', () => {})).toBe(false);
+    expect(runtime.abort('missing-session', target.operation.publish)).toBe(false);
+    expect(runtime.abort('pi-session', startInput.operation.publish)).toBe(false);
+    expect(runtime.abort('pi-session', target.operation.publish)).toBe(true);
     loader.resolve(loaded);
 
-    const results = await Promise.allSettled([start, turn, unrelatedTurn]);
-    expect(results.map(({ status }) => status)).toEqual(['fulfilled', 'rejected', 'fulfilled']);
+    const results = await Promise.allSettled([start, turn, sameSession, unrelatedTurn]);
+    expect(results.map(({ status }) => status)).toEqual(['fulfilled', 'rejected', 'fulfilled', 'fulfilled']);
     expect(results[1].reason).toMatchObject({ name: 'AbortError' });
     expect(loaded.startSession).toHaveBeenCalledTimes(1);
-    expect(loaded.runTurn).toHaveBeenCalledTimes(1);
-    expect(loaded.runTurn).toHaveBeenCalledWith({ agentSessionId: 'other-session' });
+    expect(loaded.runTurn).toHaveBeenCalledTimes(2);
+    expect(loaded.runTurn).toHaveBeenCalledWith(successor);
+    expect(loaded.runTurn).toHaveBeenCalledWith(unrelated);
     expect(loaded.abort).not.toHaveBeenCalled();
   });
 
-  it('aborts an active runtime turn while cancelling a matching queued turn', async () => {
+  it.each(['active', 'pending'])('aborts only the %s occurrence when another turn shares its session', async (target) => {
     const loaded = new FakePiRuntime();
     const activeTurn = deferred();
     const activeTurnStarted = deferred();
@@ -100,25 +122,28 @@ describe('LazyPiRuntime', () => {
       activeTurnStarted.resolve();
       return activeTurn.promise;
     });
-    loaded.abort = mock(async () => false);
+    const active = turnRequest();
+    const successor = turnRequest();
+    loaded.abort = mock(async (id, publish) => id === active.agentSessionId && publish === active.operation.publish);
     const runtime = new LazyPiRuntime(async () => loaded);
-    await runtime.startSession({});
+    await runtime.startSession(startRequest());
 
-    const runningTurn = runtime.runTurn({ agentSessionId: 'pi-session' });
+    const runningTurn = runtime.runTurn(active);
     await activeTurnStarted.promise;
-    const queuedTurn = runtime.runTurn({ agentSessionId: 'pi-session' });
+    const queuedTurn = runtime.runTurn(successor);
     const turnResults = Promise.allSettled([runningTurn, queuedTurn]);
 
-    const abortResult = runtime.abort('pi-session');
+    const publish = target === 'active' ? active.operation.publish : successor.operation.publish;
+    const abortResult = runtime.abort('pi-session', publish);
     expect(abortResult).toBeInstanceOf(Promise);
     await expect(abortResult).resolves.toBe(true);
-    expect(loaded.abort).toHaveBeenCalledWith('pi-session');
+    expect(loaded.abort).toHaveBeenCalledWith('pi-session', publish);
     activeTurn.resolve();
 
     const results = await turnResults;
-    expect(results.map(({ status }) => status)).toEqual(['fulfilled', 'rejected']);
-    expect(results[1].reason).toMatchObject({ name: 'AbortError' });
-    expect(loaded.runTurn).toHaveBeenCalledTimes(1);
+    expect(results.map(({ status }) => status)).toEqual(['fulfilled', target === 'pending' ? 'rejected' : 'fulfilled']);
+    if (target === 'pending') expect(results[1].reason).toMatchObject({ name: 'AbortError' });
+    expect(loaded.runTurn).toHaveBeenCalledTimes(target === 'pending' ? 1 : 2);
   });
 
   it('shuts down a deferred runtime without starting queued operations', async () => {
@@ -127,8 +152,8 @@ describe('LazyPiRuntime', () => {
     loaded.shutdown = mock(() => stopped.promise);
     const loader = deferred();
     const runtime = new LazyPiRuntime(() => loader.promise);
-    const start = runtime.startSession({});
-    const turn = runtime.runTurn({});
+    const start = runtime.startSession(startRequest());
+    const turn = runtime.runTurn(turnRequest());
 
     const shutdown = runtime.shutdown();
     expect(runtime.shutdown()).toBe(shutdown);
@@ -145,6 +170,6 @@ describe('LazyPiRuntime', () => {
     expect(loaded.shutdown).toHaveBeenCalledTimes(1);
     expect(loaded.startSession).not.toHaveBeenCalled();
     expect(loaded.runTurn).not.toHaveBeenCalled();
-    await expect(runtime.startSession({})).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(runtime.startSession(startRequest())).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

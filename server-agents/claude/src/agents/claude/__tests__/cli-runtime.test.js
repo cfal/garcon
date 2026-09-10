@@ -2676,14 +2676,15 @@ describe('ClaudeCliRuntime steering', () => {
 
     try {
       runtime = createRuntime();
-      const run = runtime.startClaudeCliSession(startOptions());
+      const request = startOptions();
+      const run = runtime.startClaudeCliSession(request);
       const original = await enqueueInputStarted(fake);
       await expect(runtime.steer(steerRequest(
         runtime.captureSteerTarget('expected-session'),
       ))).resolves.toEqual({ kind: 'accepted' });
       const steeringFrame = writtenUserMessages(fake).at(-1);
 
-      const abort = runtime.abortClaudeInternalSession('expected-session');
+      const abort = runtime.abortClaudeInternalSession('expected-session', request.operation.publish);
       let interrupt;
       for (let attempt = 0; attempt < 100 && !interrupt; attempt += 1) {
         interrupt = fake.proc.stdin.write.mock.calls

@@ -3,6 +3,7 @@ import type {
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
   PiResumeRequest,
   PiStartedSession,
@@ -12,7 +13,7 @@ import type {
 export interface PiRuntime {
   startSession(request: PiStartRequest): Promise<PiStartedSession>;
   runTurn(request: PiResumeRequest): Promise<void>;
-  abort(agentSessionId: string): boolean | Promise<boolean>;
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean | Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
@@ -24,7 +25,8 @@ export interface PiRuntime {
 export type PiRuntimeLoader = () => Promise<PiRuntime>;
 
 interface PendingRuntimeOperation {
-  agentSessionId: string | null;
+  readonly agentSessionId: string | null;
+  readonly publish: AgentRuntimePublisher | null;
   cancelled: boolean;
 }
 
@@ -42,16 +44,22 @@ export class LazyPiRuntime {
   }
 
   async startSession(request: PiStartRequest): Promise<PiStartedSession> {
-    return this.#runAfterLoad(null, (runtime) => runtime.startSession(request));
+    return this.#runAfterLoad(null, request.operation.publish, (runtime) => runtime.startSession(request));
   }
 
   async runTurn(request: PiResumeRequest): Promise<void> {
-    return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.runTurn(request));
+    return this.#runAfterLoad(request.agentSessionId, request.operation.publish, (runtime) => runtime.runTurn(request));
   }
 
-  abort(agentSessionId: string): boolean | Promise<boolean> {
-    const pendingCancelled = this.#cancelPendingOperations(agentSessionId);
-    const runtimeAbort = this.#runtime?.abort(agentSessionId);
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean | Promise<boolean> {
+    if (typeof publish !== 'function') return false;
+    let pendingCancelled = false;
+    for (const operation of this.#pendingOperations) {
+      if (operation.publish !== publish || operation.agentSessionId !== agentSessionId) continue;
+      operation.cancelled = true;
+      pendingCancelled = true;
+    }
+    const runtimeAbort = this.#runtime?.abort(agentSessionId, publish);
     if (runtimeAbort === undefined) return pendingCancelled;
     if (typeof runtimeAbort === 'boolean') return pendingCancelled || runtimeAbort;
     return runtimeAbort.then((aborted) => pendingCancelled || aborted);
@@ -67,7 +75,7 @@ export class LazyPiRuntime {
   }
 
   steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
-    return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.steer(request));
+    return this.#runAfterLoad(request.agentSessionId, null, (runtime) => runtime.steer(request));
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
@@ -86,7 +94,7 @@ export class LazyPiRuntime {
 
   async #shutdown(): Promise<void> {
     this.#shutdownRequested = true;
-    this.#cancelPendingOperations();
+    for (const operation of this.#pendingOperations) operation.cancelled = true;
     if (this.#runtime) {
       await this.#runtime.shutdown();
       return;
@@ -98,11 +106,12 @@ export class LazyPiRuntime {
 
   async #runAfterLoad<T>(
     agentSessionId: string | null,
+    publish: AgentRuntimePublisher | null,
     operation: (runtime: PiRuntime) => Promise<T>,
   ): Promise<T> {
     if (this.#shutdownRequested) throw this.#cancelledOperationError();
 
-    const pending: PendingRuntimeOperation = { agentSessionId, cancelled: false };
+    const pending: PendingRuntimeOperation = { agentSessionId, publish, cancelled: false };
     this.#pendingOperations.add(pending);
     let runtime: PiRuntime;
     try {
@@ -114,16 +123,6 @@ export class LazyPiRuntime {
       this.#pendingOperations.delete(pending);
     }
     return operation(runtime);
-  }
-
-  #cancelPendingOperations(agentSessionId?: string): boolean {
-    let cancelled = false;
-    for (const operation of this.#pendingOperations) {
-      if (agentSessionId !== undefined && operation.agentSessionId !== agentSessionId) continue;
-      operation.cancelled = true;
-      cancelled = true;
-    }
-    return cancelled;
   }
 
   #cancelledOperationError(): Error {

@@ -1895,12 +1895,13 @@ describe('OpenCode operation routing', () => {
     });
 
     const abortedEvents = [];
+    const abortedOperation = operation('run-abort', abortedEvents);
     await runtime.startSession({
       command: 'abort',
       chatId: 'chat-abort',
       projectPath: '/repo',
       permissionMode: 'default',
-      operation: operation('run-abort', abortedEvents),
+      operation: abortedOperation,
     });
     pushPrompt(eventStream, {
       eventId: 'event-abort-prompt',
@@ -1910,7 +1911,7 @@ describe('OpenCode operation routing', () => {
       text: 'abort',
     });
     await waitFor(() => runtime.isRunning('session-abort'));
-    await expect(runtime.abort('session-abort')).resolves.toBe(true);
+    await expect(runtime.abort('session-abort', abortedOperation.publish)).resolves.toBe(true);
     pushCompactionPart(eventStream, {
       eventId: 'event-after-abort',
       kind: 'continuation',

@@ -108,8 +108,8 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     });
   }
 
-  async abort(agentSessionId: string): Promise<boolean> {
-    return this.runtime.abortClaudeInternalSession(agentSessionId);
+  async abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
+    return this.runtime.abortClaudeInternalSession(agentSessionId, publish);
   }
 
   isRunning(agentSessionId: string): boolean {

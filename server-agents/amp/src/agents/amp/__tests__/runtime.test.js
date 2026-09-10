@@ -494,6 +494,7 @@ describe('AmpCliRuntime lifecycle', () => {
 
   it('marks aborted sessions safely and allows a later resume on the same thread', async () => {
     const provider = new AmpCliRuntime();
+    const firstOperation = noopOperation('run-first');
     const resumed = collectOperation('run-resume');
 
     const threadId = 'T-22222222-2222-2222-2222-222222222222';
@@ -512,11 +513,13 @@ describe('AmpCliRuntime lifecycle', () => {
       model: 'default',
       permissionMode: 'default',
       thinkingMode: 'none',
-      operation: noopOperation('run-first'),
+      operation: firstOperation,
     });
 
     const started = await startedPromise;
-    expect(provider.abort(started.agentSessionId)).toBe(true);
+    expect(provider.abort(started.agentSessionId, resumed.operation.publish)).toBe(false);
+    expect(firstProc.killed).toBe(false);
+    expect(provider.abort(started.agentSessionId, firstOperation.publish)).toBe(true);
     firstProc.kill();
     await firstProc.exited;
 
@@ -531,6 +534,8 @@ describe('AmpCliRuntime lifecycle', () => {
       operation: resumed.operation,
     });
 
+    expect(provider.abort(started.agentSessionId, firstOperation.publish)).toBe(false);
+    expect(secondProc.killed).toBe(false);
     secondProc.pushJson({
       type: 'assistant',
       message: {

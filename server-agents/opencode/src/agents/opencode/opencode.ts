@@ -33,6 +33,8 @@ import type { CompactionTrigger } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   runtimeRows,
+  isRuntimeAbortTarget,
+  type AgentRuntimePublisher,
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
@@ -1303,7 +1305,7 @@ export class OpenCodeRuntime {
       await pending;
       return;
     }
-    if (session.status === 'running') await this.abort(agentSessionId);
+    if (session.status === 'running') await this.#abortSession(agentSessionId, session);
   }
 
   async startSession(request: OpenCodeStartRequest): Promise<string> {
@@ -1691,9 +1693,14 @@ export class OpenCodeRuntime {
     if (session) relocateOpenCodeSession(session, directory.trim());
   }
 
-  abort(agentSessionId: string): Promise<boolean> {
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
     const session = this.#sessions.get(agentSessionId);
-    if (!session || session.status !== 'running') return Promise.resolve(false);
+    if (!session || !isRuntimeAbortTarget(session.turn.operation, publish)) return Promise.resolve(false);
+    return this.#abortSession(agentSessionId, session);
+  }
+
+  #abortSession(agentSessionId: string, session: OpenCodeSession): Promise<boolean> {
+    if (this.#sessions.get(agentSessionId) !== session || session.status !== 'running') return Promise.resolve(false);
     const existing = this.#pendingSessionAborts.get(session);
     if (existing) return existing;
 
@@ -1706,17 +1713,16 @@ export class OpenCodeRuntime {
     return pending;
   }
 
-  async #abortRunningSession(
-    agentSessionId: string,
-    session: OpenCodeSession,
-  ): Promise<boolean> {
+  async #abortRunningSession(agentSessionId: string, session: OpenCodeSession): Promise<boolean> {
+    // Cancellation must never discover a replacement endpoint for an old occurrence.
+    const client = this.#instance?.client;
+    if (!client) return false;
     const turn = session.turn;
     this.steering.stagePendingCleanup(session);
     session.providerWorkRequiresQuiescence = true;
     session.aborting = true;
 
     try {
-      const client = await this.getClient();
       const result = await this.#runScopedSessionRequest(
         'OpenCode session abort',
         { directory: session.directory },

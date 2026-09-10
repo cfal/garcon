@@ -7,6 +7,8 @@ import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
 import {
   runtimeRows,
+  isRuntimeAbortTarget,
+  type AgentRuntimePublisher,
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
@@ -882,10 +884,11 @@ class AmpCliRuntime {
     return null;
   }
 
-  abort(agentSessionId: string): boolean {
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean {
     const session = this.#runningSessions.get(agentSessionId);
     const turn = session?.activeTurn;
     if (!session || !turn?.process) return false;
+    if (!isRuntimeAbortTarget(turn.operation, publish)) return false;
 
     turn.aborted = true;
     this.#settlePendingEchoes(turn, {

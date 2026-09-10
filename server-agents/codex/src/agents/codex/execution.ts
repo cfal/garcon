@@ -107,8 +107,8 @@ export class CodexExecution implements AgentRuntimeExecution {
     return this.#resume(request, publish, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
-  async abort(agentSessionId: string): Promise<boolean> {
-    return this.runtime.abort(agentSessionId);
+  async abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
+    return this.runtime.abort(agentSessionId, publish);
   }
 
   isRunning(agentSessionId: string): boolean {

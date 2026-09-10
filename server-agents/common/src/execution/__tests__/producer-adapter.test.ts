@@ -261,14 +261,12 @@ describe('createAgentProducerAdapter', () => {
   });
 });
 
-// Compaction and goal control reach the transcript through runExisting, which must hand the
-// operation the same capability start and resume get rather than a path of its own.
-it('publishes a runExisting operation through the same capability as a run', async () => {
+it('publishes manual compaction through its captured output capability', async () => {
   const fixture = createFixture();
   let published = false;
 
-  const outcome = await fixture.adapter.runExisting(
-    { chatId: 'chat-1', agentSessionId: 'session-1', output: fixture.request.output },
+  const handle = await fixture.adapter.compact(
+    { ...fixture.request, agentSessionId: 'session-1', nativeSession: null },
     async (request, publish) => {
       expect(request).not.toHaveProperty('output');
       publish({
@@ -276,12 +274,11 @@ it('publishes a runExisting operation through the same capability as a run', asy
         rows: runtimeRows([new AssistantMessage(TS, 'compacted')]),
       });
       published = true;
-      return 'done';
     },
   );
 
   expect(published).toBeTrue();
-  expect(outcome.value).toBe('done');
+  expect(Object.isFrozen(handle)).toBe(true);
   expect(fixture.events.map((event) => event.type)).toContain('rows');
 });
 

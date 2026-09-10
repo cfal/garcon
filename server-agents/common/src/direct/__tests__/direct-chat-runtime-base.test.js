@@ -318,7 +318,9 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     const second = capturingOperation('run-second');
 
     const started = await runtime.startSession(startRequest({ operation: first.operation }));
-    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, () => {})).toBe(false);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, first.operation.publish)).toBe(true);
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'second message',
       nativeSession: started.nativeSession,
@@ -352,19 +354,27 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   it('publishes a delayed response through the request that started it', async () => {
     const runtime = new CapturingDirectRuntime();
     const firstResponse = deferred();
-    runtime.responses.push(firstResponse.promise, 'second response');
+    const secondResponse = deferred();
+    runtime.responses.push(firstResponse.promise, secondResponse.promise);
     const first = capturingOperation('run-1');
     const second = capturingOperation('run-2');
 
     const started = await runtime.startSession(startRequest({
       operation: first.operation,
     }));
-    expect(runtime.abort(started.agentSessionId)).toBe(true);
-    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+    expect(runtime.abort(started.agentSessionId, first.operation.publish)).toBe(true);
+    const secondStarted = deferred();
+    runtime.onStreamSession = () => secondStarted.resolve();
+    const successor = runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'second message',
       nativeSession: started.nativeSession,
       operation: second.operation,
     }));
+    await secondStarted.promise;
+    expect(runtime.abort(started.agentSessionId, first.operation.publish)).toBe(false);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    secondResponse.resolve('second response');
+    await successor;
     await second.terminal;
 
     firstResponse.resolve('late first response');

@@ -7,6 +7,8 @@ import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
 import {
   type AgentRuntimeOperation,
+  isRuntimeAbortTarget,
+  type AgentRuntimePublisher,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
   AgentSteerRequest,
@@ -1306,18 +1308,14 @@ class ClaudeCliRuntime {
     this.#retireSessionProcessInBackground(session);
   }
 
-  async abortClaudeInternalSession(agentSessionId: string): Promise<boolean> {
+  async abortClaudeInternalSession(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
     const session = this.#runningSessions.get(agentSessionId);
     const activeTurn = session?.activeTurn;
     if (!session?.process || !activeTurn) return false;
+    if (!isRuntimeAbortTarget(activeTurn.operation, publish)) return false;
 
     activeTurn.protocol.markAbortRequested();
-    this.#armAbortFallback(
-      session,
-      activeTurn,
-      INTERRUPT_RECEIPT_TIMEOUT_MS,
-      'receipt',
-    );
+    this.#armAbortFallback(session, activeTurn, INTERRUPT_RECEIPT_TIMEOUT_MS, 'receipt');
     const receiptCancellation = new AbortController();
     try {
       const response = this.#controlBroker.request(

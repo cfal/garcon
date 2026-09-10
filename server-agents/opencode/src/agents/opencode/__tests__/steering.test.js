@@ -781,7 +781,7 @@ describe('OpenCodeRuntime steering', () => {
       reason: 'turn-changed',
       message: 'The active OpenCode turn changed',
     });
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', successorOperation.operation.publish)).resolves.toBe(true);
     expect(await successorOutcome).toMatchObject({ message: 'OpenCode session aborted' });
     eventStream.close();
     await runtime.shutdown();
@@ -789,7 +789,7 @@ describe('OpenCodeRuntime steering', () => {
 
   it('reverts accepted but unconsumed steering before a post-stop turn', async () => {
     const { runtime, eventStream, promptAsync, revert } = createRuntime();
-    await start(runtime);
+    const published = await start(runtime);
     await bindPrompt(eventStream, promptAsync, 0, 'hello');
     const target = await waitForTarget(runtime);
     const steering = runtime.steering.steer(steerRequest(target));
@@ -809,7 +809,7 @@ describe('OpenCodeRuntime steering', () => {
       },
     }));
     await expect(steering).resolves.toEqual({ kind: 'accepted' });
-    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    await expect(runtime.abort('session-1', published.operation.publish)).resolves.toBe(true);
 
     const recoveryOperation = collectOperation('run-recovery');
     const recovery = runtime.runTurn({

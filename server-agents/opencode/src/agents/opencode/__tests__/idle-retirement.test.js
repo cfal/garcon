@@ -431,14 +431,15 @@ describe('OpenCodeRuntime idle retirement', () => {
 
     try {
       runtime.startPurgeTimer();
+      const operation = { runId: 'run-1', publish() {} };
       await runtime.startSession({
         command: 'hello',
         chatId: 'chat-1',
         projectPath: '/repo',
         permissionMode: 'default',
-        operation: { runId: 'run-1', publish() {} },
+        operation,
       });
-      await expect(runtime.abort('session-1')).resolves.toBe(true);
+      await expect(runtime.abort('session-1', operation.publish)).resolves.toBe(true);
       expect(runtime.isRunning('session-1')).toBe(false);
 
       now = 100;
@@ -478,14 +479,15 @@ describe('OpenCodeRuntime idle retirement', () => {
 
     try {
       runtime.startPurgeTimer();
+      const operation = { runId: 'run-1', publish() {} };
       await runtime.startSession({
         command: 'hello',
         chatId: 'chat-1',
         projectPath: '/repo',
         permissionMode: 'default',
-        operation: { runId: 'run-1', publish() {} },
+        operation,
       });
-      const stopping = runtime.abort('session-1');
+      const stopping = runtime.abort('session-1', operation.publish);
       promptResponse.resolve({
         data: {
           info: {
@@ -545,12 +547,13 @@ describe('OpenCodeRuntime idle retirement', () => {
 
     try {
       runtime.startPurgeTimer();
+      const operation = { runId: 'run-1', publish() {} };
       await runtime.startSession({
         command: 'hello',
         chatId: 'chat-1',
         projectPath: '/repo',
         permissionMode: 'default',
-        operation: { runId: 'run-1', publish() {} },
+        operation,
       });
       eventStream.push({
         id: 'evt-user',
@@ -566,7 +569,7 @@ describe('OpenCodeRuntime idle retirement', () => {
         },
       });
 
-      const stopping = runtime.abort('session-1');
+      const stopping = runtime.abort('session-1', operation.publish);
       eventStream.push({
         id: 'evt-assistant',
         type: 'message.updated',

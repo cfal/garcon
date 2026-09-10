@@ -22,11 +22,12 @@ import type {
   DirectStartRequest,
 } from './runtime-types.js';
 import type { DirectSessionStore } from './session-store.js';
+import type { AgentRuntimePublisher } from '../execution/runtime-events.js';
 
 export interface DirectCompatibleRuntime {
   startSession(request: DirectStartRequest): Promise<DirectStartedSession>;
   runTurn(request: DirectResumeRequest): Promise<void>;
-  abort(agentSessionId: string): boolean;
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean;
   isRunning(agentSessionId: string): boolean;
   forgetSession(agentSessionId: string): void;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
@@ -78,8 +79,8 @@ export class DirectEndpointRouterRuntime<
     await runtime.runTurn(request);
   }
 
-  abort(agentSessionId: string): boolean {
-    return this.#runtimeForSession(agentSessionId)?.abort(agentSessionId) ?? false;
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean {
+    return this.#runtimeForSession(agentSessionId)?.abort(agentSessionId, publish) ?? false;
   }
 
   isRunning(agentSessionId: string): boolean {

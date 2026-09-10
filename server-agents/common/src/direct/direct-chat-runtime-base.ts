@@ -12,8 +12,7 @@ import {
 } from './runtime-types.js';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import { runtimeRows } from '@garcon/server-agent-common/execution/runtime-events';
+import { isRuntimeAbortTarget, runtimeRows, type AgentRuntimeOperation, type AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   directSessionUnavailable,
   loadDirectSessionRequired,
@@ -160,9 +159,10 @@ export abstract class DirectChatRuntimeBase<
     }
   }
 
-  abort(agentSessionId: string): boolean {
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session?.isRunning || session.isFinalizing) return false;
+    if (!isRuntimeAbortTarget(session.operation, publish)) return false;
 
     this.#sessions.delete(agentSessionId);
     session.aborted = true;

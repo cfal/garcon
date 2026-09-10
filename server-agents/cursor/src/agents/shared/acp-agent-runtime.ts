@@ -8,6 +8,8 @@ import type { PermissionDecisionPayload } from '@garcon/common/chat-command-cont
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import {
   runtimeRows,
+  isRuntimeAbortTarget,
+  type AgentRuntimePublisher,
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
@@ -269,10 +271,11 @@ export class AcpAgentRuntime {
     this.#retireSession(session, 'session-complete');
   }
 
-  abort(agentSessionId: string): boolean {
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean {
     const session = this.#sessions.get(agentSessionId);
     const turn = session?.activeTurn;
     if (!session || !turn?.running) return false;
+    if (!isRuntimeAbortTarget(turn.operation, publish)) return false;
 
     if (abortStrategy(this.#policy) === 'process-restart') {
       turn.aborted = true;

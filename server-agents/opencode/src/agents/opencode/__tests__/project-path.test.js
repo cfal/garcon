@@ -190,12 +190,13 @@ describe('OpenCode project path updates', () => {
     }));
     const runtime = new OpenCodeRuntime({ createInstance });
 
+    const startedOperation = operation();
     await runtime.startSession({
       command: 'hello',
       chatId: 'chat-1',
       projectPath: '/repo-a',
       permissionMode: 'default',
-      operation: operation(),
+      operation: startedOperation,
     });
     const signal = new AbortController().signal;
     await runtime.moveSession('session-1', '/repo-b', signal);
@@ -206,7 +207,7 @@ describe('OpenCode project path updates', () => {
     }, { signal: expect.any(AbortSignal) });
     expect(moveSession.mock.calls[0][0]).not.toHaveProperty('moveChanges');
 
-    await runtime.abort('session-1');
+    await runtime.abort('session-1', startedOperation.publish);
     expect(abort.mock.calls[0][0]).toMatchObject({
       sessionID: 'session-1',
       directory: '/repo-b',

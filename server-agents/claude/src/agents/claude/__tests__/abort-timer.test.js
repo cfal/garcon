@@ -294,7 +294,10 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     ctrl.startLatestInput();
 
     let abortSettled = false;
-    const abort = runtime.abortClaudeInternalSession('session-1')
+    await expect(runtime.abortClaudeInternalSession('session-1', () => {})).resolves.toBe(false);
+    expect(abortTimerIds()).toEqual([]);
+    expect(ctrl.writes.some((line) => JSON.parse(line).request?.subtype === 'interrupt')).toBe(false);
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish)
       .finally(() => { abortSettled = true; });
     const [abortTimerId] = abortTimerIds();
     expect(abortTimerId).toBeDefined();
@@ -323,12 +326,13 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const request = startOptions();
+    const turn = runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
     const input = ctrl.latestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     const [receiptTimerId] = abortTimerIds();
     await acknowledgeInterrupt(ctrl, {
       cancelled: [],
@@ -355,7 +359,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     ctrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     const fallback = scheduled.find((entry) => entry.ms === 5000);
     expect(fallback).toBeDefined();
     await acknowledgeInterrupt(ctrl);
@@ -401,7 +405,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(true);
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     await acknowledgeInterrupt(ctrl);
     await expect(abort).resolves.toBe(true);
     const completionFallback = scheduled.find((entry) => entry.ms === 15_000);
@@ -441,7 +445,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     const input = ctrl.latestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     await flush();
     const interrupt = latestInterrupt(ctrl);
     const [abortTimerId] = abortTimerIds();
@@ -475,7 +479,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     const input = ctrl.latestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     await acknowledgeInterrupt(ctrl, {
       cancelled: [input.uuid],
       still_queued: [],
@@ -493,11 +497,12 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    void runtime.startClaudeCliSession(startOptions());
+    const request = startOptions();
+    void runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     const [abortTimerId] = abortTimerIds();
     await acknowledgeInterrupt(ctrl);
 
@@ -510,12 +515,13 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const request = startOptions();
+    const turn = runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     await flush();
     const interrupt = latestInterrupt(ctrl);
     ctrl.push({
@@ -543,12 +549,13 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const request = startOptions();
+    const turn = runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     await flush();
     const interrupt = latestInterrupt(ctrl);
     const [abortTimerId] = abortTimerIds();
@@ -581,7 +588,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     ctrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     await flush();
     settleTurn(ctrl, {
       type: 'result',
@@ -602,11 +609,12 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const first = runtime.startClaudeCliSession(startOptions({ command: 'first' }));
+    const request = startOptions({ command: 'first' });
+    const first = runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     await flush();
     const interrupt = latestInterrupt(ctrl);
     settleTurn(ctrl);
@@ -642,7 +650,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     await flush();
     const interrupt = latestInterrupt(ctrl);
 
@@ -687,12 +695,13 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const turn = runtime.startClaudeCliSession(startOptions());
+    const request = startOptions();
+    const turn = runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
     if (!afterRequest) fail(ctrl);
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     if (afterRequest) {
       await flush();
       fail(ctrl);
@@ -718,7 +727,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     ctrl.startLatestInput();
 
     ctrl.push({ type: 'assistant', content: [{ type: 'text', text: 'first output' }] });
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', firstPublished.operation.publish);
     await acknowledgeInterrupt(ctrl);
     await expect(abort).resolves.toBe(true);
     const [abortTimerId] = abortTimerIds();
@@ -741,6 +750,10 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(cleared).toContain(abortTimerId);
 
+    const writesBeforeStaleAbort = ctrl.writes.length;
+    await expect(runtime.abortClaudeInternalSession('session-1', firstPublished.operation.publish)).resolves.toBe(false);
+    expect(ctrl.writes).toHaveLength(writesBeforeStaleAbort);
+    expect(ctrl.proc.killed).toBe(false);
     ctrl.startLatestInput();
     ctrl.push({ type: 'assistant', content: [{ type: 'text', text: 'second output' }] });
     settleTurn(ctrl);
@@ -770,7 +783,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     firstCtrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', firstPublished.operation.publish);
     await acknowledgeInterrupt(firstCtrl);
     await expect(abort).resolves.toBe(true);
     const [abortTimerId] = abortTimerIds();
@@ -847,12 +860,13 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
-    const first = runtime.startClaudeCliSession(startOptions({ command: 'initial' }));
+    const request = startOptions({ command: 'initial' });
+    const first = runtime.startClaudeCliSession(request);
     ctrl.push(INIT);
     await flush();
     ctrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', request.operation.publish);
     await acknowledgeInterrupt(ctrl);
     await expect(abort).resolves.toBe(true);
 
@@ -947,7 +961,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     ctrl.push(INIT);
     await flush();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     const fallback = scheduled.find((s) => s.ms === 5000);
     expect(fallback).toBeDefined();
 
@@ -975,7 +989,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     ctrl.startLatestInput();
 
     // User interrupts; the CLI never acknowledges, so the fallback force-kills.
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     const fallback = scheduled.find((s) => s.ms === 5000);
     fallback.fn();
     await expect(abort).rejects.toThrow('Claude CLI interrupt control request timed out');
@@ -997,7 +1011,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     ctrl.startLatestInput();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     const [receiptTimerId] = abortTimerIds();
     await acknowledgeInterrupt(ctrl);
     await expect(abort).resolves.toBe(true);
@@ -1026,7 +1040,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     ctrl.push(INIT);
     await flush();
 
-    const abort = runtime.abortClaudeInternalSession('session-1');
+    const abort = runtime.abortClaudeInternalSession('session-1', published.operation.publish);
     // The process dies from an unrelated fault (e.g. OOM, code 137) before the
     // fallback ever fires — this is NOT the abort's own kill.
     ctrl.crash(137);

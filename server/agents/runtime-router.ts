@@ -66,6 +66,13 @@ interface LocalProducerBinding {
   readonly output: AgentEmissionSink;
 }
 
+interface RuntimeExecutionOccurrence {
+  readonly execution: AgentExecutionV5;
+  runId: string;
+  handle: AgentExecutionHandle | null;
+  interrupted: boolean;
+}
+
 export interface AgentRuntimeRouterOptions {
   registry: IChatRegistry;
   directory: AgentDirectory;
@@ -129,12 +136,7 @@ export class AgentRuntimeRouter {
   readonly #adoption: TranscriptAdoptionService;
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #producerLeases = new Map<string, LocalProducerBinding>();
-  readonly #executionHandles = new Map<string, {
-    readonly execution: AgentExecutionV5;
-    readonly runId: string;
-    readonly handle: AgentExecutionHandle;
-  }>();
-  readonly #pendingAbortRuns = new Set<string>();
+  readonly #executions = new Map<string, RuntimeExecutionOccurrence>();
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
@@ -150,8 +152,8 @@ export class AgentRuntimeRouter {
     this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
     this.#ledger.subscribe((event) => {
       if (event.type !== 'run-ended') return;
-      if (this.#executionHandles.get(event.chatId)?.runId === event.runId) {
-        this.#executionHandles.delete(event.chatId);
+      if (this.#executions.get(event.chatId)?.runId === event.runId) {
+        this.#executions.delete(event.chatId);
       }
     });
   }
@@ -191,6 +193,7 @@ export class AgentRuntimeRouter {
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
+    const occurrence = this.#trackExecution(chatId, integration.execution, runId);
     try {
       assertExecutionAdmissionOpen(opts);
       const outcome = await this.#createCarriedContext({
@@ -207,15 +210,14 @@ export class AgentRuntimeRouter {
       if (carryover.notice) {
         this.#ledger.appendCarryoverNotice(chatId, prepared.viewId, carryover.notice);
       }
-      const execution = integration.execution;
-      const handle = await execution.start({
+      const handle = await occurrence.execution.start({
         ...this.#executionContextV5(chatId, entry, configuration, runId, opts),
         output: producer.output,
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
       });
-      await this.#retainOrAbortHandle(chatId, execution, runId, handle);
+      this.#retainOrAbortHandle(chatId, occurrence, handle);
       assertExecutionAdmissionOpen(opts);
       const updated = this.#registry.updateChat(chatId, {
         model: selection.model,
@@ -225,8 +227,7 @@ export class AgentRuntimeRouter {
       });
       if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     } catch (error) {
-      this.#pendingAbortRuns.delete(runKey(chatId, runId));
-      this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
+      this.#ledger.failRun(chatId, occurrence.runId, dispatchFailureDetail(error));
       throw error;
     }
   }
@@ -257,9 +258,9 @@ export class AgentRuntimeRouter {
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
+    const occurrence = this.#trackExecution(chatId, integration.execution, runId);
     try {
-      const execution = integration.execution;
-      const handle = await execution.resume({
+      const handle = await occurrence.execution.resume({
         ...this.#executionContextV5(chatId, entry, configuration, runId, opts),
         output: producer.output,
         agentSessionId: entry.agentSessionId,
@@ -267,10 +268,9 @@ export class AgentRuntimeRouter {
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
       });
-      await this.#retainOrAbortHandle(chatId, execution, runId, handle);
+      this.#retainOrAbortHandle(chatId, occurrence, handle);
     } catch (error) {
-      this.#pendingAbortRuns.delete(runKey(chatId, runId));
-      this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
+      this.#ledger.failRun(chatId, occurrence.runId, dispatchFailureDetail(error));
       throw error;
     }
   }
@@ -404,6 +404,7 @@ export class AgentRuntimeRouter {
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
+    const occurrence = this.#trackExecution(chatId, integration.execution, runId);
     try {
       const request = {
         ...this.#executionContextV5(chatId, entry, configuration, runId, opts),
@@ -413,12 +414,10 @@ export class AgentRuntimeRouter {
         prompt,
         attachments: [],
       };
-      const execution = integration.execution;
       const handle = await compaction.compact(request);
-      await this.#retainOrAbortHandle(chatId, execution, runId, handle);
+      this.#retainOrAbortHandle(chatId, occurrence, handle);
     } catch (error) {
-      this.#pendingAbortRuns.delete(runKey(chatId, runId));
-      this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
+      this.#ledger.failRun(chatId, occurrence.runId, dispatchFailureDetail(error));
       throw error;
     }
   }
@@ -453,14 +452,14 @@ export class AgentRuntimeRouter {
   abortSession(chatId: string): Promise<boolean> {
     const runId = this.#ledger.activeRunId(chatId);
     if (!runId) return Promise.resolve(false);
-    const active = this.#executionHandles.get(chatId);
+    const active = this.#executions.get(chatId);
     this.#ledger.interruptRun(chatId);
-    if (!active || active.runId !== runId) {
-      this.#pendingAbortRuns.add(runKey(chatId, runId));
-      return Promise.resolve(true);
+    if (active?.runId === runId) {
+      active.interrupted = true;
+      if (active.handle !== null) {
+        this.#abortHandleBestEffort(chatId, active.execution, active.handle, 'accepted interruption');
+      }
     }
-    this.#executionHandles.delete(chatId);
-    this.#abortHandleBestEffort(chatId, active.execution, active.handle, 'accepted interruption');
     return Promise.resolve(true);
   }
 
@@ -759,29 +758,32 @@ export class AgentRuntimeRouter {
         validate();
         eventHandoff.commit();
         this.#ledger.handoffRun(input.chatId, input.previousRunId, input.nextRunId);
-        const active = this.#executionHandles.get(input.chatId);
+        const active = this.#executions.get(input.chatId);
         if (active?.runId === input.previousRunId) {
-          this.#executionHandles.set(input.chatId, {
-            ...active,
-            runId: input.nextRunId,
-          });
+          // The launch continuation retains this record before its native handle exists.
+          active.runId = input.nextRunId;
         }
       },
     };
   }
 
-  async #retainOrAbortHandle(
+  #trackExecution(chatId: string, execution: AgentExecutionV5, runId: string): RuntimeExecutionOccurrence {
+    const occurrence = { execution, runId, handle: null, interrupted: false };
+    this.#executions.set(chatId, occurrence);
+    return occurrence;
+  }
+
+  #retainOrAbortHandle(
     chatId: string,
-    execution: AgentExecutionV5,
-    runId: string,
+    occurrence: RuntimeExecutionOccurrence,
     handle: AgentExecutionHandle,
-  ): Promise<void> {
-    if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
-      this.#abortHandleBestEffort(chatId, execution, handle, 'interrupted launch');
+  ): void {
+    if (occurrence.interrupted) {
+      this.#abortHandleBestEffort(chatId, occurrence.execution, handle, 'interrupted launch');
       return;
     }
-    if (this.#ledger.isRunActive(chatId, runId)) {
-      this.#executionHandles.set(chatId, { execution, runId, handle });
+    if (this.#executions.get(chatId) === occurrence && this.#ledger.isRunActive(chatId, occurrence.runId)) {
+      occurrence.handle = handle;
     }
   }
 
@@ -902,10 +904,6 @@ function attachments(images: RunAgentTurnOptions['images'] = []) {
     name: image.name ?? null,
     mimeType: image.mimeType ?? 'application/octet-stream',
   }));
-}
-
-function runKey(chatId: string, runId: string): string {
-  return `${chatId}\u0000${runId}`;
 }
 
 function isAgentSettingsEnvelope(value: unknown): value is AgentSettingsEnvelope {

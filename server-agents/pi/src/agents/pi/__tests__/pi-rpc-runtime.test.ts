@@ -419,7 +419,9 @@ describe('PiRpcRuntime', () => {
     expect(started.agentSessionId).toBe('pi-session-1');
     expect(runtime.isRunning(started.agentSessionId)).toBe(true);
     expect(runtime.captureSteerTarget(started.agentSessionId)).toBeNull();
-    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, () => {})).toBe(false);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    expect(runtime.abort(started.agentSessionId, published.operation.publish)).toBe(true);
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);
     expect(published.events).toEqual([{
@@ -1123,6 +1125,8 @@ describe('PiRpcRuntime', () => {
     const recovery = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
     expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(runtime.abort('pi-session-1', published.operation.publish)).toBe(false);
+    expect(fakes[1].proc.killed).toBe(false);
     fakes[1].pushEvent({ type: 'agent_settled' });
     await recovery;
     await runtime.shutdown();
@@ -1156,7 +1160,7 @@ describe('PiRpcRuntime', () => {
     await waitForActive(runtime);
 
     expect(runtime.isRunning('pi-session-1')).toBe(true);
-    expect(runtime.abort('pi-session-1')).toBe(true);
+    expect(runtime.abort('pi-session-1', published.operation.publish)).toBe(true);
     await turn;
     expect(published.events).toEqual([{
       type: 'run-ended',
@@ -1179,13 +1183,14 @@ describe('PiRpcRuntime', () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ promptBehavior: 'hold' });
     const runtime = createRuntime();
-    const turn = runtime.runTurn(baseResumeRequest());
+    const request = baseResumeRequest();
+    const turn = runtime.runTurn(request);
     while (fakes.length === 0) await new Promise((resolve) => setTimeout(resolve, 1));
     await waitForCommand(fakes[0], 'prompt');
 
     expect(runtime.isRunning('pi-session-1')).toBe(true);
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
-    expect(runtime.abort('pi-session-1')).toBe(true);
+    expect(runtime.abort('pi-session-1', request.operation.publish)).toBe(true);
     await turn;
     expect(fakes[0].proc.killed).toBe(true);
     await runtime.shutdown();
@@ -1217,7 +1222,8 @@ describe('PiRpcRuntime', () => {
     const runtime = createRuntime();
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
 
-    const turn = runtime.runTurn(baseResumeRequest());
+    const request = baseResumeRequest();
+    const turn = runtime.runTurn(request);
     const target = await waitForActive(runtime);
     expect(target).not.toBeNull();
 
@@ -1227,7 +1233,7 @@ describe('PiRpcRuntime', () => {
     fakes[0].pushEvent({ type: 'agent_settled' });
     await turn;
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
-    expect(runtime.abort('pi-session-1')).toBe(false);
+    expect(runtime.abort('pi-session-1', request.operation.publish)).toBe(false);
     await runtime.shutdown();
   });
 

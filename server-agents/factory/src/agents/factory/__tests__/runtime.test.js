@@ -682,7 +682,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
-  it('[TLV5-L07.06-FACTORY-UNIT-01] keeps a prior process bound to its publisher until that source closes', async () => {
+  it.each(['finished', 'aborted'])('[TLV5-L07.06-FACTORY-UNIT-01] keeps a prior process bound to its publisher until that source closes (%s successor)', async (outcome) => {
     const provider = new FactoryCliRuntime();
     const firstProc = createFakeProc();
     const secondProc = createFakeProc();
@@ -738,11 +738,20 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(JSON.stringify(first.events)).toContain('late output from A');
     expect(second.events).toEqual([]);
 
-    secondProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
-    secondProc.close(0);
+    expect(provider.abort('factory-session-reused', first.operation.publish)).toBe(false);
+    expect(secondProc.killed).toBe(false);
+    if (outcome === 'aborted') {
+      expect(provider.abort('factory-session-reused', second.operation.publish)).toBe(true);
+      expect(secondProc.killed).toBe(true);
+    } else {
+      secondProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
+      secondProc.close(0);
+    }
     await secondTurn;
 
-    expect(second.events).toEqual([
+    expect(secondSettled).toBe(true);
+    expect(provider.isRunning('factory-session-reused')).toBe(false);
+    expect(second.events).toEqual(outcome === 'aborted' ? [] : [
       expect.objectContaining({ type: 'run-ended', runId: 'run-b' }),
     ]);
   });

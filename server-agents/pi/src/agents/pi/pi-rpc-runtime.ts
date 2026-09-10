@@ -10,6 +10,8 @@ import {
 import { isArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import {
   runtimeRows,
+  isRuntimeAbortTarget,
+  type AgentRuntimePublisher,
   type AgentRuntimeEvent,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
@@ -208,10 +210,11 @@ export class PiRpcRuntime {
   }
 
   // Kills the process because RPC abort can restart a queued steering message as a new run.
-  abort(agentSessionId: string): boolean {
+  abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session?.turn || session.state === 'retiring' || !session.process) return false;
     const turn = session.turn;
+    if (!isRuntimeAbortTarget(turn.operation, publish)) return false;
     turn.stopRequested = true;
     session.lastActivityAt = Date.now();
     this.#completeTurn(session, turn, 'stopped');
