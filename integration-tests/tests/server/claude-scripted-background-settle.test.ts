@@ -36,6 +36,7 @@ describe('scripted Claude background settlement', () => {
     const finished = marker('BG_SETTLE_FINISHED');
     const successorPrompt = marker('BG_SETTLE_SUCCESSOR_PROMPT');
     const successorReply = marker('BG_SETTLE_SUCCESSOR_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_bg_settle', 'Bash', {
         command: 'sleep 1',
@@ -43,12 +44,7 @@ describe('scripted Claude background settlement', () => {
       }),
     ]);
     testEnvironment.model.scriptTurn([claudeText(launched)]);
-    testEnvironment.model.scriptTurn((request) => {
-      const messages = JSON.stringify(request.body.messages);
-      expect(messages).toContain(launched);
-      expect(messages).toContain('<task-notification>');
-      return [claudeText(finished)];
-    });
+    testEnvironment.model.scriptTurn([claudeText(finished)]);
     testEnvironment.model.scriptTurn([claudeText(successorReply)]);
 
     await withIntegrationFixture('claude-scripted-background-settle', async (fixture) => {
@@ -113,6 +109,11 @@ describe('scripted Claude background settlement', () => {
         outcome: 'snapshot',
         chats: [],
       });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(4);
+      const messages = JSON.stringify(requests[2]!.body.messages);
+      expect(messages).toContain(launched);
+      expect(messages).toContain('<task-notification>');
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

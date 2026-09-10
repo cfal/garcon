@@ -125,12 +125,8 @@ describe('scripted Claude fork lifecycle matrix', () => {
       expect(assistantContents((await fixture.client.getMessages(forkChatId)).messages))
         .not.toContain(reply);
 
-      testEnvironment.model.scriptTurn((request) => {
-        expect(request.lastUserText).toContain(childPrompt);
-        expect(JSON.stringify(request.body.messages)).toContain(prompt);
-        expect(JSON.stringify(request.body.messages)).not.toContain(reply);
-        return [claudeText(childReply)];
-      });
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptTurn([claudeText(childReply)]);
       const childCursor = fixture.client.markEvents();
       const child = await fixture.client.runChat(liveClaudeRunRequest({
         chatId: forkChatId,
@@ -144,6 +140,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
         marker: childReply,
         afterIndex: childCursor,
       });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.lastUserText).toContain(childPrompt);
+      expect(JSON.stringify(requests[0]!.body.messages)).toContain(prompt);
+      expect(JSON.stringify(requests[0]!.body.messages)).not.toContain(reply);
 
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([prompt, childPrompt]);
@@ -397,12 +398,8 @@ describe('scripted Claude fork lifecycle matrix', () => {
       expect(forkedEntries.indexOf(hookSuccess!)).toBeLessThan(forkedEntries.indexOf(hookError!));
       expect(hookSuccess?.parentUuid).toBe(hookError?.uuid);
 
-      testEnvironment.model.scriptTurn((request) => {
-        expect(request.lastUserText).toContain(childPrompt);
-        expect(JSON.stringify(request.body.messages)).toContain(sourcePrompt);
-        expect(JSON.stringify(request.body.messages)).toContain(sourceReply);
-        return [claudeText(childReply)];
-      });
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptTurn([claudeText(childReply)]);
       const childCursor = fixture.client.markEvents();
       const childTurn = await fixture.client.runChat(liveClaudeRunRequest({
         chatId: forkChatId,
@@ -416,6 +413,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
         marker: childReply,
         afterIndex: childCursor,
       });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.lastUserText).toContain(childPrompt);
+      expect(JSON.stringify(requests[0]!.body.messages)).toContain(sourcePrompt);
+      expect(JSON.stringify(requests[0]!.body.messages)).toContain(sourceReply);
       await waitForNativeFileContains(fixture.dirs.workspace, forkChatId, childReply);
 
       const reforkChatId = fixture.newChatId();
@@ -453,11 +455,8 @@ describe('scripted Claude fork lifecycle matrix', () => {
         nativeSession: null,
       });
 
-      testEnvironment.model.scriptTurn((request) => {
-        expect(request.lastUserText).toContain(childPrompt);
-        expect(request.body.messages).toHaveLength(1);
-        return [claudeText(childReply)];
-      });
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptTurn([claudeText(childReply)]);
       const childCursor = fixture.client.markEvents();
       const child = await fixture.client.runChat(liveClaudeRunRequest({
         chatId: forkChatId,
@@ -471,6 +470,10 @@ describe('scripted Claude fork lifecycle matrix', () => {
         marker: childReply,
         afterIndex: childCursor,
       });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.lastUserText).toContain(childPrompt);
+      expect(requests[0]!.body.messages).toHaveLength(1);
 
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([childPrompt]);
@@ -571,12 +574,8 @@ describe('scripted Claude fork lifecycle matrix', () => {
       expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
         .not.toContain('task-notification');
 
-      testEnvironment.model.scriptTurn((request) => {
-        expect(request.lastUserText).toContain(childPrompt);
-        expect(request.lastUserText).not.toContain(sourcePrompt);
-        expect(JSON.stringify(request.body.messages)).not.toContain('task-notification');
-        return [claudeText(childReply)];
-      });
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptTurn([claudeText(childReply)]);
       const childCursor = fixture.client.markEvents();
       const child = await fixture.client.runChat(liveClaudeRunRequest({
         chatId: forkChatId,
@@ -591,6 +590,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
           marker: childReply,
           afterIndex: childCursor,
         });
+        const requests = testEnvironment.model.requestsSince(requestCursor);
+        expect(requests).toHaveLength(1);
+        expect(requests[0]!.lastUserText).toContain(childPrompt);
+        expect(requests[0]!.lastUserText).not.toContain(sourcePrompt);
+        expect(JSON.stringify(requests[0]!.body.messages)).not.toContain('task-notification');
         expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
           .not.toContain('task-notification');
       } finally {

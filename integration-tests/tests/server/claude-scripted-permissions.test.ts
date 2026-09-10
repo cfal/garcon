@@ -72,6 +72,7 @@ describe('scripted Claude permissions', () => {
     const testEnvironment = environment;
     const prompt = marker('ASK_PROMPT');
     const reply = marker('ASK_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_ask', 'AskUserQuestion', {
         questions: [{
@@ -85,10 +86,7 @@ describe('scripted Claude permissions', () => {
         }],
       }),
     ]);
-    testEnvironment.model.scriptTurn((request) => {
-      expect(JSON.stringify(request.body.messages)).toContain('Postgres');
-      return [claudeText(reply)];
-    });
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
 
     await withIntegrationFixture('claude-scripted-permissions', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -186,6 +184,9 @@ describe('scripted Claude permissions', () => {
         afterIndex: cursor,
       });
       const transcript = await fixture.client.getMessages(chatId);
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1]!.body.messages)).toContain('Postgres');
       expect(transcript.messages.some((entry) =>
         entry.message.type === 'permission-resolved'
         && entry.message.permissionOccurrenceId === permissionOccurrenceId

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -12,10 +12,11 @@ import {
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
 import type { GarconTestClient } from '../../support/garcon-client.js';
-import { forkAfterSourceSettles } from '../../support/fork-test-support.js';
+import { forkAfterSourceSettles, forkWhenTranscriptPersists } from '../../support/fork-test-support.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
   reloadUntilNativeStableAfterPrompt,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
@@ -32,12 +33,13 @@ import {
 describe('scripted Claude persistence', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     environment = await startScriptedClaudeTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('restores a tool turn from native history after restart', async () => {
@@ -190,6 +192,7 @@ describe('scripted Claude persistence', () => {
         marker: sourceReply,
         afterIndex: sourceCursor,
       });
+      await reloadUntilNativeContains(fixture, sourceChatId, sourceReply);
 
       const forkChatId = fixture.newChatId();
       await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
@@ -200,12 +203,8 @@ describe('scripted Claude persistence', () => {
       });
 
       await fixture.restartGarcon();
-      testEnvironment.model.scriptTurn((request) => {
-        expect(request.lastUserText).toContain(resumedPrompt);
-        expect(JSON.stringify(request.body.messages)).toContain(sourcePrompt);
-        expect(JSON.stringify(request.body.messages)).toContain(sourceReply);
-        return [claudeText(resumedReply)];
-      });
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptTurn([claudeText(resumedReply)]);
       const resumedCursor = fixture.client.markEvents();
       const resumed = await fixture.client.runChat(liveClaudeRunRequest({
         chatId: forkChatId,
@@ -219,6 +218,12 @@ describe('scripted Claude persistence', () => {
         marker: resumedReply,
         afterIndex: resumedCursor,
       });
+      const resumedRequests = testEnvironment.model.requestsSince(requestCursor);
+      expect(resumedRequests).toHaveLength(1);
+      const request = resumedRequests[0]!;
+      expect(request.lastUserText).toContain(resumedPrompt);
+      expect(JSON.stringify(request.body.messages)).toContain(sourcePrompt);
+      expect(JSON.stringify(request.body.messages)).toContain(sourceReply);
 
       const transcript = await fixture.client.getMessages(forkChatId);
       expect(userContents(transcript.messages)).toEqual([sourcePrompt, resumedPrompt]);
@@ -297,6 +302,106 @@ describe('scripted Claude persistence', () => {
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
     });
+  }, 60_000);
+
+  test('resumes a prompt-only native fork after restart without adopting a later source reply', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const sourcePrompt = marker('PROMPT_ONLY_SOURCE_PROMPT');
+    const sourceReply = marker('PROMPT_ONLY_SOURCE_REPLY');
+    const childPrompt = marker('PROMPT_ONLY_CHILD_PROMPT');
+    const childReply = marker('PROMPT_ONLY_CHILD_REPLY');
+    const held = testEnvironment.model.scriptHeldTurn([claudeText(sourceReply)]);
+
+    await withIntegrationFixture('claude-prompt-only-fork-restart', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const sourceCursor = fixture.client.markEvents();
+      const source = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId: sourceChatId,
+        projectPath: fixture.dirs.project,
+        command: sourcePrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await held.requested;
+      const childChatId = fixture.newChatId();
+      try {
+        await forkWhenTranscriptPersists(fixture, sourceChatId, childChatId);
+        const forked = await fixture.client.getMessages(childChatId);
+        expect(userContents(forked.messages)).toEqual([sourcePrompt]);
+        expect(assistantContents(forked.messages)).toEqual([]);
+      } finally {
+        held.release();
+      }
+      await waitForVisibleResponse({
+        fixture,
+        chatId: sourceChatId,
+        turnId: source.turnId,
+        marker: sourceReply,
+        afterIndex: sourceCursor,
+      });
+      const nativeBeforeRestart = await waitForPersistedNativeSession({
+        directories: fixture.dirs, chatId: childChatId, agentId: 'claude',
+      });
+      await fixture.restartGarcon();
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptTurn([claudeText(childReply)]);
+      const childCursor = fixture.client.markEvents();
+      const child = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId: childChatId, command: childPrompt, permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture, chatId: childChatId, turnId: child.turnId, marker: childReply, afterIndex: childCursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.lastUserText).toContain(childPrompt);
+      expect(JSON.stringify(requests[0]!.body.messages)).toContain(sourcePrompt);
+      expect(JSON.stringify(requests[0]!.body.messages)).not.toContain(sourceReply);
+      const childTranscript = await fixture.client.getMessages(childChatId);
+      expect(userContents(childTranscript.messages)).toEqual([sourcePrompt, childPrompt]);
+      expect(assistantContents(childTranscript.messages)).toEqual([childReply]);
+      expect(assistantContents((await fixture.client.getMessages(sourceChatId)).messages)).toEqual([sourceReply]);
+      const nativeAfterRestart = await waitForPersistedNativeSession({
+        directories: fixture.dirs, chatId: childChatId, agentId: 'claude',
+      });
+      expect(nativeAfterRestart.nativeSession).toEqual(nativeBeforeRestart.nativeSession);
+      testEnvironment.model.assertSettled();
+    }, { serverEnvironment: testEnvironment.serverEnvironment });
+  }, 60_000);
+
+  test('contains a scripted model failure without retries or consuming successor responses', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const reply = marker('AFTER_SCRIPT_FAILURE');
+    testEnvironment.model.scriptTurn(() => { throw new Error('Synthetic model callback failure'); });
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-model-failure-isolation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: 'Synthetic failing prompt', permissionMode: 'bypassPermissions',
+      }));
+      const failed = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(failed.type).toBe('agent-run-failed');
+      expect(testEnvironment.model.requests()).toHaveLength(1);
+      expect(testEnvironment.model.issues()).toEqual(['Request 1 scripted turn failed: Synthetic model callback failure']);
+      const failedTurnContents = assistantContents((await fixture.client.getMessages(chatId)).messages);
+
+      const nextCursor = fixture.client.markEvents();
+      const next = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId, command: 'Synthetic successor prompt', permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: next.turnId, marker: reply, afterIndex: nextCursor });
+      expect(testEnvironment.model.requests()).toHaveLength(2);
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([...failedTurnContents, reply]);
+      expect(() => testEnvironment.model.assertSettled()).toThrow(
+        /^Fake Claude model was not settled:\nRequest 1 scripted turn failed: Synthetic model callback failure$/,
+      );
+    }, { serverEnvironment: testEnvironment.serverEnvironment });
   }, 60_000);
 });
 

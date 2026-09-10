@@ -100,6 +100,39 @@ interface SseEvent {
   data: Record<string, unknown>;
 }
 
+function messageIdentity(request: RecordedClaudeModelRequest) {
+  return {
+    id: `msg_scripted_${request.id}`,
+    type: 'message',
+    role: 'assistant',
+    model: String(request.body.model ?? 'scripted'),
+  };
+}
+
+function messageUsage(outputTokens: number) {
+  return { input_tokens: 42, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens };
+}
+
+function stopReason(blocks: readonly ClaudeScriptedBlock[]): 'tool_use' | 'end_turn' {
+  return blocks.some((block) => block.kind === 'tool_use') ? 'tool_use' : 'end_turn';
+}
+
+function messageResponse(blocks: readonly ClaudeScriptedBlock[], request: RecordedClaudeModelRequest): Response {
+  return Response.json({
+    ...messageIdentity(request),
+    content: blocks.map((block) => block.kind === 'text'
+      ? { type: 'text', text: block.text }
+      : { type: 'tool_use', id: block.id, name: block.name, input: block.input }),
+    stop_reason: stopReason(blocks),
+    stop_sequence: null,
+    usage: messageUsage(7),
+  });
+}
+
+function invalidRequest(message: string): Response {
+  return Response.json({ type: 'error', error: { type: 'invalid_request_error', message } }, { status: 400 });
+}
+
 function blockEvents(block: ClaudeScriptedBlock, index: number): SseEvent[] {
   if (block.kind === 'text') {
     return [
@@ -147,26 +180,17 @@ function turnEvents(
   blocks: ClaudeScriptedBlock[],
   request: RecordedClaudeModelRequest,
 ): SseEvent[] {
-  const stopReason = blocks.some((block) => block.kind === 'tool_use') ? 'tool_use' : 'end_turn';
   return [
     {
       event: 'message_start',
       data: {
         type: 'message_start',
         message: {
-          id: `msg_scripted_${request.id}`,
-          type: 'message',
-          role: 'assistant',
-          model: String(request.body.model ?? 'scripted'),
+          ...messageIdentity(request),
           content: [],
           stop_reason: null,
           stop_sequence: null,
-          usage: {
-            input_tokens: 42,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-            output_tokens: 1,
-          },
+          usage: messageUsage(1),
         },
       },
     },
@@ -175,7 +199,7 @@ function turnEvents(
       event: 'message_delta',
       data: {
         type: 'message_delta',
-        delta: { stop_reason: stopReason, stop_sequence: null },
+        delta: { stop_reason: stopReason(blocks), stop_sequence: null },
         usage: { output_tokens: 7 },
       },
     },
@@ -222,7 +246,7 @@ export class FakeClaudeModel {
 
   private constructor() {
     this.#server = Bun.serve({
-      hostname: '127.0.0.1',
+      hostname: '0.0.0.0',
       port: 0,
       idleTimeout: 0,
       fetch: (request) => this.#handleRequest(request),
@@ -234,7 +258,7 @@ export class FakeClaudeModel {
   }
 
   get baseUrl(): string {
-    return `http://${this.#server.hostname}:${this.#server.port}`;
+    return `http://127.0.0.1:${this.#server.port}`;
   }
 
   scriptTurn(turn: ClaudeScriptedTurn): void {
@@ -332,11 +356,11 @@ export class FakeClaudeModel {
       body = await request.json();
     } catch {
       this.#issues.push('Messages request body was not valid JSON');
-      return sseResponse(errorEvents('invalid request body'));
+      return invalidRequest('invalid request body');
     }
     if (!isRecord(body)) {
       this.#issues.push('Messages request body was not an object');
-      return sseResponse(errorEvents('invalid request body'));
+      return invalidRequest('invalid request body');
     }
     const recordedUserTexts = userTexts(body);
     const recorded: RecordedClaudeModelRequest = {
@@ -353,7 +377,7 @@ export class FakeClaudeModel {
       this.#issues.push(
         `Request ${recorded.id} arrived with no scripted turn (lastUserText: ${JSON.stringify(recorded.lastUserText)})`,
       );
-      return sseResponse(errorEvents('no scripted turn available'));
+      return invalidRequest('no scripted turn available');
     }
     if (!Array.isArray(turn) && typeof turn !== 'function') {
       if (turn.kind === 'http-error') {
@@ -361,12 +385,21 @@ export class FakeClaudeModel {
           error: { type: 'api_error', message: turn.message },
         }, { status: turn.status });
       }
+      if (body.stream !== true) {
+        this.#issues.push(`Request ${recorded.id} requested a non-streaming response for a stream fault`);
+        return invalidRequest('scripted stream fault requires stream: true');
+      }
       if (turn.kind === 'stream-error') {
         return sseResponse(errorEvents(turn.message));
       }
       return sseResponse(turnEvents([], recorded).slice(0, 1));
     }
-    const blocks = typeof turn === 'function' ? await turn(recorded) : turn;
-    return sseResponse(turnEvents(blocks, recorded));
+    try {
+      const blocks = typeof turn === 'function' ? await turn(recorded) : turn;
+      return body.stream === true ? sseResponse(turnEvents(blocks, recorded)) : messageResponse(blocks, recorded);
+    } catch (error) {
+      this.#issues.push(`Request ${recorded.id} scripted turn failed: ${error instanceof Error ? error.message : String(error)}`);
+      return invalidRequest('scripted turn failed');
+    }
   }
 }
