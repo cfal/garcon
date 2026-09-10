@@ -20,6 +20,31 @@ async function fixture(options) {
 }
 
 describe('execution resource identity persistence', () => {
+  test('registers distinct remote identities without creating provider instances or project grants', async () => {
+    const { directory, store, file } = await fixture();
+    const first = await store.addRemoteNode('Synthetic node');
+    const second = await store.addRemoteNode('Synthetic node');
+    expect(first.id).not.toBe(second.id);
+    expect(first.kind).toBe('remote');
+    expect(store.snapshot().instances).toEqual([]);
+    expect(store.snapshot().workspaces).toEqual([]);
+    first.label = 'Caller mutation';
+    expect(store.requireNode(first.id).label).toBe('Synthetic node');
+    expect(() => store.requireNode('missing-node')).toThrow('Unknown execution node');
+    const saved = store.snapshot();
+    saved.nodes.find((node) => node.id === first.id).removedAt = '2026-09-10T00:00:00.000Z';
+    await writeJsonFileAtomic(file, saved);
+    const restarted = new ExecutionNodesStore(directory);
+    await restarted.init();
+    expect(() => restarted.requireNode(first.id)).toThrow('removed');
+    expect(restarted.requireNode(second.id)).toEqual(second);
+    const controls = [...Array.from({ length: 32 }, (_, index) => index), ...Array.from({ length: 33 }, (_, index) => index + 127)];
+    for (const label of ['', ' ', 'x'.repeat(121), ...controls.map((code) => `node${String.fromCharCode(code)}label`)]) {
+      await expect(restarted.addRemoteNode(label)).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+    }
+    expect(restarted.snapshot()).toEqual(saved);
+  });
+
   test('persists the local node before returning it and preserves identity after restart', async () => {
     const { directory, store, file } = await fixture();
     const saved = JSON.parse(await readFile(file, 'utf8'));
@@ -66,6 +91,17 @@ describe('execution resource identity persistence', () => {
     expect(work.storageNamespace).toBe(`instances/${work.id}`);
     expect(store.snapshot().instances).toHaveLength(3);
     expect(store.snapshot().instances[0].storageNamespace).toBe('synthetic-provider');
+  });
+
+  test('rejects invalid local instance labels before changing resource identity', async () => {
+    const { store, file } = await fixture();
+    const saved = store.snapshot();
+    const controls = [...Array.from({ length: 32 }, (_, index) => index), ...Array.from({ length: 33 }, (_, index) => index + 127)];
+    for (const label of ['', ' ', 'x'.repeat(121), ...controls.map((code) => `instance${String.fromCharCode(code)}label`)]) {
+      await expect(store.addLocalInstance('synthetic-provider', label)).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+    }
+    expect(store.snapshot()).toEqual(saved);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(saved);
   });
 
   test('registers all local provider defaults before any chat without registering a fictitious project', async () => {

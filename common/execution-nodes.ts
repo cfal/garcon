@@ -44,7 +44,7 @@ export function parseExecutionNodesSnapshot(value: unknown): ExecutionNodesSnaps
   for (const node of value.nodes) {
     if (!isRecord(node) || !keys(node, ['id', 'kind', 'label', 'removedAt'])
       || !uniqueIdentity(node.id, ids) || (node.kind !== 'local' && node.kind !== 'remote')
-      || !label(node.label) || !removalTime(node.removedAt)) return null;
+      || !isExecutionResourceLabel(node.label) || !removalTime(node.removedAt)) return null;
     nodes.push({ id: node.id, kind: node.kind, label: node.label, removedAt: node.removedAt });
   }
   const local = nodes.filter((node) => node.kind === 'local');
@@ -56,7 +56,7 @@ export function parseExecutionNodesSnapshot(value: unknown): ExecutionNodesSnaps
     if (!isRecord(instance) || !keys(instance, ['id', 'nodeId', 'agentId', 'label', 'storageNamespace', 'default', 'removedAt'])
       || !isExecutionIdentity(instance.id) || !isExecutionIdentity(instance.nodeId)
       || !nodes.some((node) => node.id === instance.nodeId) || !isProviderType(instance.agentId)
-      || !label(instance.label) || typeof instance.default !== 'boolean' || !removalTime(instance.removedAt)
+      || !isExecutionResourceLabel(instance.label) || typeof instance.default !== 'boolean' || !removalTime(instance.removedAt)
       || typeof instance.storageNamespace !== 'string'
       || (instance.storageNamespace !== instance.agentId && instance.storageNamespace !== `instances/${instance.id}`)) return null;
     const storageKey = JSON.stringify([instance.nodeId, instance.storageNamespace]);
@@ -100,8 +100,8 @@ function keys(value: Record<string, unknown>, expected: readonly string[]): bool
   return Object.keys(value).length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
-function label(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && value.length <= 120 && !/[\r\n\0]/.test(value);
+export function isExecutionResourceLabel(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 120 && !/\p{Cc}/u.test(value);
 }
 
 function removalTime(value: unknown): value is string | null {

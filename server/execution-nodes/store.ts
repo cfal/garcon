@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { ExecutionLocation } from '../../common/execution-location.js';
 import {
-  isProviderType, isStoredProjectPath, parseExecutionNodesSnapshot,
+  isExecutionResourceLabel, isProviderType, isStoredProjectPath, parseExecutionNodesSnapshot,
   type ConfiguredAgentInstance, type ConfiguredExecutionNode, type ConfiguredProjectWorkspace, type ExecutionNodesSnapshot,
 } from '../../common/execution-nodes.js';
 import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { DomainError } from '../lib/domain-error.js';
+import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
 
 export interface LocalExecutionTarget {
   readonly chatId?: string;
@@ -129,6 +129,7 @@ export class ExecutionNodesStore {
   }
 
   async addLocalInstance(agentId: string, label: string): Promise<ConfiguredAgentInstance> {
+    if (!isExecutionResourceLabel(label)) throw new ValidationDomainError('Invalid execution instance label');
     return this.#lock.runExclusive(this.#filePath, async () => {
       this.#assertWritable();
       const candidate = this.snapshot();
@@ -140,6 +141,26 @@ export class ExecutionNodesStore {
       await this.#commit({ ...candidate, instances: [...candidate.instances, instance] });
       return instance;
     });
+  }
+
+  async addRemoteNode(label: string): Promise<ConfiguredExecutionNode> {
+    if (!isExecutionResourceLabel(label)) throw new ValidationDomainError('Invalid execution node label');
+    return this.#lock.runExclusive(this.#filePath, async () => {
+      this.#assertWritable();
+      const candidate = this.snapshot();
+      const node = { id: randomUUID(), kind: 'remote', label, removedAt: null } as const;
+      await this.#commit({ ...candidate, nodes: [...candidate.nodes, node] });
+      return { ...node };
+    });
+  }
+
+  requireNode(nodeId: string): ConfiguredExecutionNode {
+    this.#assertWritable();
+    if (!this.#snapshot) throw new Error('Execution nodes are not initialized');
+    const node = this.#snapshot.nodes.find((entry) => entry.id === nodeId);
+    if (!node) throw new DomainError('NODE_UNAVAILABLE', 'Unknown execution node', 409);
+    if (node.removedAt !== null) throw new DomainError('NODE_REMOVED', 'Execution node was removed', 409);
+    return { ...node };
   }
 
   requireKnownLocation(location: ExecutionLocation, agentId: string): ResolvedExecutionLocation {
