@@ -373,7 +373,6 @@ async function prepareEmptyChat(
         projectPath: directories.project,
         tags: [],
         agentSessionId: null,
-        nextForkOrdinal: 1,
         model,
         apiProviderId: null,
         modelEndpointId: null,

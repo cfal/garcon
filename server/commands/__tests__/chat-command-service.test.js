@@ -606,7 +606,6 @@ function makeService(overrides = {}) {
     chatId: TARGET_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-2',
-    sourceNextForkOrdinal: 1,
     rollback: mock(() => Promise.resolve(undefined)),
   }));
   const carryOver = {
@@ -3386,7 +3385,6 @@ describe('ChatCommandService', () => {
         chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         agentSessionId: 'agent-2',
-        sourceNextForkOrdinal: 1,
         rollback,
       };
     });
@@ -3428,7 +3426,6 @@ describe('ChatCommandService', () => {
         chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         agentSessionId: null,
-        sourceNextForkOrdinal: 1,
         rollback: mock(async () => undefined),
       };
     });
@@ -3468,7 +3465,6 @@ describe('ChatCommandService', () => {
         model: 'opus',
         tags: [],
       });
-      registry.updateChat(SOURCE_CHAT_ID, { nextForkOrdinal: 2 });
       throw new Error('fork setup failed');
     });
     const { service, ownership, sessions, settings } = makeService({ forkChatFileCopy });
@@ -3483,7 +3479,7 @@ describe('ChatCommandService', () => {
 
     expect(ownership.delete).toHaveBeenCalledWith(TARGET_CHAT_ID);
     expect(sessions.has(TARGET_CHAT_ID)).toBeFalse();
-    expect(sessions.get(SOURCE_CHAT_ID).nextForkOrdinal).toBe(1);
+    expect(sessions.has(SOURCE_CHAT_ID)).toBeTrue();
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
     expect(settings.removeSessionName).toHaveBeenCalledWith(TARGET_CHAT_ID);
   });
@@ -3497,7 +3493,6 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       agentSessionId: 'agent-2',
-      sourceNextForkOrdinal: 1,
       rollback,
     }));
     const { service, queue, ledger } = makeService({ forkChatFileCopy });
@@ -3523,7 +3518,6 @@ describe('ChatCommandService', () => {
       forkPreparation: {
         phase: 'created',
         sourceChatId: SOURCE_CHAT_ID,
-        sourceNextForkOrdinal: 1,
       },
     });
   });
@@ -3608,7 +3602,6 @@ describe('ChatCommandService', () => {
         chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         agentSessionId: 'agent-2',
-        sourceNextForkOrdinal: 1,
         rollback: mock(() => Promise.resolve(undefined)),
       };
     });
@@ -3664,7 +3657,6 @@ describe('ChatCommandService', () => {
         chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         agentSessionId: 'agent-2',
-        sourceNextForkOrdinal: 1,
         rollback: mock(() => Promise.resolve(undefined)),
       };
     });

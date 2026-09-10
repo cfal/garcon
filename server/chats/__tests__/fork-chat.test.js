@@ -81,9 +81,8 @@ function makeDeps(overrides = {}) {
     ...overrides.ledger,
   };
   const settings = {
-    getChatName: mock(() => 'Source title'),
     ensureInNormal: mock(async () => undefined),
-    setSessionName: mock(async () => undefined),
+    setDerivedSessionName: mock(async () => 'Source title (1)'),
     removeFromAllOrderLists: mock(async () => undefined),
     removeSessionName: mock(async () => undefined),
     ...overrides.settings,
@@ -750,7 +749,8 @@ describe('forkChatFileCopy', () => {
   });
 
   it('rolls back registry, ledger, presentation, and native artifacts once', async () => {
-    const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 3 }) });
+    const deps = makeDeps();
+    const sourceBefore = structuredClone(deps.sessions.get('source-chat'));
     const result = await forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
@@ -762,7 +762,7 @@ describe('forkChatFileCopy', () => {
     await result.rollback();
 
     expect(deps.sessions.get('target-chat')).toBeUndefined();
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(3);
+    expect(deps.sessions.get('source-chat')).toEqual(sourceBefore);
     expect(deps.ownership.delete).toHaveBeenCalledOnce();
     expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
     expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();

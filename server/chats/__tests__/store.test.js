@@ -216,10 +216,10 @@ describe('ChatRegistry', () => {
       agentSettingsById: { test: envelope('test') },
       permissionMode: 'default',
       thinkingMode: 'none',
-      nextForkOrdinal: 1,
       parentChat: null,
     });
     expect(added).toHaveBeenCalledWith(CHAT_ID);
+    expect(registry.getChat(CHAT_ID)).not.toHaveProperty('nextForkOrdinal');
   });
 
   it('rejects duplicate IDs and native sessions owned by another integration', () => {
