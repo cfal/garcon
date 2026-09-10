@@ -427,6 +427,7 @@ export async function startServer(): Promise<void> {
         if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
         return carryOverCompaction.planFor({
           operation: 'fresh-start',
+          onCompactionStarted: input.onCompactionStarted,
           chatId: input.chatId,
           projectPath: input.entry.projectPath,
           messages: input.messages,

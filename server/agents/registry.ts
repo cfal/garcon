@@ -158,6 +158,7 @@ export interface AgentRegistryServiceContract {
 }
 
 interface StartSessionOptions {
+  onContextPreparation?: (phase: 'compacting-context' | 'starting-agent') => void;
   images?: AgentCommandImage[];
   model?: string;
   permissionMode?: PermissionMode;

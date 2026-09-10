@@ -180,6 +180,54 @@ for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, (
   });
 });
 
+describe('delegated startup dispatch gate', () => {
+  it('records acceptance, releases locks, and captures the receipt before a fast child can finish and be evicted', async () => {
+    const f = fixture('start');
+    const done = deferred();
+    const original = f.admit.getMockImplementation();
+    f.admit.mockImplementation(async (input) => {
+      const accepted = await original(input);
+      return { ...accepted, start: () => {
+        void (async () => {
+          expect(f.notices[0].detail.status).toBe('accepted');
+          expect(f.wait).toHaveBeenCalledTimes(1);
+          await f.context.chatMutationLock.runExclusiveMany([`chat:${PARENT}`, `chat:${CHILD}`], async () => {});
+          await f.finish('Immediate child result.');
+          const other = (await f.turns.accept({ chatId: CHILD, turnId: 'other-turn', commandType: 'agent-run',
+            clientRequestId: 'other', payload: {} })).record;
+          await f.turns.settleTerminal(other.key, 'finished');
+          await f.turns.markPublicTerminal(CHILD, other.turnId);
+          expect(await f.turns.getTurnRecord(CHILD, accepted.turnId)).toBeNull();
+          done.resolve();
+        })().catch(done.reject);
+      } };
+    });
+    f.controller.request(SOURCE, START);
+    await done.promise;
+    await until(() => f.deliveries.length === 2);
+    expect(f.deliveries.map((notice) => notice.status)).toEqual(['accepted', 'completed']);
+    expect(f.deliveries[1].output.text).toBe('Immediate child result.');
+    f.controller.shutdown();
+  });
+
+  it.each(['replace', 'discard'])('opens the accepted gate even if parent reporting is cancelled: %s', async (action) => {
+    const f = fixture('start');
+    const start = mock(() => {});
+    const original = f.admit.getMockImplementation();
+    f.admit.mockImplementation(async (input) => {
+      const accepted = await original(input);
+      if (action === 'replace') f.replace();
+      else f.controller.discardSource(PARENT);
+      return { ...accepted, start };
+    });
+    f.controller.request(SOURCE, START);
+    await until(() => start.mock.calls.length === 1);
+    expect(f.notices).toHaveLength(0);
+    expect(f.deliveries).toHaveLength(0);
+    f.controller.shutdown();
+  });
+});
+
 describe('resume authority', () => {
   it.each([null, { chatId: PARENT, relation: 'fork' }, { chatId: PARENT, relation: 'handoff' },
     { chatId: '2000000000000000', relation: 'delegation' }])('rejects a nondelegated edge without taking a foreign lock: %j', async (parentChat) => {

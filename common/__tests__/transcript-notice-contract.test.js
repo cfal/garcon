@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { AGENT_START_PROGRESS_CONTENT, AGENT_START_PROGRESS_PHASES } from '../agent-start-progress.ts';
 import {
   CliRowMessage,
   ErrorMessage,
@@ -15,6 +16,20 @@ import {
 } from '../transcript-notice-details.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
+
+describe('agent startup progress notice contracts', () => {
+  it.each(AGENT_START_PROGRESS_PHASES)('round-trips the %s milestone', (phase) => {
+    const detail = { type: 'agent-start-progress', phase };
+    const message = new TranscriptNoticeMessage(AT, AGENT_START_PROGRESS_CONTENT[phase], detail);
+    expect(parseTranscriptNoticeDetail(detail)).toEqual(detail);
+    expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+  });
+
+  it('rejects unknown phases and private execution data', () => {
+    expect(parseTranscriptNoticeDetail({ type: 'agent-start-progress', phase: 'unknown' })).toBeNull();
+    expect(parseTranscriptNoticeDetail({ type: 'agent-start-progress', phase: 'started', runId: 'private' })).toBeNull();
+  });
+});
 
 describe('preamble selection-changed notice contracts', () => {
   it('[PREAMBLE-SELECTION.01-CONTRACT-01] round-trips the update notice and permits zero entries', () => {

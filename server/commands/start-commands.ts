@@ -7,6 +7,8 @@ import {
 
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { AgentStartCompensatedError } from './agent-start-compensated-error.js';
+import { AgentStartProgress } from '../chats/agent-start-progress.js';
+import type { AcceptedDirectInput } from '../chat-execution/types.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { createLogger } from '../lib/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
@@ -29,6 +31,12 @@ import {
 } from './command-ledger.js';
 
 const logger = createLogger('commands:start');
+
+export interface AgentCommandStartAdmission {
+  readonly turnId: string;
+  readonly status: 'accepted' | 'duplicate';
+  start(): void;
+}
 
 export class StartCommands {
   constructor(private readonly support: CommandSupport) {}
@@ -55,7 +63,11 @@ export class StartCommands {
     if (replay) return replay;
     const normalized = await this.normalizeStart(input, chatId);
     signal?.throwIfAborted();
-    return this.submitNormalizedStart(normalized, signal);
+    const record = await this.admitStart(normalized, signal);
+    return {
+      ...agentTurnResultFromRecord(record),
+      chat: await this.support.projectCommandChat(chatId),
+    };
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
@@ -67,10 +79,10 @@ export class StartCommands {
     });
   }
 
-  submitAgentCommandStartLocked(
+  async submitAgentCommandStartLocked(
     input: AgentCommandStartInput,
     signal: AbortSignal,
-  ): Promise<StartChatCommandResponse> {
+  ): Promise<AgentCommandStartAdmission> {
     signal.throwIfAborted();
     this.support.requireChat(input.parentChatId);
     if (this.deps.transcripts.existingCurrentView(input.parentChatId)?.viewId !== input.sourceViewId) {
@@ -79,9 +91,26 @@ export class StartCommands {
     if (input.transcriptSnapshot && input.transcriptSnapshot.viewId !== input.sourceViewId) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'Snapshot does not belong to the requesting view', 409);
     }
-    return this.submitStartLocked({
+    const request: ChatStartInput = {
       ...input, origin: 'agent-command', images: [], orderedPreambleIds: [],
-    }, this.support.requireChatId(input.chatId), signal);
+    };
+    const chatId = this.support.requireChatId(input.chatId);
+    const replay = await this.replayStart(request, chatId);
+    if (replay) {
+      if (!replay.turnId) throw new Error('Accepted start has no turn identity');
+      return { turnId: replay.turnId, status: 'duplicate', start() {} };
+    }
+    const normalized = await this.normalizeStart(request, chatId);
+    signal.throwIfAborted();
+    const dispatch = Promise.withResolvers<void>();
+    try {
+      const record = await this.admitStart(normalized, signal, dispatch.promise);
+      if (!record.turnId) throw new Error('Accepted start has no turn identity');
+      return { turnId: record.turnId, status: 'accepted', start: dispatch.resolve };
+    } catch (error) {
+      dispatch.resolve();
+      throw error;
+    }
   }
 
   private async normalizeStart(
@@ -174,7 +203,7 @@ export class StartCommands {
     };
   }
 
-  private async submitNormalizedStart(input: NormalizedChatStart, signal?: AbortSignal): Promise<StartChatCommandResponse> {
+  private async admitStart(input: NormalizedChatStart, signal?: AbortSignal, dispatchReady?: Promise<void>): Promise<CommandLedgerRecord> {
     const existing = this.deps.chats.getChat(input.chatId);
     if (existing || input.transcriptSnapshot && this.deps.transcripts.existingCurrentView(input.chatId)) {
       throw new CommandValidationError(
@@ -193,14 +222,14 @@ export class StartCommands {
     });
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate') {
-      return this.replayedStart(ledger.record);
+      return ledger.record;
     }
 
     let registered = false;
     let seedOwned = false;
     let titleOwned = false;
     let compensated = false;
-    await this.deps.queue.runInitialInput({
+    const admission: AcceptedDirectInput = {
       command: {
         key: ledger.record.key,
         chatId: input.chatId,
@@ -209,6 +238,7 @@ export class StartCommands {
       },
       content: input.command,
       options: {
+        commandType: 'chat-start',
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         turnId,
@@ -259,6 +289,9 @@ export class StartCommands {
           await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
           signal?.throwIfAborted();
+          if (input.origin === 'agent-command' && !this.deps.metadata.getChatMetadata(input.chatId)) {
+            this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
+          }
         },
         compensate: async () => {
           if (registered) {
@@ -278,20 +311,47 @@ export class StartCommands {
           compensated = true;
         },
       },
-      dispatch: (executionAdmission) =>
-        this.deps.agents.startSession(input.chatId, input.command, {
-          projectPath: input.projectPath,
-          images: input.images.length > 0 ? input.images : undefined,
-          clientRequestId: input.clientRequestId,
-          clientMessageId: input.clientMessageId,
-          turnId,
-          executionAdmission,
-          agentSettings: input.agentSettings,
-        }),
-    }).catch((error: unknown) => {
+      dispatch: async (executionAdmission) => {
+        const progress = input.origin === 'agent-command'
+          ? new AgentStartProgress(this.deps.transcripts, input.chatId, turnId, executionAdmission.signal) : null;
+        try {
+          if (dispatchReady) await dispatchReady;
+          executionAdmission.signal.throwIfAborted();
+          progress?.report('preparing-context');
+          await this.deps.agents.startSession(input.chatId, input.command, {
+            projectPath: input.projectPath,
+            images: input.images.length > 0 ? input.images : undefined,
+            clientRequestId: input.clientRequestId,
+            clientMessageId: input.clientMessageId,
+            turnId,
+            executionAdmission: progress ? {
+              signal: executionAdmission.signal,
+              markStarted: async () => {
+                await executionAdmission.markStarted();
+                progress.report('started');
+              },
+            } : executionAdmission,
+            agentSettings: input.agentSettings,
+            ...(progress ? { onContextPreparation: (phase) => progress.report(phase) } : {}),
+          });
+        } catch (error) {
+          progress?.fail(error);
+          throw error;
+        }
+      },
+    };
+    const scheduled = input.origin === 'agent-command'
+      ? this.deps.queue.scheduleDirectInput(admission)
+      : this.deps.queue.runInitialInput(admission);
+    await scheduled.catch((error: unknown) => {
       if (input.origin === 'agent-command' && compensated) throw new AgentStartCompensatedError(error);
       throw error;
     });
+
+    if (input.origin === 'agent-command') {
+      if (input.title === null) this.generateTitle(input);
+      return ledger.record;
+    }
 
     if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
 
@@ -303,7 +363,16 @@ export class StartCommands {
       }
     }
 
-    if (input.title === null) void maybeGenerateChatTitle({
+    if (input.title === null) this.generateTitle(input);
+    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
+      status: 'running',
+      turnId,
+    });
+    return accepted ?? ledger.record;
+  }
+
+  private generateTitle(input: NormalizedChatStart): void {
+    void maybeGenerateChatTitle({
       chatId: input.chatId,
       projectPath: input.projectPath,
       firstPrompt: input.command,
@@ -311,15 +380,6 @@ export class StartCommands {
       settings: this.deps.settings,
       recentTitleIcons: this.deps.recentTitleIcons,
     });
-    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
-      status: 'running',
-      turnId,
-    });
-    const chat = await this.support.projectCommandChat(input.chatId);
-    return {
-      ...agentTurnResultFromRecord(accepted ?? ledger.record),
-      chat,
-    };
   }
 
   private async replayStart(

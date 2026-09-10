@@ -12,6 +12,7 @@ export interface ChildAdmission {
   readonly detail: AgentChildOutcomeNoticeDetail;
   readonly turnId: string | null;
   readonly recorded: boolean;
+  readonly start?: () => void;
 }
 
 export interface AgentChildTurnReplyOptions extends AgentCommandContext {
@@ -24,17 +25,23 @@ export class AgentChildTurnReplies extends AgentCommandReplies {
   launchChild(source: AgentCommandSource, admit: (signal: AbortSignal) => Promise<ChildAdmission | null>): void {
     this.launch(source, async (signal) => {
       const admission = await admit(signal);
-      if (!admission || signal.aborted) return;
+      if (!admission) return;
       const { detail, turnId } = admission;
       // Capture and bound completion before a slow acknowledgment can outlive receipt retention.
-      const completion = detail.status === 'accepted' && !detail.async && turnId !== null
-        ? this.options.turns.waitForTurnTerminal(detail.chatId, turnId, signal).then((record) =>
-          boundAgentChildResult({ ...detail, ...terminalOutcome(record, detail.chatId) }),
-        ).catch((error: unknown) => {
-          if (!signal.aborted) this.report(source, 'receipt', error, detail);
-          return null;
-        })
-        : null;
+      let completion: Promise<AgentChildOutcomeNoticeDetail | null> | null;
+      try {
+        completion = !signal.aborted && detail.status === 'accepted' && !detail.async && turnId !== null
+          ? this.options.turns.waitForTurnTerminal(detail.chatId, turnId, signal).then((record) =>
+            boundAgentChildResult({ ...detail, ...terminalOutcome(record, detail.chatId) }),
+          ).catch((error: unknown) => {
+            if (!signal.aborted) this.report(source, 'receipt', error, detail);
+            return null;
+          })
+          : null;
+      } finally {
+        admission.start?.();
+      }
+      if (signal.aborted) return;
       if (admission.recorded) await this.deliver(source, detail, signal);
       if (!completion) return;
       const terminal = await completion;

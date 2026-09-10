@@ -316,7 +316,9 @@ function makeService(overrides = {}) {
         });
         throw failure;
       }
-      const task = queue.runReservedTurn(reservation, input.content, input.options)
+      const task = (input.dispatch
+        ? input.dispatch(reservation.executionAdmission)
+        : queue.runReservedTurn(reservation, input.content, input.options))
         .then(() => queue.completeDirectTurn(reservation), () => queue.failDirectTurn(reservation));
       executionTasks.add(task);
       void task.finally(() => executionTasks.delete(task));
@@ -690,6 +692,8 @@ function makeService(overrides = {}) {
   const handoffs = { ...defaultHandoffs, ...overrides.handoffs };
   const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const transcripts = overrides.transcripts ?? {
+    subscribe: mock(() => () => undefined),
+    appendNotice: mock(() => undefined),
     currentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
     existingCurrentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
     highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 0 })),
@@ -1211,6 +1215,7 @@ describe('ChatCommandService', () => {
       transcripts.appendNotice(SOURCE_CHAT_ID, source.viewId, { title: 'Later', content: 'Excluded later notice.' });
       releaseTitle.resolve();
       const result = await starting;
+      result.start();
       expect(result.turnId).toBeString();
       expect(f.sessions.get(TARGET_CHAT_ID)).toMatchObject({
         parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' },
@@ -1231,6 +1236,48 @@ describe('ChatCommandService', () => {
     } finally { store.close(); }
   });
 
+  it.each(['started', 'failed', 'interrupted'])('observes delayed startup after the provider returns its handle: %s', async (outcome) => {
+    const store = new TranscriptLedgerStore(path.join(workspaceDir, 'delayed-start'));
+    const transcripts = new TranscriptLedgerService(store);
+    const stop = new AbortController();
+    let providerOptions;
+    const f = makeService({ transcripts, agents: {
+      startSession: mock(async (chatId, _prompt, options) => {
+        providerOptions = options;
+        transcripts.openProducer(chatId, 'claude');
+        transcripts.beginRun(chatId, options.turnId);
+        options.onContextPreparation('starting-agent');
+      }),
+    }, queue: { reserveDirectTurn: mock((chatId) => ({
+      ...directReservation(chatId), executionAdmission: { signal: stop.signal, markStarted: mock() },
+    })) } });
+    try {
+      const source = transcripts.initializeChat(SOURCE_CHAT_ID, [{
+        kind: 'provider-row', at: '2030-01-01T00:00:00.000Z',
+        message: new AssistantMessage('2030-01-01T00:00:00.000Z', 'Synthetic context'),
+      }]);
+      const admitted = await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
+        transcriptSnapshot: transcripts.highWatermark(SOURCE_CHAT_ID), title: 'Synthetic delayed startup',
+      }), new AbortController().signal);
+      admitted.start();
+      await f.queue.waitForDispatches();
+      const phases = () => transcripts.currentRows(TARGET_CHAT_ID)
+        .filter((row) => row.kind === 'notice' && row.detail.type === 'agent-start-progress')
+        .map((row) => row.detail.phase);
+      expect(phases()).toEqual(['preparing-context', 'starting-agent']);
+      if (outcome === 'started') await providerOptions.executionAdmission.markStarted();
+      else if (outcome === 'failed') transcripts.failRun(TARGET_CHAT_ID, admitted.turnId, { code: 'INTERNAL_ERROR' });
+      else stop.abort();
+      await Promise.resolve();
+      expect(phases()).toEqual(['preparing-context', 'starting-agent', outcome]);
+      await providerOptions.executionAdmission.markStarted();
+      expect(phases()).toHaveLength(3);
+    } finally {
+      stop.abort();
+      transcripts.close();
+    }
+  });
+
   it('copies a large fixed synthetic prefix with one read and one target initialization', async () => {
     const store = new TranscriptLedgerStore(path.join(workspaceDir, 'large-snapshot'));
     const transcripts = new TranscriptLedgerService(store);
@@ -1246,9 +1293,10 @@ describe('ChatCommandService', () => {
       const read = spyOn(transcripts, 'rowsThrough');
       const initialize = spyOn(transcripts, 'initializeChat');
       const f = makeService({ transcripts });
-      await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
+      const admitted = await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
         transcriptSnapshot: snapshot, title: 'Large synthetic snapshot',
       }), new AbortController().signal);
+      admitted.start();
       expect(read.mock.calls).toEqual([[SOURCE_CHAT_ID, snapshot]]);
       expect(initialize).toHaveBeenCalledTimes(1);
       expect(initialize.mock.calls[0]).toEqual([TARGET_CHAT_ID, expected, drafts.length + 1]);
@@ -1262,7 +1310,8 @@ describe('ChatCommandService', () => {
       id: 'synthetic-default', enabled: true, title: 'Default', content: 'Never injected.', scope: { type: 'global' },
       agentIds: [], tagFilter: { mode: 'any', tags: [] },
     }] }) } });
-    await f.service.submitAgentCommandStartLocked(agentStartInput('view-1'), new AbortController().signal);
+    const admitted = await f.service.submitAgentCommandStartLocked(agentStartInput('view-1'), new AbortController().signal);
+    admitted.start();
     expect(f.sessions.get(TARGET_CHAT_ID).preambleSelection).toEqual({ revision: 0, orderedPreambleIds: [] });
     expect(f.settings.getUiSettings).toHaveBeenCalled();
     await f.service.submitStart({ ...agentStartInput('view-1'), chatId: CLI_CHAT_ID, origin: 'cli' });
