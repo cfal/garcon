@@ -1,9 +1,9 @@
 <h1 align="center">Garcon</h1>
 
-<p align="center"><strong>Run the agents. Steer the work. Ship the change.</strong></p>
+<p align="center"><strong>Run the agents. See the work. Ship the change.</strong></p>
 
 <p align="center">
-  Garcon is a self-hosted workspace for coding agents. Run Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi side by side on the machine that has your code, redirect active work, and review, commit, and ship without leaving the browser.
+  Garcon is a self-hosted visual workspace for coding agents. Run Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi side by side, coordinate their work, and move from prompt to reviewed commit without leaving the browser.
 </p>
 
 <p align="center">
@@ -14,14 +14,14 @@
 </p>
 
 <p align="center">
-  <a href="screenshots/readme-parallel-agents-dark.png">
-    <img src="screenshots/readme-parallel-agents-dark.png" alt="A dark Garcon workspace with four tiled windows showing two collaborating agent chats, Chat Map, and Git with window-local tabs" width="100%" />
+  <a href="screenshots/readme-agent-coordination-dark.png">
+    <img src="screenshots/readme-agent-coordination-dark.png" alt="Garcon's dark windowed workspace showing a delegated agent result, Chat Map lineage across 33 chats, and project files" width="100%" />
   </a>
 </p>
 
-<p align="center"><em>Arrange the whole development loop as window-local tabs: agent chats, Chat Map, Git, files, terminals, history, and pull requests.</em></p>
+<p align="center"><em>Keep delegated results, chat lineage, files, terminals, and Git visible in one resizable workspace.</em></p>
 
-Agents, terminals, files, Git, and pull request commands run on the Garcon host under your account, using the agent logins and model endpoints you configure.
+Garcon runs agents, terminals, files, Git, and pull request commands on the host under your account, using the agent logins and model endpoints you configure.
 
 ## Quick Start
 
@@ -38,61 +38,65 @@ Requirements:
 
 - [Bun](https://bun.sh/), `git`, and a modern browser.
 - At least one working coding agent or API provider.
-- Optional pull request support: an authenticated GitHub CLI on the Garcon host. The Pull Requests tab stays hidden when `gh` is unavailable.
+- Optional pull request support: an authenticated GitHub CLI on the Garcon host.
 
-For a containerized install, set `GARCON_PROJECT_DIR`, `GARCON_UID`, and `GARCON_GID` in `.env`, then run `docker compose up --build -d`. See the [Docker guide](docs/docker.md) for volumes, agent login, Git, SSH, and toolchain setup.
+For a containerized install, set `GARCON_PROJECT_DIR`, `GARCON_UID`, and `GARCON_GID` in `.env`, then run `docker compose up --build -d`. The [Docker guide](docs/docker.md) covers volumes, agent login, Git, SSH, and toolchains.
 
 ## Why Garcon
 
-The terminal is excellent for one focused agent session. It gets harder when several agents are working, one needs approval, another has finished, and the resulting change still needs review.
+One agent chat is easy. The hard part begins when several agents are running, one needs approval, another has finished, and their changes still need to be understood and shipped.
 
-Garcon keeps the full loop together:
+Garcon keeps that development loop coherent:
 
-- **Build the workspace around the task.** Tile up to four resizable windows, keep each window's chats, files, terminals, Git, history, pull requests, and Chat Map in local tabs, then drag tabs or chats between windows.
-- **Steer without waiting.** Queue the next instruction, interrupt or redirect the active turn, approve tool use, answer agent questions, pause the queue, or stop work in place.
-- **Review the real change.** Browse and edit files, use a terminal, inspect rendered reasoning, tool calls, edits, and diagrams, then stage individual lines, hunks, files, or folders.
-- **Organize chats visually.** Choose Chat Views > Open canvas from the window menu to arrange live chat cards into named boxes, connect related work, and save multiple boards. Switch to the grouped list for touch and keyboard editing.
-- **Coordinate agents visibly.** Send provenance-labeled messages between chats, record delegated parents, and navigate fork, handoff, and delegation lineage in Chat Map.
-- **Find and organize the work.** Group chats by activity or project, search metadata and indexed transcripts, save filters, tag, pin, archive, share read-only snapshots, and schedule prompts.
-- **Move context deliberately.** Fork where the provider supports it, export complete Markdown or XML transcripts, create token-budgeted handoff artifacts, or delegate into a fresh chat.
-- **Close the loop from anywhere.** Work with branches, worktrees, history, pull requests, commits, and pushes from desktop or phone, with optional Telegram alerts when attention is needed.
-
-Forks and `/handoff` continuations append the first unused numeric suffix to the source's visible title, checking all chats in the workspace, including archived chats. Deleted names can be reused. Existing suffixes remain literal: forking `Topic (1)` produces `Topic (1) (1)`, not `Topic (2)`.
+- **Orchestrate visually.** Tile up to four resizable windows, move local tabs between them, organize live chats on durable canvases, track work on tag-driven boards, and inspect fork, handoff, and delegation lineage in Chat Map.
+- **Stay in control of every turn.** Queue and reorder instructions, steer active work, approve tools, answer agent questions, pause the queue, interrupt, or stop without losing the transcript.
+- **Coordinate agents visibly.** Exchange provenance-labeled messages between chats, launch delegated children, receive their final results, and keep parentage auditable instead of hiding it in a side channel.
+- **Review the real change.** Browse and edit files, run terminals, inspect reasoning and tool calls, review diffs, then stage individual lines, hunks, files, or folders before committing and pushing.
+- **Find and reuse context.** Search chat metadata and indexed transcripts, save filters, tag, pin, archive, export Markdown or XML, build bounded handoffs, share snapshots, and schedule prompts.
+- **Work from any screen.** Use the responsive workspace on desktop or phone and choose Classic, Phosphor, or colorblind-aware themes in light or dark mode.
 
 ## See It In Action
 
-<p align="center"><strong>Agents that can coordinate</strong></p>
-
 <p align="center">
-  <a href="screenshots/readme-agent-steering.png">
-    <img src="screenshots/readme-agent-steering.png" alt="A light Garcon workspace with two agent chats showing a provenance-labeled inter-agent review message and the resulting response" width="100%" />
+  <a href="screenshots/readme-chat-canvas-dark.png">
+    <img src="screenshots/readme-chat-canvas-dark.png" alt="Garcon Chat Canvas in dark mode with 24 content-rich chat cards arranged into connected Research, Implementation, Review, and Validation and Release boxes" width="100%" />
   </a>
 </p>
 
-<p align="center">An agent can discover its chat ID and message up to 16 peers. Garcon preserves the sender, transcript, and delivery outcome, whether the target is idle or already running.</p>
+<p align="center"><strong>Shape parallel work on a canvas.</strong> Group live chats into named boxes, connect related work, save multiple canvases, and switch to a structured list when that view fits better.</p>
+
+<p align="center">
+  <a href="screenshots/readme-chat-board-light.png">
+    <img src="screenshots/readme-chat-board-light.png" alt="Garcon Chat Board in light mode with 32 detailed chats distributed across Backlog, In progress, Review, and Done columns" width="100%" />
+  </a>
+</p>
+
+<p align="center"><strong>Turn live metadata into a delivery board.</strong> Define columns from chat filters and move work by applying the configured tag transitions.</p>
+
+<p align="center">
+  <a href="screenshots/readme-development-loop-dark.png">
+    <img src="screenshots/readme-development-loop-dark.png" alt="Garcon's dark workspace showing a detailed agent chat, a passing test run in a terminal, and staged, unstaged, and untracked Git changes" width="100%" />
+  </a>
+</p>
+
+<p align="center"><strong>Keep the development loop together.</strong> Follow the agent, run focused checks, inspect changed files, stage precisely, and commit from the same workspace.</p>
 
 <table>
   <tr>
-    <td width="70%" align="center">
-      <a href="screenshots/readme-git-review.png">
-        <img src="screenshots/readme-git-review.png" alt="Garcon's dark windowed workspace showing the Git workbench beside an agent chat and terminal" width="100%" />
+    <td width="50%" align="center">
+      <a href="screenshots/readme-mobile-coordination-dark.png">
+        <img src="screenshots/readme-mobile-coordination-dark.png" alt="Garcon on mobile showing a completed delegated agent review with detailed checks and bottom workspace navigation" width="100%" />
       </a>
     </td>
-    <td width="30%" align="center">
-      <a href="screenshots/readme-mobile-workspace.png">
-        <img src="screenshots/readme-mobile-workspace.png" alt="A mobile Garcon workspace showing a detailed agent chat, workspace navigation, and active task context" width="100%" />
+    <td width="50%" align="center">
+      <a href="screenshots/readme-mobile-canvas-light.png">
+        <img src="screenshots/readme-mobile-canvas-light.png" alt="Garcon Chat Canvas list view on mobile showing detailed chats in the Research workstream" width="100%" />
       </a>
     </td>
   </tr>
   <tr>
-    <td align="center">
-      <strong>Review and ship</strong><br />
-      Inspect the actual diff, stage only what belongs, commit, and push.
-    </td>
-    <td align="center">
-      <strong>Stay in control</strong><br />
-      Check progress, steer, or unblock the same work from your phone.
-    </td>
+    <td align="center"><strong>Steer and unblock from anywhere.</strong></td>
+    <td align="center"><strong>Carry the same visual plan to mobile.</strong></td>
   </tr>
 </table>
 
@@ -104,40 +108,35 @@ Forks and `/handoff` continuations append the first unused numeric suffix to the
 
 **Provider presets and discovery:** Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom OpenAI or Anthropic compatible services.
 
-Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, and permission settings where supported. CLI-backed agents retain native history where supported; direct API-backed chats live in Garcon.
+Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
 
 ## Automate And Delegate
 
-Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also starts detached work, lists and searches chat history, reads bounded transcript context, records delegated parentage, suppresses or explicitly selects new-chat preambles, queries the live agent and model catalog, observes exact turns and pending permissions, makes occurrence-bound permission decisions, sets archive/pin/title/tag state, exports transcripts, builds bounded handoff artifacts, appends presentation-only rows, delivers asynchronous work, steers active turns, and stops execution.
+The CLI drives ordinary visible Garcon chats through an already-running server. It covers live catalog discovery, synchronous or detached starts and resumes, steering, exact-turn waiting, status and fenced permission decisions, chat metadata, transcript search and bounded reads, export, handoff, and stop controls.
 
 ```bash
-# Start a visible delegated chat and record its lineage in Chat Map.
-bun cli/main.ts --workspace default start --cwd /path/to/project \
-  --parent 1785337200123456 \
-  --agent codex --model gpt-5.4 --permissions acceptEdits \
-  "Implement the validation and run its focused tests."
+# Start detached work with explicit lineage.
+bun cli/main.ts --workspace default start-async --cwd /path/to/project \
+  --parent 1785337200123456 --agent codex --model gpt-5.4 \
+  --permissions acceptEdits "Implement the validation and run focused tests."
 
-# Deliver a new turn, or steer the target when it is already busy.
-bun cli/main.ts --workspace default resume-async 1785337200123456 \
-  --allow-steer "Address the review finding and rerun the tests."
-
-# Find prior work and inspect bounded context around a search result.
+# Find prior work, then read exact context around a durable transcript row.
 bun cli/main.ts --workspace default search '"version bump"' --json
 bun cli/main.ts --workspace default read 1785337200123456 84 -B 5 -A 5
 
-# Observe the chat or export its complete authoritative transcript.
+# Inspect or steer work without creating a hidden session.
 bun cli/main.ts --workspace default status 1785337200123456 --messages 20
-bun cli/main.ts --workspace default export 1785337200123456 \
-  --format xml --output transcript.xml
+bun cli/main.ts --workspace default resume-async 1785337200123456 \
+  --allow-steer "Address the review finding and rerun the tests."
 ```
 
-See the [CLI and server guide](docs/cli.md) for server configuration, chat discovery and search, bounded reads, catalog discovery, message presentation, reattachment, status, export, handoff, queue behavior, and connection rules. `bun run build-exe` produces `garcon-cli-linux-x64` and `garcon-cli-darwin-arm64` when a repository checkout is not the desired invocation path.
+See the [CLI and server guide](docs/cli.md) for the full command and connection reference. `bun run build-exe` produces standalone Linux x64 and macOS arm64 executables.
 
-The companion [cfal/garcon-skills](https://github.com/cfal/garcon-skills) repository exposes this control plane to Claude, Codex, Pi, and other skill-aware agents:
+The companion [cfal/garcon-skills](https://github.com/cfal/garcon-skills) package exposes the same control plane to Claude, Codex, Pi, and other skill-aware agents:
 
-- `garcon-agent` validates live agent, provider, model, permission, and effort choices before starting or resuming a visible chat.
-- `garcon-message` sends in-band messages between one or many existing chats, visible by default and anonymous only when explicitly requested.
-- `garcon-amp` surrounds a durable parent agent with fresh Oracle, Finder, Librarian, and Reporter specialists for review, repository retrieval, external evidence, and transcript extraction.
+- `garcon-captain` searches, reads, organizes, monitors, and coordinates chats; `garcon-agent` starts or resumes a selected agent through the CLI.
+- `garcon-task` starts, resumes, stops, or removes delegated child chats and returns their final output; `garcon-message` exchanges in-band messages with up to 16 existing chats.
+- `garcon-schedule` creates future or recurring prompts for the current chat; `garcon-amp` equips a parent with fresh Oracle, Finder, Librarian, and Reporter specialists.
 
 ```bash
 git clone https://github.com/cfal/garcon-skills.git
@@ -145,57 +144,7 @@ cd garcon-skills
 ./link.sh
 ```
 
-The skills resolve `garcon-cli` from `PATH`, `$HOME/garcon`, or `/garcon`. Inter-agent messages remain ordinary, auditable transcript input; delegated chats keep explicit lineage instead of relying on a hidden side channel.
-
-Under the hood, `<garcon-get-chat-id />` gives an agent its runtime identity and `<garcon-send-message>` delivers a bounded message to up to 16 explicit chat IDs. Garcon infers the visible sender, supports deliberate anonymity, and creates no automatic replies.
-
-Agents can also start a delegated child, resume or stop that child, or schedule a prompt back to their own chat:
-
-```xml
-<garcon-start-agent ref="parser-review" title="Parser review">
-Review the parser tests and report missing cases.
-</garcon-start-agent>
-
-<garcon-resume-agent ref="parser-followup" chat-id="1111111111111111">
-Review the revised error handling.
-</garcon-resume-agent>
-
-<garcon-stop-agent chat-id="1111111111111111" />
-<garcon-stop-agent chat-id="1111111111111111" remove="true" />
-
-<garcon-schedule in="15m">Check whether the build finished.</garcon-schedule>
-<garcon-schedule every="5m" busy="skip" />
-```
-
-Place each command at an assistant message's leading or trailing edge, outside code fences. Attribute values use double quotes; escape body text with `&amp;` and `&lt;`. Starts require `ref` and a nonblank prompt. Selection attributes follow this hierarchy:
-
-| Attributes supplied | Child selection |
-| --- | --- |
-| None | Parent's current agent, model, and exact route |
-| `model` | Parent's agent and exact route, with the requested model |
-| `provider`, `model` | Parent's agent, with the requested provider and model |
-| `agent`, `provider`, `model` | Fully explicit selection |
-| `agent`, `model` | Requested agent's native route, without a configured API provider |
-
-Providing `agent` or `provider` requires `model`; empty attributes are invalid. An explicit `agent` without `provider` always selects native execution, even when it names the parent's agent. Native routing uses that agent's own authentication/configuration, not a configured provider's display label. It requires a known native catalog model; endpoint-only agents and unknown models reject instead of falling back to another route. Inherited routing pins the parent's provider, endpoint, and protocol; unavailable or incompatible selections reject. An explicit provider does not borrow the parent's endpoint to resolve ambiguity.
-
-`provider` accepts a configured provider ID or exact, case-sensitive display name. IDs take precedence; duplicate names reject with `ambiguous-provider` and require an ID, even with an exact model selection. With `agent` omitted, children inherit the parent's current reasoning effort and active agent settings. An explicit `agent` uses target-agent execution defaults instead; optional `reasoning-effort` overrides either choice and must be supported. Every child inherits the parent's current project path and permission mode and retains a delegation edge. Commands cannot override permissions, paths, tags, or preambles. Unsupported inherited modes reject the start. These defaults apply to markup commands; CLI start still requires explicit agent/model selection and retains its existing catalog search when `--provider` is omitted.
-
-Starts have **no preambles**: neither new-chat defaults nor the parent's selection applies. Optional `fork="true"` copies the parent's committed transcript through the requesting row into a fresh child, including across agents. It never clones a native session or filesystem, and the parent continues independently. Historical preamble notices remain history, not newly applied prefixes. Optional `title` sets a custom name before dispatch and bypasses automatic title generation; omitted titles follow ordinary generation policy.
-
-Resume requires `chat-id` and `ref`. Only the requesting chat's direct `delegation` children qualify, whether created by markup or CLI `--parent`; ordinary fork/handoff relations do not. Resume uses the child's current saved settings, including later user changes and preamble configuration. It accepts no overrides and never steers, queues, interrupts, or unpauses: a busy child rejects the request.
-
-Start and resume acknowledge admission with their respective `<garcon-start-agent-result>` or `<garcon-resume-agent-result>` envelope. By default, a second envelope reports the exact admitted turn's completion, failure, or interruption without blocking the parent. `async="true"` disables only this terminal result. Required refs match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` and are echoed unchanged; they are not aliases, authorization, or deduplication keys. Results also carry the original request's view and ordinal, but no turn ID. Available output contains the integration-selected final assistant response, preserving all its text parts; intermediary commentary stays in the transcript. An explicitly empty final remains available. Failed or interrupted turns and successful turns without an identifiable final report `no-final-response`. Oversized, invalid, expired, or unavailable output is reported explicitly, never silently truncated. Completion is not a task-success judgment.
-
-Delegated starts show **Started · Open chat** as soon as the child configuration, inherited transcript, and task are committed. Context preparation and agent startup then proceed independently of the parent. The child records separate durable notices for preparation, compaction when needed, launch, and startup success, failure, or interruption. Startup failure retains the accepted child and task for inspection or a later input. Restart preserves committed notices but does not resume startup or synthesize a completion.
-
-Stop requires only `chat-id` and accepts optional `remove="true"` or `remove="false"` (the default). It can affect only direct `delegation` children, including CLI-created relationships. A retained stop preserves history and queued inputs; pending work remains paused, and resume stays busy until the user resolves that queue. Without pending work, the parent can resume the stopped child normally. Removal uses the ordinary deletion path to stop active work and remove the chat, transcript, queued inputs, and workspace settings. Stop/remove sends no acknowledgment, result envelope, or model input. Request evidence stays private; imported history never executes it. No `ref`, `async`, or body is accepted.
-
-Scheduling accepts `in` (1 minute–365 days) or a minute-aligned `at` timestamp with an explicit timezone. Optional `every` repeats at a fixed interval of 1 minute–3,650 days; without `in` or `at`, the first run follows one interval. Durations use ordered whole `d`, `h`, and `m` components, such as `1h30m`. Optional `until` is inclusive and requires recurrence. `busy` defaults to `queue`; `skip` avoids accumulating work while busy. Schedules target only the requesting chat and use its current configuration when executed. The saved prompt is delivered inside `<garcon-schedule-action>…</garcon-schedule-action>`, or exactly `<garcon-schedule-action />` when empty. Manage saved schedules through **Scheduled prompts** in the sidebar menu; the recurrence editor supports minutes, hours, and days.
-
-Existing hourly/day schedules migrate to minute-based storage version 3 with a private, byte-exact source backup. Their cadence and next occurrence are preserved. Older binaries cannot read version 3; do not downgrade without preserving schedules created or edited since migration.
-
-Remote Settings provides independent start, child lifecycle (resume/stop/remove), and schedule toggles under the agent-command master switch. Disabling commands does not cancel accepted work or pending results. Scheduling returns one creation outcome; child start/resume commands return admission and, unless async, terminal outcomes. A resume blocked by the child's current preambles identifies the retained child. An unknown outcome requires inspecting existing work before retrying. Separate emissions may create separate work even with the same ref; imported history never re-executes commands. Saved schedules, child transcripts, titles, and delegation edges survive restart, but queued inputs and pending callbacks do not. Source deletion or transcript replacement cancels reporting without stopping accepted child work. Result delivery is best-effort and never retried after an ambiguous acknowledgment.
+The installer links the skills for Claude, Codex, Pi, and other compatible agents. Messages, delegated work, results, and lineage remain visible in Garcon.
 
 ## Trusted Local Use
 
@@ -207,7 +156,7 @@ bun run start --disable-auth
 GARCON_DISABLE_AUTH=true bun run start
 ```
 
-Do not expose an unauthenticated instance to an untrusted network. Garcon does not sandbox agents or their commands. Review the [security notes](docs/security.md), including WebSocket token logging considerations, before exposing Garcon beyond a trusted network.
+Do not expose an unauthenticated instance to an untrusted network. Garcon does not sandbox agents or their commands. Review the [security notes](docs/security.md) before exposing it beyond a trusted network.
 
 ## Build And Develop
 
