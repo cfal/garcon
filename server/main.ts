@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { SYSTEMD_HELPER_FLAG } from './execution-node/systemd/contracts.js';
 
 function printHelp() {
   const helpText = `Garcon Server
@@ -55,7 +56,10 @@ Notes:
   process.stdout.write(helpText);
 }
 
-if (process.argv.includes('--help') || process.argv.includes('-h')) {
+if (process.argv.includes(SYSTEMD_HELPER_FLAG)) {
+  const { runSystemdHelperMain } = await import('./execution-node/systemd/helper-main.js');
+  await runSystemdHelperMain();
+} else if (process.argv.includes('--help') || process.argv.includes('-h')) {
   printHelp();
 } else {
   const { startServer } = await import('./server.js');

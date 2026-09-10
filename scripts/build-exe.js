@@ -80,7 +80,7 @@ async function collectEmbeddedAssetInputs() {
   return files;
 }
 
-function createVirtualMainEntrypoint(
+export function createVirtualMainEntrypoint(
   assetsEntrypoint,
   serverMainPath,
   preMainModules,
@@ -108,10 +108,13 @@ function createVirtualMainEntrypoint(
   }`;
   return [
     `import '${assetsEntrypoint}';`,
-    ...preMainModules.map((modulePath) => `import '${toPosixPath(modulePath)}';`),
+    `import { SYSTEMD_HELPER_FLAG } from '${toPosixPath(path.join(repoRoot, 'server/execution-node/systemd/contracts.ts'))}';`,
     `const deepFreeze = (value) => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const nested of Object.values(value)) deepFreeze(nested); } return value; };`,
     `Object.defineProperty(globalThis, Symbol.for('garcon.compiled-mode'), { value: true, writable: false, configurable: false });`,
     `Object.defineProperty(globalThis, Symbol.for('garcon.embedded-search-manifest.v1'), { value: deepFreeze(${manifestExpression}), writable: false, configurable: false });`,
+    `if (!process.argv.includes(SYSTEMD_HELPER_FLAG)) {`,
+    ...preMainModules.map((modulePath) => `  await import('${toPosixPath(modulePath)}');`),
+    `}`,
     `await import('${serverMainPath}');`,
     '',
   ].join('\n');

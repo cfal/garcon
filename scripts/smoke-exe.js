@@ -2,12 +2,14 @@
 
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { smokeSystemdHelper } from './smoke-systemd-helper.js';
+import { seedSmokeAccount, seedSmokeTranscript, SMOKE_CHAT_ID, SMOKE_SEARCH_TOKEN } from './smoke-exe-fixture.js';
+import { SYSTEMD_HELPER_FLAG } from '../server/execution-node/systemd/contracts.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
 const SHUTDOWN_TIMEOUT_MS = 15000;
-const SMOKE_CHAT_ID = '1767225600000000';
 const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_CONFIG_DIR',
   'GARCON_WORKSPACE_DIR',
@@ -101,26 +103,45 @@ async function stopProcess(processHandle) {
   ]);
 }
 
-async function waitForTranscriptResult(url, token, chatId, getServerOutput) {
+async function authenticateSmoke(url, account) {
+  const anonymous = await fetch(`${url}/api/v1/chats`, { signal: AbortSignal.timeout(5_000) });
+  if (anonymous.status !== 401) throw new Error('Executable exposed unauthenticated chat access.');
+  const response = await fetch(`${url}/api/v1/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(account),
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) throw new Error(`Executable login failed with HTTP ${response.status}.`);
+  const { token } = await response.json();
+  if (typeof token !== 'string' || !token) throw new Error('Executable login returned no token.');
+  return { Authorization: `Bearer ${token}` };
+}
+
+export async function waitForTranscriptResult(url, token, chatId, getServerOutput, authorization) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   let lastStatus = 0;
   let lastBody = '';
   while (Date.now() < deadline) {
-    const response = await fetch(`${url}/api/v1/chats/search`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: token }),
-    });
-    lastStatus = response.status;
-    lastBody = await response.text();
-    if (response.ok) {
-      let body = null;
-      try {
-        body = JSON.parse(lastBody);
-      } catch {
-        // The final diagnostic retains a malformed response body.
+    try {
+      const response = await fetch(`${url}/api/v1/chats/search`, {
+        method: 'POST',
+        headers: { ...authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ query: token }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      lastStatus = response.status;
+      lastBody = await response.text();
+      if (response.ok) {
+        let body = null;
+        try {
+          body = JSON.parse(lastBody);
+        } catch {
+          // The final diagnostic retains a malformed response body.
+        }
+        if (body?.results?.some((result) => result.chatId === chatId)) return;
       }
-      if (body?.results?.some((result) => result.chatId === chatId)) return;
+    } catch (error) {
+      lastStatus = 0;
+      lastBody = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     }
     await delay(50);
   }
@@ -184,20 +205,26 @@ async function run() {
   if (!(await Bun.file(executablePaths.cli).exists())) {
     throw new Error(`Missing CLI executable at ${executablePaths.cli}. Run "bun run build-exe:compile" first.`);
   }
+  await smokeSystemdHelper([executablePath, SYSTEMD_HELPER_FLAG]);
   const cliHelp = Bun.spawnSync([executablePaths.cli, '--help']);
   if (cliHelp.exitCode !== 0 || !cliHelp.stdout.toString().startsWith('Usage:\n  garcon-cli')) {
     throw new Error(`CLI executable help smoke check failed for ${executablePaths.cli}.`);
   }
 
-  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-exe-smoke-'));
+  const directory = await mkdtemp(path.join(os.homedir(), 'garcon-exe-smoke-'));
+  const workspaceDir = path.join(directory, 'workspace');
+  const configDirectory = path.join(directory, 'config');
+  await Promise.all([workspaceDir, configDirectory].map((target) => mkdir(target, { mode: 0o700 })));
+  const account = await seedSmokeAccount(configDirectory);
   const spawnServer = () => Bun.spawn({
     cmd: [
       executablePath,
       '--port',
       '0',
       '--bind-address',
-      '127.0.0.1',
-      '--disable-auth',
+      '0.0.0.0',
+      '--config-dir',
+      configDirectory,
       '--workspace-dir',
       workspaceDir,
       '--project-base-dir',
@@ -211,6 +238,7 @@ async function run() {
   let child = spawnServer();
   try {
     let started = await waitForServerUrl(child);
+    await authenticateSmoke(started.url, account);
     const searchDatabase = path.join(workspaceDir, 'transcript-search', 'index.sqlite');
 
     if (await Bun.file(searchDatabase).exists()) {
@@ -218,49 +246,12 @@ async function run() {
     }
     await stopProcess(child);
 
-    await writeFile(
-      path.join(workspaceDir, 'project-settings.json'),
-      JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
-    );
-    const transcriptPath = path.join(workspaceDir, 'smoke-session.jsonl');
-    await writeFile(transcriptPath, `${JSON.stringify({
-      sessionId: 'smoke-session',
-      uuid: 'smoke-user-message',
-      type: 'user',
-      timestamp: '2026-01-01T00:00:00.000Z',
-      message: { role: 'user', content: 'embeddedworkertoken' },
-    })}\n`);
-    await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
-      version: 5,
-      sessions: {
-        [SMOKE_CHAT_ID]: {
-          agentId: 'claude',
-          nativeSession: {
-            ownerId: 'claude',
-            schemaVersion: 1,
-            value: {
-              path: transcriptPath,
-              agentSessionId: 'smoke-session',
-            },
-          },
-          agentOwnershipEpoch: 'smoke-ownership-epoch',
-          carryOverSegments: [],
-          nativeSeedReceipt: null,
-          carryOverMigrationQuarantine: null,
-          agentSettingsById: {
-            claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
-          },
-          tags: [],
-          agentSessionId: 'smoke-session',
-          projectPath: workspaceDir,
-          model: 'fable',
-        },
-      },
-    }));
+    await seedSmokeTranscript(workspaceDir);
     child = spawnServer();
     started = await waitForServerUrl(child);
+    let authorization = await authenticateSmoke(started.url, account);
 
-    const rootResponse = await fetch(`${started.url}/`);
+    const rootResponse = await fetch(`${started.url}/`, { headers: authorization, signal: AbortSignal.timeout(5_000) });
     if (!rootResponse.ok) {
       throw new Error(`Expected GET / to succeed, received ${rootResponse.status}`);
     }
@@ -275,7 +266,7 @@ async function run() {
       throw new Error('Could not find a /_app/ asset URL in index.html response.');
     }
 
-    const assetResponse = await fetch(`${started.url}${appAssetMatch[0]}`);
+    const assetResponse = await fetch(`${started.url}${appAssetMatch[0]}`, { headers: authorization, signal: AbortSignal.timeout(5_000) });
     if (!assetResponse.ok) {
       throw new Error(`Expected GET ${appAssetMatch[0]} to succeed, received ${assetResponse.status}`);
     }
@@ -288,29 +279,34 @@ async function run() {
 
     await waitForTranscriptResult(
       started.url,
-      'embeddedworkertoken',
+      SMOKE_SEARCH_TOKEN,
       SMOKE_CHAT_ID,
       started.getOutput,
+      authorization,
     );
     await stopProcess(child);
 
     child = spawnServer();
     started = await waitForServerUrl(child);
+    authorization = await authenticateSmoke(started.url, account);
     await waitForTranscriptResult(
       started.url,
-      'embeddedworkertoken',
+      SMOKE_SEARCH_TOKEN,
       SMOKE_CHAT_ID,
       started.getOutput,
+      authorization,
     );
   } finally {
     await stopProcess(child);
-    await rm(workspaceDir, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true });
   }
 
   console.log(`Smoke check passed for ${executablePath} and ${executablePaths.cli}`);
 }
 
-run().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+if (import.meta.main) {
+  run().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}
