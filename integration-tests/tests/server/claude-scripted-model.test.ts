@@ -306,15 +306,51 @@ describe('Claude against a scripted model', () => {
     { kind: 'stream-error' as const, message: 'scripted SSE failure' },
     { kind: 'truncated-stream' as const },
   ]) {
-    test(`fails the turn after a ${fault.kind} despite a successful retry response`, async () => {
+    test(`recovers from a ${fault.kind} through a non-streaming retry`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      const testEnvironment = environment;
+      const prompt = `Recover from the ${fault.kind} response.`;
+      const reply = `SCRIPTED_STREAM_RECOVERY_${crypto.randomUUID().replaceAll('-', '')}`;
+      const requestStart = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptFault(fault);
+      testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+      await withIntegrationFixture(`claude-scripted-${fault.kind}-recovery`, async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(liveClaudeStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: prompt,
+          permissionMode: 'bypassPermissions',
+        }));
+        await waitForVisibleResponse({
+          fixture,
+          chatId,
+          turnId: turn.turnId,
+          marker: reply,
+          afterIndex: cursor,
+        });
+        expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([reply]);
+
+        const requests = testEnvironment.model.requestsSince(requestStart);
+        expect(requests).toHaveLength(2);
+        expect(requests.map((request) => request.body.stream)).toEqual([true, false]);
+        expect(requests.every((request) => request.lastUserText.includes(prompt))).toBe(true);
+        testEnvironment.model.assertSettled();
+      }, {
+        serverEnvironment: testEnvironment.serverEnvironment,
+      });
+    });
+
+    test(`fails the turn when a ${fault.kind} and its non-streaming retry both fail`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       const testEnvironment = environment;
       const prompt = `Fail on the ${fault.kind} response.`;
-      const requestStart = testEnvironment.model.requests().length;
+      const failure = 'Synthetic non-retryable retry failure';
+      const requestStart = testEnvironment.model.markRequests();
       testEnvironment.model.scriptFault(fault);
-      testEnvironment.model.scriptTurn([
-        claudeText(`SCRIPTED_UNUSED_RETRY_${crypto.randomUUID().replaceAll('-', '')}`),
-      ]);
+      testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message: failure });
 
       await withIntegrationFixture(`claude-scripted-${fault.kind}`, async (fixture) => {
         const chatId = fixture.newChatId();
@@ -330,9 +366,13 @@ describe('Claude against a scripted model', () => {
           turn.turnId,
           { afterIndex: cursor, timeoutMs: 30_000 },
         )).type).toBe('agent-run-failed');
+        expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([
+          `API Error: 400 ${failure}`,
+        ]);
 
-        const requests = testEnvironment.model.requests().slice(requestStart);
+        const requests = testEnvironment.model.requestsSince(requestStart);
         expect(requests).toHaveLength(2);
+        expect(requests.map((request) => request.body.stream)).toEqual([true, false]);
         expect(requests.every((request) => request.lastUserText.includes(prompt))).toBe(true);
         testEnvironment.model.assertSettled();
       }, {
