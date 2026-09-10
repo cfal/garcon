@@ -5,6 +5,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import { validateAgentIntegration } from '@garcon/server-agent-interface/testing';
 import { IntegrationHostFactory } from './integration-host.js';
+import { AgentTypeRegistry } from './type-registry.js';
 
 export interface IntegrationRegistryOptions {
   readonly integrations: readonly AgentIntegrationClass[];
@@ -18,6 +19,7 @@ interface IntegrationRecord {
 }
 
 export class IntegrationRegistry {
+  readonly types: AgentTypeRegistry;
   readonly #records = new Map<string, IntegrationRecord>();
   readonly #migrationStoreFor: (agentId: string) => AgentMigrationStore;
   #startPromise: Promise<void> | null = null;
@@ -25,18 +27,31 @@ export class IntegrationRegistry {
   #started = false;
 
   constructor(options: IntegrationRegistryOptions) {
+    const declarations = [...options.integrations].map((integrationClass) => ({
+      integrationClass,
+      integrationId: integrationClass.integrationId,
+      apiVersion: integrationClass.apiVersion,
+      descriptor: integrationClass.descriptor,
+    }));
+    this.types = new AgentTypeRegistry(declarations);
     this.#migrationStoreFor = options.migrationStoreFor;
-    for (const integrationClass of options.integrations) {
-      validateClass(integrationClass, this.#records);
-      const host = options.hostFactory.forAgent(integrationClass.integrationId);
+    for (const { integrationClass, integrationId, apiVersion } of declarations) {
+      const descriptor = this.types.require(integrationId);
+      const host = options.hostFactory.forAgent(integrationId);
       const integration = new integrationClass(host);
-      validateAgentIntegration({ integrationClass, integration });
-      validateDescriptor(integration);
+      validateAgentIntegration({
+        integrationClass: { integrationId, apiVersion, descriptor },
+        integration,
+      });
+      const defaults = integration.settings.defaults();
+      if (defaults.ownerId !== integrationId || !Number.isSafeInteger(defaults.schemaVersion) || defaults.schemaVersion < 1) {
+        throw new Error(`Agent integration ${integrationId} returned invalid default settings`);
+      }
       options.hostFactory.bindConfiguration(
-        integration.descriptor.id,
-        integration.descriptor.configuration.map((entry) => entry.key),
+        integrationId,
+        descriptor.configuration.map((entry) => entry.key),
       );
-      this.#records.set(integration.descriptor.id, { integrationClass, integration });
+      this.#records.set(integrationId, { integrationClass, integration });
     }
   }
 
@@ -119,41 +134,5 @@ export class IntegrationRegistry {
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => result.reason);
     if (errors.length > 0) throw new AggregateError(errors, 'Agent integration shutdown failed');
-  }
-}
-
-function validateClass(
-  integrationClass: AgentIntegrationClass,
-  existing: ReadonlyMap<string, IntegrationRecord>,
-): void {
-  if (integrationClass.apiVersion !== 5) {
-    throw new Error(
-      `Unsupported agent integration API version for ${integrationClass.integrationId}: ${integrationClass.apiVersion}`,
-    );
-  }
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(integrationClass.integrationId)) {
-    throw new Error(`Invalid agent integration ID: ${integrationClass.integrationId}`);
-  }
-  if (existing.has(integrationClass.integrationId)) {
-    throw new Error(`Duplicate agent integration ID: ${integrationClass.integrationId}`);
-  }
-}
-
-function validateDescriptor(integration: AgentIntegration): void {
-  const { descriptor } = integration;
-  if (!descriptor.label.trim()) throw new Error(`Agent integration ${descriptor.id} has an empty label`);
-  const configurationKeys = new Set<string>();
-  for (const entry of descriptor.configuration) {
-    if (!entry.key.trim() || entry.source !== 'environment') {
-      throw new Error(`Agent integration ${descriptor.id} has an invalid configuration descriptor`);
-    }
-    if (configurationKeys.has(entry.key)) {
-      throw new Error(`Agent integration ${descriptor.id} declares configuration ${entry.key} twice`);
-    }
-    configurationKeys.add(entry.key);
-  }
-  const defaults = integration.settings.defaults();
-  if (defaults.ownerId !== descriptor.id || defaults.schemaVersion < 1) {
-    throw new Error(`Agent integration ${descriptor.id} returned invalid default settings`);
   }
 }

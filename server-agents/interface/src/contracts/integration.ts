@@ -50,8 +50,12 @@ export interface AgentIntegration {
   readonly projectPathUpdates: AgentProjectPathUpdates | null;
 }
 
-export interface AgentIntegrationClass {
-  new (host: AgentHost): AgentIntegration;
+export interface AgentIntegrationDefinition {
   readonly integrationId: string;
   readonly apiVersion: 5;
+  readonly descriptor: AgentDescriptor;
+}
+
+export interface AgentIntegrationClass extends AgentIntegrationDefinition {
+  new (host: AgentHost): AgentIntegration;
 }

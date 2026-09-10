@@ -66,7 +66,7 @@ const integration = {
 describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
     const integrationClass = {
-      integrationId: 'fake', apiVersion: 5 as const,
+      integrationId: 'fake', apiVersion: 5 as const, descriptor: { ...integration.descriptor, id: 'fake' },
     };
     expect(() => validateAgentIntegration({
       integrationClass,
@@ -76,7 +76,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects duplicate descriptor values', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 5 as const,
+      integrationId: 'other', apiVersion: 5 as const, descriptor: integration.descriptor,
     };
     expect(() => validateAgentIntegration({
       integrationClass,
@@ -92,7 +92,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects a steering facet without admission-time target capture', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 5 as const,
+      integrationId: 'other', apiVersion: 5 as const, descriptor: integration.descriptor,
     };
 
     expect(() => validateAgentIntegration({
@@ -126,7 +126,7 @@ describe('validateAgentIntegration', () => {
       const invalid = { ...integration } as Record<string, unknown>;
       delete invalid[facet];
       expect(() => validateAgentIntegration({
-        integrationClass: { integrationId: 'other', apiVersion: 5 },
+        integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
         integration: invalid as unknown as AgentIntegration,
       })).toThrow(`missing required ${facet} capability state`);
     }
@@ -161,7 +161,7 @@ describe('validateAgentIntegration', () => {
 
     for (const [facet, value] of invalidFacets) {
       expect(() => validateAgentIntegration({
-        integrationClass: { integrationId: 'other', apiVersion: 5 },
+        integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
         integration: { ...integration, [facet]: value } as AgentIntegration,
       })).toThrow(`invalid ${facet} facet`);
     }
@@ -171,7 +171,7 @@ describe('validateAgentIntegration', () => {
     const { legacyHistoryImport: _legacyHistoryImport, ...missingLegacyHistoryImport } = integration;
 
     expect(() => validateAgentIntegration({
-      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
       integration: missingLegacyHistoryImport as AgentIntegration,
     })).toThrow('missing required legacyHistoryImport capability state');
   });
@@ -180,7 +180,7 @@ describe('validateAgentIntegration', () => {
 describe('runAgentIntegrationConformance', () => {
   test('accepts an empty settings patch and a well-formed running-session snapshot', async () => {
     await expect(runAgentIntegrationConformance({
-      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
       integration: {
         ...integration,
         execution: {
@@ -197,7 +197,7 @@ describe('runAgentIntegrationConformance', () => {
 
   test('rejects an empty settings patch that changes the envelope', async () => {
     await expect(runAgentIntegrationConformance({
-      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
       integration: {
         ...integration,
         settings: {
@@ -210,7 +210,7 @@ describe('runAgentIntegrationConformance', () => {
 
   test('rejects an empty settings patch that mutates the current envelope', async () => {
     await expect(runAgentIntegrationConformance({
-      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
       integration: {
         ...integration,
         settings: {
@@ -228,7 +228,7 @@ describe('runAgentIntegrationConformance', () => {
   test('rejects a second migration that mutates its input', async () => {
     let migrationCount = 0;
     await expect(runAgentIntegrationConformance({
-      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
       integration: {
         ...integration,
         settings: {
@@ -255,7 +255,7 @@ describe('runAgentIntegrationConformance', () => {
       ],
     ]) {
       await expect(runAgentIntegrationConformance({
-        integrationClass: { integrationId: 'other', apiVersion: 5 },
+        integrationClass: { integrationId: 'other', apiVersion: 5, descriptor: integration.descriptor },
         integration: {
           ...integration,
           execution: { ...integration.execution, runningSessions },

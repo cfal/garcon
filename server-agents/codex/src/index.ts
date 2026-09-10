@@ -67,6 +67,7 @@ const CODEX_DESCRIPTOR = {
 export default class CodexAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'codex';
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = CODEX_DESCRIPTOR;
   readonly descriptor = CODEX_DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,

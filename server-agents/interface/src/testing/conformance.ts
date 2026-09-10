@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
+import type { AgentDescriptor } from '@garcon/common/agent-integration';
 import type {
-  AgentIntegrationClass,
+  AgentIntegrationDefinition,
   AgentIntegration,
 } from '../index.js';
 
@@ -30,22 +31,30 @@ const NULLABLE_FACET_METHODS = {
 } as const;
 
 export interface AgentIntegrationConformanceOptions {
-  readonly integrationClass: Pick<
-    AgentIntegrationClass,
-    'integrationId' | 'apiVersion'
-  >;
+  readonly integrationClass: AgentIntegrationDefinition;
   readonly integration: AgentIntegration;
+}
+
+export function validateAgentIntegrationDefinition(definition: AgentIntegrationDefinition): void {
+  if (definition.apiVersion !== 5) {
+    throw new Error(`Unsupported agent integration API version for ${definition.integrationId}: ${definition.apiVersion}`);
+  }
+  if (typeof definition.integrationId !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(definition.integrationId)) {
+    throw new Error(`Invalid agent integration ID: ${definition.integrationId}`);
+  }
+  if (definition.integrationId !== definition.descriptor?.id) {
+    throw new Error(`Agent integration ID mismatch: ${definition.integrationId} != ${definition.descriptor?.id}`);
+  }
+  validateDescriptor(definition.descriptor);
 }
 
 export function validateAgentIntegration(
   options: AgentIntegrationConformanceOptions,
 ): void {
   const { integration, integrationClass } = options;
+  validateAgentIntegrationDefinition(integrationClass);
   const integrationRecord = integration as unknown as Record<string, unknown>;
   const agentId = integration.descriptor?.id ?? integrationClass.integrationId;
-  if (integrationClass.apiVersion !== 5) {
-    throw new Error(`Unsupported agent integration API version: ${integrationClass.apiVersion}`);
-  }
   if (integrationClass.integrationId !== integration.descriptor.id) {
     throw new Error(
       `Agent integration ID mismatch: ${integrationClass.integrationId} != ${integration.descriptor.id}`,
@@ -74,21 +83,34 @@ export function validateAgentIntegration(
   if ('submitActiveInput' in integration.execution) {
     throw new Error(`Agent integration ${agentId} exposes removed execution.submitActiveInput`);
   }
-  assertUniqueDescriptorValues(
-    integration.descriptor.id,
-    'permission modes',
-    integration.descriptor.supportedPermissionModes,
-  );
-  assertUniqueDescriptorValues(
-    integration.descriptor.id,
-    'thinking modes',
-    integration.descriptor.supportedThinkingModes,
-  );
-  assertUniqueDescriptorValues(
-    integration.descriptor.id,
-    'endpoint protocols',
-    integration.descriptor.supportedEndpointProtocols,
-  );
+  validateDescriptor(integration.descriptor);
+  if (!isDeepStrictEqual(integration.descriptor, integrationClass.descriptor)) {
+    throw new Error(`Agent integration ${agentId} descriptor does not match its declaration`);
+  }
+}
+
+function validateDescriptor(descriptor: AgentDescriptor): void {
+  const id = descriptor.id;
+  if (typeof descriptor.label !== 'string' || !descriptor.label.trim()) throw new Error(`Agent integration ${id} has an empty label`);
+  if (descriptor.icon !== null && typeof descriptor.icon !== 'string'
+    || typeof descriptor.supportsImages !== 'boolean'
+    || typeof descriptor.supportsProjectPathUpdate !== 'boolean'
+    || typeof descriptor.requiresNativePathForProjectPathUpdate !== 'boolean') {
+    throw new Error(`Agent integration ${id} has an invalid descriptor`);
+  }
+  if (!Array.isArray(descriptor.configuration)) throw new Error(`Agent integration ${id} has invalid configuration`);
+  const configurationKeys = new Set<string>();
+  for (const entry of descriptor.configuration) {
+    if (!entry || typeof entry.key !== 'string' || !entry.key.trim() || entry.source !== 'environment'
+      || typeof entry.description !== 'string') {
+      throw new Error(`Agent integration ${id} has an invalid configuration descriptor`);
+    }
+    if (configurationKeys.has(entry.key)) throw new Error(`Agent integration ${id} declares configuration ${entry.key} twice`);
+    configurationKeys.add(entry.key);
+  }
+  assertUniqueDescriptorValues(id, 'permission modes', descriptor.supportedPermissionModes);
+  assertUniqueDescriptorValues(id, 'thinking modes', descriptor.supportedThinkingModes);
+  assertUniqueDescriptorValues(id, 'endpoint protocols', descriptor.supportedEndpointProtocols);
 }
 
 function assertFacetMethods(
@@ -154,6 +176,9 @@ function assertUniqueDescriptorValues(
   label: string,
   values: readonly string[],
 ): void {
+  if (!Array.isArray(values) || values.some((value) => typeof value !== 'string')) {
+    throw new Error(`Agent integration ${agentId} declares invalid ${label}`);
+  }
   if (new Set(values).size !== values.length) {
     throw new Error(`Agent integration ${agentId} declares duplicate ${label}`);
   }

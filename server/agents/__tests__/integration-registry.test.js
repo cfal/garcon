@@ -76,6 +76,7 @@ function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
     static apiVersion = options.apiVersion ?? 5;
+    static descriptor = createFacetIntegration(null, id).descriptor;
     constructor(host) {
       options.onConstruct?.(host);
       Object.assign(this, createFacetIntegration(host, id, options.lifecycle));
@@ -99,6 +100,85 @@ const migrationStoreFor = () => ({
 });
 
 describe('IntegrationRegistry', () => {
+  test('validates every provider declaration before constructing the first executable', () => {
+    let constructed = 0;
+    const Alpha = integrationClass('alpha', { onConstruct: () => { constructed += 1; } });
+    const Invalid = integrationClass('invalid');
+    Invalid.descriptor.label = ' ';
+    expect(() => new IntegrationRegistry({
+      integrations: [Alpha, Invalid], hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    })).toThrow('empty label');
+    expect(constructed).toBe(0);
+  });
+
+  test('rejects an executable that changes its declared metadata', () => {
+    const Alpha = integrationClass('alpha');
+    Alpha.descriptor.label = 'Declared alpha';
+    expect(() => new IntegrationRegistry({
+      integrations: [Alpha], hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    })).toThrow('descriptor does not match its declaration');
+  });
+
+  test('keeps the pre-construction metadata snapshot when the constructor mutates its declaration', () => {
+    const Alpha = integrationClass('alpha', {
+      onConstruct: () => { Alpha.descriptor.supportsImages = true; },
+    });
+    class MutatingIntegration extends Alpha {
+      constructor(host) {
+        super(host);
+        this.descriptor = Alpha.descriptor;
+      }
+    }
+    expect(() => new IntegrationRegistry({
+      integrations: [MutatingIntegration], hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    })).toThrow('descriptor does not match its declaration');
+  });
+
+  test('cannot adopt another prevalidated identity during construction', () => {
+    const Beta = integrationClass('beta');
+    class Alpha extends integrationClass('alpha') {
+      constructor(host) {
+        super(host);
+        Alpha.integrationId = 'beta';
+        Object.assign(this, createFacetIntegration(host, 'beta'));
+      }
+    }
+    expect(() => new IntegrationRegistry({
+      integrations: [Beta, Alpha], hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    })).toThrow('Agent integration ID mismatch: alpha != beta');
+  });
+
+  test('captures every complete definition before any constructor can change it', () => {
+    const Beta = integrationClass('beta');
+    const Alpha = integrationClass('alpha', { onConstruct: () => {
+      Beta.integrationId = 'changed';
+      Beta.apiVersion = 1;
+      Beta.descriptor = createFacetIntegration(null, 'changed').descriptor;
+    } });
+    const registry = new IntegrationRegistry({
+      integrations: [Alpha, Beta], hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    });
+    expect(registry.list().map((integration) => integration.descriptor.id)).toEqual(['alpha', 'beta']);
+    expect(registry.types.require('beta')).toEqual(registry.require('beta').descriptor);
+    expect(() => registry.require('beta').testHost.environment.get('BETA_BIN')).not.toThrow();
+    expect(() => registry.require('beta').testHost.environment.get('CHANGED_BIN')).toThrow();
+  });
+
+  test('captures the constructor list before any executable can replace a later constructor', () => {
+    let betaConstructed = 0;
+    let replacementConstructed = 0;
+    const Beta = integrationClass('beta', { onConstruct: () => { betaConstructed += 1; } });
+    const Replacement = integrationClass('beta', { onConstruct: () => { replacementConstructed += 1; } });
+    const Alpha = integrationClass('alpha', { onConstruct: () => { integrations[1] = Replacement; } });
+    const integrations = [Alpha, Beta];
+    const registry = new IntegrationRegistry({
+      integrations, hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    });
+    expect(registry.classes()).toEqual([Alpha, Beta]);
+    expect(betaConstructed).toBe(1);
+    expect(replacementConstructed).toBe(0);
+  });
+
   test('constructs one instance and binds only declared environment names', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'garcon-agent-host-'));
     let constructed = 0;
@@ -111,6 +191,7 @@ describe('IntegrationRegistry', () => {
       const integration = registry.require('alpha');
       expect(registry.require('alpha')).toBe(integration);
       expect(constructed).toBe(1);
+      expect(registry.types.require('alpha')).toEqual(integration.descriptor);
       expect(integration.testHost.environment.get('ALPHA_BIN')).toBe('/bin/alpha');
       expect(() => integration.testHost.environment.get('SECRET')).toThrow(AgentIntegrationError);
     } finally {
@@ -134,7 +215,7 @@ describe('IntegrationRegistry', () => {
       integrations: [Invalid],
       hostFactory: hostFactory(os.tmpdir()),
       migrationStoreFor,
-    })).toThrow('Unsupported agent integration API version');
+    })).toThrow('Unsupported agent integration API version for invalid: 1');
   });
 
   test('rolls back started integrations in reverse order', async () => {

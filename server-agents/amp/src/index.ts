@@ -41,6 +41,7 @@ const AMP_DESCRIPTOR = {
 export default class AmpAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'amp';
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = AMP_DESCRIPTOR;
   readonly descriptor = AMP_DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],

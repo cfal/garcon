@@ -44,6 +44,7 @@ const DESCRIPTOR = {
 export default class DirectAnthropicCompatibleIntegration implements AgentIntegration {
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = DESCRIPTOR;
   readonly descriptor = DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: [

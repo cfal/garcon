@@ -68,6 +68,7 @@ const CURSOR_DESCRIPTOR = {
 export default class CursorAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'cursor';
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = CURSOR_DESCRIPTOR;
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;

@@ -70,6 +70,7 @@ const CLAUDE_DESCRIPTOR = {
 export default class ClaudeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'claude';
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = CLAUDE_DESCRIPTOR;
   readonly descriptor = CLAUDE_DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,

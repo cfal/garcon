@@ -41,6 +41,7 @@ const DESCRIPTOR = {
 export default class DirectOpenAiResponsesCompatibleIntegration implements AgentIntegration {
   static readonly integrationId = DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = DESCRIPTOR;
   readonly descriptor = DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: TEXT_FILE_ATTACHMENT_MIME_TYPES,

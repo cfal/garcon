@@ -57,6 +57,7 @@ const OPENCODE_DESCRIPTOR = {
 export default class OpenCodeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'opencode';
   static readonly apiVersion = 5 as const;
+  static readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly attachments = {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
