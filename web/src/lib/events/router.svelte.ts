@@ -47,6 +47,7 @@ import {
 	type PermissionLifecycleContext,
 } from './handlers/permissions';
 import { handleExecutionControlUpdated, type QueueContext } from './handlers/queue';
+import { operationalNoticeContent } from './handlers/operational-notice';
 import {
 	handleChatCreated,
 	handleChatAborted,
@@ -384,7 +385,11 @@ function buildDispatch(
 		},
 		'chat-operational-notice': (msg) => {
 			if (!(msg instanceof ChatOperationalNoticeMessage)) return;
-			stores.chatState.appendServerNotice(msg.chatId, msg.noticeType, msg.content);
+			stores.chatState.appendServerNotice(
+				msg.chatId,
+				msg.noticeType,
+				operationalNoticeContent(msg),
+			);
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {

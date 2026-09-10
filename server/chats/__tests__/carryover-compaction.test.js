@@ -17,6 +17,7 @@ import {
   usableHandoffTokenBudget,
 } from '../../../common/handoff-sizing.js';
 import {
+  CARRYOVER_COMPACTION_STARTED_NOTICE,
   CARRYOVER_COMPACTION_TIMEOUT_MS,
   CarryOverCompactionService,
 } from '../carryover-compaction.ts';
@@ -116,6 +117,7 @@ function run(instance, {
   signal,
   operation = 'agent-switch',
   destination = DESTINATION,
+  onCompactionStarted,
 } = {}) {
   return instance.planFor({
     operation,
@@ -123,14 +125,32 @@ function run(instance, {
     projectPath: '/workspace',
     messages,
     destination,
+    onCompactionStarted,
     ...(signal ? { signal } : {}),
   });
 }
 
 describe('carryover compaction', () => {
-  it('keeps the Direct timeout cap at least as large as a compaction attempt', () => {
+  it('routes delegated compaction progress to its durable observer instead of a transient notice', async () => {
+    const f = service({ enabled: true });
+    const started = mock(() => {});
+    await run(f.instance, { onCompactionStarted: started });
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(f.onCompactionStarted).not.toHaveBeenCalled();
+    await run(f.instance, { messages: shortHistory(), onCompactionStarted: started });
+    expect(started).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows 15 minutes per compaction attempt through the Direct timeout cap', () => {
+    expect(CARRYOVER_COMPACTION_TIMEOUT_MS).toBe(15 * 60_000);
     expect(MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS).toBeGreaterThanOrEqual(
       CARRYOVER_COMPACTION_TIMEOUT_MS,
+    );
+  });
+
+  it('keeps an agent- and model-dependent fallback for older clients', () => {
+    expect(CARRYOVER_COMPACTION_STARTED_NOTICE).toBe(
+      'Compacting earlier chat history. This could take a while depending on the agent and model.',
     );
   });
 

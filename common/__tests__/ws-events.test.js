@@ -78,6 +78,7 @@ describe('parseServerWsMessage chat-operational-notice', () => {
       noticeType: 'warning',
       content: 'Carryover context was compacted.',
       timestamp: '2026-06-01T00:00:00.000Z',
+      detail: { type: 'carryover-compaction-started' },
     });
 
     expect(parsed).toBeInstanceOf(ChatOperationalNoticeMessage);
@@ -86,6 +87,7 @@ describe('parseServerWsMessage chat-operational-notice', () => {
       noticeType: 'warning',
       content: 'Carryover context was compacted.',
       timestamp: '2026-06-01T00:00:00.000Z',
+      detail: { type: 'carryover-compaction-started' },
     });
   });
 
@@ -108,6 +110,34 @@ describe('parseServerWsMessage chat-operational-notice', () => {
       chatId: 'chat-1',
       noticeType: 'progress',
       content: 'nope',
+    })).toBeNull();
+  });
+
+  it.each([
+    { type: 'native-transcript-drift' },
+    { type: 'project-unavailable', projectPath: '/workspace/missing', reason: 'not-found' },
+  ])('parses the $type detail', (detail) => {
+    expect(parseServerWsMessage({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'warning',
+      content: 'fallback',
+      detail,
+    })).toMatchObject({ detail });
+  });
+
+  it.each([
+    { type: 'unknown' },
+    { type: 'native-transcript-drift', extra: true },
+    { type: 'project-unavailable', projectPath: '', reason: 'not-found' },
+    { type: 'project-unavailable', projectPath: '/workspace/missing', reason: 'unknown' },
+  ])('rejects malformed notice detail %#', (detail) => {
+    expect(parseServerWsMessage({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'info',
+      content: 'fallback',
+      detail,
     })).toBeNull();
   });
 

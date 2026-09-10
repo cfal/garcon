@@ -12,6 +12,7 @@ export interface ChildAdmission {
   readonly detail: AgentChildOutcomeNoticeDetail;
   readonly turnId: string | null;
   readonly recorded: boolean;
+  readonly start?: () => void;
 }
 
 export interface AgentChildTurnReplyOptions extends AgentCommandContext {
@@ -24,17 +25,16 @@ export class AgentChildTurnReplies extends AgentCommandReplies {
   launchChild(source: AgentCommandSource, admit: (signal: AbortSignal) => Promise<ChildAdmission | null>): void {
     this.launch(source, async (signal) => {
       const admission = await admit(signal);
-      if (!admission || signal.aborted) return;
-      const { detail, turnId } = admission;
-      // Capture and bound completion before a slow acknowledgment can outlive receipt retention.
-      const completion = detail.status === 'accepted' && !detail.async && turnId !== null
-        ? this.options.turns.waitForTurnTerminal(detail.chatId, turnId, signal).then((record) =>
-          boundAgentChildResult({ ...detail, ...terminalOutcome(record, detail.chatId) }),
-        ).catch((error: unknown) => {
-          if (!signal.aborted) this.report(source, 'receipt', error, detail);
-          return null;
-        })
-        : null;
+      if (!admission) return;
+      const { detail } = admission;
+      // Registers completion before dispatch so slow acknowledgments cannot outlive receipt retention.
+      let completion: Promise<AgentChildOutcomeNoticeDetail | null> | null;
+      try {
+        completion = this.#observeCompletion(source, admission, signal);
+      } finally {
+        admission.start?.();
+      }
+      if (signal.aborted) return;
       if (admission.recorded) await this.deliver(source, detail, signal);
       if (!completion) return;
       const terminal = await completion;
@@ -45,6 +45,21 @@ export class AgentChildTurnReplies extends AgentCommandReplies {
       });
       if (recorded) await this.deliver(source, recorded, signal);
     });
+  }
+
+  #observeCompletion(
+    source: AgentCommandSource,
+    admission: ChildAdmission,
+    signal: AbortSignal,
+  ): Promise<AgentChildOutcomeNoticeDetail | null> | null {
+    const { detail, turnId } = admission;
+    if (signal.aborted || detail.status !== 'accepted' || detail.async || turnId === null) return null;
+    return this.options.turns.waitForTurnTerminal(detail.chatId, turnId, signal)
+      .then((record) => boundAgentChildResult({ ...detail, ...terminalOutcome(record, detail.chatId) }))
+      .catch((error: unknown) => {
+        if (!signal.aborted) this.report(source, 'receipt', error, detail);
+        return null;
+      });
   }
 }
 

@@ -40,7 +40,9 @@ const SUMMARY_CLOSE = '</summary>';
 const utf8Encoder = new TextEncoder();
 // The Direct runtime cap in server-agents/common/src/direct/single-query-options.ts
 // must remain at least this large.
-export const CARRYOVER_COMPACTION_TIMEOUT_MS = 5 * 60_000;
+export const CARRYOVER_COMPACTION_TIMEOUT_MS = 15 * 60_000;
+export const CARRYOVER_COMPACTION_STARTED_NOTICE =
+  'Compacting earlier chat history. This could take a while depending on the agent and model.';
 
 export interface CarryOverCompactionAgents {
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
@@ -74,6 +76,7 @@ export interface CarryOverCompactionDeps {
 }
 
 export interface CarryOverCompactionInput {
+  readonly onCompactionStarted?: () => void;
   readonly operation: 'agent-switch' | 'fresh-start';
   readonly chatId: string;
   readonly projectPath: string;
@@ -172,7 +175,10 @@ export class CarryOverCompactionService {
         lastFailure = new Error('the reduced compaction prompt does not fit');
         break;
       }
-      if (attempt === 0) this.deps.onCompactionStarted?.(input.chatId);
+      if (attempt === 0) {
+        if (input.onCompactionStarted) input.onCompactionStarted();
+        else this.deps.onCompactionStarted?.(input.chatId);
+      }
       try {
         const raw = await this.deps.agents.runSingleQuery(fitted.value.prompt, {
           agentId: selection.agentId,

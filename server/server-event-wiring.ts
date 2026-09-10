@@ -86,6 +86,7 @@ export interface ServerEventWiring {
     chatId: string,
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
+    detail?: ChatOperationalNoticeMessage['detail'],
   ): void;
   // Scheduled through the per-chat task queue so the invalidation follows the
   // committed update notice's own chat-messages fanout.
@@ -185,6 +186,7 @@ export function wireServerEvents({
     chatId: string,
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
+    detail?: ChatOperationalNoticeMessage['detail'],
   ): void {
     if (!chatExists(chatId)) return;
     broadcast(new ChatOperationalNoticeMessage(
@@ -192,6 +194,7 @@ export function wireServerEvents({
       noticeType,
       content,
       new Date().toISOString(),
+      detail,
     ));
   }
 
@@ -416,8 +419,13 @@ export function wireServerEvents({
     chatId: string,
     outcome: ChatStopOutcome,
     intent: ChatStopIntent,
+    interruptedTurn?: { readonly turnId?: string },
   ) => {
-    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', () => {
+    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', async () => {
+      if (outcome === 'interrupt-requested' && interruptedTurn?.turnId) {
+        await commandLedger.markInterruptedWithoutRunTerminal(chatId, interruptedTurn.turnId,
+          intent === 'chat-deletion' ? 'chat-deleted' : 'user-stop');
+      }
       if (!chatExists(chatId)) return;
       broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
     });
@@ -586,7 +594,7 @@ export function wireServerEvents({
       ),
     );
   });
-  queue.onSessionStopped((chatId, outcome, intent) => {
+  queue.onSessionStopped((chatId, outcome, intent, interruptedTurn) => {
     logger.info('queue: Stop resolved', {
       chatId,
       intent,
@@ -598,7 +606,7 @@ export function wireServerEvents({
       broadcastSessionStopped(chatId, outcome, intent);
       return;
     }
-    broadcastSessionStopped(chatId, outcome, intent);
+    broadcastSessionStopped(chatId, outcome, intent, interruptedTurn);
     publishProcessing(chatId);
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
@@ -607,7 +615,11 @@ export function wireServerEvents({
   });
   queue.onProjectUnavailable((chatId, error) => {
     scheduleChatTask(chatId, 'server-events: project unavailable notice failed', () => {
-      notifyOperationalNotice(chatId, 'warning', error.message);
+      notifyOperationalNotice(chatId, 'warning', error.message, {
+        type: 'project-unavailable',
+        projectPath: error.projectPath,
+        reason: error.reason,
+      });
     });
   });
   queue.onTurnSettled((chatId, turn) => {

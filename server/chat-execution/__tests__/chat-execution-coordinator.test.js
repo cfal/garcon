@@ -99,6 +99,27 @@ describe('ChatExecutionCoordinator', () => {
     coordinator.beginShutdown();
   });
 
+  it('stops a startup before a provider run exists and fences its late completion from a successor', async () => {
+    const starting = deferred();
+    const f = createFixture({ turnRunner: { runAgentTurn: mock(() => starting.promise) } });
+    coordinator = f.coordinator;
+    const stopped = mock(() => {});
+    coordinator.onSessionStopped(stopped);
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'first-start' });
+    const running = coordinator.runReservedTurn(reservation, 'Task', {
+      turnId: 'first-start', commandType: 'chat-start',
+    });
+    const result = await coordinator.stopActiveTurn('chat-1');
+    expect(result.outcome).toBe('interrupt-requested');
+    expect(reservation.executionAdmission.signal.aborted).toBe(true);
+    expect(stopped).toHaveBeenCalledWith('chat-1', 'interrupt-requested', 'stop', { turnId: 'first-start' });
+    const successor = coordinator.reserveDirectTurn('chat-1', { turnId: 'successor' });
+    starting.resolve();
+    await running;
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    await coordinator.releaseDirectTurn(successor);
+  });
+
   it('excludes direct execution until a transcript snapshot is released', async () => {
     const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
 

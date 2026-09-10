@@ -280,6 +280,7 @@ export type SessionStoppedCallback = (
   chatId: string,
   outcome: ChatStopOutcome,
   intent: ChatStopIntent,
+  interruptedTurn?: TurnIdentity,
 ) => void;
 export type ChatIdleCallback = (chatId: string) => void;
 export type ProjectUnavailableCallback = (

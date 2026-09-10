@@ -5,6 +5,8 @@ import { parseGarconCommandResult } from '../../../common/garcon-command-results
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { CODEX_MODELS } from '../../../common/models.js';
 import type { StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
+import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
+import { startupPhases } from '../../support/delegated-start-progress.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
 import { codexAssistantMessage, codexExecCommandCall } from '../../support/fake-codex-model.js';
@@ -116,6 +118,7 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
         for (const mode of ['start', 'resume']) {
           const final = `Synthetic ${mode} final A.\n\nSynthetic final B.`;
           const commentary = `Synthetic ${mode} progress excluded from the result.`;
+          const childEvents = fixture.client.markEvents();
           environment.script(commentary, final);
           const ack = parentModel.holdNext({ lastUserTextIncludes: 'status="accepted"' });
           const result = parentModel.holdNext({ lastUserTextIncludes: 'status="completed"' });
@@ -126,12 +129,16 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
           if (admission?.status !== 'accepted' || !('chatId' in admission)) throw new Error('Missing child admission');
           child = admission.chatId;
           ack.releaseText('Synthetic acknowledgment observed.');
+          await fixture.client.waitForEvent((event): event is AgentRunFinishedMessage =>
+            event.type === 'agent-run-finished' && event.chatId === child,
+          'delegated child turn completed', { afterIndex: childEvents, timeoutMs: 60_000 });
           const terminal = parseGarconCommandResult((await result.received).lastUserText);
           expect(terminal).toMatchObject({ status: 'completed', chatId: child,
             output: { availability: 'available', completeness: 'complete', text: final } });
           const transcript = assistantContents((await fixture.client.getMessages(child)).messages);
           expect(transcript).toContain(commentary);
           expect(transcript).toContain(final);
+          expect(await startupPhases(fixture, child)).toEqual(['preparing-context', 'starting-agent', 'started']);
           emission = result;
         }
         const cursor = fixture.client.markEvents();

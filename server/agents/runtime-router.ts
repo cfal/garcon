@@ -72,6 +72,7 @@ export interface AgentRuntimeRouterOptions {
 }
 
 export interface CreateCarriedContextInput {
+  readonly onCompactionStarted?: () => void;
   readonly chatId: string;
   readonly entry: AgentChatEntry;
   readonly messages: readonly ChatMessage[];
@@ -142,6 +143,7 @@ export class AgentRuntimeRouter {
     });
   }
   async startSession(chatId: string, prompt: string, opts: {
+    onContextPreparation?: (phase: 'compacting-context' | 'starting-agent') => void;
     images?: RunAgentTurnOptions['images'];
     model?: string;
     permissionMode?: RunAgentTurnOptions['permissionMode'];
@@ -172,6 +174,7 @@ export class AgentRuntimeRouter {
     const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
     await this.#validateEndpoint(integration, selection);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
+    assertExecutionAdmissionOpen(opts);
     if (!prepared.dispatch) return;
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
     this.#events.trackTurn(chatId, operationMetadata(operation));
@@ -187,12 +190,17 @@ export class AgentRuntimeRouter {
         destinationPrompt: prepared.prompt,
         clientRequestId: opts.clientRequestId ?? null,
         signal: opts.executionAdmission?.signal,
+        ...(opts.onContextPreparation ? { onCompactionStarted: () => {
+          assertExecutionAdmissionOpen(opts);
+          opts.onContextPreparation?.('compacting-context');
+        } } : {}),
       });
       assertExecutionAdmissionOpen(opts);
       const carryover = resolveCarryOverOutcome(outcome);
       if (carryover.notice) {
         this.#ledger.appendCarryoverNotice(chatId, prepared.viewId, carryover.notice);
       }
+      opts.onContextPreparation?.('starting-agent');
       const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,

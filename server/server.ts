@@ -50,7 +50,7 @@ import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry, createForkNativeHistoryReader } from './agents/index.js';
 import {
-  CARRYOVER_COMPACTION_TIMEOUT_MS,
+  CARRYOVER_COMPACTION_STARTED_NOTICE,
   CarryOverCompactionService,
 } from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
@@ -389,8 +389,8 @@ export async function startServer(): Promise<void> {
         if (!executionQueries) throw new Error('Chat execution coordinator is not initialized');
         return executionQueries.ownsExecution(chatId);
       },
-      notifyOperationalNotice(chatId, noticeType, content) {
-        eventWiring?.notifyOperationalNotice(chatId, noticeType, content);
+      notifyOperationalNotice(chatId, noticeType, content, detail) {
+        eventWiring?.notifyOperationalNotice(chatId, noticeType, content, detail);
       },
     });
     const transcriptReader = new TranscriptViewReader(
@@ -429,6 +429,7 @@ export async function startServer(): Promise<void> {
         if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
         return carryOverCompaction.planFor({
           operation: 'fresh-start',
+          onCompactionStarted: input.onCompactionStarted,
           chatId: input.chatId,
           projectPath: input.entry.projectPath,
           messages: input.messages,
@@ -470,7 +471,8 @@ export async function startServer(): Promise<void> {
         eventWiring?.notifyOperationalNotice(
           chatId,
           'info',
-          `Compacting earlier chat history. This may take up to ${CARRYOVER_COMPACTION_TIMEOUT_MS / 60_000} minutes per attempt.`,
+          CARRYOVER_COMPACTION_STARTED_NOTICE,
+          { type: 'carryover-compaction-started' },
         );
       },
     });

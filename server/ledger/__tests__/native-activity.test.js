@@ -35,8 +35,8 @@ describe('NativeTranscriptActivityService', () => {
           get: () => ({ nativeActivity: { lastActivity } }),
         },
         ownsExecution: () => false,
-        notifyOperationalNotice: (chatId, noticeType, content) => {
-          notices.push({ chatId, noticeType, content });
+        notifyOperationalNotice: (chatId, noticeType, content, detail) => {
+          notices.push({ chatId, noticeType, content, detail });
         },
       };
       const activity = new NativeTranscriptActivityService(options);
@@ -54,6 +54,7 @@ describe('NativeTranscriptActivityService', () => {
         chatId: CHAT_ID,
         noticeType: 'warning',
         content: NATIVE_TRANSCRIPT_DRIFT_NOTICE,
+        detail: { type: 'native-transcript-drift' },
       })));
       expect(lastActivity).toHaveBeenCalledTimes(3);
       expect(ledger.currentRows(CHAT_ID)).toEqual(rowsBefore);
