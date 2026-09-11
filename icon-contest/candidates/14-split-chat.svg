@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Split Chat</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M49 65h71v105H80l-24 22 6-22H49V65Zm87 0h71v105h-71V65Z" fill="none" stroke="#fff" stroke-width="15" stroke-linejoin="round"/>
+  <circle cx="84" cy="112" r="10" fill="#fff"/><circle cx="171" cy="112" r="10" fill="#fff"/>
+</svg>

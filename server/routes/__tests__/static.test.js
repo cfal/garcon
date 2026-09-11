@@ -43,9 +43,9 @@ describe('cacheHeaders', () => {
     });
   });
 
-  it('does not mark root-level icons immutable', () => {
-    expect(cacheHeaders('/favicon.ico')).toEqual({
-      'Cache-Control': 'public, max-age=3600, must-revalidate',
+  it('marks checksum-addressed icon assets immutable', () => {
+    expect(cacheHeaders('/icons/icon.fb8a0695ab5d.svg')).toEqual({
+      'Cache-Control': 'public, max-age=31536000, immutable',
     });
   });
 
@@ -86,6 +86,11 @@ describe('static app routes', () => {
     expect(routes['/chat']?.GET).toBeFunction();
     expect(routes['/chat/']).toBeDefined();
     expect(routes['/chat/']?.GET).toBeFunction();
+  });
+
+  it('serves checksum-addressed icon assets through a bounded public route', () => {
+    expect(routes['/icons/*']?.GET).toBeFunction();
+    expect(routes['/favicon.ico']).toBeUndefined();
   });
 });
 

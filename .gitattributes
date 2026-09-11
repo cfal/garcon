@@ -1,0 +1,3 @@
+docs/brand/*.svg text eol=lf
+web/src/lib/assets/favicon.svg text eol=lf
+web/static/icons/*.svg text eol=lf

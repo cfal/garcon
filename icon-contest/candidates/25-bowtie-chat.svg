@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Bow Tie Chat</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M44 85c0-12 13-19 23-13l47 29v54l-47 29c-10 6-23-1-23-13V85Zm168 0c0-12-13-19-23-13l-47 29v54l47 29c10 6 23-1 23-13V85Z" fill="#fff"/>
+  <rect x="108" y="101" width="40" height="54" rx="10" fill="#fff"/>
+  <path d="m126 154 21 33v-38" fill="#fff"/>
+</svg>

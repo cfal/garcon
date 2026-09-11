@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Focus Chat</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M72 52H48v37M184 52h24v37M72 204H48v-37M184 204h24v-37" fill="none" stroke="#fff" stroke-width="15" stroke-linecap="round"/>
+  <path d="M85 83h86a17 17 0 0 1 17 17v55a17 17 0 0 1-17 17h-35l-29 22 6-22H85a17 17 0 0 1-17-17v-55a17 17 0 0 1 17-17Z" fill="#fff"/>
+</svg>

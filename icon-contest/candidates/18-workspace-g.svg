@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Workspace G</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M54 56h64v55H54zM138 56h64v55h-64zM54 131h64v69H54zM138 131h64v69h-64z" fill="#fff"/>
+  <path d="M118 116h84v35h-43v24h43v25h-64v-69h-20v-15Z" fill="#2563eb"/>
+</svg>

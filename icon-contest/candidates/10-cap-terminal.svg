@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Cap Terminal</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M52 148c5-53 31-80 76-80s71 27 76 80c-49-17-103-17-152 0ZM55 166c46-18 100-18 146 0l-12 27H67l-12-27Z" fill="#fff"/>
+  <path d="m98 105 17 14-17 14M124 133h28" fill="none" stroke="#2563eb" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

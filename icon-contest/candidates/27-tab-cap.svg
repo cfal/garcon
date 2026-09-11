@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Tab Cap</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M53 139V90a17 17 0 0 1 17-17h49l15 17h52a17 17 0 0 1 17 17v32c-50-17-100-17-150 0ZM55 158c46-18 100-18 146 0-20 25-44 37-73 37-31 0-55-12-73-37Z" fill="#fff"/>
+  <path d="M79 106h38M139 106h38" stroke="#2563eb" stroke-width="11" stroke-linecap="round"/>
+</svg>

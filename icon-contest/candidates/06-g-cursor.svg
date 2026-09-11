@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>G Cursor</title>
+  <rect width="256" height="256" rx="52" fill="#2563eb"/>
+  <path d="M174 83a62 62 0 1 0 13 71v-27h-52" fill="none" stroke="#fff" stroke-width="17" stroke-linecap="round"/>
+  <path d="m164 151 39 16-17 7-7 17-15-40Z" fill="#fff" stroke="#2563eb" stroke-width="6" stroke-linejoin="round"/>
+</svg>
