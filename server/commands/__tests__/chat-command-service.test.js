@@ -336,7 +336,7 @@ function makeService(overrides = {}) {
         await queue.admitUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
         scheduled = true;
-        await input.dispatch?.(reservation.executionAdmission);
+        await agents.startSession(input.command.chatId, input.content, { ...input.options, projectPath: chats.getChat(input.command.chatId).projectPath, executionAdmission: reservation.executionAdmission });
         await queue.completeDirectTurn(reservation);
       } catch (error) {
         if (scheduled) {
@@ -368,7 +368,7 @@ function makeService(overrides = {}) {
         throw error;
       }
       await input.settlement.markScheduled(input.command, input.command.turnId);
-      const task = input.dispatch(reservation.executionAdmission)
+      const task = agents.compactSession(input.command.chatId, { instructions: input.content.slice('/compact'.length).trim() || undefined, clientRequestId: input.command.clientRequestId, turnId: input.command.turnId, executionAdmission: reservation.executionAdmission })
         .then(() => queue.completeDirectTurn(reservation), () => queue.failDirectTurn(reservation));
       executionTasks.add(task);
       void task.finally(() => executionTasks.delete(task));
@@ -798,6 +798,8 @@ function makeRealQueue(
   return new ChatExecutionCoordinator(
     workspaceDir,
     {
+      prepareTurn: mock(async () => ({ validate() {}, release() {} })),
+      prepareSteerTarget: mock(async () => () => {}),
       runAgentTurn: mock(async () => undefined),
       captureSteerTarget: mock(() => null),
       abortSession: mock(async () => false),
@@ -6818,13 +6820,7 @@ describe('ChatCommandService', () => {
     const compactStarted = deferred();
     const releaseCompact = deferred();
     const queueService = makeRealQueue(inputProjection, {
-      isChatRunning: mock(() => runtimeRunning),
-    });
-    const { service, agents } = makeService({
-      queueService,
-      agents: {
-        isChatRunning: mock(() => runtimeRunning),
-        compactSession: mock(async (_chatId, options) => {
+        runAgentTurn: mock(async (_chatId, _content, options) => {
           compactTurn = {
             clientRequestId: options.clientRequestId,
             turnId: options.turnId,
@@ -6833,6 +6829,13 @@ describe('ChatCommandService', () => {
           await releaseCompact.promise;
           runtimeRunning = true;
         }),
+      isChatRunning: mock(() => runtimeRunning),
+    });
+    const { service, agents } = makeService({
+      queueService,
+      agents: {
+        isChatRunning: mock(() => runtimeRunning),
+
       },
     });
     const nextPath = path.join(projectBaseDir, 'repo-worktree');

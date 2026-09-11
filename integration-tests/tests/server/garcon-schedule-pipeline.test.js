@@ -54,6 +54,7 @@ async function withPipeline(run) {
   const view = ledger.initializeChat(CHAT);
   const publisher = ledger.openProducer(CHAT, 'test');
   const dispatched = [];
+  const prepared = [];
   /** @type {import('../../../server/chat-execution/accepted-input-transcript.js').AcceptedInputTranscriptPort} */
   const admission = {
     hasMatchingInput: () => false,
@@ -67,6 +68,11 @@ async function withPipeline(run) {
   };
   /** @type {import('../../../server/chat-execution/types.js').AgentTurnRunnerPort} */
   const runner = {
+    async prepareTurn(chatId) {
+      prepared.push(structuredClone(registry.getChat(chatId)));
+      return { validate() {}, release() {} };
+    },
+    prepareSteerTarget: async () => { throw new Error('Scheduled actions must not steer'); },
     async runAgentTurn(chatId, content, options) {
       expect(ledger.currentRows(chatId).filter((row) => row.kind === 'user-input')).toHaveLength(1);
       dispatched.push({ content, options });
@@ -107,7 +113,7 @@ async function withPipeline(run) {
   });
   try {
     await scheduler.start(new Date(NOW));
-    await run({ registry, ledger, view, publisher, cron, schedules, execution, controller, lock, replied, dispatched });
+    await run({ registry, ledger, view, publisher, cron, schedules, execution, controller, lock, replied, dispatched, prepared });
   } finally {
     controller.shutdown(); scheduler.stop(); execution.beginShutdown();
     await execution.waitForDispatches(); await registry.flush(); ledger.close();
@@ -173,7 +179,7 @@ describe('composed assistant schedule pipeline', () => {
 
   for (const busy of ['queue', 'skip']) {
     test(`claims a minute recurrence before ordinary ${busy} admission without changing chat configuration`, async () => {
-      await withPipeline(async ({ registry, ledger, view, publisher, cron, schedules, execution, replied, dispatched }) => {
+      await withPipeline(async ({ registry, ledger, view, publisher, cron, schedules, execution, replied, dispatched, prepared }) => {
         publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(
           '2029-01-01T00:00:00.000Z',
           `<garcon-schedule in="1m" every="5m" busy="${busy}">Inspect {{chat_id}} &amp; report.</garcon-schedule>`,
@@ -204,8 +210,8 @@ describe('composed assistant schedule pipeline', () => {
           await drained;
           expect(dispatched).toMatchObject([{
             content: `<garcon-schedule-action>\nInspect ${CHAT} &amp; report.\n</garcon-schedule-action>`,
-            options: { model: 'current-model', permissionMode: 'bypassPermissions' },
           }]);
+          expect(prepared).toMatchObject([{ model: 'current-model', permissionMode: 'bypassPermissions' }]);
         } else await execution.releaseTranscriptSnapshot(reservation);
         expect(registry.getChat(CHAT)).toEqual(configured);
       });

@@ -195,9 +195,9 @@ describe('AgentRuntimeRouter producer boundary', () => {
       expect(fixture[operation]).toHaveBeenCalledWith(expect.objectContaining({
         permissionMode: 'manualBypass', thinkingMode: 'low',
         settings: { ownerId: 'test', schemaVersion: 1, values: { option: 'original' } },
-        endpoint: expect.objectContaining({
+        endpoint: { selection: expect.objectContaining({
           baseUrl: 'https://original.invalid/v1', headers: { 'x-synthetic': 'original' },
-        }),
+        }), credential: null },
       }));
       expect(fixture.endpointResolver.resolveEndpointReference).toHaveBeenCalledTimes(1);
       expect(fixture.integration.settings.parse).toHaveBeenCalledTimes(1);
@@ -627,6 +627,28 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(transcript.activeRunId()).toBeNull();
   });
 
+  it('keeps the admitted start configuration through asynchronous carryover planning', async () => {
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const { router, start, registry } = makeRouter({
+      composition: {
+        inserted: true, input: inputRow(1, 'continue'), prompt: [inputRow(1, 'continue')],
+      },
+      createCarriedContext: async () => {
+        entered.resolve();
+        await release.promise;
+        return { kind: 'complete', context: { prefix: 'synthetic seed' } };
+      },
+    });
+    const pending = router.runAgentTurn('chat-1', 'continue', { clientMessageId: 'message-1', turnId: 'turn-1' });
+    await entered.promise;
+    registry.updateChat('chat-1', { model: 'synthetic-later-model' });
+    release.resolve();
+    await pending;
+    expect(start.mock.calls[0][0]).toMatchObject({ model: 'model-a', carriedContext: { prefix: 'synthetic seed' } });
+    expect(registry.getChat('chat-1').model).toBe('synthetic-later-model');
+  });
+
   it('fails closed when the transcript view changes during carryover planning', async () => {
     let currentView = {
       viewId: 'view-1',
@@ -653,7 +675,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await expect(router.runAgentTurn('chat-1', 'continue', {
       clientMessageId: 'message-1',
       turnId: 'turn-1',
-    })).rejects.toThrow('stale view');
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY', retryable: true });
 
     expect(start).not.toHaveBeenCalled();
     expect(transcript.notices).toEqual([]);
@@ -829,9 +851,12 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const { router, events, captureTarget, providerTarget, steer } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn,
+      resume: mock(async () => ({})),
     });
+    await router.runAgentTurn('chat-1', 'synthetic input', { turnId: 'turn-active', clientRequestId: 'request-active' });
     const prepareDelivery = mock(async () => undefined);
     const target = router.captureSteerTarget('chat-1');
+    await router.prepareSteerTarget('chat-1', target);
 
     await expect(router.steerInput('chat-1', 'guidance', {
       clientRequestId: 'request-steer',

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { CommandErrorCode } from '../../common/chat-command-contracts.ts';
 import type {
-  AgentExecutionAdmission,
+  PreparedExecutionTurn,
   AgentSteerOptions,
   RunAgentTurnOptions,
 } from '../agents/session-types.ts';
@@ -49,6 +49,7 @@ const logger = createLogger('accepted-input');
 
 // Exposes coordinator-owned operations that accepted-input handling drives.
 export interface AcceptedInputCoordinator {
+  prepareTurn(chatId: string, options: RunAgentTurnOptions, signal: AbortSignal): Promise<PreparedExecutionTurn>;
   requestDrain(chatId: string, context: string): void;
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
   checkpoint(reservation: DirectTurnReservation): void;
@@ -68,7 +69,6 @@ export interface AcceptedInputCoordinator {
     reservation: DirectTurnReservation,
     content: string,
     options: RunAgentTurnOptions,
-    dispatch?: (admission: AgentExecutionAdmission) => Promise<void>,
     beforeFailureRelease?: (error: unknown) => Promise<void>,
   ): Promise<void>;
   trackDispatch(task: Promise<void>): void;
@@ -184,10 +184,11 @@ export class AcceptedInputHandler {
   }
 
   async schedule(input: AcceptedDirectInput): Promise<DirectInputScheduleOutcome> {
-    const reservation = await this.#prepareDirect(input);
-    if (!reservation) return 'duplicate';
+    const prepared = await this.#prepareDirect(input);
+    if (!prepared) return 'duplicate';
+    const { reservation, options } = prepared;
     this.#coordinator.trackDispatch(
-      this.#coordinator.runDirect(reservation, input.content, input.options, input.dispatch).catch((error) => {
+      this.#coordinator.runDirect(reservation, input.content, options).finally(() => options.preparedExecution?.release()).catch((error) => {
         logger.error('commands: run failed:', error instanceof Error ? error.message : String(error));
       }),
     );
@@ -195,62 +196,22 @@ export class AcceptedInputHandler {
   }
 
   async runInitial(input: AcceptedDirectInput): Promise<void> {
-    const reservation = await this.#prepareDirect(input);
-    if (!reservation) return;
-    await this.#coordinator.runDirect(
-      reservation,
-      input.content,
-      input.options,
-      input.dispatch,
+    const prepared = await this.#prepareDirect(input);
+    if (!prepared) return;
+    const { reservation, options } = prepared;
+    await this.#coordinator.runDirect(reservation, input.content, options,
       (error) => this.#settleInitialFailure(input, error),
-    );
+    ).finally(() => options.preparedExecution?.release());
   }
 
   async scheduleOperation(input: AcceptedDirectOperation): Promise<void> {
-    const options = withTurnIdentifiers(input.command);
-    let reservation: DirectTurnReservation;
-    try {
-      reservation = this.#coordinator.reserveDirect(input.command.chatId, options);
-    } catch (error) {
-      await this.#recordAdmissionFailure(input, error);
-      throw error;
-    }
-    try {
-      this.#checkpoint(reservation);
-      const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
-      assertDirectControlAvailable(control);
-      await this.#checkpointAfter(
-        reservation,
-        this.#projectAdmission.assertAvailable(input.command.chatId),
-      );
-      await this.#checkpointAfter(
-        reservation,
-        input.settlement.markScheduled(input.command, options.turnId!),
-      );
-    } catch (error) {
-      let failure = error;
-      try {
-        await this.#coordinator.releaseDirect(reservation);
-      } catch (releaseError) {
-        failure = aggregateFailure(
-          failure,
-          releaseError,
-          `Failed to release direct operation for ${input.command.chatId}`,
-        );
-      }
-      try {
-        await this.#recordAdmissionFailure(input, failure);
-      } catch (settlementError) {
-        failure = aggregateFailure(
-          failure,
-          settlementError,
-          `Failed to settle direct operation admission for ${input.command.chatId}`,
-        );
-      }
-      throw failure;
-    }
+    const prepared = await this.#prepareDirect({
+      ...input, content: '', options: { ...input.options, ...withTurnIdentifiers(input.command) },
+    });
+    if (!prepared) return;
+    const { reservation, options } = prepared;
     this.#coordinator.trackDispatch(
-      this.#coordinator.runDirect(reservation, '', options, input.dispatch).catch(async (error) => {
+      this.#coordinator.runDirect(reservation, input.content, options).finally(() => options.preparedExecution?.release()).catch(async (error) => {
         logger.error('compact: failed to compact chat:', error instanceof Error ? error.message : String(error));
         try {
           await input.settlement.settleOperationFailure(input.command, error);
@@ -566,8 +527,10 @@ export class AcceptedInputHandler {
     return error instanceof DomainError && error.code === 'SESSION_NOT_FOUND';
   }
 
-  async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation | null> {
+  async #prepareDirect(input: AcceptedDirectInput): Promise<{ reservation: DirectTurnReservation; options: RunAgentTurnOptions } | null> {
     let reservation: DirectTurnReservation;
+    let prepared: PreparedExecutionTurn | undefined;
+    let scheduled = false;
     try {
       reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options);
     } catch (error) {
@@ -599,9 +562,11 @@ export class AcceptedInputHandler {
         reservation,
         this.#projectAdmission.assertAvailable(input.command.chatId),
       );
+      prepared = await this.#coordinator.prepareTurn(input.command.chatId, input.options, reservation.executionAdmission.signal);
+      this.#checkpoint(reservation);
       const inserted = await this.#checkpointAfter(
         reservation,
-        this.#coordinator.admitInput(input.command.chatId, input.content, { ...input.options, userMessagePresentation: input.userMessagePresentation }),
+        this.#coordinator.admitInput(input.command.chatId, input.content, { ...input.options, userMessagePresentation: input.userMessagePresentation, validateBeforeCommit: prepared.validate }),
       );
       if (inserted === false) {
         await input.settlement.settleDuplicateInput(input.command);
@@ -612,7 +577,8 @@ export class AcceptedInputHandler {
         reservation,
         input.settlement.markScheduled(input.command, input.options.turnId!),
       );
-      return reservation;
+      scheduled = true;
+      return { reservation, options: { ...input.options, preparedExecution: prepared } };
     } catch (error) {
       let failure: unknown = error;
       // A recoverable preamble rejection retains a prepared new-chat, fork, or
@@ -661,6 +627,8 @@ export class AcceptedInputHandler {
         );
       }
       throw failure;
+    } finally {
+      if (!scheduled) prepared?.release();
     }
   }
 

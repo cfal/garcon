@@ -29,8 +29,9 @@ function fixture(profile = 'primary') {
 const endpoint = {
   apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
   protocol: 'openai-responses', baseUrl: 'https://synthetic.invalid/v1', model: 'synthetic-model',
-  isLocal: false, capabilities: null, headers: { 'x-synthetic': 'original' }, credential: null,
+  isLocal: false, capabilities: null, headers: { 'x-synthetic': 'original' },
 };
+const admittedEndpoint = { selection: endpoint, credential: 'synthetic-original-secret' };
 
 describe('instance-owned provider configuration', () => {
   test('resolves provider defaults and parsing on the exact instance', async () => {
@@ -60,16 +61,18 @@ describe('instance-owned provider configuration', () => {
     const { service, request, integration } = fixture();
     const validation = Promise.withResolvers();
     integration.endpoints.validate = mock(() => validation.promise);
-    const input = { ...request, endpoint: structuredClone(endpoint),
+    const input = { ...request, endpoint: structuredClone(admittedEndpoint),
       settings: { ownerId: 'synthetic', schemaVersion: 1, values: { option: 'original' } } };
     const pending = service.resolve(input, new AbortController().signal);
-    input.endpoint.headers['x-synthetic'] = 'changed';
+    input.endpoint.selection.headers['x-synthetic'] = 'changed';
+    input.endpoint.selection.baseUrl = 'https://changed.invalid';
+    input.endpoint.credential = 'synthetic-changed-secret';
     input.settings.values.option = 'changed';
     expect(integration.settings.parse).not.toHaveBeenCalled();
     validation.resolve();
     const result = await pending;
     expect(integration.endpoints.validate).toHaveBeenCalledWith(endpoint);
-    expect(result.endpoint).toEqual(endpoint);
+    expect(result.endpoint).toEqual(admittedEndpoint);
     expect(result.settings.values.option).toBe('original');
   });
 
@@ -85,7 +88,7 @@ describe('instance-owned provider configuration', () => {
   test('rejects unsupported endpoints without invoking settings', async () => {
     const { service, request, integration } = fixture();
     integration.endpoints = null;
-    await expect(service.resolve({ ...request, endpoint }, new AbortController().signal))
+    await expect(service.resolve({ ...request, endpoint: admittedEndpoint }, new AbortController().signal))
       .rejects.toThrow('does not accept API provider endpoints');
     expect(integration.settings.parse).not.toHaveBeenCalled();
   });
@@ -97,7 +100,7 @@ describe('instance-owned provider configuration', () => {
     integration.endpoints.validate = mock(() => validation.promise);
     const reason = new Error('admission retired');
     if (phase === 'before') abort.abort(reason);
-    const result = service.resolve({ ...request, endpoint }, abort.signal);
+    const result = service.resolve({ ...request, endpoint: admittedEndpoint }, abort.signal);
     abort.abort(reason);
     validation.resolve();
     await expect(result).rejects.toBe(reason);

@@ -338,11 +338,18 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#catalog.requiresStrictModelDiscovery(agentId);
   }
 
+  prepareTurn(chatId: string, options: RunAgentTurnOptions, signal: AbortSignal) {
+    return this.#runtime.prepareTurn(chatId, options, signal);
+  }
+
   startSession(chatId: string, command: string, opts: StartSessionOptions = {}): Promise<void> {
     return this.#runtime.startSession(chatId, command, opts);
   }
   runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
+  }
+  prepareSteerTarget(chatId: string, target: AgentSteerTarget | null): Promise<() => void> {
+    return this.#runtime.prepareSteerTarget(chatId, target);
   }
   captureSteerTarget(chatId: string): AgentSteerTarget | null {
     return this.#runtime.captureSteerTarget(chatId);
@@ -528,10 +535,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     // Direct admission shares the narrow selection/admission lock with Save so
     // an input can never observe a new selection before its update-notice
     // attempt, and Save can never interleave inside this commit.
+    const view = await this.#adoption.ensure(chatId);
     return this.#selectionAdmissionLock.runExclusive(`chat:${chatId}`, async () => {
       const session = this.#registry.getChat(chatId);
       if (!session) throw new Error(`Session not initialized: ${chatId}`);
-      const view = await this.#adoption.ensure(chatId);
       this.#validateInputAdmission(chatId, session, options);
       return this.#commitInput(chatId, message, options, view.viewId);
     });
@@ -600,7 +607,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       // not only slash commands. A later catalog change that makes the
       // current selection unsafe cannot turn an identical retry into a new
       // rejection (ledger L4).
-      if (pending && this.#ledger.hasMatchingInputSubmission({
+      if (this.#ledger.hasMatchingInputSubmission({
         chatId,
         viewId,
         message,
@@ -610,9 +617,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       })) {
         // The early return must not leave a proven-consumed stale boundary
         // armed; repair the registry the same way the ordinary path would.
-        if (alreadyConsumed) this.#clearProvenPendingBoundary(chatId, pending);
+        if (alreadyConsumed && pending) this.#clearProvenPendingBoundary(chatId, pending);
         return { inserted: false };
       }
+      options.validateBeforeCommit?.();
       // Application resolves the chat's saved order against one catalog
       // snapshot; unavailable entries are skipped, and the exact eligible
       // composition is proven safe immediately before the input commits.

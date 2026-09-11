@@ -200,7 +200,6 @@ function createHost(root, binary) {
     environment: {
       get: (name) => name === 'AMP_BINARY' ? binary : undefined,
     },
-    apiProviders: { resolveCredential: async () => null },
   };
 }
 

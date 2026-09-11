@@ -10,7 +10,6 @@ function selection(endpoint = {}) {
       baseUrl: 'https://api.acme.test/anthropic',
       model: 'acme-claude',
       isLocal: false,
-      credential: null,
       ...endpoint,
     },
     credential: 'secret',

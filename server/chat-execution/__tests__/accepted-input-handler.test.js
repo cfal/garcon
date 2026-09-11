@@ -107,6 +107,7 @@ function scaffold(overrides = {}) {
       pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
     })),
     read: mock(async () => control()),
+    prepareTurn: mock(async () => ({ validate() {}, release() {} })),
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
@@ -134,6 +135,7 @@ function scaffold(overrides = {}) {
       read: m.read,
     },
     coordinator: {
+      prepareTurn: m.prepareTurn,
       requestDrain: m.requestDrain,
       reserveDirect: m.reserveDirect,
       checkpoint: m.checkpoint,
@@ -303,7 +305,6 @@ describe('AcceptedInputHandler', () => {
   test('rejects compact when the project is unavailable and releases ownership', async () => {
     const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
     const settle = settlement();
-    const dispatch = mock(async () => undefined);
     const { handler, m } = scaffold({
       assertProjectAvailable: mock(async () => { throw unavailable; }),
     });
@@ -311,18 +312,48 @@ describe('AcceptedInputHandler', () => {
     await expect(handler.scheduleOperation({
       command: command(),
       settlement: settle,
-      dispatch,
+      content: '/compact', options: { commandType: 'agent-compact' },
     })).rejects.toBe(unavailable);
 
     expect(m.releaseDirect).toHaveBeenCalledOnce();
     expect(m.runDirect).not.toHaveBeenCalled();
     expect(m.trackDispatch).not.toHaveBeenCalled();
-    expect(dispatch).not.toHaveBeenCalled();
     expect(settle.markScheduled).not.toHaveBeenCalled();
     expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
       error: unavailable,
       retryable: true,
+      preserveForkPreparation: false,
     });
+  });
+
+  test.each(['commit', 'duplicate', 'cancel'])('owns preparation until direct admission resolves with %s', async (outcome) => {
+    const entered = Promise.withResolvers();
+    const ready = Promise.withResolvers();
+    const release = mock(() => {});
+    const validate = mock(() => {});
+    let cancelled = false;
+    const failure = new Error('synthetic cancelled admission');
+    const { handler, m } = scaffold({
+      prepareTurn: mock(async () => { entered.resolve(); await ready.promise; return { validate, release }; }),
+      checkpoint: mock(() => { if (cancelled) throw failure; }),
+      admitInput: mock(async (_chatId, _content, options) => { options.validateBeforeCommit(); return outcome !== 'duplicate'; }),
+    });
+    const pending = handler.schedule({ command: command(), content: 'synthetic input',
+      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' }, settlement: settlement(),
+    });
+    const observed = pending.catch((error) => error);
+    await entered.promise;
+    expect(m.admitInput).not.toHaveBeenCalled();
+    expect(m.runDirect).not.toHaveBeenCalled();
+    cancelled = outcome === 'cancel';
+    ready.resolve();
+    expect(await observed).toBe(outcome === 'cancel' ? failure : outcome === 'duplicate' ? 'duplicate' : 'scheduled');
+    await Promise.resolve();
+    expect(release).toHaveBeenCalledOnce();
+    if (outcome === 'commit') expect(m.runDirect).toHaveBeenCalledOnce();
+    else expect(m.runDirect).not.toHaveBeenCalled();
+    if (outcome === 'cancel') expect(m.admitInput).not.toHaveBeenCalled();
+    else expect(validate).toHaveBeenCalledOnce();
   });
 
   test('admits direct presentation without exposing it to provider run options', async () => {
@@ -340,8 +371,10 @@ describe('AcceptedInputHandler', () => {
       clientRequestId: 'request-1',
       turnId: 'turn-1',
       userMessagePresentation: presentation,
+      validateBeforeCommit: expect.any(Function),
     });
     expect(m.runDirect.mock.calls[0][2]).toEqual({
+      preparedExecution: await m.prepareTurn.mock.results[0].value,
       clientRequestId: 'request-1',
       turnId: 'turn-1',
     });
@@ -432,7 +465,7 @@ describe('AcceptedInputHandler', () => {
       settleOperationFailure: mock(async () => { events.push('settled'); }),
     });
     const { handler } = scaffold({
-      runDirect: mock(async (_reservation, _content, _options, _dispatch, beforeFailureRelease) => {
+      runDirect: mock(async (_reservation, _content, _options, beforeFailureRelease) => {
         try {
           await beforeFailureRelease(providerError);
         } finally {

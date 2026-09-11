@@ -1,7 +1,4 @@
 import { describe, expect, mock, test } from 'bun:test';
-import {
-  type AgentHost,
-} from '@garcon/server-agent-interface';
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type {
   AgentRuntimeEvent,
@@ -20,30 +17,18 @@ const NATIVE_SESSION = {
 
 function endpoint(endpointId: string) {
   return {
-    apiProviderId: 'provider',
-    endpointId,
-    providerLabel: 'Provider',
-    protocol: 'openai-compatible' as const,
-    baseUrl: `https://${endpointId}.example.test`,
-    model: 'model',
-    isLocal: false,
-    capabilities: null,
-    headers: {},
-    credential: null,
-  };
-}
-
-function host(): AgentHost {
-  return {
-    agentId: 'direct-test',
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
-    storage: {
-      rootDirectory: '/tmp',
-      directory: async () => '/tmp',
-      claimLegacyWorkspaceDirectory: async () => ({ moved: 0, skipped: 0 }),
+    selection: {
+      apiProviderId: 'provider',
+      endpointId,
+      providerLabel: 'Provider',
+      protocol: 'openai-compatible' as const,
+      baseUrl: `https://${endpointId}.example.test`,
+      model: 'model',
+      isLocal: false,
+      capabilities: null,
+      headers: {},
     },
-    environment: { get: () => undefined },
-    apiProviders: { resolveCredential: async () => null },
+    credential: null,
   };
 }
 
@@ -75,7 +60,7 @@ describe('DirectExecution', () => {
       nativeSession: NATIVE_SESSION,
     }));
     const runtime = { startSession };
-    const execution = new DirectExecution(host(), runtime as never);
+    const execution = new DirectExecution(runtime as never);
     const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...base } = request('endpoint-a');
     const start: AgentRuntimeStartRequest = {
       ...base,
@@ -106,7 +91,7 @@ describe('DirectExecution', () => {
   test('resumes from the exact native session without forwarding ledger context', async () => {
     const runTurn = mock(async () => {});
     const runtime = { runTurn };
-    const execution = new DirectExecution(host(), runtime as never);
+    const execution = new DirectExecution(runtime as never);
     const resume = request('endpoint-b');
 
     await expect(execution.resume(resume, () => {})).resolves.toBeUndefined();
@@ -126,7 +111,7 @@ describe('DirectExecution', () => {
         return { agentSessionId: SESSION_ID, nativeSession: NATIVE_SESSION };
       }),
     };
-    const execution = new DirectExecution(host(), runtime as never);
+    const execution = new DirectExecution(runtime as never);
     const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...start } = request('endpoint-a');
     const firstEvents: AgentRuntimeEvent[] = [];
     const replacementEvents: AgentRuntimeEvent[] = [];
@@ -154,7 +139,7 @@ describe('DirectExecution', () => {
         nativeSession: NATIVE_SESSION,
       })),
     };
-    const execution = new DirectExecution(host(), runtime as never);
+    const execution = new DirectExecution(runtime as never);
     const { agentSessionId: _agentSessionId, nativeSession: _nativeSession, ...start } = request('endpoint-a');
 
     await execution.start({ ...start, carriedContext: null }, (event) => emitted.push(event));

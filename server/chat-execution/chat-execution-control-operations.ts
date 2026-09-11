@@ -18,6 +18,8 @@ import {
   moveQueueEntry,
   pauseQueue,
   dequeueNextTurn,
+  sameQueuedTurn,
+  peekNextTurn,
   enqueueControlInput,
   consumeQueueSteer,
   releaseQueueSteer,
@@ -276,6 +278,7 @@ export class ChatExecutionControlOperations {
 
   async dequeueNextTurn(
     chatId: string,
+    expected: DequeuedTurnInput,
     admit: (input: DequeuedTurnInput) => boolean,
   ): Promise<{
     input: DequeuedTurnInput;
@@ -288,7 +291,7 @@ export class ChatExecutionControlOperations {
       if (transition.outcome.status === 'rejected') {
         throw transitionError(transition.outcome.rejection, current);
       }
-      if (!transition.outcome.value) return Promise.resolve(null);
+      if (!transition.outcome.value || !sameQueuedTurn(expected, transition.outcome.value)) return Promise.resolve(null);
       const inserted = admit(transition.outcome.value);
       const control = this.#commitNow(chatId, transition.next, transition.publicChanged);
       const committed = { value: transition.outcome.value, control };
@@ -376,6 +379,17 @@ export class ChatExecutionControlOperations {
       }
       this.#logPauseMutation('pause', chatId, committed.control, entryId);
       return committed.control;
+    });
+  }
+
+  async pauseBeforeDispatchFailure(chatId: string, expected: DequeuedTurnInput): Promise<boolean> {
+    return this.host.runExclusive(chatId, async () => {
+      const current = this.#load(chatId);
+      const head = peekNextTurn(current);
+      if (!head || !sameQueuedTurn(head, expected)) return false;
+      await this.#commitTransition(chatId, current,
+        pauseAfterDispatchFailure(current, expected.entry.id, transitionContext()));
+      return true;
     });
   }
 

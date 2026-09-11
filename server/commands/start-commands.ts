@@ -210,6 +210,7 @@ export class StartCommands {
       },
       content: input.command,
       options: {
+        commandType: 'chat-start',
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         turnId,
@@ -280,16 +281,6 @@ export class StartCommands {
           compensated = true;
         },
       },
-      dispatch: (executionAdmission) =>
-        this.deps.agents.startSession(input.chatId, input.command, {
-          projectPath: input.projectPath,
-          images: input.images.length > 0 ? input.images : undefined,
-          clientRequestId: input.clientRequestId,
-          clientMessageId: input.clientMessageId,
-          turnId,
-          executionAdmission,
-          agentSettings: input.agentSettings,
-        }),
     }).catch((error: unknown) => {
       if (input.origin === 'agent-command' && compensated) throw new AgentStartCompensatedError(error);
       throw error;

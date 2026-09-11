@@ -80,9 +80,6 @@ function createHost() {
       warn: mock(() => undefined),
       error: mock(() => undefined),
     },
-    apiProviders: {
-      resolveCredential: mock(async () => ({ kind: 'api-key', value: 'secret' })),
-    },
   };
 }
 
@@ -139,7 +136,6 @@ describe('CodexExecution', () => {
   it('preserves admission, endpoint configuration, session identity, and run correlation', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -148,20 +144,18 @@ describe('CodexExecution', () => {
     const publish = (event) => events.push(event);
     const request = startRequest({
       endpoint: {
-        apiProviderId: 'provider-1',
-        endpointId: 'endpoint-1',
-        providerLabel: 'Provider One',
-        protocol: 'openai-compatible',
-        baseUrl: 'https://example.test/v1',
-        model: 'gpt-5.4',
-        isLocal: false,
-        capabilities: { chatCompletions: false, responses: true },
-        headers: { 'X-Test': 'value' },
-        credential: {
-          kind: 'api-provider-endpoint',
+        selection: {
           apiProviderId: 'provider-1',
           endpointId: 'endpoint-1',
+          providerLabel: 'Provider One',
+          protocol: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          model: 'gpt-5.4',
+          isLocal: false,
+          capabilities: { chatCompletions: false, responses: true },
+          headers: { 'X-Test': 'value' },
         },
+        credential: 'secret',
       },
     });
 
@@ -212,7 +206,6 @@ describe('CodexExecution', () => {
       throw new Error('Codex thread did not materialize transcript');
     });
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -228,7 +221,6 @@ describe('CodexExecution', () => {
     const publish = () => {};
     const runtime = createRuntime();
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -258,7 +250,6 @@ describe('CodexExecution', () => {
   it('rejects goal controls that cannot start a new thread', async () => {
     const publish = () => {};
     const execution = new CodexExecution(
-      createHost(),
       createRuntime(),
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -272,7 +263,6 @@ describe('CodexExecution', () => {
     it(`keeps the predecessor run active when goal control has a pre-boundary ${outcome}`, async () => {
       const runtime = createRuntime();
       const execution = new CodexExecution(
-        createHost(),
         runtime,
         createPathNativeSessionCodec('codex'),
         createConfig(),
@@ -303,7 +293,6 @@ describe('CodexExecution', () => {
   it('retains successor correlation after a post-boundary delivery failure', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -340,7 +329,6 @@ describe('CodexExecution', () => {
     };
     const runtime = createRuntime();
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -395,7 +383,6 @@ describe('CodexExecution', () => {
     const host = createHost();
     const runtime = createRuntime(host);
     const execution = new CodexExecution(
-      host,
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -404,30 +391,28 @@ describe('CodexExecution', () => {
     const replacementEvents = [];
     await execution.start(startRequest(), (event) => priorEvents.push(event));
     runtime.emitFinished('chat-1', 'run-1');
-    host.apiProviders.resolveCredential.mockImplementation(async () => {
-      throw new Error('credential lookup failed before session activation');
+    runtime.startSession.mockImplementationOnce(async () => {
+      throw new Error('synthetic launch failure before session activation');
     });
 
     await expect(execution.start(startRequest({
       runId: 'run-2',
       endpoint: {
-        apiProviderId: 'provider-1',
-        endpointId: 'endpoint-1',
-        providerLabel: 'Provider One',
-        protocol: 'openai-compatible',
-        baseUrl: 'https://example.test/v1',
-        model: 'gpt-5.4',
-        isLocal: false,
-        capabilities: { chatCompletions: false, responses: true },
-        headers: {},
-        credential: {
-          kind: 'api-provider-endpoint',
+        selection: {
           apiProviderId: 'provider-1',
           endpointId: 'endpoint-1',
+          providerLabel: 'Provider One',
+          protocol: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          model: 'gpt-5.4',
+          isLocal: false,
+          capabilities: { chatCompletions: false, responses: true },
+          headers: {},
         },
+        credential: 'secret',
       },
     }), (event) => replacementEvents.push(event))).rejects.toThrow(
-      'credential lookup failed before session activation',
+      'synthetic launch failure before session activation',
     );
 
     runtime.emitRows('chat-1', 'run-1', [
@@ -447,7 +432,6 @@ describe('CodexExecution', () => {
     const host = createHost();
     const runtime = createRuntime(host);
     const execution = new CodexExecution(
-      host,
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -486,7 +470,6 @@ describe('CodexExecution', () => {
   it('forwards supported configuration changes while the provider source is live', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -522,7 +505,6 @@ describe('CodexExecution', () => {
     runtime.hasSource.mockReturnValue(true);
     runtime.isRunning.mockReturnValue(true);
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -546,7 +528,6 @@ describe('CodexExecution', () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -571,7 +552,6 @@ describe('CodexExecution', () => {
   it('allows returning to provider-default effort after the source is gone', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -600,7 +580,6 @@ describe('CodexExecution', () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -631,7 +610,6 @@ describe('CodexExecution', () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),
@@ -660,7 +638,6 @@ describe('CodexExecution', () => {
     runtime.isRunning.mockReturnValue(true);
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
-      createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
       createConfig(),

@@ -100,7 +100,7 @@ async function forkJsonlAtProviderPoint(
     const nativeSession = options.nativeSessions.encode({
       path: result.nativePath,
       agentSessionId: result.agentSessionId,
-      modelEndpointId: request.endpoint?.endpointId ?? sourceNative.modelEndpointId,
+      modelEndpointId: request.endpoint?.selection.endpointId ?? sourceNative.modelEndpointId,
     });
     let forkedMessages: readonly ChatMessage[] | null = null;
     if (result.expectedSemanticDigest !== undefined || request.source.nativeSeedReceipt) {

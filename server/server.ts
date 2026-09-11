@@ -225,12 +225,6 @@ export async function startServer(): Promise<void> {
 
     const integrationHostFactory = new IntegrationHostFactory({
       workspaceDir,
-      async resolveCredential({ reference, signal }) {
-        signal.throwIfAborted();
-        const resolved = apiProviderStore.getEndpoint(reference.endpointId);
-        if (!resolved || resolved.apiProvider.id !== reference.apiProviderId) return null;
-        return { kind: 'api-key', value: resolved.endpoint.apiKey };
-      },
     });
     const integrationRegistry = new IntegrationRegistry({
       integrations: defaultAgentIntegrations,

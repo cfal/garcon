@@ -1,4 +1,4 @@
-import type { ResolvedAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
+import type { AgentAdmittedEndpoint } from '@garcon/server-agent-interface';
 import type { CodexConfig } from '../../../config.js';
 import type { CodexConfigObject, CodexProviderConfig } from '../runtime-types.js';
 
@@ -7,7 +7,7 @@ export interface CodexEndpointRuntime {
 }
 
 export function buildCodexAppServerEndpointRuntime(
-  endpoint: ResolvedAgentEndpoint,
+  endpoint: AgentAdmittedEndpoint,
 ): CodexEndpointRuntime | null {
   if (endpoint.selection.protocol !== 'openai-compatible') return null;
   if (endpoint.selection.capabilities?.responses !== true) return null;

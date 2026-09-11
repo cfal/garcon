@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { userContents } from '../../support/chat-assertions.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,77 +7,111 @@ import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
 import type { ExecutionSettingsPatchResponse } from '../../../common/chat-command-contracts.js';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
 import { isRecord } from '../../../common/json.js';
-import type { ChatListRefreshRequestedMessage } from '../../../common/ws-events.js';
+import type { ChatListRefreshRequestedMessage, ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { ProviderSessionConfigurationRequest, ProviderSessionConfigurationResult } from '../../../server/execution-nodes/provider-configuration.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { fakeOpenAiRequestHeaders } from '../../support/openai-test-contract.js';
 
 describe('provider configuration through HTTP', () => {
   for (const operation of ['start', 'resume', 'single-query'] as const) {
-    test(`${operation} dispatches the endpoint snapshot captured before asynchronous validation`, async () => {
+    test(`${operation} dispatches the URL and credential captured before asynchronous validation`, async () => {
       const gate = validationGate();
       try {
         await withIntegrationFixture(`configuration-snapshot-${operation}`, async (fixture) => {
           const chatId = fixture.newChatId();
           const agent = fixture.directAgents.openAi;
-          if (operation === 'resume') {
-            const started = await fixture.client.startDirectChat({
-              chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic initial input',
-            });
-            await fixture.client.waitForTurnTerminal(chatId, started.turnId);
-          }
-          if (operation === 'single-query') {
-            await fixture.client.updateSettings({ ui: { promptRefinement: {
-              agentId: agent.agentId, model: agent.provider.model,
-              apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,
-              modelProtocol: agent.provider.protocol, thinkingMode: 'none',
-            } } });
-          }
-
-          const validation = gate.holdNext();
-          const output = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
-          const input = { chatId, agent, content: 'synthetic validated input' };
-          const pending = operation === 'single-query'
-            ? fixture.client.refinePrompt({ draft: input.content, target: 'prompt' })
-            : operation === 'start'
-              ? fixture.client.startDirectChat({ ...input, projectPath: fixture.dirs.project })
-              : fixture.client.runDirectChat(input);
-          void pending.catch(() => undefined);
+          const requests: { path: string; authorization: string | null }[] = [];
+          const endpoint = Bun.serve({
+            hostname: '0.0.0.0', port: 0, idleTimeout: 0,
+            async fetch(request) {
+              requests.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization') });
+              return fetch(`${fixture.fakeProviders.openAi.baseUrl}/v1/chat/completions`, {
+                method: 'POST', headers: fakeOpenAiRequestHeaders(), body: await request.text(), signal: request.signal,
+              });
+            },
+          });
           try {
-            const originalBaseUrl = `${fixture.fakeProviders.openAi.baseUrl}/v1`;
-            expect(await withTimeout(validation.entered.promise, 5_000,
-              () => 'Provider did not enter endpoint validation')).toMatchObject({
-              baseUrl: originalBaseUrl, model: agent.provider.model, endpointId: agent.provider.endpointId,
+            const originalBaseUrl = `http://127.0.0.1:${endpoint.port}/original`;
+            const changedBaseUrl = `http://127.0.0.1:${endpoint.port}/updated`;
+            await fixture.client.put<ApiProviderCatalogEntry>(`/api/v1/api-providers?id=${agent.provider.providerId}`, {
+              endpoint: { baseUrl: originalBaseUrl, apiKey: 'synthetic-original-key' },
             });
-            expect(fixture.fakeProviders.openAi.requests()).toHaveLength(operation === 'resume' ? 1 : 0);
-            const changedBaseUrl = `${fixture.fakeProviders.openAi.baseUrl}/synthetic-changed-endpoint`;
-            const changed = await fixture.client.put<ApiProviderCatalogEntry>(
-              `/api/v1/api-providers?id=${agent.provider.providerId}`,
-              { endpoint: { baseUrl: changedBaseUrl } },
-            );
-            expect(changed.endpoints.find((endpoint) => endpoint.id === agent.provider.endpointId)?.baseUrl).toBe(changedBaseUrl);
-            validation.release.resolve(true);
-            expect((await output.received).body.model).toBe(agent.provider.model);
-            expect(output.releaseText('synthetic validated result')).toBeTrue();
-            const result = await pending;
-            if ('refinedPrompt' in result) {
-              expect(result).toEqual({ success: true, refinedPrompt: 'synthetic validated result' });
-            } else {
-              await fixture.client.waitForTurnTerminal(chatId, result.turnId);
-              expect(parseAgentTurnReceipt(await fixture.client.get(
-                `/api/v1/chats/turn-receipt?chatId=${chatId}&turnId=${result.turnId}`,
-              ))).toMatchObject({ state: 'completed' });
-              expect((await fixture.client.getMessages(chatId)).messages.some((row) =>
-                'content' in row.message && row.message.content === 'synthetic validated result')).toBeTrue();
+            if (operation === 'resume') {
+              const started = await fixture.client.startDirectChat({
+                chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic initial input',
+              });
+              await fixture.client.waitForTurnTerminal(chatId, started.turnId);
             }
-            expect(fixture.fakeProviders.openAi.requests()).toHaveLength(operation === 'resume' ? 2 : 1);
-          } finally {
-            validation.release.resolve(false);
-            output.allowAbort();
-            output.releaseText('synthetic cleanup result');
-            await pending.catch(() => undefined);
-          }
+            if (operation === 'single-query') {
+              await fixture.client.updateSettings({ ui: { promptRefinement: {
+                agentId: agent.agentId, model: agent.provider.model,
+                apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,
+                modelProtocol: agent.provider.protocol, thinkingMode: 'none',
+              } } });
+            }
+
+            const validation = gate.holdNext();
+            const output = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
+            const input = { chatId, agent, content: 'synthetic validated input' };
+            const pending = operation === 'single-query'
+              ? fixture.client.refinePrompt({ draft: input.content, target: 'prompt' })
+              : operation === 'start'
+                ? fixture.client.startDirectChat({ ...input, projectPath: fixture.dirs.project })
+                : fixture.client.runDirectChat(input);
+            void pending.catch(() => undefined);
+            try {
+              expect(await withTimeout(validation.entered.promise, 5_000,
+                () => 'Provider did not enter endpoint validation')).toMatchObject({
+                baseUrl: originalBaseUrl, model: agent.provider.model, endpointId: agent.provider.endpointId,
+              });
+              expect(fixture.fakeProviders.openAi.requests()).toHaveLength(operation === 'resume' ? 1 : 0);
+              const changed = await fixture.client.put<ApiProviderCatalogEntry>(
+                `/api/v1/api-providers?id=${agent.provider.providerId}`,
+                { endpoint: { baseUrl: changedBaseUrl, apiKey: 'synthetic-updated-key' } },
+              );
+              expect(changed.endpoints.find((endpoint) => endpoint.id === agent.provider.endpointId)?.baseUrl).toBe(changedBaseUrl);
+              validation.release.resolve(true);
+              expect((await output.received).body.model).toBe(agent.provider.model);
+              expect(requests.every((request) => request.path === '/original/chat/completions'
+                && request.authorization === 'Bearer synthetic-original-key')).toBe(true);
+              expect(output.releaseText('synthetic validated result')).toBeTrue();
+              const result = await pending;
+              if ('refinedPrompt' in result) {
+                expect(result).toEqual({ success: true, refinedPrompt: 'synthetic validated result' });
+              } else {
+                await fixture.client.waitForTurnTerminal(chatId, result.turnId);
+                expect(parseAgentTurnReceipt(await fixture.client.get(
+                  `/api/v1/chats/turn-receipt?chatId=${chatId}&turnId=${result.turnId}`,
+                ))).toMatchObject({ state: 'completed' });
+                expect((await fixture.client.getMessages(chatId)).messages.some((row) =>
+                  'content' in row.message && row.message.content === 'synthetic validated result')).toBeTrue();
+              }
+              expect(fixture.fakeProviders.openAi.requests()).toHaveLength(operation === 'resume' ? 2 : 1);
+              const next = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
+              const following = operation === 'single-query'
+                ? fixture.client.refinePrompt({ draft: 'synthetic next input', target: 'prompt' })
+                : fixture.client.runDirectChat({ chatId, agent, content: 'synthetic next input' });
+              try {
+                await next.received;
+                expect(requests.at(-1)).toEqual({ path: '/updated/chat/completions', authorization: 'Bearer synthetic-updated-key' });
+                next.releaseText('synthetic next result');
+                const result = await following;
+                if ('refinedPrompt' in result) expect(result.refinedPrompt).toBe('synthetic next result');
+                else await fixture.client.waitForTurnTerminal(chatId, result.turnId);
+              } finally {
+                next.allowAbort();
+                next.releaseText('synthetic cleanup result');
+                await following.catch(() => undefined);
+              }
+            } finally {
+              validation.release.resolve(false);
+              output.allowAbort();
+              output.releaseText('synthetic cleanup result');
+              await pending.catch(() => undefined);
+            }
+          } finally { await endpoint.stop(true); }
         }, {
           authentication: 'account', bindAddress: '0.0.0.0',
           preloadModules: [fileURLToPath(new URL('../../support/provider-configuration-preload.ts', import.meta.url))],
@@ -85,6 +120,208 @@ describe('provider configuration through HTTP', () => {
       } finally { await gate.close(); }
     }, 30_000);
   }
+
+  test('rejects provider preparation before committing an existing-chat input', async () => {
+    const gate = validationGate();
+    try {
+      await withIntegrationFixture('execution-preparation-refusal', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const started = await fixture.client.startDirectChat({ chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic initial input' });
+        await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+        const before = await fixture.client.getMessages(chatId);
+        const validation = gate.holdNext();
+        const pending = fixture.client.runDirectChat({ chatId, agent, content: 'synthetic rejected input' });
+        void pending.catch(() => {});
+        try {
+          await withTimeout(validation.entered.promise, 5_000, () => 'Execution preparation did not validate');
+          expect(await fixture.client.getMessages(chatId)).toEqual(before);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+          validation.release.resolve(false);
+          await expect(pending).rejects.toMatchObject({ status: 500 });
+          expect(await fixture.client.getMessages(chatId)).toEqual(before);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+        } finally { validation.release.resolve(false); await pending.catch(() => {}); }
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_CONFIGURATION_GATE: gate.url },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
+
+  test('keeps a queued input editable during preparation and dispatches its revised head once', async () => {
+    const gate = validationGate();
+    try {
+      await withIntegrationFixture('execution-preparation-queue-edit', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const first = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic queue initial' });
+        const revised = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic revised queue input' });
+        let validation: ReturnType<typeof gate.holdNext> | undefined;
+        try {
+          await fixture.client.startDirectChat({ chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic queue initial' });
+          await first.received;
+          const queued = await fixture.client.enqueueNew(chatId, 'synthetic original queue input');
+          validation = gate.holdNext();
+          first.releaseText('synthetic initial response');
+          await withTimeout(validation.entered.promise, 5_000, () => 'Queued execution preparation did not validate');
+          const control = await fixture.client.getExecutionControl(chatId);
+          expect(control.queue.entries.map((entry) => entry.content)).toEqual(['synthetic original queue input']);
+          expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual(['synthetic queue initial']);
+          await withTimeout(fixture.client.replaceQueued({
+            chatId, entryId: queued.entryId, expectedRevision: control.queue.entries[0]!.revision,
+            clientRequestId: crypto.randomUUID(), content: 'synthetic revised queue input',
+          }), 5_000, () => 'Provider preparation held the queue mutation lock');
+          validation.release.resolve(true);
+          await revised.received;
+          const afterIndex = fixture.client.events().length;
+          revised.releaseText('synthetic revised response');
+          await fixture.client.waitForProcessing(chatId, false, { afterIndex });
+          expect(userContents((await fixture.client.getMessages(chatId)).messages))
+            .toEqual(['synthetic queue initial', 'synthetic revised queue input']);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(2);
+          expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+        } finally {
+          validation?.release.resolve(false);
+          first.releaseText('synthetic cleanup');
+          revised.releaseText('synthetic cleanup');
+        }
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_CONFIGURATION_GATE: gate.url },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
+
+  test('a rejected control preparation cannot block the following queued user input', async () => {
+    const gate = validationGate();
+    try {
+      await withIntegrationFixture('execution-preparation-control-failure', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const sourceChatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const first = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic target input' });
+        const source = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic source input' });
+        const next = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic queued input' });
+        let validation: ReturnType<typeof gate.holdNext> | undefined;
+        try {
+          const started = await fixture.client.startDirectChat({ chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic target input' });
+          await first.received;
+          await fixture.client.enqueueNew(chatId, 'synthetic queued input');
+          const paused = await fixture.client.pauseQueue(chatId);
+          await fixture.client.startDirectChat({ chatId: sourceChatId, agent, projectPath: fixture.dirs.project, content: 'synthetic source input' });
+          await source.received;
+          source.releaseText(`<garcon-send-message to="${chatId}" hide-sender="false">\nsynthetic rejected control\n</garcon-send-message>`);
+          await fixture.client.waitForEvent(
+            (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === sourceChatId
+              && event.messages.some(({ message }) => message.type === 'transcript-notice'
+                && message.detail?.type === 'inter-agent-message-outcome'),
+            'queued control receipt',
+          );
+          validation = gate.holdNext();
+          first.releaseText('synthetic initial response');
+          await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+          await fixture.client.resumeQueue(chatId, paused.control.queue.pause!.id);
+          await withTimeout(validation.entered.promise, 5_000, () => 'Control preparation did not reach validation');
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(2);
+          validation.release.resolve(false);
+          await withTimeout(next.received, 5_000, () => 'Rejected control blocked the queued user input');
+          const afterIndex = fixture.client.markEvents();
+          next.releaseText('synthetic queued response');
+          await fixture.client.waitForProcessing(chatId, false, { afterIndex });
+          expect(userContents((await fixture.client.getMessages(chatId)).messages))
+            .toEqual(['synthetic target input', 'synthetic queued input']);
+          const control = await fixture.client.getExecutionControl(chatId);
+          expect(control.queue.entries).toEqual([]);
+          expect(control.queue.pause).toBeNull();
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(3);
+        } finally {
+          validation?.release.resolve(false);
+          for (const held of [first, source, next]) { held.allowAbort(); held.releaseText('synthetic cleanup'); }
+        }
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_CONFIGURATION_GATE: gate.url },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
+
+  test('Stop cancels queued preparation even when the queue is resumed before validation returns', async () => {
+    const gate = validationGate();
+    try {
+      await withIntegrationFixture('execution-preparation-stop', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const first = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic first input' });
+        const next = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'synthetic queued input' });
+        let oldValidation: ReturnType<typeof gate.holdNext> | undefined;
+        let freshValidation: ReturnType<typeof gate.holdNext> | undefined;
+        try {
+          await fixture.client.startDirectChat({ chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic first input' });
+          await first.received;
+          await fixture.client.enqueueNew(chatId, 'synthetic queued input');
+          oldValidation = gate.holdNext();
+          first.releaseText('synthetic first response');
+          await withTimeout(oldValidation.entered.promise, 5_000, () => 'Queued preparation did not reach validation');
+          const stopped = await fixture.client.stopChat({ chatId, clientRequestId: crypto.randomUUID() });
+          expect(stopped.control.queue.pause).not.toBeNull();
+          await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
+          freshValidation = gate.holdNext();
+          oldValidation.release.resolve(true);
+          await withTimeout(freshValidation.entered.promise, 5_000, () => 'Resuming reused the cancelled preparation');
+          expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual(['synthetic first input']);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+          freshValidation.release.resolve(true);
+          await next.received;
+          const afterIndex = fixture.client.events().length;
+          next.releaseText('synthetic queued response');
+          await fixture.client.waitForProcessing(chatId, false, { afterIndex });
+          expect(userContents((await fixture.client.getMessages(chatId)).messages))
+            .toEqual(['synthetic first input', 'synthetic queued input']);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(2);
+        } finally {
+          oldValidation?.release.resolve(false);
+          freshValidation?.release.resolve(false);
+          first.releaseText('synthetic cleanup');
+          next.releaseText('synthetic cleanup');
+        }
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_CONFIGURATION_GATE: gate.url },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
+
+  test('reserves start capacity while another chat is still validating its configuration', async () => {
+    const gate = validationGate();
+    try {
+      await withIntegrationFixture('execution-preparation-capacity', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const validation = gate.holdNext();
+        const first = fixture.client.startDirectChat({ chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic first input' });
+        void first.catch(() => {});
+        try {
+          await withTimeout(validation.entered.promise, 5_000, () => 'The first start did not reach validation');
+          await expect(fixture.client.startDirectChat({ chatId: fixture.newChatId(), agent,
+            projectPath: fixture.dirs.project, content: 'synthetic excess input',
+          })).rejects.toMatchObject({ status: 429 });
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(0);
+          validation.release.resolve(true);
+          await fixture.client.waitForTurnTerminal(chatId, (await first).turnId);
+          expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+        } finally { validation.release.resolve(false); await first.catch(() => {}); }
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_CONFIGURATION_GATE: gate.url, GARCON_MAX_SESSIONS: '1' },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
 
   test('persists settings only after provider validation, preserves rejected settings, and resumes after restart', async () => {
     const gate = validationGate();
@@ -277,7 +514,7 @@ function validationGate() {
   let next: HeldValidation | null = null;
   const held = new Set<HeldValidation>();
   const server = Bun.serve({
-    hostname: '0.0.0.0', port: 0,
+    hostname: '0.0.0.0', port: 0, idleTimeout: 0,
     async fetch(request) {
       const validation = next;
       next = null;

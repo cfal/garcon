@@ -3,7 +3,6 @@ import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type { ClaudeThinkingMode } from '@garcon/common/chat-modes';
 import {
   AgentIntegrationError,
-  type AgentHost,
   type AgentLogger,
   type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
@@ -13,7 +12,6 @@ import {
   type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import {
   buildClaudeEndpointRuntime,
@@ -28,7 +26,6 @@ import type { ClaudeConfig } from '../../config.js';
 
 export class ClaudeExecution implements AgentRuntimeExecution {
   constructor(
-    private readonly host: AgentHost,
     private readonly runtime: ClaudeCliRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly logger: AgentLogger,
@@ -40,7 +37,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     request.admission.signal.throwIfAborted();
-    const envOverrides = await this.#endpointEnvironment(request);
+    const envOverrides = this.#endpointEnvironment(request);
     const agentSessionId = crypto.randomUUID();
     const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
       configHomeDir: envOverrides?.CLAUDE_CONFIG_DIR,
@@ -61,7 +58,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
       nativeSession: this.nativeSessions.encode({
         path: nativePath,
         agentSessionId,
-        modelEndpointId: request.endpoint?.endpointId ?? null,
+        modelEndpointId: request.endpoint?.selection.endpointId ?? null,
       }),
       nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
     };
@@ -103,7 +100,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
       command: request.prompt,
       images: request.attachments,
       nativePath: this.nativeSessions.decode(request.nativeSession).path,
-      envOverrides: await this.#endpointEnvironment(request),
+      envOverrides: this.#endpointEnvironment(request),
       operation: runtimeOperation(request.runId, publish),
     });
   }
@@ -174,12 +171,9 @@ export class ClaudeExecution implements AgentRuntimeExecution {
   }
 
 
-  async #endpointEnvironment(request: AgentRuntimeExecutionContext) {
-    const endpoint = await resolveAgentEndpoint(
-      this.host,
-      request.endpoint,
-      request.admission.signal,
-    );
+  #endpointEnvironment(request: AgentRuntimeExecutionContext) {
+    request.admission.signal.throwIfAborted();
+    const endpoint = request.endpoint;
     const environment = buildClaudeHostEnvironment(this.config);
     if (!endpoint) return environment;
     const runtime = buildClaudeEndpointRuntime(endpoint);

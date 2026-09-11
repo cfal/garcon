@@ -22,6 +22,7 @@ type ChatOwner =
   | { readonly kind: 'direct'; readonly reservationId: string }
   | {
       readonly kind: 'draining';
+      readonly preparationController: AbortController;
       activeEntryId: string | null;
     }
   | { readonly kind: 'snapshot'; readonly reservationId: string };
@@ -96,6 +97,7 @@ export class ExecutionOwnership {
   // never delays ownership retirement.
   #abortAdmissions(state: ChatExecutionState, reason: Error): void {
     state.turn?.admissionController.abort(reason);
+    if (state.owner.kind === 'draining') state.owner.preparationController.abort(reason);
   }
 
   // Drain handles only exist while a drain owns the chat. The drainer sets them between
@@ -264,13 +266,18 @@ export class ExecutionOwnership {
       throw new Error('Cannot drain a chat holding an execution reservation');
     }
     if (state.owner.kind === 'draining') return;
-    state.owner = { kind: 'draining', activeEntryId: null };
+    state.owner = { kind: 'draining', activeEntryId: null, preparationController: new AbortController() };
+  }
+
+  drainSignal(chatId: string): AbortSignal {
+    return this.#requireDraining(chatId, 'prepare a turn').preparationController.signal;
   }
 
   endDrain(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
     if (state.owner.kind === 'draining') {
+      state.owner.preparationController.abort(new Error('Queue drain ended'));
       state.owner = state.repairSnapshot
         ? { kind: 'snapshot', reservationId: state.repairSnapshot.reservationId }
         : IDLE_OWNER;
@@ -409,7 +416,7 @@ export class ExecutionOwnership {
       // A live drain keeps its ownership while its loop unwinds against a deleted chat, but
       // loses the handles that only describe the entry it was running.
       state.owner = state.owner.kind === 'draining'
-        ? { kind: 'draining', activeEntryId: null }
+        ? { ...state.owner, activeEntryId: null }
         : IDLE_OWNER;
     }
     this.#turnFinalizations.clearChat(chatId);

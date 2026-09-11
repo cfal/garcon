@@ -54,7 +54,9 @@ describe('instance-qualified controls', () => {
   });
 
   it('captures and delivers steering on the selected instance despite a colliding native ID', async () => {
+    await fixture.agents.runAgentTurn(chatId, 'synthetic prompt');
     const target = fixture.agents.captureSteerTarget(chatId);
+    await fixture.agents.prepareSteerTarget(chatId, target);
     const prepare = mock(async () => {});
     expect(await fixture.agents.steerInput(chatId, 'synthetic guidance', {
       clientRequestId: 'request-steer', clientMessageId: 'message-steer',

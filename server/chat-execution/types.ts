@@ -17,6 +17,7 @@ import type {
 import type {
   AgentExecutionCommandType,
   AgentExecutionAdmission,
+  PreparedExecutionTurn,
   AgentSteerOptions,
   RunAgentTurnOptions,
 } from '../agents/session-types.ts';
@@ -46,6 +47,7 @@ export type UserInputAdmissionOptions = Pick<
 > & {
   commandType?: AgentExecutionCommandType | 'steer' | 'goal-control';
   createdAt?: string; userMessagePresentation?: UserMessagePresentation;
+  validateBeforeCommit?: () => void;
 };
 
 export class QueueEntryMutationError extends DomainError {
@@ -146,7 +148,7 @@ export interface AcceptedDirectInput {
   options: RunAgentTurnOptions;
   settlement: CommandSettlementPort;
   preparation?: DirectInputPreparation;
-  dispatch?: (admission: AgentExecutionAdmission) => Promise<void>; userMessagePresentation?: UserMessagePresentation;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export type DirectInputScheduleOutcome = 'scheduled' | 'duplicate';
@@ -154,7 +156,8 @@ export type DirectInputScheduleOutcome = 'scheduled' | 'duplicate';
 export interface AcceptedDirectOperation {
   command: AcceptedExecutionCommand;
   settlement: CommandSettlementPort;
-  dispatch: (admission: AgentExecutionAdmission) => Promise<void>;
+  content: string;
+  options: RunAgentTurnOptions & { commandType: 'agent-compact' };
 }
 
 export interface AcceptedQueueCreate {
@@ -249,8 +252,10 @@ export interface TranscriptSnapshotReservation {
 }
 
 export interface AgentTurnRunnerPort {
+  prepareTurn(chatId: string, options: RunAgentTurnOptions, signal: AbortSignal): Promise<PreparedExecutionTurn>;
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   captureSteerTarget(chatId: string): AgentSteerTarget | null;
+  prepareSteerTarget(chatId: string, target: AgentSteerTarget | null): Promise<() => void>;
   steerInput(
     chatId: string,
     input: string,

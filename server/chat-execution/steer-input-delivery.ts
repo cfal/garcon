@@ -53,12 +53,16 @@ export class SteerInputDelivery {
     let inserted = false;
     try {
       this.#assertTarget(chatId, target);
+      const validateProvider = await this.options.turnRunner.prepareSteerTarget(chatId, target.providerTarget);
+      const validate = () => { this.#assertTarget(chatId, target); validateProvider(); };
+      validate();
       inserted = await this.options.admitInput(chatId, content, {
         clientRequestId: options.clientRequestId,
         clientMessageId: options.clientMessageId,
         transcriptViewId: options.transcriptViewId,
         turnId: target.identity.turnId,
         commandType: 'steer',
+        validateBeforeCommit: validate,
         userMessagePresentation,
       });
       if (!inserted) return { turnId: target.identity.turnId, duplicate: true };
@@ -76,6 +80,9 @@ export class SteerInputDelivery {
   async deliverControl(
     chatId: string, content: string, transcriptViewId: string, target: CapturedSteerTarget,
   ): Promise<void> {
+    this.#assertTarget(chatId, target);
+    const validateProvider = await this.options.turnRunner.prepareSteerTarget(chatId, target.providerTarget);
+    validateProvider();
     const clientMessageId = crypto.randomUUID();
     await this.#deliverToProvider(chatId, content, {
       clientRequestId: clientMessageId,

@@ -1,22 +1,14 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
-import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
-import type { AgentExecutionAdmission, AgentRunningSession } from './execution.js';
+import type { AgentExecutionAdmission, AgentRunningSession, AgentPreparedProviderConfiguration } from './execution.js';
 import type { AgentEmissionSink } from './producer.js';
 import type { AgentNativeSessionRef } from './transcript.js';
-import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 
 export type AgentExecutionHandle = object;
 
-export interface AgentExecutionContextV5 {
+export interface AgentExecutionContextV5 extends AgentPreparedProviderConfiguration {
   readonly chatId: string;
   readonly projectPath: string;
-  readonly model: string;
-  readonly permissionMode: PermissionMode;
-  readonly thinkingMode: ThinkingMode;
-  readonly settings: AgentSettingsEnvelope;
-  readonly endpoint: AgentEndpointSelection | null;
   readonly runId: string;
   readonly output: AgentEmissionSink;
   readonly admission: AgentExecutionAdmission;

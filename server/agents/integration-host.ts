@@ -11,17 +11,14 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import type {
-  AgentApiProviderReader,
   AgentEnvironmentReader,
   AgentHost,
   AgentHostFactory,
   AgentLegacyDirectoryClaim,
   AgentLogger,
-  AgentResolvedCredential,
   AgentScopedStorage,
 } from '@garcon/server-agent-interface';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
-import type { AgentCredentialReference } from '@garcon/common/agent-execution';
 import type { JsonObject } from '@garcon/common/json';
 import { createLogger } from '../lib/log.js';
 
@@ -30,11 +27,6 @@ const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 export interface IntegrationHostFactoryOptions {
   readonly workspaceDir: string;
-  readonly resolveCredential: (request: {
-    readonly agentId: string;
-    readonly reference: AgentCredentialReference;
-    readonly signal: AbortSignal;
-  }) => Promise<AgentResolvedCredential | null>;
   readonly readEnvironment?: (name: string) => string | undefined;
   readonly loggerFactory?: (agentId: string) => AgentLogger;
 }
@@ -263,19 +255,11 @@ export class IntegrationHostFactory implements AgentHostFactory {
     const environment = new BoundEnvironmentReader(
       this.#options.readEnvironment ?? ((name) => process.env[name]),
     );
-    const apiProviders: AgentApiProviderReader = {
-      resolveCredential: ({ reference, signal }) => this.#options.resolveCredential({
-        agentId,
-        reference,
-        signal,
-      }),
-    };
     const host: AgentHost = Object.freeze({
       agentId,
       logger: this.#options.loggerFactory?.(agentId) ?? defaultLogger(agentId),
       storage: new ScopedStorage(this.#options.workspaceDir, agentId),
       environment,
-      apiProviders,
     });
     this.#hosts.set(agentId, { host, environment });
     return host;

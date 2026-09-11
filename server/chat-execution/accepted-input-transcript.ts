@@ -51,7 +51,7 @@ export class AcceptedInputTranscript {
     content: string,
     options: UserInputAdmissionOptions,
   ): Promise<boolean> {
-    if (!content && !options.images?.length) return true;
+    if (!content && !options.images?.length) { options.validateBeforeCommit?.(); return true; }
     if (!options.clientRequestId) {
       throw new TypeError('Accepted input is missing a client request ID');
     }
@@ -68,7 +68,7 @@ export class AcceptedInputTranscript {
     content: string,
     options: UserInputAdmissionOptions,
   ): boolean {
-    if (!content && !options.images?.length) return true;
+    if (!content && !options.images?.length) { options.validateBeforeCommit?.(); return true; }
     if (!options.clientRequestId) {
       throw new TypeError('Accepted input is missing a client request ID');
     }

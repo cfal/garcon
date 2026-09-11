@@ -1,3 +1,4 @@
+import type { AgentAdmittedEndpoint } from './execution.js';
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
@@ -182,7 +183,7 @@ export interface AgentSingleQueryRequest {
   readonly thinkingMode: ThinkingMode;
   readonly timeoutMs?: number;
   readonly settings: AgentSettingsEnvelope;
-  readonly endpoint: AgentEndpointSelection | null;
+  readonly endpoint: AgentAdmittedEndpoint | null;
   readonly signal: AbortSignal;
 }
 
@@ -198,7 +199,7 @@ export interface AgentTextGenerationRequest {
   readonly model: string;
   readonly thinkingMode: ThinkingMode;
   readonly settings: AgentSettingsEnvelope;
-  readonly endpoint: AgentEndpointSelection | null;
+  readonly endpoint: AgentAdmittedEndpoint | null;
   /** Positive integer milliseconds, at most MAX_TEXT_GENERATION_TIMEOUT_MS. */
   readonly timeoutMs: number;
   readonly signal: AbortSignal;

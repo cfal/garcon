@@ -3,7 +3,6 @@ import {
   AgentIntegrationError,
   type AgentEstablishedSession,
   type AgentGoalControlRequest,
-  type AgentHost,
 } from '@garcon/server-agent-interface';
 import {
   type AgentRuntimeExecution,
@@ -12,7 +11,6 @@ import {
   type AgentRuntimeResumeRequest,
   type AgentRuntimeStartRequest,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
 import {
@@ -38,14 +36,13 @@ type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'output'>;
 
 export class CodexExecution implements AgentRuntimeExecution {
   constructor(
-    private readonly host: AgentHost,
     private readonly runtime: CodexAppServerRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly config: CodexConfig,
   ) {}
 
   async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
-    const configuration = await this.#runtimeConfiguration(request);
+    const configuration = this.#runtimeConfiguration(request);
     const runtimeRequest = prepareStartRequest(request, configuration, publish);
     // A blocking runtime can settle the first turn inside startSession.
     const holder: { session: AgentEstablishedSession | null } = { session: null };
@@ -56,7 +53,7 @@ export class CodexExecution implements AgentRuntimeExecution {
         nativeSession: this.nativeSessions.encode({
           path: started.nativePath,
           agentSessionId: started.agentSessionId,
-          modelEndpointId: request.endpoint?.endpointId ?? null,
+          modelEndpointId: request.endpoint?.selection.endpointId ?? null,
         }),
         nativeSeedReceipt: receiptForCarriedContext(
           request.carriedContext,
@@ -80,7 +77,7 @@ export class CodexExecution implements AgentRuntimeExecution {
           nativeSession: this.nativeSessions.encode({
             path: started.nativePath,
             agentSessionId: started.agentSessionId,
-            modelEndpointId: request.endpoint?.endpointId ?? null,
+            modelEndpointId: request.endpoint?.selection.endpointId ?? null,
           }),
         }
       : emitStarted(started);
@@ -96,7 +93,7 @@ export class CodexExecution implements AgentRuntimeExecution {
   ): Promise<boolean> {
     const runtimeRequest = prepareResumeRequest(
       request,
-      await this.#runtimeConfiguration(request),
+      this.#runtimeConfiguration(request),
       this.nativeSessions,
       publish,
     );
@@ -168,20 +165,17 @@ export class CodexExecution implements AgentRuntimeExecution {
   ): Promise<void> {
     await action(prepareResumeRequest(
       request,
-      await this.#runtimeConfiguration(request),
+      this.#runtimeConfiguration(request),
       this.nativeSessions,
       publish,
     ));
   }
 
-  async #runtimeConfiguration(
+  #runtimeConfiguration(
     request: AgentRuntimeExecutionContext,
-  ): Promise<CodexRuntimeConfiguration> {
-    const endpoint = await resolveAgentEndpoint(
-      this.host,
-      request.endpoint,
-      request.admission.signal,
-    );
+  ): CodexRuntimeConfiguration {
+    request.admission.signal.throwIfAborted();
+    const endpoint = request.endpoint;
     if (!endpoint) {
       return { envOverrides: buildCodexHostEnvironment(this.config) };
     }

@@ -25,6 +25,7 @@ import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
 import { isThinkingModeSupported } from '../../common/execution-defaults.js';
 import { sameExecutionOwner, type ExecutionLocation } from '../../common/execution-location.js';
 import type { LocalExecutionPlacement } from '../execution-nodes/local-placement.js';
+import { toAgentEndpointSelection } from './execution-planning.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -155,7 +156,7 @@ export class AgentHandoffService {
         422,
       );
     }
-    const endpoint = this.deps.endpointResolver.resolveEndpointReference(selection);
+    const endpoint = toAgentEndpointSelection(this.deps.endpointResolver, selection);
     if (endpoint) {
       if (!integration.endpoints) {
         throw new DomainError(
@@ -164,22 +165,7 @@ export class AgentHandoffService {
           422,
         );
       }
-      await integration.endpoints.validate({
-        apiProviderId: selection.apiProviderId!,
-        endpointId: selection.endpointId!,
-        providerLabel: endpoint.apiProvider.label || selection.apiProviderId!,
-        protocol: selection.protocol!,
-        baseUrl: endpoint.endpoint.baseUrl,
-        model: selection.model,
-        isLocal: selection.isLocal,
-        capabilities: endpoint.endpoint.capabilities ?? null,
-        headers: { ...(endpoint.endpoint.headers ?? {}) },
-        credential: {
-          kind: 'api-provider-endpoint',
-          apiProviderId: selection.apiProviderId!,
-          endpointId: selection.endpointId!,
-        },
-      });
+      await integration.endpoints.validate(endpoint);
     }
 
     const permissionMode = requested.permissionMode ?? preferredValue(

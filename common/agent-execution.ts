@@ -7,12 +7,6 @@ export interface AgentAttachment {
   readonly mimeType: string;
 }
 
-export interface AgentCredentialReference {
-  readonly kind: 'api-provider-endpoint';
-  readonly apiProviderId: string;
-  readonly endpointId: string;
-}
-
 export interface AgentEndpointSelection {
   readonly apiProviderId: string;
   readonly endpointId: string;
@@ -23,7 +17,6 @@ export interface AgentEndpointSelection {
   readonly isLocal: boolean;
   readonly capabilities: OpenAiEndpointCapabilities | null;
   readonly headers: Readonly<Record<string, string>>;
-  readonly credential: AgentCredentialReference | null;
 }
 
 export interface AgentAuthStatus {

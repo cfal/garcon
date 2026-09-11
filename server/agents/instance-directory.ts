@@ -22,6 +22,8 @@ import { LocalProviderSingleQueryService } from '../execution-node/local-provide
 import type { ProviderSingleQueryService } from '../execution-nodes/provider-single-query.js';
 import { LocalProviderTextGenerationService } from '../execution-node/local-provider-text-generation.js';
 import type { ProviderTextGenerationService } from '../execution-nodes/provider-text-generation.js';
+import { LocalProviderExecutionService } from '../execution-node/local-provider-execution.js';
+import type { ProviderExecutionService } from '../execution-nodes/provider-execution.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -43,6 +45,7 @@ export class AgentInstanceDirectory {
   readonly #nativeForkServices = new Map<string, ProviderNativeForkService>();
   readonly #singleQueryServices = new Map<string, ProviderSingleQueryService>();
   readonly #textGenerationServices = new Map<string, ProviderTextGenerationService>();
+  readonly #executionServices = new Map<string, ProviderExecutionService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -87,6 +90,17 @@ export class AgentInstanceDirectory {
 
   configurationFor(owner: LocatedChatOwner): ProviderConfigurationService {
     return this.#configurationService(this.requireFor(owner));
+  }
+
+  executionFor(owner: LocatedChatOwner): ProviderExecutionService {
+    const integration = this.requireFor(owner);
+    const key = executionInstanceKey(owner.executionLocation);
+    let service = this.#executionServices.get(key);
+    if (!service) {
+      service = new LocalProviderExecutionService(integration, this.#configurationService(integration));
+      this.#executionServices.set(key, service);
+    }
+    return service;
   }
 
   catalogForInstance(ref: ExecutionInstanceRef): ProviderCatalogService {

@@ -22,7 +22,6 @@ function createHost(Integration: AgentIntegrationClass, root: string) {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     environment: { get: () => undefined },
     storage: { rootDirectory: root, directory: mock(forbidden), claimLegacyWorkspaceDirectory: mock(forbidden) },
-    apiProviders: { resolveCredential: mock(async () => ({ kind: 'api-key', value: 'synthetic-credential' })) },
   } satisfies AgentHost;
 }
 
@@ -93,9 +92,12 @@ for (const { provider, entrypoint } of cases) {
         prompt, model: 'synthetic-model', thinkingMode: 'none', timeoutMs: 5_000,
         settings: { ...integration.settings.defaults(), values: { tools: ['bash'], cwd: root, projectPath: root } },
         endpoint: {
-          apiProviderId: 'synthetic-provider', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic provider',
-          protocol: provider.protocol, baseUrl: `http://127.0.0.1:${server.port}/v1`, model: 'synthetic-model',
-          isLocal: true, capabilities: null, headers: {}, credential: null,
+          selection: {
+            apiProviderId: 'synthetic-provider', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic provider',
+            protocol: provider.protocol, baseUrl: `http://127.0.0.1:${server.port}/v1`, model: 'synthetic-model',
+            isLocal: true, capabilities: null, headers: {},
+          },
+          credential: null,
         },
         signal: new AbortController().signal,
       };
@@ -129,7 +131,6 @@ for (const { provider, entrypoint } of cases) {
       expect(await readdir(root)).toEqual(['synthetic-private-file.txt']);
       expect(host.storage.directory).not.toHaveBeenCalled();
       expect(host.storage.claimLegacyWorkspaceDirectory).not.toHaveBeenCalled();
-      expect(host.apiProviders.resolveCredential).not.toHaveBeenCalled();
     } finally {
       try { await integration?.lifecycle.stop(); }
       finally {

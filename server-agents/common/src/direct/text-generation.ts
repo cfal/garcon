@@ -1,11 +1,9 @@
-import { AgentIntegrationError, MAX_TEXT_GENERATION_TIMEOUT_MS, type AgentHost, type AgentTextGeneration } from '@garcon/server-agent-interface';
-import { resolveAgentEndpoint, type ResolvedAgentEndpoint } from '../execution/resolve-endpoint.js';
+import { AgentIntegrationError, MAX_TEXT_GENERATION_TIMEOUT_MS, type AgentAdmittedEndpoint, type AgentTextGeneration } from '@garcon/server-agent-interface';
 import { withSingleQueryControl } from '../shared/single-query-control.js';
 import { classifyDirectIntegrationError } from './errors.js';
 
 export function createDirectTextGeneration(
-  host: AgentHost,
-  runtime: { runSingleQuery(prompt: string, endpoint: ResolvedAgentEndpoint, options: Record<string, unknown>): Promise<string> },
+  runtime: { runSingleQuery(prompt: string, endpoint: AgentAdmittedEndpoint, options: Record<string, unknown>): Promise<string> },
 ): AgentTextGeneration {
   return {
     async run(input) {
@@ -16,7 +14,7 @@ export function createDirectTextGeneration(
         throw new TypeError('Invalid text generation timeout');
       }
       return withSingleQueryControl({ signal: callerSignal, timeoutMs: request.timeoutMs }, async (signal) => {
-        const endpoint = await resolveAgentEndpoint(host, request.endpoint, signal);
+        const endpoint = request.endpoint;
         signal.throwIfAborted();
         if (!endpoint) throw new AgentIntegrationError('INVALID_ENDPOINT', 'Text generation requires an API provider endpoint', false);
         try {

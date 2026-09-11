@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { RunAgentTurnOptions } from '../agents/session-types.ts';
+import type { PreparedExecutionTurn, RunAgentTurnOptions } from '../agents/session-types.ts';
 import {
   hasPendingTurnInput,
   type StoredControlInputEntry,
@@ -10,20 +10,20 @@ import { DomainError, ProjectUnavailableError } from '../lib/domain-error.ts';
 import { isRecoverablePreambleAdmissionError } from '../preambles/selection.js';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
-import type { DequeuedTurnInput } from './chat-execution-control-transitions.ts';
+import { peekNextTurn, type DequeuedTurnInput } from './chat-execution-control-transitions.ts';
 import type { ExecutionOwnership } from './execution-ownership.ts';
 import {
   executionTurnIdentity,
   type AgentTurnRunnerPort,
   type ProjectAdmissionPort,
-  type QueueDrainOptionsResolver,
+  type UserInputAdmissionOptions,
 } from './types.ts';
 
 const logger = createLogger('queue-dispatch');
 
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
-  registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
+  registerQueued(chatId: string, content: string, options: RunAgentTurnOptions & Pick<UserInputAdmissionOptions, 'validateBeforeCommit'>): boolean;
   appendControlReceipt(chatId: string, entry: StoredControlInputEntry): void;
   isControlInputViewCurrent(chatId: string, viewId: string): boolean;
   discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
@@ -37,7 +37,6 @@ export interface QueueDispatchDeps {
   ownership: ExecutionOwnership;
   controls: ChatExecutionControlOperations;
   turnRunner: AgentTurnRunnerPort;
-  getDrainOptions: QueueDrainOptionsResolver;
   // Shared with selection Save and direct admission; held around the dequeue
   // transition so a queued input resolves selection at admission, never before
   // a Save's update-notice attempt. Expressed as a function port so the lock
@@ -47,13 +46,9 @@ export interface QueueDispatchDeps {
   callbacks: QueueDispatchCallbacks;
 }
 
-function optionsForTurn(
-  options: RunAgentTurnOptions,
-  input: DequeuedTurnInput,
-): RunAgentTurnOptions & { createdAt: string } {
+function optionsForTurn(input: DequeuedTurnInput): RunAgentTurnOptions & { createdAt: string } {
   const submission = input.kind === 'user' ? input.entry.submission : null;
   return {
-    ...options,
     clientRequestId: crypto.randomUUID(),
     clientMessageId: submission?.clientMessageId ?? crypto.randomUUID(),
     turnId: crypto.randomUUID(),
@@ -96,11 +91,8 @@ export class QueueDrainer {
         callbacks.publishIdle(chatId);
         return;
       }
-      if (
-        pending.pause
-        || pending.entries.some((entry) => entry.status === 'steering')
-        || this.#shouldHalt(chatId)
-      ) return;
+      const candidate = peekNextTurn(pending);
+      if (!candidate || this.#shouldHalt(chatId)) return;
       if (pending.entries.length > 0) {
         try {
           await this.deps.projectAdmission.assertAvailable(chatId);
@@ -115,91 +107,121 @@ export class QueueDrainer {
       }
       if (this.#shouldHalt(chatId)) return;
 
-      let options: RunAgentTurnOptions | undefined;
-      let inputInserted = false;
-      const admission = { failure: null as DomainError | null };
-      let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
+      const options = optionsForTurn(candidate);
+      let prepared: PreparedExecutionTurn | undefined;
       try {
-        // The dequeue transition and its synchronous registerQueued() callback
-        // run inside the selection/admission lock; the callback itself stays
-        // synchronous, so it never awaits inside the dequeue.
-        result = await this.deps.runSelectionAdmissionExclusive(
-          chatId,
-          () => controls.dequeueNextTurn(chatId, (input) => {
-            options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
-            if (input.kind === 'control') {
-              if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
-                logger.debug('queue: discarded stale control input', {
-                  chatId,
-                  entryId: input.entry.id,
-                  transcriptViewId: input.entry.transcriptViewId,
-                });
-                return false;
-              }
-              callbacks.appendControlReceipt(chatId, input.entry);
-              inputInserted = true;
-              return true;
-            }
-            try {
-              inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
-            } catch (error) {
-              if (!isRecoverablePreambleAdmissionError(error)) throw error;
-              admission.failure = error;
-              return false;
-            }
-            return inputInserted;
-          }),
-        );
-      } catch (error) {
-        if (inputInserted) callbacks.discardPreparedInput(chatId, options?.clientMessageId);
-        throw error;
-      }
-      if (!result) {
-        const control = await controls.read(chatId);
-        if (!hasPendingTurnInput(control)) callbacks.publishIdle(chatId);
-        return;
-      }
-      if (!options) throw new Error('Queued input admission did not produce dispatch options');
-      if (admission.failure) {
-        logger.warn('queue: queued turn rejected before admission', {
-          chatId,
-          entryId: result.input.entry.id,
-          code: admission.failure.code,
-        });
-        callbacks.publishTurnFailed(chatId, admission.failure.message, options);
-        continue;
-      }
-      if (!result.inserted) continue;
-      try {
-        const input = result.input;
-        const turn = executionTurnIdentity(options)!;
-        const attempt = new QueueExecutionAttempt(
-          turn,
-          input.kind === 'user' ? input.entry.id : undefined,
-        );
-        const dispatchOptions = {
-          ...options,
-          executionAdmission: ownership.installAttempt(chatId, attempt),
-        };
-        const finalization = ownership.beginFinalization(chatId, turn.turnId!);
-        if (input.kind === 'user') ownership.setActiveDrainEntry(chatId, input.entry.id);
-
-        if (callbacks.isShuttingDown()) {
-          finalization.settle('not-committed');
-          callbacks.retireAttempt(chatId, attempt);
+        try {
+          prepared = await this.deps.turnRunner.prepareTurn(chatId, options, ownership.drainSignal(chatId));
+        } catch (error) {
+          if (await this.#preparationFailed(chatId, candidate, options, error)) continue;
           return;
         }
-
-        finalization.settle('committed');
-        attempt.markLaunching();
-        const shouldContinue = await this.#runEntry(chatId, input, dispatchOptions, attempt);
-        if (!shouldContinue) return;
-      } finally {
-        if (result.input.kind === 'user') {
-          callbacks.discardPreparedInput(chatId, options.clientMessageId);
+        if (this.#shouldHalt(chatId)) return;
+        options.preparedExecution = prepared;
+        let inputInserted = false;
+        const admission = { failure: null as DomainError | null };
+        let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
+        try {
+          // The dequeue transition and its synchronous registerQueued() callback
+          // run inside the selection/admission lock; the callback itself stays
+          // synchronous, so it never awaits inside the dequeue.
+          result = await this.deps.runSelectionAdmissionExclusive(
+            chatId,
+            () => controls.dequeueNextTurn(chatId, candidate, (input) => {
+              if (this.#shouldHalt(chatId)) throw new DOMException('Queue admission cancelled', 'AbortError');
+              if (input.kind === 'control') {
+                if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
+                  logger.debug('queue: discarded stale control input', {
+                    chatId,
+                    entryId: input.entry.id,
+                    transcriptViewId: input.entry.transcriptViewId,
+                  });
+                  return false;
+                }
+                prepared!.validate();
+                callbacks.appendControlReceipt(chatId, input.entry);
+                inputInserted = true;
+                return true;
+              }
+              try {
+                inputInserted = callbacks.registerQueued(chatId, input.entry.content, { ...options, validateBeforeCommit: prepared!.validate });
+              } catch (error) {
+                if (!isRecoverablePreambleAdmissionError(error)) throw error;
+                admission.failure = error;
+                return false;
+              }
+              return inputInserted;
+            }),
+          );
+        } catch (error) {
+          if (inputInserted) callbacks.discardPreparedInput(chatId, options.clientMessageId);
+          if (this.#shouldHalt(chatId)) return;
+          if (!inputInserted && error instanceof DomainError && error.code === 'SESSION_BUSY') {
+            if (await this.#preparationFailed(chatId, candidate, options, error)) continue;
+            return;
+          }
+          throw error;
         }
+        if (!result) continue;
+        if (admission.failure) {
+          logger.warn('queue: queued turn rejected before admission', {
+            chatId,
+            entryId: result.input.entry.id,
+            code: admission.failure.code,
+          });
+          callbacks.publishTurnFailed(chatId, admission.failure.message, options);
+          continue;
+        }
+        if (!result.inserted) continue;
+        try {
+          if (this.#shouldHalt(chatId) || ownership.drainSignal(chatId).aborted) return;
+          const input = result.input;
+          const turn = executionTurnIdentity(options)!;
+          const attempt = new QueueExecutionAttempt(turn, input.kind === 'user' ? input.entry.id : undefined);
+          const dispatchOptions = {
+            ...options,
+            executionAdmission: ownership.installAttempt(chatId, attempt),
+          };
+          const finalization = ownership.beginFinalization(chatId, turn.turnId!);
+          if (input.kind === 'user') ownership.setActiveDrainEntry(chatId, input.entry.id);
+
+          if (callbacks.isShuttingDown()) {
+            finalization.settle('not-committed');
+            callbacks.retireAttempt(chatId, attempt);
+            return;
+          }
+
+          finalization.settle('committed');
+          attempt.markLaunching();
+          if (!await this.#runEntry(chatId, input, dispatchOptions, attempt)) return;
+        } finally {
+          if (result.input.kind === 'user') callbacks.discardPreparedInput(chatId, options.clientMessageId);
+        }
+      } finally {
+        prepared?.release();
       }
     }
+  }
+
+  async #preparationFailed(chatId: string, candidate: DequeuedTurnInput, options: RunAgentTurnOptions, error: unknown): Promise<boolean> {
+    if (this.#shouldHalt(chatId) || this.deps.ownership.drainSignal(chatId).aborted) return false;
+    if (candidate.kind === 'user') {
+      if (!await this.deps.controls.pauseBeforeDispatchFailure(chatId, candidate)) return true;
+    } else {
+      try {
+        const removed = await this.deps.controls.dequeueNextTurn(chatId, candidate, () => {
+          this.deps.ownership.drainSignal(chatId).throwIfAborted();
+          if (this.#shouldHalt(chatId)) throw new DOMException('Queue admission cancelled', 'AbortError');
+          return false;
+        });
+        if (!removed) return true;
+      } catch (failure) {
+        if (this.#shouldHalt(chatId) || this.deps.ownership.drainSignal(chatId).aborted) return false;
+        throw failure;
+      }
+    }
+    this.deps.callbacks.publishTurnFailed(chatId, error instanceof Error ? error.message : String(error), options);
+    return candidate.kind === 'control';
   }
 
   async #runEntry(

@@ -1,9 +1,8 @@
 import { expect, mock, test } from 'bun:test';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { AgentEventBus } from '../event-bus.js';
 import { AgentRuntimeRouter } from '../runtime-router.js';
-import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createRuntimeInstanceFixture, createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function fixture() {
   const transcript = createRuntimeTranscriptFixture();
@@ -43,7 +42,7 @@ function fixture() {
   };
   const execution = {
     ...adapter.execution,
-    start: (request) => delay(adapter.execution.start(request)),
+    start: mock((request) => delay(adapter.execution.start(request))),
     resume: (request) => delay(adapter.execution.resume(request)),
     abort: mock(adapter.execution.abort),
   };
@@ -57,20 +56,21 @@ function fixture() {
     execution,
     compaction: { compact: (request) => delay(adapter.compact(request, async (_request, publish) => activate(publish))) },
     goals: {
-      submitControl: (request) => adapter.submitGoalControl(request, async (goal) => {
+      submitControl: mock((request) => adapter.submitGoalControl(request, async (goal) => {
         await goal.beforeDelivery({ validate() {}, commit() {} });
         return true;
-      }),
+      })),
     },
+  };
+  const endpointResolver = {
+    resolveSelection: () => ({ model: entry.model, apiProviderId: null, endpointId: null, protocol: null }),
+    resolveEndpointReference: () => null,
   };
   const router = new AgentRuntimeRouter({
     registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
-    instances: { requireFor: () => integration, configurationFor: () => new LocalProviderConfigurationService(integration) },
+    instances: { requireFor: () => integration, ...createRuntimeInstanceFixture(integration) },
     directory: { list: () => [integration] },
-    endpointResolver: {
-      resolveSelection: () => ({ model: entry.model, apiProviderId: null, endpointId: null, protocol: null }),
-      resolveEndpointReference: () => null,
-    },
+    endpointResolver,
     events, getCarryOverRevision: () => 'synthetic-revision',
     createCarriedContext: async () => ({ kind: 'no-history' }),
     ledger: transcript.ledger, adoption: transcript.adoption, hasPendingOwnershipTransfer: () => false,
@@ -86,8 +86,53 @@ function fixture() {
     handoff.validate();
     handoff.commit();
   });
-  return { router, transcript, runtime, execution, integration, publishers, launched, handleReady, launch, handoff };
+  return { router, entry, endpointResolver, transcript, runtime, execution, integration, publishers, launched, handleReady, launch, handoff };
 }
+
+test('each goal captures fresh endpoint credentials and retains the exact operation delivery', async () => {
+  const f = fixture();
+  const selection = { model: f.entry.model, apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint',
+    protocol: 'openai-compatible', isLocal: false };
+  Object.assign(f.entry, { apiProviderId: selection.apiProviderId, modelEndpointId: selection.endpointId, modelProtocol: selection.protocol });
+  let endpoint = { baseUrl: 'https://original.invalid/v1', apiKey: 'synthetic-original-key' };
+  f.endpointResolver.resolveSelection = () => selection;
+  f.endpointResolver.resolveEndpointReference = mock(() => ({ apiProvider: { label: 'Synthetic API' }, endpoint }));
+  f.integration.endpoints = { validate: mock(async () => {}) };
+  const launching = f.launch('start');
+  try {
+    await f.launched.promise;
+    const start = f.execution.start.mock.calls[0][0];
+    expect(start.endpoint).toMatchObject({
+      selection: { baseUrl: 'https://original.invalid/v1' }, credential: 'synthetic-original-key',
+    });
+    endpoint = { baseUrl: 'https://updated.invalid/v1', apiKey: 'synthetic-updated-key' };
+    const validation = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    f.integration.endpoints.validate.mockImplementationOnce(() => { entered.resolve(); return validation.promise; });
+    const pending = f.handoff('run-2');
+    await entered.promise;
+    endpoint = { baseUrl: 'https://latest.invalid/v1', apiKey: 'synthetic-latest-key' };
+    validation.resolve();
+    expect(await pending).toBe(true);
+    expect(await f.handoff('run-3')).toBe(true);
+    const goals = f.integration.goals.submitControl.mock.calls.map(([request]) => request);
+    expect(goals.map((request) => [request.endpoint.selection.baseUrl, request.endpoint.credential])).toEqual([
+      ['https://updated.invalid/v1', 'synthetic-updated-key'],
+      ['https://latest.invalid/v1', 'synthetic-latest-key'],
+    ]);
+    for (const request of goals) {
+      expect(request.output).toBe(start.output);
+      expect(request.admission).toBe(start.admission);
+      expect(request.agentSessionId).toBe('synthetic-native');
+    }
+    expect(f.execution.start).toHaveBeenCalledOnce();
+    expect(f.endpointResolver.resolveEndpointReference).toHaveBeenCalledTimes(3);
+    expect(f.transcript.activeRunId()).toBe('run-3');
+  } finally {
+    f.handleReady.resolve();
+    await launching;
+  }
+});
 
 for (const kind of ['start', 'resume', 'compact']) {
   test.each(['before', 'after'])(`${kind} preserves cancellation through goal handoffs when Stop is %s handle return`, async (timing) => {

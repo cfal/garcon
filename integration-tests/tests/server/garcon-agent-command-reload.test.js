@@ -48,6 +48,7 @@ async function withReload(run) {
   const lease = ledger.openProducer(CHAT, 'test');
   const dispatched = [];
   const turnRunner = {
+    prepareTurn: async () => ({ validate() {}, release() {} }),
     runAgentTurn: async (_chatId, content, options) => {
       dispatched.push(content);
       await execution.onAgentTurnTerminal(CHAT, { turnId: options.turnId });

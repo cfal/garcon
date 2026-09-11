@@ -12,7 +12,6 @@ function selection(endpoint = {}) {
       capabilities: { responses: true },
       model: 'acme-code',
       isLocal: false,
-      credential: null,
       headers: {
         'HTTP-Referer': 'https://github.com/cfal/garcon',
         'X-OpenRouter-Title': 'Garcon',

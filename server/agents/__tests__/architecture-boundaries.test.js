@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 function walk(dir) {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((entry) => {
-    if (entry === 'node_modules' || entry === 'dist' || entry === 'build') return [];
-    const filePath = join(dir, entry);
-    if (statSync(filePath).isDirectory()) return walk(filePath);
-    return /\.(?:ts|js)$/.test(filePath) ? [filePath] : [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (['node_modules', 'dist', 'build', 'paraglide'].includes(entry.name)) return [];
+    const filePath = join(dir, entry.name);
+    if (entry.isDirectory()) return walk(filePath);
+    return /\.(?:ts|js|svelte)$/.test(filePath) ? [filePath] : [];
   });
 }
 
@@ -65,6 +65,20 @@ describe('agent architecture boundaries', () => {
       for (const packageName of providerPackages) expect(source, file).not.toContain(packageName);
       expect(source, file).not.toMatch(/\b(?:Worker|SQLite|FTS5?|source-kind)\b/i);
     }
+  });
+
+  test('keeps admitted credentials private and removes dispatch-time credential lookup', () => {
+    for (const file of [...walk('common'), ...walk('web/src'),
+      'server-agents/interface/src/contracts/node-wire.ts', 'server-agents/interface/src/node-wire.ts']) {
+      if (file.includes('__tests__')) continue;
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/\bAgent(?:AdmittedEndpoint|PreparedProviderConfiguration)\b/);
+    }
+    for (const file of walk('server-agents')) {
+      if (file.includes('__tests__')) continue;
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/\b(?:resolveAgentEndpoint|resolveCredential|AgentCredentialReference)\b/);
+    }
+    expect(existsSync('server-agents/common/src/execution/resolve-endpoint.ts')).toBe(false);
+    expect(readFileSync('common/agent-execution.ts', 'utf8')).not.toContain('credential');
   });
 
   test('[TLV5-L12.02-STATIC-01] keeps the common toolkit independent of providers and core', () => {
@@ -151,7 +165,7 @@ describe('agent architecture boundaries', () => {
     const router = readFileSync('server/agents/runtime-router.ts', 'utf8');
     expect(router.split('conversationMessages(')).toHaveLength(2);
     expect(router.indexOf('conversationMessages(')).toBeLessThan(
-      router.indexOf('execution.start('),
+      router.indexOf('service.dispatch('),
     );
   });
 

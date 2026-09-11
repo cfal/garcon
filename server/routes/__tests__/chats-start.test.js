@@ -92,7 +92,11 @@ const queue = {
       await input.preparation?.prepare();
       await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
       await input.settlement.markScheduled(input.command, input.options.turnId, true);
-      await input.dispatch?.(reservation.executionAdmission);
+      await agents.startSession(input.command.chatId, input.content, {
+        ...input.options,
+        projectPath: registry.getChat(input.command.chatId).projectPath,
+        executionAdmission: reservation.executionAdmission,
+      });
       await queue.completeDirectTurn(reservation);
     } catch (error) {
       await input.preparation?.compensate();

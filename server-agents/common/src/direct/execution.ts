@@ -1,6 +1,5 @@
 import {
   AgentIntegrationError,
-  type AgentHost,
 } from '@garcon/server-agent-interface';
 import {
   runtimeOperation,
@@ -10,13 +9,11 @@ import {
 } from '../execution/runtime-events.js';
 import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
-import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
 export class DirectExecution<TRuntime extends DirectCompatibleRuntime>
 implements AgentRuntimeExecution {
   constructor(
-    private readonly host: AgentHost,
     private readonly runtime: DirectEndpointRouterRuntime<TRuntime>,
   ) {}
 
@@ -24,7 +21,7 @@ implements AgentRuntimeExecution {
     request: Parameters<AgentRuntimeExecution['start']>[0],
     publish: AgentRuntimePublisher,
   ) {
-    const endpoint = await this.#endpoint(request);
+    const endpoint = this.#endpoint(request);
     let established: AgentEstablishedSession | null = null;
     const establish = (result: {
       readonly agentSessionId: string;
@@ -61,7 +58,7 @@ implements AgentRuntimeExecution {
     request: Parameters<AgentRuntimeExecution['resume']>[0],
     publish: AgentRuntimePublisher,
   ): Promise<void> {
-    const endpoint = await this.#endpoint(request);
+    const endpoint = this.#endpoint(request);
     await this.runtime.runTurn({
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
@@ -95,12 +92,9 @@ implements AgentRuntimeExecution {
     request.signal.throwIfAborted();
   }
 
-  async #endpoint(request: AgentRuntimeExecutionContext) {
-    const endpoint = await resolveAgentEndpoint(
-      this.host,
-      request.endpoint,
-      request.admission.signal,
-    );
+  #endpoint(request: AgentRuntimeExecutionContext) {
+    request.admission.signal.throwIfAborted();
+    const endpoint = request.endpoint;
     if (!endpoint) {
       throw new AgentIntegrationError(
         'INVALID_ENDPOINT',

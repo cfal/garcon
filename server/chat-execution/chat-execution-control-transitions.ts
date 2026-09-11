@@ -488,30 +488,35 @@ export function dequeueNextTurn(
   context: TransitionContext,
 ): ControlTransition<DequeuedTurnInput | null> {
   const next = cloneStoredChatExecutionControl(current);
-  if (next.pause) return accepted(next, null, false);
-  if (next.entries.some((entry) => entry.status === 'steering')) {
-    return accepted(next, null, false);
+  const input = peekNextTurn(next);
+  if (!input) return accepted(next, null, false);
+  if (input.kind === 'control') {
+    next.controlEntries.shift();
+    return acceptedInternal(next, input);
   }
-  const controlEntry = next.controlEntries.shift();
-  if (controlEntry) {
-    return acceptedInternal(next, {
-      kind: 'control',
-      entry: cloneControlInputEntry(controlEntry),
-    });
-  }
-  const entry = next.entries.find((candidate) => candidate.status === 'queued');
-  if (!entry) return accepted(next, null, false);
-
-  next.entries.splice(next.entries.indexOf(entry), 1);
+  const { entry } = input;
+  next.entries.splice(next.entries.findIndex((candidate) => candidate.id === entry.id), 1);
   next.recentlyDispatched = [
     ...next.recentlyDispatched.filter((candidate) => candidate.entryId !== entry.id),
     { entryId: entry.id, revision: entry.revision, dispatchedAt: context.now },
   ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
   bump(next, context.now);
-  return accepted(next, {
-    kind: 'user',
-    entry: cloneQueueEntry(entry),
-  }, true);
+  return accepted(next, input, true);
+}
+
+export function peekNextTurn(current: StoredChatExecutionControlState): DequeuedTurnInput | null {
+  if (current.pause || current.entries.some((entry) => entry.status === 'steering')) return null;
+  const control = current.controlEntries[0];
+  if (control) return { kind: 'control', entry: cloneControlInputEntry(control) };
+  const entry = current.entries.find((candidate) => candidate.status === 'queued');
+  return entry ? { kind: 'user', entry: cloneQueueEntry(entry) } : null;
+}
+
+export function sameQueuedTurn(left: DequeuedTurnInput, right: DequeuedTurnInput): boolean {
+  if (left.entry.id !== right.entry.id) return false;
+  if (left.kind === 'user' && right.kind === 'user') return left.entry.revision === right.entry.revision;
+  return left.kind === 'control' && right.kind === 'control'
+    && left.entry.transcriptViewId === right.entry.transcriptViewId;
 }
 
 export function reserveQueueSteer(

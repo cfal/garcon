@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
+import { LocalProviderExecutionService } from '../../execution-node/local-provider-execution.js';
 
 export function createRuntimeTranscriptFixture(options = {}) {
   const view = {
@@ -162,5 +164,16 @@ export function createRuntimeTranscriptFixture(options = {}) {
     get sink() { return currentLease?.sink ?? null; },
     notices,
     activeRunId: () => activeRunId,
+  };
+}
+
+export function createRuntimeInstanceFixture(integration) {
+  const configuration = new LocalProviderConfigurationService(integration);
+  const execution = new LocalProviderExecutionService(integration, configuration);
+  return {
+    get: () => integration,
+    requireFor: () => integration,
+    configurationFor: () => configuration,
+    executionFor: () => execution,
   };
 }

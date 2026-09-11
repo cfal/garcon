@@ -10,7 +10,6 @@ import {
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
@@ -153,7 +152,6 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       }],
     });
     const providerExecution = new ClaudeExecution(
-      host,
       runtime,
       nativeSessions,
       logger,
@@ -231,7 +229,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     };
     this.singleQuery = {
       async run(request) {
-        const resolved = await resolveAgentEndpoint(host, request.endpoint, request.signal);
+        request.signal.throwIfAborted();
+        const resolved = request.endpoint;
         const endpointRuntime = resolved ? buildClaudeEndpointRuntime(resolved) : null;
         if (resolved && !endpointRuntime) {
           throw new AgentIntegrationError(

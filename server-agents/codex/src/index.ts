@@ -12,7 +12,6 @@ import {
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
@@ -128,7 +127,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    const execution = new CodexExecution(host, runtime, nativeSessions, config);
+    const execution = new CodexExecution(runtime, nativeSessions, config);
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration, previousConfiguration) => (
         execution.applySessionConfiguration(agentSessionId, configuration, previousConfiguration)
@@ -195,7 +194,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
       allowUnmaterializedWholeSession: true,
       forkWholeSession: (request) => forkCodexNativeSession(
         request,
-        host,
         runtime,
         nativeSessions,
         config,
@@ -229,14 +227,12 @@ export default class CodexAgentIntegration implements AgentIntegration {
       },
       forkPaginatedWhole: (request) => forkCodexNativeSession(
         request,
-        host,
         runtime,
         nativeSessions,
         config,
       ),
       forkPaginatedPoint: (request, lastTurnId) => forkCodexNativeSession(
         request,
-        host,
         runtime,
         nativeSessions,
         config,
@@ -263,7 +259,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     this.singleQuery = {
       async run(request) {
-        const resolved = await resolveAgentEndpoint(host, request.endpoint, request.signal);
+        request.signal.throwIfAborted();
+        const resolved = request.endpoint;
         const endpointRuntime = resolved
           ? buildCodexAppServerEndpointRuntime(resolved)
           : null;
@@ -301,14 +298,14 @@ export default class CodexAgentIntegration implements AgentIntegration {
 
 async function forkCodexNativeSession(
   request: AgentNativeForkRequest,
-  host: AgentHost,
   runtime: CodexAppServerRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
   config: CodexConfig,
   lastTurnId?: string,
 ) {
   const source = nativeSessions.decode(request.source.nativeSession);
-  const endpoint = await resolveAgentEndpoint(host, request.endpoint, request.admission.signal);
+  request.admission.signal.throwIfAborted();
+  const endpoint = request.endpoint;
   const endpointRuntime = endpoint ? buildCodexAppServerEndpointRuntime(endpoint) : null;
   if (endpoint && !endpointRuntime) {
     throw new AgentIntegrationError(
@@ -343,7 +340,7 @@ async function forkCodexNativeSession(
     nativeSession: nativeSessions.encode({
       path: result.nativePath,
       agentSessionId: result.agentSessionId,
-      modelEndpointId: request.endpoint?.endpointId ?? source.modelEndpointId,
+      modelEndpointId: request.endpoint?.selection.endpointId ?? source.modelEndpointId,
     }),
     nativeSeedReceipt: retargetNativeSeedReceipt(
       request.source.nativeSeedReceipt,

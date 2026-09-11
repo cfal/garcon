@@ -2,7 +2,7 @@ import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import { normalizePermissionMode } from '@garcon/common/chat-modes';
 import { isThinkingModeSupported, normalizeSupportedThinkingMode } from '@garcon/common/execution-defaults';
-import type { AgentIntegration, AgentSessionConfiguration } from '@garcon/server-agent-interface';
+import type { AgentIntegration, AgentPreparedProviderConfiguration } from '@garcon/server-agent-interface';
 import type {
   ProviderConfigurationRequest, ProviderConfigurationService,
   ProviderConfigurationUpdate, ProviderConfigurationUpdateRequest,
@@ -13,10 +13,10 @@ import { DomainError } from '../lib/domain-error.js';
 export class LocalProviderConfigurationService implements ProviderConfigurationService {
   constructor(private readonly integration: Pick<AgentIntegration, 'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration'>) {}
 
-  async resolve(input: ProviderConfigurationRequest, signal: AbortSignal): Promise<AgentSessionConfiguration> {
+  async resolve(input: ProviderConfigurationRequest, signal: AbortSignal): Promise<AgentPreparedProviderConfiguration> {
     signal.throwIfAborted();
     const request = structuredClone(input);
-    await this.#validateEndpoint(request.endpoint);
+    await this.#validateEndpoint(request.endpoint?.selection ?? null);
     signal.throwIfAborted();
     const permissionMode = normalizePermissionMode(request.permissionMode);
     return structuredClone({

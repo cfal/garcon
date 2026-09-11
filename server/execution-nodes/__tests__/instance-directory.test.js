@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 
 function instance(nodeId, id, defaults = false) {
@@ -123,5 +123,55 @@ describe('instance-qualified executable directory', () => {
     ]) {
       expect(() => directory.catalogForInstance(ref)).toThrow('unavailable');
     }
+  });
+
+  test('execution operations retain the configured instance and its cached configuration service', async () => {
+    const entries = [instance('node-a', 'work', true), instance('node-a', 'personal'), instance('node-b', 'work', true)];
+    for (const entry of entries) {
+      Object.assign(entry.integration.descriptor, { supportedPermissionModes: ['default'], supportedThinkingModes: ['none'] });
+      entry.integration.settings = {
+        defaults: () => ({ ownerId: 'synthetic-provider', schemaVersion: 1, values: { profile: entry.configuration.id } }),
+        parse: (value) => value,
+      };
+      const handle = Object.freeze({});
+      entry.integration.execution = {
+        start: mock(async () => handle), resume: mock(async () => handle),
+        abort: mock(async (target) => target === handle), runningSessions: () => [],
+      };
+      entry.integration.compaction = null;
+    }
+    const directory = new AgentInstanceDirectory(entries);
+    const services = [];
+    for (const entry of entries) {
+      const owner = { agentId: 'synthetic-provider', executionLocation: {
+        nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id, workspaceId: 'workspace',
+      } };
+      const configuration = directory.configurationFor(owner);
+      configuration.resolve = mock(configuration.resolve.bind(configuration));
+      const service = directory.executionFor(owner);
+      expect(directory.executionFor(structuredClone(owner))).toBe(service);
+      const operation = await service.prepare({
+        kind: 'resume', chatId: 'synthetic-chat', projectPath: '/project', runId: 'synthetic-run',
+        agentSessionId: 'colliding-native-session', nativeSession: null,
+        configuration: { model: 'synthetic-model', settings: null, endpoint: null },
+      }, new AbortController().signal);
+      const content = { prompt: 'synthetic input', attachments: [], carriedContext: null };
+      const delivery = { output: { emit() {} }, admission: { signal: new AbortController().signal, async markStarted() {} } };
+      for (const other of services) {
+        await expect(other.dispatch(operation, content, delivery)).rejects.toThrow('operation is invalid');
+        await expect(other.abort(operation)).rejects.toThrow('operation is invalid');
+      }
+      await service.dispatch(operation, content, delivery);
+      expect(configuration.resolve).toHaveBeenCalledTimes(1);
+      expect(entry.integration.execution.resume).toHaveBeenCalledTimes(1);
+      expect(entry.integration.execution.resume.mock.calls[0][0].settings.values).toEqual({ profile: entry.configuration.id });
+      expect(await service.abort(operation)).toBe(true);
+      expect(entry.integration.execution.abort).toHaveBeenCalledTimes(1);
+      services.push(service);
+      expect(() => directory.executionFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
+      expect(() => directory.executionFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
+        .toThrow('unavailable');
+    }
+    expect(new Set(services).size).toBe(3);
   });
 });

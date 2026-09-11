@@ -1,4 +1,3 @@
-import type { AgentCredentialReference } from '@garcon/common/agent-execution';
 import type { JsonObject, JsonValue } from '@garcon/common/json';
 
 export interface AgentHost {
@@ -6,7 +5,6 @@ export interface AgentHost {
   readonly logger: AgentLogger;
   readonly storage: AgentScopedStorage;
   readonly environment: AgentEnvironmentReader;
-  readonly apiProviders: AgentApiProviderReader;
 }
 
 export interface AgentHostFactory {
@@ -33,18 +31,6 @@ export interface AgentLogger {
 
 export interface AgentEnvironmentReader {
   get(name: string): string | undefined;
-}
-
-export interface AgentApiProviderReader {
-  resolveCredential(request: {
-    readonly reference: AgentCredentialReference;
-    readonly signal: AbortSignal;
-  }): Promise<AgentResolvedCredential | null>;
-}
-
-export interface AgentResolvedCredential {
-  readonly kind: string;
-  readonly value: string;
 }
 
 export interface AgentMigrationStore {

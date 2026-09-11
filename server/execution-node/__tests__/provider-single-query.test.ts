@@ -34,9 +34,12 @@ function fixture(saved = false) {
     configuration: {
       model: 'synthetic-model', thinkingMode: 'low', settings,
       endpoint: {
-        apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
-        protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'synthetic-model',
-        isLocal: false, capabilities: null, headers: { 'x-synthetic': 'original' }, credential: null,
+        selection: {
+          apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
+          protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'synthetic-model',
+          isLocal: false, capabilities: null, headers: { 'x-synthetic': 'original' },
+        },
+        credential: 'synthetic-secret',
       },
     },
   } satisfies ProviderSingleQueryRequest;
@@ -64,12 +67,12 @@ test.each([false, true])('validates an immutable request on the selected instanc
   const pending = f.service.run(f.request, f.controller.signal);
   f.request.prompt = 'caller mutation';
   f.request.projectPath = '/changed';
-  f.request.configuration.endpoint.headers['x-synthetic'] = 'caller mutation';
+  f.request.configuration.endpoint.selection.headers['x-synthetic'] = 'caller mutation';
   if (f.request.configuration.settings) f.request.configuration.settings.values.profile = 'caller mutation';
   validation.resolve();
   await expect(pending).resolves.toBe('Synthetic response');
   expect(f.integration.endpoints.validate).toHaveBeenCalledTimes(1);
-  expect(f.integration.endpoints.validate).toHaveBeenCalledWith(expected.configuration.endpoint);
+  expect(f.integration.endpoints.validate).toHaveBeenCalledWith(expected.configuration.endpoint.selection);
   expect(f.integration.settings.parse).toHaveBeenCalledTimes(1);
   expect(f.defaults.values.profile).toBe('secondary');
   expect(f.request.configuration.settings?.values.profile).toBe(saved ? 'caller mutation' : undefined);

@@ -509,12 +509,8 @@ export class SessionCommands {
             turnId,
           },
           settlement: this.support.settlement,
-          dispatch: (executionAdmission) => this.deps.agents.compactSession(input.chatId, {
-            instructions: input.instructions,
-            clientRequestId,
-            turnId,
-            executionAdmission,
-          }),
+          content: input.instructions?.trim() ? `/compact ${input.instructions.trim()}` : '/compact',
+          options: { commandType: 'agent-compact' },
         });
       } catch (error) {
         throw await withCurrentExecutionControl({

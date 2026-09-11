@@ -59,6 +59,5 @@ function createHost() {
       claimLegacyWorkspaceDirectory: async () => ({ moved: 0, skipped: 0 }),
     },
     environment: { get: () => undefined },
-    apiProviders: { resolveCredential: async () => null },
   };
 }

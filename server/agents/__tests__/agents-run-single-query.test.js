@@ -110,7 +110,7 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
     }));
   });
 
-  it('passes an owner-bound settings envelope and provider-neutral endpoint selection', async () => {
+  it('passes an owner-bound settings envelope and admitted endpoint', async () => {
     const { router, integration, endpointResolver, run } = makeRouter();
     const settings = envelope('test', { effort: 'high' });
 
@@ -136,20 +136,18 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
       model: 'model-a',
       settings,
       endpoint: {
-        apiProviderId: 'provider-a',
-        endpointId: 'endpoint-a',
-        providerLabel: 'Provider A',
-        protocol: 'openai-compatible',
-        baseUrl: 'https://example.test/v1',
-        model: 'model-a',
-        isLocal: false,
-        capabilities: null,
-        headers: {},
-        credential: {
-          kind: 'api-provider-endpoint',
+        selection: {
           apiProviderId: 'provider-a',
           endpointId: 'endpoint-a',
+          providerLabel: 'Provider A',
+          protocol: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          model: 'model-a',
+          isLocal: false,
+          capabilities: null,
+          headers: {},
         },
+        credential: null,
       },
     }));
   });
@@ -209,7 +207,7 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
     integration.endpoints.validate = mock(() => { entered.resolve(); return gate.promise; });
     const reference = {
       apiProvider: { label: 'Synthetic API' },
-      endpoint: { baseUrl: 'https://original.invalid/v1', headers: { 'x-synthetic': 'original' } },
+      endpoint: { baseUrl: 'https://original.invalid/v1', apiKey: 'synthetic-original-key', headers: { 'x-synthetic': 'original' } },
     };
     endpointResolver.resolveEndpointReference.mockImplementation(() => reference);
     const settings = envelope('test', { option: 'original' });
@@ -219,12 +217,16 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
     });
     await Promise.race([entered.promise, pending]);
     reference.endpoint.baseUrl = 'https://changed.invalid/v1';
+    reference.endpoint.apiKey = 'synthetic-changed-key';
     settings.values.option = 'changed';
     gate.resolve();
     await pending;
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       settings: envelope('test', { option: 'original' }),
-      endpoint: expect.objectContaining({ baseUrl: 'https://original.invalid/v1' }),
+      endpoint: {
+        selection: expect.objectContaining({ baseUrl: 'https://original.invalid/v1' }),
+        credential: 'synthetic-original-key',
+      },
     }));
     expect(endpointResolver.resolveEndpointReference).toHaveBeenCalledTimes(1);
   });

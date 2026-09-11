@@ -19,7 +19,6 @@ function createHost(root = '/tmp/garcon-claude-integration-test') {
       claimLegacyWorkspaceDirectory: mock(() => Promise.resolve({ moved: 0, skipped: 0 })),
     },
     environment: { get: mock(() => undefined) },
-    apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },
   };
 }
 

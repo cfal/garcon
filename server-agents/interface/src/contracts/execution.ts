@@ -11,6 +11,16 @@ export interface AgentSessionConfiguration {
   readonly endpoint: AgentEndpointSelection | null;
 }
 
+/** Contains the credential captured with its endpoint; excluded from public and persisted configuration. */
+export interface AgentAdmittedEndpoint {
+  readonly selection: AgentEndpointSelection;
+  readonly credential: string | null;
+}
+
+export interface AgentPreparedProviderConfiguration extends Omit<AgentSessionConfiguration, 'endpoint'> {
+  readonly endpoint: AgentAdmittedEndpoint | null;
+}
+
 export interface AgentProjectPathUpdateRequest {
   readonly chat: AgentChatReference;
   readonly nextProjectPath: string;

@@ -46,9 +46,12 @@ function fixture() {
     configuration: {
       model: 'synthetic-model', permissionMode: 'default', thinkingMode: 'low', settings: null,
       endpoint: {
-        apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
-        protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'synthetic-model',
-        isLocal: false, capabilities: null, headers: { 'x-synthetic': 'original' }, credential: null,
+        selection: {
+          apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
+          protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'synthetic-model',
+          isLocal: false, capabilities: null, headers: { 'x-synthetic': 'original' },
+        },
+        credential: 'synthetic-secret',
       },
     },
     providerMeta: { point: { id: 'original' } },
@@ -89,7 +92,7 @@ test.each([false, true])('captures the request before validation and parses sett
   f.request.chatId = '1000000000000003';
   f.request.source.projectPath = '/changed';
   f.request.source.nativeSession.value.id = 'caller mutation';
-  f.request.configuration.endpoint.headers['x-synthetic'] = 'caller mutation';
+  f.request.configuration.endpoint.selection.headers['x-synthetic'] = 'caller mutation';
   f.request.providerMeta.point.id = 'caller mutation';
   if (saved) {
     f.request.source.settings.values.profile = 'caller mutation';
@@ -97,7 +100,7 @@ test.each([false, true])('captures the request before validation and parses sett
   }
   validation.resolve();
   expect(await pending).toEqual({ kind: 'materialized', session: f.session });
-  expect(f.integration.endpoints.validate).toHaveBeenCalledWith(original.configuration.endpoint);
+  expect(f.integration.endpoints.validate).toHaveBeenCalledWith(original.configuration.endpoint.selection);
   expect(f.integration.settings.parse).toHaveBeenCalledTimes(2);
   expect(f.defaults.values.profile).toBe('secondary');
   expect(f.request.source.nativeSession.value.id).toBe('caller mutation');

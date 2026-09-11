@@ -3,9 +3,8 @@ import { UserMessage } from '../../../common/chat-types.js';
 import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
-import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { LocalProviderNativeForkService } from '../../execution-node/local-provider-native-fork.js';
-import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createRuntimeInstanceFixture, createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function makeRouter(fork) {
   const transcript = createRuntimeTranscriptFixture();
@@ -76,7 +75,7 @@ function makeRouter(fork) {
     registry,
     instances: {
       requireFor: mock(() => integration),
-      configurationFor: () => new LocalProviderConfigurationService(integration),
+      ...createRuntimeInstanceFixture(integration),
       nativeForkFor: () => new LocalProviderNativeForkService(integration, integration.forking),
     },
     directory: {
@@ -136,10 +135,12 @@ describe('AgentRuntimeRouter forks', () => {
       permissionMode: 'acceptEdits', thinkingMode: 'low',
       settings: { ownerId: 'test', schemaVersion: 1, values: { profile: 'saved' } },
       endpoint: {
-        apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
-        protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'resolved-model',
-        isLocal: false, capabilities: null, headers: { 'x-synthetic': 'test' },
-        credential: { kind: 'api-provider-endpoint', apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint' },
+        selection: {
+          apiProviderId: 'synthetic-api', endpointId: 'synthetic-endpoint', providerLabel: 'Synthetic API',
+          protocol: 'openai-compatible', baseUrl: 'https://synthetic.invalid/v1', model: 'resolved-model',
+          isLocal: false, capabilities: null, headers: { 'x-synthetic': 'test' },
+        },
+        credential: null,
       },
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
       admission: expect.objectContaining({ signal: controller.signal }),

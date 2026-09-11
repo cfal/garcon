@@ -42,9 +42,7 @@ function createClaudeStub(startError) {
 
 function createExecution(runtime, configHomeDir) {
   const logger = createLogger();
-  return new ClaudeExecution({
-    apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },
-  }, runtime, createPathNativeSessionCodec('claude'), logger, {
+  return new ClaudeExecution(runtime, createPathNativeSessionCodec('claude'), logger, {
     binary: () => 'claude',
     anthropicApiKey: () => null,
     anthropicBaseUrl: () => null,

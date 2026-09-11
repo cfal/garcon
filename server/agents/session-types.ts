@@ -1,4 +1,3 @@
-import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ApiProtocol } from '@garcon/common/api-providers';
 import {
@@ -33,6 +32,13 @@ export interface PersistedChatExecutionConfig {
 export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
   markStarted(): Promise<void>;
+}
+
+export interface PreparedExecutionTurn {
+  /** Revalidates binding and configuration before admission, synchronously without provider I/O. */
+  validate(): void;
+  /** Releases unused preparation; dispatch owns cleanup once it consumes this capability. */
+  release(): void;
 }
 
 export function assertExecutionAdmissionOpen(
@@ -160,7 +166,7 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   turnId?: string;
   commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;
-  integrationEndpoint?: AgentEndpointSelection | null;
+  preparedExecution?: PreparedExecutionTurn;
 };
 
 export interface AgentSteerOptions {

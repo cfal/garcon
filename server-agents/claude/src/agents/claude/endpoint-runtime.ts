@@ -1,4 +1,4 @@
-import type { ResolvedAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
+import type { AgentAdmittedEndpoint } from '@garcon/server-agent-interface';
 import type { ClaudeConfig } from '../../config.js';
 
 export interface ClaudeEndpointRuntime {
@@ -6,7 +6,7 @@ export interface ClaudeEndpointRuntime {
 }
 
 export function buildClaudeEndpointRuntime(
-  endpoint: ResolvedAgentEndpoint,
+  endpoint: AgentAdmittedEndpoint,
 ): ClaudeEndpointRuntime | null {
   if (endpoint.selection.protocol !== 'anthropic-messages') return null;
 

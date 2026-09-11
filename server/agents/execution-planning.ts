@@ -1,4 +1,5 @@
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
+import type { AgentAdmittedEndpoint } from '@garcon/server-agent-interface';
 import type {
   ApiProviderEndpointResolver,
   ResolvedModelSelection,
@@ -21,6 +22,13 @@ export function toAgentEndpointSelection(
   endpointResolver: ApiProviderEndpointResolver,
   selection: ResolvedModelSelection,
 ): AgentEndpointSelection | null {
+  return toAdmittedEndpoint(endpointResolver, selection)?.selection ?? null;
+}
+
+export function toAdmittedEndpoint(
+  endpointResolver: ApiProviderEndpointResolver,
+  selection: ResolvedModelSelection,
+): AgentAdmittedEndpoint | null {
   const reference = endpointResolver.resolveEndpointReference(selection);
   if (
     !reference
@@ -29,19 +37,17 @@ export function toAgentEndpointSelection(
     || !selection.protocol
   ) return null;
   return {
-    apiProviderId: selection.apiProviderId,
-    endpointId: selection.endpointId,
-    providerLabel: reference.apiProvider.label || selection.apiProviderId,
-    protocol: selection.protocol,
-    baseUrl: reference.endpoint.baseUrl,
-    model: selection.model,
-    isLocal: selection.isLocal,
-    capabilities: reference.endpoint.capabilities ?? null,
-    headers: { ...(reference.endpoint.headers ?? {}) },
-    credential: {
-      kind: 'api-provider-endpoint',
+    credential: reference.endpoint.apiKey || null,
+    selection: {
       apiProviderId: selection.apiProviderId,
       endpointId: selection.endpointId,
+      providerLabel: reference.apiProvider.label || selection.apiProviderId,
+      protocol: selection.protocol,
+      baseUrl: reference.endpoint.baseUrl,
+      model: selection.model,
+      isLocal: selection.isLocal,
+      capabilities: structuredClone(reference.endpoint.capabilities ?? null),
+      headers: { ...(reference.endpoint.headers ?? {}) },
     },
   };
 }

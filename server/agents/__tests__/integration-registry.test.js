@@ -88,7 +88,6 @@ function integrationClass(id, options = {}) {
 function hostFactory(workspaceDir) {
   return new IntegrationHostFactory({
     workspaceDir,
-    resolveCredential: async () => null,
     loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
     readEnvironment: (name) => name === 'ALPHA_BIN' ? '/bin/alpha' : undefined,
   });

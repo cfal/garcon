@@ -54,6 +54,8 @@ function createFixture(overrides = {}) {
     discardPreparedInput: mock(() => undefined),
   };
   const turnRunner = {
+    prepareTurn: mock(async () => ({ validate() {}, release() {} })),
+    prepareSteerTarget: mock(async () => () => {}),
     runAgentTurn: mock(async () => undefined),
     captureSteerTarget: mock(() => null),
     steerInput: mock(async () => ({ kind: 'declined' })),
@@ -1002,6 +1004,45 @@ describe('ChatExecutionCoordinator', () => {
     expect(options.executionAdmission.signal.aborted).toBe(true);
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
     expect(failures).toEqual([]);
+  });
+
+  it('Stop cancels blocked queue preparation before an execution attempt exists', async () => {
+    const entered = deferred();
+    const ready = deferred();
+    let preparationSignal;
+    const fixture = createFixture({ turnRunner: {
+      prepareTurn: mock(async (_chatId, _options, signal) => {
+        preparationSignal = signal;
+        entered.resolve();
+        await ready.promise;
+        signal.throwIfAborted();
+        return { validate() {}, release() {} };
+      }),
+    } });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'synthetic queued input');
+    const drain = coordinator.triggerDrain('chat-1');
+    await entered.promise;
+    try {
+      await coordinator.stopActiveTurn('chat-1');
+      expect(preparationSignal.aborted).toBe(true);
+      expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+      expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    } finally { ready.resolve(); await drain; }
+  });
+
+  it('passes only queue identity into preparation so configuration has one registry snapshot', async () => {
+    const getDrainOptions = mock(() => ({ model: 'synthetic-stale-model', thinkingMode: 'high' }));
+    const fixture = createFixture({ getDrainOptions });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'synthetic queued input');
+    await coordinator.triggerDrain('chat-1');
+    expect(getDrainOptions).not.toHaveBeenCalled();
+    const options = fixture.turnRunner.prepareTurn.mock.calls[0][1];
+    expect(options.turnId).toBeString();
+    expect(options).not.toHaveProperty('model');
+    expect(options).not.toHaveProperty('thinkingMode');
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
   });
 
   it('treats interruption while idle as a no-op', async () => {

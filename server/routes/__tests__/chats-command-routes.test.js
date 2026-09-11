@@ -217,13 +217,17 @@ function createRouteAgent(sessionOverrides = {}) {
       });
       await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
       await input.settlement.markScheduled(input.command, input.options.turnId);
-      await input.dispatch?.(reservation.executionAdmission);
+      await agents.startSession(input.command.chatId, input.content, {
+        ...input.options,
+        projectPath: registry.getChat(input.command.chatId).projectPath,
+        executionAdmission: reservation.executionAdmission,
+      });
       await queue.completeDirectTurn(reservation);
     }),
     scheduleDirectOperation: mock(async (input) => {
       const reservation = queue.reserveDirectTurn(input.command.chatId, input.command);
       await input.settlement.markScheduled(input.command, input.command.turnId);
-      void input.dispatch(reservation.executionAdmission);
+      void agents.compactSession(input.command.chatId, { instructions: input.content.slice('/compact'.length).trim() || undefined, clientRequestId: input.command.clientRequestId, turnId: input.command.turnId, executionAdmission: reservation.executionAdmission });
     }),
     enqueueAccepted: mock(async (input) => {
       try {

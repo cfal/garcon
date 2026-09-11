@@ -1,9 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
-import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { resetServerConfigForTests } from '../../config.ts';
-import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createRuntimeInstanceFixture, createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function deferred() {
   let resolve;
@@ -11,7 +10,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function makeRouter(execution) {
+function makeRouter(execution, overrides = {}) {
   const transcript = createRuntimeTranscriptFixture();
   const entry = {
     id: 'chat-1',
@@ -44,7 +43,7 @@ function makeRouter(execution) {
       getChat: mock(() => entry),
       updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),
     },
-    instances: { requireFor: mock(() => integration), configurationFor: () => new LocalProviderConfigurationService(integration) },
+    instances: { requireFor: mock(() => integration), ...createRuntimeInstanceFixture(integration) },
     directory: {
       require: mock(() => integration),
       get: mock(() => integration),
@@ -69,11 +68,73 @@ function makeRouter(execution) {
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
+    ...overrides,
   });
   return { router, transcript };
 }
 
 describe('AgentRuntimeRouter execution handles', () => {
+  it('reports steering unavailable before an occurrence exists or its session is published', async () => {
+    const entered = deferred();
+    const ready = deferred();
+    const execution = {
+      start: mock(async () => { entered.resolve(); await ready.promise; return {}; }),
+      resume: mock(async () => ({})), abort: mock(async () => false),
+    };
+    const { router } = makeRouter(execution);
+    await expect(router.prepareSteerTarget('chat-1', router.captureSteerTarget('chat-1')))
+      .rejects.toMatchObject({ code: 'STEER_TURN_CHANGED' });
+    const pending = router.startSession('chat-1', 'synthetic input', { turnId: 'synthetic-turn' });
+    await entered.promise;
+    try {
+      await expect(router.prepareSteerTarget('chat-1', router.captureSteerTarget('chat-1')))
+        .rejects.toMatchObject({ code: 'STEER_TURN_UNAVAILABLE' });
+    } finally { ready.resolve(); await pending; }
+  });
+
+  it('owns a consumed preparation while carried-context creation is pending', async () => {
+    const entered = deferred();
+    const ready = deferred();
+    const execution = {
+      start: mock(async () => ({})), resume: mock(async () => ({})), abort: mock(async () => false),
+    };
+    const { router } = makeRouter(execution, {
+      createCarriedContext: async () => { entered.resolve(); await ready.promise; return { kind: 'no-history' }; },
+    });
+    const options = { turnId: 'synthetic-turn' };
+    const preparedExecution = await router.prepareTurn('chat-1', options, new AbortController().signal);
+    const pending = router.runAgentTurn('chat-1', 'synthetic input', { ...options, preparedExecution });
+    await entered.promise;
+    preparedExecution.release();
+    ready.resolve();
+    await pending;
+    expect(execution.start).toHaveBeenCalledOnce();
+  });
+
+  it('reserves the session cap for concurrent preparations and releases unused capacity', async () => {
+    const previousLimit = process.env.GARCON_MAX_SESSIONS;
+    process.env.GARCON_MAX_SESSIONS = '1';
+    resetServerConfigForTests();
+    try {
+      const execution = {
+        start: mock(async () => ({})), resume: mock(async () => ({})), abort: mock(async () => false),
+      };
+      const { router } = makeRouter(execution);
+      const first = await router.prepareTurn('chat-1', { turnId: 'synthetic-first' }, new AbortController().signal);
+      try {
+        await expect(router.prepareTurn('chat-2', { turnId: 'synthetic-second' }, new AbortController().signal))
+          .rejects.toMatchObject({ code: 'SESSION_LIMIT', status: 429 });
+      } finally { first.release(); }
+      const second = await router.prepareTurn('chat-2', { turnId: 'synthetic-second' }, new AbortController().signal);
+      second.release();
+      expect(execution.start).not.toHaveBeenCalled();
+    } finally {
+      if (previousLimit === undefined) delete process.env.GARCON_MAX_SESSIONS;
+      else process.env.GARCON_MAX_SESSIONS = previousLimit;
+      resetServerConfigForTests();
+    }
+  });
+
   it('tracks only live core-owned execution handles', async () => {
     const execution = {
       start: mock(async () => ({ id: 'handle-1' })),

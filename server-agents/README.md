@@ -188,11 +188,18 @@ The constructor receives an `AgentHost` scoped to the integration:
 | `logger` | Emits structured logs tagged with agent identity. Never log transcript content. |
 | `storage` | Allocates integration-owned directories and claims released legacy storage during migration. |
 | `environment` | Reads only variables declared by the descriptor. |
-| `apiProviders` | Resolves endpoint credentials without exposing core credential storage. |
 
 Declare environment names in the descriptor and defer reads until lifecycle or
 operation methods. Constructor-time environment reads are rejected by the
 conformance suite.
+
+Endpoint-backed operations receive an `AgentAdmittedEndpoint` containing metadata
+and the credential captured from the same controller configuration snapshot.
+Providers consume that value without reading current controller credentials.
+Each goal control receives a fresh snapshot while retaining its execution
+occurrence. Session-setting application receives metadata only. Admitted
+credentials never belong in chat records, transcript rows, public responses, or
+logs; native authentication remains in effect when the endpoint is null.
 
 ## Package and Build Metadata
 

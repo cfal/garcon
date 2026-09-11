@@ -192,6 +192,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#acceptedInputHandler = new AcceptedInputHandler({
       controls: this.#controlOperations,
       coordinator: {
+        prepareTurn: (chatId, options, signal) => this.#turnRunner.prepareTurn(chatId, options, signal),
         requestDrain: (chatId, context) => { this.#requestDrain(chatId, context); },
         reserveDirect: (chatId, turn) => this.#reserveDirect(chatId, turn),
         checkpoint: (reservation) => {
@@ -208,8 +209,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.#acceptedInputTranscript.discard(chatId, clientMessageId);
         },
         releaseDirect: (reservation) => this.#finishDirect(reservation, 'released'),
-        runDirect: (reservation, content, options, dispatch, beforeFailureRelease) => (
-          this.#runDirect(reservation, content, options, dispatch, beforeFailureRelease)
+        runDirect: (reservation, content, options, beforeFailureRelease) => (
+          this.#runDirect(reservation, content, options, beforeFailureRelease)
         ),
         trackDispatch: (task) => { this.#trackDispatch(task); },
         deliverGoalControl: (chatId, content, options, beforeDelivery) => (
@@ -223,7 +224,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       ownership: this.#ownership,
       controls: this.#controlOperations,
       turnRunner: this.#turnRunner,
-      getDrainOptions: this.#getDrainOptions,
       runSelectionAdmissionExclusive: (chatId, operation) =>
         selectionAdmissionLock.runExclusive(`chat:${chatId}`, operation),
       projectAdmission: options.projectAdmission,
@@ -729,7 +729,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     reservation: DirectTurnReservation,
     content: string,
     options: RunAgentTurnOptions,
-    dispatch?: (admission: AgentExecutionAdmission) => Promise<void>,
     beforeFailureRelease?: (error: unknown) => Promise<void>,
   ): Promise<void> {
     this.#checkpointDirect(reservation);
@@ -741,14 +740,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     let outcome: 'completed' | 'failed' = 'failed';
     try {
       reservation.executionAdmission.signal.throwIfAborted();
-      if (dispatch) {
-        await dispatch(reservation.executionAdmission);
-      } else {
-        await this.#turnRunner.runAgentTurn(reservation.chatId, content, {
-          ...options,
-          executionAdmission: reservation.executionAdmission,
-        });
-      }
+      await this.#turnRunner.runAgentTurn(reservation.chatId, content, {
+        ...options,
+        executionAdmission: reservation.executionAdmission,
+      });
       outcome = 'completed';
     } catch (error: unknown) {
       let failure = error;
@@ -946,7 +941,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async #performStop(chatId: string): Promise<ChatStopOutcome> {
     const attempt = this.#ownership.attempt(chatId);
     const interruption = new Error('Turn interrupted by the user');
-    if (attempt) this.#ownership.abortAdmission(chatId, interruption);
+    this.#ownership.abortAdmission(chatId, interruption);
     try {
       const acknowledged = await this.#turnRunner.abortSession(chatId);
       let currentAttempt: QueueExecutionAttempt | undefined;

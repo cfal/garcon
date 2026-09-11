@@ -12,7 +12,6 @@ async function createStorage() {
   createdDirectories.push(workspaceDir);
   const factory = new IntegrationHostFactory({
     workspaceDir,
-    resolveCredential: async () => null,
     loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
   });
   return { storage: factory.forAgent('alpha').storage, workspaceDir };
