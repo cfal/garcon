@@ -1858,7 +1858,9 @@ describe('PromptComposer focus', () => {
 
 		await screen.findByText('Project folder unavailable');
 		const notice = container.querySelector('[data-project-availability-notice]');
+		const noticeContent = notice?.querySelector<HTMLElement>('[role="status"]');
 		const noticeFrame = notice?.parentElement;
+		expect(noticeContent?.className).toContain('mx-auto');
 		expect(noticeFrame?.querySelector('[data-composer]')).toBeTruthy();
 		expect(noticeFrame?.className).toContain('w-full');
 		expect(noticeFrame?.className).toContain('lg:mx-auto');

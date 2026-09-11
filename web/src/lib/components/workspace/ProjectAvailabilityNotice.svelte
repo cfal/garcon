@@ -32,7 +32,7 @@
 	});
 </script>
 
-<div class="max-w-md text-center" role="status">
+<div class="mx-auto max-w-md text-center" role="status">
 	<p class="font-medium text-foreground">{m.workspace_project_unavailable()}</p>
 	<p class="mt-1 text-sm text-muted-foreground">{detail}</p>
 	<p class="mt-1 break-all text-xs text-muted-foreground">{projectPath}</p>
