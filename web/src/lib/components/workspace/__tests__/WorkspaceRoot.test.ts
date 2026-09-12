@@ -37,6 +37,8 @@ const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown>
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
 
 vi.mock('$lib/context', () => ({
+	getAuth: () => ({ token: null }),
+	setIssueSourceNavigation: () => {},
 	getAppShell: () => testContext.current?.appShell,
 	getChatSessions: () => testContext.current?.sessions,
 	getFileSessions: () => testContext.current?.fileSessions,

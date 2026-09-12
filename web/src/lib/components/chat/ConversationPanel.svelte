@@ -146,13 +146,16 @@
 
 	$effect(() => {
 		const registration = panel;
-		return registration.attachPresentation({
-			getScrollContainer: () => scrollContainer,
-			getViewport: () => conversationViewport,
-			getQueueContainer: () => queueControlsContainer,
-			captureRestoreTarget: () => feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
-			closeTransients: () => feedPresentation?.closeTransients(),
-		});
+		return untrack(() =>
+			registration.attachPresentation({
+				getScrollContainer: () => scrollContainer,
+				getViewport: () => conversationViewport,
+				getQueueContainer: () => queueControlsContainer,
+				captureRestoreTarget: () =>
+					feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
+				closeTransients: () => feedPresentation?.closeTransients(),
+			}),
+		);
 	});
 
 	$effect(() => {

@@ -1,4 +1,13 @@
 import { tick } from 'svelte';
+import {
+	jumpToLoadedTranscriptRow,
+	navigateTranscriptRowViewport,
+} from './transcript-row-viewport-navigation.js';
+import type {
+	TranscriptRowNavigationResult,
+	TranscriptRowTarget,
+	TranscriptRowWindowResult,
+} from './transcript-row-navigation.js';
 import type { ConversationScrollControllerDeps } from '$lib/chat/transcript/conversation-scroll-controller-contract.js';
 import type {
 	TranscriptPageApplicationGate,
@@ -480,43 +489,58 @@ export class ConversationScrollController {
 		) {
 			return 'unavailable';
 		}
-		const wasPinned = this.isPinnedToBottom;
 		let shouldResumeAutoFill = false;
 		this.#activeTargetNavigations += 1;
+		const operationEpoch = this.#beginViewportOperation();
 		try {
 			this.deps.chatState.invalidatePendingHistoryLoad();
-			await tick();
-			if (
-				this.deps.getChatId() !== target.chatId ||
-				this.deps.chatState.transcriptViewId !== target.transcriptViewId
-			) {
-				return 'cancelled';
-			}
-			const operationEpoch = this.#beginViewportOperation();
-			const viewport = this.deps.getViewport();
-			if (!viewport) return 'unavailable';
-			this.#preserveHistoryBrowsing();
-			const result = await viewport.scrollToTarget(
-				{ kind: 'row', id: target.rowId },
-				options.viewportOffset === undefined
-					? { align: 'center' }
-					: { viewportOffset: options.viewportOffset },
+			const result = await jumpToLoadedTranscriptRow(
+				target,
+				options,
+				() => this.#isCurrentViewportOperation(target.chatId, operationEpoch),
+				{
+					wasPinned: this.isPinnedToBottom,
+					viewId: () => this.deps.chatState.transcriptViewId,
+					viewport: this.deps.getViewport,
+					preserveHistoryBrowsing: () => this.#preserveHistoryBrowsing(),
+					setPinned: (pinned) => this.setPinnedToBottom(pinned),
+				},
 			);
-			if (!this.#isCurrentViewportOperation(target.chatId, operationEpoch)) return 'cancelled';
-			if (result === 'cancelled') return 'cancelled';
-			if (result !== 'completed') {
-				if (wasPinned) {
-					viewport.scrollToEnd();
-					this.setPinnedToBottom(true);
-				}
-				return 'unavailable';
-			}
-			const atLiveEnd = viewport.isAtEnd();
-			this.setPinnedToBottom(atLiveEnd);
-			shouldResumeAutoFill = true;
-			return 'completed';
+			shouldResumeAutoFill = result === 'completed';
+			return result;
 		} finally {
 			this.#finishTargetNavigation(shouldResumeAutoFill);
+		}
+	}
+
+	async navigateToTranscriptRow(
+		target: TranscriptRowTarget,
+		signal: AbortSignal,
+		loadWindow: (isCurrent: () => boolean) => Promise<TranscriptRowWindowResult>,
+		ownsNavigation: () => boolean,
+	): Promise<TranscriptRowNavigationResult> {
+		const epoch = this.#beginViewportOperation();
+		const current = () =>
+			!signal.aborted && ownsNavigation() && this.#isCurrentViewportOperation(target.chatId, epoch);
+		const cancel = () => {
+			if (epoch !== this.#viewportOperationEpoch) return;
+			this.#cancelViewportOperations();
+			this.deps.getViewport()?.cancelPendingLayoutMutation();
+		};
+		signal.addEventListener('abort', cancel, { once: true });
+		this.#activeTargetNavigations += 1;
+		this.#initialBottomRestoreChatId = null;
+		this.#initialBottomPaintChatId = null;
+		this.#preserveHistoryBrowsing();
+		try {
+			return await navigateTranscriptRowViewport(target, current, loadWindow, {
+				windowLoaded: () => this.#resetPagingContext(),
+				viewId: () => this.deps.chatState.transcriptViewId,
+				viewport: this.deps.getViewport,
+			});
+		} finally {
+			signal.removeEventListener('abort', cancel);
+			this.#finishTargetNavigation(false);
 		}
 	}
 
@@ -640,10 +664,10 @@ export class ConversationScrollController {
 		if (isVisible === this.#isViewportVisible) return;
 		this.#isViewportVisible = isVisible;
 		if (!isVisible) this.cancelNativeScroll();
-		this.#cancelViewportOperations();
+		if (!isVisible || this.#activeTargetNavigations === 0) this.#cancelViewportOperations();
 		this.#previousLogicalOffset =
 			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? null;
-		if (!isVisible) return;
+		if (!isVisible || this.#activeTargetNavigations > 0) return;
 		void this.#restoreVisibleViewport();
 	}
 
@@ -821,10 +845,7 @@ export class ConversationScrollController {
 	}
 
 	#isCurrentViewportOperation(chatId: string, operationEpoch: number): boolean {
-		return (
-			this.deps.getChatId() === chatId &&
-			this.#viewportOperationEpoch === operationEpoch
-		);
+		return this.deps.getChatId() === chatId && this.#viewportOperationEpoch === operationEpoch;
 	}
 
 	#beginViewportOperation(): number {

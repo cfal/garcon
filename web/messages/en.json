@@ -2419,5 +2419,10 @@
 	"canvas_new_name": "Untitled canvas",
 	"canvas_board_empty": "Add a box or a chat to get started.",
 	"canvas_show_details": "Element details",
-	"canvas_done": "Done"
+	"canvas_done": "Done",
+	"issues_open_source": "Open source",
+	"issues_source_reloaded": "Transcript was reloaded; exact row unavailable.",
+	"issues_source_missing": "Exact source row unavailable.",
+	"issues_source_chat_missing": "Source chat is no longer available.",
+	"issues_source_failed": "Could not open issue source. Try again."
 }

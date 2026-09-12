@@ -37,6 +37,7 @@
 <script lang="ts">
 	import {
 		getChatSessions,
+		getIssueSourceNavigation,
 		getAuth,
 		getFileSessions,
 		getGhCapability,
@@ -80,6 +81,7 @@
 	const files = getFileSessions();
 	const sessions = getChatSessions();
 	const auth = getAuth();
+	const issueSourceNavigation = getIssueSourceNavigation();
 	const projectState = $derived(workspaceContext.projectState);
 </script>
 
@@ -227,12 +229,19 @@
 	{:else if surface.type === 'singleton' && surface.kind === 'issues'}
 		{@const controller = singletonSurfaces.issues()}
 		{#await issuesRenderer() then IssuesPanel}
-			<IssuesPanel {controller} {visible} chats={sessions.orderedChats}
-				username={auth.user?.username ?? 'local'} directory={workspaceContext.current?.projectPath ?? null}
+			<IssuesPanel
+				{controller}
+				{visible}
+				chats={sessions.orderedChats}
+				onOpenSource={(source) =>
+					void issueSourceNavigation.open(source, presentation, () => controller.bootstrap)}
+				username={auth.user?.username ?? 'local'}
+				directory={workspaceContext.current?.projectPath ?? null}
 				onOpenChat={(chatId) => {
 					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
 					else void workspace.showChatInWindow(chatId, presentation);
-				}} />
+				}}
+			/>
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'chat-board'}
 		{@const controller = singletonSurfaces.chatBoard()}

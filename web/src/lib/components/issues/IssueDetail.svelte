@@ -2,7 +2,7 @@
 	import { tick, untrack } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Copy from '@lucide/svelte/icons/copy';
-	import type { IssueDetail, IssueStatus } from '$shared/issues';
+	import type { IssueDetail, IssueSource, IssueStatus } from '$shared/issues';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import {
 		canSubmitIssueForm,
@@ -30,6 +30,7 @@
 		chats,
 		username,
 		onOpenChat,
+		onOpenSource,
 		onBack,
 		onStatus,
 	}: {
@@ -38,6 +39,7 @@
 		chats: readonly IssueChatSummary[];
 		username: string;
 		onOpenChat: (id: string) => void;
+		onOpenSource: (source: IssueSource) => void;
 		onBack: () => void;
 		onStatus: (status: IssueStatus) => void;
 	} = $props();
@@ -277,5 +279,5 @@
 			{onOpenChat}
 			onSubmitted={() => void latestComments()}
 		/>
-	{:else}<IssueActivity {controller} {chats} {username} {onOpenChat} />{/if}
+	{:else}<IssueActivity {controller} {chats} {username} {onOpenChat} {onOpenSource} />{/if}
 </section>

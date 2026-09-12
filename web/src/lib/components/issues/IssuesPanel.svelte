@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
-	import type { IssueStatus, IssueSummary } from '$shared/issues';
+	import type { IssueSource, IssueStatus, IssueSummary } from '$shared/issues';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import type { IssueChatSummary } from './issue-presentation.js';
@@ -23,6 +23,7 @@
 		username,
 		directory,
 		onOpenChat,
+		onOpenSource,
 	}: {
 		controller: IssuesController;
 		visible: boolean;
@@ -30,6 +31,7 @@
 		username: string;
 		directory: string | null;
 		onOpenChat: (id: string) => void;
+		onOpenSource: (source: IssueSource) => void;
 	} = $props();
 	const frame = getSurfaceFrameBridge();
 	let root = $state<HTMLElement | null>(null);
@@ -216,6 +218,7 @@
 						{chats}
 						{username}
 						{onOpenChat}
+						{onOpenSource}
 						onBack={() => void back()}
 						onStatus={(next) => {
 							if (controller.detail.current) void status(controller.detail.current.issue, next);

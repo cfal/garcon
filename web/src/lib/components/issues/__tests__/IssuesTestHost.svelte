@@ -24,4 +24,5 @@
 	username="local"
 	directory={null}
 	onOpenChat={() => {}}
+	onOpenSource={() => {}}
 />

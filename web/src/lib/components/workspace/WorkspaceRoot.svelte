@@ -18,6 +18,9 @@
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
 		getChatSessions,
+		getAuth,
+		getNotifications,
+		setIssueSourceNavigation,
 		getFileSessions,
 		getGitBranchActions,
 		getGitQuickSummary,
@@ -35,6 +38,7 @@
 		type WorkspaceChatActions,
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
+	import { IssueSourceNavigationController } from '$lib/issues/navigation/issue-source-navigation-controller.js';
 	import type {
 		UserMessageNavigatorCommand,
 		UserMessageNavigatorRegistration,
@@ -119,6 +123,21 @@
 		getSelectedChatId: () => sessions.selectedChatId,
 	});
 	setConversationPanels(conversationPanels);
+	const auth = getAuth();
+	const issueSourceNavigation = new IssueSourceNavigationController({
+		workspace,
+		panels: conversationPanels,
+		notifications: getNotifications(),
+		hasChat: (chatId) => !!sessions.byId[chatId],
+		authority: () => auth.token,
+	});
+	setIssueSourceNavigation(issueSourceNavigation);
+	$effect(() => {
+		void auth.token;
+		void workspace.focusOwnerRevision;
+		void sessions.byId;
+		untrack(() => issueSourceNavigation.reconcile());
+	});
 	const unregisterChatSurfaceTransfers =
 		workspace.registerChatSurfaceTransferPort(conversationPanels);
 	conversationUi.mountExecutionControlPruning({
@@ -372,6 +391,7 @@
 	});
 
 	onDestroy(() => {
+		issueSourceNavigation.invalidate();
 		gitQuickSummary.setVisibleProjects([]);
 		gitQuickSummary.reconcilePolling();
 		unregisterChatSurfaceTransfers();

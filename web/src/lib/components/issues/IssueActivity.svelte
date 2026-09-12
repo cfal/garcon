@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
+	import type { IssueSource } from '$shared/issues';
 	import { issueActivityLabel, type IssueChatSummary } from './issue-presentation.js';
 	import IssueActor from './IssueActor.svelte';
 	import IssueMarkdown from './IssueMarkdown.svelte';
@@ -9,11 +10,13 @@
 		chats,
 		username,
 		onOpenChat,
+		onOpenSource,
 	}: {
 		controller: IssuesController;
 		chats: readonly IssueChatSummary[];
 		username: string;
 		onOpenChat: (id: string) => void;
+		onOpenSource: (source: IssueSource) => void;
 	} = $props();
 </script>
 
@@ -63,6 +66,13 @@
 							view: entry.source.transcriptViewId,
 							ordinal: entry.source.ordinal,
 						})}
+						<button
+							class="issue-button"
+							disabled={!chats.some((chat) => chat.id === entry.source?.chatId)}
+							onclick={() => {
+								if (entry.source) onOpenSource(entry.source);
+							}}>{m.issues_open_source()}</button
+						>
 					</p>{/if}
 			</li>
 			{#snippet failed()}<li class="issue-notice">{m.issues_invalid_entry()}</li>{/snippet}

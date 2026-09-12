@@ -160,6 +160,8 @@ Drafts stay in the current browser tab's recovery storage when available. Save a
 
 Comment removal retains previous text in activity history; it is not redaction. Issues live in the workspace's `issues.sqlite`, independently of chats and transcripts. Back up a live store through SQLite's backup API or `VACUUM INTO`, not by copying only the main file while WAL writes are active. A damaged or unknown-schema store is left unavailable for explicit recovery, never rebuilt from transcripts.
 
+Activity's **Open source** opens the originating chat at the visible issue-command result, including older rows outside the loaded transcript. If the transcript was reloaded or the exact result is missing, it opens the chat with a notification instead. Deleted chats cannot be opened. Source addresses remain immutable; navigation never substitutes a row from a replacement transcript.
+
 ## Trusted Local Use
 
 To disable authentication for a trusted single-user environment:
