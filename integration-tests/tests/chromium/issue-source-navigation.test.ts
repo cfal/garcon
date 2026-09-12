@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
-import type { Page } from 'playwright';
+import type { Page, Route } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { Deferred, withTimeout } from '../../support/deferred.js';
 import { createIssueSource } from '../../support/issue-source-fixture.js';
 import type { IssueSource } from '../../../common/issues.js';
 
@@ -49,27 +50,63 @@ for (const width of [1440, 390]) {
 }
 
 test('a reload between lookup and page load opens the chat without reusing the ordinal', async () => {
-  await withChromiumFixture('issue-source-reload-race', async ({ page, integration, browserErrors }) => {
+  const messageUrls: string[] = [];
+  const interceptedUrls: string[] = [];
+  let requests = 0;
+  await withChromiumFixture('issue-source-reload-race', async ({ page, context, integration, browserErrors }, markPhase) => {
     const { chatId, issueId, target } = await createIssueSource(integration, 110);
-    await page.goto(integration.garcon.baseUrl);
-    await collapseCanonicalFilesWindow(page);
-    await openActivity(page, issueId);
-    let requests = 0;
-    await page.route('**/api/v1/chats/messages?*', async (route) => {
+    const requestStarted = new Deferred<Route>();
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/v1/chats/messages') messageUrls.push(request.url());
+    });
+    await context.route('**/api/v1/chats/messages?*', async (route) => {
+      interceptedUrls.push(route.request().url());
       const query = new URL(route.request().url()).searchParams;
-      if (query.get('beforeOrdinal') === String(target.ordinal + 1)) {
+      if (query.get('chatId') === chatId && query.get('beforeOrdinal') === String(target.ordinal + 1)) {
         requests++;
-        await integration.client.reloadChat(chatId);
+        if (requestStarted.resolve(route)) return;
       }
       await route.continue();
     });
+    await page.goto(integration.garcon.baseUrl);
+    await collapseCanonicalFilesWindow(page);
+    await openActivity(page, issueId);
+    markPhase('capturing the exact source page request');
     await page.getByRole('button', { name: 'Open source', exact: true }).click();
+    const route = await withTimeout(requestStarted.promise, 20_000,
+      () => 'The exact source page request was not intercepted.');
+    try {
+      markPhase('reloading while the source page request is held');
+      const reloaded = await integration.client.reloadChat(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(target.transcriptViewId);
+    } finally {
+      markPhase('releasing the old-view source page request');
+      await route.continue();
+    }
+    markPhase('waiting for the transcript reload notification');
     await page.getByText('Transcript was reloaded; exact row unavailable.', { exact: true }).waitFor();
     await page.locator('[data-chat-scroll-viewport]').waitFor();
     expect(requests).toBe(1);
     expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
     expect(browserErrors.filter((error) => !error.includes('409 (Conflict)'))).toEqual([]);
-  });
+  }, async ({ page }) => ({
+    requests,
+    messageUrls,
+    interceptedUrls,
+    presentation: await page.evaluate(() => {
+      const activeElement = document.activeElement;
+      return {
+        activeElement: activeElement && {
+          tag: activeElement.tagName,
+          id: activeElement.id,
+          role: activeElement.getAttribute('role'),
+          label: activeElement.getAttribute('aria-label'),
+        },
+        panels: Array.from(document.querySelectorAll('[data-conversation-panel-chat-id]'), (panel) =>
+          Object.fromEntries(Array.from(panel.attributes, (attribute) => [attribute.name, attribute.value]))),
+      };
+    }),
+  }));
 });
 
 test('a missing exact outcome still opens its chat and reports the missing row', async () => {
