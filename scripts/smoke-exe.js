@@ -6,6 +6,8 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { smokeSystemdHelper } from './smoke-systemd-helper.js';
 import { seedSmokeAccount, seedSmokeTranscript, SMOKE_CHAT_ID, SMOKE_SEARCH_TOKEN } from './smoke-exe-fixture.js';
 import { SYSTEMD_HELPER_FLAG } from '../server/execution-node/systemd/contracts.js';
+import { nodeWorkerRoleFlag } from '../server/execution-node/worker/roles.js';
+import { smokeNodeWorkers } from './smoke-node-workers.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -206,6 +208,7 @@ async function run() {
     throw new Error(`Missing CLI executable at ${executablePaths.cli}. Run "bun run build-exe:compile" first.`);
   }
   await smokeSystemdHelper([executablePath, SYSTEMD_HELPER_FLAG]);
+  await smokeNodeWorkers((role) => [executablePath, nodeWorkerRoleFlag(role)]);
   const cliHelp = Bun.spawnSync([executablePaths.cli, '--help']);
   if (cliHelp.exitCode !== 0 || !cliHelp.stdout.toString().startsWith('Usage:\n  garcon-cli')) {
     throw new Error(`CLI executable help smoke check failed for ${executablePaths.cli}.`);

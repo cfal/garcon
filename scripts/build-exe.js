@@ -83,7 +83,7 @@ async function collectEmbeddedAssetInputs() {
 export function createVirtualMainEntrypoint(
   assetsEntrypoint,
   serverMainPath,
-  preMainModules,
+  contributions,
   transcriptSearchWorkers,
 ) {
   const entrypointUrl = (entry) => {
@@ -108,13 +108,18 @@ export function createVirtualMainEntrypoint(
   }`;
   return [
     `import '${assetsEntrypoint}';`,
-    `import { SYSTEMD_HELPER_FLAG } from '${toPosixPath(path.join(repoRoot, 'server/execution-node/systemd/contracts.ts'))}';`,
     `const deepFreeze = (value) => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const nested of Object.values(value)) deepFreeze(nested); } return value; };`,
     `Object.defineProperty(globalThis, Symbol.for('garcon.compiled-mode'), { value: true, writable: false, configurable: false });`,
     `Object.defineProperty(globalThis, Symbol.for('garcon.embedded-search-manifest.v1'), { value: deepFreeze(${manifestExpression}), writable: false, configurable: false });`,
-    `if (!process.argv.includes(SYSTEMD_HELPER_FLAG)) {`,
-    ...preMainModules.map((modulePath) => `  await import('${toPosixPath(modulePath)}');`),
-    `}`,
+    `Object.defineProperty(globalThis, Symbol.for('garcon.prepare-agent-runtime'), { value: async (agentId) => {`,
+    `  switch (agentId) {`,
+    ...contributions.filter((entry) => entry.preMainModules.length > 0).flatMap((entry) => [
+      `    case ${JSON.stringify(entry.integrationId)}:`,
+      ...entry.preMainModules.map((modulePath) => `      await import('${toPosixPath(modulePath)}');`),
+      `      break;`,
+    ]),
+    `  }`,
+    `}, writable: false, configurable: false });`,
     `await import('${serverMainPath}');`,
     '',
   ].join('\n');
@@ -174,7 +179,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, transcrip
       [mainEntrypoint]: createVirtualMainEntrypoint(
         assetsEntrypoint,
         serverMainPath,
-        contributions.flatMap((contribution) => contribution.preMainModules),
+        contributions,
         transcriptSearchWorkers,
       ),
     },
