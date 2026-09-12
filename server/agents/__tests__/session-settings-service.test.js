@@ -22,6 +22,7 @@ function makeService(thinkingMode = 'high') {
       supportedThinkingModes: [],
     },
     endpoints: null,
+    configurationValidation: null,
     sessionConfiguration: null,
     settings: {
       defaults: () => ({ ownerId: 'amp', schemaVersion: 2, values: {} }),
@@ -51,6 +52,48 @@ function makeService(thinkingMode = 'high') {
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('preflights a new configuration without applying settings or saving a chat', async () => {
+    const { service, updateChat, integration } = makeService();
+    const validate = mock(async () => undefined);
+    const apply = mock(async () => undefined);
+    integration.configurationValidation = { validate };
+    integration.sessionConfiguration = { apply };
+    const agentSettings = { ownerId: 'amp', schemaVersion: 2, values: {} };
+
+    await service.validateConfiguration({
+      agentId: 'amp', model: 'next-model', permissionMode: 'default',
+      thinkingMode: 'none', agentSettings,
+    });
+
+    expect(validate).toHaveBeenCalledWith({
+      model: 'next-model', permissionMode: 'default', thinkingMode: 'none',
+      settings: agentSettings, endpoint: null,
+    });
+    expect(apply).not.toHaveBeenCalled();
+    expect(updateChat).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'session-1'])('validates before live changes or persistence with native session %s', async (agentSessionId) => {
+    const { service, updateChat, entry, integration } = makeService('none');
+    entry.agentSessionId = agentSessionId;
+    const validate = mock(async () => { throw new Error('invalid model'); });
+    const apply = mock(async () => undefined);
+    integration.configurationValidation = { validate };
+    integration.sessionConfiguration = { apply };
+
+    await expect(service.updateSessionSettings('chat-1', { model: 'invalid' }))
+      .rejects.toThrow('invalid model');
+    expect(validate).toHaveBeenCalledWith({
+      model: 'invalid',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'none',
+      settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
+      endpoint: null,
+    });
+    expect(apply).not.toHaveBeenCalled();
+    expect(updateChat).not.toHaveBeenCalled();
+  });
+
   it('rejects an explicit thinking mode outside the agent capability', async () => {
     const { service, updateChat } = makeService('none');
 

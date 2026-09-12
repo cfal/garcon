@@ -1,4 +1,5 @@
-const MINIMUM_CLAUDE_CLI_VERSION: readonly [number, number, number] = [2, 1, 220];
+// The pinned scripted-model suite verifies --autocompact as well as the persistent protocol.
+const MINIMUM_CLAUDE_CLI_VERSION: readonly [number, number, number] = [2, 1, 238];
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 const VERSION_PROBE_EXIT_GRACE_MS = 1_000;
 const MAX_VERSION_OUTPUT_BYTES = 16 * 1024;

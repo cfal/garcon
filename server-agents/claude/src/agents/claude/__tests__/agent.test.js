@@ -77,6 +77,26 @@ function startRequest(projectPath, signal = new AbortController().signal) {
 }
 
 describe('ClaudeExecution', () => {
+  it('rejects invalid models before native-path creation, runtime admission, or activation', async () => {
+    const configHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-validation-'));
+    const runtime = createClaudeStub();
+    const execution = createExecution(runtime, configHomeDir);
+    const publish = mock(() => undefined);
+    const request = { ...startRequest(configHomeDir), model: 'custom[99k]' };
+    try {
+      await expect(execution.start(request, publish)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+      await expect(execution.resume({
+        ...request, agentSessionId: 'session-1', nativeSession: null,
+      }, publish)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+      expect(await fs.readdir(configHomeDir)).toEqual([]);
+      expect(runtime.startClaudeCliSession).not.toHaveBeenCalled();
+      expect(runtime.runClaudeTurn).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(configHomeDir, { recursive: true, force: true });
+    }
+  });
+
   it('emits a failed event when fire-and-forget startup rejects', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-'));
     try {

@@ -37,6 +37,11 @@ export interface AgentRunningSession {
   readonly startedAt: string | null;
 }
 
+export interface AgentConfigurationValidation {
+  // Runs without a native session and must not mutate provider or persisted state.
+  validate(configuration: AgentSessionConfiguration): Promise<void>;
+}
+
 export interface AgentSessionConfigurationUpdates {
   apply(
     agentSessionId: string,

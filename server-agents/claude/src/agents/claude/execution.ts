@@ -25,6 +25,7 @@ import {
 } from './native-path.js';
 import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
+import { resolveClaudeModel } from './model-context.js';
 
 export class ClaudeExecution implements AgentRuntimeExecution {
   constructor(
@@ -40,6 +41,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
   ) {
     request.admission.signal.throwIfAborted();
+    resolveClaudeModel(request.model);
     const envOverrides = await this.#endpointEnvironment(request);
     const agentSessionId = crypto.randomUUID();
     const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
@@ -97,6 +99,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     request: Parameters<AgentRuntimeExecution['resume']>[0],
     publish: AgentRuntimePublisher,
   ): Promise<void> {
+    resolveClaudeModel(request.model);
     await this.runtime.runClaudeTurn({
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
@@ -128,6 +131,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     agentSessionId: string,
     configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
   ): Promise<void> {
+    // Model-only patches reapply these options; unchanged values must preserve the process.
     this.runtime.setInternalPermissionMode(agentSessionId, configuration.permissionMode);
     this.runtime.setInternalThinkingMode(agentSessionId, configuration.thinkingMode);
     this.runtime.setInternalClaudeThinkingMode(

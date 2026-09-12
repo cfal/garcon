@@ -39,6 +39,7 @@ const AMP_DESCRIPTOR = {
 } as const;
 
 export default class AmpAgentIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = 'amp';
   static readonly apiVersion = 5 as const;
   readonly descriptor = AMP_DESCRIPTOR;

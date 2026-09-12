@@ -48,6 +48,7 @@ import {
 } from './agents/claude/native-path.js';
 import { ClaudeSlashCommandDiscovery } from './agents/claude/slash-command-discovery.js';
 import { createClaudeNativeActivityProbe } from './agents/claude/native-activity.js';
+import { resolveClaudeModel } from './agents/claude/model-context.js';
 
 const CLAUDE_DESCRIPTOR = {
   id: 'claude',
@@ -79,6 +80,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly nativeHistoryImport;
   readonly nativeActivity;
   readonly nativeSessions;
+  readonly configurationValidation: NonNullable<AgentIntegration['configurationValidation']> = {
+    async validate(configuration) {
+      resolveClaudeModel(configuration.model);
+    },
+  };
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;

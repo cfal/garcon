@@ -24,6 +24,21 @@ function createHost(root = '/tmp/garcon-claude-integration-test') {
 }
 
 describe('ClaudeAgentIntegration', () => {
+  it('validates model annotations without requiring an active native session', async () => {
+    const integration = new ClaudeAgentIntegration(createHost());
+    const configuration = {
+      model: 'custom[922k]',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      settings: integration.settings.defaults(),
+      endpoint: null,
+    };
+    await expect(integration.configurationValidation.validate(configuration)).resolves.toBeUndefined();
+    await expect(integration.configurationValidation.validate({
+      ...configuration, model: 'custom[99k]',
+    })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+  });
+
   it('composes the provider facets without reading environment during construction', () => {
     const host = createHost();
     const integration = new ClaudeAgentIntegration(host);

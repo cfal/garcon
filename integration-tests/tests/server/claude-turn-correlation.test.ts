@@ -15,7 +15,7 @@ const { dirname, join, resolve } = await import('node:path');
 const args = process.argv.slice(2);
 
 if (args.includes('--version')) {
-  console.log('2.1.220 (Claude Code)');
+  console.log('2.1.238 (Claude Code)');
   process.exit(0);
 }
 

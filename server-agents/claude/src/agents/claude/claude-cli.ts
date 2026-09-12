@@ -5,6 +5,8 @@ import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
+import { buildClaudeCLIEnvironment } from './cli-environment.js';
+import { resolveClaudeModel } from './model-context.js';
 import {
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
@@ -771,7 +773,7 @@ class ClaudeCliRuntime {
 
     session.options = { ...session.options, thinkingMode: mode };
 
-    if (session.process && !session.activeTurn) {
+    if (session.process && !session.activeTurn && mode !== session.currentThinkingMode) {
       this.#retireSessionProcessInBackground(session);
     }
   }
@@ -782,7 +784,7 @@ class ClaudeCliRuntime {
 
     session.options = { ...session.options, claudeThinkingMode: mode };
 
-    if (session.process && !session.activeTurn) {
+    if (session.process && !session.activeTurn && mode !== session.currentClaudeThinkingMode) {
       this.#retireSessionProcessInBackground(session);
     }
   }
@@ -946,14 +948,10 @@ class ClaudeCliRuntime {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: (() => {
-        const { CLAUDECODE, ...env } = process.env;
-        return {
-          ...env,
-          ...options.envOverrides,
-          CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
-        };
-      })(),
+      env: {
+        ...buildClaudeCLIEnvironment(options.model, options.envOverrides),
+        CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
+      },
     });
 
     session.options = options;
@@ -1025,6 +1023,7 @@ class ClaudeCliRuntime {
 
   async startClaudeCliSession(request: ClaudeStartRequest): Promise<string> {
     assertClaudeExecutionOpen(request);
+    resolveClaudeModel(request.model || '');
     const {
       command,
       agentSessionId,
@@ -1127,6 +1126,7 @@ class ClaudeCliRuntime {
 
   async runClaudeTurn(request: ClaudeResumeRequest): Promise<void> {
     assertClaudeExecutionOpen(request);
+    resolveClaudeModel(request.model || '');
     const {
       command,
       agentSessionId,
@@ -1207,18 +1207,19 @@ class ClaudeCliRuntime {
     let ownedTurn: ClaudeActiveTurn | null = null;
     let cleanupVideoAttachments = async () => {};
     try {
-      if (chatId !== session.chatId) {
-        throw new Error('Chat ID mismatch');
-      }
+      if (chatId !== session.chatId) throw new Error('Chat ID mismatch');
 
-      session.options = mergeClaudeSessionOptions(session.options, allOpts);
+      const desiredOptions = mergeClaudeSessionOptions(session.options, allOpts);
+      const desiredModel = desiredOptions.model || '';
+      const resolvedModel = resolveClaudeModel(desiredModel);
+      const currentModel = resolveClaudeModel(session.currentModel);
+      session.options = desiredOptions;
       session.chatId = chatId;
       session.lastActivityAt = Date.now();
       const desiredThinkingMode = session.options.thinkingMode || 'none';
       const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(
         session.options.claudeThinkingMode,
       );
-      const desiredModel = session.options.model || '';
       const desiredPermissionMode = session.options.permissionMode || 'default';
       const previousProviderPermissionMode = session.process
         ? providerStartupPermissionMode(session.currentPermissionMode)
@@ -1233,11 +1234,15 @@ class ClaudeCliRuntime {
         session.currentEnvOverrides,
         session.options.envOverrides,
       );
+      // set_model cannot change --autocompact; resuming reapplies the cap without losing history.
+      // https://github.com/anthropics/claude-agent-sdk-python/blob/3379406f18fcea64617d25663d811dfdde8cd171/src/claude_agent_sdk/_internal/query.py#L697-L704
+      const contextWindowChanged = currentModel.autoCompactWindow !== resolvedModel.autoCompactWindow;
       if (session.process && (
         desiredThinkingMode !== session.currentThinkingMode
         || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
         || permissionStartupChanged
         || envChanged
+        || contextWindowChanged
       )) {
         await this.#retireSessionProcess(session);
       }
@@ -1245,18 +1250,13 @@ class ClaudeCliRuntime {
       if (!session.process) {
         // Always resumes because the native transcript owns conversation context.
         assertClaudeExecutionOpen(requestAdmission);
-        await this.#spawnCLI(
-          session,
-          session.options,
-          true,
-          cliVersion,
-        );
+        await this.#spawnCLI(session, session.options, true, cliVersion);
       }
 
       if (session.process && desiredModel !== session.currentModel) {
         await this.#controlBroker.request(session.id, {
           subtype: 'set_model',
-          model: desiredModel,
+          model: resolvedModel.model,
         });
         session.currentModel = desiredModel;
       }

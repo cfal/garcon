@@ -210,6 +210,7 @@ function executionModeMethods({
   thinkingModes = ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 } = {}) {
   return {
+    validateConfiguration: mock(async () => undefined),
     assertExecutionModeSelectionSupported: mock((agentId, selection) => {
       if (selection.permissionMode !== undefined && !permissionModes.includes(selection.permissionMode)) {
         throw new DomainError(
@@ -1461,6 +1462,35 @@ describe('ChatCommandService', () => {
       'req-start-unsupported-thinking',
       TARGET_CHAT_ID,
     )).toBeNull();
+  });
+
+  it('rejects provider configuration before chat creation or command acceptance', async () => {
+    const { service, chats, ledger, agents } = makeService();
+    agents.validateConfiguration.mockRejectedValue(new AgentIntegrationError(
+      'INVALID_SETTINGS', 'Synthetic invalid model configuration.', false,
+    ));
+    const input = {
+      origin: 'interactive',
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'Synthetic initial prompt.',
+      model: 'invalid-model',
+      permissionMode: 'default',
+      thinkingMode: 'low',
+      agentSettings: agentSettings('claude'),
+      clientRequestId: 'req-start-invalid-model',
+      clientMessageId: 'msg-start-invalid-model',
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(service.submitStart(input)).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED', status: 422, retryable: false,
+      });
+    }
+    expect(agents.validateConfiguration).toHaveBeenCalledWith(input);
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'chat-start', input.clientRequestId, TARGET_CHAT_ID)).toBeNull();
   });
 
   it('persists the neutral chat-start value for an agent without thinking modes', async () => {

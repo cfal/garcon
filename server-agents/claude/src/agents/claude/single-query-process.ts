@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { buildClaudeCLIEnvironment } from './cli-environment.js';
 
 const MAX_SINGLE_QUERY_STDOUT_BYTES = 4 * 1024 * 1024;
 const MAX_SINGLE_QUERY_STDERR_BYTES = 16 * 1024;
@@ -9,6 +10,7 @@ const SINGLE_QUERY_EXIT_GRACE_MS = 1_000;
 interface ClaudeSingleQueryProcessOptions {
   readonly binary: string;
   readonly args: string[];
+  readonly model?: string;
   readonly cwd: string;
   readonly envOverrides?: Record<string, string>;
   readonly signal: AbortSignal;
@@ -18,19 +20,19 @@ interface ClaudeSingleQueryProcessOptions {
 export async function runClaudeSingleQueryProcess({
   binary,
   args,
+  model,
   cwd,
   envOverrides,
   signal,
   logger,
 }: ClaudeSingleQueryProcessOptions): Promise<string> {
-  const { CLAUDECODE, ...env } = process.env;
   const proc = Bun.spawn([binary, ...args], {
     cwd,
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
     signal,
-    env: { ...env, ...envOverrides },
+    env: buildClaudeCLIEnvironment(model, envOverrides),
   });
 
   let stdout: string;

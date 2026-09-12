@@ -31,7 +31,7 @@ if [ ! -f ${successMarker} ]; then
   echo "transient failure" >&2
   exit 1
 fi
-echo "2.1.220 (Claude Code)"
+echo "2.1.238 (Claude Code)"
 `, { mode: 0o755 });
   return { binaryPath, callLogPath };
 }
@@ -50,9 +50,9 @@ describe('parseClaudeCliVersion', () => {
 
 describe('isVersionBefore', () => {
   it('compares versions numerically per component', () => {
-    expect(isVersionBefore([2, 1, 219], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
+    expect(isVersionBefore([2, 1, 237], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
     expect(isVersionBefore([1, 9, 999], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
-    expect(isVersionBefore([2, 1, 220], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
+    expect(isVersionBefore([2, 1, 238], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
     expect(isVersionBefore([2, 2, 0], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
     expect(isVersionBefore([3, 0, 0], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
   });
@@ -63,18 +63,18 @@ function createProbe() {
 }
 
 describe('ClaudeCliVersionProbe', () => {
-  it('requires the tested persistent protocol version', async () => {
-    const supported = await createFakeClaudeBinary('2.1.220 (Claude Code)');
-    const unsupported = await createFakeClaudeBinary('2.1.219 (Claude Code)');
+  it('requires the tested persistent protocol and context-window version', async () => {
+    const supported = await createFakeClaudeBinary('2.1.238 (Claude Code)');
+    const unsupported = await createFakeClaudeBinary('2.1.237 (Claude Code)');
 
     await expect(createProbe().assertCompatible(supported.binaryPath))
       .resolves.toEqual(MINIMUM_CLAUDE_CLI_VERSION);
     await expect(createProbe().assertCompatible(unsupported.binaryPath))
-      .rejects.toThrow('Upgrade to 2.1.220 or newer');
+      .rejects.toThrow('Upgrade to 2.1.238 or newer');
   });
 
   it('probes each binary path only once', async () => {
-    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.1.220 (Claude Code)');
+    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.1.238 (Claude Code)');
     const probe = createProbe();
     expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);
     expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);

@@ -18,6 +18,13 @@ function selection(endpoint = {}) {
 }
 
 describe('buildClaudeEndpointRuntime', () => {
+  it('normalizes the custom endpoint subagent model without changing the selection', () => {
+    const endpoint = selection({ model: 'acme-claude[922k]' });
+    expect(buildClaudeEndpointRuntime(endpoint).envOverrides.CLAUDE_CODE_SUBAGENT_MODEL)
+      .toBe('acme-claude[1m]');
+    expect(endpoint.selection.model).toBe('acme-claude[922k]');
+  });
+
   it('builds Anthropic environment overrides for Claude endpoint-backed runs', () => {
     expect(buildClaudeEndpointRuntime(selection())).toEqual({
       envOverrides: {

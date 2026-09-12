@@ -42,6 +42,7 @@ const DESCRIPTOR = {
 } as const;
 
 export default class DirectAnthropicCompatibleIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;
