@@ -215,6 +215,18 @@ it('allows delayed composer focus on the target surface during page loading', as
 	expect(f.deps.notifications.error).not.toHaveBeenCalled();
 });
 
+it('requires the returned surface to stay focused even when the focus revision is unchanged', async () => {
+	const f = fixture();
+	f.deps.workspace.showChatInWindow.mockImplementation(async () => {
+		f.deps.workspace.lastFocusedSurfaceId = 'singleton:files';
+		return surfaceId;
+	});
+	await f.open();
+	expect(f.panel.navigateToTranscriptRow).not.toHaveBeenCalled();
+	expect(f.deps.notifications.info).not.toHaveBeenCalled();
+	expect(f.deps.notifications.error).not.toHaveBeenCalled();
+});
+
 it('does not report an error for a panel-local cancellation', async () => {
 	const f = fixture();
 	f.panel.navigateToTranscriptRow.mockRejectedValue(

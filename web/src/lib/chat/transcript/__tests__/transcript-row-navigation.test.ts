@@ -88,6 +88,24 @@ it.each(['cancel', 'focus', 'window', 'chat'] as const)(
 	},
 );
 
+it.each(['pending-snapshot', 'aborted-snapshot', 'navigation-cancelled'] as const)(
+	'rejects a snapshot-superseded target page after %s',
+	async (change) => {
+		const transcript = fixture();
+		const read = held<ChatHistoryResponse>();
+		vi.mocked(getChatMessages).mockReturnValue(read.promise);
+		const abort = new AbortController();
+		const work = transcript.navigateToRow(target, abort.signal, () => true);
+		const epoch = transcript.beginSnapshotLoad();
+		if (change === 'aborted-snapshot') transcript.abortSnapshotLoad(epoch);
+		if (change === 'navigation-cancelled') abort.abort();
+		read.release(page());
+		expect(await work).toBe(change === 'navigation-cancelled' ? 'cancelled' : 'unavailable');
+		expect(transcript.entries.map((entry) => entry.ordinal)).toEqual([1000]);
+		transcript.abortSnapshotLoad(epoch);
+	},
+);
+
 it('does not relabel a replaced-view ordinal or page a replacement view', async () => {
 	const transcript = fixture();
 	vi.mocked(getChatMessages).mockRejectedValue(

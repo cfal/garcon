@@ -30,7 +30,7 @@ export interface IssueSourceNavigationDeps {
 }
 
 export class IssueSourceNavigationController {
-	#pending: { abort: AbortController; valid: () => boolean } | null = null;
+	#pending: { abort: AbortController; ownsNavigation: () => boolean } | null = null;
 
 	constructor(private readonly deps: IssueSourceNavigationDeps) {}
 
@@ -40,7 +40,7 @@ export class IssueSourceNavigationController {
 	}
 
 	reconcile(): void {
-		if (this.#pending && !this.#pending.valid()) this.invalidate();
+		if (this.#pending && !this.#pending.ownsNavigation()) this.invalidate();
 	}
 
 	async open(
@@ -53,33 +53,34 @@ export class IssueSourceNavigationController {
 		if (!partition || !this.deps.hasChat(source.chatId)) return;
 		const authority = this.deps.authority();
 		const originFocusRevision = this.deps.workspace.focusOwnerRevision;
-		const valid = () =>
+		const ownsSource = () =>
 			this.deps.authority() === authority &&
 			this.deps.hasChat(source.chatId) &&
 			getPartition()?.storeId === partition.storeId &&
 			getPartition()?.viewerKey === partition.viewerKey;
 		const pending = {
 			abort: new AbortController(),
-			valid: () => valid() && this.deps.workspace.focusOwnerRevision === originFocusRevision,
+			ownsNavigation: () =>
+				ownsSource() && this.deps.workspace.focusOwnerRevision === originFocusRevision,
 		};
 		this.#pending = pending;
-		const current = () =>
-			this.#pending === pending && !pending.abort.signal.aborted && pending.valid();
+		const isCurrent = () =>
+			this.#pending === pending && !pending.abort.signal.aborted && pending.ownsNavigation();
 		const timeout = setTimeout(() => {
 			if (this.#pending !== pending) return;
-			const owned = pending.valid();
+			const wasOwned = pending.ownsNavigation();
 			this.invalidate();
-			if (owned) this.deps.notifications.error(m.issues_source_failed());
+			if (wasOwned) this.deps.notifications.error(m.issues_source_failed());
 		}, 30_000);
 		try {
 			const resolution = await (this.deps.resolve ?? resolveIssueSource)(
 				source,
 				pending.abort.signal,
 			);
-			if (!current()) return;
+			if (!isCurrent()) return;
 			let surfaceId: ChatViewSurfaceId | null = null;
-			pending.valid = () => {
-				if (!valid()) return false;
+			pending.ownsNavigation = () => {
+				if (!ownsSource()) return false;
 				if (surfaceId !== null && this.deps.workspace.lastFocusedSurfaceId !== surfaceId)
 					return false;
 				if (this.deps.workspace.focusOwnerRevision === originFocusRevision) return true;
@@ -94,7 +95,7 @@ export class IssueSourceNavigationController {
 					? await this.deps.workspace.showChatInCurrentWindow(source.chatId)
 					: await this.deps.workspace.showChatInWindow(source.chatId, host);
 			await tick();
-			if (!current() || this.deps.workspace.lastFocusedSurfaceId !== surfaceId) return;
+			if (!isCurrent()) return;
 			if (resolution.kind !== 'found') {
 				this.deps.notifications.info(
 					resolution.kind === 'transcript-reloaded'
@@ -107,19 +108,22 @@ export class IssueSourceNavigationController {
 			const panel = this.deps.panels.panel(targetSurfaceId);
 			if (!panel || panel.chatId !== source.chatId)
 				throw new Error('Conversation panel unavailable');
-			const ownsPanel = () => current() && this.deps.panels.panel(targetSurfaceId) === panel;
+			const ownsPanel = () => isCurrent() && this.deps.panels.panel(targetSurfaceId) === panel;
 			const result = await panel.navigateToTranscriptRow(
 				resolution.target,
 				pending.abort.signal,
 				ownsPanel,
 			);
 			if (!ownsPanel()) return;
-			if (result === 'view-changed') this.deps.notifications.info(m.issues_source_reloaded());
-			else if (result === 'unavailable') this.deps.notifications.info(m.issues_source_missing());
+			if (result === 'view-changed') {
+				this.deps.notifications.info(m.issues_source_reloaded());
+			} else if (result === 'unavailable') {
+				this.deps.notifications.info(m.issues_source_missing());
+			}
 		} catch (error) {
 			if (
 				this.#pending !== pending ||
-				!pending.valid() ||
+				!pending.ownsNavigation() ||
 				pending.abort.signal.aborted ||
 				(error instanceof DOMException && error.name === 'AbortError')
 			)

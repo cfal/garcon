@@ -855,17 +855,14 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		const windowEpoch = ++this.#windowNavigationEpoch;
 		const loadEpoch = this.#beginLoadEpoch();
 		this.#invalidatePageLoad();
-		const current = () =>
+		const ownsWindow = () =>
 			!signal.aborted &&
 			ownsNavigation() &&
 			this.activeChatId === target.chatId &&
-			windowEpoch === this.#windowNavigationEpoch &&
-			loadEpoch === this.#loadEpoch;
+			windowEpoch === this.#windowNavigationEpoch;
 		const result = await loadTranscriptRowPage(target, signal);
-		if (!current()) {
-			return !signal.aborted && ownsNavigation() && this.activeChatId === target.chatId
-				&& windowEpoch === this.#windowNavigationEpoch ? 'unavailable' : 'cancelled';
-		}
+		if (!ownsWindow()) return 'cancelled';
+		if (loadEpoch !== this.#loadEpoch) return 'unavailable';
 		if (this.transcriptViewId !== target.transcriptViewId || result.kind === 'view-changed')
 			return 'view-changed';
 		if (result.kind !== 'loaded') return result.kind;
