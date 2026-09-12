@@ -36,6 +36,27 @@ function harness(handle: (url: URL, body: unknown) => Response | Promise<Respons
 }
 
 describe('issue CLI execution', () => {
+  test('interrupt diagnostics distinguish read, pre-submission and uncertain mutation phases', async () => {
+    for (const args of [['list'], ['read', 'ISS-1'], ['history', 'ISS-1'], ['create', '--title', 'Synthetic task', '--project', 'Release']]) {
+      const interrupt = new AbortController();
+      const testCase = harness(() => { interrupt.abort(); throw new Error('Synthetic interruption'); });
+      expect(await testCase.run(args, { signal: interrupt.signal })).toBe(130);
+      expect(testCase.stderr.join('')).toContain('no issue mutation was submitted');
+      expect(testCase.stderr.join('')).not.toContain('printed identity');
+    }
+    const stdinInterrupt = new AbortController();
+    const stdin = harness(() => { throw new Error('No HTTP call expected'); });
+    expect(await stdin.run(['comment', 'ISS-1', '--stdin'], { signal: stdinInterrupt.signal,
+      readStdin: async () => { stdinInterrupt.abort(); throw new Error('Synthetic interruption'); } })).toBe(130);
+    expect(stdin.calls).toHaveLength(0);
+    expect(stdin.stderr.join('')).toContain('no issue mutation was submitted');
+    const interrupt = new AbortController();
+    const mutation = harness(() => { interrupt.abort(); throw new Error('Synthetic interruption'); });
+    expect(await mutation.run(['comment', 'ISS-1', '--body', 'Synthetic', '--request-id', REQUEST, '--expected-store-id', STORE],
+      { signal: interrupt.signal })).toBe(130);
+    expect(mutation.stderr.join('')).toContain('the issue save is not confirmed');
+    expect(mutation.stderr.join('')).toContain(REQUEST);
+  });
   test('resolves default and prints frozen retry identity before the first authenticated POST', async () => {
     const testCase = harness((url, body) => {
       if (url.pathname.endsWith('/bootstrap')) return Response.json({ storeId: STORE, collectionRevision: 0, viewerKey: 'local' });

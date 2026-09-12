@@ -10,6 +10,7 @@ import { ISSUE_ERROR_POLICY, IssueDomainError } from '../../issues/errors.js';
 import { issueErrorResponse } from '../../issues/http.js';
 import { initializeIssues } from '../../issues/setup.js';
 import { jsonErrorFromUnknown } from '../../lib/http-error.js';
+import { wrapRoutes } from '../../lib/http-route.js';
 import { createIssueRoutes } from '../issues.js';
 
 describe('authenticated Issues routes', () => {
@@ -45,6 +46,21 @@ describe('authenticated Issues routes', () => {
       const result = await call(path.slice('/api/v1/issues'.length), method === 'POST' ? {} : undefined, { principal: null });
       expect(result.response.status).toBe(401);
       expect(result.body.errorCode).toBe('ISSUE_UNAUTHORIZED');
+    }
+    expect(fixture.service.list({}).items).toEqual([]);
+  });
+
+  test('keeps no-store on production-wrapped authentication failures for every issue endpoint', async () => {
+    const wrapped = wrapRoutes(routes);
+    for (const [path, methods] of Object.entries(wrapped)) {
+      for (const [method, handler] of Object.entries(methods)) {
+        for (const authorization of [null, 'Bearer synthetic-invalid-token']) {
+          const response = await handler(new Request(`http://localhost${path}`, { method,
+            headers: authorization ? { authorization } : {} }));
+          expect(response.status).toBe(401);
+          expect(response.headers.get('cache-control')).toBe('no-store');
+        }
+      }
     }
     expect(fixture.service.list({}).items).toEqual([]);
   });

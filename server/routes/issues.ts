@@ -7,9 +7,10 @@ import { issueErrorResponse, issueJson, readIssueBody, requireIssuePrincipal } f
 import { resolveIssueProjectDefault } from '../issues/project-default.js';
 import type { IssueRuntime } from '../issues/setup.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
+import { markRouteNoStore } from '../lib/http-route.js';
 
 function authenticated(handler: RouteHandler): RouteHandler {
-  return async (request, url, server, context) => {
+  return markRouteNoStore(async (request, url, server, context) => {
     try {
       requireIssuePrincipal(context);
       request.signal.throwIfAborted();
@@ -17,7 +18,7 @@ function authenticated(handler: RouteHandler): RouteHandler {
     } catch (error) {
       return issueErrorResponse(error);
     }
-  };
+  });
 }
 
 export function createIssueRoutes(issues: IssueRuntime,

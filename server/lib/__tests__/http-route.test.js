@@ -37,7 +37,7 @@ mock.module('../../config.js', () => ({
   isHttpCompressionEnabled,
 }));
 
-import { markRouteNoAuth, isNoAuthHandler, wrapRoute, wrapRoutes } from '../http-route.js';
+import { markRouteNoAuth, markRouteNoStore, isNoAuthHandler, wrapRoute, wrapRoutes } from '../http-route.js';
 import { withJsonBody } from '../json-route.js';
 
 function resetConfigMocks() {
@@ -48,6 +48,17 @@ function resetConfigMocks() {
 }
 
 describe('http route wrapping', () => {
+  it('preserves the no-store route policy on authentication rejection before handler admission', async () => {
+    const handler = mock(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(markRouteNoStore(handler), '/api/v1/issues', 'GET');
+    for (const authorization of [null, 'Bearer invalid']) {
+      authenticateHttpRequest.mockResolvedValueOnce({ principal: null, errorResponse: Response.json({ error: 'Unauthorized' }, { status: 401 }) });
+      const response = await wrapped(new Request('http://localhost/api/v1/issues', { headers: authorization ? { Authorization: authorization } : {} }));
+      expect(response.status).toBe(401);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+    }
+    expect(handler).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     authenticateHttpRequest.mockClear();
     parseJsonBody.mockClear();

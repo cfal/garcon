@@ -187,6 +187,7 @@ export async function main(
 ): Promise<number> {
   const output = options.output ?? createCliOutput();
   let command: ParsedCliCommand | undefined;
+  let issueSubmissionStarted = false;
   try {
     command = parseCliArgs(argv);
     if (command.kind === 'help') {
@@ -202,7 +203,7 @@ export async function main(
         ? applyIssueStdin(command, await readConfiguredStdin(options,
           (signal) => readIssueStdin(Bun.stdin.stream(), signal))) : command;
       const client = await connectedClient(issueCommand, options);
-      await runIssueCommand(issueCommand, client, output, options.signal);
+      await runIssueCommand(issueCommand, client, output, options.signal, () => { issueSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'list') {
@@ -366,7 +367,9 @@ export async function main(
   } catch (error) {
     if (options.signal?.aborted) {
       output.diagnostic(command?.kind === 'issue'
-        ? 'terminal interrupted; if submitted, the issue save is not confirmed. Retry with the printed identity and identical body.'
+        ? issueSubmissionStarted
+          ? 'terminal interrupted; the issue save is not confirmed. Retry with the printed identity and identical body.'
+          : 'terminal interrupted; no issue mutation was submitted'
         : interruptDiagnostic(command));
       return 130;
     }

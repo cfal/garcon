@@ -13,8 +13,9 @@ import { createLogger } from './log.js';
 const logger = createLogger('lib:http-route');
 
 const noAuthRouteMarker: unique symbol = Symbol('no-auth-route');
+const noStoreRouteMarker: unique symbol = Symbol('no-store-route');
 
-type MarkedRouteHandler = RouteHandler & { [noAuthRouteMarker]?: true };
+type MarkedRouteHandler = RouteHandler & { [noAuthRouteMarker]?: true; [noStoreRouteMarker]?: true };
 type WrappedRouteHandler = (request: Request, server?: unknown) => Promise<Response>;
 type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
 
@@ -53,6 +54,11 @@ export function markRouteNoAuth<T extends RouteHandler>(handler: T): T {
 export function isNoAuthHandler(handler: unknown): handler is MarkedRouteHandler {
   return typeof handler === 'function'
     && Boolean((handler as MarkedRouteHandler)[noAuthRouteMarker]);
+}
+
+export function markRouteNoStore<T extends RouteHandler>(handler: T): T {
+  Object.defineProperty(handler, noStoreRouteMarker, { value: true });
+  return handler;
 }
 
 async function invokeRouteHandler(
@@ -95,7 +101,10 @@ export function wrapRoute(
 
   return async (req: Request, server?: unknown): Promise<Response> => {
     const { errorResponse, principal } = await authenticateHttpRequest(req, authOptions);
-    if (errorResponse) return compressHttpResponse(req, errorResponse);
+    if (errorResponse) {
+      if ((handler as MarkedRouteHandler)[noStoreRouteMarker]) errorResponse.headers.set('Cache-Control', 'no-store');
+      return compressHttpResponse(req, errorResponse);
+    }
     return invokeRouteHandler(handler, req, server, { principal });
   };
 }

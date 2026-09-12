@@ -28,7 +28,7 @@ export function applyIssueStdin(command: IssueCliCommand, text: string): IssueCl
 }
 
 export async function runIssueCommand(command: IssueCliCommand, client: IssueClient,
-  output: CliOutput, signal?: AbortSignal): Promise<void> {
+  output: CliOutput, signal?: AbortSignal, onSubmissionStarted?: () => void): Promise<void> {
   if (command.readsBodyFromStdin) throw argumentError('Issue stdin has not been read');
   const operation = command.operation;
   if (isIssueRead(operation)) {
@@ -64,6 +64,7 @@ export async function runIssueCommand(command: IssueCliCommand, client: IssueCli
   }
   output.diagnostic(issueRetryDiagnostic(request, kind));
   signal?.throwIfAborted();
+  onSubmissionStarted?.();
   try {
     const result = await client.mutateIssue(request, signal);
     output.result(command.json ? issueJsonOutput(result) : formatIssueMutation(result));
