@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { SYSTEMD_HELPER_FLAG } from './execution-node/systemd/contracts.js';
+import { NODE_INSTANCE_WORKER_FLAG, NODE_SESSION_WORKER_FLAG } from './execution-node/worker/roles.js';
 
 function printHelp() {
   const helpText = `Garcon Server
@@ -56,7 +57,10 @@ Notes:
   process.stdout.write(helpText);
 }
 
-if (process.argv.includes(SYSTEMD_HELPER_FLAG)) {
+if (process.argv.includes(NODE_SESSION_WORKER_FLAG) || process.argv.includes(NODE_INSTANCE_WORKER_FLAG)) {
+  const { runNodeWorkerMain } = await import('./execution-node/worker/main.js');
+  await runNodeWorkerMain(process.argv.includes(NODE_SESSION_WORKER_FLAG) ? 'session' : 'instance');
+} else if (process.argv.includes(SYSTEMD_HELPER_FLAG)) {
   const { runSystemdHelperMain } = await import('./execution-node/systemd/helper-main.js');
   await runSystemdHelperMain();
 } else if (process.argv.includes('--help') || process.argv.includes('-h')) {

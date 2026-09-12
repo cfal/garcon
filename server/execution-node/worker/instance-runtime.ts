@@ -1,0 +1,111 @@
+import { loadAgentIntegration } from '../../agents/default-agent-integrations.js';
+import { NodeProviderCapacity } from '../provider-capacity.js';
+import { IntegrationHostFactory } from '../../agents/integration-host.js';
+import { FileAgentMigrationStore } from '../../agents/integration-migration-store.js';
+import { IntegrationRegistry } from '../../agents/integration-registry.js';
+import { createNodeProviderManifest } from '../../execution-nodes/provider-manifest.js';
+import type { NodeWorkerRuntime, NodeWorkerRuntimeContext } from './bootstrap.js';
+import { prepareNodeInstanceEnvironments } from './environment.js';
+import { NODE_WORKER_BUN_OPTIONS, prepareNodeInstanceStorage } from './launch.js';
+import { promises as fs } from 'node:fs';
+import { inspectProjectDirectory } from '../../projects/project-directory-service.js';
+import { NodeExecutionHost } from '../execution-host.js';
+import { NodeExecutionResources } from '../execution-resources.js';
+import { LocalProviderConfigurationService } from '../local-provider-configuration.js';
+import { NodeProviderConfigurationHost } from '../provider-configuration-host.js';
+import { NodeSessionConfigurationHost } from '../provider-session-configuration-host.js';
+import { LocalProviderCatalogService } from '../local-provider-catalog.js';
+import { NodeProviderCatalogHost } from '../provider-catalog-host.js';
+import { LocalProviderAuthService } from '../local-provider-auth.js';
+import { NodeProviderAuthHost } from '../provider-auth-host.js';
+import { LocalProviderCommandsService } from '../local-provider-commands.js';
+import { NodeProviderCommandsHost } from '../provider-commands-host.js';
+import { LocalProviderExecutionService } from '../local-provider-execution.js';
+import { NodeOperationTable } from '../operation-table.js';
+import { NodeWorkerExecutionRouter } from './execution-router.js';
+import { NodeWorkerInstanceServices } from './instance-services.js';
+import { NodeWorkerServiceRouter } from './service-router.js';
+import { NodeWorkerTransportError } from './framing.js';
+import type { NodeWorkerWriter } from './writer.js';
+
+export async function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext, writer: Pick<NodeWorkerWriter, 'submit'>): Promise<NodeWorkerRuntime> {
+  const { configuration, authority } = context;
+  if (configuration.role !== 'instance') throw new TypeError('Invalid instance worker role');
+  const validate = () => { authority.poll(); authority.signal.throwIfAborted(); };
+  validate();
+  const instance = configuration.instance;
+  const prepared = (await prepareNodeInstanceEnvironments([instance], authority.signal)).get(instance.id)!;
+  const environment: Readonly<Record<string, string>> = { ...prepared.values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS };
+  if (Object.keys(process.env).length !== Object.keys(environment).length
+    || Object.entries(environment).some(([key, value]) => process.env[key] !== value)) throw new Error('Worker environment differs from its configured instance');
+  const storageDirectory = await prepareNodeInstanceStorage(configuration.storageDirectory, instance.id);
+  validate();
+  const integration = await loadAgentIntegration(instance.agentId);
+  validate();
+  const hosts = new IntegrationHostFactory({ workspaceDir: configuration.storageDirectory, instance,
+    readEnvironment: (key) => environment[key] });
+  const registry = new IntegrationRegistry({ integrations: [integration], hostFactory: hosts,
+    migrationStoreFor: () => new FileAgentMigrationStore(storageDirectory) });
+  const resources = new NodeExecutionResources(configuration.nodeId);
+  let table: NodeOperationTable;
+  let host: NodeExecutionHost;
+  let services: NodeWorkerInstanceServices;
+  let requests: NodeWorkerServiceRouter;
+  let execution: NodeWorkerExecutionRouter;
+  let closing: Promise<void> | null = null;
+  const close = () => {
+    execution?.close(); requests?.close(); services?.close(); host?.close(); table?.close(); resources.close();
+    return closing ??= registry.stop();
+  };
+  try {
+    table = new NodeOperationTable({ connection: context.connection, supervisor: authority, resources,
+      limits: { maxOperations: instance.maxOperations } });
+    host = new NodeExecutionHost(context.connection, authority, table);
+    await registry.start();
+    validate();
+    const provider = registry.require(instance.agentId);
+    const providerCapacity = new NodeProviderCapacity();
+    const configurationService = new LocalProviderConfigurationService(provider);
+    services = new NodeWorkerInstanceServices({ authority, instanceId: instance.id, host, writer,
+      sessionConfiguration: new NodeSessionConfigurationHost({ instanceId: instance.id, connection: context.connection, supervisor: authority,
+        capacity: providerCapacity, configuration: configurationService, resources, execution: host }),
+      configuration: new NodeProviderConfigurationHost(providerCapacity, instance.id, configurationService),
+      catalog: new NodeProviderCatalogHost(providerCapacity, instance.id, new LocalProviderCatalogService(provider)),
+      commands: new NodeProviderCommandsHost(providerCapacity, { nodeId: configuration.nodeId, instanceId: instance.id }, resources,
+        new LocalProviderCommandsService(provider, (projectPath) => inspectProjectDirectory(projectPath, { resolvePath: fs.realpath }))),
+      auth: new NodeProviderAuthHost(providerCapacity, instance.id, new LocalProviderAuthService(provider)) });
+    requests = new NodeWorkerServiceRouter(context.connectionId, { authority, writer,
+      execute: (_connectionId, connection, command, signal) => services.service(connection, command, signal) });
+    execution = new NodeWorkerExecutionRouter(context.connectionId, { authority, writer,
+      instanceIds: new Set([instance.id]), execute: (_instance, _connectionId, connection, command, signal) => services.execution(connection, command, signal) });
+    const service = new LocalProviderExecutionService(provider, configurationService);
+    for (const workspace of configuration.workspaces.filter((workspace) => instance.workspaceIds.includes(workspace.id))) resources.register({
+      location: { nodeId: configuration.nodeId, instanceId: instance.id, workspaceId: workspace.id }, projectPath: workspace.projectPath, execution: service,
+      files: { async inspectProject(projectPath, signal) {
+        signal.throwIfAborted();
+        const result = await inspectProjectDirectory(projectPath, { resolvePath: fs.realpath });
+        signal.throwIfAborted();
+        return result;
+      } },
+    });
+    const manifest = createNodeProviderManifest(configuration.nodeId, instance.id, provider, new Set(['catalog', 'auth', 'commands']), instance.maxOperations);
+    return { manifests: Object.freeze([manifest]), close,
+      application(frame, text) {
+        validate();
+        switch (frame.type) {
+          case 'node-worker-execution': execution.receive(frame); return;
+          case 'node-worker-service-request': case 'node-worker-service-cancel': requests.receive(frame); return;
+          case 'node-worker-bulk': services.bulk(frame); return;
+          case 'node-worker-output-retired': services.receiveRetirement(text); return;
+          default: throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
+        }
+      },
+      async control(message) {
+        validate();
+        if (message.type === 'node-worker-attach') { execution.attach(message.connectionId); requests.attach(message.connectionId); }
+      } };
+  } catch (error) {
+    await close();
+    throw error;
+  }
+}
