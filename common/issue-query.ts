@@ -1,4 +1,4 @@
-import { ISSUE_LIMITS, type IssueListQuery, type IssueReadQuery,
+import { ISSUE_LIMITS, issueAssigneeQuery, type IssueListQuery, type IssueReadQuery,
   type IssueCommentsQuery, type IssueHistoryQuery } from './issues.js';
 import { issueBoolean, issueId, issueInteger, issueInvalid, issueLine, issueOwner, issuePriority,
   issueProject, issueRecord, issueStatus, parseIssueAssigneeQuery } from './issue-validation.js';
@@ -92,4 +92,15 @@ export function issueQueryParams(params: URLSearchParams): Record<string, unknow
     }
   }
   return raw;
+}
+
+export function issueSearchParams(query: IssueListQuery | IssueReadQuery | IssueCommentsQuery | IssueHistoryQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined) continue;
+    if (key === 'assignee' && 'assignee' in query && query.assignee && query.assignee !== 'unassigned') {
+      params.set(key, issueAssigneeQuery(query.assignee));
+    } else params.set(key, String(value));
+  }
+  return params;
 }

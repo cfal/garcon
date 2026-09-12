@@ -75,6 +75,7 @@ import {
   parseNativeSessionId,
 } from '@garcon/common/native-session-lookup';
 import { argumentError } from './errors.js';
+import { ISSUE_PARSE_OPTIONS, ISSUE_STRING_OPTIONS, parseIssueCliCommand, type IssueCliCommand } from './issue-args.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
   ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
@@ -82,6 +83,7 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
+  garcon-cli [connection options] issue <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [issue-id] [options]
   garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] start-async [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
@@ -122,6 +124,29 @@ uses notice; a style without a title displays its CLI label. --color selects cus
 --collapsible starts the CLI-authored body collapsed without requiring a style.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
+
+Issue management:
+  create --title <text> [--description <text> | --stdin] [--project <text>]
+    [--cwd <directory>] [--priority <0|1|2|3>] [--label <text>...] [--assignee <owner>] [--parent-id <ISS-n>]
+  list [--project <text>] [--query <text>] [--status <open|in-progress|in-review|closed>]
+    [--ready] [--include-closed] [--priority <0|1|2|3>] [--label <text>] [--assignee <owner>]
+    [--limit <1..100>] [--before-number <n> --expected-collection-revision <n>]
+  read <ISS-n> [--include-description <true|false>] [--comment-limit <0..100>]
+    [--before-comment-sequence <n> --expected-collection-revision <n>]
+  history <ISS-n> [--limit <1..100>] [--before-sequence <n>]
+  update <ISS-n> --expected-revision <n> --patch <JSON object>
+  claim|release|reopen <ISS-n> --expected-revision <n>
+  close <ISS-n> --expected-revision <n> [--resolution <done|canceled>] [--comment <text> | --stdin]
+  comment <ISS-n> (--body <text> | --stdin)
+  comment-edit <ISS-n> --comment-id <uuid> --expected-revision <n> (--body <text> | --stdin)
+  comment-delete <ISS-n> --comment-id <uuid> --expected-revision <n>
+  link|unlink <ISS-n> --expected-revision <n> --target-id <ISS-n> --target-revision <n> --link-kind <blocks|related>
+  Every verb accepts --json. Mutations accept --from-chat <chat-id> as declared attribution.
+  Owners: chat:<id>, user:<username>, or unassigned. Read before editing to obtain revisions.
+  New create defaults to the shared repository or folder path; --project is an arbitrary string.
+  Mutations print retry identity before POST. Retry with identical arguments/body and paired
+  --request-id <uuid> --expected-store-id <uuid>; create retries also require the printed --project.
+  No automatic retries. Comment removal preserves prior versions in activity history.
 
 List resources:
   agents
@@ -441,10 +466,12 @@ export type ParsedCliCommand =
   | ChatsCliCommand
   | SearchCliCommand
   | ReadCliCommand
+  | IssueCliCommand
   | StartAsyncCliInvocation
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
+  ...ISSUE_STRING_OPTIONS,
   'workspace',
   'config-dir',
   'server',
@@ -1379,6 +1406,7 @@ export function parseCliArgs(
       allowPositionals: true,
       strict: true,
       options: {
+        ...ISSUE_PARSE_OPTIONS,
         workspace: { type: 'string' },
         'config-dir': { type: 'string' },
         server: { type: 'string' },
@@ -1479,6 +1507,7 @@ export function parseCliArgs(
 
   const commandName = parsed.positionals[0];
   if (commandName === undefined) throw argumentError('a command is required');
+  if (commandName === 'issue') return parseIssueCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'stop') return parseStop(parsed, values, connection);
   if (commandName === 'permission-decision') {
