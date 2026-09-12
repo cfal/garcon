@@ -20,6 +20,12 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 
+interface TerminalCleanupResponse {
+  spawned: number;
+  kills: number;
+  error: string | null;
+}
+
 class TerminalClient {
   readonly messages: TerminalStreamServerMessage[] = [];
   readonly #socket: WebSocket;
@@ -116,6 +122,213 @@ class TerminalClient {
 }
 
 describe('workspace terminals through authenticated HTTP and WebSocket', () => {
+  test.each(['exit', 'rename'])(
+    'initial truncation retains reentrant %s metadata and subsequent output',
+    async (action) => {
+      await withIntegrationFixture(
+        `workspace-terminal-replay-${action}`,
+        async (fixture) => {
+          const { terminal } = await fixture.client.post<TerminalCreateResponse>(
+            '/api/v1/terminals',
+            { requestId: 'create', requestedInitialWorkingDirectory: fixture.dirs.project },
+          );
+          const client = await TerminalClient.connect(fixture);
+          try {
+            client.send({
+              type: 'terminal-attach',
+              terminalId: terminal.terminalId,
+              clientId: 'tab',
+              afterSequence: 0,
+              intent: 'restore',
+            });
+            await client.waitForOutput('c');
+            const listed = await fixture.client.get<TerminalListResponse>('/api/v1/terminals');
+            expect(client.messages.map((message) => message.type)).toEqual([
+              'terminal-replay-truncated',
+              'terminal-status',
+              'terminal-attached',
+              'terminal-output',
+            ]);
+            expect(client.messages[0]).toMatchObject({ firstSequence: 2 });
+            expect(client.messages[2]).toMatchObject({
+              terminal: listed.terminals[0],
+              replay: [{ sequence: 2, data: 'b' }],
+            });
+            expect(listed.terminals[0]).toMatchObject(
+              action === 'exit'
+                ? { processStatus: 'exited', exitCode: 17, latestOutputSequence: 3 }
+                : { title: 'Synthetic renamed terminal', latestOutputSequence: 3 },
+            );
+            expect(client.messages[3]).toMatchObject({ sequence: 3, data: 'c' });
+          } finally {
+            await client.close();
+          }
+        },
+        {
+          authentication: 'account',
+          bindAddress: '0.0.0.0',
+          preloadModules: [
+            fileURLToPath(
+              new URL('../../support/workspace-terminals-stream-preload.ts', import.meta.url),
+            ),
+          ],
+          resolveServerEnvironment: () => ({ GARCON_TEST_TERMINAL_REENTRANT_METADATA: action }),
+        },
+      );
+    },
+  );
+
+  test('takeover replays earlier bytes before output produced during peer notifications', async () => {
+    await withIntegrationFixture(
+      'workspace-terminal-takeover-order',
+      async (fixture) => {
+        const { terminal } = await fixture.client.post<TerminalCreateResponse>(
+          '/api/v1/terminals',
+          {
+            requestId: 'create',
+            requestedInitialWorkingDirectory: fixture.dirs.project,
+          },
+        );
+        const first = await TerminalClient.connect(fixture);
+        const second = await TerminalClient.connect(fixture);
+        const attach = {
+          type: 'terminal-attach',
+          terminalId: terminal.terminalId,
+          clientId: 'first',
+          afterSequence: 0,
+          intent: 'restore',
+        } as const;
+        try {
+          first.send(attach);
+          await first.waitFor((messages) =>
+            messages.find((message) => message.type === 'terminal-attached'),
+          );
+          first.send({ type: 'terminal-input', terminalId: terminal.terminalId, data: 'first' });
+          first.send({ type: 'terminal-input', terminalId: terminal.terminalId, data: 'second' });
+          await first.waitForOutput('synthetic-echo:second');
+          second.send({ ...attach, clientId: 'second', intent: 'takeover' });
+          await second.waitForOutput('synthetic-during-attach');
+          expect(second.messages.map((message) => message.type)).toEqual([
+            'terminal-attached',
+            'terminal-output',
+          ]);
+          expect(second.messages[0]).toMatchObject({
+            type: 'terminal-attached',
+            replay: [
+              { sequence: 1, data: 'synthetic-echo:first' },
+              { sequence: 2, data: 'synthetic-echo:second' },
+              { sequence: 3, data: 'synthetic-during-takeover' },
+            ],
+          });
+          expect(second.messages[1]).toMatchObject({
+            sequence: 4,
+            data: 'synthetic-during-attach',
+          });
+          second.send({ type: 'terminal-input', terminalId: terminal.terminalId, data: 'current' });
+          expect(await second.waitForOutput('synthetic-echo:current')).toBe(5);
+        } finally {
+          await Promise.all([first.close(), second.close()]);
+        }
+      },
+      {
+        authentication: 'account',
+        bindAddress: '0.0.0.0',
+        preloadModules: [
+          fileURLToPath(
+            new URL('../../support/workspace-terminals-stream-preload.ts', import.meta.url),
+          ),
+        ],
+        resolveServerEnvironment: () => ({ GARCON_TEST_TERMINAL_REENTRANT_OUTPUT: '1' }),
+      },
+    );
+  });
+
+  test('a refreshed HTTP retry cannot duplicate a late PTY whose cleanup failed', async () => {
+    const entered = new Deferred<void>();
+    const release = new Deferred<void>();
+    const gate = Bun.serve({
+      hostname: '0.0.0.0',
+      port: 0,
+      async fetch() {
+        entered.resolve();
+        await release.promise;
+        return new Response(null, { status: 204 });
+      },
+    });
+    try {
+      await withIntegrationFixture(
+        'workspace-terminal-late-cleanup',
+        async (fixture) => {
+          const request = {
+            requestId: 'late',
+            requestedInitialWorkingDirectory: fixture.dirs.project,
+          };
+          const creating = fixture.client.post('/api/v1/terminals', request);
+          void creating.catch(() => {});
+          try {
+            await withTimeout(
+              entered.promise,
+              5_000,
+              () => 'Terminal spawn did not reach its barrier',
+            );
+            release.resolve();
+            expect(await creating.catch((error: unknown) => error)).toMatchObject({ status: 401 });
+            expect(
+              await fixture.client
+                .post('/api/v1/terminals', request)
+                .catch((error: unknown) => error),
+            ).toMatchObject({ status: 401 });
+            expect(
+              await fixture.client
+                .post('/api/v1/terminals', { ...request, requestId: 'another' })
+                .catch((error: unknown) => error),
+            ).toMatchObject({ status: 429 });
+            expect(
+              await fixture.client.get<TerminalListResponse>('/api/v1/terminals'),
+            ).toMatchObject({ terminals: [] });
+            expect(
+              await fixture.client.post<TerminalCleanupResponse>('/api/v1/test/terminal-cleanup', {
+                refuseKill: true,
+              }),
+            ).toEqual({
+              spawned: 1,
+              kills: 2,
+              error: 'terminal-internal',
+            });
+            expect(
+              await fixture.client.post<TerminalCleanupResponse>('/api/v1/test/terminal-cleanup', {
+                refuseKill: false,
+              }),
+            ).toEqual({
+              spawned: 1,
+              kills: 3,
+              error: null,
+            });
+          } finally {
+            release.resolve();
+            await creating.catch(() => {});
+            await fixture.client.post('/api/v1/test/terminal-cleanup', { refuseKill: false });
+          }
+        },
+        {
+          authentication: 'account',
+          bindAddress: '0.0.0.0',
+          preloadModules: [
+            fileURLToPath(
+              new URL('../../support/workspace-terminals-cleanup-preload.ts', import.meta.url),
+            ),
+          ],
+          resolveServerEnvironment: () => ({
+            GARCON_TEST_TERMINAL_GATE: `http://127.0.0.1:${gate.port}/spawn`,
+          }),
+        },
+      );
+    } finally {
+      release.resolve();
+      await gate.stop(true);
+    }
+  });
+
   test.each(['expire', 'overflow'] as const)(
     'fences %s during owner output on the primary WebSocket',
     async (action) => {

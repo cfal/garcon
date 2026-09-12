@@ -5,6 +5,7 @@ import path from 'node:path';
 import { LocalWorkspaceTerminalService } from '../local-workspace-terminals.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.js';
 import { WorkspaceTerminalError } from '../../execution-nodes/workspace-terminals.js';
+import { waitForShutdownPhasesWithTimeout } from '../../lib/shutdown.js';
 
 const principal = { key: 'local', mode: 'local', username: 'local', expiresAtMs: null };
 const services = [];
@@ -211,6 +212,129 @@ test('closes create admission synchronously and returns the same shutdown settle
   expect(spawn).not.toHaveBeenCalled();
 });
 
+test('retains a late spawn and its create result through failed cleanup and idempotency expiry', async () => {
+  let now = 0;
+  let refusesKill = true;
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const child = pty();
+  const kill = spyOn(child, 'kill').mockImplementation(() => {
+    if (refusesKill) throw new Error('Synthetic PTY cleanup failure');
+  });
+  const spawn = mock(async () => {
+    entered.resolve();
+    return release.promise;
+  });
+  const owner = service({
+    now: () => now,
+    createResultTtlMs: 1,
+    requestResultsTotal: 1,
+    spawnPty: spawn,
+  });
+  const request = { requestId: 'late', requestedInitialWorkingDirectory: null };
+  const creating = owner.create({ key: 'alice', expiresAtMs: 1 }, request).catch((error) => error);
+  try {
+    await entered.promise;
+    now = 1;
+    release.resolve(child);
+    expect(await creating).toMatchObject({ code: 'terminal-auth-expired' });
+    expect(kill).toHaveBeenCalledTimes(1);
+    now = 1000;
+    const refreshed = { key: 'alice', expiresAtMs: null };
+    await expect(owner.create(refreshed, request)).rejects.toMatchObject({
+      code: 'terminal-auth-expired',
+    });
+    await expect(
+      owner.create(refreshed, { ...request, requestId: 'another' }),
+    ).rejects.toMatchObject({ code: 'terminal-backpressure' });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(owner.list(refreshed)).toEqual([]);
+    const stopped = await waitForShutdownPhasesWithTimeout([() => owner.shutdown()]);
+    expect(stopped.errors).toHaveLength(1);
+    expect(stopped.errors[0]).toMatchObject({
+      code: 'terminal-internal',
+      message: 'Terminal cleanup remains incomplete.',
+    });
+    expect(kill).toHaveBeenCalledTimes(2);
+    refusesKill = false;
+    await owner.shutdown();
+    expect(kill).toHaveBeenCalledTimes(3);
+  } finally {
+    refusesKill = false;
+    release.resolve(child);
+    await creating;
+  }
+});
+
+test('shutdown reports failed cleanup for a spawn returned after shutdown began', async () => {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const child = pty();
+  const kill = spyOn(child, 'kill').mockImplementation(() => {
+    throw new Error('Synthetic PTY cleanup failure');
+  });
+  const owner = service({
+    spawnPty: async () => {
+      entered.resolve();
+      return release.promise;
+    },
+  });
+  const creating = owner
+    .create(principal, { requestId: 'late', requestedInitialWorkingDirectory: null })
+    .catch((error) => error);
+  try {
+    await entered.promise;
+    const stopping = waitForShutdownPhasesWithTimeout([() => owner.shutdown()]);
+    release.resolve(child);
+    expect(await creating).toMatchObject({ code: 'terminal-internal' });
+    expect((await stopping).errors).toHaveLength(1);
+    expect(kill).toHaveBeenCalledTimes(2);
+    kill.mockRestore();
+    await owner.shutdown();
+    expect(child.killCount).toBe(1);
+  } finally {
+    kill.mockRestore();
+    release.resolve(child);
+    await creating;
+  }
+});
+
+test('reserves global create-result capacity before another principal can begin asynchronous authorization', async () => {
+  let now = 0;
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const authorize = mock(async (target) => {
+    entered.resolve();
+    await release.promise;
+    return target;
+  });
+  const owner = service({
+    now: () => now,
+    createResultTtlMs: 1,
+    requestResultsTotal: 1,
+    assertProjectPathAllowed: authorize,
+    spawnPty: () => pty(),
+  });
+  const request = { requestId: 'create', requestedInitialWorkingDirectory: null };
+  const first = owner.create({ key: 'first', expiresAtMs: null }, request);
+  try {
+    await entered.promise;
+    now = 1000;
+    await expect(owner.create({ key: 'second', expiresAtMs: null }, request)).rejects.toMatchObject(
+      { code: 'terminal-backpressure' },
+    );
+    expect(authorize).toHaveBeenCalledTimes(1);
+    release.resolve();
+    expect(await first).toMatchObject({ success: true });
+    expect(await owner.create({ key: 'first', expiresAtMs: null }, request)).toMatchObject({
+      success: true,
+    });
+  } finally {
+    release.resolve();
+    await first;
+  }
+});
+
 test('refuses terminal listing for an expired principal', async () => {
   let now = 0;
   const owner = service({ now: () => now, spawnPty: () => pty() });
@@ -406,6 +530,215 @@ test.each(['terminal-taken-over', 'terminal-replay-truncated', 'terminal-attache
       WorkspaceTerminalError,
     );
     expect(messages.at(-1).type).toBe(event);
+  },
+);
+
+test('takeover delivers replay before output emitted reentrantly during either peer callback', async () => {
+  const child = pty();
+  const owner = service({ spawnPty: () => child });
+  const { terminal } = await owner.create(principal, {
+    requestId: 'create',
+    requestedInitialWorkingDirectory: null,
+  });
+  const emit = (data) => child.dataListeners.forEach((listener) => listener(data));
+  const request = {
+    type: 'terminal-attach',
+    terminalId: terminal.terminalId,
+    clientId: 'old',
+    afterSequence: 0,
+    intent: 'restore',
+  };
+  const original = peer('original', (message) => {
+    if (message.type === 'terminal-taken-over') emit('third');
+  });
+  owner.attach(principal, original, request);
+  emit('first');
+  emit('second');
+  const messages = [];
+  const replacement = peer('replacement', (message) => {
+    if (message.type === 'terminal-attached') emit('fourth');
+    if (message.type === 'terminal-output' && message.sequence === 4) emit('fifth');
+    messages.push(message);
+  });
+  owner.attach(principal, replacement, { ...request, clientId: 'new', intent: 'takeover' });
+  expect(messages.map((message) => message.type)).toEqual([
+    'terminal-attached',
+    'terminal-output',
+    'terminal-output',
+  ]);
+  expect(messages[0].replay).toEqual([
+    { sequence: 1, data: 'first' },
+    { sequence: 2, data: 'second' },
+    { sequence: 3, data: 'third' },
+  ]);
+  expect(messages.slice(1).map(({ sequence, data }) => ({ sequence, data }))).toEqual([
+    { sequence: 4, data: 'fourth' },
+    { sequence: 5, data: 'fifth' },
+  ]);
+});
+
+test('attachment initialization discloses evicted output and drains reentrant truncation output in order', async () => {
+  const child = pty();
+  const owner = service({ spawnPty: () => child, replayBytes: 1 });
+  const { terminal } = await owner.create(principal, {
+    requestId: 'create',
+    requestedInitialWorkingDirectory: null,
+  });
+  const emit = (data) => child.dataListeners.forEach((listener) => listener(data));
+  emit('a');
+  const messages = [];
+  const client = peer('client', (message) => {
+    if (message.type === 'terminal-attached') {
+      emit('oversized');
+      emit('b');
+    }
+    if (message.type === 'terminal-replay-truncated') emit('c');
+    messages.push(message);
+  });
+  owner.attach(principal, client, {
+    type: 'terminal-attach',
+    terminalId: terminal.terminalId,
+    clientId: 'tab',
+    afterSequence: 0,
+    intent: 'restore',
+  });
+  emit('d');
+  expect(messages.map((message) => message.type)).toEqual([
+    'terminal-attached',
+    'terminal-replay-truncated',
+    'terminal-output',
+    'terminal-output',
+    'terminal-output',
+  ]);
+  expect(messages[0].replay).toEqual([{ sequence: 1, data: 'a' }]);
+  expect(messages[1]).toMatchObject({ firstSequence: 3 });
+  expect(messages.slice(2).map(({ sequence, data }) => ({ sequence, data }))).toEqual([
+    { sequence: 3, data: 'b' },
+    { sequence: 4, data: 'c' },
+    { sequence: 5, data: 'd' },
+  ]);
+});
+
+test.each(['exit', 'rename'])(
+  'initial truncation preserves a reentrant %s and delivers output after the captured replay',
+  async (action) => {
+    const child = pty();
+    const owner = service({ spawnPty: () => child, replayBytes: 1 });
+    const { terminal } = await owner.create(principal, {
+      requestId: 'create',
+      requestedInitialWorkingDirectory: null,
+    });
+    const emit = (data) => child.dataListeners.forEach((listener) => listener(data));
+    emit('a');
+    emit('b');
+    const messages = [];
+    const client = peer('client', (message) => {
+      messages.push(message);
+      if (message.type !== 'terminal-replay-truncated') return;
+      emit('c');
+      if (action === 'exit') child.exitListeners.forEach((listener) => listener({ exitCode: 17 }));
+      else owner.rename(principal, terminal.terminalId, 'Synthetic renamed terminal');
+    });
+    owner.attach(principal, client, {
+      type: 'terminal-attach',
+      terminalId: terminal.terminalId,
+      clientId: 'tab',
+      afterSequence: 0,
+      intent: 'restore',
+    });
+    expect(messages.map((message) => message.type)).toEqual([
+      'terminal-replay-truncated',
+      'terminal-status',
+      'terminal-attached',
+      'terminal-output',
+    ]);
+    expect(messages[0]).toMatchObject({ firstSequence: 2 });
+    expect(messages[2].terminal).toEqual(owner.list(principal)[0]);
+    expect(messages[2].terminal).toMatchObject(
+      action === 'exit'
+        ? { processStatus: 'exited', exitCode: 17, latestOutputSequence: 3 }
+        : { title: 'Synthetic renamed terminal', latestOutputSequence: 3 },
+    );
+    expect(messages[2].replay).toEqual([{ sequence: 2, data: 'b' }]);
+    expect(messages[3]).toMatchObject({ sequence: 3, data: 'c' });
+  },
+);
+
+test('a throwing predecessor notification cannot prevent successor initialization', async () => {
+  const child = pty();
+  const owner = service({ spawnPty: () => child });
+  const { terminal } = await owner.create(principal, {
+    requestId: 'create',
+    requestedInitialWorkingDirectory: null,
+  });
+  const request = {
+    type: 'terminal-attach',
+    terminalId: terminal.terminalId,
+    clientId: 'old',
+    afterSequence: 0,
+    intent: 'restore',
+  };
+  const original = peer('original', (message) => {
+    if (message.type === 'terminal-taken-over') throw new Error('Synthetic prior peer failure');
+  });
+  owner.attach(principal, original, request);
+  const messages = [];
+  const replacement = peer('replacement', (message) => messages.push(message));
+  expect(() =>
+    owner.attach(principal, replacement, { ...request, clientId: 'new', intent: 'takeover' }),
+  ).not.toThrow();
+  expect(messages.map((message) => message.type)).toEqual(['terminal-attached']);
+  expectTerminalError(
+    () => owner.input(principal, original, terminal.terminalId, 'old'),
+    'terminal-not-attached',
+  );
+  owner.input(principal, replacement, terminal.terminalId, 'new');
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(child.writes).toEqual(['new']);
+});
+
+test.each([false, true])(
+  'an initialization exception detaches only its failed attachment (replacement: %s)',
+  async (replace) => {
+    const child = pty();
+    const owner = service({ spawnPty: () => child });
+    const { terminal } = await owner.create(principal, {
+      requestId: 'create',
+      requestedInitialWorkingDirectory: null,
+    });
+    const request = {
+      type: 'terminal-attach',
+      terminalId: terminal.terminalId,
+      clientId: 'initial',
+      afterSequence: 0,
+      intent: 'restore',
+    };
+    const successor = peer('successor');
+    const failed = peer('failed', (message) => {
+      if (message.type !== 'terminal-attached') return;
+      expectTerminalError(
+        () => owner.input(principal, failed, terminal.terminalId, 'initializing'),
+        'terminal-not-attached',
+      );
+      if (replace)
+        owner.attach(principal, successor, {
+          ...request,
+          clientId: 'successor',
+          intent: 'takeover',
+        });
+      throw new Error('Synthetic initialization failure');
+    });
+    expect(() => owner.attach(principal, failed, request)).toThrow(
+      'Synthetic initialization failure',
+    );
+    expectTerminalError(
+      () => owner.input(principal, failed, terminal.terminalId, 'failed'),
+      'terminal-not-attached',
+    );
+    if (replace) owner.input(principal, successor, terminal.terminalId, 'successor');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(child.writes).toEqual(replace ? ['successor'] : []);
+    expect(owner.list(principal)[0].attachmentStatus).toBe(replace ? 'attached' : 'detached');
   },
 );
 

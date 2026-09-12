@@ -31,6 +31,7 @@ interface TerminalAttachment {
   clientId: string;
   peer: TerminalStreamPeer;
   expiresAtMs: number | null;
+  initializing: boolean;
 }
 
 interface TerminalSession {
@@ -133,6 +134,7 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
     Map<string, TerminalSession>
   >();
   readonly #createResults = new Map<string, Map<string, CachedCreateResult>>();
+  readonly #lateCreations = new Map<TerminalPty, CachedCreateResult>();
   readonly #terminateResults = new Map<
     string,
     Map<string, CachedTerminateResult>
@@ -232,115 +234,145 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
       }
       this.#assertRequestResultCapacity(principal.key);
 
-      const sessions = this.#sessionsFor(principal.key);
-      if (sessions.size >= TERMINAL_SESSION_LIMIT) {
-        return this.#cacheCreateError(
-          principal.key,
-          request.requestId,
-          "terminal-limit",
-          "Close a terminal before creating another one.",
-        );
-      }
-
-      let cwd: string;
-      try {
-        cwd = await this.#resolveInitialDirectory(
-          request.requestedInitialWorkingDirectory,
-        );
-      } catch (error) {
-        this.#assertAvailable(principal);
-        logger.warn("terminal create validation failed:", errorMessage(error));
-        return this.#cacheCreateError(
-          principal.key,
-          request.requestId,
-          "terminal-validation",
-          "Initial terminal directory is unavailable.",
-        );
-      }
-
-      this.#assertAvailable(principal);
-      const displaySequence =
-        (this.#displaySequenceByPrincipal.get(principal.key) ?? 0) + 1;
-      this.#displaySequenceByPrincipal.set(principal.key, displaySequence);
-      const terminalId = crypto.randomUUID();
-      let pty: TerminalPty;
-      try {
-        const options = {
-          name: "xterm-256color",
-          cols: 80,
-          rows: 24,
-          cwd,
-          env: { ...this.#environment },
-        };
-        pty = await this.#spawnPty(this.#shell, [], options);
-      } catch (error) {
-        this.#assertAvailable(principal);
-        logger.error("terminal create failed:", errorMessage(error));
-        return this.#cacheCreateError(
-          principal.key,
-          request.requestId,
-          "terminal-internal",
-          "Unable to start terminal.",
-        );
-      }
-
-      try {
-        this.#assertAvailable(principal);
-      } catch (error) {
-        try {
-          pty.kill();
-        } catch (cleanupError) {
-          logger.warn(
-            "late terminal cleanup failed:",
-            errorMessage(cleanupError),
-          );
-        }
-        throw error;
-      }
-
-      const metadata: TerminalMetadata = {
-        terminalId,
-        displaySequence,
-        title: null,
-        initialWorkingDirectory: cwd,
-        processStatus: "running",
-        attachmentStatus: "detached",
-        createdAt: new Date(this.#now()).toISOString(),
-        exitCode: null,
-        latestOutputSequence: 0,
-      };
-      const session: TerminalSession = {
-        metadata,
-        principalKey: principal.key,
-        pty,
-        replay: new TerminalReplayBuffer(this.#replayBytes),
-        attachment: null,
-        subscribers: new Set(),
-        attachmentGeneration: 0,
-        pendingOperations: 0,
-        operationChain: Promise.resolve(),
-        pendingResize: null,
-        terminating: false,
-      };
-      sessions.set(terminalId, session);
-      this.#wireSession(session);
-      const response: TerminalCreateResponse = {
-        success: true,
-        terminal: cloneTerminalMetadata(metadata),
-      };
+      const reserved: CachedCreateResult = { expiresAt: Infinity };
       this.#setRequestResult(
         this.#createResults,
         principal.key,
         request.requestId,
-        {
-          expiresAt: this.#now() + this.#createResultTtlMs,
-          response,
-        },
+        reserved,
       );
-      logger.info(
-        `terminal created id=${terminalId} principal=${principal.key} sequence=${displaySequence}`,
-      );
-      return response;
+      try {
+        const sessions = this.#sessionsFor(principal.key);
+        if (sessions.size >= TERMINAL_SESSION_LIMIT) {
+          return this.#cacheCreateError(
+            principal.key,
+            request.requestId,
+            "terminal-limit",
+            "Close a terminal before creating another one.",
+          );
+        }
+
+        let cwd: string;
+        try {
+          cwd = await this.#resolveInitialDirectory(
+            request.requestedInitialWorkingDirectory,
+          );
+        } catch (error) {
+          this.#assertAvailable(principal);
+          logger.warn(
+            "terminal create validation failed:",
+            errorMessage(error),
+          );
+          return this.#cacheCreateError(
+            principal.key,
+            request.requestId,
+            "terminal-validation",
+            "Initial terminal directory is unavailable.",
+          );
+        }
+
+        this.#assertAvailable(principal);
+        const displaySequence =
+          (this.#displaySequenceByPrincipal.get(principal.key) ?? 0) + 1;
+        this.#displaySequenceByPrincipal.set(principal.key, displaySequence);
+        const terminalId = crypto.randomUUID();
+        let pty: TerminalPty;
+        try {
+          const options = {
+            name: "xterm-256color",
+            cols: 80,
+            rows: 24,
+            cwd,
+            env: { ...this.#environment },
+          };
+          pty = await this.#spawnPty(this.#shell, [], options);
+        } catch (error) {
+          this.#assertAvailable(principal);
+          logger.error("terminal create failed:", errorMessage(error));
+          return this.#cacheCreateError(
+            principal.key,
+            request.requestId,
+            "terminal-internal",
+            "Unable to start terminal.",
+          );
+        }
+
+        try {
+          this.#assertAvailable(principal);
+        } catch (error) {
+          const failure = terminalCreateFailure(error);
+          const result: CachedCreateResult = {
+            expiresAt: Infinity,
+            error: { code: failure.code, message: failure.message },
+          };
+          this.#setRequestResult(
+            this.#createResults,
+            principal.key,
+            request.requestId,
+            result,
+          );
+          this.#lateCreations.set(pty, result);
+          this.#cleanupLateCreation(pty, result);
+          throw failure;
+        }
+
+        const metadata: TerminalMetadata = {
+          terminalId,
+          displaySequence,
+          title: null,
+          initialWorkingDirectory: cwd,
+          processStatus: "running",
+          attachmentStatus: "detached",
+          createdAt: new Date(this.#now()).toISOString(),
+          exitCode: null,
+          latestOutputSequence: 0,
+        };
+        const session: TerminalSession = {
+          metadata,
+          principalKey: principal.key,
+          pty,
+          replay: new TerminalReplayBuffer(this.#replayBytes),
+          attachment: null,
+          subscribers: new Set(),
+          attachmentGeneration: 0,
+          pendingOperations: 0,
+          operationChain: Promise.resolve(),
+          pendingResize: null,
+          terminating: false,
+        };
+        sessions.set(terminalId, session);
+        this.#wireSession(session);
+        const response: TerminalCreateResponse = {
+          success: true,
+          terminal: cloneTerminalMetadata(metadata),
+        };
+        this.#setRequestResult(
+          this.#createResults,
+          principal.key,
+          request.requestId,
+          {
+            expiresAt: this.#now() + this.#createResultTtlMs,
+            response,
+          },
+        );
+        logger.info(
+          `terminal created id=${terminalId} principal=${principal.key} sequence=${displaySequence}`,
+        );
+        return response;
+      } catch (error) {
+        if (
+          this.#createResults.get(principal.key)?.get(request.requestId) !==
+          reserved
+        )
+          throw error;
+        const failure = terminalCreateFailure(error);
+        return this.#cacheCreateError(
+          principal.key,
+          request.requestId,
+          failure.code,
+          failure.message,
+        );
+      }
     });
   }
 
@@ -463,11 +495,13 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
       }
     }
 
-    session.attachment = {
+    const attachment: TerminalAttachment = {
       clientId: request.clientId,
       peer,
       expiresAtMs: principal.expiresAtMs,
+      initializing: true,
     };
+    session.attachment = attachment;
     session.attachmentGeneration += 1;
     session.metadata.attachmentStatus = "attached";
     const generation = session.attachmentGeneration;
@@ -476,27 +510,65 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
       previous.clientId !== request.clientId &&
       !previous.peer.signal.aborted
     ) {
-      previous.peer.sendTerminalMessage({
-        type: "terminal-taken-over",
-        terminalId: session.metadata.terminalId,
-        replacementClientId: request.clientId,
-      });
+      try {
+        previous.peer.sendTerminalMessage({
+          type: "terminal-taken-over",
+          terminalId: session.metadata.terminalId,
+          replacementClientId: request.clientId,
+        });
+      } catch (error) {
+        logger.warn(
+          "terminal takeover notification failed:",
+          errorMessage(error),
+        );
+      }
     }
-    if (!this.#stillOwns(session, peer, generation)) return;
-    const firstSequence = session.replay.firstRetainedSequence;
-    if (request.afterSequence < firstSequence - 1) {
-      peer.sendTerminalMessage({
-        type: "terminal-replay-truncated",
-        terminalId: session.metadata.terminalId,
-        firstSequence,
-      });
+    try {
       if (!this.#stillOwns(session, peer, generation)) return;
+      let throughSequence = session.metadata.latestOutputSequence;
+      const replay = session.replay.after(request.afterSequence);
+      const firstSequence = session.replay.firstRetainedSequence;
+      if (request.afterSequence < firstSequence - 1) {
+        peer.sendTerminalMessage({
+          type: "terminal-replay-truncated",
+          terminalId: session.metadata.terminalId,
+          firstSequence,
+        });
+        if (!this.#stillOwns(session, peer, generation)) return;
+      }
+      const terminal = cloneTerminalMetadata(session.metadata);
+      peer.sendTerminalMessage({ type: "terminal-attached", terminal, replay });
+      while (
+        this.#stillOwns(session, peer, generation) &&
+        throughSequence < session.metadata.latestOutputSequence
+      ) {
+        const latestSequence = session.metadata.latestOutputSequence;
+        const chunks = session.replay.after(throughSequence);
+        const firstSequence = session.replay.firstRetainedSequence;
+        if (throughSequence < firstSequence - 1) {
+          peer.sendTerminalMessage({
+            type: "terminal-replay-truncated",
+            terminalId: terminal.terminalId,
+            firstSequence,
+          });
+        }
+        for (const chunk of chunks) {
+          if (!this.#stillOwns(session, peer, generation)) return;
+          peer.sendTerminalMessage({
+            type: "terminal-output",
+            terminalId: terminal.terminalId,
+            ...chunk,
+          });
+        }
+        throughSequence = latestSequence;
+      }
+      if (!this.#stillOwns(session, peer, generation)) return;
+      attachment.initializing = false;
+    } catch (error) {
+      if (session.attachment === attachment)
+        this.detachTerminal(principal, peer, session.metadata.terminalId);
+      throw error;
     }
-    peer.sendTerminalMessage({
-      type: "terminal-attached",
-      terminal: cloneTerminalMetadata(session.metadata),
-      replay: session.replay.after(request.afterSequence),
-    });
     logger.info(
       `terminal attached id=${session.metadata.terminalId} principal=${principal.key}`,
     );
@@ -613,12 +685,33 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
       sessions.clear();
     }
     this.#sessionsByPrincipal.clear();
-    this.#createResults.clear();
-    this.#terminateResults.clear();
-    this.#requestResultCount = 0;
     this.#displaySequenceByPrincipal.clear();
-    this.#shutdownPromise = Promise.allSettled(pending).then(() => undefined);
+    this.#shutdownPromise = Promise.allSettled(pending).then(() => {
+      for (const [pty, result] of this.#lateCreations)
+        this.#cleanupLateCreation(pty, result);
+      if (this.#lateCreations.size)
+        throw new WorkspaceTerminalError(
+          "terminal-internal",
+          "Terminal cleanup remains incomplete.",
+        );
+      this.#createResults.clear();
+      this.#terminateResults.clear();
+      this.#requestResultCount = 0;
+    });
+    void this.#shutdownPromise.catch(() => {
+      this.#shutdownPromise = null;
+    });
     return this.#shutdownPromise;
+  }
+
+  #cleanupLateCreation(pty: TerminalPty, result: CachedCreateResult): void {
+    try {
+      pty.kill();
+      this.#lateCreations.delete(pty);
+      result.expiresAt = this.#now() + this.#createResultTtlMs;
+    } catch (error) {
+      logger.warn("late terminal cleanup failed:", errorMessage(error));
+    }
   }
 
   #trackRequest<T>(operation: Promise<T>): Promise<T> {
@@ -684,7 +777,7 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
     terminalId: string,
   ): TerminalSession {
     const session = this.#requireSession(principal, terminalId);
-    if (session.attachment?.peer !== peer) {
+    if (session.attachment?.peer !== peer || session.attachment.initializing) {
       throw new WorkspaceTerminalError(
         "terminal-not-attached",
         "Terminal is not attached to this connection.",
@@ -718,6 +811,7 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
       const peer = session.attachment?.peer;
       if (
         !peer ||
+        session.attachment?.initializing ||
         !this.#stillOwns(session, peer, session.attachmentGeneration)
       )
         return;
@@ -887,4 +981,13 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
         : null,
     };
   }
+}
+
+function terminalCreateFailure(error: unknown): WorkspaceTerminalError {
+  return error instanceof WorkspaceTerminalError
+    ? error
+    : new WorkspaceTerminalError(
+        "terminal-internal",
+        "Unable to start terminal.",
+      );
 }
