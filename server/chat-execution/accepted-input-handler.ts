@@ -538,14 +538,11 @@ export class AcceptedInputHandler {
       throw error;
     }
     try {
-      this.#checkpoint(reservation);
-      const duplicate = await this.#checkpointAfter(
-        reservation,
-        Promise.resolve(this.#coordinator.hasMatchingInput(
-          input.command.chatId,
-          input.content,
-          { ...input.options, userMessagePresentation: input.userMessagePresentation },
-        )),
+      this.#coordinator.checkpoint(reservation);
+      const duplicate = this.#coordinator.hasMatchingInput(
+        input.command.chatId,
+        input.content,
+        { ...input.options, userMessagePresentation: input.userMessagePresentation },
       );
       if (duplicate) {
         await input.settlement.settleDuplicateInput(input.command);
@@ -556,17 +553,25 @@ export class AcceptedInputHandler {
       assertDirectControlAvailable(control);
       await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
-          assertAdmissionActive: () => this.#checkpoint(reservation),
+          assertAdmissionActive: () => this.#coordinator.checkpoint(reservation),
         })));
       await this.#checkpointAfter(
         reservation,
         this.#projectAdmission.assertAvailable(input.command.chatId),
       );
       prepared = await this.#coordinator.prepareTurn(input.command.chatId, input.options, reservation.executionAdmission.signal);
-      this.#checkpoint(reservation);
+      this.#coordinator.checkpoint(reservation);
       const inserted = await this.#checkpointAfter(
         reservation,
-        this.#coordinator.admitInput(input.command.chatId, input.content, { ...input.options, userMessagePresentation: input.userMessagePresentation, validateBeforeCommit: prepared.validate }),
+        this.#coordinator.admitInput(input.command.chatId, input.content, {
+          ...input.options,
+          userMessagePresentation: input.userMessagePresentation,
+          validateBeforeCommit: () => {
+            reservation.executionAdmission.signal.throwIfAborted();
+            this.#coordinator.checkpoint(reservation);
+            prepared!.validate();
+          },
+        }),
       );
       if (inserted === false) {
         await input.settlement.settleDuplicateInput(input.command);
@@ -593,9 +598,8 @@ export class AcceptedInputHandler {
         } catch (compensationError) {
           retryable = false;
           preserveForkPreparation = true;
-          failure = aggregateFailure(
-            failure,
-            compensationError,
+          failure = new AggregateError(
+            [failure, compensationError],
             `Failed to prepare and roll back ${input.preparation.operation} for ${input.command.chatId}`,
           );
         }
@@ -607,9 +611,8 @@ export class AcceptedInputHandler {
         );
         await this.#coordinator.releaseDirect(reservation);
       } catch (releaseError) {
-        failure = aggregateFailure(
-          failure,
-          releaseError,
+        failure = new AggregateError(
+          [failure, releaseError],
           `Failed to release direct input for ${input.command.chatId}`,
         );
       }
@@ -620,9 +623,8 @@ export class AcceptedInputHandler {
           preserveForkPreparation,
         });
       } catch (settlementError) {
-        failure = aggregateFailure(
-          failure,
-          settlementError,
+        failure = new AggregateError(
+          [failure, settlementError],
           `Failed to settle direct input admission for ${input.command.chatId}`,
         );
       }
@@ -638,9 +640,8 @@ export class AcceptedInputHandler {
       try {
         await input.preparation.compensate();
       } catch (compensationError) {
-        failure = aggregateFailure(
-          failure,
-          compensationError,
+        failure = new AggregateError(
+          [failure, compensationError],
           `Failed to roll back ${input.preparation.operation} for ${input.command.chatId}`,
         );
       }
@@ -648,17 +649,12 @@ export class AcceptedInputHandler {
     try {
       await input.settlement.settleOperationFailure(input.command, failure);
     } catch (settlementError) {
-      failure = aggregateFailure(
-        failure,
-        settlementError,
+      failure = new AggregateError(
+        [failure, settlementError],
         `Failed to settle initial input for ${input.command.chatId}`,
       );
     }
     if (failure !== error) throw failure;
-  }
-
-  #checkpoint(reservation: DirectTurnReservation): void {
-    this.#coordinator.checkpoint(reservation);
   }
 
   // Revalidates after every awaited step that can race an admission abort or clear.
@@ -690,10 +686,6 @@ function withTurnIdentifiers(command: AcceptedDirectOperation['command']): RunAg
     clientMessageId: crypto.randomUUID(),
     turnId: command.turnId ?? crypto.randomUUID(),
   };
-}
-
-function aggregateFailure(primary: unknown, secondary: unknown, message: string): AggregateError {
-  return new AggregateError([primary, secondary], message);
 }
 
 function queueSteerDomainErrorCode(code: DomainError['code']): CommandErrorCode {

@@ -77,7 +77,8 @@ export class QueueDrainer {
 
   async run(chatId: string): Promise<void> {
     const { ownership, controls, callbacks } = this.deps;
-    while (!this.#shouldHalt(chatId)) {
+    const drainSignal = ownership.drainSignal(chatId);
+    while (!drainSignal.aborted && !this.#shouldHalt(chatId)) {
       const lingering = ownership.attempt(chatId);
       if (lingering) {
         const control = await controls.read(chatId);
@@ -111,13 +112,18 @@ export class QueueDrainer {
       let prepared: PreparedExecutionTurn | undefined;
       try {
         try {
-          prepared = await this.deps.turnRunner.prepareTurn(chatId, options, ownership.drainSignal(chatId));
+          prepared = await this.deps.turnRunner.prepareTurn(chatId, options, drainSignal);
         } catch (error) {
           if (await this.#preparationFailed(chatId, candidate, options, error)) continue;
           return;
         }
-        if (this.#shouldHalt(chatId)) return;
+        if (drainSignal.aborted || this.#shouldHalt(chatId)) return;
         options.preparedExecution = prepared;
+        const validateBeforeCommit = () => {
+          drainSignal.throwIfAborted();
+          if (this.#shouldHalt(chatId)) throw new DOMException('Queue admission cancelled', 'AbortError');
+          prepared!.validate();
+        };
         let inputInserted = false;
         const admission = { failure: null as DomainError | null };
         let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
@@ -128,6 +134,7 @@ export class QueueDrainer {
           result = await this.deps.runSelectionAdmissionExclusive(
             chatId,
             () => controls.dequeueNextTurn(chatId, candidate, (input) => {
+              drainSignal.throwIfAborted();
               if (this.#shouldHalt(chatId)) throw new DOMException('Queue admission cancelled', 'AbortError');
               if (input.kind === 'control') {
                 if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
@@ -138,13 +145,13 @@ export class QueueDrainer {
                   });
                   return false;
                 }
-                prepared!.validate();
+                validateBeforeCommit();
                 callbacks.appendControlReceipt(chatId, input.entry);
                 inputInserted = true;
                 return true;
               }
               try {
-                inputInserted = callbacks.registerQueued(chatId, input.entry.content, { ...options, validateBeforeCommit: prepared!.validate });
+                inputInserted = callbacks.registerQueued(chatId, input.entry.content, { ...options, validateBeforeCommit });
               } catch (error) {
                 if (!isRecoverablePreambleAdmissionError(error)) throw error;
                 admission.failure = error;
@@ -155,7 +162,7 @@ export class QueueDrainer {
           );
         } catch (error) {
           if (inputInserted) callbacks.discardPreparedInput(chatId, options.clientMessageId);
-          if (this.#shouldHalt(chatId)) return;
+          if (drainSignal.aborted || this.#shouldHalt(chatId)) return;
           if (!inputInserted && error instanceof DomainError && error.code === 'SESSION_BUSY') {
             if (await this.#preparationFailed(chatId, candidate, options, error)) continue;
             return;
@@ -174,7 +181,7 @@ export class QueueDrainer {
         }
         if (!result.inserted) continue;
         try {
-          if (this.#shouldHalt(chatId) || ownership.drainSignal(chatId).aborted) return;
+          if (drainSignal.aborted || this.#shouldHalt(chatId)) return;
           const input = result.input;
           const turn = executionTurnIdentity(options)!;
           const attempt = new QueueExecutionAttempt(turn, input.kind === 'user' ? input.entry.id : undefined);

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
 import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts';
+import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 
 function deferred() {
   let resolve;
@@ -46,7 +47,7 @@ function createFixture(overrides = {}) {
   const queuedAdmission = overrides.queuedAdmission ?? (() => ({ inserted: true }));
   const projection = {
     admitInput: mock(async () => ({ inserted: true })),
-    hasMatchingInput: mock(async () => false),
+    hasMatchingInput: mock(() => false),
     admitQueuedInput: mock((...args) => {
       events.push('transcript');
       return queuedAdmission(...args);
@@ -82,6 +83,7 @@ function createFixture(overrides = {}) {
       ?? new InMemoryChatExecutionControlRepository('server-instance-test'),
     {
       projectAdmission,
+      selectionAdmissionLock: overrides.selectionAdmissionLock,
       unsettledQueueReceiptKeys: () => new Set(),
       appendControlReceipt,
       isControlInputViewCurrent: overrides.isControlInputViewCurrent ?? (() => true),
@@ -1029,6 +1031,45 @@ describe('ChatExecutionCoordinator', () => {
       expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
       expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
     } finally { ready.resolve(); await drain; }
+  });
+
+  it('interrupt-and-send re-prepares the retained head after cancelling locked admission', async () => {
+    const entered = deferred();
+    const ready = deferred();
+    const lock = new KeyedPromiseLock();
+    const runExclusive = lock.runExclusive.bind(lock);
+    const held = runExclusive('chat:chat-1', () => ready.promise);
+    lock.runExclusive = (...args) => { entered.resolve(); return runExclusive(...args); };
+    const releases = [];
+    const signals = [];
+    const failures = [];
+    const fixture = createFixture({ selectionAdmissionLock: lock, turnRunner: {
+      prepareTurn: mock(async (_chatId, _options, signal) => {
+        signals.push(signal);
+        const release = mock(() => {});
+        releases.push(release);
+        return { validate: () => signal.throwIfAborted(), release };
+      }),
+    } });
+    coordinator = fixture.coordinator;
+    coordinator.onTurnFailed((...args) => failures.push(args));
+    await coordinator.createChatQueueEntry('chat-1', 'Synthetic retained input');
+    const draining = coordinator.triggerDrain('chat-1');
+    try {
+      await entered.promise;
+      await coordinator.interruptActiveTurn('chat-1');
+      expect(signals[0].aborted).toBe(true);
+      expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    } finally { ready.resolve(); await held; }
+    await draining;
+    expect(signals).toHaveLength(2);
+    expect(signals[1]).not.toBe(signals[0]);
+    expect(signals[1].aborted).toBe(true); // The completed drain retires its preparation signal.
+    expect(fixture.projection.admitQueuedInput).toHaveBeenCalledOnce();
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledOnce();
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+    expect(failures).toEqual([]);
+    for (const release of releases) expect(release).toHaveBeenCalledOnce();
   });
 
   it('passes only queue identity into preparation so configuration has one registry snapshot', async () => {

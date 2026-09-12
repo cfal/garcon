@@ -63,6 +63,46 @@ function queueCallbacks(overrides = {}) {
 }
 
 describe('QueueDrainer', () => {
+  it.each(['user', 'control'])('retains %s input cancelled while waiting for locked admission', async (kind) => {
+    const entry = { id: 'entry-1', content: 'Synthetic queued input', revision: 1,
+      createdAt: TS, updatedAt: TS, status: 'queued' };
+    const repository = new InMemoryChatExecutionControlRepository('server-1');
+    repository.save('chat-1', control(kind === 'user' ? [entry] : [], kind === 'control' ? [privateControlEntry()] : []));
+    const controls = new ChatExecutionControlOperations(repository, {
+      runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
+      unsettledQueueReceiptKeys: () => new Set(), publish() {},
+    }, availableProjectAdmission());
+    const entered = Promise.withResolvers();
+    const ready = Promise.withResolvers();
+    const lifetime = new AbortController();
+    const release = mock(() => {});
+    const callbacks = queueCallbacks();
+    const runAgentTurn = mock(async () => {});
+    const drainer = new QueueDrainer({
+      ownership: idleOwnership({ drainSignal: () => lifetime.signal }), controls, callbacks,
+      turnRunner: { prepareTurn: async () => ({ validate() {}, release }), isChatRunning: () => false, runAgentTurn },
+      projectAdmission: availableProjectAdmission(),
+      runSelectionAdmissionExclusive: async (_chatId, operation) => {
+        entered.resolve();
+        await ready.promise;
+        return operation();
+      },
+    });
+    const before = await controls.read('chat-1');
+    const pending = drainer.run('chat-1');
+    try {
+      await entered.promise;
+      lifetime.abort(new Error('Synthetic interrupted preparation'));
+    } finally { ready.resolve(); }
+    await pending;
+    expect(await controls.read('chat-1')).toEqual(before);
+    expect(callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(callbacks.appendControlReceipt).not.toHaveBeenCalled();
+    expect(callbacks.publishTurnFailed).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it('discards a prepared input when queue removal fails after transcript admission', async () => {
     const failure = new Error('queue removal failed');
     const discardPreparedInput = mock(() => undefined);

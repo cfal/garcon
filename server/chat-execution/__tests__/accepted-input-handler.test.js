@@ -111,7 +111,7 @@ function scaffold(overrides = {}) {
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
-    hasMatchingInput: mock(async () => false),
+    hasMatchingInput: mock(() => false),
     admitInput: mock(async () => true),
     discardPreparedInput: mock(() => undefined),
     releaseDirect: mock(async () => undefined),
@@ -247,7 +247,7 @@ describe('AcceptedInputHandler', () => {
 
   test('skips control, preparation, and project admission for a matching input', async () => {
     const settle = settlement();
-    const { handler, m } = scaffold({ hasMatchingInput: mock(async () => true) });
+    const { handler, m } = scaffold({ hasMatchingInput: mock(() => true) });
     const prepare = mock(async () => undefined);
 
     await handler.schedule({
@@ -354,6 +354,46 @@ describe('AcceptedInputHandler', () => {
     else expect(m.runDirect).not.toHaveBeenCalled();
     if (outcome === 'cancel') expect(m.admitInput).not.toHaveBeenCalled();
     else expect(validate).toHaveBeenCalledOnce();
+  });
+
+  test.each(['signal', 'reservation'])('refuses %s cancellation inside the final direct admission callback', async (kind) => {
+    const entered = Promise.withResolvers();
+    const ready = Promise.withResolvers();
+    const controller = new AbortController();
+    const failure = new Error('Synthetic cancellation before commit');
+    const release = mock(() => {});
+    const commit = mock(() => {});
+    const settle = settlement();
+    let retired = false;
+    const { handler, m } = scaffold({
+      reserveDirect: () => ({ chatId: 'chat-1', reservationId: 'reservation-1',
+        executionAdmission: { signal: controller.signal } }),
+      checkpoint: () => { if (retired) throw failure; },
+      prepareTurn: async () => ({ validate() {}, release }),
+      admitInput: async (_chatId, _content, options) => {
+        entered.resolve();
+        await ready.promise;
+        options.validateBeforeCommit();
+        commit();
+        return true;
+      },
+    });
+    const pending = handler.schedule({ command: command(), content: 'Synthetic cancelled input',
+      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' }, settlement: settle,
+    });
+    const observed = pending.catch((error) => error);
+    try {
+      await entered.promise;
+      if (kind === 'signal') controller.abort(failure);
+      else retired = true;
+    } finally { ready.resolve(); }
+    expect(await observed).toBe(failure);
+    expect(commit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+    expect(m.releaseDirect).toHaveBeenCalledOnce();
+    expect(m.runDirect).not.toHaveBeenCalled();
+    expect(settle.markScheduled).not.toHaveBeenCalled();
+    expect(settle.markPreScheduleFailure).toHaveBeenCalledOnce();
   });
 
   test('admits direct presentation without exposing it to provider run options', async () => {
