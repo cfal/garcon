@@ -60,6 +60,10 @@ export class PiRpcClient {
   #nextId = 0;
   #disposed = false;
   #buffer = '';
+  #reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  readonly #readTask: Promise<void>;
+  #closing: Promise<void> | null = null;
+  #readCancelled = false;
   readonly exited: Promise<number>;
 
   constructor(proc: PiRpcProcess, options: PiRpcClientOptions) {
@@ -72,8 +76,13 @@ export class PiRpcClient {
         pending.writeAttempted,
       ));
       return code;
+    }, (error) => {
+      this.dispose('Pi process exit could not be observed');
+      throw error;
     });
-    void this.#readStdout();
+    void this.exited.catch(() => undefined);
+    this.#readTask = this.#readStdout();
+    void this.#readTask.catch(() => undefined);
   }
 
   // Sends a correlated command with a bounded response timeout.
@@ -94,6 +103,23 @@ export class PiRpcClient {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#failPending((pending) => new PiRpcTransportError(reason, pending.writeAttempted));
+  }
+
+  close(reason: string): Promise<void> {
+    if (this.#closing) return this.#closing;
+    this.dispose(reason);
+    this.#readCancelled = true;
+    this.#closing = (async () => {
+      const results = await Promise.allSettled([
+        this.#reader?.cancel(), this.#readTask, this.#writer,
+      ]);
+      this.#buffer = '';
+      const failures = results.filter((result) => result.status === 'rejected');
+      if (failures.length) {
+        throw new AggregateError(failures.map((failure) => failure.reason), 'Pi RPC I/O cleanup failed');
+      }
+    })();
+    return this.#closing;
   }
 
   #send(
@@ -187,8 +213,10 @@ export class PiRpcClient {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     try {
       reader = (stdout as ReadableStream<Uint8Array>).getReader();
+      this.#reader = reader;
       while (true) {
         const { done, value } = await reader.read();
+        if (this.#readCancelled) return;
         if (done) break;
         if (this.#options.maxOutputBytes !== undefined) {
           outputBytes += value.byteLength;
@@ -214,6 +242,7 @@ export class PiRpcClient {
       // Stream closed; the exit handler settles pending requests.
     } finally {
       reader?.releaseLock();
+      if (this.#reader === reader) this.#reader = null;
     }
   }
 

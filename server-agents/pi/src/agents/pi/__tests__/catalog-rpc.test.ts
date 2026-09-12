@@ -5,10 +5,14 @@ function scriptedProcess(onCommand: (command: Record<string, unknown>) => void =
   const exit = Promise.withResolvers<number>();
   const written = Promise.withResolvers<Record<string, unknown>>();
   const output = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const terminated = Promise.withResolvers<void>();
+  const cancelled = Promise.withResolvers<void>();
   const kills: (number | NodeJS.Signals | undefined)[] = [];
   let closed = false;
   let killed = false;
   let flush = () => Promise.resolve(0);
+  let cancel = () => Promise.resolve();
+  let closeOutputOnExit = true;
   const proc = {
     exited: exit.promise,
     get killed() { return killed; },
@@ -16,6 +20,7 @@ function scriptedProcess(onCommand: (command: Record<string, unknown>) => void =
       kills.push(signal);
       killed = true;
       finish();
+      terminated.resolve();
     },
     stdin: {
       write(data: string | ArrayBufferView | ArrayBuffer | SharedArrayBuffer) {
@@ -28,13 +33,13 @@ function scriptedProcess(onCommand: (command: Record<string, unknown>) => void =
     },
     stdout: new ReadableStream<Uint8Array>({
       start(controller) { output.resolve(controller); },
-      cancel() { closed = true; },
+      cancel() { closed = true; cancelled.resolve(); return cancel(); },
     }),
   } satisfies ReturnType<PiCatalogProcessFactory['start']>;
   function finish(code = 0) {
     exit.resolve(code);
     void output.promise.then((controller) => {
-      if (!closed) {
+      if (!closed && closeOutputOnExit) {
         closed = true;
         controller.close();
       }
@@ -46,9 +51,14 @@ function scriptedProcess(onCommand: (command: Record<string, unknown>) => void =
   async function emitBytes(value: string) {
     if (!closed) (await output.promise).enqueue(new TextEncoder().encode(value));
   }
-  return { proc, kills, written: written.promise, emit, emitBytes, finish, holdFlush(value: Promise<number>) {
-    flush = () => value;
-  } };
+  return {
+    proc, kills, written: written.promise, terminated: terminated.promise, cancelled: cancelled.promise,
+    emit, emitBytes, finish,
+    holdFlush(value: Promise<number>) { flush = () => value; },
+    holdCancel(value: Promise<void>) { cancel = () => value; },
+    holdOutputAfterExit() { closeOutputOnExit = false; },
+    rejectExit(error: unknown) { exit.reject(error); },
+  };
 }
 
 function profile(name = 'first') {
@@ -129,11 +139,20 @@ describe('scoped Pi RPC catalog', () => {
     const controller = new AbortController();
     const discover = createPiCatalogRpcDiscovery({ ...profile(), processes: { start: () => child.proc } });
     const pending = discover(controller.signal);
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
     await child.written;
     controller.abort(new Error('Synthetic cancellation'));
+    try {
+      await child.terminated;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(child.kills).toEqual(['SIGTERM']);
+    } finally {
+      flushed.resolve(0);
+    }
     await expect(pending).rejects.toBe(controller.signal.reason);
-    expect(child.kills).toEqual(['SIGTERM']);
-    flushed.resolve(0);
+    expect(child.proc.stdout.locked).toBe(false);
   });
 
   test('bounds startup and a held stdin write before the RPC response timer starts', async () => {
@@ -143,11 +162,66 @@ describe('scoped Pi RPC catalog', () => {
     const discover = createPiCatalogRpcDiscovery({ ...profile(), timeoutMs: 10,
       processes: { start: () => child.proc },
     });
-    await expect(discover(new AbortController().signal)).rejects.toMatchObject({
+    const pending = discover(new AbortController().signal);
+    void pending.catch(() => undefined);
+    try {
+      await child.terminated;
+      expect(child.kills).toEqual(['SIGTERM']);
+    } finally {
+      flushed.resolve(0);
+    }
+    await expect(pending).rejects.toMatchObject({
       message: 'Pi catalog discovery timed out',
     });
-    expect(child.kills).toEqual(['SIGTERM']);
-    flushed.resolve(0);
+  });
+
+  test('awaits owned read cancellation and flush after a successful reply and child exit', async () => {
+    const child = scriptedProcess();
+    const flushed = Promise.withResolvers<number>();
+    const cancelled = Promise.withResolvers<void>();
+    child.holdFlush(flushed.promise);
+    child.holdCancel(cancelled.promise);
+    child.holdOutputAfterExit();
+    const discover = createPiCatalogRpcDiscovery({ ...profile(), processes: { start: () => child.proc } });
+    const pending = discover(new AbortController().signal);
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    try {
+      const command = await child.written;
+      await child.emit(reply(command, available));
+      await child.terminated;
+      await child.cancelled;
+      expect(await child.proc.exited).toBe(0);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      cancelled.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(child.proc.stdout.locked).toBe(false);
+    } finally {
+      cancelled.resolve();
+      flushed.resolve(0);
+    }
+    expect(await pending).toEqual(expected);
+  });
+
+  test('fails discovery and escalates when exit observation rejects after a successful reply', async () => {
+    const child = scriptedProcess();
+    const exitFailure = new Error('Synthetic exit observation failure');
+    const discover = createPiCatalogRpcDiscovery({ ...profile(), processes: {
+      start: () => ({ ...child.proc, kill(signal) {
+        child.rejectExit(exitFailure);
+        child.proc.kill(signal);
+      } }),
+    } });
+    const pending = discover(new AbortController().signal);
+    const command = await child.written;
+    await child.emit(reply(command, available));
+    await expect(pending).rejects.toMatchObject({
+      message: 'Pi process exit could not be confirmed after SIGKILL', cause: exitFailure,
+    });
+    expect(child.kills).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(child.proc.stdout.locked).toBe(false);
   });
 
   test.each([

@@ -91,19 +91,20 @@ export function createPiCatalogRpcDiscovery(options: {
       failure = { error: reason };
       throw reason;
     } finally {
+      const cleanup = await Promise.allSettled([
+        client?.close('Pi catalog discovery complete'),
+        process ? terminatePiProcess(process) : undefined,
+      ]);
       clearTimeout(timer);
       launchSignal.removeEventListener('abort', onAbort);
-      client?.dispose('Pi catalog discovery complete');
-      if (process) {
-        try {
-          await terminatePiProcess(process);
-        } catch (cleanupError) {
-          const primaryFailure = failure ?? (launchSignal.aborted ? { error: launchSignal.reason } : null);
-          if (primaryFailure) throw new AggregateError([primaryFailure.error, cleanupError], 'Pi catalog discovery and cleanup failed');
-          throw cleanupError;
-        }
+      const errors = cleanup.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (errors.length) {
+        const primaryFailure = failure ?? (launchSignal.aborted ? { error: launchSignal.reason } : null);
+        if (primaryFailure) errors.unshift(primaryFailure.error);
+        if (errors.length === 1) throw errors[0];
+        throw new AggregateError(errors, 'Pi catalog discovery and cleanup failed');
       }
-      signal.throwIfAborted();
+      launchSignal.throwIfAborted();
     }
   };
 }
