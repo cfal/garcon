@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { parseChatRowTitle } from '../../common/chat-row-contracts.js';
 import {
   recordsStartupPreferences,
@@ -158,6 +159,16 @@ export class StartCommands {
 
     if (!input.agentSettings || input.agentSettings.ownerId !== input.agentId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'agentSettings must be owned by agentId');
+    }
+
+    // Rejected configuration must not reserve a request identity or publish a partial chat.
+    try {
+      await this.deps.agents.validateConfiguration(input);
+    } catch (error) {
+      if (error instanceof AgentIntegrationError && error.code === 'INVALID_SETTINGS') {
+        throw new CommandValidationError('VALIDATION_FAILED', error.message, 422, error.retryable);
+      }
+      throw error;
     }
 
     const projectPath = await resolveStartProjectPath(input.projectPath);

@@ -42,7 +42,7 @@ import {
   type CreateCarriedContextInput,
   type RunSingleQueryOptions,
 } from './runtime-router.js';
-import { AgentSessionSettingsService } from './session-settings-service.js';
+import { AgentSessionSettingsService, type AgentConfigurationInput } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../lib/log.js';
 import type { UserMessage } from '@garcon/common/chat-types';
@@ -154,6 +154,7 @@ export interface AgentRegistryServiceContract {
     session: AgentChatEntry,
     chatId: string,
   ): Promise<AgentTranscriptSourceLocation | null>;
+  validateConfiguration(input: AgentConfigurationInput): Promise<void>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -369,6 +370,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
   discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
     return this.#runtime.discardForkedAgentSession(agentId, session);
+  }
+  validateConfiguration(input: AgentConfigurationInput): Promise<void> {
+    return this.#settings.validateConfiguration(input);
   }
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
     return this.#settings.updateSessionSettings(chatId, patch);

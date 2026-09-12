@@ -1,4 +1,6 @@
 import { normalizePermissionMode } from '../../common/chat-modes.js';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
@@ -12,6 +14,16 @@ import {
 } from '../../common/execution-defaults.js';
 import { DomainError } from '../lib/domain-error.js';
 
+export interface AgentConfigurationInput {
+  readonly agentId: string;
+  readonly model: string;
+  readonly apiProviderId?: string | null;
+  readonly modelEndpointId?: string | null;
+  readonly permissionMode: PermissionMode;
+  readonly thinkingMode: ThinkingMode;
+  readonly agentSettings: AgentSettingsEnvelope;
+}
+
 export class AgentSessionSettingsService {
   readonly #lock: KeyedPromiseLock;
 
@@ -22,6 +34,22 @@ export class AgentSessionSettingsService {
     chatMutationLock?: KeyedPromiseLock;
   }) {
     this.#lock = deps.chatMutationLock ?? new KeyedPromiseLock();
+  }
+
+  async validateConfiguration(input: AgentConfigurationInput): Promise<void> {
+    const integration = this.deps.directory.require(input.agentId);
+    if (!integration.configurationValidation) return;
+    const selection = this.deps.endpointResolver.resolveSelection(input);
+    await integration.configurationValidation.validate({
+      model: selection.model,
+      permissionMode: normalizePermissionMode(input.permissionMode),
+      thinkingMode: normalizeSupportedThinkingMode(
+        input.thinkingMode,
+        integration.descriptor.supportedThinkingModes,
+      ),
+      settings: integration.settings.parse(input.agentSettings),
+      endpoint: toAgentEndpointSelection(this.deps.endpointResolver, selection),
+    });
   }
 
   updateSessionSettings(

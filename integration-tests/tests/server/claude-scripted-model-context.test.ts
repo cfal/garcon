@@ -11,6 +11,38 @@ import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
+test('Claude rejects invalid initial models consistently before creating a chat', async () => {
+  const environment = await startScriptedClaudeTestEnvironment();
+  try {
+    await withIntegrationFixture('claude-model-context-start-validation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const request = {
+        ...liveClaudeStartRequest({ chatId, projectPath: fixture.dirs.project, command: 'Confirm the model.' }),
+        model: 'custom[99k]',
+      };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await expect(fixture.client.startChat(request)).rejects.toMatchObject({
+          status: 422,
+          body: { errorCode: 'VALIDATION_FAILED', retryable: false },
+        });
+      }
+      await expect(fixture.client.getChatSnapshot(chatId)).rejects.toMatchObject({ status: 404 });
+      expect(environment.model.requests()).toHaveLength(0);
+      expect(fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(0);
+
+      // Reusing the rejected request identity proves preflight did not reserve a command or chat.
+      const reply = 'The initial model is corrected.';
+      environment.model.scriptTurn([claudeText(reply)]);
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat({ ...request, model: 'custom[922k]' });
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+      environment.model.assertSettled();
+    }, { serverEnvironment: environment.serverEnvironment });
+  } finally {
+    environment.dispose();
+  }
+}, 60_000);
+
 test('Claude validates unstarted chat settings before persistence and can start after correction', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
   const chatId = '1786120000000003';
