@@ -31,6 +31,8 @@ export function createLocalWorkspaceGitService({
 
   async function project<O extends ProjectOptions>(options: O): Promise<O> {
     const captured = { ...options };
+    const { signal: _signal, trace: _trace, metrics: _metrics, ...values } = captured;
+    Object.assign(captured, structuredClone(values));
     captured.signal?.throwIfAborted();
     const projectPath = await assertProjectPathAllowed(captured.projectPath);
     captured.signal?.throwIfAborted();
@@ -90,7 +92,7 @@ export function createLocalWorkspaceGitService({
     removeWorktree: async (options) => worktrees.removeWorktree(await worktree(options)),
     getQuickSummary: async (options) => quickSummary.getQuickSummary(await project(options)),
     captureCommitMessageSource: async (options) => status.captureCommitMessageSource(
-      await project({ ...options, files: Array.isArray(options.files) ? [...options.files] : options.files }),
+      await project(options),
     ),
   } satisfies WorkspaceGitService;
 }

@@ -36,11 +36,100 @@ async function repository() {
   return { directory, projectPath, aliasPath, authorize, service };
 }
 
+function heldAuthorization(authorize) {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const service = createLocalWorkspaceGitService({
+    networkTimeoutMs: 30_000,
+    assertProjectPathAllowed: async (target) => {
+      entered.resolve();
+      await release.promise;
+      return authorize(target);
+    },
+  });
+  return { entered, release, service };
+}
+
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
 describe('local workspace Git owner', () => {
+  test.each(['stagePaths', 'commit'])('captures the %s file selection before owner authorization', async (operation) => {
+    const { projectPath, authorize } = await repository();
+    await fs.writeFile(path.join(projectPath, 'a.txt'), 'selected change\n');
+    await fs.writeFile(path.join(projectPath, 'b.txt'), 'unselected change\n');
+    const held = heldAuthorization(authorize);
+    const selection = ['a.txt'];
+    const result = operation === 'stagePaths'
+      ? held.service.stagePaths({ projectPath, paths: selection, mode: 'stage' })
+      : held.service.commit({ projectPath, files: selection, message: 'selected change' });
+    try {
+      await held.entered.promise;
+      selection[0] = 'b.txt';
+      held.release.resolve();
+      expect(await result).toMatchObject({ success: true });
+      expect(await git(projectPath, operation === 'stagePaths'
+        ? ['diff', '--cached', '--name-only']
+        : ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'])).toBe('a.txt');
+      expect(await git(projectPath, ['diff', '--name-only'])).toBe('b.txt');
+    } finally {
+      held.release.resolve();
+      await result.catch(() => {});
+    }
+  });
+
+  test('captures selected line indices before owner authorization', async () => {
+    const { projectPath, authorize } = await repository();
+    await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\nthree\n');
+    await git(projectPath, ['add', 'a.txt']);
+    await git(projectPath, ['commit', '-m', 'synthetic lines']);
+    await fs.writeFile(path.join(projectPath, 'a.txt'), 'ONE\ntwo\nTHREE\n');
+    const held = heldAuthorization(authorize);
+    const selection = { lineIndices: [0, 1] };
+    const result = held.service.stageSelection({ projectPath, file: 'a.txt', mode: 'stage', selection, contextLines: 3 });
+    try {
+      await held.entered.promise;
+      selection.lineIndices.splice(0, 2, 3, 4);
+      held.release.resolve();
+      expect(await result).toEqual({ success: true });
+      expect(await git(projectPath, ['show', ':a.txt'])).toBe('ONE\ntwo\nthree');
+      expect(await fs.readFile(path.join(projectPath, 'a.txt'), 'utf8')).toBe('ONE\ntwo\nTHREE\n');
+    } finally {
+      held.release.resolve();
+      await result.catch(() => {});
+    }
+  });
+
+  test.each(['getComparisonSnapshot', 'getComparisonFreshness'])('captures %s revision selectors before owner authorization', async (operation) => {
+    const { projectPath, authorize } = await repository();
+    const hash = await git(projectPath, ['rev-parse', 'HEAD']);
+    const held = heldAuthorization(authorize);
+    const from = { kind: 'revision', revision: 'HEAD', hash };
+    const to = { kind: 'revision', revision: 'HEAD', hash };
+    const result = operation === 'getComparisonSnapshot'
+      ? held.service.getComparisonSnapshot({ projectPath, from, to, mode: 'direct' })
+      : held.service.getComparisonFreshness({ projectPath, from, to });
+    try {
+      await held.entered.promise;
+      from.revision = 'missing-source';
+      to.revision = 'missing-target';
+      held.release.resolve();
+      const response = await result;
+      expect(response.status).toBe('ready');
+      if (operation === 'getComparisonSnapshot') {
+        expect(response.from.hash).toBe(hash);
+        expect(response.to.hash).toBe(hash);
+      } else {
+        expect(response.fromHash).toBe(hash);
+        expect(response.changedEndpoints).toEqual([]);
+      }
+    } finally {
+      held.release.resolve();
+      await result.catch(() => {});
+    }
+  });
+
   test('shares review document identity between an alias snapshot and canonical body request', async () => {
     const { projectPath, aliasPath, service } = await repository();
     await fs.writeFile(path.join(projectPath, 'a.txt'), 'captured change\n');

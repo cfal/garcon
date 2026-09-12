@@ -54,6 +54,17 @@ afterEach(async () => {
 });
 
 describe('files route', () => {
+  it.each(['list', 'identity'])('sanitizes unexpected %s project-inspection failures', async (operation) => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const query = new URLSearchParams({ projectPath: path.join(projectPath, 'x'.repeat(300)), path: 'sample.txt' });
+    const url = new URL(`http://localhost/api/v1/files/${operation}?${query}`);
+    const response = await routes[url.pathname].GET(new Request(url), url);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+    });
+  });
+
   it.each([1, 2])('returns a revision conflict for a cyclic save target at resolution %i', async (attempt) => {
     const alias = path.join(projectPath, 'cycle.ts');
     await fs.symlink(path.join(projectPath, 'src/main.ts'), alias);

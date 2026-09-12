@@ -6,7 +6,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
-import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { cancelledRequestResponse, jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { isDomainError, ProjectUnavailableError, ValidationDomainError } from '../lib/domain-error.js';
 import { FilePathMustIdentifyFileError } from '../files/file-revision.js';
 import {
@@ -25,7 +25,6 @@ import { FILE_REVISION_HEADER, parseSaveTextRequest } from '../../common/file-co
 const logger = createLogger('routes:files');
 
 const ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE = 'Upload too large. Maximum request size is 30MB.';
-const CLIENT_CLOSED_REQUEST_STATUS = 499;
 
 async function readAttachmentFormData(request: Request): Promise<FormData> {
   if (!request.body) return request.formData();
@@ -60,22 +59,13 @@ function unexpectedFileOperationError(
   error: unknown,
   request: Request,
 ): Response {
-  const cancelled = cancelledFileRequestResponse(request, error);
+  const cancelled = cancelledRequestResponse(request, error);
   if (cancelled) return cancelled;
   if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
   if (!isDomainError(error)) {
     logger.error(`files: ${operation} error:`, errorMessage(error));
   }
   return jsonErrorFromUnknown(error);
-}
-
-function cancelledFileRequestResponse(request: Request, error: unknown): Response | null {
-  if (request.signal.aborted && (
-    error === request.signal.reason || (error instanceof Error && error.name === 'AbortError')
-  )) {
-    return new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS });
-  }
-  return null;
 }
 
 export default function createFilesRoutes(
@@ -130,10 +120,7 @@ export default function createFilesRoutes(
         headers: truncated ? { 'X-Garcon-File-List-Truncated': 'true' } : undefined,
       });
     } catch (error) {
-      const cancelled = cancelledFileRequestResponse(request, error);
-      if (cancelled) return cancelled;
-      if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return unexpectedFileOperationError('file list', error, request);
     }
   }
 
@@ -145,7 +132,7 @@ export default function createFilesRoutes(
         projectPath: selected.projectPath, filePath: url.searchParams.get('path') || '',
       }, request.signal));
     } catch (error) {
-      const cancelled = cancelledFileRequestResponse(request, error);
+      const cancelled = cancelledRequestResponse(request, error);
       if (cancelled) return cancelled;
       if (error instanceof ProjectUnavailableError) return projectUnavailableResponse(error.projectPath, error.reason);
       if (error instanceof ValidationDomainError || error instanceof FilePathMustIdentifyFileError) {
@@ -163,8 +150,7 @@ export default function createFilesRoutes(
       if (hasNodeErrorCode(error, 'EACCES')) {
         return Response.json({ error: 'Permission denied' }, { status: 403 });
       }
-      logger.error('files: identity error:', errorMessage(error));
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return unexpectedFileOperationError('identity', error, request);
     }
   }
 

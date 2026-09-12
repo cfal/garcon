@@ -79,6 +79,21 @@ function fixtureOptions(gate: ReturnType<typeof saveGate>, alias: 'hard-link' | 
 }
 
 describe('workspace files through HTTP', () => {
+  test('sanitizes unexpected project-inspection failures for listing and identity', async () => {
+    await withIntegrationFixture('workspace-file-inspection-error', async (fixture) => {
+      const query = new URLSearchParams({ projectPath: join(fixture.dirs.project, 'x'.repeat(300)), path: 'sample.txt' });
+      for (const operation of ['list', 'identity']) {
+        const response = await fetch(`${fixture.garcon.baseUrl}/api/v1/files/${operation}?${query}`, {
+          headers: { Authorization: `Bearer ${fixture.authToken}` }, signal: AbortSignal.timeout(15_000),
+        });
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({
+          success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+        });
+      }
+    }, { authentication: 'account', bindAddress: '0.0.0.0' });
+  }, 30_000);
+
   test('cancels a file-tree read without logging a server failure or returning an empty tree', async () => {
     const held = new Deferred<void>();
     const aborted = new Deferred<void>();
