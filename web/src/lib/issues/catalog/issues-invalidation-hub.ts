@@ -21,5 +21,7 @@ export class IssuesInvalidationHub {
 		this.publish({ kind: 'reconnect' });
 	}
 
-	publishAuthority(authenticated: boolean): void { this.publish({ kind: 'authority', authenticated }); }
+	publishAuthority(authenticated: boolean): void {
+		this.publish({ kind: 'authority', authenticated });
+	}
 }
