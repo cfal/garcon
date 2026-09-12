@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { collectAgentBuildContributions } from '../agent-build-metadata.js';
-import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const temporaryDirectories = [];
 

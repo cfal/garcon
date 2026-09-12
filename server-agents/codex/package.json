@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": { ".": "./src/index.ts", "./native-environment": "./src/native-environment.ts" },
   "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
   "dependencies": {
     "@garcon/common": "workspace:*",

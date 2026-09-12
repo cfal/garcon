@@ -61,3 +61,12 @@ export interface AgentIntegrationDefinition {
 export interface AgentIntegrationClass extends AgentIntegrationDefinition {
   new (host: AgentHost): AgentIntegration;
 }
+
+/** Declares native directories before executable provider imports; paths are relative to the configured home. */
+export interface AgentNativeEnvironment {
+  readonly integrationId: string;
+  readonly directories: readonly {
+    readonly path: string;
+    readonly environmentKey: string | null;
+  }[];
+}

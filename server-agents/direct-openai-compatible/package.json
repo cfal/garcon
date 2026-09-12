@@ -1,7 +1,7 @@
 {
   "name": "@garcon/server-agent-direct-openai-compatible",
   "version": "0.1.0", "private": true, "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": { ".": "./src/index.ts", "./native-environment": "./src/native-environment.ts" },
   "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
   "dependencies": { "@garcon/common": "workspace:*", "@garcon/server-agent-common": "workspace:*", "@garcon/server-agent-interface": "workspace:*" },
   "devDependencies": { "@types/bun": "^1.4.1", "typescript": "^6.0.3" },
