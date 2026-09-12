@@ -13,7 +13,7 @@ interface IssueProjectResolverOptions {
 
 function unavailable(): IssueDomainError {
   return new IssueDomainError('ISSUE_PROJECT_UNAVAILABLE',
-    'Cannot resolve the project default. Check the directory and Git configuration, or enter an explicit project.');
+    'Cannot resolve the project default. Check the context directory, or enter an explicit project.');
 }
 
 function singlePath(output: string): string {
@@ -22,14 +22,6 @@ function singlePath(output: string): string {
   if (!isAbsolute(path)) throw unavailable();
   issueProject(path);
   return path;
-}
-
-function isNotRepository(error: unknown): boolean {
-  const failure = error as GitProcessError;
-  return failure.code === 128 && !failure.aborted && !failure.timedOut
-    && typeof failure.stderr === 'string'
-    && (failure.stderr === 'fatal: not a git repository (or any of the parent directories): .git\n'
-      || /^fatal: not a git repository \(or any parent up to mount point [^\r\n]+\)\nStopping at filesystem boundary \(GIT_DISCOVERY_ACROSS_FILESYSTEM not set\)\.\n$/.test(failure.stderr));
 }
 
 function primaryCheckout(output: string): string {
@@ -58,6 +50,7 @@ export async function resolveIssueProjectDefault(directory: string, signal?: Abo
     const result = await inspect(path);
     probeSignal.throwIfAborted();
     if (result.kind !== 'available') throw unavailable();
+    if (issueProject(result.effectiveProjectKey) !== result.effectiveProjectKey) throw unavailable();
     return result.effectiveProjectKey;
   };
   const probe = async (cwd: string, args: string[]): Promise<string> => {
@@ -71,15 +64,14 @@ export async function resolveIssueProjectDefault(directory: string, signal?: Abo
     probeSignal.throwIfAborted();
     return result.stdout;
   };
+  let cwd: string;
+  try { cwd = await canonical(directory); }
+  catch {
+    signal?.throwIfAborted();
+    throw unavailable();
+  }
   try {
-    const cwd = await canonical(directory);
-    let commonPath: string;
-    try {
-      commonPath = await probe(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-    } catch (error) {
-      if (!isNotRepository(error)) throw error;
-      return { project: issueProject(cwd), kind: 'folder' };
-    }
+    const commonPath = await probe(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
     const commonDirectory = await canonical(singlePath(commonPath));
     const mainGitDir = `--git-dir=${commonDirectory}`;
     const bare = await probe(cwd, [mainGitDir, 'rev-parse', '--is-bare-repository']);
@@ -102,6 +94,6 @@ export async function resolveIssueProjectDefault(directory: string, signal?: Abo
     return { project: issueProject(await canonical(checkout)), kind: 'repository' };
   } catch {
     signal?.throwIfAborted();
-    throw unavailable();
+    return { project: issueProject(cwd), kind: 'folder' };
   }
 }

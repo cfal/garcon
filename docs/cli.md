@@ -45,7 +45,7 @@ bun cli/main.ts issue history ISS-42 --limit 20
 bun cli/main.ts issue close ISS-42 --expected-revision 3 --resolution done --comment 'Verified through the API.'
 ```
 
-`project` is an arbitrary, editable string, not a directory capability. New creates resolve an omitted project from `--cwd` or the process directory. Normal Git worktrees share the primary repository path; non-Git contexts use their canonical folder. An explicit `--project` bypasses filesystem lookup. Lists default to all projects and nonclosed issues, not the process directory. Use `--include-closed` or an explicit `--status closed` to include closed work.
+`project` is an arbitrary, editable string, not a directory capability. New creates resolve an omitted project from `--cwd` or the process directory. Normal Git worktrees share the primary repository path; non-Git contexts use their canonical folder. If Git fails or cannot identify the primary checkout, the default is the canonical `--cwd` or process directory. An explicit `--project` bypasses filesystem lookup. Lists default to all projects and nonclosed issues, not the process directory. Use `--include-closed` or an explicit `--status closed` to include closed work.
 
 Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create accepts repeatable `--label`, `--assignee chat:<id>|user:<username>|unassigned`, and `--parent-id ISS-n`. User assignment is limited to the current authenticated user. Update accepts a JSON patch containing title, description, project, nonclosed status, priority, labels, assignee, or parentId; use JSON null to clear assignee/parent. Only `close` and `reopen` transition into/out of Closed.
 

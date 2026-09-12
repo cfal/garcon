@@ -54,6 +54,17 @@ describe('issue project defaults', () => {
     expect(await resolve(clone)).toEqual({ project: clone, kind: 'repository' });
   });
 
+  test('falls back to each captured context when separate Git storage cannot identify its primary checkout', async () => {
+    const base = await repo('separate', [`--separate-git-dir=${join(root, 'metadata')}`]);
+    const linked = join(root, 'linked');
+    await git(base, 'worktree', 'add', '-b', 'synthetic-linked', linked);
+    const nested = join(linked, 'nested');
+    mkdirSync(nested);
+    for (const directory of [base, linked, nested]) {
+      expect(await resolve(directory)).toEqual({ project: directory, kind: 'folder' });
+    }
+  });
+
   test('uses the shared bare directory and treats submodules independently', async () => {
     const bare = join(root, 'bare');
     await git(root, 'init', '--bare', bare);
@@ -77,20 +88,22 @@ describe('issue project defaults', () => {
     expect(await resolve(linked)).toEqual({ project: base, kind: 'repository' });
   });
 
-  test('uses a canonical folder only after a positive non-Git classification', async () => {
+  test('uses the canonical context for non-Git folders and broken Git metadata', async () => {
     const folder = join(root, 'plain folder');
     mkdirSync(folder);
     const alias = join(root, 'alias');
     symlinkSync(folder, alias);
     expect(await resolve(alias)).toEqual({ project: folder, kind: 'folder' });
     writeFileSync(join(folder, '.git'), 'gitdir: missing\n');
-    await expect(resolve(folder)).rejects.toMatchObject({ code: 'ISSUE_PROJECT_UNAVAILABLE' });
+    expect(await resolve(alias)).toEqual({ project: folder, kind: 'folder' });
   });
 
   test('rejects unavailable, outside-base and control-containing contexts without leaking paths', async () => {
     const controlled = join(root, 'line\nbreak');
     mkdirSync(controlled);
-    for (const path of [join(root, 'absent'), homedir(), controlled]) {
+    const alias = join(root, 'control-alias');
+    symlinkSync(controlled, alias);
+    for (const path of [join(root, 'absent'), homedir(), controlled, alias]) {
       try { await resolve(path); throw new Error('Expected rejection'); }
       catch (error) {
         expect(error.code).toBe('ISSUE_PROJECT_UNAVAILABLE');
@@ -99,7 +112,30 @@ describe('issue project defaults', () => {
     }
   });
 
-  test('recognizes the exact filesystem-boundary non-Git diagnostic without masking other failures', async () => {
+  test.each([' ', '\u00a0'])('rejects canonical contexts ending in %j without probing a trimmed sibling', async (suffix) => {
+    const sibling = await repo('context');
+    const directory = `${sibling}${suffix}`;
+    mkdirSync(directory);
+    const alias = join(root, 'context-alias');
+    symlinkSync(directory, alias);
+    const calls = [];
+    for (const path of [directory, alias]) {
+      await expect(resolveIssueProjectDefault(path, undefined, {
+        ...options, git: async (cwd) => { calls.push(cwd); throw new Error('Unexpected Git probe'); },
+      })).rejects.toMatchObject({ code: 'ISSUE_PROJECT_UNAVAILABLE' });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test.each([' ', '\u00a0'])('falls back when the primary checkout ends in %j without substituting its sibling', async (suffix) => {
+    await repo('primary');
+    const base = await repo(`primary${suffix}`);
+    const linked = join(root, 'linked');
+    await git(base, 'worktree', 'add', '-b', 'synthetic-linked', linked);
+    expect(await resolve(linked)).toEqual({ project: linked, kind: 'folder' });
+  });
+
+  test('falls back regardless of Git diagnostic wording or exit status', async () => {
     const boundary = 'fatal: not a git repository (or any parent up to mount point /)\n'
       + 'Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n';
     const probe = (failure) => resolveIssueProjectDefault(root, undefined, {
@@ -112,21 +148,21 @@ describe('issue project defaults', () => {
       { code: 1, stderr: boundary },
       { code: 128, stderr: `${boundary}fatal: additional failure\n` },
     ]) {
-      await expect(probe(failure)).rejects.toMatchObject({ code: 'ISSUE_PROJECT_UNAVAILABLE' });
+      expect(await probe(failure)).toEqual({ project: root, kind: 'folder' });
     }
   });
 
-  test('does not classify missing Git, permissions, timeout, unsafe or malformed output as a folder', async () => {
+  test('falls back on missing Git, permission errors, timeout, unsafe or malformed output within the probe bounds', async () => {
     const failures = [new Error('missing git'), { code: 'EACCES' },
       { code: 128, timedOut: true, stderr: 'fatal: not a git repository (or any of the parent directories): .git\n' },
       { code: 128, stderr: 'fatal: detected dubious ownership' }];
     for (const failure of failures) {
-      await expect(resolveIssueProjectDefault(root, undefined, {
+      expect(await resolveIssueProjectDefault(root, undefined, {
         ...options, git: async () => { throw failure; },
-      })).rejects.toMatchObject({ code: 'ISSUE_PROJECT_UNAVAILABLE' });
+      })).toEqual({ project: root, kind: 'folder' });
     }
     const calls = [];
-    await expect(resolveIssueProjectDefault(root, undefined, {
+    expect(await resolveIssueProjectDefault(root, undefined, {
       ...options, git: async (_cwd, args, config) => {
         calls.push(config);
         if (args.includes('--git-common-dir')) return { stdout: `${root}\n`, stderr: '' };
@@ -134,7 +170,7 @@ describe('issue project defaults', () => {
         if (args.includes('config')) throw { code: 1, stdout: '', stderr: '' };
         return { stdout: `worktree ${root}\nHEAD abc\n`, stderr: '' };
       },
-    })).rejects.toMatchObject({ code: 'ISSUE_PROJECT_UNAVAILABLE' });
+    })).toEqual({ project: root, kind: 'folder' });
     expect(calls).toHaveLength(4);
     for (const config of calls) {
       expect(config.env.LC_ALL).toBe('C');
@@ -144,6 +180,17 @@ describe('issue project defaults', () => {
       expect(config.signal).toBe(calls[0].signal);
     }
     expect(calls[3].timeoutMs).toBeLessThanOrEqual(calls[0].timeoutMs);
+  });
+
+  test('falls back when the discovered primary checkout is inaccessible', async () => {
+    expect(await resolveIssueProjectDefault(root, undefined, {
+      ...options, git: async (_cwd, args) => {
+        if (args.includes('--git-common-dir')) return { stdout: `${root}\n`, stderr: '' };
+        if (args.includes('--is-bare-repository')) return { stdout: 'false\n', stderr: '' };
+        if (args.includes('config')) throw { code: 1, stdout: '', stderr: '' };
+        return { stdout: `worktree ${join(root, 'absent')}\0HEAD abc\0\0`, stderr: '' };
+      },
+    })).toEqual({ project: root, kind: 'folder' });
   });
 
   test('honors cancellation before and during a probe', async () => {

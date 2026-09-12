@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir, realpath, symlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { garconIssueResultContent, parseGarconIssueResult, type GarconIssueResult } from '../../../common/garcon-issue-result.js';
 import { parseIssueWriteResult } from '../../../common/issue-records.js';
 import { parseIssueBootstrap, parseIssueCommentsPage, parseIssueDetail, parseIssueHistoryPage,
-  parseIssuePage } from '../../../common/issue-responses.js';
+  parseIssuePage, parseIssueProjectDefault } from '../../../common/issue-responses.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -36,6 +38,38 @@ function mutation(result: GarconIssueResult) {
 }
 
 describe('Garcon issue commands', () => {
+  test('uses the captured chat project when Git metadata is broken, through commands and HTTP defaults', async () => {
+    await withIntegrationFixture('garcon-issues-broken-git', async (fixture) => {
+      const project = await realpath(fixture.dirs.project);
+      await writeFile(join(fixture.dirs.project, '.git'), 'gitdir: synthetic-missing-metadata\n');
+      const resolved = parseIssueProjectDefault(await fixture.client.post('/api/v1/issues/project-default', {
+        directory: fixture.dirs.project,
+      }));
+      expect(resolved).toEqual({ project, kind: 'folder' });
+      const emit = issueCommands(fixture, fixture.newChatId());
+      const created = mutation(await emit('<garcon-issue-create ref="fallback">{"title":"Synthetic fallback issue"}</garcon-issue-create>'));
+      const detail = parseIssueDetail(await fixture.client.get(`/api/v1/issues/detail?issueId=${created.issueId}`));
+      expect(detail.issue.project).toBe(project);
+    });
+  });
+
+  test('rejects defaults whose canonical context would be trimmed to a different path', async () => {
+    await withIntegrationFixture('garcon-issues-lossy-path', async (fixture) => {
+      const sibling = join(fixture.dirs.project, 'context');
+      await mkdir(sibling);
+      for (const [index, suffix] of [' ', '\u00a0'].entries()) {
+        const directory = `${sibling}${suffix}`;
+        const alias = join(fixture.dirs.project, `alias-${index}`);
+        await mkdir(directory);
+        await symlink(directory, alias);
+        for (const path of [directory, alias]) {
+          await expect(fixture.client.post('/api/v1/issues/project-default', { directory: path }))
+            .rejects.toMatchObject({ status: 503, body: { errorCode: 'ISSUE_PROJECT_UNAVAILABLE' } });
+        }
+      }
+    });
+  });
+
   test('shares attributed state with HTTP and preserves exact retries through native reload and restart', async () => {
     await withIntegrationFixture('garcon-issues', async (fixture) => {
       const chatId = fixture.newChatId();
