@@ -722,6 +722,7 @@ export async function startServer(): Promise<void> {
       processing: chatProcessingActivity,
       metadata,
       chatViews: chatViewPages,
+      issueSources: transcriptReader,
       shareSnapshots: transcriptReader,
       agents: agentRegistry,
       telegramNotifier,

@@ -79,8 +79,8 @@ import {
   preparePreambleInput,
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
+import { findIssueOutcomeOrdinal } from './issue-outcome-query.js';
 
-const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
 const logger = createLogger('ledger:store');
@@ -386,6 +386,13 @@ export class TranscriptLedgerStore {
         rows,
         nextBefore: oldest !== null && oldest > 1 ? oldest : null,
       };
+    });
+  }
+
+  issueOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return findIssueOutcomeOrdinal(entry.db, viewId, requestOrdinal);
     });
   }
 

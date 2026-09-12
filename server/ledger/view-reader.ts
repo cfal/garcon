@@ -5,6 +5,8 @@ import type {
 } from '../../common/chat-view.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../../common/chat-view.js';
 import type { ChatMessage } from '../../common/chat-types.js';
+import type { IssueSource } from '../../common/issues.js';
+import type { IssueSourceResolution } from '../../common/issue-source-navigation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { TranscriptAdoptionService } from './adoption.js';
@@ -43,6 +45,20 @@ export class TranscriptViewReader {
       expectedTranscriptViewId,
       signal,
     ));
+  }
+
+  async resolveIssueSource(source: IssueSource, signal?: AbortSignal): Promise<IssueSourceResolution> {
+    return readWithFenceTranslation(async () => {
+      signal?.throwIfAborted();
+      const { chatId, transcriptViewId, ordinal } = source;
+      const current = this.#ledger.existingCurrentView(chatId);
+      if (!current) return { kind: 'outcome-unavailable', chatId };
+      if (current.viewId !== transcriptViewId) return { kind: 'transcript-reloaded', chatId };
+      const outcomeOrdinal = this.#ledger.issueOutcomeOrdinal(chatId, current.viewId, ordinal);
+      return outcomeOrdinal === null
+        ? { kind: 'outcome-unavailable', chatId }
+        : { kind: 'found', target: { chatId, transcriptViewId, ordinal: outcomeOrdinal } };
+    });
   }
 
   async #page(

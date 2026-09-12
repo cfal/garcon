@@ -573,6 +573,10 @@ export class TranscriptLedgerService {
     return this.#store.page(chatId, viewId, limit, before);
   }
 
+  issueOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
+    return this.#store.issueOutcomeOrdinal(chatId, viewId, requestOrdinal);
+  }
+
   rowsAfter(
     chatId: string,
     viewId: TranscriptViewId,
