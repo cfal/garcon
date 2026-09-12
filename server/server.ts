@@ -108,6 +108,7 @@ import {
 } from './snippets/service.js';
 import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
+import { initializeIssues } from './issues/setup.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -399,6 +400,14 @@ export async function startServer(): Promise<void> {
     );
     const preambles = await initializePreambleService(workspaceDir);
     const chatBoardRuntime = await initializeChatBoardRuntime({ workspaceDir, registry: chatRegistry, chatMutationLock, archiveState: settings });
+    const issues = initializeIssues(workspaceDir, {
+      chatExists: (chatId) => chatRegistry.hasChat(chatId),
+      commandsEnabled: () => {
+        const commands = settings.getFeatureSettings().agentCommands;
+        return commands.enabled;
+      },
+      onInvalidated: (revision) => eventWiring?.broadcastIssuesInvalidated(revision),
+    });
     const chatPreambleSelection = initializeChatPreambleSelectionService({
       preambles,
       registry: chatRegistry,
@@ -726,6 +735,7 @@ export async function startServer(): Promise<void> {
       preambles,
       chatPreambleSelection,
       ...chatBoardRuntime,
+      issues,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,
@@ -951,6 +961,7 @@ export async function startServer(): Promise<void> {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
+        issues.close();
         if (runtimeFilePath) {
           try {
             await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);

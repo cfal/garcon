@@ -52,6 +52,7 @@
     "./issue-commands": "./issue-commands.ts",
     "./issue-query": "./issue-query.ts",
     "./issue-records": "./issue-records.ts",
+    "./issue-responses": "./issue-responses.ts",
     "./json": "./json.ts",
     "./model-catalog": "./model-catalog.ts",
     "./model-routing": "./model-routing.ts",
