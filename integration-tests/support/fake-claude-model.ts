@@ -25,6 +25,12 @@ export type ClaudeScriptedFault =
   | { readonly kind: 'stream-error'; readonly message: string }
   | { readonly kind: 'truncated-stream' };
 
+interface QueuedClaudeTurn {
+  readonly kind: 'turn';
+  readonly turn: ClaudeScriptedTurn;
+  readonly inputTokens: number;
+}
+
 export interface HeldClaudeTurn {
   readonly requested: Promise<RecordedClaudeModelRequest>;
   release(): void;
@@ -146,6 +152,7 @@ function blockEvents(block: ClaudeScriptedBlock, index: number): SseEvent[] {
 function turnEvents(
   blocks: ClaudeScriptedBlock[],
   request: RecordedClaudeModelRequest,
+  inputTokens = 42,
 ): SseEvent[] {
   const stopReason = blocks.some((block) => block.kind === 'tool_use') ? 'tool_use' : 'end_turn';
   return [
@@ -162,7 +169,7 @@ function turnEvents(
           stop_reason: null,
           stop_sequence: null,
           usage: {
-            input_tokens: 42,
+            input_tokens: inputTokens,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 0,
             output_tokens: 1,
@@ -212,7 +219,7 @@ function errorEvents(message: string): SseEvent[] {
 
 export class FakeClaudeModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: Array<ClaudeScriptedTurn | ClaudeScriptedFault> = [];
+  readonly #turns: Array<QueuedClaudeTurn | ClaudeScriptedFault> = [];
   readonly #requests: RecordedClaudeModelRequest[] = [];
   readonly #issues: string[] = [];
   readonly #otherRequests: string[] = [];
@@ -222,7 +229,7 @@ export class FakeClaudeModel {
 
   private constructor() {
     this.#server = Bun.serve({
-      hostname: '127.0.0.1',
+      hostname: '0.0.0.0',
       port: 0,
       idleTimeout: 0,
       fetch: (request) => this.#handleRequest(request),
@@ -234,11 +241,11 @@ export class FakeClaudeModel {
   }
 
   get baseUrl(): string {
-    return `http://${this.#server.hostname}:${this.#server.port}`;
+    return `http://127.0.0.1:${this.#server.port}`;
   }
 
-  scriptTurn(turn: ClaudeScriptedTurn): void {
-    this.#turns.push(turn);
+  scriptTurn(turn: ClaudeScriptedTurn, { inputTokens = 42 }: { inputTokens?: number } = {}): void {
+    this.#turns.push({ kind: 'turn', turn, inputTokens });
   }
 
   // Holds the response before its first SSE event. The CLI enforces request timeouts, so
@@ -260,7 +267,7 @@ export class FakeClaudeModel {
       releaseGate();
     };
     this.#pendingReleases.add(release);
-    this.#turns.push(async (request) => {
+    this.scriptTurn(async (request) => {
       resolveRequested(request);
       await gate;
       return typeof turn === 'function' ? turn(request) : turn;
@@ -355,7 +362,7 @@ export class FakeClaudeModel {
       );
       return sseResponse(errorEvents('no scripted turn available'));
     }
-    if (!Array.isArray(turn) && typeof turn !== 'function') {
+    if (turn.kind !== 'turn') {
       if (turn.kind === 'http-error') {
         return Response.json({
           error: { type: 'api_error', message: turn.message },
@@ -366,7 +373,7 @@ export class FakeClaudeModel {
       }
       return sseResponse(turnEvents([], recorded).slice(0, 1));
     }
-    const blocks = typeof turn === 'function' ? await turn(recorded) : turn;
-    return sseResponse(turnEvents(blocks, recorded));
+    const blocks = typeof turn.turn === 'function' ? await turn.turn(recorded) : turn.turn;
+    return sseResponse(turnEvents(blocks, recorded, turn.inputTokens));
   }
 }
