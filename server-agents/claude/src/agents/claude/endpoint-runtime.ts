@@ -1,5 +1,6 @@
 import type { ResolvedAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { ClaudeConfig } from '../../config.js';
+import { resolveClaudeModel } from './model-context.js';
 
 export interface ClaudeEndpointRuntime {
   readonly envOverrides: Record<string, string>;
@@ -15,7 +16,7 @@ export function buildClaudeEndpointRuntime(
       ANTHROPIC_BASE_URL: endpoint.selection.baseUrl,
       ...(endpoint.credential ? { ANTHROPIC_AUTH_TOKEN: endpoint.credential } : {}),
       ANTHROPIC_API_KEY: '',
-      CLAUDE_CODE_SUBAGENT_MODEL: endpoint.selection.model,
+      CLAUDE_CODE_SUBAGENT_MODEL: resolveClaudeModel(endpoint.selection.model).model,
     },
   };
 }

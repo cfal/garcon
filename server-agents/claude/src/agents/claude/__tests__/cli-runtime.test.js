@@ -20,7 +20,7 @@ function createRuntime(logger = createLogger(), overrides = {}) {
     binary: () => 'claude',
     logger,
     versionProbe: {
-      assertCompatible: mock(() => Promise.resolve([2, 1, 220])),
+      assertCompatible: mock(() => Promise.resolve([2, 1, 238])),
     },
     ...overrides,
   });
@@ -2006,7 +2006,123 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('does not spawn a replacement until the previous native-session writer exits', async () => {
+  it.each([
+    ['custom', 'custom[922k]', 'custom[1m]', '922k'],
+    ['custom[922k]', 'custom[850k]', 'custom[1m]', '850k'],
+    ['custom[922k]', 'custom', 'custom', null],
+    ['custom[922k]', 'custom[1m]', 'custom[1m]', null],
+  ])('resumes the same session when its context cap changes: %s -> %s', async (from, to, wireModel, cap) => {
+    const originalSpawn = Bun.spawn;
+    const first = createFakeClaudeProcess();
+    const second = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({
+        model: from,
+        envOverrides: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' },
+      }));
+      await enqueueResult(first);
+      await start;
+      const resumed = runtime.runClaudeTurn(startOptions({ model: to }));
+      await enqueueResult(second);
+      await resumed;
+
+      expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+      const [args, options] = Bun.spawn.mock.calls[1];
+      expect(args).toContain('--resume=expected-session');
+      expect(args[args.indexOf('--model') + 1]).toBe(wireModel);
+      if (cap === null) {
+        expect(args).not.toContain('--autocompact');
+        expect(options.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('700000');
+      } else {
+        expect(args[args.indexOf('--autocompact') + 1]).toBe(cap);
+        expect(options.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+      }
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('uses a normalized set_model for same-cap changes and remembers the annotated selection', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    Bun.spawn = mock(() => fake.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(fake);
+      await start;
+      const switched = runtime.runClaudeTurn(startOptions({ model: 'second[922k]' }));
+      await enqueueResult(fake);
+      await switched;
+      const continued = runtime.runClaudeTurn({
+        agentSessionId: 'expected-session', chatId: 'chat-1', command: 'continue',
+        operation: { runId: 'run-context-continue', publish() {} },
+      });
+      await enqueueResult(fake);
+      await continued;
+      const models = fake.proc.stdin.write.mock.calls
+        .map(([line]) => JSON.parse(line).request)
+        .filter(request => request?.subtype === 'set_model');
+      expect(models).toEqual([{ subtype: 'set_model', model: 'second[1m]' }]);
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it.each(['startClaudeCliSession', 'runClaudeTurn'])('rejects invalid %s models without poisoning subsequent resumes', async (method) => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    const onSessionActivated = mock(() => undefined);
+    Bun.spawn = mock(() => fake.proc);
+    try {
+      await expect(runtime[method](startOptions({ model: 'custom[99k]', onSessionActivated })))
+        .rejects.toThrow('context suffix');
+      expect(onSessionActivated).not.toHaveBeenCalled();
+      expect(Bun.spawn).not.toHaveBeenCalled();
+      const resumed = runtime.runClaudeTurn(startOptions({ model: 'custom[922k]' }));
+      await enqueueResult(fake);
+      await resumed;
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('rejects an invalid cap before changing the healthy process or its saved options', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    Bun.spawn = mock(() => fake.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'custom[922k]' }));
+      await enqueueResult(fake);
+      await start;
+      await expect(runtime.runClaudeTurn(startOptions({ model: 'custom[99k]' })))
+        .rejects.toThrow('context suffix');
+      const continued = runtime.runClaudeTurn({
+        agentSessionId: 'expected-session', chatId: 'chat-1', command: 'continue',
+        operation: { runId: 'run-context-recover', publish() {} },
+      });
+      await enqueueResult(fake);
+      await continued;
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+      expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+      expect(fake.proc.stdin.write.mock.calls.some(([line]) => JSON.parse(line).request?.subtype === 'set_model')).toBe(false);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it.each([{ thinkingMode: 'high' }, { model: 'custom[922k]' }])('waits for the previous native-session writer before restarting for %j', async (change) => {
     const originalSpawn = Bun.spawn;
     const first = createFakeClaudeProcess({ onEnd: () => null });
     const second = createFakeClaudeProcess();
@@ -2023,7 +2139,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       const resumed = runtime.runClaudeTurn(startOptions({
         command: 'restart after config change',
-        thinkingMode: 'high',
+        ...change,
       }));
       for (
         let attempt = 0;

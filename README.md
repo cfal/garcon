@@ -113,6 +113,10 @@ Garcon keeps that development loop coherent:
 
 Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
 
+Claude Code requires version 2.1.238 or newer. A model ending in `[Nk]` sets a per-chat auto-compaction window without a per-model configuration table. For example, `gpt-6-astra[922k]` launches Claude with `--model gpt-6-astra[1m] --autocompact 922k`; Claude strips `[1m]` before calling the provider. `N` must be an integer from 100 through 1000 (thousands of tokens). The suffix should reflect the model's supported **input** limit, not input plus output; Claude reserves additional compaction headroom below it. Garcon retains the annotated model in the chat configuration. Custom endpoints must include that exact annotated ID in their model catalog.
+
+Existing `[1m]` names keep Claude's native compaction policy. An explicit `[Nk]` annotation overrides `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for that child process only; other environment and Claude settings remain in effect. Changing or removing the numeric cap resumes the same native session in a new Claude process between turns, since the model-switch control cannot update the startup compaction flag. See [Claude's context-window documentation](https://code.claude.com/docs/en/model-config#context-window-and-auto-compaction).
+
 ## Automate And Delegate
 
 The CLI drives ordinary visible Garcon chats through an already-running server. It covers live catalog discovery, synchronous or detached starts and resumes, steering, exact-turn waiting, status and fenced permission decisions, chat metadata, transcript search and bounded reads, export, handoff, and stop controls.
