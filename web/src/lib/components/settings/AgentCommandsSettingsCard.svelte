@@ -122,6 +122,18 @@
 					onCheckedChange={(checked) => void setCommandSetting('schedule', checked)}
 				/>
 			</div>
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<label for="issues-enabled" class="text-sm text-foreground">{m.settings_enable_issues()}</label>
+					<p class="text-xs text-muted-foreground">{m.settings_issues_description()}</p>
+				</div>
+				<Switch
+					id="issues-enabled"
+					checked={commands?.issues ?? true}
+					disabled={isSaving}
+					onCheckedChange={(checked) => void setCommandSetting('issues', checked)}
+				/>
+			</div>
 		</div>
 	{/if}
 

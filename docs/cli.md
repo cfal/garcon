@@ -29,6 +29,55 @@ Common options and environment variables:
 
 Run `bun run help` for the complete server option list.
 
+## Issues
+
+Issues belong to the selected Garcon workspace, independently of chats and Git. All commands use the authenticated server API; the CLI never opens the issue database or starts an agent.
+
+```bash
+bun cli/main.ts issue create --title 'Preserve failed-save drafts' --cwd /path/to/worktree
+bun cli/main.ts issue create --title 'Release checklist' --project 'September release' --priority 1
+bun cli/main.ts issue list --ready --json
+bun cli/main.ts issue read ISS-42
+bun cli/main.ts issue update ISS-42 --expected-revision 1 --patch '{"status":"in-review","labels":["ui"]}'
+bun cli/main.ts issue claim ISS-42 --expected-revision 2 --from-chat 1000000000000001
+bun cli/main.ts issue comment ISS-42 --stdin
+bun cli/main.ts issue history ISS-42 --limit 20
+bun cli/main.ts issue close ISS-42 --expected-revision 3 --resolution done --comment 'Verified through the API.'
+```
+
+`project` is an arbitrary, editable string, not a directory capability. New creates resolve an omitted project from `--cwd` or the process directory. Normal Git worktrees share the primary repository path; non-Git contexts use their canonical folder. If Git fails or cannot identify the primary checkout, the default is the canonical `--cwd` or process directory. An explicit `--project` bypasses filesystem lookup. Lists default to all projects and nonclosed issues, not the process directory. Use `--include-closed` or an explicit `--status closed` to include closed work.
+
+Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create accepts repeatable `--label`, `--assignee chat:<id>|user:<username>|unassigned`, and `--parent-id ISS-n`. User assignment is limited to the current authenticated user. Update accepts a JSON patch containing title, description, project, nonclosed status, priority, labels, assignee, or parentId; use JSON null to clear assignee/parent. Only `close` and `reopen` transition into/out of Closed.
+
+Read the current revision before a field or workflow mutation. Comment append does not need an issue revision and does not advance it. Claim atomically assigns the caller (or declared chat) and moves Open to In progress; release removes only that caller's assignment. Neither is an access-control lock. `--from-chat` records declared provenance alongside the actual HTTP principal; it cannot grant permission to edit a chat-authored comment.
+
+Additional mutations:
+
+```bash
+bun cli/main.ts issue release ISS-42 --expected-revision 4
+bun cli/main.ts issue reopen ISS-42 --expected-revision 5
+bun cli/main.ts issue comment-edit ISS-42 --comment-id 33333333-3333-4333-8333-333333333333 --expected-revision 1 --body 'Updated progress.'
+bun cli/main.ts issue comment-delete ISS-42 --comment-id 33333333-3333-4333-8333-333333333333 --expected-revision 2
+bun cli/main.ts issue link ISS-42 --expected-revision 6 --target-id ISS-43 --target-revision 1 --link-kind blocks
+bun cli/main.ts issue unlink ISS-42 --expected-revision 7 --target-id ISS-43 --target-revision 2 --link-kind blocks
+```
+
+`related` is an undirected alternative to `blocks`. Parent grouping does not imply blocking. Canceled blockers remain unresolved until unlinked or later closed as Done. Comment edit/remove is author-only. Removal hides the current comment body but preserves all previous versions in activity history; it is not redaction.
+
+Reads are bounded. Lists accept project, status, priority, one label, assignee, ready, and literal title/description query filters. List/history limits default to 50, maximum 100. Follow returned continuations with the same filters:
+
+```bash
+bun cli/main.ts issue list --before-number 100 --expected-collection-revision 12
+bun cli/main.ts issue read ISS-42 --include-description false --comment-limit 10 --before-comment-sequence 21 --expected-collection-revision 12
+bun cli/main.ts issue history ISS-42 --before-sequence 300 --limit 20
+```
+
+List/comment continuations require the returned collection revision; refresh from the first page if it changed. Immutable activity history needs no revision fence. `--include-description false --comment-limit 0` reads only metadata and links. Responses never silently truncate authored bodies.
+
+Every mutation prints its generated request ID and expected store ID to stderr **before** submission. Creates also print the resolved project. If confirmation is lost, reuse the same arguments/body with the printed `--request-id`, `--expected-store-id`, and explicit create `--project`. The server returns the original committed result, even after later edits or restart. That result confirms the operation; use `read` for current state. A changed payload under the same identity conflicts. A replacement issue database has a different store ID and rejects stale requests. The CLI never automatically resubmits mutations or stores stdin for recovery.
+
+`--stdin` supplies create descriptions, comment bodies, or closing comments as strict UTF-8 up to 48 KiB; it is mutually exclusive with the corresponding inline flag. Encoded requests must fit 64 KiB, so escape-heavy text may require a smaller body. `--json` emits only the typed response on stdout; progress/retry hints stay on stderr. Human output renders terminal control sequences visibly; JSON remains lossless while escaping terminal controls. Exit 0 means confirmed success, 2 means invalid CLI input, and 3 means a domain/transport failure. An interrupted command exits 130 and may already have committed.
+
 ## Start And Resume
 
 Start a visible chat and wait for its accepted turn:

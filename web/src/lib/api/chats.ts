@@ -365,7 +365,10 @@ export async function updateChatProjectPath(
 	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
 }
 
-export async function getChatMessages(params: ChatMessagesRequest): Promise<ChatHistoryResponse> {
+export async function getChatMessages(
+	params: ChatMessagesRequest,
+	options?: ApiFetchOptions,
+): Promise<ChatHistoryResponse> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
 		limit: String(params.limit ?? 50),
@@ -379,7 +382,7 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 	if (params.purpose !== undefined) {
 		query.set('purpose', params.purpose);
 	}
-	const response = await apiGet<unknown>(`/api/v1/chats/messages?${query.toString()}`);
+	const response = await apiGet<unknown>(`/api/v1/chats/messages?${query.toString()}`, options);
 	return parseChatHistoryResponse(params, response);
 }
 

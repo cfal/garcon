@@ -16,6 +16,7 @@ import type { ChatListEntry } from '$shared/chat-list';
 import type { ProjectTarget } from '$shared/project-resolution';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
+import { IssuesInvalidationHub } from '$lib/issues/catalog/issues-invalidation-hub.js';
 import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
 import {
 	MIN_WINDOW_WIDTH_PX,
@@ -113,6 +114,7 @@ function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 		services: createWorkspaceServices({
 			appShell: createAppShellStore(),
 			chatBoardInvalidations: createChatBoardInvalidationHub(),
+			issuesInvalidations: new IssuesInvalidationHub(),
 			chatSessions,
 			ghCapability,
 			localSettings,

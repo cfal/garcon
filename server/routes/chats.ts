@@ -500,7 +500,7 @@ export default function createChatRoutes({
     } satisfies SetLastSelectedChatResponse);
   }
 
-  async function getMessages(_request: Request, url: URL): Promise<Response> {
+  async function getMessages(request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
 
@@ -540,7 +540,7 @@ export default function createChatRoutes({
         limit,
         beforeOrdinal,
         expectedTranscriptViewId || undefined,
-        undefined,
+        request.signal,
         purpose,
       );
       if (
@@ -570,6 +570,7 @@ export default function createChatRoutes({
         limit,
       } satisfies CompleteChatHistoryResponse);
     } catch (error: unknown) {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       // A fenced ledger is permanent for the process, and its cause can carry a database path or
       // chat identity. It reports one fixed line with sanitized identifiers and returns before the
       // generic diagnostic below, which logs the raw message.

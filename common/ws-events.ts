@@ -341,6 +341,11 @@ export class ChatBoardsInvalidatedMessage {
   ) {}
 }
 
+export class IssuesInvalidatedMessage {
+  readonly type = 'issues-invalidated' as const;
+  constructor(public revision: number) {}
+}
+
 export class SettingsChangedMessage {
   readonly type = 'settings-changed' as const;
   constructor(public settings: RemoteSettingsSnapshot) {}
@@ -439,6 +444,7 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | ChatBoardsInvalidatedMessage
+  | IssuesInvalidatedMessage
   | SettingsChangedMessage
   | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
@@ -866,6 +872,11 @@ export function parseServerWsMessage(
       return revision !== null && reason
         ? new ChatBoardsInvalidatedMessage(revision, reason)
         : null;
+    }
+    case 'issues-invalidated': {
+      if (Object.keys(data).length !== 2 || !Object.hasOwn(data, 'revision')) return null;
+      const revision = nonNegativeInt(data.revision);
+      return revision !== null ? new IssuesInvalidatedMessage(revision) : null;
     }
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);

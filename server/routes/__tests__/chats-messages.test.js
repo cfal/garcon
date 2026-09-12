@@ -161,7 +161,8 @@ describe('GET /api/v1/chats/messages', () => {
       + '&beforeOrdinal=10&transcriptViewId=view-1&purpose=activation',
     );
 
-    await expect(routes['/api/v1/chats/messages'].GET(new Request(activeUrl), activeUrl))
+    const activeRequest = new Request(activeUrl);
+    await expect(routes['/api/v1/chats/messages'].GET(activeRequest, activeUrl))
       .resolves.toMatchObject({ status: 200 });
     expect(chatViews.page).toHaveBeenNthCalledWith(
       1,
@@ -169,11 +170,12 @@ describe('GET /api/v1/chats/messages', () => {
       20,
       undefined,
       undefined,
-      undefined,
+      activeRequest.signal,
       'activation',
     );
 
-    await expect(routes['/api/v1/chats/messages'].GET(new Request(backgroundUrl), backgroundUrl))
+    const backgroundRequest = new Request(backgroundUrl);
+    await expect(routes['/api/v1/chats/messages'].GET(backgroundRequest, backgroundUrl))
       .resolves.toMatchObject({ status: 200 });
     expect(chatViews.page).toHaveBeenNthCalledWith(
       2,
@@ -181,7 +183,7 @@ describe('GET /api/v1/chats/messages', () => {
       20,
       undefined,
       undefined,
-      undefined,
+      backgroundRequest.signal,
       undefined,
     );
 
@@ -201,7 +203,8 @@ describe('GET /api/v1/chats/messages', () => {
       + '&limit=999999&beforeOrdinal=10&transcriptViewId=view-1',
     );
 
-    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const request = new Request(url);
+    const response = await routes['/api/v1/chats/messages'].GET(request, url);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -221,10 +224,25 @@ describe('GET /api/v1/chats/messages', () => {
       200,
       10,
       'view-1',
-      undefined,
+      request.signal,
       undefined,
     );
     expect(agents.resendCandidates).toHaveBeenCalledWith(CHAT_ID);
+  });
+
+  it('propagates request cancellation without reporting a server failure', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const abort = new AbortController();
+    const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+    const request = new Request(url, { signal: abort.signal });
+    chatViews.page.mockImplementation(async (_chat, _limit, _before, _view, signal) => {
+      expect(signal).toBe(request.signal);
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      signal.throwIfAborted();
+    });
+    const response = routes['/api/v1/chats/messages'].GET(request, url);
+    abort.abort();
+    expect((await response).status).toBe(499);
   });
 
   it('requires a transcript view for every earlier-page cursor', async () => {

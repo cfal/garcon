@@ -49,21 +49,15 @@ import {
   type ChatIdRequestSink,
   type AgentStartRequestSink,
   type AgentScheduleRequestSink,
+  type IssueCommandRequestSink,
   type AgentResumeRequestSink,
   type AgentStopRequestSink,
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
-import { PermissionNotActionableError } from './errors.js';
+import { PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { TranscriptLedgerStore } from './store.js';
-
-export class TranscriptSinkClosedError extends Error {
-  constructor() {
-    super('Transcript producer sink is closed');
-    this.name = 'TranscriptSinkClosedError';
-  }
-}
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
@@ -119,6 +113,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly agentResumes?: AgentResumeRequestSink;
   readonly agentStops?: AgentStopRequestSink;
   readonly agentSchedules?: AgentScheduleRequestSink;
+  readonly issueCommands?: IssueCommandRequestSink;
 }
 
 export interface PermissionResolutionClaim {
@@ -162,6 +157,7 @@ export class TranscriptLedgerService {
   readonly #agentResumes: AgentResumeRequestSink;
   readonly #agentStops: AgentStopRequestSink;
   readonly #agentSchedules: AgentScheduleRequestSink;
+  readonly #issueCommands: IssueCommandRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -182,6 +178,7 @@ export class TranscriptLedgerService {
     this.#agentResumes = options.agentResumes ?? { request: () => undefined };
     this.#agentStops = options.agentStops ?? { request: () => undefined };
     this.#agentSchedules = options.agentSchedules ?? { request: () => undefined };
+    this.#issueCommands = options.issueCommands ?? { request: () => undefined };
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -576,6 +573,10 @@ export class TranscriptLedgerService {
     return this.#store.page(chatId, viewId, limit, before);
   }
 
+  issueOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
+    return this.#store.issueOutcomeOrdinal(chatId, viewId, requestOrdinal);
+  }
+
   rowsAfter(
     chatId: string,
     viewId: TranscriptViewId,
@@ -741,6 +742,7 @@ export class TranscriptLedgerService {
           agentResumes: this.#agentResumes,
           agentStops: this.#agentStops,
           agentSchedules: this.#agentSchedules,
+          issueCommands: this.#issueCommands,
           committedRows: committed,
         });
         if (committed.length > 0) {

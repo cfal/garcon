@@ -3,6 +3,7 @@
 
 import { createContext } from 'svelte';
 import type { AuthStore } from '$lib/stores/auth.svelte';
+import type { IssueSourceNavigationController } from '$lib/issues/navigation/issue-source-navigation-controller.js';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { NavigationStore } from '$lib/stores/navigation.svelte';
@@ -54,6 +55,8 @@ export interface ThemeRuntime {
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
+export const [getIssueSourceNavigation, setIssueSourceNavigation] =
+	createContext<IssueSourceNavigationController>();
 export const [getNavigation, setNavigation] = createContext<NavigationStore>();
 export const [getChatSessions, setChatSessions] = createContext<ChatSessionsStore>();
 export const [getAppShell, setAppShell] = createContext<AppShellStore>();

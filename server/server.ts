@@ -108,6 +108,7 @@ import {
 } from './snippets/service.js';
 import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
+import { initializeIssues } from './issues/setup.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -128,7 +129,7 @@ import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-leas
 import {
   advertisedServerUrl,
   createServerRuntimeState,
-  listeningServerUrl,
+  logServerReady,
   publishServerRuntime,
   removeServerRuntime,
 } from './lib/server-runtime.js';
@@ -308,6 +309,7 @@ export async function startServer(): Promise<void> {
       agentResumes: agentCommands.agentResumes,
       agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
+      issueCommands: agentCommands.issueCommands,
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
@@ -399,6 +401,14 @@ export async function startServer(): Promise<void> {
     );
     const preambles = await initializePreambleService(workspaceDir);
     const chatBoardRuntime = await initializeChatBoardRuntime({ workspaceDir, registry: chatRegistry, chatMutationLock, archiveState: settings });
+    const issues = initializeIssues(workspaceDir, {
+      chatExists: (chatId) => chatRegistry.hasChat(chatId),
+      commandsEnabled: () => {
+        const commands = settings.getFeatureSettings().agentCommands;
+        return commands.enabled && commands.issues;
+      },
+      onInvalidated: (revision) => eventWiring?.broadcastIssuesInvalidated(revision),
+    });
     const chatPreambleSelection = initializeChatPreambleSelectionService({
       preambles,
       registry: chatRegistry,
@@ -643,6 +653,7 @@ export async function startServer(): Promise<void> {
       turns: commandLedger,
       chatIds,
       scheduler: scheduledPrompts,
+      issues,
     });
 
     const snippetStore = new SnippetStore(workspaceDir);
@@ -711,6 +722,7 @@ export async function startServer(): Promise<void> {
       processing: chatProcessingActivity,
       metadata,
       chatViews: chatViewPages,
+      issueSources: transcriptReader,
       shareSnapshots: transcriptReader,
       agents: agentRegistry,
       telegramNotifier,
@@ -726,6 +738,7 @@ export async function startServer(): Promise<void> {
       preambles,
       chatPreambleSelection,
       ...chatBoardRuntime,
+      issues,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,
@@ -951,6 +964,7 @@ export async function startServer(): Promise<void> {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
+        issues.close();
         if (runtimeFilePath) {
           try {
             await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);
@@ -972,19 +986,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    logger.info(
-      `Started at ${listeningServerUrl(bindAddress, actualPort)}`,
-    );
-    logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
-    if (
-      authDisabled &&
-      bindAddress !== '127.0.0.1' &&
-      bindAddress !== 'localhost'
-    ) {
-      logger.warn(
-        'WARNING: authentication is disabled while bound to a non-localhost address.',
-      );
-    }
+    logServerReady(logger, { bindAddress, port: actualPort, authDisabled });
   } catch (error) {
     await workspaceLease?.release().catch((releaseError) => {
       logger.warn('Failed to release workspace lease:', errorMessage(releaseError));

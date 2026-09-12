@@ -10,6 +10,13 @@ import {
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from '../generation-prompts.js';
 
 describe('generation settings contracts', () => {
+  it('normalizes the independent issue command gate', () => {
+    for (const issues of [true, false, 'false', null, 0]) {
+      const commands = normalizeRemoteFeatureSettings({ agentCommands: { issues, schedule: false } }).agentCommands;
+      expect(commands.issues).toBe(typeof issues === 'boolean' ? issues : true);
+      expect(commands.schedule).toBe(false);
+    }
+  });
   it('normalizes the independent resume gate without changing start or send authority', () => {
     for (const resumeAgent of [false, true, null, 'false', 0]) {
       const commands = normalizeRemoteFeatureSettings({ agentCommands: { resumeAgent, startAgent: false, sendMessage: false } }).agentCommands;
@@ -28,6 +35,7 @@ describe('generation settings contracts', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
+        issues: true,
       },
     });
     expect(normalizeRemoteFeatureSettings({
@@ -39,6 +47,7 @@ describe('generation settings contracts', () => {
       startAgent: true,
       resumeAgent: true,
       schedule: true,
+      issues: true,
     });
   });
 
@@ -52,6 +61,7 @@ describe('generation settings contracts', () => {
       startAgent: true,
       resumeAgent: true,
       schedule: true,
+      issues: true,
     });
     expect(normalizeRemoteFeatureSettings({
       agentCommands: { enabled: true },

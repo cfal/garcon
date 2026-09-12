@@ -10,6 +10,9 @@ import { HOVER_CAPABLE_MEDIA_QUERY } from '$lib/layout/desktop-layout.js';
 import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
+import { page } from '$lib/mocks/app/state';
+import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
+import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -36,6 +39,7 @@ vi.mock('$lib/context', () => ({
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getSingletonSurfaces: () => testContext.current?.singletons,
 	getTransientLayers: () => testContext.current?.transientLayers,
 	getWs: () => testContext.current?.ws,
 	setChatDrafts: chatDraftContext.set,
@@ -237,6 +241,7 @@ describe('AppShell responsive workspace binding', () => {
 
 	afterEach(() => {
 		cleanup();
+		page.url = new URL('http://localhost');
 		document.querySelector('[data-mobile-sidebar-focus-trigger]')?.remove();
 		testContext.current = null;
 		vi.unstubAllGlobals();
@@ -244,6 +249,29 @@ describe('AppShell responsive workspace binding', () => {
 		chatNavigation.gotoChat.mockReset();
 		chatNavigation.gotoChat.mockResolvedValue(undefined);
 		chatDraftContext.set.mockReset();
+	});
+
+	it('opens an issue deep link after surface admission without selecting a chat', async () => {
+		const workspace = installContext();
+		const opened = deferred<void>();
+		const openSingletonAsTab = vi.fn<WorkspaceCoordinator['openSingletonAsTab']>(
+			() => opened.promise,
+		);
+		Object.assign(workspace, { openSingletonAsTab });
+		const issues = { select: vi.fn<IssuesController['select']>() } satisfies Pick<
+			IssuesController,
+			'select'
+		>;
+		testContext.current!.singletons = { issues: () => issues };
+		page.url = new URL('http://localhost/?issue=ISS-42');
+		render(AppShell);
+		await waitFor(() =>
+			expect(openSingletonAsTab).toHaveBeenCalledWith('issues', workspace.currentWindowId),
+		);
+		expect(issues.select).not.toHaveBeenCalled();
+		opened.resolve(undefined);
+		await waitFor(() => expect(issues.select).toHaveBeenCalledWith('ISS-42'));
+		expect(chatNavigation.gotoChat).not.toHaveBeenCalled();
 	});
 
 	it('provides one shared draft store for the shell lifetime', () => {

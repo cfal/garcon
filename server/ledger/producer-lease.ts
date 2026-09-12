@@ -1,5 +1,5 @@
 import type { AgentProducerEvent, AgentProducerSink } from '@garcon/server-agent-interface';
-import { TranscriptSinkClosedError } from './service.js';
+import { TranscriptSinkClosedError } from './errors.js';
 import type { TranscriptProducerLease } from './service.js';
 
 export class ProducerLease implements TranscriptProducerLease {

@@ -5,6 +5,7 @@ import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js
 import type { GarconResumeAgentCommand } from '../../common/garcon-resume-agent.js';
 import type { GarconStopAgentCommand } from '../../common/garcon-stop-agent.js';
 import type { GarconScheduleCommand } from '../../common/garcon-schedule.js';
+import type { GarconIssueCommand } from '../../common/garcon-issue-command.js';
 
 export const CHAT_ID_REQUEST_NOTICE_TYPE = 'chat-id-request';
 export const INTER_AGENT_SEND_REQUEST_NOTICE_TYPE = 'inter-agent-send-request';
@@ -12,6 +13,15 @@ export const AGENT_START_REQUEST_NOTICE_TYPE = 'agent-start-request';
 export const AGENT_RESUME_REQUEST_NOTICE_TYPE = 'agent-resume-request';
 export const AGENT_STOP_REQUEST_NOTICE_TYPE = 'agent-stop-request';
 export const AGENT_SCHEDULE_REQUEST_NOTICE_TYPE = 'agent-schedule-request';
+export const ISSUE_COMMAND_REQUEST_NOTICE_TYPE = 'issue-command-request';
+
+export function issueCommandRequestNoticeDraft(at: string, command: GarconIssueCommand): LedgerRowDraft {
+  return {
+    kind: 'notice', at, message: 'Agent requested issue management',
+    detail: { type: ISSUE_COMMAND_REQUEST_NOTICE_TYPE, command: JSON.parse(JSON.stringify(command)) as JsonObject },
+    providerMeta: null,
+  };
+}
 
 type AgentActionCommand = GarconStartAgentCommand | GarconResumeAgentCommand | GarconStopAgentCommand | GarconScheduleCommand;
 
@@ -74,5 +84,6 @@ export function isLedgerPrivateGarconCommandRow(row: LedgerRow): boolean {
       || row.detail.type === AGENT_RESUME_REQUEST_NOTICE_TYPE
       || row.detail.type === AGENT_STOP_REQUEST_NOTICE_TYPE
       || row.detail.type === AGENT_SCHEDULE_REQUEST_NOTICE_TYPE
+      || row.detail.type === ISSUE_COMMAND_REQUEST_NOTICE_TYPE
     );
 }

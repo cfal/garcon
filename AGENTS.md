@@ -246,6 +246,7 @@ Rules:
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
 - `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.
 - `web/src/lib/chat-canvas/` owns canvas documents, layout/membership rules, undo history, save coordination, and draft recovery. `server/chat-canvas/` persists provider-neutral canvas documents independently of chats and transcript ledgers; renderers and graph-engine adapters live in `components/chat-canvas`.
+- `web/src/lib/issues/` owns the global issue catalog, detail projections, mutation drafts, and tab-scoped recovery. `server/issues/` is the synchronous SQLite authority for workspace issues, comments, relationships, attributed history, and durable operation results. Operation results support explicit retries only; they are never an execution queue or replayed at startup. Issue renderers and DOM interaction state live in `components/issues`; HTTP and WebSocket adaptation stay in the integration layer.
 - Their Svelte renderers remain in the corresponding `components` directories.
 
 ### Utilities Layer

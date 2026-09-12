@@ -32,6 +32,10 @@ import type {
 	ChatSurfaceTransferPort,
 } from '$lib/workspace/chat-surface-transfer.js';
 import type { WorkspacePublication } from '$lib/workspace/workspace-commit.js';
+import type {
+	TranscriptRowNavigationResult,
+	TranscriptRowTarget,
+} from '$lib/chat/transcript/transcript-row-navigation.js';
 
 export type ConversationPanelSnapshotAdmission = 'deferred' | 'admitted';
 
@@ -66,6 +70,11 @@ export interface ConversationPanelRegistration {
 	attachPresentation(port: ConversationPanelPresentationPort): () => void;
 	captureRestoreTarget(): ConversationPanelRestoreTarget;
 	resumePendingRestore(): void;
+	navigateToTranscriptRow(
+		target: TranscriptRowTarget,
+		signal: AbortSignal,
+		isCurrent: () => boolean,
+	): Promise<TranscriptRowNavigationResult>;
 	prepareForInteractionLoss(): void;
 	prepareForHide(): ConversationPanelRestoreTarget;
 	restore(target: ConversationPanelRestoreTarget | null): Promise<void>;
@@ -112,6 +121,8 @@ class PanelRegistration implements ConversationPanelRegistration {
 	#restoreResumeRequested = false;
 	#destroyed = false;
 	#snapshotAdmission: ConversationPanelSnapshotAdmission;
+	#rowNavigation: AbortController | null = null;
+	#presentationReady: (() => void) | null = null;
 
 	readonly transcript: ActiveTranscriptState;
 	readonly lifecycle: ConversationLifecycleState;
@@ -125,6 +136,10 @@ class PanelRegistration implements ConversationPanelRegistration {
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
 		overlays: ConversationTranscriptOverlayStore,
 		onSnapshotResendCandidates: (chatId: string, candidates: readonly ResendCandidate[]) => void,
+		private readonly snapshots: {
+			load(options: ChatLoadMessagesOptions): Promise<boolean>;
+			wait(signal: AbortSignal): Promise<void>;
+		},
 	) {
 		this.#snapshotAdmission = snapshotAdmission;
 		this.transcript = new ActiveTranscriptState(cache, overlays.forChat(chatId), {
@@ -156,9 +171,11 @@ class PanelRegistration implements ConversationPanelRegistration {
 		if (this.#destroyed) return () => {};
 		this.#presentation = port;
 		this.scroll.setViewportVisible(true);
+		if (port.getViewport()) this.#presentationReady?.();
 		this.resumePendingRestore();
 		return () => {
 			if (this.#presentation !== port) return;
+			this.#rowNavigation?.abort();
 			this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
 			port.closeTransients();
 			this.#presentation = null;
@@ -166,6 +183,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	resumePendingRestore(): void {
+		if (this.#presentation?.getViewport()) this.#presentationReady?.();
 		if (this.#applyingRestoreEpoch !== null) {
 			this.#restoreResumeRequested = true;
 			return;
@@ -174,6 +192,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	prepareForInteractionLoss(): void {
+		this.#rowNavigation?.abort();
 		this.#presentation?.closeTransients();
 	}
 
@@ -185,6 +204,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	prepareForHide(): ConversationPanelRestoreTarget {
+		this.#rowNavigation?.abort();
 		const target = this.captureRestoreTarget();
 		this.#presentation?.closeTransients();
 		this.scroll.setViewportVisible(false);
@@ -194,23 +214,77 @@ class PanelRegistration implements ConversationPanelRegistration {
 		return target;
 	}
 
-	async restore(
-		target: ConversationPanelRestoreTarget | null,
-		loadSnapshot?: (options: ChatLoadMessagesOptions) => Promise<boolean>,
-	): Promise<void> {
+	async restore(target: ConversationPanelRestoreTarget | null): Promise<void> {
 		if (this.#destroyed) return;
+		this.#rowNavigation?.abort();
 		const restoreEpoch = ++this.#restoreEpoch;
 		this.#readyRestoreEpoch = null;
 		this.#lastTarget = target ?? { kind: 'end' };
 		const restored = this.transcript.activateChat(this.chatId);
 		if (!restored || restored.stale) {
 			const loadOptions = { minimumLimit: restored?.count ?? 0 };
-			if (loadSnapshot) await loadSnapshot(loadOptions);
-			else await this.transcript.loadMessages(this.chatId, loadOptions);
+			await this.snapshots.load(loadOptions);
 		}
 		if (this.#destroyed || restoreEpoch !== this.#restoreEpoch) return;
 		this.#readyRestoreEpoch = restoreEpoch;
 		await this.#applyPendingRestore();
+	}
+
+	async navigateToTranscriptRow(
+		target: TranscriptRowTarget,
+		signal: AbortSignal,
+		ownsNavigation: () => boolean,
+	): Promise<TranscriptRowNavigationResult> {
+		this.#rowNavigation?.abort();
+		const operation = new AbortController();
+		this.#rowNavigation = operation;
+		const combined = AbortSignal.any([signal, operation.signal]);
+		const current = () => !this.#destroyed && this.#rowNavigation === operation && ownsNavigation();
+		++this.#restoreEpoch;
+		this.#readyRestoreEpoch = null;
+		try {
+			const result = await this.scroll.navigateToTranscriptRow(
+				target,
+				combined,
+				async (isCurrent) => {
+					await this.#waitForPresentation(combined);
+					if (!isCurrent()) return 'cancelled';
+					await this.snapshots.wait(combined);
+					if (!isCurrent()) return 'cancelled';
+					return this.transcript.navigateToRow(target, combined, isCurrent);
+				},
+				current,
+			);
+			if (combined.aborted || !current()) return 'cancelled';
+			await this.snapshots.wait(combined);
+			if (combined.aborted || !current()) return 'cancelled';
+			if (
+				this.transcript.transcriptViewId &&
+				this.transcript.transcriptViewId !== target.transcriptViewId
+			)
+				return 'view-changed';
+			return result;
+		} catch (error) {
+			if (combined.aborted || !current()) return 'cancelled';
+			throw error;
+		} finally {
+			if (this.#rowNavigation === operation) this.#rowNavigation = null;
+		}
+	}
+
+	#waitForPresentation(signal: AbortSignal): Promise<void> {
+		signal.throwIfAborted();
+		if (this.#presentation?.getViewport()) return Promise.resolve();
+		return new Promise((resolve, reject) => {
+			const finish = () => {
+				if (this.#presentationReady === finish) this.#presentationReady = null;
+				signal.removeEventListener('abort', finish);
+				if (signal.aborted) reject(signal.reason);
+				else resolve();
+			};
+			this.#presentationReady = finish;
+			signal.addEventListener('abort', finish, { once: true });
+		});
 	}
 
 	async #applyPendingRestore(): Promise<void> {
@@ -271,6 +345,27 @@ class PanelRegistration implements ConversationPanelRegistration {
 		this.#presentation = null;
 		this.transcript.clearMessages();
 	}
+}
+
+function waitForSnapshot(snapshot: Promise<unknown>, signal: AbortSignal): Promise<void> {
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise((resolve, reject) => {
+		const abort = () => {
+			signal.removeEventListener('abort', abort);
+			reject(signal.reason);
+		};
+		signal.addEventListener('abort', abort, { once: true });
+		void snapshot.then(
+			() => {
+				signal.removeEventListener('abort', abort);
+				resolve();
+			},
+			(error: unknown) => {
+				signal.removeEventListener('abort', abort);
+				reject(error);
+			},
+		);
+	});
 }
 
 export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
@@ -383,6 +478,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				(snapshotChatId, candidates) => {
 					this.replaceResendCandidates(snapshotChatId, candidates);
 				},
+				{
+					load: (options) => this.loadChatSnapshot(item.chatId, options),
+					wait: (signal) => this.#waitForChatSnapshot(item.chatId, signal),
+				},
 			);
 			this.#panels.set(item.surfaceId, panel);
 			const stored = this.#restoreTargets.get(item.surfaceId);
@@ -395,11 +494,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 			this.#pendingSurfaceTransfers.delete(item.surfaceId);
 			this.#restoreTargets.delete(item.surfaceId);
-			void panel
-				.restore(target, (options) => this.loadChatSnapshot(item.chatId, options))
-				.catch(() => {
-					this.options.cache.markStale(item.chatId);
-				});
+			void panel.restore(target).catch(() => {
+				this.options.cache.markStale(item.chatId);
+			});
 		}
 		this.#visible = [...visible];
 		for (const chatId of admittedChatIds) {
@@ -461,6 +558,16 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		};
 		this.#snapshotLoads.set(chatId, operation);
 		return operation.promise;
+	}
+
+	async #waitForChatSnapshot(chatId: string, signal: AbortSignal): Promise<void> {
+		signal.throwIfAborted();
+		let pending = this.#snapshotLoads.get(chatId);
+		while (pending) {
+			await waitForSnapshot(pending.promise, signal);
+			signal.throwIfAborted();
+			pending = this.#snapshotLoads.get(chatId);
+		}
 	}
 
 	async #performChatSnapshotLoad(

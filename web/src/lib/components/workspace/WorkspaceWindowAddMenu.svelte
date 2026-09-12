@@ -93,6 +93,7 @@
 		'chat-map': m.workspace_surface_chat_map,
 		'chat-canvas': m.workspace_surface_chat_canvas,
 		'chat-board': m.workspace_surface_chat_board,
+		issues: m.issues_title,
 	};
 	const chatViewActions = $derived(
 		availableSingletonKinds.filter((kind) => CHAT_VIEW_KINDS.includes(kind)).map(singletonAction),

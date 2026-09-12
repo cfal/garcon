@@ -32,6 +32,11 @@ import {
 } from './transcript-page-progress.js';
 import { TranscriptPageLoader } from './transcript-page-loader.js';
 import {
+	loadTranscriptRowPage,
+	type TranscriptRowTarget,
+	type TranscriptRowWindowResult,
+} from './transcript-row-navigation.js';
+import {
 	collapseBackwardTranscriptDemand,
 	loadTranscriptPageDemand,
 } from './transcript-page-demand.js';
@@ -821,26 +826,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 					: 'invalidated';
 			}
 
-			this.expandedVisibleStartOrdinal = null;
-			this.windowRevision += 1;
-			const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
-				page.messages,
-				'earlier',
-				page.nextBeforeOrdinal,
-			);
-			this.entries = retainedMessages;
-			this.lastOrdinal = page.lastOrdinal;
-			this.nextBeforeOrdinal = nextBeforeOrdinal;
-			this.loadedThroughOrdinal = page.pageNewestOrdinal;
-			this.hasEarlierMessages = nextBeforeOrdinal !== null;
-			this.hasLaterMessages = page.pageNewestOrdinal < page.lastOrdinal;
-			this.visibleMessageCount = retainedMessages.length;
-			if (this.hasLaterMessages) {
-				this.isUserScrolledUp = true;
-			}
-			this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
-			this.loadError = null;
-			this.feedMutations.record('replacement');
+			this.#replaceWindowPage(page);
 			return 'loaded';
 		} catch (error) {
 			if (
@@ -854,6 +840,58 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			console.error(`Error loading ${target} messages:`, error);
 			return 'failed';
 		}
+	}
+
+	async navigateToRow(
+		target: TranscriptRowTarget,
+		signal: AbortSignal,
+		ownsNavigation: () => boolean,
+	): Promise<TranscriptRowWindowResult> {
+		if (signal.aborted || !ownsNavigation() || this.activeChatId !== target.chatId)
+			return 'cancelled';
+		if (!this.transcriptViewId) throw new Error('Transcript has not loaded');
+		if (this.transcriptViewId !== target.transcriptViewId) return 'view-changed';
+		if (this.#snapshotBuffer) return 'unavailable';
+		const windowEpoch = ++this.#windowNavigationEpoch;
+		const loadEpoch = this.#beginLoadEpoch();
+		this.#invalidatePageLoad();
+		const ownsWindow = () =>
+			!signal.aborted &&
+			ownsNavigation() &&
+			this.activeChatId === target.chatId &&
+			windowEpoch === this.#windowNavigationEpoch;
+		const result = await loadTranscriptRowPage(target, signal);
+		if (!ownsWindow()) return 'cancelled';
+		if (loadEpoch !== this.#loadEpoch) return 'unavailable';
+		if (this.transcriptViewId !== target.transcriptViewId || result.kind === 'view-changed')
+			return 'view-changed';
+		if (result.kind !== 'loaded') return result.kind;
+		this.#replaceWindowPage({
+			...result.page,
+			lastOrdinal: Math.max(this.lastOrdinal, result.page.lastOrdinal),
+		});
+		return 'loaded';
+	}
+
+	#replaceWindowPage(page: TranscriptPage): void {
+		this.expandedVisibleStartOrdinal = null;
+		this.windowRevision += 1;
+		const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
+			page.messages,
+			'earlier',
+			page.nextBeforeOrdinal,
+		);
+		this.entries = retainedMessages;
+		this.lastOrdinal = page.lastOrdinal;
+		this.nextBeforeOrdinal = nextBeforeOrdinal;
+		this.loadedThroughOrdinal = page.pageNewestOrdinal;
+		this.hasEarlierMessages = nextBeforeOrdinal !== null;
+		this.hasLaterMessages = page.pageNewestOrdinal < page.lastOrdinal;
+		this.visibleMessageCount = retainedMessages.length;
+		if (this.hasLaterMessages) this.isUserScrolledUp = true;
+		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
+		this.loadError = null;
+		this.feedMutations.record('replacement');
 	}
 
 	#beginLoadEpoch(): number {

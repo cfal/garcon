@@ -72,4 +72,11 @@
 	<button type="button" data-detach-feed onclick={() => onPresentationPortChange?.(null)}>
 		Detach feed
 	</button>
+	<button
+		type="button"
+		data-replace-viewport
+		onclick={() => onViewportPortChange?.({ ...viewport })}
+	>
+		Replace viewport
+	</button>
 </div>

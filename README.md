@@ -54,6 +54,7 @@ Garcon keeps that development loop coherent:
 - **Orchestrate visually.** Tile up to four resizable windows, move local tabs between them, organize live chats on durable canvases, track work on tag-driven boards, and inspect fork, handoff, and delegation lineage in Chat Map.
 - **Stay in control of every turn.** Queue and reorder instructions, steer active work, approve tools, answer agent questions, pause the queue, interrupt, or stop without losing the transcript.
 - **Coordinate agents visibly.** Exchange provenance-labeled messages between chats, launch delegated children, receive their final results, and keep parentage auditable instead of hiding it in a side channel.
+- **Track durable work.** Create workspace issues in a list or status board, assign and claim work, discuss progress, and retain attributed change history across chat deletion and server restarts.
 - **Review the real change.** Browse and edit files, run terminals, inspect reasoning and tool calls, review diffs, then stage individual lines, hunks, files, or folders before committing and pushing.
 - **Find and reuse context.** Search chat metadata and indexed transcripts, save filters, tag, pin, archive, export Markdown or XML, build bounded handoffs, share snapshots, and schedule prompts.
 - **Work from any screen.** Use the responsive workspace on desktop or phone and choose Classic, Phosphor, or colorblind-aware themes in light or dark mode.
@@ -152,6 +153,18 @@ cd garcon-skills
 ```
 
 The installer links the skills for Claude, Codex, Pi, and other compatible agents. Messages, delegated work, results, and lineage remain visible in Garcon.
+
+## Issues
+
+Open **Issues** from a workspace window's add menu. Create work without starting a chat, switch between list and board, and filter by project, status, priority, label, assignee, or readiness. The detail pane shares properties, comments, relationships, and activity across both layouts. On narrow screens, Back returns to the collection. Status menus provide a keyboard equivalent to board dragging; closing asks for Done or Canceled. Moving a card changes only its status, not its assignee.
+
+Project is an editable grouping string, not a directory permission. Enter any name, use an exact project filter, or accept the default from the selected chat's repository/folder. If Git fails or cannot identify the primary checkout, the default is the chat's project path. Issues are also available through the [CLI](docs/cli.md#issues) and the `garcon-issue-*` agent commands. Agent command settings do not disable human issue management.
+
+Drafts stay in the current browser tab's recovery storage when available. Save and comment shortcuts use Cmd/Ctrl+Enter; Enter in a multiline field inserts a newline. After an uncertain save, **Retry same request** confirms the original operation and refreshes current server values. Conflicts preserve local text for review. Recovery is not a backup: copy text before closing if storage reports a warning. Different accounts and replacement issue databases never inherit a draft's write authority.
+
+Comment removal retains previous text in activity history; it is not redaction. Issues live in the workspace's `issues.sqlite`, independently of chats and transcripts. Back up a live store through SQLite's backup API or `VACUUM INTO`, not by copying only the main file while WAL writes are active. A damaged or unknown-schema store is left unavailable for explicit recovery, never rebuilt from transcripts.
+
+Activity's **Open source** opens the originating chat at the visible issue-command result, including older rows outside the loaded transcript. If the transcript was reloaded or the exact result is missing, it opens the chat with a notification instead. Deleted chats cannot be opened. Source addresses remain immutable; navigation never substitutes a row from a replacement transcript.
 
 ## Trusted Local Use
 

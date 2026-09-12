@@ -1,0 +1,571 @@
+import { describe, expect, test } from "bun:test";
+import {
+  parseIssueBootstrap,
+  parseIssueDetail,
+} from "../../../common/issue-responses.js";
+import { parseIssueWriteResult } from "../../../common/issue-records.js";
+import type { IssueMutationPayload } from "../../../common/issue-commands.js";
+import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import {
+  clickWorkspaceWindowAddAction,
+  collapseCanonicalFilesWindow,
+} from "../../support/chromium-workspace.js";
+
+describe("Chromium Issues interaction", () => {
+  test("keeps newer editor focus while a status completion waits for authoritative counts", async () => {
+    await withChromiumFixture("issues-status-focus-owner", async (fixture) => {
+      const { page, integration } = fixture;
+      const bootstrap = parseIssueBootstrap(
+        await integration.client.get("/api/v1/issues/bootstrap"),
+      );
+      for (let number = 1; number <= 2; number++) {
+        await integration.client.post("/api/v1/issues/mutate", {
+          requestId: crypto.randomUUID(),
+          expectedStoreId: bootstrap.storeId,
+          payload: {
+            action: "create",
+            input: { title: `Synthetic issue ${number}`, project: "Release" },
+          },
+        });
+      }
+      await page.goto(integration.garcon.baseUrl, {
+        waitUntil: "domcontentloaded",
+      });
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Issues");
+      await page.getByRole("button", { name: "Board", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Open ISS-2", exact: true })
+        .click();
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      const title = page.getByLabel("Title", { exact: true });
+      await title.fill("Newer unsaved title");
+      const status = page.getByRole("button", {
+        name: "Change status of ISS-1",
+      });
+      await status.focus();
+      await status.click();
+      await page
+        .getByRole("menuitem", { name: "Close issue", exact: true })
+        .click();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started!: () => void;
+      const captured = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      await page.route("**/api/v1/issues/counts?*", async (route) => {
+        started();
+        await held;
+        await route.continue();
+      });
+      try {
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "Close issue", exact: true })
+          .click();
+        await captured;
+        await page.getByRole("dialog").waitFor({ state: "hidden" });
+        await title.focus();
+        await title.evaluate((element: HTMLInputElement) =>
+          element.setSelectionRange(2, 8, "backward"),
+        );
+        release();
+        await page
+          .locator('[data-issue-id="ISS-1"]')
+          .waitFor({ state: "hidden" });
+        await page
+          .getByText("This issue is outside the current filters.", {
+            exact: true,
+          })
+          .waitFor();
+        expect(
+          await title.evaluate((element: HTMLInputElement) => ({
+            focused: document.activeElement === element,
+            value: element.value,
+            start: element.selectionStart,
+            end: element.selectionEnd,
+            direction: element.selectionDirection,
+          })),
+        ).toEqual({
+          focused: true,
+          value: "Newer unsaved title",
+          start: 2,
+          end: 8,
+          direction: "backward",
+        });
+        fixture.assertNoBrowserErrors();
+      } finally {
+        release();
+        await page.unroute("**/api/v1/issues/counts?*");
+      }
+    });
+  });
+
+  test("preserves the visible collection anchor and focused row across a remote insert", async () => {
+    await withChromiumFixture(
+      "issues-collection-anchor",
+      async ({ page, integration, assertNoBrowserErrors }) => {
+        const bootstrap = parseIssueBootstrap(
+          await integration.client.get("/api/v1/issues/bootstrap"),
+        );
+        const create = (title: string) =>
+          integration.client.post("/api/v1/issues/mutate", {
+            requestId: crypto.randomUUID(),
+            expectedStoreId: bootstrap.storeId,
+            payload: {
+              action: "create",
+              input: { title, project: "Synthetic scroll project" },
+            },
+          });
+        for (let index = 1; index <= 60; index++)
+          await create(`Synthetic issue ${index}`);
+        await page.goto(integration.garcon.baseUrl, {
+          waitUntil: "domcontentloaded",
+        });
+        await collapseCanonicalFilesWindow(page);
+        await clickWorkspaceWindowAddAction(page, "Open Issues");
+        const row = page.locator('[data-issue-id="ISS-35"]');
+        await row.waitFor();
+        await row.scrollIntoViewIfNeeded();
+        await row.locator("button").first().focus();
+        const snapshot = () =>
+          page.locator('[data-issue-scroll="list"]').evaluate((element) => {
+            const top = element.getBoundingClientRect().top;
+            const anchor = [
+              ...element.querySelectorAll<HTMLElement>("[data-issue-id]"),
+            ].find((node) => node.getBoundingClientRect().bottom > top);
+            return {
+              id: anchor?.dataset.issueId,
+              offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
+              focus:
+                document.activeElement?.closest<HTMLElement>("[data-issue-id]")
+                  ?.dataset.issueId,
+            };
+          });
+        const before = await snapshot();
+        await create("Synthetic newly inserted issue");
+        await page.waitForFunction(() =>
+          document
+            .querySelector(".issue-list .issue-counts")
+            ?.textContent?.includes("61"),
+        );
+        const after = await snapshot();
+        expect(after.id).toBe(before.id);
+        expect(after.focus).toBe("ISS-35");
+        expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(1);
+        assertNoBrowserErrors();
+      },
+    );
+  });
+
+  test("retains a dirty editor through window transfer and rapid chat switching with incoming updates", async () => {
+    await withChromiumFixture(
+      "issues-window-transfer",
+      async (fixture, markPhase) => {
+        const { page, integration } = fixture;
+        const bootstrap = parseIssueBootstrap(
+          await integration.client.get("/api/v1/issues/bootstrap"),
+        );
+        const create = (title: string) =>
+          integration.client.post("/api/v1/issues/mutate", {
+            requestId: crypto.randomUUID(),
+            expectedStoreId: bootstrap.storeId,
+            payload: {
+              action: "create",
+              input: { title, project: "Synthetic host project" },
+            },
+          });
+        await create("Synthetic retained issue");
+        const chats: string[] = [];
+        for (const content of [
+          "Synthetic first chat",
+          "Synthetic second chat",
+        ]) {
+          const chatId = integration.newChatId();
+          const started = await integration.client.startDirectChat({
+            chatId,
+            content,
+            projectPath: integration.dirs.project,
+            agent: integration.directAgents.openAi,
+          });
+          await integration.client.waitForTurnTerminal(chatId, started.turnId);
+          chats.push(chatId);
+        }
+        await page.goto(
+          `${integration.garcon.baseUrl}/chat/${chats[0]}?issue=ISS-1`,
+          { waitUntil: "domcontentloaded" },
+        );
+        await collapseCanonicalFilesWindow(page);
+        await page.locator(".issue-detail-title").waitFor();
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        const title = page.locator(".issue-detail .issue-title-input");
+        await title.fill("Synthetic retained editor");
+        await title.evaluate((element) => {
+          if (!(element instanceof HTMLInputElement))
+            throw new Error("Expected editor");
+          element.focus();
+          element.setSelectionRange(2, 9, "backward");
+        });
+        const owner = await page
+          .locator('[data-workspace-window-active-surface="singleton:issues"]')
+          .getAttribute("data-workspace-window-id");
+        markPhase("moving the editor into a different window");
+        await page
+          .locator(`[id="${owner}-tab-singleton:issues"]`)
+          .click({ button: "right" });
+        await page
+          .getByRole("menuitem", {
+            name: "Move to new window right",
+            exact: true,
+          })
+          .click();
+        await page.waitForFunction(
+          (previous) =>
+            document
+              .querySelector(
+                '[data-workspace-window-active-surface="singleton:issues"]',
+              )
+              ?.getAttribute("data-workspace-window-id") !== previous,
+          owner,
+        );
+        await title.waitFor();
+        expect(
+          await title.evaluate((element) => {
+            if (!(element instanceof HTMLInputElement))
+              throw new Error("Expected editor");
+            return {
+              value: element.value,
+              focused: element === document.activeElement,
+              start: element.selectionStart,
+              end: element.selectionEnd,
+            };
+          }),
+        ).toEqual({
+          value: "Synthetic retained editor",
+          focused: true,
+          start: 2,
+          end: 9,
+        });
+        markPhase("switching chats while issue updates arrive");
+        for (let index = 0; index < 6; index++) {
+          await page
+            .locator(`[data-sidebar-virtual-row="${chats[index % 2]}"]`)
+            .click();
+          await create(`Synthetic background update ${index}`);
+        }
+        await page.locator('[role="tab"][id$="-tab-singleton:issues"]').click();
+        await title.waitFor({ state: "visible" });
+        expect(await title.inputValue()).toBe("Synthetic retained editor");
+        fixture.assertNoBrowserErrors();
+      },
+    );
+  });
+
+  test("renders a persisted single-status lane at 390px", async () => {
+    await withChromiumFixture(
+      "issues-narrow-restored-lane",
+      async ({ page, context, integration, assertNoBrowserErrors }) => {
+        const bootstrap = parseIssueBootstrap(
+          await integration.client.get("/api/v1/issues/bootstrap"),
+        );
+        const mutate = (payload: IssueMutationPayload) =>
+          integration.client.post("/api/v1/issues/mutate", {
+            requestId: crypto.randomUUID(),
+            expectedStoreId: bootstrap.storeId,
+            payload,
+          });
+        await mutate({
+          action: "create",
+          input: { title: "Synthetic review issue", project: "Release" },
+        });
+        await mutate({
+          action: "update",
+          issueId: "ISS-1",
+          expectedRevision: 1,
+          patch: { status: "in-review" },
+        });
+        await context.addInitScript(() =>
+          localStorage.setItem(
+            "garcon-issues-preferences-v1",
+            JSON.stringify({
+              version: 1,
+              layout: "board",
+              query: { status: "in-review" },
+            }),
+          ),
+        );
+        await page.setViewportSize({ width: 390, height: 900 });
+        await page.goto(`${integration.garcon.baseUrl}/?issue=ISS-1`, {
+          waitUntil: "domcontentloaded",
+        });
+        await page.locator(".issue-detail-title").waitFor();
+        await page
+          .locator(".issues-surface")
+          .getByRole("button", { name: "Back to issues", exact: true })
+          .click();
+        const lane = page.locator('.issue-lane[data-status="in-review"]');
+        await lane.waitFor({ state: "visible" });
+        expect(await lane.getAttribute("data-active")).toBe("true");
+        expect(await lane.locator('[data-issue-id="ISS-1"]').isVisible()).toBe(
+          true,
+        );
+        assertNoBrowserErrors();
+      },
+    );
+  });
+
+  test("preserves dirty text, focus and selection across responsive hosts and remote updates", async () => {
+    await withChromiumFixture(
+      "issues-responsive-focus",
+      async (fixture, markPhase) => {
+        const { page, integration } = fixture;
+        const bootstrap = parseIssueBootstrap(
+          await integration.client.get("/api/v1/issues/bootstrap"),
+        );
+        const mutate = async (payload: IssueMutationPayload) =>
+          parseIssueWriteResult(
+            await integration.client.post("/api/v1/issues/mutate", {
+              requestId: crypto.randomUUID(),
+              expectedStoreId: bootstrap.storeId,
+              payload,
+            }),
+          );
+        await mutate({
+          action: "create",
+          input: {
+            title: "Synthetic focused issue",
+            project: "Synthetic release",
+          },
+        });
+        markPhase("opening a deep-linked issue without a chat");
+        await page.goto(`${integration.garcon.baseUrl}/?issue=ISS-1`, {
+          waitUntil: "domcontentloaded",
+        });
+        await page.locator(".issue-detail-title").waitFor();
+        await collapseCanonicalFilesWindow(page);
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        const title = page.locator(".issue-detail .issue-title-input");
+        await title.fill("Unsaved synthetic title");
+        await title.evaluate((element) => {
+          if (!(element instanceof HTMLInputElement))
+            throw new Error("Expected title input");
+          element.focus();
+          element.setSelectionRange(2, 10, "backward");
+        });
+        markPhase("refreshing without replacing the editor");
+        await mutate({
+          action: "update",
+          issueId: "ISS-1",
+          expectedRevision: 1,
+          patch: { title: "Remote synthetic title" },
+        });
+        await page.waitForFunction(
+          () =>
+            document.querySelector(".issue-row-title")?.textContent ===
+            "Remote synthetic title",
+        );
+        expect(await title.inputValue()).toBe("Unsaved synthetic title");
+        expect(
+          await title.evaluate((element) => {
+            if (!(element instanceof HTMLInputElement))
+              throw new Error("Expected title input");
+            return {
+              focused: element === document.activeElement,
+              start: element.selectionStart,
+              end: element.selectionEnd,
+            };
+          }),
+        ).toEqual({ focused: true, start: 2, end: 10 });
+        for (const width of [768, 390, 1440]) {
+          markPhase(`restoring the editor at ${width}px`);
+          await page.setViewportSize({ width, height: 900 });
+          await title.waitFor({ state: "visible" });
+          await page.waitForFunction(() => {
+            const input = document.querySelector<HTMLInputElement>(
+              ".issue-detail .issue-title-input",
+            );
+            return (
+              input === document.activeElement &&
+              input?.selectionStart === 2 &&
+              input.selectionEnd === 10
+            );
+          });
+          expect(await title.inputValue()).toBe("Unsaved synthetic title");
+          expect(
+            await page
+              .locator("[data-issues-panel]")
+              .evaluate(
+                (element) => element.scrollWidth <= element.clientWidth + 1,
+              ),
+          ).toBe(true);
+        }
+        markPhase("honoring explicit focus outside the surface during refresh");
+        const outside = page
+          .locator("[data-workspace-window-fullscreen]")
+          .first();
+        await outside.focus();
+        await mutate({
+          action: "comment",
+          issueId: "ISS-1",
+          body: "Synthetic remote comment",
+        });
+        await page.locator("[data-comment-id]").waitFor();
+        expect(
+          await outside.evaluate(
+            (element) => element === document.activeElement,
+          ),
+        ).toBe(true);
+        for (const dark of [true, false]) {
+          await page.evaluate(
+            (enabled) =>
+              document.documentElement.classList.toggle("dark", enabled),
+            dark,
+          );
+          expect(
+            await title.evaluate((element) => getComputedStyle(element).color),
+          ).not.toBe("rgba(0, 0, 0, 0)");
+        }
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        expect(await title.inputValue()).toBe("Unsaved synthetic title");
+        fixture.assertNoBrowserErrors();
+      },
+    );
+  });
+
+  test("moves status with the pointer and keeps a keyboard-accessible equivalent", async () => {
+    await withChromiumFixture("issues-status-drag", async (fixture) => {
+      const { page, integration } = fixture;
+      const bootstrap = parseIssueBootstrap(
+        await integration.client.get("/api/v1/issues/bootstrap"),
+      );
+      await integration.client.post("/api/v1/issues/mutate", {
+        requestId: crypto.randomUUID(),
+        expectedStoreId: bootstrap.storeId,
+        payload: {
+          action: "create",
+          input: {
+            title: "Synthetic draggable issue",
+            project: "Synthetic release",
+          },
+        },
+      });
+      await page.goto(integration.garcon.baseUrl, {
+        waitUntil: "domcontentloaded",
+      });
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Issues");
+      await page.getByRole("button", { name: "Board", exact: true }).click();
+      const handle = page.locator('[data-issue-id="ISS-1"] [data-issue-drag]');
+      await handle.waitFor();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-issue-id="ISS-1"]')
+            ?.getAttribute("draggable") === "true",
+      );
+      await handle.dragTo(
+        page.locator('.issue-lane[data-status="in-review"] h3'),
+      );
+      await page
+        .locator('.issue-lane[data-status="in-review"] [data-issue-id="ISS-1"]')
+        .waitFor();
+      const current = parseIssueDetail(
+        await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
+      );
+      expect(current.issue.status).toBe("in-review");
+      expect(current.issue.assignee).toBeNull();
+      const status = page.getByRole("button", {
+        name: "Change status of ISS-1",
+      });
+      await status.focus();
+      await page.keyboard.press("Enter");
+      await page
+        .getByRole("menuitem", { name: "Close issue", exact: true })
+        .click();
+      await page.getByRole("dialog").waitFor();
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(
+        parseIssueDetail(
+          await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
+        ).issue.status,
+      ).toBe("in-review");
+      await status.focus();
+      await page.keyboard.press("Enter");
+      await page
+        .getByRole("menuitem", { name: "Close issue", exact: true })
+        .click();
+      await page
+        .getByRole("dialog")
+        .getByRole("textbox")
+        .fill("Synthetic closing comment");
+      let injectedReadFailures = 0;
+      await page.route("**/api/v1/issues/counts?*", (route) => {
+        injectedReadFailures++;
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            error: "Synthetic authoritative refresh unavailable",
+            errorCode: "ISSUE_STORAGE_UNAVAILABLE",
+            retryable: false,
+          }),
+        });
+      });
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Close issue", exact: true })
+        .click();
+      await page.getByRole("dialog").waitFor({ state: "hidden" });
+      const refreshError = page
+        .locator(".issues-surface > .issue-notice")
+        .filter({
+          hasText: "Synthetic authoritative refresh unavailable",
+        });
+      await refreshError.waitFor();
+      expect(await page.locator('[data-issue-id="ISS-1"]').count()).toBe(1);
+      expect(
+        await page
+          .locator('.issues-surface > .sr-only[role="status"]')
+          .textContent(),
+      ).toBe("ISS-1 moved to In review.");
+      await page.unroute("**/api/v1/issues/counts?*");
+      await refreshError
+        .getByRole("button", { name: "Refresh", exact: true })
+        .click();
+      await page
+        .getByText("This issue is outside the current filters.", {
+          exact: true,
+        })
+        .waitFor();
+      await page.waitForFunction(
+        () =>
+          document.activeElement ===
+          document.querySelector('.issue-lane[data-status="open"] h3'),
+      );
+      expect(await page.locator('[data-issue-id="ISS-1"]').count()).toBe(0);
+      expect(
+        parseIssueDetail(
+          await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
+        ).issue.status,
+      ).toBe("closed");
+      const expectedFailure =
+        "console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)";
+      expect(injectedReadFailures).toBeGreaterThan(0);
+      const reportedFailures = fixture.browserErrors.filter(
+        (error) => error === expectedFailure,
+      );
+      // Superseded reads can abort before Chromium emits a resource diagnostic.
+      expect(reportedFailures.length).toBeGreaterThan(0);
+      expect(reportedFailures.length).toBeLessThanOrEqual(injectedReadFailures);
+      for (let index = fixture.browserErrors.length - 1; index >= 0; index--) {
+        if (fixture.browserErrors[index] === expectedFailure)
+          fixture.browserErrors.splice(index, 1);
+      }
+      fixture.assertNoBrowserErrors();
+    });
+  });
+});

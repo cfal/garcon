@@ -11,7 +11,8 @@ import {
 } from '../../../common/chat-types.ts';
 import { transcriptViewId } from '../contracts.ts';
 import { LedgerFencedError, PermissionNotActionableError } from '../errors.ts';
-import { TranscriptLedgerService, TranscriptSinkClosedError } from '../service.ts';
+import { TranscriptLedgerService } from '../service.ts';
+import { TranscriptSinkClosedError } from '../errors.js';
 import { TranscriptLedgerStore } from '../store.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';

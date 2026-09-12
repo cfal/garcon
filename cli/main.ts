@@ -25,6 +25,9 @@ import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
+import { applyIssueStdin, runIssueCommand } from './issue-commands.js';
+import { issueLineOutput } from './issue-output.js';
+import { readIssueStdin } from './issue-stdin.js';
 
 export interface MainOptions {
   signal?: AbortSignal;
@@ -184,6 +187,7 @@ export async function main(
 ): Promise<number> {
   const output = options.output ?? createCliOutput();
   let command: ParsedCliCommand | undefined;
+  let issueSubmissionStarted = false;
   try {
     command = parseCliArgs(argv);
     if (command.kind === 'help') {
@@ -192,6 +196,14 @@ export async function main(
     }
     if (command.kind === 'version') {
       process.stdout.write(`${packageJson.version}\n`);
+      return 0;
+    }
+    if (command.kind === 'issue') {
+      const issueCommand = command.readsBodyFromStdin
+        ? applyIssueStdin(command, await readConfiguredStdin(options,
+          (signal) => readIssueStdin(Bun.stdin.stream(), signal))) : command;
+      const client = await connectedClient(issueCommand, options);
+      await runIssueCommand(issueCommand, client, output, options.signal, () => { issueSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'list') {
@@ -354,13 +366,18 @@ export async function main(
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {
-      output.diagnostic(interruptDiagnostic(command));
+      output.diagnostic(command?.kind === 'issue'
+        ? issueSubmissionStarted
+          ? 'terminal interrupted; the issue save is not confirmed. Retry with the printed identity and identical body.'
+          : 'terminal interrupted; no issue mutation was submitted'
+        : interruptDiagnostic(command));
       return 130;
     }
     const cliError = error instanceof CliError
       ? error
       : new CliError('submission', error instanceof Error ? error.message : String(error), 3);
-    output.diagnostic(`${cliError.phase}: ${cliError.message}`);
+    const diagnostic = `${cliError.phase}: ${cliError.message}`;
+    output.diagnostic(command?.kind === 'issue' || argv.includes('issue') ? issueLineOutput(diagnostic) : diagnostic);
     return cliError.exitCode;
   }
 }

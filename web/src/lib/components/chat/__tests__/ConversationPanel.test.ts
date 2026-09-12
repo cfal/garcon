@@ -159,6 +159,7 @@ function makePanel() {
 			return lastRestoreTarget;
 		},
 		resumePendingRestore: () => {},
+		navigateToTranscriptRow: async () => 'cancelled',
 		prepareForInteractionLoss,
 		prepareForHide: () => {
 			lastRestoreTarget = presentation?.captureRestoreTarget() ?? lastRestoreTarget;
@@ -207,6 +208,29 @@ describe('ConversationPanel', () => {
 		runtime.queue = null;
 		runtime.summary = null;
 		vi.clearAllMocks();
+	});
+
+	it('keeps the presentation attached when its viewport becomes available', async () => {
+		const { panel } = makePanel();
+		const detach = vi.fn();
+		const attach = vi.spyOn(panel, 'attachPresentation').mockImplementation((port) => {
+			port.getViewport();
+			return detach;
+		});
+		const rendered = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+		await waitFor(() => expect(attach.mock.calls[0]?.[0].getViewport()).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: 'Replace viewport' }));
+		expect(attach).toHaveBeenCalledOnce();
+		expect(detach).not.toHaveBeenCalled();
+		rendered.unmount();
+		expect(detach).toHaveBeenCalledOnce();
 	});
 
 	it('leaves remount scroll restoration to the panel registry', async () => {
