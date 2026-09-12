@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { NodeProviderCapacity } from '../../../server/execution-node/provider-capacity.js';
+import { NODE_WIRE_VERSION } from '../../../server-agents/interface/src/index.js';
+import { NodeProviderCatalogHost } from '../../../server/execution-node/provider-catalog-host.js';
+import { parseNodeWorkerServiceText, serializeNodeWorkerService } from '../../../server/execution-node/worker/service-protocol.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
@@ -33,6 +37,26 @@ describeOnLinux('scripted OpenCode thinking effort', () => {
     environment?.dispose();
     environment = undefined;
   });
+
+  test('projects real reasoning-model discovery through the private catalog wire contract', async () => {
+    const provider = requireEnvironment();
+    await withIntegrationFixture('opencode-catalog-wire', async (fixture) => {
+      const catalog = (await fixture.client.listAgentCatalog()).agents.find(({ id }) => id === 'opencode');
+      if (!catalog) throw new Error('OpenCode catalog was not discovered.');
+      const reasoning = catalog.models.find(({ value }) => value === OPENCODE_TEST_REASONING_MODEL);
+      expect(reasoning).toHaveProperty('thinkingModes', ['low', 'medium', 'high']);
+      const host = new NodeProviderCatalogHost(new NodeProviderCapacity(), 'synthetic-instance', { snapshot: async () => ({ models: catalog.models,
+        defaultModel: catalog.defaultModel, requiresStrictModelDiscovery: catalog.requiresStrictModelDiscovery, generation: catalog.generation }) });
+      const result = await host.snapshot({ strict: true }, new AbortController().signal);
+      if (result.kind !== 'provider-catalog') throw new Error(`Catalog wire capture failed: ${result.kind}`);
+      expect(result.snapshot.models.find(({ value }) => value === OPENCODE_TEST_REASONING_MODEL))
+        .toEqual({ value: OPENCODE_TEST_REASONING_MODEL, label: reasoning!.label, supportsImages: false });
+      const frame = { type: 'node-worker-service-result', version: NODE_WIRE_VERSION, connectionId: 1, requestId: 1,
+        session: { controllerBootId: 'controller-boot', nodeBootId: 'node-boot', logicalSessionId: 'synthetic-session' }, result } as const;
+      expect(parseNodeWorkerServiceText(serializeNodeWorkerService(frame))).toEqual(frame);
+      expect(provider.model.requests()).toEqual([]);
+    }, { ...withScriptedOpenCode(), bindAddress: '0.0.0.0', authentication: 'account' });
+  }, 120_000);
 
   test('carries a declared effort mode onto the provider request', async () => {
     const testEnvironment = requireEnvironment();
