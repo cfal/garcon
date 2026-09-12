@@ -9,9 +9,7 @@ import {
   type CodexOperation,
 } from './operation-routes.js';
 import {
-  AgentIntegrationError,
   type AgentFinalResponse,
-  type AgentSessionConfiguration,
   type AgentGoalControlHandoff,
   type AgentLogger,
   type AgentSteerRequest,
@@ -47,9 +45,10 @@ import {
 import { convertCodexRawCodeModeItem } from './converter.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter } from './native-path-discovery-refresh.js';
+import { CodexSessionConfigurationController } from './runtime-configuration.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import { isRuntimeAbortTarget, type AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
-import { codexAbortOperation } from './runtime-session-state.js';
+import { AgentRuntimeAdmissionRejectedError, isRuntimeAbortTarget, type AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
+import { clearActiveTurn, codexAbortOperation, codexTurnLifecycleOperation } from './runtime-session-state.js';
 import type {
   ErrorNotification,
   ItemCompletedNotification,
@@ -71,7 +70,6 @@ import {
   buildInjectedContextItems,
   buildThreadForkParams,
   buildThreadResumeParams,
-  buildThreadSettingsUpdateParams,
   buildThreadStartParams,
   buildTurnStartParams,
   parseLeadingSlashCommand,
@@ -80,7 +78,6 @@ import {
   threadSettingsMatch,
   threadSettingsTargetFromSnapshot,
   type CodexConfirmedThreadSettings,
-  type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
 import { RuntimeGoalCoordinator } from './runtime-goal.js';
@@ -322,7 +319,10 @@ export class CodexAppServerRuntime {
       const session = this.#activateSession({
         chatId: request.chatId,
         threadId,
+        projectPath: request.projectPath,
         nativePath: started.thread.path,
+        publishedNativePath: started.thread.path,
+        nativeModelEndpointId: request.nativeModelEndpointId ?? null,
         codexHome: initialized.codexHome || null,
         client,
         runtimeIdentity: codexSourceRuntimeIdentity(request),
@@ -422,6 +422,7 @@ export class CodexAppServerRuntime {
     } catch (error) {
       const activationFailure = error instanceof CodexSessionActivationFailure ? error : null;
       const originalError = activationFailure?.originalError ?? error;
+      if (!activeSession && originalError instanceof AgentRuntimeAdmissionRejectedError) throw originalError;
       const message = humanizeCodexAppServerError(originalError);
       const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
@@ -470,6 +471,7 @@ export class CodexAppServerRuntime {
     } catch (error) {
       const activationFailure = error instanceof CodexSessionActivationFailure ? error : null;
       const originalError = activationFailure?.originalError ?? error;
+      if (!activeSession && originalError instanceof AgentRuntimeAdmissionRejectedError) throw originalError;
       const message = humanizeCodexAppServerError(originalError);
       const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
@@ -525,9 +527,7 @@ export class CodexAppServerRuntime {
     return status !== undefined && isActiveSessionStatus(status);
   }
 
-  hasSource(agentSessionId: string): boolean {
-    return this.#sourceForThread(agentSessionId) !== null;
-  }
+
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
     return Array.from(this.#sessions.values())
@@ -586,75 +586,13 @@ export class CodexAppServerRuntime {
     takePendingApproval(this.#pendingApprovals, pending.client, pending.requestId, pending);
   }
 
-  updateSessionSettings(
-    agentSessionId: string,
-    configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>,
-  ): Promise<void> {
-    const session = this.#sourceForThread(agentSessionId);
-    if (!session) return Promise.resolve();
-    const target = codexThreadSettingsTarget(configuration);
-    // Records explicit intent before the RPC because its confirmation may precede its response.
-    if (target.effort !== null) session.providerOwnsReasoningEffort = false;
-    const update = session.threadSettingsUpdateChain.then(() => (
-      this.#applyThreadSettings(session, target)
-    ));
-    session.threadSettingsUpdateChain = update.catch(() => undefined);
-    return update;
-  }
-
-  async #applyThreadSettings(
-    session: RunningCodexSession,
-    target: CodexThreadSettingsTarget,
-  ): Promise<void> {
-    if (this.#sources.get(session.client) !== session) return;
-    if (session.configurationFenced) {
-      throw new AgentIntegrationError(
-        'INVALID_SETTINGS',
-        'Codex settings are fenced after an ambiguous update',
-        false,
-      );
-    }
-    if (threadSettingsMatch(session.confirmedThreadSettings, target)) {
-      session.permissionMode = target.permissionMode;
-      return;
-    }
-
-    let resolveConfirmation!: () => void;
-    let rejectConfirmation!: (error: Error) => void;
-    const confirmation = new Promise<void>((resolve, reject) => {
-      resolveConfirmation = resolve;
-      rejectConfirmation = reject;
-    });
-    const waiter = {
-      target,
-      timeout: setTimeout(() => {
-        if (session.pendingThreadSettings !== waiter) return;
-        session.pendingThreadSettings = null;
-        session.configurationFenced = true;
-        rejectConfirmation(new AgentIntegrationError(
-          'TIMEOUT',
-          'Codex thread settings confirmation timed out; automatic turns are fenced',
-          false,
-        ));
-      }, this.#settingsUpdateTimeoutMs),
-      resolve: resolveConfirmation,
-      reject: rejectConfirmation,
-    };
-    session.pendingThreadSettings = waiter;
-    try {
-      await Promise.all([
-        session.client.updateThreadSettings(
-          buildThreadSettingsUpdateParams(session.threadId, target),
-        ),
-        confirmation,
-      ]);
-    } finally {
-      if (session.pendingThreadSettings === waiter) {
-        clearTimeout(waiter.timeout);
-        session.pendingThreadSettings = null;
-      }
-    }
-  }
+  readonly #configuration = new CodexSessionConfigurationController({
+    sourceForChat: (id) => this.#latestSourceByChat.get(id),
+    sourceForClient: (client) => this.#sources.get(client),
+    sourceForThread: (id) => this.#sourceForThread(id),
+    timeoutMs: () => this.#settingsUpdateTimeoutMs,
+  });
+  readonly sessionConfiguration = this.#configuration.updates;
 
   async #ensureGoalEffort(
     session: RunningCodexSession,
@@ -663,7 +601,7 @@ export class CodexAppServerRuntime {
     if (!request.codexGoalCommand) return;
     const requested = codexThreadSettingsTarget(request);
     if (!requested.effort || session.confirmedThreadSettings.effort === requested.effort) return;
-    await this.#applyThreadSettings(session, requested);
+    await this.#configuration.applyThreadSettings(session, requested);
   }
 
   #sourceForThread(threadId: string): RunningCodexSession | null {
@@ -826,7 +764,10 @@ export class CodexAppServerRuntime {
   #activateSession(args: {
     chatId: string;
     threadId: string;
+    projectPath: string;
     nativePath: string | null;
+    publishedNativePath: string | null;
+    nativeModelEndpointId: string | null;
     codexHome: string | null;
     client: CodexAppServerClient;
     runtimeIdentity: string;
@@ -840,11 +781,17 @@ export class CodexAppServerRuntime {
     const session: RunningCodexSession = {
       chatId: args.chatId,
       threadId: args.threadId,
+      projectPath: args.projectPath,
       nativePath: args.nativePath,
+      publishedNativePath: args.publishedNativePath,
+      nativeModelEndpointId: args.nativeModelEndpointId,
+      configurationEpoch: 0,
+      configurationPreparing: null,
       codexHome: args.codexHome,
       client: args.client,
       runtimeIdentity: args.runtimeIdentity,
       activeTurnId: null,
+      activeTurnPermissionMode: null,
       status: 'running',
       permissionMode: args.confirmedThreadSettings.permissionMode,
       startedAt: new Date().toISOString(),
@@ -879,6 +826,7 @@ export class CodexAppServerRuntime {
       sourceOperation: args.operation,
       nextTurnOperation: args.operation,
       goalOperation: null,
+      activeTurnOperation: null,
       lastTurnOperation: null,
       terminalTurnIds: new Set(),
       superseded: false,
@@ -907,6 +855,18 @@ export class CodexAppServerRuntime {
   ): Promise<{ session: RunningCodexSession; buffered: boolean }> {
     const runtimeIdentity = codexSourceRuntimeIdentity(request);
     const retained = this.#latestSourceByChat.get(request.chatId);
+    if (retained?.configurationPreparing) throw new AgentRuntimeAdmissionRejectedError('Codex session is already preparing a turn');
+    const activeRetained = retained && retained.threadId === request.agentSessionId
+      && !retained.superseded && isActiveSessionStatus(retained.status);
+    if (activeRetained && retained.status !== 'interrupting' && retained.status !== 'completing') {
+      throw new AgentRuntimeAdmissionRejectedError('Codex thread already has an active turn');
+    }
+    const preparation = Object.freeze({});
+    if (retained) {
+      retained.configurationEpoch += 1;
+      retained.configurationPreparing = preparation;
+    }
+    try {
     // Omitted effort is reusable only when no prior turn, settings update, or goal delivery took ownership.
     const reasoningEffortIsReusable = () => !providerOwnsReasoningEffort(request)
       || retained?.providerOwnsReasoningEffort === true;
@@ -918,41 +878,27 @@ export class CodexAppServerRuntime {
       && !retained.configurationFenced
       && !retained.pendingThreadSettings
       && retained.runtimeIdentity === runtimeIdentity
+      && retained.projectPath === request.projectPath
       && matchingPath
       && reasoningEffortIsReusable(),
     );
     let interruptedWriterReady = false;
-    if (
-      retained
-      && retained.threadId === request.agentSessionId
-      && !retained.superseded
-      && isActiveSessionStatus(retained.status)
-    ) {
+    if (activeRetained) {
       if (retained.status === 'interrupting' && reusableRuntime) {
         const acknowledgement = retained.interruptAcknowledgement;
         if (!acknowledgement) {
-          throw new AgentIntegrationError(
-            'SESSION_BUSY',
+          throw new AgentRuntimeAdmissionRejectedError(
             'Codex thread interruption has not established a replacement-turn barrier',
-            true,
           );
         }
         interruptedWriterReady = await this.#waitForInterruptAcknowledgement(acknowledgement, request);
         if (!interruptedWriterReady) {
-          throw new AgentIntegrationError(
-            'SESSION_BUSY',
+          throw new AgentRuntimeAdmissionRejectedError(
             'Codex turn interruption failed before the next turn could start',
-            true,
           );
         }
-      } else if (retained.status === 'interrupting' || retained.status === 'completing') {
-        await this.#waitForSourceTerminal(retained, request);
       } else {
-        throw new AgentIntegrationError(
-          'SESSION_BUSY',
-          'Codex thread already has an active turn',
-          true,
-        );
+        await this.#waitForSourceTerminal(retained, request);
       }
       assertCodexExecutionOpen(request);
     }
@@ -980,6 +926,7 @@ export class CodexAppServerRuntime {
         retained.status === 'interrupting' && interruptedWriterReady
       ))
       && retained.runtimeIdentity === runtimeIdentity
+      && retained.projectPath === request.projectPath
       && matchingPath
       && reasoningEffortIsReusable()
     ) {
@@ -1006,7 +953,10 @@ export class CodexAppServerRuntime {
         session: this.#activateSession({
           chatId: request.chatId,
           threadId: resumed.thread.id,
+          projectPath: request.projectPath,
           nativePath: resumed.thread.path ?? request.nativePath ?? null,
+          publishedNativePath: request.nativePath ?? null,
+          nativeModelEndpointId: request.nativeModelEndpointId ?? null,
           codexHome: initialized.codexHome || null,
           client,
           runtimeIdentity,
@@ -1020,6 +970,9 @@ export class CodexAppServerRuntime {
       this.#discardBufferedClientEvents(client);
       throw new CodexSessionActivationFailure(error, this.#shutdownClient(client));
     }
+    } finally {
+      if (retained?.configurationPreparing === preparation) retained.configurationPreparing = null;
+    }
   }
 
   #reactivateSession(
@@ -1029,7 +982,9 @@ export class CodexAppServerRuntime {
   ): RunningCodexSession {
     const previousAttachmentCleanup = session.cleanupAttachments;
     session.nativePath = request.nativePath ?? session.nativePath;
-    session.activeTurnId = null;
+    session.publishedNativePath = request.nativePath ?? session.publishedNativePath;
+    session.nativeModelEndpointId = request.nativeModelEndpointId ?? null;
+    clearActiveTurn(session);
     session.status = 'running';
     session.startedAt = new Date().toISOString();
     session.idleSince = null;
@@ -1316,7 +1271,7 @@ export class CodexAppServerRuntime {
     }
     const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turn.id);
     if (!session) return;
-    const operation = session.turnRoutes.get(params.turn.id);
+    const operation = codexTurnLifecycleOperation(session, params.turn.id);
     if (!operation) return;
     if (session.terminalTurnIds.has(params.turn.id)) {
       for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
@@ -1374,7 +1329,7 @@ export class CodexAppServerRuntime {
         return;
       }
       if (session.managesGoalLifecycle && session.goal && session.goal.status !== 'active') {
-        session.activeTurnId = null;
+        clearActiveTurn(session);
         session.completedGoalTurn = true;
         this.#finishSession(session, {}, operation);
         return;
@@ -1386,7 +1341,7 @@ export class CodexAppServerRuntime {
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
     session.status = 'completing';
-    session.activeTurnId = null;
+    clearActiveTurn(session);
     this.#threadListCaches.clear();
     if (session.managesGoalLifecycle && !aborted) {
       session.completedGoalTurn = true;
@@ -1417,7 +1372,7 @@ export class CodexAppServerRuntime {
       session.pendingCapacityFailure = { turnId: params.turnId, message };
       return;
     }
-    this.#finishSession(session, { failedMessage: message }, operation);
+    this.#finishSession(session, { failedMessage: message }, codexTurnLifecycleOperation(session, params.turnId) ?? null);
   }
 
   async #retryCapacityFailure(
@@ -1431,7 +1386,7 @@ export class CodexAppServerRuntime {
 
     session.capacityRetryCount += 1;
     const retryGeneration = ++session.turnAttemptGeneration;
-    session.activeTurnId = null;
+    clearActiveTurn(session);
     session.status = 'running';
     await this.#capacityRetryDelay(delayMs);
 
@@ -1518,7 +1473,7 @@ export class CodexAppServerRuntime {
         : null;
     const nativeTurnId = typeof params.turnId === 'string' ? params.turnId : null;
     const session = threadId ? sourceForClientThread(this.#sources, client, threadId) : null;
-    const operation = nativeTurnId ? session?.turnRoutes.get(nativeTurnId) : undefined;
+    const operation = session && nativeTurnId ? codexTurnLifecycleOperation(session, nativeTurnId) : undefined;
     if (!session || !operation) {
       this.#logger.warn('Dropped an unowned Codex approval request', {
         threadId,
@@ -1559,7 +1514,7 @@ export class CodexAppServerRuntime {
       client.respond(request.id, denialResponseForRequest(request.method, params));
       return;
     }
-    if (session.permissionMode === 'manualBypass') {
+    if (session.activeTurnPermissionMode === 'manualBypass') {
       client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
       return;
     }
@@ -1590,8 +1545,10 @@ export class CodexAppServerRuntime {
       this.#finishSession(
         session,
         { failedMessage: `Codex app-server exited with code ${code}` },
-        session.sourceOperation,
+        session.goalOperation ?? session.sourceOperation,
       );
+      // Source retirement cannot leave a parked control holding its only terminal event.
+      if (session.pendingFinish) this.#completeSessionFinish(session, session.pendingFinish, session.pendingFinishOperation);
     }
     this.#retireSource(client);
   }
@@ -1609,7 +1566,13 @@ export class CodexAppServerRuntime {
       session.pendingFinishOperation = operation ?? session.pendingFinishOperation;
       return;
     }
+    this.#completeSessionFinish(session, opts, operation);
+  }
 
+  #completeSessionFinish(session: RunningCodexSession, opts: FinishSessionOptions, operation: CodexOperation | null): void {
+    if (this.#sessions.get(session.threadId) !== session) return;
+    session.pendingFinish = null;
+    session.pendingFinishOperation = null;
     this.#sessions.delete(session.threadId);
     session.idleSince = Date.now();
     this.#threadListCaches.clear();
@@ -1617,7 +1580,7 @@ export class CodexAppServerRuntime {
     session.interruptAcknowledgement = null;
     // A finished session no longer drives the goal loop; leaving this state
     // set would pin its retained source out of the idle sweep forever.
-    session.activeTurnId = null;
+    clearActiveTurn(session);
     session.goal = null;
     session.managesGoalLifecycle = false;
     session.completedGoalTurn = false;
@@ -1653,11 +1616,7 @@ export class CodexAppServerRuntime {
 
   #flushPendingFinish(session: RunningCodexSession): void {
     if (session.activeDeliveryReservations > 0 || !session.pendingFinish) return;
-    const pending = session.pendingFinish;
-    const operation = session.pendingFinishOperation;
-    session.pendingFinish = null;
-    session.pendingFinishOperation = null;
-    this.#finishSession(session, pending, operation);
+    this.#finishSession(session, session.pendingFinish, session.pendingFinishOperation);
   }
 
   #publishDetachedTurnTerminal(
@@ -1707,6 +1666,7 @@ export class CodexAppServerRuntime {
       this.#latestSourceByChat.delete(session.chatId);
     }
     session.turnRoutes.clear();
+    clearActiveTurn(session);
     session.interruptAcknowledgement = null;
     for (const resolve of [...session.terminalWaiters]) resolve();
     session.nextTurnOperation = null;

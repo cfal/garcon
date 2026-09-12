@@ -24,27 +24,37 @@ test('cancellation during target persistence rejects the completed placement', a
 
 function fixture() {
   const source = { agentId: 'test', projectPath: '/repo', executionLocation: testExecutionLocation() };
-  const resolved = { instance: { default: true }, workspace: { projectPath: '/repo' } };
+  const resolved = { instance: { default: true, storageNamespace: 'test' }, workspace: { projectPath: '/repo' } };
+  let target;
   const nodes = {
     localNodeId: source.executionLocation.nodeId,
-    requireLocation: mock(() => resolved),
-    prepareLocalTargets: mock(async () => [{
-      ...source.executionLocation, instanceId: 'target-default', workspaceId: 'target-workspace',
-    }]),
+    requireLocation: mock((location) => location.instanceId === 'target-default' ? target : resolved),
+    prepareLocalTargets: mock(async ([request]) => {
+      target = { instance: { default: true, storageNamespace: request.agentId }, workspace: { projectPath: request.projectPath } };
+      return [{ ...source.executionLocation, instanceId: 'target-default', workspaceId: 'target-workspace' }];
+    }),
   };
   return { source, resolved, nodes, placements: new LocalExecutionPlacement(nodes) };
 }
 
-test.each(['remote-node', 'nondefault-profile', 'project-mismatch'])('rejects unavailable placement: %s', (kind) => {
+test.each(['remote-node', 'nondefault-profile', 'isolated-default', 'project-mismatch'])('rejects unavailable placement: %s', (kind) => {
   const f = fixture();
   if (kind === 'remote-node') f.source.executionLocation.nodeId = 'remote-node';
   if (kind === 'nondefault-profile') f.resolved.instance.default = false;
+  if (kind === 'isolated-default') f.resolved.instance.storageNamespace = 'instances/synthetic-profile';
   if (kind === 'project-mismatch') f.source.projectPath = '/drifted-project';
   expect(() => f.placements.assertAvailable(f.source)).toThrow(expect.objectContaining({
     code: 'NODE_UNAVAILABLE',
     ...(kind === 'project-mismatch' ? { message: 'The chat project does not match its registered execution workspace.' } : {}),
   }));
   expect(f.nodes.requireLocation).toHaveBeenCalledWith(f.source.executionLocation, 'test');
+});
+
+test('new admission rejects an isolated default instead of labeling the legacy host with its identity', async () => {
+  const f = fixture();
+  f.resolved.instance.storageNamespace = 'instances/synthetic-profile';
+  f.nodes.prepareLocalTargets = mock(async () => [f.source.executionLocation]);
+  await expect(f.placements.prepare(f.source.agentId, f.source.projectPath)).rejects.toMatchObject({ code: 'NODE_UNAVAILABLE' });
 });
 
 test('relocation keeps the source instance while registering the new workspace', async () => {

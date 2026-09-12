@@ -29,15 +29,13 @@ function makeRouter(hasPendingOwnershipTransfer) {
     forking: null,
   };
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: {
       getChat: mock(() => entry),
       updateChat: mock(async () => entry),
     },
-    instances: { requireFor: mock(() => integration), ...createRuntimeInstanceFixture(integration) },
-    directory: {
-      require: mock(() => integration),
-      list: mock(() => [integration]),
-    },
+    instances: createRuntimeInstanceFixture(integration),
+    providerIds: ['test'],
     endpointResolver: {
       resolveSelection: mock(() => ({
         model: 'model-a',

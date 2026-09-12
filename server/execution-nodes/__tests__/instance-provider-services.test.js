@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 import { createProviderAuthFixture } from '../../agents/__tests__/provider-auth-fixture.js';
 import { LOCATED_CHATS } from '../../agents/__tests__/located-instance-fixture.js';
@@ -48,7 +49,7 @@ test('the same instance ID on different nodes cannot share a cached auth or comm
     },
     integration: f[profile].integration,
   }));
-  const directory = new AgentInstanceDirectory(entries);
+  const directory = new AgentInstanceDirectory(createLocalProviderInstances(entries));
   const signal = new AbortController().signal;
   for (const profile of ['primary', 'secondary']) {
     const ref = { nodeId: `${profile}-node`, instanceId: 'profile' };
@@ -61,13 +62,13 @@ test('the same instance ID on different nodes cannot share a cached auth or comm
 
 test('missing and removed instances refuse service acquisition without borrowing a default', async () => {
   const f = await fixture();
-  const removed = new AgentInstanceDirectory([{
+  const removed = new AgentInstanceDirectory(createLocalProviderInstances([{
     configuration: {
       id: 'primary', nodeId: 'local-node', agentId: 'test', label: 'Removed',
       storageNamespace: 'instances/primary', default: true, removedAt: '2026-09-10T00:00:00.000Z',
     },
     integration: f.primary.integration,
-  }]);
+  }]));
   for (const [directory, ref] of [
     [f.instances, { nodeId: 'local-node', instanceId: 'missing' }],
     [f.instances, { nodeId: 'offline', instanceId: 'primary' }],

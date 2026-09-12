@@ -15,8 +15,8 @@ const locks = new KeyedPromiseLock();
 export class FileAgentMigrationStore implements AgentMigrationStore {
   readonly #filePath: string;
 
-  constructor(workspaceDir: string, agentId: string) {
-    this.#filePath = path.join(workspaceDir, 'agent-data', agentId, 'migration-state.json');
+  constructor(storageDirectory: string) {
+    this.#filePath = path.join(storageDirectory, 'migration-state.json');
   }
 
   async getVersion(): Promise<number> {

@@ -1,3 +1,4 @@
+import { nativePermissionsFixture } from './native-permissions-fixture.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { OpenCodeRuntime } from '../opencode.js';
@@ -70,6 +71,7 @@ function deathClient(overrides = {}) {
     permission: { reply: mock(() => Promise.resolve({})) },
     global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
     session: {
+      ...nativePermissionsFixture(),
       create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
       prompt: mock(() => new Promise(() => {})),
       promptAsync: mock(() => Promise.resolve({})),

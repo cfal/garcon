@@ -20,6 +20,8 @@ import type {
 } from '@garcon/server-agent-interface';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { JsonObject } from '@garcon/common/json';
+import { isExecutionIdentity } from '../../common/execution-location.js';
+import type { ConfiguredAgentInstance } from '../../common/execution-nodes.js';
 import { createLogger } from '../lib/log.js';
 
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -27,6 +29,7 @@ const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 export interface IntegrationHostFactoryOptions {
   readonly workspaceDir: string;
+  readonly instance?: Pick<ConfiguredAgentInstance, 'id' | 'agentId'>;
   readonly readEnvironment?: (name: string) => string | undefined;
   readonly loggerFactory?: (agentId: string) => AgentLogger;
 }
@@ -62,16 +65,22 @@ class ScopedStorage implements AgentScopedStorage {
   readonly rootDirectory: string;
   readonly #workspaceDir: string;
 
-  constructor(workspaceDir: string, agentId: string) {
+  constructor(workspaceDir: string, private readonly namespace: readonly string[], private readonly legacyWorkspace: string | null) {
     this.#workspaceDir = path.resolve(workspaceDir);
-    this.rootDirectory = path.join(this.#workspaceDir, 'agent-data', agentId);
+    this.rootDirectory = path.join(this.#workspaceDir, 'agent-data', ...namespace);
   }
 
   async directory(namespace: string): Promise<string> {
     assertNamespace(namespace);
-    const parent = path.dirname(this.rootDirectory);
-    await mkdir(parent, { recursive: true });
-    await ensureDirectoryWithoutSymlink(this.rootDirectory);
+    await mkdir(this.#workspaceDir, { recursive: true });
+    const dataDirectory = path.join(this.#workspaceDir, 'agent-data');
+    if (this.legacyWorkspace) await mkdir(dataDirectory, { recursive: true });
+    else await ensureDirectoryWithoutSymlink(dataDirectory);
+    let parent = await realpath(dataDirectory);
+    for (const component of this.namespace) {
+      parent = path.join(parent, component);
+      await ensureDirectoryWithoutSymlink(parent);
+    }
 
     const root = await realpath(this.rootDirectory);
     const candidate = path.join(root, namespace);
@@ -90,7 +99,8 @@ class ScopedStorage implements AgentScopedStorage {
 
   async claimLegacyWorkspaceDirectory(name: string): Promise<AgentLegacyDirectoryClaim> {
     assertNamespace(name);
-    const source = path.join(this.#workspaceDir, name);
+    if (!this.legacyWorkspace) return { moved: 0, skipped: 0 };
+    const source = path.join(this.legacyWorkspace, name);
     const sourceStats = await lstatOrNull(source);
     if (!sourceStats) return { moved: 0, skipped: 0 };
     assertDirectoryWithoutSymlink(source, sourceStats);
@@ -108,7 +118,10 @@ async function ensureDirectoryWithoutSymlink(directory: string): Promise<void> {
     assertDirectoryWithoutSymlink(directory, existing);
     return;
   }
-  await mkdir(directory);
+  await mkdir(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EEXIST') throw error;
+  });
+  assertDirectoryWithoutSymlink(directory, await lstat(directory));
 }
 
 function assertDirectoryWithoutSymlink(
@@ -244,11 +257,16 @@ export class IntegrationHostFactory implements AgentHostFactory {
   readonly #hosts = new Map<string, HostRecord>();
 
   constructor(options: IntegrationHostFactoryOptions) {
-    this.#options = options;
+    if (options.instance && (!isExecutionIdentity(options.instance.id) || !AGENT_ID_PATTERN.test(options.instance.agentId))) {
+      throw new Error('Invalid agent instance storage identity');
+    }
+    this.#options = { ...options, ...(options.instance ? { instance: Object.freeze({ ...options.instance }) } : {}) };
   }
 
   forAgent(agentId: string): AgentHost {
     if (!AGENT_ID_PATTERN.test(agentId)) throw new Error(`Invalid agent integration ID: ${agentId}`);
+    const instance = this.#options.instance;
+    if (instance && instance.agentId !== agentId) throw new Error('Agent instance storage belongs to another provider');
     const existing = this.#hosts.get(agentId);
     if (existing) return existing.host;
 
@@ -258,7 +276,8 @@ export class IntegrationHostFactory implements AgentHostFactory {
     const host: AgentHost = Object.freeze({
       agentId,
       logger: this.#options.loggerFactory?.(agentId) ?? defaultLogger(agentId),
-      storage: new ScopedStorage(this.#options.workspaceDir, agentId),
+      storage: new ScopedStorage(this.#options.workspaceDir, instance ? ['instances', instance.id] : [agentId],
+        instance ? null : path.resolve(this.#options.workspaceDir)),
       environment,
     });
     this.#hosts.set(agentId, { host, environment });

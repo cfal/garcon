@@ -85,11 +85,10 @@ it('[TLV5-PERM.10-CORE-UNIT-01] retries the exact live capability after a provid
 
 function makeRouter(ledger, view) {
   return new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: { getChat: mock(() => ({ agentId: 'test' })) },
-    instances: { requireFor: () => { throw new Error('Unexpected instance lookup'); } },
-    directory: {
-      get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
-    },
+    instances: {},
+    providerIds: ['test'],
     endpointResolver: {},
     events: {},
     projection: {},

@@ -116,6 +116,7 @@ export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
 
 export interface AgentGoalControlHandoff {
   validate(): void;
+  /** Synchronously transfers run-scoped lifecycle to the requested run on the same execution occurrence. */
   commit(): void;
 }
 

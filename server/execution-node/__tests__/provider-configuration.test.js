@@ -34,6 +34,27 @@ const endpoint = {
 const admittedEndpoint = { selection: endpoint, credential: 'synthetic-original-secret' };
 
 describe('instance-owned provider configuration', () => {
+  test.each(['resolve', 'prepareUpdate'])('captures effective default values before %s endpoint validation', async (operation) => {
+    const f = fixture();
+    const defaults = { ownerId: 'synthetic', schemaVersion: 1, values: { profile: 'captured' } };
+    f.integration.settings.defaults = () => defaults;
+    const validation = Promise.withResolvers();
+    f.integration.endpoints.validate = () => validation.promise;
+    const signal = new AbortController().signal;
+    const pending = operation === 'resolve'
+      ? f.service.resolve({ ...f.request, endpoint: admittedEndpoint }, signal)
+      : f.service.prepareUpdate({ previous: f.request, next: { model: f.request.model, endpoint }, patch: {} }, signal);
+    defaults.values.profile = 'changed during preparation';
+    expect(f.integration.settings.parse).not.toHaveBeenCalled();
+    validation.resolve();
+    const result = await pending;
+    if (operation === 'resolve') expect(result.settings.values.profile).toBe('captured');
+    else {
+      expect(result.previous.settings.values.profile).toBe('captured');
+      expect(result.next.settings.values.profile).toBe('captured');
+    }
+  });
+
   test('resolves provider defaults and parsing on the exact instance', async () => {
     const first = fixture('first');
     const second = fixture('second');
@@ -89,7 +110,9 @@ describe('instance-owned provider configuration', () => {
     const { service, request, integration } = fixture();
     integration.endpoints = null;
     await expect(service.resolve({ ...request, endpoint: admittedEndpoint }, new AbortController().signal))
-      .rejects.toThrow('does not accept API provider endpoints');
+      .rejects.toMatchObject({ code: 'INVALID_ENDPOINT', retryable: false });
+    await expect(service.prepareUpdate({ previous: request, next: { model: request.model, endpoint }, patch: {} }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'INVALID_ENDPOINT', retryable: false });
     expect(integration.settings.parse).not.toHaveBeenCalled();
   });
 
@@ -132,80 +155,143 @@ describe('instance-owned provider configuration', () => {
     expect(integration.settings.parse).not.toHaveBeenCalled();
   });
 
-  test('applies to the captured instance with isolated configuration snapshots and waits for confirmation', async () => {
+  test('prepares the exact instance and isolated snapshots, then waits for commit confirmation', async () => {
     const first = fixture('first');
     const second = fixture('second');
     const gate = Promise.withResolvers();
-    const seen = [];
-    first.integration.sessionConfiguration = { apply: mock(async (id, next, previous) => {
-      seen.push(structuredClone({ id, next, previous }));
-      next.model = 'provider-mutated-model';
-      await gate.promise;
-      expect(next.settings.values.profile).toBe('first');
-    }) };
-    second.integration.sessionConfiguration = { apply: mock(async () => {}) };
-    const previous = await first.service.resolve(first.request, new AbortController().signal);
-    const next = { ...structuredClone(previous), model: 'changed-model' };
-    const input = { expected: { agentSessionId: 'shared-session', nativeSession: null, projectPath: '/synthetic-project' }, previous, next };
+    const facet = configurationFacet(() => gate.promise);
+    first.integration.sessionConfiguration = facet;
+    second.integration.sessionConfiguration = configurationFacet();
+    const input = await applicationRequest(first);
+    const expected = structuredClone(input);
+    const prepared = await first.service.prepareApply(input, new AbortController().signal);
+    expect(prepared.kind).toBe('prepared');
+    input.next.settings.values.profile = 'caller-mutated';
+    expect(facet.prepare.mock.calls[0][0]).toEqual({ expected: expected.expected, previous: expected.previous, next: expected.next,
+      signal: expect.any(AbortSignal) });
+    expect(facet.commit).not.toHaveBeenCalled();
+    first.integration.sessionConfiguration = configurationFacet();
     let settled = false;
-    const pending = first.service.apply(input, new AbortController().signal).then((result) => { settled = true; return result; });
+    const pending = first.service.commit(prepared.operation, new AbortController().signal)
+      .then(result => { settled = true; return result; });
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(next.model).toBe('changed-model');
-    next.settings.values.profile = 'caller-mutated-profile';
-    expect(seen).toEqual([{ id: 'shared-session', previous,
-      next: { ...previous, model: 'changed-model' } }]);
-    gate.resolve();
+    expect(facet.commit).toHaveBeenCalledWith(facet.target, expect.any(AbortSignal));
+    expect(first.integration.sessionConfiguration.commit).not.toHaveBeenCalled();
+    expect(second.integration.sessionConfiguration.prepare).not.toHaveBeenCalled();
+    gate.resolve({ kind: 'applied' });
     expect(await pending).toEqual({ kind: 'applied' });
-    expect(first.integration.sessionConfiguration.apply).toHaveBeenCalledTimes(1);
-    expect(second.integration.sessionConfiguration.apply).not.toHaveBeenCalled();
+    expect(await first.service.commit(prepared.operation, new AbortController().signal))
+      .toEqual({ kind: 'rejected', reason: 'target-changed' });
   });
 
   test('reports unsupported application without invoking configuration validators', async () => {
-    const { service, request, integration } = fixture();
-    const configuration = await service.resolve(request, new AbortController().signal);
-    integration.settings.parse.mockClear();
-    expect(await service.apply({
-      expected: { agentSessionId: 'original-session', nativeSession: null, projectPath: '/synthetic-project' },
-      previous: configuration, next: configuration,
-    }, new AbortController().signal)).toEqual({ kind: 'unsupported' });
-    expect(integration.settings.parse).not.toHaveBeenCalled();
+    const instance = fixture();
+    const input = await applicationRequest(instance);
+    instance.integration.settings.parse.mockClear();
+    expect(await instance.service.prepareApply(input, new AbortController().signal)).toEqual({ kind: 'unsupported' });
+    expect(instance.integration.settings.parse).not.toHaveBeenCalled();
   });
 
-  test('honors pre-delivery cancellation without hiding a confirmed application after cancellation', async () => {
-    const { service, request, integration } = fixture();
-    const configuration = await service.resolve(request, new AbortController().signal);
-    const input = {
-      expected: { agentSessionId: 'original-session', nativeSession: null, projectPath: '/synthetic-project' },
-      previous: configuration, next: configuration,
-    };
-    const gate = Promise.withResolvers();
-    const apply = mock(() => gate.promise);
-    integration.sessionConfiguration = { apply };
+  test('rejects a foreign native owner before provider preparation', async () => {
+    const instance = fixture();
+    const input = await applicationRequest(instance);
+    instance.integration.sessionConfiguration = configurationFacet();
+    input.expected.nativeSession = { ownerId: 'foreign', schemaVersion: 1, value: {} };
+    await expect(instance.service.prepareApply(input, new AbortController().signal)).rejects.toThrow();
+    expect(instance.integration.sessionConfiguration.prepare).not.toHaveBeenCalled();
+  });
+
+  test.each(['not-required', 'rejected'])('preserves definite preparation outcome %s', async (kind) => {
+    const instance = fixture();
+    const input = await applicationRequest(instance);
+    const result = kind === 'rejected' ? { kind, reason: 'target-conflict' } : { kind };
+    instance.integration.sessionConfiguration = { ...configurationFacet(), prepare: mock(async () => result) };
+    expect(await instance.service.prepareApply(input, new AbortController().signal)).toEqual(result);
+    expect(instance.integration.sessionConfiguration.commit).not.toHaveBeenCalled();
+  });
+
+  test('honors cancellation before preparation and before delivery', async () => {
+    const instance = fixture();
+    const input = await applicationRequest(instance);
+    const facet = configurationFacet();
+    instance.integration.sessionConfiguration = facet;
     const reason = new Error('settings cancelled');
-    await expect(service.apply(input, AbortSignal.abort(reason))).rejects.toBe(reason);
-    expect(apply).not.toHaveBeenCalled();
+    await expect(instance.service.prepareApply(input, AbortSignal.abort(reason))).rejects.toBe(reason);
+    expect(facet.prepare).not.toHaveBeenCalled();
     const controller = new AbortController();
-    const pending = service.apply(input, controller.signal);
+    const prepared = await instance.service.prepareApply(input, controller.signal);
     controller.abort(reason);
-    gate.resolve();
-    expect(await pending).toEqual({ kind: 'applied' });
-    expect(apply).toHaveBeenCalledTimes(1);
+    expect(await instance.service.commit(prepared.operation, new AbortController().signal))
+      .toEqual({ kind: 'rejected', reason: 'cancelled' });
+    expect(facet.commit).not.toHaveBeenCalled();
+    expect(facet.cancel).toHaveBeenCalledWith(facet.target);
   });
 
-  test.each(['throw', 'reject'])('preserves a provider %s without retrying application', async (kind) => {
-    const { service, request, integration } = fixture();
-    const configuration = await service.resolve(request, new AbortController().signal);
+  test('keeps confirmed delivery after cancellation while waiting for native settlement', async () => {
+    const instance = fixture();
+    const input = await applicationRequest(instance);
+    const gate = Promise.withResolvers();
+    const facet = configurationFacet(() => gate.promise);
+    instance.integration.sessionConfiguration = facet;
+    const controller = new AbortController();
+    const prepared = await instance.service.prepareApply(input, controller.signal);
+    const pending = instance.service.commit(prepared.operation, controller.signal);
+    controller.abort();
+    gate.resolve({ kind: 'applied' });
+    expect(await pending).toEqual({ kind: 'applied' });
+    expect(facet.commit).toHaveBeenCalledTimes(1);
+  });
+
+  test('cancels an unused operation once on its captured facet and rejects foreign operations', async () => {
+    const first = fixture();
+    const second = fixture();
+    const facet = configurationFacet();
+    first.integration.sessionConfiguration = facet;
+    const prepared = await first.service.prepareApply(await applicationRequest(first), new AbortController().signal);
+    expect(await second.service.commit(prepared.operation, new AbortController().signal))
+      .toEqual({ kind: 'rejected', reason: 'target-changed' });
+    first.integration.sessionConfiguration = configurationFacet();
+    await first.service.cancel(prepared.operation);
+    await first.service.cancel(prepared.operation);
+    expect(facet.cancel).toHaveBeenCalledTimes(1);
+    expect(facet.cancel).toHaveBeenCalledWith(facet.target);
+    expect(await first.service.commit(prepared.operation, new AbortController().signal))
+      .toEqual({ kind: 'rejected', reason: 'target-changed' });
+  });
+
+  test.each(['throw', 'reject'])('classifies an unexpected provider commit %s as unknown without retry', async kind => {
+    const instance = fixture();
+    const input = await applicationRequest(instance);
     const failure = new Error('synthetic settings failure');
-    const apply = mock(() => {
+    const facet = configurationFacet(() => {
       if (kind === 'throw') throw failure;
       return Promise.reject(failure);
     });
-    integration.sessionConfiguration = { apply };
-    await expect(service.apply({
-      expected: { agentSessionId: 'original-session', nativeSession: null, projectPath: '/synthetic-project' },
-      previous: configuration, next: configuration,
-    }, new AbortController().signal)).rejects.toBe(failure);
-    expect(apply).toHaveBeenCalledTimes(1);
+    instance.integration.sessionConfiguration = facet;
+    const prepared = await instance.service.prepareApply(input, new AbortController().signal);
+    expect(await instance.service.commit(prepared.operation, new AbortController().signal)).toEqual({ kind: 'unknown' });
+    expect(facet.commit).toHaveBeenCalledTimes(1);
   });
 });
+
+function configurationFacet(deliver = async () => ({ kind: 'applied' })) {
+  const target = Object.freeze({});
+  /** @satisfies {import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates} */
+  const facet = {
+    prepare: mock(async () => ({ kind: 'prepared', target })),
+    commit: mock(deliver),
+    cancel: mock(() => {}),
+  };
+  return { ...facet, target };
+}
+
+async function applicationRequest(instance) {
+  const previous = await instance.service.resolve(instance.request, new AbortController().signal);
+  return {
+    executionLocation: { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' },
+    expected: { chatId: 'chat-1', agentSessionId: 'shared-session', nativeSession: null, projectPath: '/synthetic-project' },
+    previous,
+    next: { ...structuredClone(previous), model: 'changed-model' },
+  };
+}

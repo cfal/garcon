@@ -29,9 +29,9 @@ async function fixture() {
 
 test('provider-only auth routes use the configured default for status, readiness and colliding login sessions', async () => {
   const f = await fixture();
-  f.integrations.get = () => f.secondary.integration;
-  f.integrations.require = () => f.secondary.integration;
-  f.integrations.list = () => [f.secondary.integration];
+  f.types.get = () => f.secondary.integration.descriptor;
+  f.types.require = () => f.secondary.integration.descriptor;
+  f.types.list = () => [f.secondary.integration.descriptor];
   expect(await (await f.get('/api/v1/agents/auth?agent=test')).json()).toEqual({ test: {
     authenticated: true, canReauth: true, label: 'primary', source: 'cli',
   } });

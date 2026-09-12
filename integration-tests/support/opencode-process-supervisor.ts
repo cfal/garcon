@@ -59,6 +59,7 @@ interface TransportDirective {
   connectionId?: number;
   responseId?: number;
   path?: string;
+  method?: string;
   startMarker?: string;
   endMarker?: string;
 }
@@ -794,7 +795,7 @@ function startTransportProxy(input: {
       if (directive.action === 'hold') {
         holdArmed = true;
       } else if (directive.action === 'hold-response' && typeof directive.path === 'string') {
-        heldResponsePaths.add(directive.path);
+        heldResponsePaths.add(JSON.stringify([directive.method ?? null, directive.path]));
       } else if (directive.action === 'release-response') {
         responseRuntimes.get(directive.responseId ?? -1)?.release();
       } else {
@@ -826,7 +827,8 @@ function startTransportProxy(input: {
 
   return createServer((request, response) => {
     const path = (request.url ?? '/').split('?')[0];
-    const holdResponse = heldResponsePaths.delete(path);
+    const holdResponse = heldResponsePaths.delete(JSON.stringify([request.method ?? 'GET', path]))
+      || heldResponsePaths.delete(JSON.stringify([null, path]));
     recordRequest(request.method ?? 'GET', path);
     const upstream = httpRequest({
       hostname: backend.hostname,

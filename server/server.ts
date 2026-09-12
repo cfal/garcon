@@ -1,6 +1,7 @@
 // Composition root. Instantiates all services and wires them together.
 // This is the single place where dependencies are resolved.
 
+import { createLocalProviderInstances } from './execution-node/local-provider-instance.js';
 import path from 'path';
 import { initializeServerConfig } from './config.js';
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
@@ -16,7 +17,8 @@ import {
 } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
-import { resolveFileMentionsInCommand } from './chats/file-mentions.js';
+import { WorkspaceFileMentionResolver } from './chats/workspace-file-mention-resolver.js';
+import { LocalWorkspaceFileMentionService } from './execution-node/local-workspace-file-mentions.js';
 import { wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -56,12 +58,10 @@ import {
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { AgentCommandComposition } from './chats/agent-command-composition.js';
 import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
-import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { loadServerTls } from './lib/controller-tls.js';
-import { IntegrationHostFactory } from './agents/integration-host.js';
+import { prepareStandaloneIntegrations } from './agents/standalone-integrations.js';
 import { AgentInstanceDirectory } from './agents/instance-directory.js';
-import { IntegrationRegistry } from './agents/integration-registry.js';
-import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
 import {
   migrateAgentIntegrationCoreRecords,
   refreshAgentExecutionModeCoreRecords,
@@ -91,7 +91,6 @@ import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
-import { ExecutionNodesStore } from './execution-nodes/store.js';
 import { LocalExecutionPlacement } from './execution-nodes/local-placement.js';
 import { resolveLocalNativeSessions } from './execution-nodes/local-native-sessions.js';
 import { migrateWorkspaceExecutionLocations } from './execution-nodes/workspace-migration.js';
@@ -146,6 +145,8 @@ import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
 } from './lib/http-route-types.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const logger = createLogger('server');
 
@@ -223,14 +224,7 @@ export async function startServer(): Promise<void> {
     const carryOver = new CarryOverTranscriptStore({ workspaceDir });
     await carryOver.initialize();
 
-    const integrationHostFactory = new IntegrationHostFactory({
-      workspaceDir,
-    });
-    const integrationRegistry = new IntegrationRegistry({
-      integrations: defaultAgentIntegrations,
-      hostFactory: integrationHostFactory,
-      migrationStoreFor: (agentId) => new FileAgentMigrationStore(workspaceDir, agentId),
-    });
+    const { executionNodes, localInstances, integrationRegistry } = await prepareStandaloneIntegrations(workspaceDir, defaultAgentIntegrations);
     const endpointResolver = new ApiProviderEndpointResolver(
       () => apiProviderStore.list(),
       (agentId) => integrationRegistry.types.get(agentId)?.supportedEndpointProtocols ?? [],
@@ -260,19 +254,18 @@ export async function startServer(): Promise<void> {
     ));
     // Earlier carryover migrations cannot read the located registry after an interrupted upgrade.
     await workspaceMigrations.checkpoint();
-    const executionNodes = new ExecutionNodesStore(workspaceDir);
-    await executionNodes.init();
     await workspaceMigrations.run('execution-location-migration', () => (
       migrateWorkspaceExecutionLocations(workspaceDir, executionNodes)
     ));
     const placements = new LocalExecutionPlacement(executionNodes);
-    const localInstances = await executionNodes.registerLocalDefaults(
-      integrationRegistry.types.list().map((descriptor) => descriptor.id),
-    );
-    const instances = new AgentInstanceDirectory(localInstances.map((configuration) => ({
+    const fileMentions = new WorkspaceFileMentionResolver((target) => {
+      placements.assertAvailable(target);
+      return new LocalWorkspaceFileMentionService();
+    });
+    const instances = new AgentInstanceDirectory(createLocalProviderInstances(localInstances.map((configuration) => ({
       configuration,
       integration: integrationRegistry.require(configuration.agentId),
-    })));
+    }))));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
@@ -399,9 +392,10 @@ export async function startServer(): Promise<void> {
     });
 
     agentRegistry = new AgentRegistry({
+      fileMentions,
       localNodeId: executionNodes.localNodeId,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      types: integrationRegistry.types,
       instances,
       endpointResolver,
       getCarryOverRevision: (entry) => carryOver.revision(
@@ -597,7 +591,7 @@ export async function startServer(): Promise<void> {
       recentTitleIcons,
       metadata,
       agents: agentRegistry,
-      fileMentions: { resolve: resolveFileMentionsInCommand },
+      fileMentions,
       forkChatFileCopy,
       readForkedNativeHistory: createForkNativeHistoryReader({
         instances,

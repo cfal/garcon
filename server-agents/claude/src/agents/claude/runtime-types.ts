@@ -18,6 +18,8 @@ export interface ClaudeExecutionRequest {
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
   readonly claudeThinkingMode?: ClaudeThinkingMode;
+  readonly nativePath?: string | null;
+  readonly nativeModelEndpointId?: string | null;
   readonly executionAdmission?: ClaudeExecutionAdmission;
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
@@ -32,7 +34,6 @@ export interface ClaudeStartRequest extends ClaudeExecutionRequest {
 
 export interface ClaudeResumeRequest extends ClaudeExecutionRequest {
   readonly agentSessionId: string;
-  readonly nativePath?: string | null;
 }
 
 export interface ClaudeProjectPathUpdate {

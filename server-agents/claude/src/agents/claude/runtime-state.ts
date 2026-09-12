@@ -19,6 +19,11 @@ export type InterruptFallbackStage = 'receipt' | 'completion';
 export interface ClaudeRunningSession {
   id: string;
   chatId: string;
+  nativePath: string | null;
+  nativeModelEndpointId: string | null;
+  configurationEpoch: number;
+  configurationPreparing: object | null;
+  configurationUpdateChain: Promise<void>;
   initialization: Promise<void> | null;
   completeInitialization: (() => void) | null;
   lastActivityAt: number;
@@ -31,6 +36,7 @@ export interface ClaudeRunningSession {
   retirement: Promise<void> | null;
   options: ClaudeSessionOptions;
   currentPermissionMode: PermissionMode;
+  permissionModeConfirmed: boolean;
   currentThinkingMode: ThinkingMode;
   currentClaudeThinkingMode: ClaudeThinkingMode;
   currentModel: string;

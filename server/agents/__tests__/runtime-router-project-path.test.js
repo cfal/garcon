@@ -32,26 +32,16 @@ function makeRouter(overrides = {}) {
     agentSettingsById: {},
     ...overrides.entry,
   };
-  const integration = {
-    descriptor: { id: 'claude' },
-    settings: {
-      defaults: mock(() => ({
-        ownerId: 'claude',
-        schemaVersion: 1,
-        values: {},
-      })),
-      parse: mock((settings) => settings),
-    },
-    projectPathUpdates: { prepare: prepareProjectPathUpdate },
-  };
+  /** @satisfies {import('../../execution-nodes/provider-project-path.js').ProviderProjectPathUpdateService} */
+  const service = { prepare: prepareProjectPathUpdate };
+  const projectPathUpdatesFor = mock(() => overrides.unsupported ? null : service);
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: {
       getChat: mock(() => entry),
     },
-    instances: { requireFor: mock(() => integration) },
-    directory: {
-      require: mock(() => integration),
-    },
+    instances: { projectPathUpdatesFor },
+    providerIds: ['test'],
     endpointResolver: {},
     events: {},
     projection: {},
@@ -63,7 +53,7 @@ function makeRouter(overrides = {}) {
     adoption: transcript.adoption,
   });
 
-  return { entry, preparation, prepareProjectPathUpdate, router };
+  return { entry, preparation, prepareProjectPathUpdate, projectPathUpdatesFor, router };
 }
 
 describe('AgentRuntimeRouter project-path preparation', () => {
@@ -85,11 +75,21 @@ describe('AgentRuntimeRouter project-path preparation', () => {
         agentSessionId: 'session-1',
         projectPath: '/old',
         nativeSession: resolvedNativeSession,
+        settings: null,
       }),
       nextProjectPath: '/next',
-      signal: expect.any(AbortSignal),
-    });
+    }, expect.any(AbortSignal));
+    expect(fixture.projectPathUpdatesFor).toHaveBeenCalledWith(fixture.entry);
     expect(fixture.entry.nativeSession).toBe(storedNativeSession);
+  });
+
+  it('preserves an absent project-path capability', async () => {
+    const fixture = makeRouter({ unsupported: true });
+    expect(await fixture.router.prepareProjectPathUpdate('claude', {
+      chatId: 'chat-1', agentSessionId: 'session-1', previousProjectPath: '/old',
+      nextProjectPath: '/next', nativeSession: resolvedNativeSession,
+    })).toBeUndefined();
+    expect(fixture.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
   it('rejects a stale request before calling the provider', async () => {

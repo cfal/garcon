@@ -29,6 +29,7 @@ import {
   type PreambleId,
 } from '../../common/preambles.js';
 import type { PreambleService } from '../preambles/service.js';
+import type { FileMentionResolver } from '../chats/file-mentions.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatStartupPreferences } from '../settings/types.js';
 import type {
@@ -144,10 +145,6 @@ export type ForkChatFileCopyDep = (args: {
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
 }) => Promise<ForkChatFileCopyResult>;
 
-export interface FileMentionResolverDep {
-  resolve(command: string, projectPath: string): Promise<string>;
-}
-
 export interface ChatCommandServiceDeps {
   chats: IChatRegistry;
   placements: Pick<import('../execution-nodes/local-placement.js').LocalExecutionPlacement, 'prepare' | 'prepareRelocation'>;
@@ -157,7 +154,7 @@ export interface ChatCommandServiceDeps {
   recentTitleIcons: RecentTitleIconSource;
   metadata: MetadataDep;
   agents: AgentRegistryDep;
-  fileMentions: FileMentionResolverDep;
+  fileMentions: FileMentionResolver;
   forkChatFileCopy: ForkChatFileCopyDep;
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;

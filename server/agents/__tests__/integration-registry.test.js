@@ -100,6 +100,29 @@ const migrationStoreFor = () => ({
 });
 
 describe('IntegrationRegistry', () => {
+  test('retains unavailable provider metadata without constructing or starting its executable', async () => {
+    const calls = [];
+    const Alpha = integrationClass('alpha', {
+      onConstruct: () => calls.push('construct-alpha'),
+      lifecycle: { start: async () => { calls.push('start-alpha'); } },
+    });
+    const Beta = integrationClass('beta', { onConstruct: () => { throw new Error('unavailable executable'); } });
+    const registry = new IntegrationRegistry({
+      integrations: [Alpha, Beta], executableAgentIds: ['alpha'],
+      hostFactory: hostFactory(os.tmpdir()), migrationStoreFor,
+    });
+    try {
+      await registry.start();
+      expect(registry.types.list().map((descriptor) => descriptor.id)).toEqual(['alpha', 'beta']);
+      expect(registry.types.require('beta')).toEqual(Beta.descriptor);
+      expect(registry.get('beta')).toBeNull();
+      expect(registry.classes()).toEqual([Alpha]);
+      expect(calls).toEqual(['construct-alpha', 'start-alpha']);
+    } finally {
+      await registry.stop();
+    }
+  });
+
   test('validates every provider declaration before constructing the first executable', () => {
     let constructed = 0;
     const Alpha = integrationClass('alpha', { onConstruct: () => { constructed += 1; } });

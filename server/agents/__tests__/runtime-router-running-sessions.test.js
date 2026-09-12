@@ -39,16 +39,13 @@ function makeRouter(execution, overrides = {}) {
     execution,
   };
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: {
       getChat: mock(() => entry),
       updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),
     },
-    instances: { requireFor: mock(() => integration), ...createRuntimeInstanceFixture(integration) },
-    directory: {
-      require: mock(() => integration),
-      get: mock(() => integration),
-      list: mock(() => [integration]),
-    },
+    instances: createRuntimeInstanceFixture(integration),
+    providerIds: ['test'],
     endpointResolver: {
       resolveSelection: mock((request) => ({
         model: request.model,
@@ -144,10 +141,12 @@ describe('AgentRuntimeRouter execution handles', () => {
     const { router, transcript } = makeRouter(execution);
 
     await router.startSession('chat-1', 'hello', { turnId: 'turn-1' });
+    expect(router.getRunningSessions()).toEqual({ test: [{ id: 'chat-1', status: 'running' }] });
     expect(router.getRunningChatIdsSnapshot()).toEqual(['chat-1']);
     expect(router.getRunningSessionCount()).toBe(1);
 
     transcript.sink.publish({ type: 'run-ended', runId: 'turn-1', outcome: 'finished' });
+    expect(router.getRunningSessions()).toEqual({ test: [] });
     expect(router.getRunningChatIdsSnapshot()).toEqual([]);
   });
 

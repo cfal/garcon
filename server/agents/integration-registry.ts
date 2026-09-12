@@ -9,6 +9,7 @@ import { AgentTypeRegistry } from './type-registry.js';
 
 export interface IntegrationRegistryOptions {
   readonly integrations: readonly AgentIntegrationClass[];
+  readonly executableAgentIds?: readonly string[];
   readonly hostFactory: IntegrationHostFactory;
   readonly migrationStoreFor: (agentId: string) => AgentMigrationStore;
 }
@@ -34,8 +35,11 @@ export class IntegrationRegistry {
       descriptor: integrationClass.descriptor,
     }));
     this.types = new AgentTypeRegistry(declarations);
+    const executableAgentIds = new Set(options.executableAgentIds ?? declarations.map((entry) => entry.integrationId));
+    for (const agentId of executableAgentIds) this.types.require(agentId);
     this.#migrationStoreFor = options.migrationStoreFor;
     for (const { integrationClass, integrationId, apiVersion } of declarations) {
+      if (!executableAgentIds.has(integrationId)) continue;
       const descriptor = this.types.require(integrationId);
       const host = options.hostFactory.forAgent(integrationId);
       const integration = new integrationClass(host);

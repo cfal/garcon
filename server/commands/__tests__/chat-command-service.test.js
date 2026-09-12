@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { WorkspaceFileMentionResolver } from '../../chats/workspace-file-mention-resolver.js';
 import { testExecutionLocation, testPlacements } from '../../execution-nodes/testing/placement.js';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
@@ -782,7 +783,7 @@ function makeService(overrides = {}) {
 function makeInputProjection(overrides = {}) {
   return {
     admitInput: mock(async () => ({ inserted: true })),
-    hasMatchingInput: mock(async () => false),
+    hasMatchingInput: mock(() => false),
     admitQueuedInput: mock(() => ({ inserted: true })),
     discardPreparedInput: mock(() => undefined),
     ...overrides,
@@ -4951,9 +4952,10 @@ describe('ChatCommandService', () => {
     let currentControl = queued;
     const { service, queue, ledger, fileMentions } = makeService({
       fileMentions: {
-        resolve: mock(async (content, projectPath) => {
+        resolve: mock(async (content, target, signal) => {
           expect(content).toBe('authoritative @notes.txt');
-          expect(projectPath).toBe('/repo');
+          expect(target).toMatchObject({ projectPath: '/repo', executionLocation: testExecutionLocation('claude') });
+          expect(signal.aborted).toBe(false);
           return 'authoritative content\n\nresolved context';
         }),
       },
@@ -5368,6 +5370,23 @@ describe('ChatCommandService', () => {
     }));
   });
 
+  it.each(['synthetic guidance', 'focus @notes.txt'])('preserves steering input when mention placement is unavailable: %s', async (content) => {
+    const serviceFor = mock(() => { throw new DomainError('NODE_UNAVAILABLE', 'Synthetic placement failure', 409); });
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const { service, queue } = makeService({
+      fileMentions: new WorkspaceFileMentionResolver(serviceFor),
+      queue: { captureSteerTarget: mock(() => target) },
+    });
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID, content,
+      clientRequestId: 'request-steer-placement', clientMessageId: 'message-steer-placement',
+    })).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-active' });
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
+      content, providerContent: content, target,
+    }));
+    expect(serviceFor).toHaveBeenCalledTimes(content.includes('@') ? 1 : 0);
+  });
+
   it('keeps the first same-identity steering admission while file preparation is delayed', async () => {
     const resolutionStarted = deferred();
     const releaseResolution = deferred();
@@ -5493,7 +5512,7 @@ describe('ChatCommandService', () => {
     ]);
   });
 
-  it('bounds stalled steering file preparation and skips additional uncancellable reads', async () => {
+  it('cancels stalled steering file preparation and holds capacity until the read settles', async () => {
     const resolutionStarted = deferred();
     const releaseResolution = deferred();
     const target = { attempt: {}, identity: { turnId: 'turn-active' } };
@@ -5537,6 +5556,7 @@ describe('ChatCommandService', () => {
     });
 
     const results = await Promise.all([first, duplicate, later]);
+    expect(fileMentions.resolve.mock.calls[0][2].aborted).toBe(true);
     releaseResolution.resolve();
 
     expect(results).toEqual([

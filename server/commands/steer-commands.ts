@@ -154,7 +154,7 @@ export class SteerCommands {
           chatId: input.chatId,
           clientRequestId,
           content: input.content,
-          projectPath: initialChat?.projectPath,
+          target: initialChat,
         });
         // Enqueues the command lock before releasing steering preparation order.
         return { response: scheduleResponse() };
@@ -345,7 +345,7 @@ export class SteerCommands {
             chatId: input.chatId,
             clientRequestId,
             content: observedEntry.content,
-            projectPath: initialChat?.projectPath,
+            target: initialChat,
           });
         }
         return { response: scheduleResponse() };
@@ -377,9 +377,9 @@ export class SteerCommands {
     chatId: string;
     clientRequestId: string;
     content: string;
-    projectPath?: string;
+    target: import('../chats/file-mentions.js').FileMentionTarget | null;
   }): Promise<string> {
-    if (!input.projectPath) return input.content;
+    if (!input.target?.projectPath) return input.content;
     if (
       this.#fileContextResolutions.has(input.chatId)
       || this.#fileContextResolutions.size >= STEER_FILE_CONTEXT_IN_FLIGHT_LIMIT
@@ -387,7 +387,8 @@ export class SteerCommands {
       return input.content;
     }
 
-    const resolution = this.deps.fileMentions.resolve(input.content, input.projectPath);
+    const cancellation = new AbortController();
+    const resolution = this.deps.fileMentions.resolve(input.content, input.target, cancellation.signal);
     this.#fileContextResolutions.set(input.chatId, resolution);
     const clearResolution = () => {
       if (this.#fileContextResolutions.get(input.chatId) === resolution) {
@@ -404,6 +405,7 @@ export class SteerCommands {
       );
     } catch (error) {
       if (!(error instanceof PromiseTimeoutError)) throw error;
+      cancellation.abort(error);
       logger.warn('steer file context timed out', {
         chatId: input.chatId,
         clientRequestId: input.clientRequestId,

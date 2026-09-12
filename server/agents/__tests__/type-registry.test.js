@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { AgentTypeRegistry } from '../type-registry.ts';
-import { defaultAgentIntegrations } from '../default-agent-integrations.ts';
+import { loadDefaultAgentIntegrations } from '../default-agent-integrations.ts';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 function definition(id = 'alpha') {
   return {

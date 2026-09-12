@@ -41,6 +41,8 @@ export interface OpenCodeTurnContext {
 }
 
 export interface OpenCodeSession {
+  configurationEpoch: number;
+  configurationPreparing: boolean;
   status: 'running' | 'completed' | 'aborted';
   // Set while a provider abort is in flight so a named completion cannot claim the turn
   // before the abort is acknowledged; a rejected abort replays the completion.
@@ -66,6 +68,7 @@ export interface OpenCodeSession {
 }
 
 export function relocateOpenCodeSession(session: OpenCodeSession, directory: string): void {
+  session.configurationEpoch += 1;
   session.directory = directory;
   session.lastActivityAt = Date.now();
 }
@@ -81,6 +84,8 @@ export function activateOpenCodeSessionTurn(
     turn: OpenCodeTurnContext;
   },
 ): void {
+  session.configurationEpoch += 1;
+  session.configurationPreparing = true;
   session.status = 'running';
   session.aborting = false;
   session.providerWorkRequiresQuiescence = false;

@@ -51,10 +51,11 @@ export function parseExecutionOrigin(value: unknown): ExecutionOrigin | null {
 }
 
 export function sameExecutionOwner(a: LocatedChatOwner, b: LocatedChatOwner): boolean {
-  return a.agentId === b.agentId
-    && a.executionLocation.nodeId === b.executionLocation.nodeId
-    && a.executionLocation.instanceId === b.executionLocation.instanceId
-    && a.executionLocation.workspaceId === b.executionLocation.workspaceId;
+  return a.agentId === b.agentId && sameExecutionLocation(a.executionLocation, b.executionLocation);
+}
+
+export function sameExecutionLocation(a: ExecutionLocation, b: ExecutionLocation): boolean {
+  return a.nodeId === b.nodeId && a.instanceId === b.instanceId && a.workspaceId === b.workspaceId;
 }
 
 export function projectWorkspaceKey(ref: ProjectWorkspaceRef): string {

@@ -157,11 +157,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       logger,
       config,
     );
-    this.sessionConfiguration = {
-      apply: (agentSessionId, configuration) => (
-        providerExecution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
+    this.sessionConfiguration = runtime.sessionConfiguration;
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };

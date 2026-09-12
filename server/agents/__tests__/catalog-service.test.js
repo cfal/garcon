@@ -1,3 +1,4 @@
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { describe, expect, mock, test } from "bun:test";
 import { AgentCatalogService } from "../catalog-service.ts";
 import { AgentInstanceDirectory } from "../instance-directory.js";
@@ -64,6 +65,7 @@ function createIntegration() {
     },
     goals: null,
     endpoints: {},
+    projectPathUpdates: { prepare: async () => {} },
   };
 }
 
@@ -83,7 +85,7 @@ function serviceFor(instances, endpointResolver = {
   getModelOptions: () => [], modelSupportsImages: () => false,
 }) {
   return new AgentCatalogService({
-    instances: new AgentInstanceDirectory(instances), localNodeId: "local",
+    instances: new AgentInstanceDirectory(createLocalProviderInstances(instances)), localNodeId: "local",
     defaultAgentIds: ["sample-agent"], endpointResolver,
   });
 }
@@ -180,11 +182,12 @@ describe("AgentCatalogService", () => {
 
   test("cancellation at the port handoff cannot deliver models or update the strictness cache", async () => {
     const local = configuredInstance({ id: "default", defaults: true, strict: true });
-    const directory = new AgentInstanceDirectory([local]);
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances([local]));
     const controller = new AbortController();
-    /** @satisfies {Pick<AgentInstanceDirectory, 'require' | 'defaultFor' | 'catalogForInstance'>} */
+    /** @satisfies {Pick<AgentInstanceDirectory, 'metadataForInstance' | 'defaultFor' | 'catalogForInstance' | 'assertAvailableForInstance'>} */
     const instances = {
-      require: directory.require.bind(directory),
+      metadataForInstance: directory.metadataForInstance.bind(directory),
+      assertAvailableForInstance: directory.assertAvailableForInstance.bind(directory),
       defaultFor: directory.defaultFor.bind(directory),
       catalogForInstance: (ref) => ({
         snapshot: (request, signal) => {
@@ -231,13 +234,13 @@ describe("AgentCatalogService", () => {
   test("projects integration-owned capabilities, modes, and settings into the catalog", async () => {
     const integration = createIntegration();
     const service = new AgentCatalogService({
-      instances: new AgentInstanceDirectory([{
+      instances: new AgentInstanceDirectory(createLocalProviderInstances([{
         configuration: {
           nodeId: "local", id: "default", agentId: integration.descriptor.id, label: "Default",
           default: true, storageNamespace: integration.descriptor.id, removedAt: null,
         },
         integration,
-      }]),
+      }])),
       localNodeId: "local",
       defaultAgentIds: [integration.descriptor.id],
       endpointResolver: {
@@ -290,5 +293,12 @@ describe("AgentCatalogService", () => {
         { value: "sample-model", label: "Sample Model", supportsImages: true },
       ],
     });
+  });
+
+  test("project-path support remains available when no native preparation is needed", async () => {
+    const local = configuredInstance({ id: "default", defaults: true });
+    local.integration.projectPathUpdates = null;
+    const entry = await serviceFor([local]).getAgentCatalogEntry("sample-agent");
+    expect(entry.supportsUpdateProjectPath).toBe(true);
   });
 });

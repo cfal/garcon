@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { ProviderSteerTarget, ProviderExecutionOperation, ProviderExecutionService } from '../execution-nodes/provider-execution.js';
+import type { ProviderSteerTarget, ProviderExecutionOperation, ProviderExecutionOutput, ProviderExecutionService } from '../execution-nodes/provider-execution.js';
 import {
   AgentIntegrationError,
   type AgentGoalControlHandoff,
@@ -8,7 +8,6 @@ import {
   type AgentSteerResult,
   type AgentSteerTarget,
   type AgentEstablishedSession,
-  type AgentEmissionSink,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ExecutionInstanceRef, LocatedChatOwner } from '@garcon/common/execution-location';
@@ -21,13 +20,12 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import { getMaxSessions } from '../config.js';
-import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
+import type { FileMentionResolver } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
 import type { TurnReceiptOwner } from '../lib/turn-identity.js';
 import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import { localEmissionSink } from './local-emission.js';
-import type { AgentDirectory } from './directory.js';
 import type { AgentInstanceDirectory } from './instance-directory.js';
 import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
@@ -43,7 +41,7 @@ import type {
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAdmittedEndpoint } from './execution-planning.js';
-import { toAgentChatReference, toProviderNativeChatReference } from './integration-chat-reference.js';
+import { toProviderNativeChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type {
@@ -63,7 +61,7 @@ interface TurnOperation extends TurnReceiptOwner {
 
 interface LocalProducerBinding {
   readonly lease: TranscriptProducerLease;
-  readonly output: AgentEmissionSink;
+  readonly output: ProviderExecutionOutput;
 }
 
 interface RuntimeExecutionOccurrence {
@@ -88,10 +86,11 @@ interface PreparedTurn {
 
 export interface AgentRuntimeRouterOptions {
   registry: IChatRegistry;
-  directory: AgentDirectory;
+  providerIds: readonly string[];
   localNodeId: string;
+  fileMentions: FileMentionResolver;
   instances: Pick<AgentInstanceDirectory,
-    'get' | 'requireFor' | 'defaultFor' | 'executionFor' | 'configurationFor' | 'commandsForInstance' | 'nativeForkFor' | 'singleQueryForInstance'>;
+    'assertAvailableFor' | 'defaultFor' | 'executionFor' | 'configurationFor' | 'commandsForInstance' | 'nativeForkFor' | 'singleQueryForInstance' | 'projectPathUpdatesFor'>;
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
@@ -138,9 +137,10 @@ type PreparedPrompt =
 
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
-  readonly #directory: AgentDirectory;
+  readonly #providerIds: readonly string[];
   readonly #instances: AgentRuntimeRouterOptions['instances'];
   readonly #localNodeId: string;
+  readonly #fileMentions: FileMentionResolver;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -159,9 +159,10 @@ export class AgentRuntimeRouter {
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
-    this.#directory = options.directory;
+    this.#providerIds = [...options.providerIds];
     this.#instances = options.instances;
     this.#localNodeId = options.localNodeId;
+    this.#fileMentions = options.fileMentions;
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
@@ -258,7 +259,7 @@ export class AgentRuntimeRouter {
     try {
       // Admission fixes configuration; dispatch still fences changes to the owning session or view.
       prepared.validateBinding();
-      const content = prepared.kind === 'compact' ? null : await this.#preparePrompt(chatId, prompt, opts, prepared.entry.projectPath);
+      const content = prepared.kind === 'compact' ? null : await this.#preparePrompt(chatId, prompt, opts, prepared.entry);
       if (content && !content.dispatch) return;
       assertExecutionAdmissionOpen(opts);
       prepared.validateBinding();
@@ -392,9 +393,10 @@ export class AgentRuntimeRouter {
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     const previousTurn = this.#events.getActiveTurn(chatId);
     const previousRunId = occurrence.runId;
+    const signal = opts.executionAdmission?.signal ?? new AbortController().signal;
     return occurrence.service.submitGoalControl(occurrence.operation, {
       runId: operation.turnId, configuration: this.#configurationRequest(entry, selection, opts),
-      prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath), attachments: attachments(opts.images),
+      prompt: await this.#fileMentions.resolve(prompt, entry, signal), attachments: attachments(opts.images),
       beforeDelivery: async (handoff) => {
         await beforeDelivery(this.#goalRunHandoff({
           chatId, previousRunId, nextRunId: operation.turnId, previousTurn,
@@ -402,7 +404,7 @@ export class AgentRuntimeRouter {
         }));
         this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
       },
-    }, opts.executionAdmission?.signal ?? new AbortController().signal);
+    }, signal);
   }
 
   compactSession(chatId: string, opts: {
@@ -426,18 +428,16 @@ export class AgentRuntimeRouter {
     ) {
       throw new Error(`Session changed while preparing project path: ${request.chatId}`);
     }
-    const integration = this.#instances.requireFor(entry);
-    if (!integration.projectPathUpdates) return;
-    return integration.projectPathUpdates.prepare({
-      chat: toAgentChatReference(
-        integration,
+    const service = this.#instances.projectPathUpdatesFor(entry);
+    if (!service) return;
+    return service.prepare({
+      chat: toProviderNativeChatReference(
         request.chatId,
         { ...entry, nativeSession: request.nativeSession },
         this.#getCarryOverRevision(entry),
       ),
       nextProjectPath: request.nextProjectPath,
-      signal: new AbortController().signal,
-    });
+    }, new AbortController().signal);
   }
 
   abortSession(chatId: string): Promise<boolean> {
@@ -460,9 +460,9 @@ export class AgentRuntimeRouter {
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>> {
     const result: Record<string, Array<{ id: string; [key: string]: unknown }>> = {};
     const activeChatIds = this.#ledger.activeChatIds();
-    for (const integration of this.#directory.list()) {
-      result[integration.descriptor.id] = activeChatIds
-        .filter((chatId) => this.#registry.getChat(chatId)?.agentId === integration.descriptor.id)
+    for (const agentId of this.#providerIds) {
+      result[agentId] = activeChatIds
+        .filter((chatId) => this.#registry.getChat(chatId)?.agentId === agentId)
         .map((chatId) => ({ id: chatId, status: 'running' }));
     }
     return result;
@@ -629,13 +629,13 @@ export class AgentRuntimeRouter {
 
   async discoverChatSlashCommands(chat: AgentChatEntry, agentId: string, signal: AbortSignal) {
     signal.throwIfAborted();
-    this.#instances.requireFor(chat);
+    this.#instances.assertAvailableFor(chat);
     let target: ExecutionInstanceRef = chat.executionLocation;
     if (agentId !== chat.agentId) {
       // A staged provider change selects its default on the same node, never another machine.
       const staged = this.#instances.defaultFor(chat.executionLocation.nodeId, agentId);
       if (!staged) throw new DomainError('NODE_UNAVAILABLE', 'The selected provider is unavailable on this chat node.', 409);
-      this.#instances.requireFor({
+      this.#instances.assertAvailableFor({
         agentId, executionLocation: { ...chat.executionLocation, instanceId: staged.instanceId },
       });
       target = staged;
@@ -693,8 +693,8 @@ export class AgentRuntimeRouter {
   async #preparePrompt(
     chatId: string,
     fallbackPrompt: string,
-    opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images'>,
-    projectPath: string,
+    opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images' | 'executionAdmission'>,
+    entry: AgentChatEntry,
   ): Promise<PreparedPrompt> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
@@ -710,7 +710,8 @@ export class AgentRuntimeRouter {
     const preparedAttachments = promptRows.length > 0
       ? promptRows.flatMap((row) => row.detail.attachments)
       : attachments(opts.images);
-    const resolvedPrompt = await resolveFileMentionsInCommand(prompt, projectPath);
+    const resolvedPrompt = await this.#fileMentions.resolve(prompt, entry,
+      opts.executionAdmission?.signal ?? new AbortController().signal);
     return {
       dispatch: true,
       prompt: resolvedPrompt,
@@ -746,13 +747,13 @@ export class AgentRuntimeRouter {
       validate,
       commit: () => {
         validate();
-        eventHandoff.commit();
         this.#ledger.handoffRun(input.chatId, input.previousRunId, input.nextRunId);
         const active = this.#executions.get(input.chatId);
         if (active?.runId === input.previousRunId) {
           // The launch continuation retains this record before its native handle exists.
           active.runId = input.nextRunId;
         }
+        eventHandoff.commit();
       },
     };
   }
@@ -763,7 +764,7 @@ export class AgentRuntimeRouter {
     if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const lease = this.#ledger.openProducer(chatId, entry.agentId);
-    const binding = { lease, output: localEmissionSink(lease.sink) };
+    const binding = { lease, output: Object.freeze({ ...localEmissionSink(lease.sink), signal: lease.signal }) };
     this.#producerLeases.set(chatId, binding);
     return binding;
   }

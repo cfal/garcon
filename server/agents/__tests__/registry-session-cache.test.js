@@ -58,7 +58,7 @@ describe('AgentRegistry session cache', () => {
   function createRegistry(
     adoption = { ensure: () => Promise.reject(new Error('unused')) },
     preambles = { snapshot: () => ({ revision: 0, preambles: [] }) },
-    integrations = {
+    types = {
       has: () => false,
       get: () => null,
       require: () => { throw new Error('unused'); },
@@ -66,10 +66,11 @@ describe('AgentRegistry session cache', () => {
     },
   ) {
     return new AgentRegistry({
+    fileMentions: { resolve: async (command) => command },
       localNodeId: 'local-node',
       registry: chats,
-      integrations,
-      instances: { requireFor: (owner) => integrations.require(owner.agentId) },
+      types,
+      instances: {},
       endpointResolver: {},
       getCarryOverRevision: () => 'carry-1',
       ledger,

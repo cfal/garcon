@@ -104,11 +104,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
         (runtimeRequest, publish) => providerExecution.compact(runtimeRequest, publish),
       ),
     };
-    this.sessionConfiguration = {
-      apply: (agentSessionId, configuration) => (
-        providerExecution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
+    this.sessionConfiguration = runtime.sessionConfiguration;
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId);
     this.nativeSessions = nativeEvidence;
     this.projectPathUpdates = createOpenCodeProjectPathUpdates({ runtime, sessionId });

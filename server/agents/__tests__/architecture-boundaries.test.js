@@ -67,6 +67,13 @@ describe('agent architecture boundaries', () => {
     }
   });
 
+  test('keeps instance service selection independent of local executable adapters', () => {
+    for (const file of ['server/agents/instance-directory.ts', 'server/execution-nodes/provider-instance.ts']) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).not.toMatch(/\bAgentIntegration\b|execution-node\/local-provider-/);
+    }
+  });
+
   test('keeps admitted credentials private and removes dispatch-time credential lookup', () => {
     for (const file of [...walk('common'), ...walk('web/src'),
       'server-agents/interface/src/contracts/node-wire.ts', 'server-agents/interface/src/node-wire.ts']) {

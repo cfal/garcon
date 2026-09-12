@@ -1,3 +1,4 @@
+import { nativePermissionsFixture } from './native-permissions-fixture.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
 import { OpenCodeSteeringController } from '../steering.js';
@@ -177,6 +178,7 @@ function createRuntime(overrides = {}) {
         permission: { reply: mock(() => Promise.resolve({})) },
         global: { event: mock(({ signal }) => Promise.resolve({ stream: eventStream.stream(signal) })) },
         session: {
+          ...nativePermissionsFixture(),
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
           prompt,
           promptAsync: submitAsync,

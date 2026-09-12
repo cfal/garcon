@@ -13,7 +13,6 @@ describe('instance-qualified controls', () => {
   afterEach(async () => { await fixture?.dispose(); });
 
   it('discovers project-only commands from the configured default, not the provider-type registry', async () => {
-    fixture.integrations.get = () => fixture.secondary.integration;
     const alias = path.join(fixture.root, 'project-alias');
     await symlink(fixture.root, alias);
     const canonicalRoot = await realpath(fixture.root);
@@ -29,7 +28,6 @@ describe('instance-qualified controls', () => {
     const run = mock(async () => 'synthetic response');
     fixture.primary.integration.singleQuery = { runsToolsWithoutPermission, run };
     fixture.secondary.integration.singleQuery = { runsToolsWithoutPermission: !runsToolsWithoutPermission, run: mock(async () => '') };
-    fixture.integrations.get = () => fixture.secondary.integration;
     expect(fixture.agents.singleQueryRunsToolsWithoutPermission('test')).toBe(runsToolsWithoutPermission);
     expect(await fixture.agents.runSingleQuery('synthetic prompt', { agentId: 'test' })).toBe('synthetic response');
     expect(run).toHaveBeenCalledOnce();
@@ -106,6 +104,19 @@ describe('instance-qualified controls', () => {
     expect(fixture.primary.integration.execution.abort).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('supports relocation without native preparation and preserves the native-path requirement: %s', async (requiresNativePath) => {
+    fixture.secondary.integration.projectPathUpdates = null;
+    fixture.secondary.integration.descriptor.requiresNativePathForProjectPathUpdate = requiresNativePath;
+    const owner = fixture.chats.getChat(chatId);
+    expect(fixture.agents.supportsUpdateProjectPath(owner)).toBe(true);
+    expect(fixture.agents.requiresNativePathForProjectPathUpdate(owner)).toBe(requiresNativePath);
+    expect(await fixture.agents.prepareProjectPathUpdate('test', {
+      chatId, agentSessionId: owner.agentSessionId, nativeSession: owner.nativeSession,
+      previousProjectPath: owner.projectPath, nextProjectPath: `${fixture.root}/next`,
+    })).toBeUndefined();
+    expect(fixture.primary.integration.projectPathUpdates.prepare).not.toHaveBeenCalled();
+  });
+
   it('prepares relocation and applies live configuration on the same captured instance', async () => {
     const owner = fixture.chats.getChat(chatId);
     expect(await fixture.agents.prepareProjectPathUpdate('test', {
@@ -116,12 +127,17 @@ describe('instance-qualified controls', () => {
     expect(fixture.secondary.integration.projectPathUpdates.prepare).toHaveBeenCalledWith(expect.objectContaining({
       chat: expect.objectContaining({ settings: expect.objectContaining({ values: { parsedBy: 'secondary' } }) }),
     }));
-    expect(fixture.secondary.integration.sessionConfiguration.apply).toHaveBeenCalledWith(
-      'colliding-session', expect.objectContaining({ model: 'changed-model' }), expect.objectContaining({ model: 'synthetic-model' }),
-    );
+    expect(fixture.secondary.integration.sessionConfiguration.prepare).toHaveBeenCalledWith({
+      expected: { chatId, agentSessionId: 'colliding-session', nativeSession: owner.nativeSession, projectPath: owner.projectPath },
+      next: expect.objectContaining({ model: 'changed-model' }),
+      previous: expect.objectContaining({ model: 'synthetic-model' }),
+      signal: expect.any(AbortSignal),
+    });
+    expect(fixture.secondary.integration.sessionConfiguration.commit).toHaveBeenCalledWith(
+      fixture.secondary.target, expect.any(AbortSignal));
     expect(fixture.chats.getChat(chatId).model).toBe('changed-model');
     expect(fixture.primary.integration.projectPathUpdates.prepare).not.toHaveBeenCalled();
-    expect(fixture.primary.integration.sessionConfiguration.apply).not.toHaveBeenCalled();
+    expect(fixture.primary.integration.sessionConfiguration.prepare).not.toHaveBeenCalled();
   });
 
   it('forks and disposes through the captured owner even after its registry entry changes', async () => {

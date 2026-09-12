@@ -19,7 +19,6 @@ import {
   markAcpExecutionStarted,
   type AcpProjectPathUpdateRequest,
   type AcpResumeRequest,
-  type AcpSessionSettingsPatch,
   type AcpStartedSession,
   type AcpStartRequest,
 } from './runtime-types.js';
@@ -40,6 +39,9 @@ import { reconnectOrder } from '../../acp/reconnect-policy.js';
 import { AcpTransport } from '../../acp/transport.js';
 import type { AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { SessionConfigurationPreparations } from '@garcon/server-agent-common/execution/session-configuration';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import type { AgentSessionConfigurationPrepareRequest } from '@garcon/server-agent-interface';
 import {
   abortStrategy,
   asObject,
@@ -73,13 +75,15 @@ interface AcpAgentRuntimeSession {
   remoteSessionId: string;
   chatId: string;
   projectPath: string;
+  nativePath: string | null;
+  configurationEpoch: number;
+  configuring: boolean;
   client: AcpClient;
   capabilities: AcpAdvertisedCapabilities;
   state: RuntimeSessionState;
   retired: boolean;
   activeTurn: AcpTurnContext | null;
   sourceTurn: AcpTurnContext | null;
-  permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
   startedAt: string;
   lastActivityAt: number;
@@ -165,6 +169,36 @@ export class AcpAgentRuntime {
     this.#logger = options.logger ?? SILENT_LOGGER;
   }
 
+  readonly sessionConfiguration = new SessionConfigurationPreparations((request) => this.#captureConfiguration(request));
+
+  #captureConfiguration(request: AgentSessionConfigurationPrepareRequest) {
+    const { expected, previous, next } = request;
+    const session = this.#sessions.get(expected.agentSessionId);
+    if (!session) return null;
+    const conflict = { kind: 'rejected', reason: 'target-conflict' } as const;
+    if (session.chatId !== expected.chatId || session.projectPath !== expected.projectPath || !expected.nativeSession) return conflict;
+    try {
+      const native = createPathNativeSessionCodec(this.#policy.agentId).decode(expected.nativeSession);
+      if (native.agentSessionId !== session.id || native.path !== session.nativePath || native.modelEndpointId !== null) return conflict;
+    } catch { return conflict; }
+    const epoch = session.configurationEpoch;
+    const client = session.client;
+    const remoteSessionId = session.remoteSessionId;
+    return {
+      validate: () => this.#sessions.get(session.id) === session && !session.retired && !session.configuring
+        && session.configurationEpoch === epoch && session.client === client && session.remoteSessionId === remoteSessionId
+        && session.chatId === expected.chatId && session.projectPath === expected.projectPath,
+      async deliver(beforeMutation: () => void) {
+        if (previous.permissionMode === next.permissionMode || !session.activeTurn?.running) {
+          return 'not-required' as const;
+        }
+        beforeMutation();
+        if (session.sourceTurn) session.sourceTurn.permissionMode = next.permissionMode;
+        return 'applied' as const;
+      },
+    };
+  }
+
   async startSession(request: AcpStartRequest): Promise<AcpStartedSession> {
     assertAcpExecutionOpen(request);
     const client = await this.#connectClient(request);
@@ -198,13 +232,15 @@ export class AcpAgentRuntime {
       remoteSessionId: sessionId,
       chatId: request.chatId,
       projectPath: request.projectPath,
+      nativePath: this.#nativePathFor(sessionId),
+      configurationEpoch: 1,
+      configuring: true,
       client,
       capabilities,
       state: 'idle',
       retired: false,
       activeTurn: null,
       sourceTurn: null,
-      permissionMode: request.permissionMode,
       configOptions: created.configOptions,
       startedAt: now,
       lastActivityAt: Date.now(),
@@ -212,7 +248,7 @@ export class AcpAgentRuntime {
     this.#sessions.set(sessionId, session);
     const result = {
       agentSessionId: sessionId,
-      nativePath: this.#nativePathFor(sessionId),
+      nativePath: session.nativePath,
     };
     request.onSessionActivated?.(result);
     let resolveStarted!: () => void;
@@ -321,15 +357,6 @@ export class AcpAgentRuntime {
     pending.turn.pendingPermissions.delete(pending);
   }
 
-  updateSessionSettings(agentSessionId: string, patch: AcpSessionSettingsPatch): void {
-    const session = this.#sessions.get(agentSessionId);
-    if (!session) return;
-    if (patch.permissionMode !== undefined) {
-      session.permissionMode = patch.permissionMode;
-      if (session.sourceTurn) session.sourceTurn.permissionMode = patch.permissionMode;
-    }
-  }
-
   shutdown(): void {
     this.#idlePurger.stop();
     for (const session of [...this.#sessions.values()]) {
@@ -376,6 +403,14 @@ export class AcpAgentRuntime {
       if (existing.chatId !== request.chatId) {
         throw new Error(`ACP session ${request.agentSessionId} is already bound to another chat`);
       }
+      if (existing.projectPath !== request.projectPath) {
+        throw new Error(`ACP session ${request.agentSessionId} is already bound to another project`);
+      }
+      if (existing.activeTurn?.running || existing.configuring) {
+        throw new Error(`Session ${request.agentSessionId} is already running`);
+      }
+      existing.configurationEpoch += 1;
+      existing.configuring = true;
       return existing;
     }
 
@@ -387,22 +422,27 @@ export class AcpAgentRuntime {
       remoteSessionId: request.agentSessionId,
       chatId: request.chatId,
       projectPath: request.projectPath,
+      nativePath: request.nativePath ?? this.#nativePathFor(request.agentSessionId),
+      configurationEpoch: 1,
+      configuring: true,
       client,
       capabilities,
       state: 'idle',
       retired: false,
       activeTurn: null,
       sourceTurn: null,
-      permissionMode: request.permissionMode,
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
     };
     this.#sessions.set(request.agentSessionId, baseSession);
 
-    const connected = await this.#reconnectSession(baseSession, request, order);
-    if (!connected) {
+    try {
+      if (!await this.#reconnectSession(baseSession, request, order)) {
+        throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
+      }
+    } catch (error) {
       this.#retireSession(baseSession, 'cancelled');
-      throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
+      throw error;
     }
     return baseSession;
   }
@@ -463,8 +503,9 @@ export class AcpAgentRuntime {
     request: AcpStartRequest | AcpResumeRequest,
     onExecutionStarted?: () => void,
   ): Promise<void> {
-    assertAcpExecutionOpen(request);
     const turn = this.#createTurn(session, request);
+    const epoch = session.configurationEpoch;
+    session.configuring = true;
     this.#bindTurnSource(turn);
     this.#converter.beginTurn?.(session.id);
 
@@ -475,6 +516,7 @@ export class AcpAgentRuntime {
     let admissionClosed = false;
 
     try {
+      assertAcpExecutionOpen(request);
       await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
@@ -499,6 +541,7 @@ export class AcpAgentRuntime {
         failureMessage = humanizeError(error);
       }
     } finally {
+      if (session.configurationEpoch === epoch) session.configuring = false;
       const finalMessages = executionStarted ? this.#emitFlushedMessages(turn)
         .filter((message) => message.type === 'assistant-message') : [];
       if (turn.aborted) {
@@ -569,7 +612,7 @@ export class AcpAgentRuntime {
     turn.running = true;
     session.sourceTurn = turn;
     session.activeTurn = turn;
-    session.permissionMode = turn.permissionMode;
+    session.configuring = false;
     session.projectPath = projectPath;
     session.state = 'running';
     session.lastActivityAt = Date.now();

@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../../server/execution-node/local-provider-instance.js';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -104,13 +105,13 @@ for (const { provider, entrypoint } of cases) {
       let result: string;
       if (entrypoint === 'facet') result = await integration.textGeneration.run(request);
       else {
-        const instances = new AgentInstanceDirectory([{
+        const instances = new AgentInstanceDirectory(createLocalProviderInstances([{
           configuration: {
             nodeId: 'synthetic-node', id: 'synthetic-instance', agentId: integration.descriptor.id,
             label: 'Synthetic instance', storageNamespace: 'synthetic-instance', default: false, removedAt: null,
           },
           integration,
-        }]);
+        }]));
         const generation = instances.textGenerationForInstance({ nodeId: 'synthetic-node', instanceId: 'synthetic-instance' });
         if (!generation) throw new Error('Instance did not expose text generation');
         const { prompt, timeoutMs, signal, ...configuration } = request;

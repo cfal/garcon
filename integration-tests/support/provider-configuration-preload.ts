@@ -1,6 +1,8 @@
 import DirectOpenAiCompatibleIntegration from '../../server-agents/direct-openai-compatible/src/index.js';
 import { AgentIntegrationError, type AgentHost } from '../../server-agents/interface/src/index.js';
-import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const validationGate = process.env.GARCON_TEST_CONFIGURATION_GATE ?? '';
 if (!validationGate) throw new Error('Configuration validation requires its isolated fixture barrier');

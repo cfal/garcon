@@ -55,11 +55,18 @@ export type BufferedClientEvent =
 export interface RunningCodexSession {
   chatId: string;
   threadId: string;
+  projectPath: string;
   nativePath: string | null;
+  publishedNativePath: string | null;
+  nativeModelEndpointId: string | null;
+  configurationEpoch: number;
+  configurationPreparing: object | null;
   codexHome: string | null;
   client: CodexAppServerClient;
   runtimeIdentity: string;
   activeTurnId: string | null;
+  activeTurnPermissionMode: PermissionMode | null;
+  activeTurnOperation: CodexOperation | null;
   status: RunningStatus;
   permissionMode: PermissionMode;
   startedAt: string;
@@ -106,13 +113,30 @@ export function providerOwnsReasoningEffort(
 }
 
 export function codexAbortOperation(
-  session: Pick<RunningCodexSession, 'activeTurnId' | 'turnRoutes' | 'sourceOperation' | 'goalOperation' | 'nextTurnOperation'>,
+  session: Pick<RunningCodexSession, 'activeTurnId' | 'activeTurnOperation' | 'turnRoutes' | 'sourceOperation' | 'goalOperation' | 'nextTurnOperation'>,
 ): CodexOperation | null {
   const operation = session.activeTurnId !== null
-    ? session.turnRoutes.get(session.activeTurnId)
+    ? codexTurnLifecycleOperation(session, session.activeTurnId)
     : session.goalOperation ?? session.nextTurnOperation ?? session.sourceOperation;
   // Goal handoffs change run identity while retaining the source execution occurrence.
   return operation && isRuntimeAbortTarget(operation, session.sourceOperation.publish) ? operation : null;
+}
+
+export function codexTurnLifecycleOperation(
+  session: Pick<RunningCodexSession, 'activeTurnId' | 'activeTurnOperation' | 'turnRoutes'>,
+  turnId: string,
+): CodexOperation | undefined {
+  const captured = session.turnRoutes.get(turnId);
+  if (!captured) return undefined;
+  return session.activeTurnId === turnId ? session.activeTurnOperation ?? captured : captured;
+}
+
+export function commitGoalLifecycleHandoff(session: RunningCodexSession, operation: CodexOperation): void {
+  session.goalOperation = operation;
+  session.nextTurnOperation = operation;
+  // Only the active lifecycle transfers; content and detached turns keep their captured routes.
+  if (session.activeTurnId !== null) session.activeTurnOperation = operation;
+  if (session.pendingFinish) session.pendingFinishOperation = operation;
 }
 
 export function recordExplicitReasoningEffort(
@@ -216,10 +240,19 @@ export function adoptTurn(
   operation: CodexOperation,
 ): boolean {
   if (session.turnRoutes.has(turnId)) return false;
+  session.configurationEpoch += 1;
   session.turnRoutes.set(turnId, operation);
   session.activeTurnId = turnId;
+  session.activeTurnPermissionMode = session.permissionMode;
+  session.activeTurnOperation = operation;
   if (session.nextTurnOperation === operation) session.nextTurnOperation = null;
   return true;
+}
+
+export function clearActiveTurn(session: RunningCodexSession): void {
+  session.activeTurnId = null;
+  session.activeTurnPermissionMode = null;
+  session.activeTurnOperation = null;
 }
 
 export function sourceForClientThread(

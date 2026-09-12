@@ -25,9 +25,6 @@ function createClaudeStub(startError) {
     abortClaudeInternalSession: mock(() => Promise.resolve(false)),
     isClaudeInternalSessionRunning: mock(() => false),
     getRunningClaudeInternalSessions: mock(() => []),
-    setInternalPermissionMode: mock(() => undefined),
-    setInternalThinkingMode: mock(() => undefined),
-    setInternalClaudeThinkingMode: mock(() => undefined),
     prepareClaudeProjectPathUpdate: mock(() => Promise.resolve()),
     failClaudeInternalSession: mock((_agentSessionId, _chatId, errorMessage, operation) => {
       operation.publish({

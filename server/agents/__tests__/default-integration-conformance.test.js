@@ -3,9 +3,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runAgentIntegrationConformance } from '@garcon/server-agent-interface/testing';
-import { defaultAgentIntegrations } from '../default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from '../default-agent-integrations.js';
 import { IntegrationHostFactory } from '../integration-host.js';
 import { IntegrationRegistry } from '../integration-registry.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 describe('default agent integration conformance', () => {
   let workspaceDir;

@@ -86,17 +86,6 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
     }));
   }
 
-  async applySessionConfiguration(
-    agentSessionId: string,
-    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
-  ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
-      model: configuration.model,
-      permissionMode: configuration.permissionMode,
-      thinkingMode: configuration.thinkingMode,
-    });
-  }
-
 }
 
 function executionFields(request: AgentRuntimeExecutionContext) {

@@ -1,3 +1,4 @@
+import { nativePermissionsFixture } from './native-permissions-fixture.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { OpenCodeRuntime } from '../opencode.js';
@@ -180,6 +181,7 @@ function createRuntime(
           event: subscribe,
         },
         session: {
+          ...nativePermissionsFixture(),
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
           prompt,
           promptAsync,
@@ -214,6 +216,140 @@ async function start(runtime, overrides = {}) {
   return published;
 }
 
+function completePrompt(eventStream, prompt, index) {
+  const messageId = `configuration-user-${index}`;
+  eventStream.push(envelope({
+    id: `configuration-part-${index}`,
+    type: 'message.part.updated',
+    properties: {
+      sessionID: 'session-1',
+      part: { id: prompt.mock.calls[index][0].parts[0].id, messageID: messageId, type: 'text', text: 'synthetic input' },
+    },
+  }));
+  eventStream.push(completedAssistantEnvelope({
+    eventId: `configuration-terminal-${index}`, messageId: `configuration-assistant-${index}`, parentId: messageId,
+  }));
+}
+
+async function prepareConfiguration(runtime) {
+  const configuration = {
+    model: 'provider/model', permissionMode: 'default', thinkingMode: 'none', endpoint: null,
+    settings: { ownerId: 'opencode', schemaVersion: 1, values: {} },
+  };
+  return runtime.sessionConfiguration.prepare({
+    expected: { chatId: 'chat-1', agentSessionId: 'session-1', projectPath: '/repo', nativeSession: null },
+    previous: configuration, next: configuration, signal: new AbortController().signal,
+  });
+}
+
+describe('OpenCode configuration turn admission', () => {
+  for (const method of ['runTurn', 'compact']) {
+    it(`releases the configuration fence after ${method} admission rejects after activation`, async () => {
+      const eventStream = createEventStream();
+      const prompt = mock(() => Promise.resolve({}));
+      const runtime = createRuntime(mock(() => Promise.resolve({ data: true })), prompt,
+        mock(() => Promise.resolve({ stream: eventStream.stream() })),
+        { turnPrompt: promptThrough(eventStream, prompt) });
+      const controller = new AbortController();
+      const entered = deferred();
+      const admission = deferred();
+      let pending;
+      try {
+        await start(runtime);
+        completePrompt(eventStream, prompt, 0);
+        await waitFor(() => !runtime.isRunning('session-1'));
+        const captured = await prepareConfiguration(runtime);
+        expect(captured.kind).toBe('prepared');
+        const request = {
+          agentSessionId: 'session-1', chatId: 'chat-1', projectPath: '/repo',
+          permissionMode: 'default', command: 'synthetic resume', operation: collectOperation('configuration-failed').operation,
+        };
+        pending = runtime[method]({ ...request, executionAdmission: {
+          signal: controller.signal,
+          async markStarted() { entered.resolve(); await admission.promise; controller.signal.throwIfAborted(); },
+        } }).then(() => null, error => error);
+        await entered.promise;
+        expect(runtime.isRunning('session-1')).toBe(true);
+        expect((await prepareConfiguration(runtime)).kind).toBe('rejected');
+        controller.abort(new Error('admission revoked'));
+        admission.resolve();
+        expect(await pending).toMatchObject({ message: 'admission revoked' });
+        expect(prompt).toHaveBeenCalledTimes(1);
+        expect(await runtime.sessionConfiguration.commit(captured.target, new AbortController().signal))
+          .toEqual({ kind: 'rejected', reason: 'target-changed' });
+        const fresh = await prepareConfiguration(runtime);
+        expect(fresh.kind).toBe('prepared');
+        runtime.sessionConfiguration.cancel(fresh.target);
+        const recovery = runtime.runTurn({ ...request, operation: collectOperation('configuration-recovered').operation });
+        await waitFor(() => prompt.mock.calls.length === 2);
+        completePrompt(eventStream, prompt, 1);
+        await recovery;
+      } finally {
+        admission.resolve();
+        await pending;
+        eventStream.close();
+        await runtime.shutdown();
+      }
+    });
+  }
+
+  for (const method of ['get', 'update']) {
+    it(`holds preparation through cancelled native ${method} settlement and reconciles before the next prompt`, async () => {
+      const eventStream = createEventStream();
+      const prompt = mock(() => Promise.resolve({}));
+      const native = nativePermissionsFixture();
+      const runtime = createRuntime(mock(() => Promise.resolve({ data: true })), prompt,
+        mock(() => Promise.resolve({ stream: eventStream.stream() })),
+        { turnPrompt: promptThrough(eventStream, prompt), sessionOverrides: native });
+      const entered = deferred();
+      const reply = deferred();
+      const controller = new AbortController();
+      const markStarted = mock(async () => {});
+      let pending;
+      try {
+        await start(runtime);
+        completePrompt(eventStream, prompt, 0);
+        await waitFor(() => !runtime.isRunning('session-1'));
+        const original = native[method].getMockImplementation();
+        native[method].mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          entered.resolve(args[1].signal);
+          await reply.promise;
+          return result;
+        });
+        const request = {
+          agentSessionId: 'session-1', chatId: 'chat-1', projectPath: '/repo',
+          permissionMode: 'acceptEdits', command: 'synthetic resume', operation: collectOperation('configuration-cancelled').operation,
+        };
+        let settled = false;
+        pending = runtime.runTurn({ ...request, executionAdmission: { signal: controller.signal, markStarted } })
+          .then(() => null, error => error).finally(() => { settled = true; });
+        const signal = await entered.promise;
+        controller.abort(new Error('admission cancelled'));
+        await new Promise(resolve => setImmediate(resolve));
+        expect(signal.aborted).toBe(true);
+        expect(settled).toBe(false);
+        expect(markStarted).not.toHaveBeenCalled();
+        expect(prompt).toHaveBeenCalledTimes(1);
+        expect((await prepareConfiguration(runtime)).kind).toBe('rejected');
+        await expect(runtime.runTurn(request)).rejects.toMatchObject({ code: 'SESSION_BUSY', retryable: true });
+        reply.resolve();
+        expect(await pending).toMatchObject({ message: 'admission cancelled' });
+        const recovery = runtime.runTurn({ ...request, operation: collectOperation('configuration-recovered').operation });
+        await waitFor(() => prompt.mock.calls.length === 2);
+        expect(native.update).toHaveBeenCalledTimes(1);
+        completePrompt(eventStream, prompt, 1);
+        await recovery;
+      } finally {
+        reply.resolve();
+        await pending;
+        eventStream.close();
+        await runtime.shutdown();
+      }
+    });
+  }
+});
+
 describe('OpenCodeRuntime abort', () => {
   it('establishes the event stream before creating or prompting a session', async () => {
     const eventStream = createEventStream({ connected: false });
@@ -226,6 +362,7 @@ describe('OpenCodeRuntime abort', () => {
           permission: { reply: mock(() => Promise.resolve({})) },
           global: { event: subscribe },
           session: {
+            ...nativePermissionsFixture(),
             create,
             prompt: (...args) => {
               void promptAsync(...args);
@@ -296,6 +433,7 @@ describe('OpenCodeRuntime abort', () => {
           permission: { reply: mock(() => Promise.resolve({})) },
           global: { event: subscribe },
           session: {
+            ...nativePermissionsFixture(),
             create,
             prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
@@ -336,6 +474,7 @@ describe('OpenCodeRuntime abort', () => {
           permission: { reply: mock(() => Promise.resolve({})) },
           global: { event: subscribe },
           session: {
+            ...nativePermissionsFixture(),
             create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
             prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
@@ -886,6 +1025,7 @@ describe('OpenCodeRuntime abort', () => {
       permission: { reply: mock(() => Promise.resolve({})) },
       global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
       session: {
+        ...nativePermissionsFixture(),
         create: mock(() => Promise.resolve({ data: { id: 'replacement-session' } })),
         prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
         promptAsync: mock(() => Promise.resolve({})),
@@ -898,6 +1038,7 @@ describe('OpenCodeRuntime abort', () => {
           permission: { reply: mock(() => Promise.resolve({})) },
           global: { event: firstSubscribe },
           session: {
+            ...nativePermissionsFixture(),
             create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
             prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
@@ -934,6 +1075,7 @@ describe('OpenCodeRuntime abort', () => {
           permission: { reply: mock(() => Promise.resolve({})) },
           global: { event: subscribe },
           session: {
+            ...nativePermissionsFixture(),
             create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
             prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
@@ -950,6 +1092,7 @@ describe('OpenCodeRuntime abort', () => {
           permission: { reply: mock(() => Promise.resolve({})) },
           global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
           session: {
+            ...nativePermissionsFixture(),
             create: mock(() => Promise.resolve({ data: { id: 'session-2' } })),
             prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
             promptAsync: mock(() => Promise.resolve({})),
@@ -1145,6 +1288,7 @@ describe('OpenCodeRuntime abort', () => {
         permission: { reply: mock(() => Promise.resolve({})) },
         global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
         session: {
+          ...nativePermissionsFixture(),
           create: mock(() => {
             createStarted.resolve();
             return sessionCreate.promise;
@@ -1212,6 +1356,7 @@ describe('OpenCodeRuntime abort', () => {
         permission: { reply: mock(() => Promise.resolve({})) },
         global: { event: subscribe },
         session: {
+          ...nativePermissionsFixture(),
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
           prompt: promptThrough(eventStream, promptAsync),
           promptAsync,
@@ -1284,6 +1429,7 @@ describe('OpenCodeRuntime abort', () => {
         permission: { reply: mock(() => Promise.resolve({})) },
         global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
         session: {
+          ...nativePermissionsFixture(),
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
           prompt: mock(() => new Promise(() => {})),
           promptAsync: mock(() => Promise.resolve({})),
@@ -1344,6 +1490,7 @@ describe('OpenCodeRuntime abort', () => {
         permission: { reply: mock(() => Promise.resolve({})) },
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
+          ...nativePermissionsFixture(),
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
           prompt: promptThrough(eventStream, promptAsync),
           promptAsync,

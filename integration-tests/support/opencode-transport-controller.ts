@@ -15,6 +15,7 @@ interface TransportDirective {
   connectionId?: number;
   responseId?: number;
   path?: string;
+  method?: string;
   startMarker?: string;
   endMarker?: string;
 }
@@ -160,8 +161,8 @@ export class OpenCodeTransportController {
     );
   }
 
-  async holdNextResponse(path: string): Promise<void> {
-    const seq = await this.#append({ action: 'hold-response', path });
+  async holdNextResponse(path: string, method?: string): Promise<void> {
+    const seq = await this.#append({ action: 'hold-response', path, method });
     await this.#waitForObservation(
       (observations) => observations.appliedSeq >= seq ? observations.appliedSeq : null,
       `response hold directive ${seq} was never applied`,
@@ -187,6 +188,14 @@ export class OpenCodeTransportController {
         (entry) => entry.id === responseId && entry.released,
       ),
       `response ${responseId} was never released`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
+  async waitForResponseClosed(responseId: number): Promise<void> {
+    await this.#waitForObservation(
+      observations => observations.responses.find(entry => entry.id === responseId && entry.closed),
+      `response ${responseId} was never closed`,
       DEFAULT_TIMEOUT_MS,
     );
   }

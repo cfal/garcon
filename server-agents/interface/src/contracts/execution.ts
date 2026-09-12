@@ -48,12 +48,44 @@ export interface AgentRunningSession {
 }
 
 export interface AgentSessionConfigurationUpdates {
-  apply(
-    agentSessionId: string,
-    configuration: AgentSessionConfiguration,
-    previousConfiguration: AgentSessionConfiguration,
-  ): Promise<void>;
+  /** Captures native identity and configuration without mutation; only definite initial absence permits not-required. */
+  prepare(request: AgentSessionConfigurationPrepareRequest): Promise<AgentSessionConfigurationPreparation>;
+  /** Consumes the capture once and revalidates at native delivery; uncertain mutation must return unknown. */
+  commit(target: AgentSessionConfigurationTarget, signal: AbortSignal): Promise<AgentSessionConfigurationCommitResult>;
+  cancel(target: AgentSessionConfigurationTarget): void;
 }
+
+export interface AgentSessionConfigurationIdentity {
+  readonly chatId: string;
+  readonly agentSessionId: string;
+  readonly nativeSession: AgentNativeSessionRef | null;
+  readonly projectPath: string;
+}
+
+export interface AgentSessionConfigurationPrepareRequest {
+  readonly expected: AgentSessionConfigurationIdentity;
+  readonly previous: AgentSessionConfiguration;
+  readonly next: AgentSessionConfiguration;
+  readonly signal: AbortSignal;
+}
+
+export type AgentSessionConfigurationTarget = object;
+
+export type AgentSessionConfigurationRejection = {
+  readonly kind: 'rejected';
+  readonly reason: 'target-conflict' | 'target-changed' | 'cancelled';
+};
+
+export type AgentSessionConfigurationPreparation =
+  | { readonly kind: 'prepared'; readonly target: AgentSessionConfigurationTarget }
+  | { readonly kind: 'not-required' }
+  | AgentSessionConfigurationRejection;
+
+export type AgentSessionConfigurationCommitResult =
+  | { readonly kind: 'applied' }
+  | { readonly kind: 'not-required' }
+  | AgentSessionConfigurationRejection
+  | { readonly kind: 'unknown' };
 
 export interface AgentProjectPathUpdates {
   /** Transfers a confirmed native preparation to its caller even after cancellation. */

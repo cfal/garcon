@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 import { toProviderNativeChatReference } from '../../agents/integration-chat-reference.js';
 import { createLocatedInstanceFixture, LOCATED_CHATS } from '../../agents/__tests__/located-instance-fixture.js';
@@ -57,13 +58,13 @@ test.each(['same-node', 'same-instance-id'])('history service caches isolate %s 
       instanceId: placement === 'same-node' ? profile : 'profile', workspaceId: 'project',
     },
   }));
-  const directory = new AgentInstanceDirectory(owners.map((owner, index) => ({
+  const directory = new AgentInstanceDirectory(createLocalProviderInstances(owners.map((owner, index) => ({
     configuration: {
       id: owner.executionLocation.instanceId, nodeId: owner.executionLocation.nodeId, agentId: 'test',
       label: `Profile ${index}`, storageNamespace: `instances/${index}`, default: index === 0, removedAt: null,
     },
     integration: f[index === 0 ? 'primary' : 'secondary'].integration,
-  })));
+  }))));
   for (const [accessor, facet, suffix] of [
     ['legacyHistoryImportFor', 'legacyHistoryImport', 'legacy'],
     ['nativeHistoryImportFor', 'nativeHistoryImport', 'native'],
@@ -84,11 +85,11 @@ test('unavailable, removed and foreign-provider instances reject before null fac
   const f = await fixture();
   f.primary.integration.legacyHistoryImport = null;
   f.primary.integration.nativeHistoryImport = null;
-  const removed = new AgentInstanceDirectory([{
+  const removed = new AgentInstanceDirectory(createLocalProviderInstances([{
     configuration: { id: 'primary', nodeId: 'local-node', agentId: 'test', label: 'Removed',
       storageNamespace: 'instances/primary', default: true, removedAt: '2026-09-10T00:00:00.000Z' },
     integration: f.primary.integration,
-  }]);
+  }]));
   for (const [directory, agentId, nodeId, instanceId] of [
     [f.instances, 'test', 'local-node', 'missing'], [f.instances, 'test', 'offline-node', 'primary'],
     [f.instances, 'foreign', 'local-node', 'primary'], [removed, 'test', 'local-node', 'primary'],

@@ -14,6 +14,7 @@ export class LocalExecutionPlacement {
     signal?.throwIfAborted();
     const [location] = await this.nodes.prepareLocalTargets([{ agentId, projectPath }]);
     signal?.throwIfAborted();
+    this.assertAvailable({ agentId, projectPath, executionLocation: location! });
     return location!;
   }
 
@@ -30,7 +31,8 @@ export class LocalExecutionPlacement {
 
   assertAvailable(source: PlacedProject): void {
     const { instance, workspace } = this.nodes.requireLocation(source.executionLocation, source.agentId);
-    if (source.executionLocation.nodeId !== this.nodes.localNodeId || !instance.default) {
+    if (source.executionLocation.nodeId !== this.nodes.localNodeId || !instance.default
+      || instance.storageNamespace !== source.agentId) {
       throw new DomainError('NODE_UNAVAILABLE', 'This execution instance is not available through local execution.', 409);
     }
     if (workspace.projectPath !== source.projectPath) {

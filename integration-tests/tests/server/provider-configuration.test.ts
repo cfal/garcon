@@ -353,7 +353,7 @@ describe('provider configuration through HTTP', () => {
                 agentSettings: agent.agentSettings,
               });
             } else {
-              await expect(pending).rejects.toMatchObject({ status: 500, body: { errorCode: 'INTERNAL_ERROR' } });
+              await expect(pending).rejects.toMatchObject({ status: 422, body: { errorCode: 'VALIDATION_FAILED', retryable: false } });
               expect(await persistedChat(fixture, chatId)).toEqual(original);
             }
           } finally {
@@ -442,7 +442,7 @@ describe('provider configuration through HTTP', () => {
     } finally { await gate.close(); }
   }, 30_000);
 
-  test('keeps settings unchanged on unknown application and persists only a confirmed instance result', async () => {
+  test('keeps settings unchanged on rejected or unknown commits and persists only a confirmed instance result', async () => {
     const gate = sessionApplicationGate();
     try {
       await withIntegrationFixture('configuration-application-outcome', async (fixture) => {
@@ -455,7 +455,10 @@ describe('provider configuration through HTTP', () => {
         await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: agent.agentId });
         const original = await persistedChat(fixture, chatId);
         const history = await fixture.client.getMessages(chatId);
-        for (const kind of ['unknown', 'applied'] as const) {
+        const outcomes = [
+          { kind: 'rejected', reason: 'target-changed' }, { kind: 'unknown' }, { kind: 'applied' },
+        ] as const satisfies readonly ProviderSessionConfigurationResult[];
+        for (const [index, outcome] of outcomes.entries()) {
           const application = gate.holdNext();
           const pending = fixture.client.patch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', {
             chatId, permissionMode: 'bypassPermissions', thinkingMode: 'none', agentSettingsPatch: {},
@@ -464,13 +467,18 @@ describe('provider configuration through HTTP', () => {
           try {
             expect(await withTimeout(application.entered.promise, 5_000, () => 'Settings did not reach the instance service'))
               .toMatchObject({
-                expected: { agentSessionId: original.agentSessionId, nativeSession: original.nativeSession, projectPath: fixture.dirs.project },
+                expected: { chatId, agentSessionId: original.agentSessionId, nativeSession: original.nativeSession, projectPath: fixture.dirs.project },
                 previous: { model: agent.provider.model, permissionMode: 'default' },
                 next: { model: agent.provider.model, permissionMode: 'bypassPermissions' },
               });
             expect(await persistedChat(fixture, chatId)).toEqual(original);
-            application.release.resolve({ kind });
-            if (kind === 'unknown') {
+            application.release.resolve(outcome);
+            if (outcome.kind === 'rejected') {
+              await expect(pending).rejects.toMatchObject({
+                status: 409, body: { errorCode: 'SESSION_SETTINGS_TARGET_CHANGED', retryable: false },
+              });
+              expect(await persistedChat(fixture, chatId)).toEqual(original);
+            } else if (outcome.kind === 'unknown') {
               await expect(pending).rejects.toMatchObject({
                 status: 504, body: { errorCode: 'SESSION_SETTINGS_OUTCOME_UNKNOWN', retryable: false },
               });
@@ -482,7 +490,7 @@ describe('provider configuration through HTTP', () => {
             application.release.resolve({ kind: 'unknown' });
             await pending.catch(() => undefined);
           }
-          expect(gate.calls()).toBe(kind === 'unknown' ? 1 : 2);
+          expect(gate.calls()).toBe(index + 1);
           expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
           expect(await fixture.client.getMessages(chatId)).toEqual(history);
         }
@@ -491,7 +499,7 @@ describe('provider configuration through HTTP', () => {
         await fixture.restartGarcon();
         expect(await persistedChat(fixture, chatId)).toEqual(saved);
         expect(await fixture.client.getMessages(chatId)).toEqual(history);
-        expect(gate.calls()).toBe(2);
+        expect(gate.calls()).toBe(outcomes.length);
       }, {
         authentication: 'account', bindAddress: '0.0.0.0',
         preloadModules: [fileURLToPath(new URL('../../support/provider-session-configuration-preload.ts', import.meta.url))],

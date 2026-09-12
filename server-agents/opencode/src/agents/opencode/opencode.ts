@@ -1,7 +1,8 @@
 // OpenCode SDK integration. Each provider operation owns its transcript publisher.
 
 import crypto from 'crypto';
-import type { AgentFinalResponse } from '@garcon/server-agent-interface';
+import type { AgentFinalResponse, AgentSessionConfigurationUpdates } from '@garcon/server-agent-interface';
+import { createOpenCodeSessionConfiguration, prepareOpenCodeConfigurationTurn, reconcileOpenCodeTurnPermissions, type PreparedConfigurationTurn } from './session-configuration.js';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
@@ -45,7 +46,6 @@ import {
   markOpenCodeExecutionStarted,
   type OpenCodeExecutionAdmission,
   type OpenCodeResumeRequest,
-  type OpenCodeSessionSettingsPatch,
   type OpenCodeStartRequest,
 } from './runtime-types.js';
 import {
@@ -85,7 +85,7 @@ import {
   OpenCodeDecisionController,
   mapPermissionMode,
 } from './permissions.js';
-import { createOpenCodeInstance } from './server-instance.js';
+import { normalizeOpenCodeRuntimeOptions, type OpenCodeRuntimeOptions, type NormalizedOpenCodeRuntimeOptions } from './runtime-options.js';
 import {
   configuredProvidersFromResult,
   connectedProvidersFromListResult,
@@ -107,75 +107,11 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
   error() {},
 });
 
-// Matches OpenCode's own subprocess harness: cold starts of the platform binary are
-// dominated by transpile and plugin init, not the listen() call.
-// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/test/lib/cli-process.ts#L363
-const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 15_000;
-const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
-const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
-const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
 const RETAINED_SESSION_DELETION_LIMIT = 256;
-const DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS = 30_000;
-const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
-const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
-const DEFAULT_OPENCODE_SHUTDOWN_FORK_GRACE_MS = 3_000;
 type OpenCodeForkSessionOptions = { projectPath?: string | null; messageId?: string; permissionMode?: string; signal?: AbortSignal };
 interface PendingTurnWaiter {
   promise: Promise<Error | null>;
   settle: (failure: Error | null) => void;
-}
-
-interface OpenCodeRuntimeOptions {
-  config?: OpenCodeConfig;
-  logger?: AgentLogger;
-  startupTimeoutMs?: number;
-  modelDiscoveryTimeoutMs?: number;
-  requestTimeoutMs?: number;
-  unavailableRetryMs?: number;
-  sseRetryDelayMs?: number;
-  sseHeartbeatTimeoutMs?: number;
-  modelCacheTtlMs?: number;
-  shutdownStartupGraceMs?: number;
-  shutdownNativeForkGraceMs?: number;
-  idleRetirementDelayMs?: number;
-  idleRetirementCheckIntervalMs?: number;
-  now?: () => number;
-  createInstance?: (input: { signal: AbortSignal }) => Promise<OpenCodeInstance>;
-}
-
-interface NormalizedOpenCodeRuntimeOptions {
-  startupTimeoutMs: number;
-  modelDiscoveryTimeoutMs: number;
-  requestTimeoutMs: number;
-  unavailableRetryMs: number;
-  sseRetryDelayMs: number;
-  sseHeartbeatTimeoutMs: number;
-  modelCacheTtlMs: number;
-  shutdownStartupGraceMs: number;
-  shutdownNativeForkGraceMs: number;
-  now: () => number;
-  requiresExecutable: boolean;
-  createInstance: (input: { signal: AbortSignal }) => Promise<OpenCodeInstance>;
-}
-
-function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
-  return {
-    startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
-    modelDiscoveryTimeoutMs: options.modelDiscoveryTimeoutMs ?? DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS,
-    requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS,
-    unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
-    sseRetryDelayMs: options.sseRetryDelayMs ?? DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS,
-    sseHeartbeatTimeoutMs: options.sseHeartbeatTimeoutMs ?? DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS,
-    modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
-    shutdownStartupGraceMs:
-      options.shutdownStartupGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS,
-    shutdownNativeForkGraceMs:
-      options.shutdownNativeForkGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_FORK_GRACE_MS,
-    now: options.now ?? (() => Date.now()),
-    requiresExecutable: options.createInstance === undefined,
-    createInstance: options.createInstance ?? createOpenCodeInstance,
-  };
 }
 
 export class OpenCodeRuntime {
@@ -201,6 +137,7 @@ export class OpenCodeRuntime {
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
   readonly #decisions: OpenCodeDecisionController;
   readonly steering: OpenCodeSteeringController;
+  readonly sessionConfiguration: AgentSessionConfigurationUpdates;
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
   readonly #globalEventListener: OpenCodeGlobalEventListener;
   readonly #operationRoutes: OpenCodeOperationRoutes;
@@ -217,7 +154,13 @@ export class OpenCodeRuntime {
     this.#config = options.config ?? { isTestEnvironment: () => false };
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#operationRoutes = new OpenCodeOperationRoutes(this.#logger);
-    this.#options = normalizeOptions(options);
+    this.sessionConfiguration = createOpenCodeSessionConfiguration({
+      session: (id) => this.#sessions.get(id),
+      generation: () => this.#instanceGeneration,
+      shuttingDown: () => this.#shuttingDown,
+      routes: this.#operationRoutes,
+    });
+    this.#options = normalizeOpenCodeRuntimeOptions(options);
     this.#decisions = new OpenCodeDecisionController({
       logger: this.#logger,
       publish: (agentSessionId, operation, event) => this.#publish(
@@ -870,6 +813,7 @@ export class OpenCodeRuntime {
   ): unknown {
     if (turn.providerMessageId === null) this.#operationRoutes.unregister(route);
     const sess = this.#sessions.get(agentSessionId);
+    if (sess?.turn === turn) sess.configurationPreparing = false;
     if (request.executionAdmission?.signal.aborted) {
       if (sess?.turn === turn) {
         sess.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
@@ -909,6 +853,8 @@ export class OpenCodeRuntime {
       return;
     }
     this.#sessions.set(agentSessionId, {
+      configurationEpoch: 1,
+      configurationPreparing: true,
       status: 'running',
       chatId: input.chatId,
       model: input.model,
@@ -1349,6 +1295,8 @@ export class OpenCodeRuntime {
     const turn = createOpenCodeTurnContext(operation);
     const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
     this.#sessions.set(agentSessionId, {
+      configurationEpoch: 1,
+      configurationPreparing: true,
       status: 'running',
       chatId,
       model,
@@ -1390,6 +1338,7 @@ export class OpenCodeRuntime {
       // failure whose cleanup deletes the just-created native session; a chat
       // must never stay durably bound to a session this path removed.
       request.onSessionActivated?.(agentSessionId);
+      activeSession.configurationPreparing = false;
     } catch (error) {
       this.#operationRoutes.unregister(route);
       this.#sessions.delete(agentSessionId);
@@ -1422,7 +1371,25 @@ export class OpenCodeRuntime {
     }
   }
 
+  #reconcilePermissions(
+    instance: OpenCodeInstance, request: Omit<OpenCodeResumeRequest, 'command' | 'images'>,
+    preparation: PreparedConfigurationTurn, scope: OpenCodeRequestScope,
+  ): Promise<void> {
+    return reconcileOpenCodeTurnPermissions({ client: instance.client, request, scope, timeoutMs: this.#options.requestTimeoutMs,
+      validate: () => { this.#assertInstanceCurrent(instance); preparation.validate(); },
+      run: (signal, operation) => this.#runScopedTurnRequest(scope, signal, operation) });
+  }
+
   async runTurn(request: OpenCodeResumeRequest): Promise<void> {
+    const preparation = prepareOpenCodeConfigurationTurn(request, () => this.#sessions.get(request.agentSessionId));
+    try {
+      await this.#runTurn(request, preparation);
+    } finally {
+      preparation.release();
+    }
+  }
+
+  async #runTurn(request: OpenCodeResumeRequest, preparation: PreparedConfigurationTurn): Promise<void> {
     this.#endpointCoordinator.turnAdmissionStarted();
     try {
     assertOpenCodeExecutionOpen(request);
@@ -1437,9 +1404,9 @@ export class OpenCodeRuntime {
       thinkingMode,
       operation,
     } = request;
-    const pendingSession = this.#sessions.get(agentSessionId);
-    if (pendingSession) await this.#quiesceSessionBeforeTurn(agentSessionId, pendingSession);
-    const session = this.#sessions.get(agentSessionId);
+    const session = preparation.session;
+    if (session) await this.#quiesceSessionBeforeTurn(agentSessionId, session);
+    preparation.validate();
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
 
@@ -1452,13 +1419,18 @@ export class OpenCodeRuntime {
     const client: any = instance.client;
     if (session) {
       await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+      preparation.validate();
       await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
     this.#assertInstanceCurrent(instance);
-    const waiter = this.#createTurnWaiter(agentSessionId);
+    await this.#reconcilePermissions(instance, request, preparation, scope);
     // One resolution per turn: the stored variant steering reuses must be the
     // variant this prompt submits, even if discovery refreshes mid-admission.
     const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+    assertOpenCodeExecutionOpen(request);
+    this.#assertInstanceCurrent(instance);
+    preparation.validate();
+    const waiter = this.#createTurnWaiter(agentSessionId);
     this.#activateTurn(agentSessionId, session, {
       chatId,
       model,
@@ -1492,6 +1464,7 @@ export class OpenCodeRuntime {
       }
       if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
       this.#assertInstanceCurrent(instance);
+      activeSession.configurationPreparing = false;
       const promptRequest = this.#runScopedTurnRequest(
         scope,
         route.requestAbortController.signal,
@@ -1521,6 +1494,15 @@ export class OpenCodeRuntime {
   // the compaction user message it created and the summary assistant's terminal
   // arrives through the global stream.
   async compact(request: Omit<OpenCodeResumeRequest, 'command' | 'images'>): Promise<void> {
+    const preparation = prepareOpenCodeConfigurationTurn(request, () => this.#sessions.get(request.agentSessionId));
+    try {
+      await this.#compact(request, preparation);
+    } finally {
+      preparation.release();
+    }
+  }
+
+  async #compact(request: Omit<OpenCodeResumeRequest, 'command' | 'images'>, preparation: PreparedConfigurationTurn): Promise<void> {
     this.#endpointCoordinator.turnAdmissionStarted();
     let turn: OpenCodeTurnContext | null = null;
     try {
@@ -1532,7 +1514,7 @@ export class OpenCodeRuntime {
         projectPath,
         operation,
       } = request;
-      const session = this.#sessions.get(agentSessionId);
+      const session = preparation.session;
       if (session?.status === 'running') {
         throw new Error('Cannot compact while an OpenCode turn is active');
       }
@@ -1548,9 +1530,11 @@ export class OpenCodeRuntime {
       const client: any = instance.client;
       if (session) {
         await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+        preparation.validate();
         await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
       }
       this.#assertInstanceCurrent(instance);
+      await this.#reconcilePermissions(instance, request, preparation, scope);
       this.#activateTurn(agentSessionId, session, {
         chatId,
         model,
@@ -1577,6 +1561,7 @@ export class OpenCodeRuntime {
         }
         if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
         this.#assertInstanceCurrent(instance);
+        activeSession.configurationPreparing = false;
         const parsedModel = parseOpenCodeModel(model);
         const summarizeRequest = this.#runScopedTurnRequest(
           scope,
@@ -1682,15 +1667,34 @@ export class OpenCodeRuntime {
   }
 
   async discardSession(agentSessionId: string, projectPath?: string | null): Promise<void> {
+    const session = this.#sessions.get(agentSessionId);
+    if (session) {
+      session.configurationEpoch += 1;
+      session.configurationPreparing = true;
+    }
     await this.#deleteSessionBestEffort(agentSessionId, createOpenCodeRequestScope(projectPath));
+    if (session && this.#sessions.get(agentSessionId) === session) {
+      this.#operationRoutes.retireTurn(session.turn);
+      this.#sessions.delete(agentSessionId);
+    }
   }
 
   async moveSession(agentSessionId: string, directory: string, signal: AbortSignal): Promise<void> {
-    await this.#endpointCoordinator.moveSession(
-      agentSessionId, directory, signal, (...args) => this.#runRequest(...args),
-    );
     const session = this.#sessions.get(agentSessionId.trim());
-    if (session) relocateOpenCodeSession(session, directory.trim());
+    if (session?.configurationPreparing) throw new Error('OpenCode session admission is in progress');
+    const epoch = session ? ++session.configurationEpoch : null;
+    if (session) session.configurationPreparing = true;
+    try {
+      await this.#endpointCoordinator.moveSession(
+        agentSessionId, directory, signal, (...args) => this.#runRequest(...args),
+      );
+      if (session && this.#sessions.get(agentSessionId.trim()) === session && session.configurationEpoch === epoch) {
+        session.configurationPreparing = false;
+        relocateOpenCodeSession(session, directory.trim());
+      }
+    } finally {
+      if (session?.configurationEpoch === epoch) session.configurationPreparing = false;
+    }
   }
 
   abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean> {
@@ -1765,12 +1769,6 @@ export class OpenCodeRuntime {
   isRunning(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     return session?.status === 'running';
-  }
-
-  updateSessionSettings(agentSessionId: string, patch: OpenCodeSessionSettingsPatch): void {
-    const session = this.#sessions.get(agentSessionId);
-    if (!session) return;
-    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {

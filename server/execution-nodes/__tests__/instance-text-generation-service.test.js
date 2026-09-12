@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 import { createLocatedInstanceFixture } from '../../agents/__tests__/located-instance-fixture.js';
 
@@ -20,7 +21,7 @@ test.each(['same-node', 'same-instance-id'])('text generation isolates %s and us
     nodeId: placement === 'same-node' ? 'local-node' : `${profile}-node`,
     instanceId: placement === 'same-node' ? profile : 'profile',
   }));
-  const directory = new AgentInstanceDirectory(profiles.map((profile, index) => {
+  const directory = new AgentInstanceDirectory(createLocalProviderInstances(profiles.map((profile, index) => {
     f[profile].integration.textGeneration = { run: mock(async () => `${profile} text`) };
     f[profile].integration.singleQuery = { run: mock(async () => { throw new Error('Unexpected one-shot fallback'); }) };
     return {
@@ -30,7 +31,7 @@ test.each(['same-node', 'same-instance-id'])('text generation isolates %s and us
       },
       integration: f[profile].integration,
     };
-  }));
+  })));
   const services = references.map((reference) => directory.textGenerationForInstance(reference));
   expect(services[0]).not.toBe(services[1]);
   for (const [index, profile] of profiles.entries()) {
@@ -60,13 +61,13 @@ test.each([false, true])('tool-free capability cannot be inferred from the one-s
 
 test('missing and removed targets reject before capability absence without a default fallback', async () => {
   const f = await fixture();
-  const removed = new AgentInstanceDirectory([{
+  const removed = new AgentInstanceDirectory(createLocalProviderInstances([{
     configuration: {
       nodeId: 'local-node', id: 'primary', agentId: 'test', label: 'Removed',
       storageNamespace: 'instances/primary', default: true, removedAt: '2026-09-10T00:00:00.000Z',
     },
     integration: f.primary.integration,
-  }]);
+  }]));
   for (const [directory, nodeId, instanceId] of [
     [f.instances, 'local-node', 'missing'], [f.instances, 'offline-node', 'primary'],
     [removed, 'local-node', 'primary'],

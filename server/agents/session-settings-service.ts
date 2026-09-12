@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { sameExecutionOwner } from '../../common/execution-location.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
@@ -8,13 +9,14 @@ import type { AgentChatEntry, AgentSessionSettingsPatch } from './session-types.
 import type { AgentInstanceDirectory } from './instance-directory.js';
 import { toAgentEndpointSelection } from './execution-planning.js';
 import { DomainError } from '../lib/domain-error.js';
+import type { ProviderSessionConfigurationOperation } from '../execution-nodes/provider-configuration.js';
 
 export class AgentSessionSettingsService {
   readonly #lock: KeyedPromiseLock;
 
   constructor(private readonly deps: {
     registry: IChatRegistry;
-    instances: Pick<AgentInstanceDirectory, 'requireFor' | 'configurationFor'>;
+    instances: Pick<AgentInstanceDirectory, 'assertAvailableFor' | 'configurationFor'>;
     endpointResolver: ApiProviderEndpointResolver;
     chatMutationLock?: KeyedPromiseLock;
   }) {
@@ -59,41 +61,64 @@ export class AgentSessionSettingsService {
           thinkingMode: patch.thinkingMode,
           settings: patch.agentSettingsPatch,
         },
-      }, new AbortController().signal);
+      }, new AbortController().signal).catch(configurationPreparationFailed);
       this.#assertCurrentTarget(chatId, entry);
 
-      if (entry.agentSessionId) {
-        const result = await configurationService.apply({
-          expected: {
-            agentSessionId: entry.agentSessionId,
-            nativeSession: entry.nativeSession ?? null,
-            projectPath: entry.projectPath,
-          },
-          next: configuration.next,
-          previous: configuration.previous,
-        }, new AbortController().signal);
-        if (result.kind !== 'applied' && result.kind !== 'unsupported') {
-          throw new DomainError('SESSION_SETTINGS_OUTCOME_UNKNOWN',
-            'The agent did not confirm the settings update; saved settings are unchanged', 504);
+      let operation: ProviderSessionConfigurationOperation | null = null;
+      let applied = false;
+      const controller = new AbortController();
+      try {
+        if (entry.agentSessionId) {
+          const prepared = await configurationService.prepareApply({
+            executionLocation: entry.executionLocation,
+            expected: {
+              chatId,
+              agentSessionId: entry.agentSessionId,
+              nativeSession: entry.nativeSession ?? null,
+              projectPath: entry.projectPath,
+            },
+            next: configuration.next,
+            previous: configuration.previous,
+          }, controller.signal).catch(configurationPreparationFailed);
+          if (prepared.kind === 'prepared') operation = prepared.operation;
+          if (prepared.kind === 'rejected') throw configurationTargetChanged();
+          this.#assertCurrentTarget(chatId, entry);
+          if (operation) {
+            const result = await configurationService.commit(operation, controller.signal);
+            if (result.kind === 'rejected') throw configurationTargetChanged();
+            if (result.kind === 'unknown') {
+              throw new DomainError('SESSION_SETTINGS_OUTCOME_UNKNOWN',
+                'The agent did not confirm the settings update; saved settings are unchanged', 504);
+            }
+            applied = result.kind === 'applied';
+            this.#assertCurrentTarget(chatId, entry);
+          }
         }
-        this.#assertCurrentTarget(chatId, entry);
-      }
 
-      const { permissionMode, thinkingMode, settings } = configuration.next;
-      const updated = await this.deps.registry.updateChat(chatId, {
-        model: next.model,
-        apiProviderId: next.apiProviderId,
-        modelEndpointId: next.endpointId,
-        modelProtocol: next.protocol,
-        permissionMode,
-        thinkingMode,
-        agentSettingsById: {
-          ...entry.agentSettingsById,
-          [entry.agentId]: settings,
-        },
-      }, { flush: true });
-      if (!updated) throw new Error(`Session not found: ${chatId}`);
-      return updated;
+        const { model, permissionMode, thinkingMode, settings } = configuration.next;
+        const updated = await this.deps.registry.updateChat(chatId, {
+          model,
+          apiProviderId: next.apiProviderId,
+          modelEndpointId: next.endpointId,
+          modelProtocol: next.protocol,
+          permissionMode,
+          thinkingMode,
+          agentSettingsById: {
+            ...entry.agentSettingsById,
+            [entry.agentId]: settings,
+          },
+        }, { flush: true });
+        if (!updated) throw new Error(`Session not found: ${chatId}`);
+        return updated;
+      } catch (error) {
+        if (!applied) throw error;
+        throw new DomainError('SESSION_SETTINGS_PARTIAL',
+          'The agent applied the settings, but saving them could not be confirmed. Refresh the chat before continuing.',
+          error instanceof DomainError && error.code === 'SOURCE_REVISION_CHANGED' ? 409 : 500, false, { cause: error });
+      } finally {
+        controller.abort();
+        if (operation) await configurationService.cancel(operation);
+      }
     });
   }
 
@@ -106,6 +131,25 @@ export class AgentSessionSettingsService {
       || !isDeepStrictEqual(current.nativeSession, expected.nativeSession)) {
       throw new DomainError('SOURCE_REVISION_CHANGED', 'Session changed while updating settings', 409);
     }
-    this.deps.instances.requireFor(current);
+    this.deps.instances.assertAvailableFor(current);
   }
+}
+
+function configurationTargetChanged(): DomainError {
+  return new DomainError('SESSION_SETTINGS_TARGET_CHANGED', 'The agent session changed before the settings update was delivered', 409);
+}
+
+function configurationPreparationFailed(error: unknown): never {
+  if (error instanceof AgentIntegrationError) {
+    if (error.code === 'SESSION_BUSY') {
+      throw new DomainError(error.code, error.message, 409, error.retryable, { cause: error });
+    }
+    if (error.code === 'OPERATION_UNSUPPORTED') {
+      throw new DomainError(error.code, error.message, 422, error.retryable, { cause: error });
+    }
+    if (error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_ENDPOINT') {
+      throw new DomainError('VALIDATION_FAILED', error.message, 422, error.retryable, { cause: error });
+    }
+  }
+  throw error;
 }

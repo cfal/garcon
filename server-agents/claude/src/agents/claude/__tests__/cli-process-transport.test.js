@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 
 import {
   ClaudeProcessTransport,
+  DEFAULT_WRITE_TIMEOUT_MS,
   MAX_STDERR_TAIL_BYTES,
   MAX_STDOUT_FRAME_BYTES,
 } from '../cli-process-transport.js';
@@ -10,10 +11,12 @@ const encoder = new TextEncoder();
 
 function deferred() {
   let resolve;
-  const promise = new Promise((complete) => {
+  let reject;
+  const promise = new Promise((complete, fail) => {
     resolve = complete;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function createStream() {
@@ -88,6 +91,7 @@ function createTransport(options = {}) {
     exits,
     writes,
     logger,
+    exited,
   };
 }
 
@@ -275,10 +279,20 @@ describe('ClaudeProcessTransport', () => {
 
     await expect(fake.transport.writeLine('{"order":1}', {
       beforeWrite,
-      killProcessAfterAttemptFailure: true,
     })).rejects.toThrow('no writable stdin');
     expect(beforeWrite).not.toHaveBeenCalled();
     expect(fake.process.kill).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale delivery guard without failing the process or a subsequent write', async () => {
+    const fake = createTransport();
+    await expect(fake.transport.writeLine('{"stale":true}', {
+      beforeWrite: () => { throw new Error('target changed'); },
+    })).rejects.toThrow('target changed');
+    expect(fake.failures).toEqual([]);
+    expect(fake.writes).toEqual([]);
+    await fake.transport.writeLine('{"current":true}');
+    expect(fake.writes).toEqual(['{"current":true}\n']);
   });
 
   it('kills before reporting a strict attempted write failure', async () => {
@@ -295,27 +309,70 @@ describe('ClaudeProcessTransport', () => {
 
     await expect(fake.transport.writeLine('{"order":1}', {
       beforeWrite: () => undefined,
-      killProcessAfterAttemptFailure: true,
     })).rejects.toThrow('strict write exploded');
     expect(killedWhenReported).toBe(true);
     expect(fake.process.kill).toHaveBeenCalledTimes(1);
   });
 
-  it('times out and kills a stalled strict write', async () => {
-    const fake = createTransport();
-    fake.process.stdin.write.mockImplementationOnce(() => new Promise(() => {}));
+  for (const stalledPhase of ['write', 'flush']) {
+    for (const settlesFirst of ['io', 'exit']) {
+      it(`holds a timed-out ${stalledPhase} through native settlement with ${settlesFirst} first`, async () => {
+        const fake = createTransport();
+        const entered = deferred();
+        const native = deferred();
+        const originalSetTimeout = globalThis.setTimeout;
+        let expire;
+        globalThis.setTimeout = (callback, delay, ...args) => {
+          if (delay === (stalledPhase === 'write' ? DEFAULT_WRITE_TIMEOUT_MS : 1234)) {
+            expire = callback;
+            return 0;
+          }
+          return originalSetTimeout(callback, delay, ...args);
+        };
+        fake.process.stdin[stalledPhase].mockImplementationOnce(() => {
+          entered.resolve();
+          return native.promise;
+        });
+        fake.process.kill.mockImplementation(() => undefined);
+        let settled = false;
+        let retired = false;
+        const result = fake.transport.writeLine('{"order":1}', {
+          attemptTimeoutMs: stalledPhase === 'write' ? undefined : 1234,
+        }).then(() => null, error => error).finally(() => { settled = true; });
+        try {
+          await entered.promise;
+          const retirement = fake.transport.retire().finally(() => { retired = true; });
+          expire();
+          await flush();
+          expect(fake.process.kill).toHaveBeenCalledWith('SIGKILL');
+          expect(fake.process.kill).toHaveBeenCalledTimes(1);
+          expect(settled).toBe(false);
+          expect(retired).toBe(false);
+          expect(fake.failures).toEqual([]);
 
-    await expect(fake.transport.writeLine('{"order":1}', {
-      beforeWrite: () => undefined,
-      attemptTimeoutMs: 1,
-      killProcessAfterAttemptFailure: true,
-    })).rejects.toThrow('stdin write timed out');
-    expect(fake.process.kill).toHaveBeenCalledTimes(1);
-    expect(fake.failures).toEqual([{
-      kind: 'write',
-      message: 'Claude CLI stdin write timed out',
-    }]);
-  });
+          if (settlesFirst === 'io') native.reject(new Error('synthetic EPIPE'));
+          else fake.exited.resolve(137);
+          await flush();
+          expect(settled).toBe(false);
+          expect(retired).toBe(false);
+          expect(fake.failures).toEqual([]);
+
+          native.reject(new Error('synthetic EPIPE'));
+          fake.exited.resolve(137);
+          expect((await result)?.message).toBe('Claude CLI stdin write timed out');
+          await retirement;
+          expect(fake.failures).toEqual([{ kind: 'write', message: 'Claude CLI stdin write timed out' }]);
+          expect(fake.process.kill).toHaveBeenCalledTimes(1);
+          await expect(fake.transport.writeLine('{"order":2}')).rejects.toThrow('not writable');
+        } finally {
+          native.reject(new Error('synthetic teardown'));
+          fake.exited.resolve(137);
+          await result;
+          globalThis.setTimeout = originalSetTimeout;
+        }
+      });
+    }
+  }
 
   it('closes stdin and awaits natural exit during retirement', async () => {
     const fake = createTransport();

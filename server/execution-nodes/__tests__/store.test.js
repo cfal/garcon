@@ -107,32 +107,52 @@ describe('execution resource identity persistence', () => {
   test('registers all local provider defaults before any chat without registering a fictitious project', async () => {
     const { directory, store, file } = await fixture();
     const providers = ['synthetic-provider', 'second-provider', 'synthetic-provider'];
-    const instances = await store.registerLocalDefaults(providers);
+    const instances = await store.ensureLocalDefaults(providers);
     expect(instances.map((instance) => instance.agentId)).toEqual(['synthetic-provider', 'second-provider']);
     expect(instances.map((instance) => instance.storageNamespace)).toEqual(['synthetic-provider', 'second-provider']);
     expect(store.snapshot().workspaces).toEqual([]);
     expect(JSON.parse(await readFile(file, 'utf8')).instances).toEqual(instances);
     const restarted = new ExecutionNodesStore(directory);
     await restarted.init();
-    expect(await restarted.registerLocalDefaults(providers)).toEqual(instances);
+    expect(await restarted.ensureLocalDefaults(providers)).toEqual(instances);
     const [location] = await restarted.prepareLocalTargets([{ agentId: providers[0], projectPath: '/synthetic/project' }]);
     expect(location.instanceId).toBe(instances[0].id);
     instances[0].label = 'caller mutation';
     expect(restarted.snapshot().instances[0].label).toBe('synthetic-provider');
   });
 
-  test('rejects a removed local default without registering replacements or partial defaults', async () => {
+  test('retains removed defaults during startup while admitting unrelated providers', async () => {
     const { directory, store, file } = await fixture();
-    await store.registerLocalDefaults(['synthetic-provider']);
+    await store.ensureLocalDefaults(['synthetic-provider']);
     const removed = store.snapshot();
     removed.instances[0].removedAt = '2026-09-10T00:00:00.000Z';
     await writeJsonFileAtomic(file, removed);
     const restarted = new ExecutionNodesStore(directory);
     await restarted.init();
-    await expect(restarted.registerLocalDefaults(['second-provider', 'synthetic-provider']))
-      .rejects.toMatchObject({ code: 'NODE_REMOVED' });
+    const defaults = await restarted.ensureLocalDefaults(['second-provider', 'synthetic-provider']);
+    expect(defaults.find((instance) => instance.agentId === 'synthetic-provider')).toEqual(removed.instances[0]);
+    expect(defaults.filter((instance) => instance.agentId === 'synthetic-provider')).toHaveLength(1);
+    const saved = restarted.snapshot();
     await expect(restarted.prepareLocalTargets([{ agentId: 'synthetic-provider', projectPath: '/synthetic/project' }]))
       .rejects.toMatchObject({ code: 'NODE_REMOVED' });
+    expect(restarted.snapshot()).toEqual(saved);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(saved);
+    const [location] = await restarted.prepareLocalTargets([{ agentId: 'second-provider', projectPath: '/synthetic/project' }]);
+    expect(restarted.requireLocation(location, 'second-provider').instance.removedAt).toBeNull();
+  });
+
+  test('refuses removed target admission without persisting partial defaults or workspaces', async () => {
+    const { directory, store, file } = await fixture();
+    await store.ensureLocalDefaults(['synthetic-provider']);
+    const removed = store.snapshot();
+    removed.instances[0].removedAt = '2026-09-10T00:00:00.000Z';
+    await writeJsonFileAtomic(file, removed);
+    const restarted = new ExecutionNodesStore(directory);
+    await restarted.init();
+    await expect(restarted.prepareLocalTargets([
+      { agentId: 'second-provider', projectPath: '/synthetic/other' },
+      { agentId: 'synthetic-provider', projectPath: '/synthetic/project' },
+    ])).rejects.toMatchObject({ code: 'NODE_REMOVED' });
     expect(restarted.snapshot()).toEqual(removed);
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(removed);
   });

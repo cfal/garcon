@@ -1,8 +1,10 @@
 import DirectOpenAiCompatibleIntegration from '../../server-agents/direct-openai-compatible/src/index.js';
 import type { AgentHost } from '../../server-agents/interface/src/index.js';
-import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
 import { AgentRuntimeRouter } from '../../server/agents/runtime-router.js';
 import { LocalProviderConfigurationService } from '../../server/execution-node/local-provider-configuration.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const mode = process.env.GARCON_TEST_SINGLE_QUERY_CANCEL;
 if (mode !== 'validation' && mode !== 'result') throw new Error('One-shot fixture requires an explicit cancellation phase');

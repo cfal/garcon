@@ -24,7 +24,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import type { IntegrationRegistry } from './integration-registry.js';
+import type { AgentTypeRegistry } from './type-registry.js';
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
@@ -39,7 +39,6 @@ import type {
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentAuthService } from './auth-service.js';
 import type { AgentInstanceDirectory } from './instance-directory.js';
-import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import {
   AgentRuntimeRouter,
@@ -185,11 +184,11 @@ interface CompactSessionOptions {
 }
 
 type RegistryInstances = AgentRuntimeRouterOptions['instances']
-  & Pick<AgentInstanceDirectory, 'require' | 'catalogForInstance' | 'authForInstance' | 'nativeSessionsFor'>;
+  & Pick<AgentInstanceDirectory, 'metadataFor' | 'metadataForInstance' | 'assertAvailableForInstance' | 'catalogForInstance' | 'authForInstance' | 'nativeSessionsFor'>;
 
 export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
-  readonly #directory: AgentDirectory;
+  readonly #types: Pick<AgentTypeRegistry, 'has' | 'get' | 'require' | 'list'>;
   readonly #instances: RegistryInstances;
   readonly #localNodeId: string;
   readonly #catalog: AgentCatalogService;
@@ -213,9 +212,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   constructor(args: {
     registry: IChatRegistry;
-    integrations: IntegrationRegistry;
+    types: Pick<AgentTypeRegistry, 'has' | 'get' | 'require' | 'list'>;
     instances: RegistryInstances;
     localNodeId: string;
+    fileMentions: AgentRuntimeRouterOptions['fileMentions'];
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
@@ -231,10 +231,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#getCarryOverRevision = args.getCarryOverRevision;
     this.#ledger = args.ledger;
     this.#adoption = args.adoption;
-    this.#directory = new AgentDirectory(args.integrations);
+    this.#types = args.types;
     this.#instances = args.instances;
     this.#localNodeId = args.localNodeId;
-    const defaultAgentIds = this.#directory.list().map((integration) => integration.descriptor.id);
+    const defaultAgentIds = this.#types.list().map((descriptor) => descriptor.id);
     this.#catalog = new AgentCatalogService({
       instances: this.#instances,
       localNodeId: this.#localNodeId,
@@ -251,11 +251,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#runtime = new AgentRuntimeRouter({
       registry: this.#registry,
       localNodeId: this.#localNodeId,
-      directory: this.#directory,
+      providerIds: defaultAgentIds,
       endpointResolver: args.endpointResolver,
       events: this.#events,
       instances: this.#instances,
       getCarryOverRevision: args.getCarryOverRevision,
+      fileMentions: args.fileMentions,
       createCarriedContext: args.createCarriedContext,
       ledger: this.#ledger,
       adoption: this.#adoption,
@@ -280,12 +281,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#ledger.subscribe((event) => this.#onTranscriptCommit(event));
   }
 
-  hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
+  hasAgent(agentId: string): boolean { return this.#types.has(agentId); }
   assertExecutionModeSelectionSupported(agentId: string, selection: {
     readonly permissionMode?: PermissionMode;
     readonly thinkingMode?: ThinkingMode;
   }): void {
-    const descriptor = this.#directory.get(agentId)?.descriptor;
+    const descriptor = this.#types.get(agentId);
     if (!descriptor) throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
     if (
       selection.permissionMode !== undefined
@@ -311,27 +312,30 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode {
     return normalizeSupportedThinkingMode(
       value,
-      this.#directory.require(agentId).descriptor.supportedThinkingModes,
+      this.#types.require(agentId).supportedThinkingModes,
     );
   }
   supportsAuthLogin(agentId: string): boolean { return this.#auth.supportsLogin(agentId); }
   supportsAuthLoginCompletion(agentId: string): boolean { return this.#auth.supportsLoginCompletion(agentId); }
-  supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
+  supportsFork(agentId: string): boolean { return this.#types.has(agentId); }
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
     const instance = this.#instances.defaultFor(this.#localNodeId, agentId);
     return instance ? this.#instances.singleQueryForInstance(instance)?.runsToolsWithoutPermission ?? false : false;
   }
-  supportsForkAtMessage(agentId: string): boolean { return this.#directory.has(agentId); }
-  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.has(agentId); }
+  supportsForkAtMessage(agentId: string): boolean { return this.#types.has(agentId); }
+  supportsForkWhileRunning(agentId: string): boolean { return this.#types.has(agentId); }
   supportsUpdateProjectPath(owner: LocatedChatOwner): boolean {
-    return this.#instances.requireFor(owner).descriptor.supportsProjectPathUpdate;
+    const metadata = this.#instances.metadataFor(owner);
+    return metadata.descriptor.supportsProjectPathUpdate;
   }
   requiresNativePathForProjectPathUpdate(owner: LocatedChatOwner): boolean {
-    return this.#instances.requireFor(owner).descriptor.requiresNativePathForProjectPathUpdate;
+    const metadata = this.#instances.metadataFor(owner);
+    return metadata.descriptor.requiresNativePathForProjectPathUpdate;
   }
-  supportsImages(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsImages ?? false; }
+  supportsImages(agentId: string): boolean { return this.#types.get(agentId)?.supportsImages ?? false; }
   supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean {
-    return this.#directory.get(agentId)?.attachments?.fileMimeTypes.includes(mimeType.toLowerCase()) ?? false;
+    const instance = this.#instances.defaultFor(this.#localNodeId, agentId);
+    return instance ? this.#instances.metadataForInstance(instance).fileAttachmentMimeTypes.includes(mimeType.toLowerCase()) : false;
   }
 
   requiresStrictModelDiscovery(agentId: string): boolean {

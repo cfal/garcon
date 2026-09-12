@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { defaultAgentIntegrations } from '../default-agent-integrations.ts';
+import { loadDefaultAgentIntegrations } from '../default-agent-integrations.ts';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 describe('default agent integrations', () => {
   it('registers every shipped integration exactly once in product order', () => {

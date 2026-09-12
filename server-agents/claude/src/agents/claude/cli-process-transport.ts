@@ -8,6 +8,7 @@ const MAX_STDERR_TAIL_BYTES = 16 * 1024;
 const PROCESS_EXIT_GRACE_MS = 5_000;
 const PROCESS_EXIT_TERM_MS = 5_000;
 const PROCESS_EXIT_KILL_MS = 5_000;
+const DEFAULT_WRITE_TIMEOUT_MS = 15_000;
 
 type ClaudeSubprocess = ReturnType<typeof Bun.spawn>;
 
@@ -44,7 +45,6 @@ interface ClaudeProcessTransportOptions<Message> {
 export interface ClaudeWriteLineOptions {
   readonly beforeWrite?: () => void;
   readonly attemptTimeoutMs?: number;
-  readonly killProcessAfterAttemptFailure?: boolean;
 }
 
 interface StderrSummary {
@@ -147,30 +147,6 @@ async function drainStderr(
   if (remainder) onChunk(remainder);
 }
 
-async function writeAndFlushWithTimeout(
-  stdin: import('bun').FileSink,
-  frame: string,
-  timeoutMs: number,
-): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error('Claude CLI stdin write timed out'));
-    }, timeoutMs);
-  });
-  try {
-    await Promise.race([
-      (async () => {
-        await stdin.write(frame);
-        await stdin.flush();
-      })(),
-      timeout,
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 export class ClaudeProcessTransport<Message> {
   readonly process: ClaudeSubprocess;
   readonly #options: ClaudeProcessTransportOptions<Message>;
@@ -178,6 +154,7 @@ export class ClaudeProcessTransport<Message> {
   #stderrReader: Promise<void> = Promise.resolve();
   #retirement: Promise<void> | null = null;
   #retiring = false;
+  #writeTerminationRequested = false;
   #failureReported = false;
   #stdoutNoiseCount = 0;
   #stderrTail = '';
@@ -193,31 +170,56 @@ export class ClaudeProcessTransport<Message> {
   writeLine(jsonl: string, options: ClaudeWriteLineOptions = {}): Promise<void> {
     let attemptBegan = false;
     const write = this.#writeTail.then(async () => {
-      if (this.#retiring || this.process.killed) {
+      if (this.#retiring || this.#writeTerminationRequested || this.process.killed) {
         throw new Error('Claude CLI process is not writable');
       }
       const stdin = this.process.stdin as import('bun').FileSink;
       if (!stdin?.write) throw new Error('Claude CLI process has no writable stdin');
       options.beforeWrite?.();
       attemptBegan = true;
-      const frame = jsonl + '\n';
-      if (options.attemptTimeoutMs !== undefined) {
-        await writeAndFlushWithTimeout(stdin, frame, options.attemptTimeoutMs);
-      } else {
-        await stdin.write(frame);
-        await stdin.flush();
+      await this.#writeFrame(stdin, jsonl + '\n', options.attemptTimeoutMs ?? DEFAULT_WRITE_TIMEOUT_MS);
+    }).catch(async (error: unknown) => {
+      if (attemptBegan) {
+        this.#requestWriteTermination();
+        await this.process.exited.catch(() => undefined);
+        this.#reportFailure({ kind: 'write', message: errorMessage(error) });
       }
-    }).catch((error: unknown) => {
-      if (
-        options.killProcessAfterAttemptFailure
-        && attemptBegan
-        && !this.process.killed
-      ) this.process.kill();
-      this.#reportFailure({ kind: 'write', message: errorMessage(error) });
       throw error;
     });
     this.#writeTail = write.catch(() => undefined);
     return write;
+  }
+
+  async #writeFrame(stdin: import('bun').FileSink, frame: string, timeoutMs: number): Promise<void> {
+    let timeoutError: Error | null = null;
+    const timer = setTimeout(() => {
+      timeoutError = new Error('Claude CLI stdin write timed out');
+      this.#requestWriteTermination();
+    }, timeoutMs);
+    try {
+      // Termination closes the peer's pipe; capacity stays held until native I/O settles.
+      await stdin.write(frame);
+      await stdin.flush();
+    } catch (error) {
+      throw timeoutError ?? error;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (timeoutError) throw timeoutError;
+  }
+
+  #requestWriteTermination(): void {
+    if (this.#writeTerminationRequested) return;
+    this.#writeTerminationRequested = true;
+    if (this.process.killed) return;
+    try {
+      this.process.kill('SIGKILL');
+    } catch (error) {
+      this.#options.logger.error('Claude CLI write failure termination failed', {
+        sessionId: this.#options.sessionId.slice(0, 8),
+        error: errorMessage(error),
+      });
+    }
   }
 
   retire(): Promise<void> {
@@ -294,6 +296,7 @@ export class ClaudeProcessTransport<Message> {
 
     void this.process.exited.then(
       async (exitCode: number) => {
+        await this.#writeTail;
         await this.#stderrReader;
         const stderr = this.stderrSummary();
         this.#options.onExit({
@@ -305,10 +308,13 @@ export class ClaudeProcessTransport<Message> {
           stderrTruncated: stderr.truncated,
         });
       },
-      (error: unknown) => this.#reportFailure({
-        kind: 'stdout',
-        message: `Claude CLI exit status failed: ${errorMessage(error)}`,
-      }),
+      async (error: unknown) => {
+        await this.#writeTail;
+        this.#reportFailure({
+          kind: 'stdout',
+          message: `Claude CLI exit status failed: ${errorMessage(error)}`,
+        });
+      },
     );
   }
 
@@ -341,6 +347,7 @@ export class ClaudeProcessTransport<Message> {
 }
 
 export {
+  DEFAULT_WRITE_TIMEOUT_MS,
   MAX_STDERR_TAIL_BYTES,
   MAX_STDOUT_FRAME_BYTES,
   PROCESS_EXIT_GRACE_MS,

@@ -76,7 +76,7 @@ export class ExecutionNodesStore {
     return this.#snapshot.localNodeId;
   }
 
-  async registerLocalDefaults(agentIds: readonly string[]): Promise<readonly ConfiguredAgentInstance[]> {
+  async ensureLocalDefaults(agentIds: readonly string[]): Promise<readonly ConfiguredAgentInstance[]> {
     const providers = [...new Set(agentIds)];
     if (!providers.every(isProviderType)) throw new TypeError('Invalid local provider type');
     return this.#lock.runExclusive(this.#filePath, async () => {
@@ -113,6 +113,9 @@ export class ExecutionNodesStore {
         .map((entry) => [entry.projectPath, entry]));
       const locations = captured.map((target): ExecutionLocation => {
         const instance = defaultsByAgent.get(target.agentId)!;
+        if (instance.removedAt !== null) {
+          throw new DomainError('NODE_REMOVED', 'The default local instance was removed', 409);
+        }
         let workspace = workspacesByPath.get(target.projectPath);
         if (!workspace) {
           workspace = { id: randomUUID(), nodeId, projectPath: target.projectPath, removedAt: null };
@@ -213,9 +216,6 @@ function prepareLocalDefaults(
   const defaults = new Map(instances.filter((entry) => entry.nodeId === nodeId && entry.default)
     .map((entry) => [entry.agentId, entry]));
   for (const agentId of agentIds) {
-    if (defaults.get(agentId)?.removedAt) {
-      throw new DomainError('NODE_REMOVED', 'The default local instance was removed', 409);
-    }
     if (defaults.has(agentId)) continue;
     const instance: ConfiguredAgentInstance = {
       id: randomUUID(), nodeId, agentId, label: agentId,

@@ -2,7 +2,9 @@ import { writeFileSync } from 'node:fs';
 import OpenCodeIntegration from '../../server-agents/opencode/src/index.js';
 import { OpenCodeRuntime } from '../../server-agents/opencode/src/agents/opencode/opencode.js';
 import type { AgentHost } from '../../server-agents/interface/src/index.js';
-import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const diagnosticsPath = process.env.GARCON_TEST_PROJECT_CANCELLATION_DIAGNOSTICS ?? '';
 if (!diagnosticsPath) throw new Error('Project cancellation fixture requires a diagnostics path');

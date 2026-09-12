@@ -6,6 +6,7 @@ import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/na
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
 import {
+  AgentRuntimeAdmissionRejectedError,
   type AgentRuntimeOperation,
   isRuntimeAbortTarget,
   type AgentRuntimePublisher,
@@ -15,7 +16,8 @@ import type {
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
-import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import { ClaudeSessionConfigurationController } from './session-configuration.js';
+import type { PermissionMode } from '@garcon/common/chat-modes';
 import {
   assertClaudeExecutionOpen,
   type ClaudeProjectPathUpdate,
@@ -86,6 +88,8 @@ class ClaudeCliRuntime {
   #pendingPermissions = new Set<PendingPermission>();
   #controlBroker: ClaudeControlBroker;
   #steering: ClaudeSteeringController;
+  readonly #configuration: ClaudeSessionConfigurationController;
+  get sessionConfiguration() { return this.#configuration.updates; }
   #turnPublisher: ClaudeTurnPublisher;
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
   #shuttingDown = false;
@@ -95,8 +99,15 @@ class ClaudeCliRuntime {
     this.#dependencies = dependencies;
     this.#turnPublisher = new ClaudeTurnPublisher(dependencies.logger);
     this.#controlBroker = new ClaudeControlBroker(
-      (agentSessionId, jsonl) => this.#writeToCLI(agentSessionId, jsonl),
+      (agentSessionId, jsonl, beforeWrite) => this.#writeToCLI(agentSessionId, jsonl, beforeWrite),
     );
+    this.#configuration = new ClaudeSessionConfigurationController({
+      sessions: this.#runningSessions, controls: this.#controlBroker, controlTimeoutMs: dependencies.controlTimeoutMs,
+      shuttingDown: () => this.#shuttingDown, removeSession: (id) => { this.#runningSessions.delete(id); },
+      hasPendingPermission: (id) => [...this.#pendingPermissions].some((pending) => pending.agentSessionId === id),
+      retireProcess: (session) => this.#retireSessionProcess(session),
+      waitForRetirement: (id, chatId) => this.#processRetirements.wait(id, chatId),
+    });
     this.#steering = new ClaudeSteeringController({
       session: agentSessionId => this.#runningSessions.get(agentSessionId) ?? null,
       isShuttingDown: () => this.#shuttingDown,
@@ -135,18 +146,22 @@ class ClaudeCliRuntime {
       throw new Error(`Claude session ${session.id} already has an active turn`);
     }
     const activeTurn = new ClaudeActiveTurn(session.backgroundTaskCount, operation);
+    session.configurationEpoch += 1;
     session.unownedProviderActivity = false;
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
     return activeTurn;
   }
 
-  async #writeToCLI(sessionId: string, jsonl: string): Promise<void> {
+  async #writeToCLI(sessionId: string, jsonl: string, beforeWrite?: () => void): Promise<void> {
     const session = this.#runningSessions.get(sessionId);
     if (!session?.transport) {
       throw new Error(`Claude session ${sessionId} has no writable process`);
     }
-    await session.transport.writeLine(jsonl);
+    await session.transport.writeLine(jsonl, {
+      beforeWrite,
+      attemptTimeoutMs: this.#dependencies.controlWriteTimeoutMs,
+    });
   }
 
   #trySendToCLI(sessionId: string, jsonl: string): void {
@@ -650,11 +665,17 @@ class ClaudeCliRuntime {
     const priorRetirement = session.retirement ?? Promise.resolve();
     const retirement = priorRetirement.then(() => transport.retire());
     session.retirement = retirement;
-    const processExit = proc.exited.then(() => {
+    let retirementSettled = false;
+    const finished = retirement.then(() => { retirementSettled = true; }, () => { retirementSettled = true; });
+    // A retirement deadline may fail before eventual exit; both it and native I/O
+    // must settle before the exit can release the successor fence.
+    const settled = proc.exited.then(async () => {
+      if (!retirementSettled) await finished;
       if (session.retirement === retirement) session.retirement = null;
     });
-    this.#processRetirements.track(session.id, session.chatId, processExit);
+    this.#processRetirements.track(session.id, session.chatId, settled);
     await retirement;
+    await settled;
   }
 
   #retireSessionProcessInBackground(session: ClaudeRunningSession): void {
@@ -668,6 +689,7 @@ class ClaudeCliRuntime {
   }
 
   async #retireSession(session: ClaudeRunningSession): Promise<void> {
+    session.configurationEpoch += 1;
     const activeTurn = session.activeTurn;
     this.#clearAbortTimer(session);
     session.activeTurn = null;
@@ -722,71 +744,8 @@ class ClaudeCliRuntime {
     });
   }
 
-  async prepareClaudeProjectPathUpdate(request: ClaudeProjectPathUpdate): Promise<void> {
-    const agentSessionId = request.agentSessionId;
-    if (!agentSessionId) return;
-
-    const session = this.#runningSessions.get(agentSessionId);
-    if (session && session.chatId !== request.chatId) {
-      throw new Error('Chat ID mismatch');
-    }
-    if (session?.activeTurn) {
-      throw new Error('Cannot update project path while Claude is running');
-    }
-    for (const pending of this.#pendingPermissions) {
-      if (pending.agentSessionId === agentSessionId) {
-        throw new Error('Cannot update project path while Claude is waiting for permission');
-      }
-    }
-
-    if (session) {
-      this.#clearAbortTimer(session);
-      await this.#retireSessionProcess(session);
-    }
-    await this.#processRetirements.wait(agentSessionId, request.chatId);
-  }
-
-  setInternalPermissionMode(agentSessionId: string, mode: PermissionMode): void {
-    const session = this.#runningSessions.get(agentSessionId);
-    if (!session) return;
-
-    session.currentPermissionMode = mode;
-    session.options = { ...session.options, permissionMode: mode };
-
-    if (session.process) {
-      const providerMode = providerStartupPermissionMode(mode);
-      this.#controlBroker.request(session.id, {
-        subtype: 'set_permission_mode',
-        mode: providerMode,
-      }).catch((error: unknown) => {
-        this.#dependencies.logger.warn('Claude CLI permission-mode update failed', {
-          sessionId: agentSessionId.slice(0, 8),
-          error: errorMessage(error),
-        });
-      });
-    }
-  }
-
-  setInternalThinkingMode(agentSessionId: string, mode: ThinkingMode): void {
-    const session = this.#runningSessions.get(agentSessionId);
-    if (!session) return;
-
-    session.options = { ...session.options, thinkingMode: mode };
-
-    if (session.process && !session.activeTurn) {
-      this.#retireSessionProcessInBackground(session);
-    }
-  }
-
-  setInternalClaudeThinkingMode(agentSessionId: string, mode: ClaudeThinkingMode): void {
-    const session = this.#runningSessions.get(agentSessionId);
-    if (!session) return;
-
-    session.options = { ...session.options, claudeThinkingMode: mode };
-
-    if (session.process && !session.activeTurn) {
-      this.#retireSessionProcessInBackground(session);
-    }
+  prepareClaudeProjectPathUpdate(request: ClaudeProjectPathUpdate): Promise<void> {
+    return this.#configuration.prepareProjectPathUpdate(request);
   }
 
   async #resolvePendingPermission(
@@ -963,6 +922,8 @@ class ClaudeCliRuntime {
     session.backgroundTaskCount = 0;
     session.unownedProviderActivity = false;
     session.process = proc;
+    session.currentPermissionMode = options.permissionMode;
+    session.permissionModeConfirmed = true;
     session.currentThinkingMode = options.thinkingMode || 'none';
     session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
     session.currentModel = options.model || '';
@@ -1064,6 +1025,11 @@ class ClaudeCliRuntime {
     const session: ClaudeRunningSession = {
       id: agentSessionId,
       chatId,
+      nativePath: request.nativePath ?? null,
+      nativeModelEndpointId: request.nativeModelEndpointId ?? null,
+      configurationEpoch: 0,
+      configurationPreparing: null,
+      configurationUpdateChain: Promise.resolve(),
       initialization,
       completeInitialization,
       lastActivityAt: Date.now(),
@@ -1076,6 +1042,7 @@ class ClaudeCliRuntime {
       retirement: null,
       options: allOpts,
       currentPermissionMode: permissionMode || 'default',
+      permissionModeConfirmed: true,
       currentThinkingMode: thinkingMode || 'none',
       currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
       currentModel: model || '',
@@ -1129,6 +1096,27 @@ class ClaudeCliRuntime {
 
   async runClaudeTurn(request: ClaudeResumeRequest): Promise<void> {
     assertClaudeExecutionOpen(request);
+    const session = this.#runningSessions.get(request.agentSessionId);
+    if (session && session.chatId !== request.chatId) throw new Error('Chat ID mismatch');
+    if (session && session.options.projectPath !== request.projectPath) throw new Error('Project path mismatch');
+    if (session?.configurationPreparing) throw new AgentRuntimeAdmissionRejectedError('Claude session is already preparing a turn');
+    if (session?.activeTurn && !session.activeTurn.protocol.abortRequested) {
+      throw new AgentRuntimeAdmissionRejectedError(`Claude session ${request.agentSessionId} already has an active turn`);
+    }
+    const preparation = { session, owner: Object.freeze({}) };
+    if (session) {
+      session.configurationEpoch += 1;
+      session.configurationPreparing = preparation.owner;
+    }
+    try {
+      await this.#runClaudeTurn(request, preparation);
+    } finally {
+      if (preparation.session?.configurationPreparing === preparation.owner) preparation.session.configurationPreparing = null;
+    }
+  }
+
+  async #runClaudeTurn(request: ClaudeResumeRequest, preparation: { session: ClaudeRunningSession | undefined; readonly owner: object }): Promise<void> {
+    assertClaudeExecutionOpen(request);
     const {
       command,
       agentSessionId,
@@ -1169,15 +1157,20 @@ class ClaudeCliRuntime {
       envOverrides,
     };
 
-    let session = this.#runningSessions.get(agentSessionId);
+    let session = preparation.session;
     if (session?.initialization) {
       await session.initialization;
-      session = this.#runningSessions.get(agentSessionId);
     }
+    if (this.#runningSessions.get(agentSessionId) !== session) throw new Error('Claude session changed while preparing a turn');
     if (!session) {
       session = {
         id: agentSessionId,
         chatId: chatId,
+        nativePath: request.nativePath ?? null,
+        nativeModelEndpointId: request.nativeModelEndpointId ?? null,
+        configurationEpoch: 0,
+        configurationPreparing: preparation.owner,
+        configurationUpdateChain: Promise.resolve(),
         initialization: null,
         completeInitialization: null,
         lastActivityAt: Date.now(),
@@ -1190,12 +1183,14 @@ class ClaudeCliRuntime {
         retirement: null,
         options: allOpts,
         currentPermissionMode: permissionMode || 'default',
+        permissionModeConfirmed: true,
         currentThinkingMode: thinkingMode || 'none',
         currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
         currentModel: model || '',
         currentEnvOverrides: envOverrides,
       };
       this.#runningSessions.set(agentSessionId, session);
+      preparation.session = session;
     }
     if (this.#shuttingDown) throw new Error('Claude runtime is shutting down');
     if (session.activeTurn?.protocol.abortRequested) {
@@ -1207,14 +1202,17 @@ class ClaudeCliRuntime {
     }
 
     let ownedTurn: ClaudeActiveTurn | null = null;
+    const turnEpoch = session.configurationEpoch;
     let cleanupVideoAttachments = async () => {};
     try {
-      if (chatId !== session.chatId) {
-        throw new Error('Chat ID mismatch');
+      await session.configurationUpdateChain;
+      assertClaudeExecutionOpen(requestAdmission);
+      if (this.#runningSessions.get(agentSessionId) !== session || session.configurationEpoch !== turnEpoch) {
+        throw new Error('Claude session changed while preparing a turn');
       }
-
+      session.nativePath = request.nativePath ?? null;
+      session.nativeModelEndpointId = request.nativeModelEndpointId ?? null;
       session.options = mergeClaudeSessionOptions(session.options, allOpts);
-      session.chatId = chatId;
       session.lastActivityAt = Date.now();
       const desiredThinkingMode = session.options.thinkingMode || 'none';
       const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(
@@ -1236,7 +1234,8 @@ class ClaudeCliRuntime {
         session.options.envOverrides,
       );
       if (session.process && (
-        desiredThinkingMode !== session.currentThinkingMode
+        !session.permissionModeConfirmed
+        || desiredThinkingMode !== session.currentThinkingMode
         || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
         || permissionStartupChanged
         || envChanged
@@ -1263,11 +1262,8 @@ class ClaudeCliRuntime {
         session.currentModel = desiredModel;
       }
 
-      if (
-        session.currentPermissionMode
-        && desiredPermissionMode !== session.currentPermissionMode
-      ) {
-        this.setInternalPermissionMode(agentSessionId, desiredPermissionMode);
+      if (desiredPermissionMode !== session.currentPermissionMode) {
+        await this.#configuration.setPermissionMode(session, desiredPermissionMode, () => assertClaudeExecutionOpen(requestAdmission));
       }
       session.currentPermissionMode = desiredPermissionMode;
 
@@ -1279,6 +1275,7 @@ class ClaudeCliRuntime {
       const prepared = await materializeClaudeVideoAttachments(command, images);
       cleanupVideoAttachments = prepared.cleanup;
       if (executionAdmission) await executionAdmission.markStarted();
+      if (session.configurationPreparing === preparation.owner) session.configurationPreparing = null;
       await this.#sendUserMessage(session, activeTurn, prepared.command, images);
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
@@ -1317,22 +1314,25 @@ class ClaudeCliRuntime {
     activeTurn.protocol.markAbortRequested();
     this.#armAbortFallback(session, activeTurn, INTERRUPT_RECEIPT_TIMEOUT_MS, 'receipt');
     const receiptCancellation = new AbortController();
+    const response = this.#controlBroker.request(
+      session.id,
+      {
+        subtype: 'interrupt',
+        cancel_queued: true,
+      },
+      { signal: receiptCancellation.signal },
+    ).then(value => ({ type: 'receipt' as const, value }));
     try {
-      const response = this.#controlBroker.request(
-        session.id,
-        {
-          subtype: 'interrupt',
-          cancel_queued: true,
-        },
-        { signal: receiptCancellation.signal },
-      ).then(value => ({ type: 'receipt' as const, value }));
       const lifecycle = activeTurn.preStartAbortConfirmation.then(
         () => ({ type: 'lifecycle' as const }),
       );
       const completion = activeTurn.completion.then(() => ({ type: 'completion' as const }));
       const acknowledgement = await Promise.race([response, lifecycle, completion]);
       if (acknowledgement.type === 'lifecycle') return true;
-      if (acknowledgement.type === 'completion') return false;
+      if (acknowledgement.type === 'completion') {
+        if (activeTurn.interruptRequestFailed) await response;
+        return false;
+      }
       const receipt = acknowledgement.value;
       return handleClaudeInterruptReceipt(session, activeTurn, receipt, {
         logger: this.#dependencies.logger,
@@ -1364,6 +1364,7 @@ class ClaudeCliRuntime {
       throw error;
     } finally {
       receiptCancellation.abort(new Error('Claude interrupt settled through another signal'));
+      await response.catch(() => undefined);
     }
   }
 

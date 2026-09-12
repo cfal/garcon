@@ -22,13 +22,12 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
     }],
   })) {
   return new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: {
       getChat: mock(() => ({ agentId: 'test' })),
     },
-    instances: { requireFor: () => { throw new Error('Unexpected instance lookup'); } },
-    directory: {
-      get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
-    },
+    instances: {},
+    providerIds: ['test'],
     endpointResolver: {},
     events: {},
     projection: {},

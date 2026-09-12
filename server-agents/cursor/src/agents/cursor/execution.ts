@@ -75,17 +75,6 @@ export class CursorExecution implements AgentRuntimeExecution {
     }));
   }
 
-  async applySessionConfiguration(
-    agentSessionId: string,
-    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
-  ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
-      model: configuration.model,
-      permissionMode: configuration.permissionMode,
-      thinkingMode: configuration.thinkingMode,
-    });
-  }
-
   async prepareProjectPathUpdate(
     request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
   ): Promise<void> {

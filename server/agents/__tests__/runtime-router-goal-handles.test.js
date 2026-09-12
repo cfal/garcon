@@ -46,6 +46,7 @@ function fixture() {
     resume: (request) => delay(adapter.execution.resume(request)),
     abort: mock(adapter.execution.abort),
   };
+  const commitGoal = mock(() => {});
   const integration = {
     descriptor: {
       id: 'synthetic', supportedPermissionModes: ['default'], supportedThinkingModes: ['none'],
@@ -57,7 +58,7 @@ function fixture() {
     compaction: { compact: (request) => delay(adapter.compact(request, async (_request, publish) => activate(publish))) },
     goals: {
       submitControl: mock((request) => adapter.submitGoalControl(request, async (goal) => {
-        await goal.beforeDelivery({ validate() {}, commit() {} });
+        await goal.beforeDelivery({ validate() {}, commit: commitGoal });
         return true;
       })),
     },
@@ -67,9 +68,10 @@ function fixture() {
     resolveEndpointReference: () => null,
   };
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
-    instances: { requireFor: () => integration, ...createRuntimeInstanceFixture(integration) },
-    directory: { list: () => [integration] },
+    instances: createRuntimeInstanceFixture(integration),
+    providerIds: ['test'],
     endpointResolver,
     events, getCarryOverRevision: () => 'synthetic-revision',
     createCarriedContext: async () => ({ kind: 'no-history' }),
@@ -86,8 +88,62 @@ function fixture() {
     handoff.validate();
     handoff.commit();
   });
-  return { router, entry, endpointResolver, transcript, runtime, execution, integration, publishers, launched, handleReady, launch, handoff };
+  return { router, entry, endpointResolver, transcript, events, runtime, execution, integration, publishers, launched, handleReady, launch, handoff, commitGoal };
 }
+
+test.each(['run-1', 'run-2'])('all goal owners select the successor before synchronous terminal %s', async (terminalRunId) => {
+  const f = fixture();
+  const terminals = [];
+  f.events.onFinished((_chatId, _exitCode, metadata) => { terminals.push(metadata.turnId); });
+  const launching = f.launch('start');
+  try {
+    await f.launched.promise;
+    f.commitGoal.mockImplementationOnce(() => {
+      expect(f.transcript.activeRunId()).toBe('run-2');
+      expect(f.events.getActiveTurn('chat-1').turnId).toBe('run-2');
+      f.publishers[0]({ type: 'run-ended', runId: terminalRunId, outcome: 'finished' });
+    });
+    expect(await f.handoff('run-2')).toBe(true);
+    if (terminalRunId === 'run-2') {
+      expect(f.transcript.activeRunId()).toBeNull();
+      expect(terminals).toEqual(['run-2']);
+      expect(await f.handoff('run-3')).toBe(false);
+    } else {
+      expect(terminals).toEqual([]);
+      expect(f.transcript.activeRunId()).toBe('run-2');
+      expect(await f.handoff('run-3')).toBe(true);
+      expect(await f.router.abortSession('chat-1')).toBe(true);
+    }
+  } finally {
+    f.handleReady.resolve();
+    await launching;
+  }
+});
+
+test.each([false, true])('throwing goal commit cannot restore a predecessor after terminal=%s', async (terminal) => {
+  const f = fixture();
+  const launching = f.launch('start');
+  try {
+    await f.launched.promise;
+    f.commitGoal.mockImplementationOnce(() => {
+      if (terminal) f.publishers[0]({ type: 'run-ended', runId: 'run-2', outcome: 'finished' });
+      throw new Error('synthetic post-transfer failure');
+    });
+    await expect(f.handoff('run-2')).rejects.toThrow('synthetic post-transfer failure');
+    f.publishers[0]({ type: 'run-ended', runId: 'run-1', outcome: 'finished' });
+    expect(f.transcript.activeRunId()).toBe(terminal ? null : 'run-2');
+    if (!terminal) {
+      expect(f.events.getActiveTurn('chat-1').turnId).toBe('run-2');
+      expect(await f.router.abortSession('chat-1')).toBe(true);
+      f.handleReady.resolve();
+      await launching;
+      expect(f.runtime.abort).toHaveBeenCalledWith('synthetic-native', f.publishers[0]);
+    }
+  } finally {
+    f.handleReady.resolve();
+    await launching;
+  }
+});
 
 test('each goal captures fresh endpoint credentials and retains the exact operation delivery', async () => {
   const f = fixture();

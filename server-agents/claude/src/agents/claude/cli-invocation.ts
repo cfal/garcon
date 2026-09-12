@@ -45,6 +45,8 @@ export interface ClaudeCliDependencies {
   readonly versionProbe: ClaudeCliVersionProbe;
   readonly steerWriteTimeoutMs?: number;
   readonly steerIdleFenceTimeoutMs?: number;
+  readonly controlTimeoutMs?: number;
+  readonly controlWriteTimeoutMs?: number;
 }
 
 function defaultClaudeCliDependencies(): ClaudeCliDependencies {

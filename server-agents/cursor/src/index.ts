@@ -112,11 +112,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new CursorExecution(runtime, nativeSessions);
-    this.sessionConfiguration = {
-      apply: (agentSessionId, configuration) => (
-        providerExecution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
+    this.sessionConfiguration = runtime.sessionConfiguration;
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };

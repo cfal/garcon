@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +11,8 @@ import { AgentInstanceDirectory } from '../instance-directory.ts';
 import { testExecutionLocation } from '../../execution-nodes/testing/placement.ts';
 import { DomainError } from '../../lib/domain-error.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { LocalWorkspaceFileMentionService } from '../../execution-node/local-workspace-file-mentions.js';
+import { WorkspaceFileMentionResolver } from '../../chats/workspace-file-mention-resolver.js';
 
 let projectDir;
 
@@ -109,17 +112,16 @@ function makeRouter(overrides = {}) {
     })),
     resolveEndpointReference: mock(() => null),
   };
-  const directory = {
-    require: mock(() => integration),
-    get: mock(() => integration),
-    list: mock(() => [integration]),
-  };
-  const instances = overrides.instances?.(integration) ?? new AgentInstanceDirectory([
+  const instances = overrides.instances?.(integration) ?? new AgentInstanceDirectory(createLocalProviderInstances([
     { configuration: instanceConfiguration('test-test', true), integration },
-  ]);
+  ]));
   const router = new AgentRuntimeRouter({
+    fileMentions: overrides.fileMentions ?? {
+      resolve: (command, target, signal) => new LocalWorkspaceFileMentionService()
+        .resolve({ command, projectPath: target.projectPath }, signal),
+    },
     registry,
-    directory,
+    providerIds: ['test'],
     localNodeId: testExecutionLocation().nodeId,
     instances,
     endpointResolver,
@@ -147,7 +149,6 @@ function makeRouter(overrides = {}) {
     endpointResolver,
     transcript,
     integration,
-    directory,
     instances,
   };
 }
@@ -163,6 +164,46 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   for (const operation of ['start', 'resume']) {
+    it.each(['synthetic input', 'read @notes.txt'])(`preserves ${operation} input when mention placement is unavailable: %s`, async (prompt) => {
+      const serviceFor = mock(() => { throw new DomainError('NODE_UNAVAILABLE', 'Synthetic placement failure', 409); });
+      const fixture = makeRouter({
+        fileMentions: new WorkspaceFileMentionResolver(serviceFor),
+        entry: { agentSessionId: operation === 'resume' ? 'native-1' : null },
+      });
+      await fixture.router.runAgentTurn('chat-1', prompt);
+      expect(fixture[operation]).toHaveBeenCalledWith(expect.objectContaining({ prompt }));
+      expect(serviceFor).toHaveBeenCalledTimes(prompt.includes('@') ? 1 : 0);
+    });
+
+    it(`captures the workspace target and admission cancellation for ${operation} file mentions`, async () => {
+      const entered = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      const cancellation = new AbortController();
+      const fileMentions = {
+        resolve: mock(async (_command, _target, signal) => {
+          entered.resolve();
+          await release.promise;
+          signal.throwIfAborted();
+          return 'resolved synthetic context';
+        }),
+      };
+      const f = makeRouter({ fileMentions, entry: { agentSessionId: operation === 'resume' ? 'native-1' : null } });
+      const pending = f.router.runAgentTurn('chat-1', 'read @notes.txt', {
+        executionAdmission: { signal: cancellation.signal, async markStarted() {} },
+      });
+      await entered.promise;
+      const target = fileMentions.resolve.mock.calls[0][1];
+      expect(target).toMatchObject({ projectPath: projectDir, executionLocation: testExecutionLocation() });
+      expect(fileMentions.resolve.mock.calls[0][2]).toBe(cancellation.signal);
+      f.registry.updateChat('chat-1', { projectPath: '/successor', executionLocation: testExecutionLocation('successor') });
+      expect(target).toMatchObject({ projectPath: projectDir, executionLocation: testExecutionLocation() });
+      cancellation.abort(new Error('Synthetic mention admission cancellation'));
+      release.resolve();
+      await expect(pending).rejects.toBe(cancellation.signal.reason);
+      expect(f[operation]).not.toHaveBeenCalled();
+      expect(f.transcript.ledger.activeRunId()).toBeNull();
+    });
+
     it(`uses the validated configuration snapshot for ${operation}`, async () => {
       const fixture = makeRouter({
         entry: { agentSessionId: operation === 'resume' ? 'native-1' : null },
@@ -234,7 +275,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
           executionLocation: location,
           agentSessionId: operation === 'resume' ? 'same-native-id' : null,
         },
-        instances: (integration) => new AgentInstanceDirectory([
+        instances: (integration) => new AgentInstanceDirectory(createLocalProviderInstances([
           {
             configuration: instanceConfiguration('test-test', true),
             integration,
@@ -247,7 +288,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
               settings: { ...integration.settings, parse },
             },
           },
-        ]),
+        ])),
       });
 
       await fixture.router.runAgentTurn('chat-1', 'synthetic input', { turnId: 'synthetic-turn' });
@@ -255,19 +296,17 @@ describe('AgentRuntimeRouter producer boundary', () => {
       expect(execute).toHaveBeenCalledTimes(1);
       expect(parse).toHaveBeenCalledTimes(1);
       expect(fixture[operation]).not.toHaveBeenCalled();
-      expect(fixture.directory.require).not.toHaveBeenCalled();
     });
 
     it(`rejects ${operation} for an unavailable instance without using the provider default`, async () => {
       const fixture = makeRouter({
         entry: { agentSessionId: operation === 'resume' ? 'same-native-id' : null },
-        instances: () => new AgentInstanceDirectory([]),
+        instances: () => new AgentInstanceDirectory(createLocalProviderInstances([])),
       });
 
       await expect(fixture.router.runAgentTurn('chat-1', 'synthetic input'))
         .rejects.toMatchObject({ code: 'NODE_UNAVAILABLE' });
       expect(fixture[operation]).not.toHaveBeenCalled();
-      expect(fixture.directory.require).not.toHaveBeenCalled();
     });
 
     it(`aborts a retained ${operation} handle through its captured execution owner`, async () => {
@@ -725,11 +764,30 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(resume.mock.calls[0][0]).not.toHaveProperty('providerPrefix');
   });
 
+  it.each(['synthetic goal', 'read @notes.txt'])('preserves goal input when mention placement is unavailable: %s', async (prompt) => {
+    const serviceFor = mock(() => { throw new DomainError('NODE_UNAVAILABLE', 'Synthetic placement failure', 409); });
+    const { router, submitGoalControl } = makeRouter({
+      entry: {
+        agentSessionId: 'native-1',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      },
+      resume: mock(async () => ({ id: 'active-handle' })),
+      fileMentions: new WorkspaceFileMentionResolver(serviceFor),
+    });
+    await router.runAgentTurn('chat-1', 'start active run', { turnId: 'turn-1' });
+    const signal = new AbortController().signal;
+    await expect(router.submitGoalControl('chat-1', prompt,
+      { turnId: 'turn-2', executionAdmission: { signal, async markStarted() {} } }, async () => undefined)).resolves.toBe(true);
+    expect(submitGoalControl.mock.calls[0][0].prompt).toBe(prompt);
+    expect(serviceFor).toHaveBeenCalledTimes(prompt.includes('@') ? 1 : 0);
+  });
+
   it('submits goal control without materializing the ledger conversation', async () => {
     const conversationMessages = mock(() => {
       throw new Error('goal control must not scan ledger context');
     });
     const resume = mock(async () => ({ id: 'active-handle' }));
+    const fileMentions = { resolve: mock(async () => 'Synthetic expanded goal.') };
     const { router, submitGoalControl } = makeRouter({
       entry: {
         agentSessionId: 'native-1',
@@ -737,17 +795,24 @@ describe('AgentRuntimeRouter producer boundary', () => {
       },
       conversationMessages,
       resume,
+      fileMentions,
     });
     await router.runAgentTurn('chat-1', 'start active run', { turnId: 'turn-1' });
+    fileMentions.resolve.mockClear();
+    const signal = new AbortController().signal;
 
     await expect(router.submitGoalControl(
       'chat-1',
       'update goal',
-      { turnId: 'turn-2' },
+      { turnId: 'turn-2', executionAdmission: { signal, async markStarted() {} } },
       async () => undefined,
     )).resolves.toBe(true);
 
     expect(conversationMessages).not.toHaveBeenCalled();
+    expect(fileMentions.resolve).toHaveBeenCalledWith('update goal', expect.objectContaining({
+      projectPath: projectDir, executionLocation: testExecutionLocation(),
+    }), signal);
+    expect(submitGoalControl.mock.calls[0][0].prompt).toBe('Synthetic expanded goal.');
     expect(submitGoalControl.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 

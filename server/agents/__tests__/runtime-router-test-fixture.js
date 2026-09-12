@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { LocalProviderConfigurationService } from '../../execution-node/local-provider-configuration.js';
 import { LocalProviderExecutionService } from '../../execution-node/local-provider-execution.js';
+import { LocalProviderProjectPathUpdateService } from '../../execution-node/local-provider-project-path.js';
 
 export function createRuntimeTranscriptFixture(options = {}) {
   const view = {
@@ -23,6 +24,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
   };
   const createLease = () => {
     let closed = false;
+    const lifetime = new AbortController();
     const sink = {
       publish(event) {
         if (closed) throw new Error('sink closed');
@@ -43,8 +45,9 @@ export function createRuntimeTranscriptFixture(options = {}) {
     };
     return {
       sink,
+      signal: lifetime.signal,
       get closed() { return closed; },
-      close() { closed = true; activeRunId = null; },
+      close() { closed = true; activeRunId = null; lifetime.abort(); },
     };
   };
   const appendNotice = (chatId, viewId, input) => {
@@ -171,9 +174,10 @@ export function createRuntimeInstanceFixture(integration) {
   const configuration = new LocalProviderConfigurationService(integration);
   const execution = new LocalProviderExecutionService(integration, configuration);
   return {
-    get: () => integration,
-    requireFor: () => integration,
+    assertAvailableFor() {},
     configurationFor: () => configuration,
     executionFor: () => execution,
+    projectPathUpdatesFor: () => integration.projectPathUpdates
+      ? new LocalProviderProjectPathUpdateService(integration, integration.projectPathUpdates) : null,
   };
 }

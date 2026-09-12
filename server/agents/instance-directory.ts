@@ -1,65 +1,41 @@
-import type { AgentIntegration } from '@garcon/server-agent-interface';
 import { executionInstanceKey, type ExecutionInstanceRef, type LocatedChatOwner } from '../../common/execution-location.js';
 import type { ConfiguredAgentInstance } from '../../common/execution-nodes.js';
+import type { ProviderInstanceRegistration, ProviderInstanceServices } from '../execution-nodes/provider-instance.js';
 import { DomainError } from '../lib/domain-error.js';
-import { LocalProviderConfigurationService } from '../execution-node/local-provider-configuration.js';
 import type { ProviderConfigurationService } from '../execution-nodes/provider-configuration.js';
-import { LocalProviderCatalogService } from '../execution-node/local-provider-catalog.js';
 import type { ProviderCatalogService } from '../execution-nodes/provider-catalog.js';
-import { LocalProviderAuthService } from '../execution-node/local-provider-auth.js';
 import type { ProviderAuthService } from '../execution-nodes/provider-auth.js';
-import { LocalProviderCommandsService } from '../execution-node/local-provider-commands.js';
 import type { ProviderCommandsService } from '../execution-nodes/provider-commands.js';
-import { LocalProviderNativeSessionService } from '../execution-node/local-provider-native-sessions.js';
 import type { ProviderNativeSessionService } from '../execution-nodes/provider-native-sessions.js';
-import { LocalProviderNativeActivityService } from '../execution-node/local-provider-native-activity.js';
 import type { ProviderNativeActivityService } from '../execution-nodes/provider-native-activity.js';
-import { LocalProviderHistoryImportService } from '../execution-node/local-provider-history-import.js';
 import type { ProviderHistoryImportService } from '../execution-nodes/provider-history-import.js';
-import { LocalProviderNativeForkService } from '../execution-node/local-provider-native-fork.js';
 import type { ProviderNativeForkService } from '../execution-nodes/provider-native-fork.js';
-import { LocalProviderSingleQueryService } from '../execution-node/local-provider-single-query.js';
 import type { ProviderSingleQueryService } from '../execution-nodes/provider-single-query.js';
-import { LocalProviderTextGenerationService } from '../execution-node/local-provider-text-generation.js';
 import type { ProviderTextGenerationService } from '../execution-nodes/provider-text-generation.js';
-import { LocalProviderExecutionService } from '../execution-node/local-provider-execution.js';
 import type { ProviderExecutionService } from '../execution-nodes/provider-execution.js';
+import type { ProviderProjectPathUpdateService } from '../execution-nodes/provider-project-path.js';
+import type { ProviderInstanceMetadata } from '../execution-nodes/provider-metadata.js';
 
-export interface ExecutableAgentInstance {
-  readonly configuration: ConfiguredAgentInstance;
-  readonly integration: AgentIntegration;
-}
-
-/** Resolves concrete executables by placement while retaining provider type as a separate identity. */
+/** Resolves instance-bound services by placement without retaining executable provider integrations. */
 export class AgentInstanceDirectory {
-  readonly #instances = new Map<string, ExecutableAgentInstance>();
+  readonly #instances = new Map<string, ProviderInstanceRegistration>();
   readonly #defaults = new Map<string, ExecutionInstanceRef>();
-  readonly #configurationServices = new WeakMap<AgentIntegration, ProviderConfigurationService>();
-  readonly #catalogServices = new Map<string, ProviderCatalogService>();
-  readonly #authServices = new Map<string, ProviderAuthService>();
-  readonly #commandsServices = new Map<string, ProviderCommandsService>();
-  readonly #nativeSessionServices = new Map<string, ProviderNativeSessionService>();
-  readonly #nativeActivityServices = new Map<string, ProviderNativeActivityService>();
-  readonly #legacyHistoryImportServices = new Map<string, ProviderHistoryImportService>();
-  readonly #nativeHistoryImportServices = new Map<string, ProviderHistoryImportService>();
-  readonly #nativeForkServices = new Map<string, ProviderNativeForkService>();
-  readonly #singleQueryServices = new Map<string, ProviderSingleQueryService>();
-  readonly #textGenerationServices = new Map<string, ProviderTextGenerationService>();
-  readonly #executionServices = new Map<string, ProviderExecutionService>();
 
-  constructor(instances: readonly ExecutableAgentInstance[]) {
-    const executables = new Set<AgentIntegration>();
+  constructor(instances: readonly ProviderInstanceRegistration[]) {
+    const registrations = new Set<object>();
     const storage = new Set<string>();
-    for (const { configuration, integration } of instances) {
+    for (const { configuration, services } of instances) {
       const ref = { nodeId: configuration.nodeId, instanceId: configuration.id };
       const key = executionInstanceKey(ref);
       const storageKey = JSON.stringify([configuration.nodeId, configuration.storageNamespace]);
       if (this.#instances.has(key)) throw new Error('Duplicate configured agent instance');
-      if (integration.descriptor.id !== configuration.agentId) throw new Error('Executable provider type does not match its instance');
-      if (executables.has(integration)) throw new Error('Configured instances cannot share one executable integration');
+      if (services.agentId !== configuration.agentId) throw new Error('Service provider type does not match its instance');
+      const binding = services.binding;
+      if (!binding || typeof binding !== 'object') throw new Error('Service registration requires an opaque binding');
+      if (registrations.has(binding)) throw new Error('Configured instances cannot share one service binding');
       if (storage.has(storageKey)) throw new Error('Configured instances cannot share one storage namespace');
-      this.#instances.set(key, { configuration: Object.freeze({ ...configuration }), integration });
-      executables.add(integration);
+      this.#instances.set(key, { configuration: Object.freeze({ ...configuration }), services });
+      registrations.add(binding);
       storage.add(storageKey);
       if (configuration.default) {
         const providerKey = JSON.stringify([configuration.nodeId, configuration.agentId]);
@@ -69,168 +45,103 @@ export class AgentInstanceDirectory {
     }
   }
 
-  get(ref: ExecutionInstanceRef): AgentIntegration | null {
+  get(ref: ExecutionInstanceRef): ProviderInstanceServices | null {
     const instance = this.#instances.get(executionInstanceKey(ref));
-    return instance && instance.configuration.removedAt === null ? instance.integration : null;
+    return instance && instance.configuration.removedAt === null ? instance.services : null;
   }
 
-  require(ref: ExecutionInstanceRef): AgentIntegration {
-    const integration = this.get(ref);
-    if (!integration) throw new DomainError('NODE_UNAVAILABLE', `Execution instance unavailable: ${ref.nodeId}/${ref.instanceId}`, 409);
-    return integration;
+  require(ref: ExecutionInstanceRef): ProviderInstanceServices {
+    const services = this.get(ref);
+    if (!services) throw new DomainError('NODE_UNAVAILABLE', `Execution instance unavailable: ${ref.nodeId}/${ref.instanceId}`, 409);
+    return services;
   }
 
-  requireFor(owner: LocatedChatOwner): AgentIntegration {
-    const integration = this.require(owner.executionLocation);
-    if (integration.descriptor.id !== owner.agentId) {
+  requireFor(owner: LocatedChatOwner): ProviderInstanceServices {
+    const services = this.require(owner.executionLocation);
+    if (services.agentId !== owner.agentId) {
       throw new DomainError('NODE_UNAVAILABLE', 'Execution instance does not match the chat provider', 409);
     }
-    return integration;
+    return services;
+  }
+
+  metadataForInstance(ref: ExecutionInstanceRef): ProviderInstanceMetadata {
+    const services = this.require(ref);
+    const agentId = this.#instances.get(executionInstanceKey(ref))!.configuration.agentId;
+    const metadata = services.metadata;
+    if (metadata.descriptor.id !== agentId || metadata.defaultSettings.ownerId !== agentId) {
+      throw new DomainError('NODE_UNAVAILABLE', 'Execution instance metadata does not match its provider', 409);
+    }
+    return metadata;
+  }
+
+  metadataFor(owner: LocatedChatOwner): ProviderInstanceMetadata {
+    this.requireFor(owner);
+    return this.metadataForInstance(owner.executionLocation);
+  }
+
+  assertAvailableForInstance(ref: ExecutionInstanceRef): void {
+    this.require(ref);
+  }
+
+  assertAvailableFor(owner: LocatedChatOwner): void {
+    this.requireFor(owner);
   }
 
   configurationFor(owner: LocatedChatOwner): ProviderConfigurationService {
-    return this.#configurationService(this.requireFor(owner));
+    return this.requireFor(owner).configuration;
   }
 
   executionFor(owner: LocatedChatOwner): ProviderExecutionService {
-    const integration = this.requireFor(owner);
-    const key = executionInstanceKey(owner.executionLocation);
-    let service = this.#executionServices.get(key);
-    if (!service) {
-      service = new LocalProviderExecutionService(integration, this.#configurationService(integration));
-      this.#executionServices.set(key, service);
-    }
-    return service;
+    return this.requireFor(owner).execution;
   }
 
   catalogForInstance(ref: ExecutionInstanceRef): ProviderCatalogService {
-    const integration = this.require(ref);
-    const key = executionInstanceKey(ref);
-    let service = this.#catalogServices.get(key);
-    if (!service) {
-      service = new LocalProviderCatalogService(integration);
-      this.#catalogServices.set(key, service);
-    }
-    return service;
+    return this.require(ref).catalog;
   }
 
   authForInstance(ref: ExecutionInstanceRef): ProviderAuthService {
-    const integration = this.require(ref);
-    const key = executionInstanceKey(ref);
-    let service = this.#authServices.get(key);
-    if (!service) {
-      service = new LocalProviderAuthService(integration);
-      this.#authServices.set(key, service);
-    }
-    return service;
+    return this.require(ref).auth;
   }
 
   commandsForInstance(ref: ExecutionInstanceRef): ProviderCommandsService {
-    const integration = this.require(ref);
-    const key = executionInstanceKey(ref);
-    let service = this.#commandsServices.get(key);
-    if (!service) {
-      service = new LocalProviderCommandsService(integration);
-      this.#commandsServices.set(key, service);
-    }
-    return service;
+    return this.require(ref).commands;
   }
 
   nativeSessionsFor(owner: LocatedChatOwner): ProviderNativeSessionService {
-    const integration = this.requireFor(owner);
-    const key = executionInstanceKey(owner.executionLocation);
-    let service = this.#nativeSessionServices.get(key);
-    if (!service) {
-      service = new LocalProviderNativeSessionService(integration);
-      this.#nativeSessionServices.set(key, service);
-    }
-    return service;
+    return this.requireFor(owner).nativeSessions;
   }
 
   nativeActivityFor(owner: LocatedChatOwner): ProviderNativeActivityService | null {
-    const integration = this.requireFor(owner);
-    if (!integration.nativeActivity) return null;
-    const key = executionInstanceKey(owner.executionLocation);
-    let service = this.#nativeActivityServices.get(key);
-    if (!service) {
-      service = new LocalProviderNativeActivityService(integration);
-      this.#nativeActivityServices.set(key, service);
-    }
-    return service;
+    return this.requireFor(owner).nativeActivity;
   }
 
   legacyHistoryImportFor(owner: LocatedChatOwner): ProviderHistoryImportService | null {
-    const integration = this.requireFor(owner);
-    if (!integration.legacyHistoryImport) return null;
-    const key = executionInstanceKey(owner.executionLocation);
-    let service = this.#legacyHistoryImportServices.get(key);
-    if (!service) {
-      service = new LocalProviderHistoryImportService(integration, integration.legacyHistoryImport);
-      this.#legacyHistoryImportServices.set(key, service);
-    }
-    return service;
+    return this.requireFor(owner).legacyHistoryImport;
   }
 
   nativeHistoryImportFor(owner: LocatedChatOwner): ProviderHistoryImportService | null {
-    const integration = this.requireFor(owner);
-    if (!integration.nativeHistoryImport) return null;
-    const key = executionInstanceKey(owner.executionLocation);
-    let service = this.#nativeHistoryImportServices.get(key);
-    if (!service) {
-      service = new LocalProviderHistoryImportService(integration, integration.nativeHistoryImport);
-      this.#nativeHistoryImportServices.set(key, service);
-    }
-    return service;
-  }
-
-  hasAvailableNativeHistoryImportFor(owner: LocatedChatOwner): boolean {
-    const integration = this.get(owner.executionLocation);
-    return integration !== null && integration.descriptor.id === owner.agentId && Boolean(integration.nativeHistoryImport);
+    return this.requireFor(owner).nativeHistoryImport;
   }
 
   nativeForkFor(owner: LocatedChatOwner): ProviderNativeForkService | null {
-    const integration = this.requireFor(owner);
-    if (!integration.forking) return null;
-    const key = executionInstanceKey(owner.executionLocation);
-    let service = this.#nativeForkServices.get(key);
-    if (!service) {
-      service = new LocalProviderNativeForkService(integration, integration.forking);
-      this.#nativeForkServices.set(key, service);
-    }
-    return service;
+    return this.requireFor(owner).nativeFork;
   }
 
   singleQueryForInstance(ref: ExecutionInstanceRef): ProviderSingleQueryService | null {
-    const integration = this.require(ref);
-    if (!integration.singleQuery) return null;
-    const key = executionInstanceKey(ref);
-    let service = this.#singleQueryServices.get(key);
-    if (!service) {
-      service = new LocalProviderSingleQueryService(integration, integration.singleQuery);
-      this.#singleQueryServices.set(key, service);
-    }
-    return service;
+    return this.require(ref).singleQuery;
+  }
+
+  projectPathUpdatesFor(owner: LocatedChatOwner): ProviderProjectPathUpdateService | null {
+    return this.requireFor(owner).projectPathUpdates;
   }
 
   textGenerationForInstance(ref: ExecutionInstanceRef): ProviderTextGenerationService | null {
-    const integration = this.require(ref);
-    if (!integration.textGeneration) return null;
-    const key = executionInstanceKey(ref);
-    let service = this.#textGenerationServices.get(key);
-    if (!service) {
-      service = new LocalProviderTextGenerationService(integration, integration.textGeneration);
-      this.#textGenerationServices.set(key, service);
-    }
-    return service;
+    return this.require(ref).textGeneration;
   }
 
-  #configurationService(integration: AgentIntegration): ProviderConfigurationService {
-    let service = this.#configurationServices.get(integration);
-    if (!service) {
-      service = new LocalProviderConfigurationService(integration);
-      this.#configurationServices.set(integration, service);
-    }
-    return service;
+  hasAvailableNativeHistoryImportFor(owner: LocatedChatOwner): boolean {
+    const services = this.get(owner.executionLocation);
+    return services !== null && services.agentId === owner.agentId && services.nativeHistoryImport !== null;
   }
 
   defaultFor(nodeId: string, agentId: string): ExecutionInstanceRef | null {

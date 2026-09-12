@@ -1,3 +1,4 @@
+import { nativePermissionsFixture } from './native-permissions-fixture.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
 
@@ -93,6 +94,7 @@ function createRuntime(sessionIds, options = {}) {
         question: { reply: questionReply, reject: questionReject },
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
+          ...nativePermissionsFixture(),
           create,
           prompt,
           promptAsync,

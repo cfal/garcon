@@ -28,7 +28,7 @@ export class AgentCatalogService {
 
   constructor(
     private readonly deps: {
-      instances: Pick<AgentInstanceDirectory, 'catalogForInstance' | 'defaultFor' | 'require'>;
+      instances: Pick<AgentInstanceDirectory, 'catalogForInstance' | 'defaultFor' | 'metadataForInstance' | 'assertAvailableForInstance'>;
       localNodeId: string;
       defaultAgentIds: readonly string[];
       endpointResolver: ApiProviderEndpointResolver;
@@ -66,9 +66,9 @@ export class AgentCatalogService {
   }): Promise<boolean> {
     const ref = this.deps.instances.defaultFor(this.deps.localNodeId, input.agentId);
     if (!ref) return false;
-    const integration = this.deps.instances.require(ref);
+    const metadata = this.deps.instances.metadataForInstance(ref);
     if (!input.apiProviderId || !input.modelEndpointId)
-      return integration.descriptor.supportsImages;
+      return metadata.descriptor.supportsImages;
     return this.deps.endpointResolver.modelSupportsImages(input);
   }
 
@@ -82,7 +82,7 @@ export class AgentCatalogService {
   }
 
   requiresStrictModelDiscoveryForInstance(ref: ExecutionInstanceRef): boolean {
-    this.deps.instances.require(ref);
+    this.deps.instances.assertAvailableForInstance(ref);
     return this.#requiresStrictByInstance.get(executionInstanceKey(ref)) ?? false;
   }
 
@@ -104,35 +104,34 @@ export class AgentCatalogService {
   ): Promise<AgentCatalogEntry> {
     const signal = query.signal;
     signal?.throwIfAborted();
-    const integration = this.deps.instances.require(ref);
-    const agentId = integration.descriptor.id;
+    const metadata = this.deps.instances.metadataForInstance(ref);
+    const agentId = metadata.descriptor.id;
     const snapshot = await this.#snapshot(ref, query);
     signal?.throwIfAborted();
-    const endpointModels = integration.endpoints
+    const endpointModels = metadata.facets.endpoints
       ? this.deps.endpointResolver.getModelOptions(agentId)
       : [];
     const models = dedupeModels([...snapshot.models, ...endpointModels]);
     return {
-      id: integration.descriptor.id,
-      label: integration.descriptor.label,
+      id: metadata.descriptor.id,
+      label: metadata.descriptor.label,
       kind: "agent",
-      supportsCompact: integration.compaction !== null,
+      supportsCompact: metadata.facets.compaction !== null,
       supportsFork: true,
       supportsForkAtMessage: true,
       supportsForkWhileRunning: true,
-      supportsUpdateProjectPath:
-        integration.descriptor.supportsProjectPathUpdate,
-      supportsSteering: integration.steering !== null,
-      supportsGoals: integration.goals !== null,
-      supportsImages: integration.descriptor.supportsImages,
-      fileAttachmentMimeTypes: [...(integration.attachments?.fileMimeTypes ?? [])],
-      acceptsApiProviderEndpoints: integration.endpoints !== null,
-      supportedProtocols: [...integration.descriptor.supportedEndpointProtocols],
-      authLoginSupported: Boolean(integration.auth?.launchLogin),
-      supportedPermissionModes: [...integration.descriptor.supportedPermissionModes],
-      supportedThinkingModes: [...integration.descriptor.supportedThinkingModes],
-      settings: [...integration.settings.describe()],
-      defaultSettings: integration.settings.defaults(),
+      supportsUpdateProjectPath: metadata.descriptor.supportsProjectPathUpdate,
+      supportsSteering: metadata.facets.steering !== null,
+      supportsGoals: metadata.facets.goals !== null,
+      supportsImages: metadata.descriptor.supportsImages,
+      fileAttachmentMimeTypes: [...metadata.fileAttachmentMimeTypes],
+      acceptsApiProviderEndpoints: metadata.facets.endpoints !== null,
+      supportedProtocols: [...metadata.descriptor.supportedEndpointProtocols],
+      authLoginSupported: metadata.authCapabilities.launchLogin,
+      supportedPermissionModes: [...metadata.descriptor.supportedPermissionModes],
+      supportedThinkingModes: [...metadata.descriptor.supportedThinkingModes],
+      settings: structuredClone([...metadata.settings]),
+      defaultSettings: structuredClone(metadata.defaultSettings),
       requiresStrictModelDiscovery: snapshot.requiresStrictModelDiscovery,
       generation: snapshot.generation,
       defaultModel: snapshot.defaultModel || models[0]?.value || "",

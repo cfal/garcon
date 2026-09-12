@@ -1,11 +1,11 @@
-import type { AgentIntegration } from '@garcon/server-agent-interface';
+import type { ProviderInstanceMetadata } from '../execution-nodes/provider-metadata.js';
 import type { AgentAuthStatus, AgentReadiness } from '../../common/agent-execution.js';
 import type { ExecutionInstanceRef } from '../../common/execution-location.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { AgentInstanceDirectory } from './instance-directory.js';
 
 export interface AgentAuthServiceOptions {
-  readonly instances: Pick<AgentInstanceDirectory, 'defaultFor' | 'require' | 'authForInstance'>;
+  readonly instances: Pick<AgentInstanceDirectory, 'defaultFor' | 'metadataForInstance' | 'authForInstance'>;
   readonly localNodeId: string;
   readonly defaultAgentIds: readonly string[];
   hasEndpointModels(agentId: string): boolean;
@@ -16,12 +16,12 @@ export class AgentAuthService {
 
   supportsLogin(agentId: string): boolean {
     const ref = this.#defaultFor(agentId);
-    return ref !== null && Boolean(this.deps.instances.require(ref).auth?.launchLogin);
+    return ref !== null && this.deps.instances.metadataForInstance(ref).authCapabilities.launchLogin;
   }
 
   supportsLoginCompletion(agentId: string): boolean {
     const ref = this.#defaultFor(agentId);
-    return ref !== null && Boolean(this.deps.instances.require(ref).auth?.completeLogin);
+    return ref !== null && this.deps.instances.metadataForInstance(ref).authCapabilities.completeLogin;
   }
 
   async launchLogin(agentId: string) {
@@ -50,9 +50,9 @@ export class AgentAuthService {
 
   async statusMap(signal: AbortSignal): Promise<Record<string, AgentAuthStatus>> {
     signal.throwIfAborted();
-    const entries = await Promise.all(this.#defaults().map(async ({ ref, integration }) => {
+    const entries = await Promise.all(this.#defaults().map(async ({ ref, metadata }) => {
       const status = await this.deps.instances.authForInstance(ref).status(signal);
-      return [integration.descriptor.id, status ?? unauthenticated(integration.descriptor.label)] as const;
+      return [metadata.descriptor.id, status ?? unauthenticated(metadata.descriptor.label)] as const;
     }));
     signal.throwIfAborted();
     return Object.fromEntries(entries);
@@ -61,15 +61,15 @@ export class AgentAuthService {
   async readinessMap(authByAgent: Record<string, unknown> | undefined, signal: AbortSignal): Promise<Record<string, AgentReadiness>> {
     signal.throwIfAborted();
     const defaults = this.#defaults();
-    const entries = await Promise.all(defaults.map(async ({ ref, integration }) => {
-      const agentId = integration.descriptor.id;
+    const entries = await Promise.all(defaults.map(async ({ ref, metadata }) => {
+      const agentId = metadata.descriptor.id;
       const status = authByAgent === undefined
         ? await this.deps.instances.authForInstance(ref).status(signal)
         : authByAgent[agentId];
       signal.throwIfAborted();
       const nativeReady = typeof status === 'object' && status !== null
         && 'authenticated' in status && status.authenticated === true;
-      const endpointReady = integration.endpoints !== null && this.deps.hasEndpointModels(agentId);
+      const endpointReady = metadata.facets.endpoints !== null && this.deps.hasEndpointModels(agentId);
       return [agentId, {
         ready: nativeReady || endpointReady,
         nativeReady,
@@ -85,10 +85,10 @@ export class AgentAuthService {
     return Object.fromEntries(entries);
   }
 
-  #defaults(): { ref: ExecutionInstanceRef; integration: AgentIntegration }[] {
+  #defaults(): { ref: ExecutionInstanceRef; metadata: ProviderInstanceMetadata }[] {
     return this.deps.defaultAgentIds.flatMap((agentId) => {
       const ref = this.#defaultFor(agentId);
-      return ref ? [{ ref, integration: this.deps.instances.require(ref) }] : [];
+      return ref ? [{ ref, metadata: this.deps.instances.metadataForInstance(ref) }] : [];
     });
   }
 

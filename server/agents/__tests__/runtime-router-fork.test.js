@@ -72,16 +72,13 @@ function makeRouter(fork) {
     resolveEndpointReference: mock(() => null),
   };
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry,
     instances: {
-      requireFor: mock(() => integration),
       ...createRuntimeInstanceFixture(integration),
       nativeForkFor: () => new LocalProviderNativeForkService(integration, integration.forking),
     },
-    directory: {
-      require: mock(() => integration),
-      list: mock(() => [integration]),
-    },
+    providerIds: ['test'],
     endpointResolver,
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',

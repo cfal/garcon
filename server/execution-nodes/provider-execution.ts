@@ -62,8 +62,13 @@ export interface ProviderExecutionInput {
   readonly carriedContext: CarriedContext | null;
 }
 
+export interface ProviderExecutionOutput extends AgentEmissionSink {
+  /** Closes the captured publisher source independently of any run or physical connection. */
+  readonly signal: AbortSignal;
+}
+
 export interface ProviderExecutionDelivery {
-  readonly output: AgentEmissionSink;
+  readonly output: ProviderExecutionOutput;
   readonly admission: AgentExecutionAdmission;
 }
 

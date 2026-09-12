@@ -28,12 +28,6 @@ export interface OpenCodeResumeRequest extends OpenCodeStartRequest {
   readonly agentSessionId: string;
 }
 
-export interface OpenCodeSessionSettingsPatch {
-  readonly permissionMode?: PermissionMode;
-  readonly thinkingMode?: ThinkingMode;
-  readonly model?: string;
-}
-
 export type OpenCodePermissionDecision = PermissionDecisionPayload;
 
 export function assertOpenCodeExecutionOpen(

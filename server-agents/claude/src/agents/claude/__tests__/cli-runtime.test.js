@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 
 import { ClaudeCliRuntime } from '../claude-cli.js';
 
@@ -91,7 +92,7 @@ function createFakeClaudeProcess(options = {}) {
         const message = JSON.parse(line);
         if (
           message.type !== 'control_request'
-          || !['initialize', 'set_model'].includes(message.request?.subtype)
+          || !['initialize', 'set_model', ...(options.autoPermission === false ? [] : ['set_permission_mode'])].includes(message.request?.subtype)
           || options.autoControls === false
         ) return;
         queueMicrotask(() => {
@@ -1935,7 +1936,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('preserves existing resume options when the caller omits unchanged fields', async () => {
+  it('preserves optional resume settings with the same required configuration and project', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     let runtime;
@@ -1947,6 +1948,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       const start = runtime.startClaudeCliSession(startOptions({
         permissionMode: 'acceptEdits',
         thinkingMode: 'medium',
+        claudeThinkingMode: 'on',
       }));
       await enqueueResult(fake);
       await expect(start).resolves.toBe('expected-session');
@@ -1955,6 +1957,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       fake.proc.kill.mockClear();
       const resumedOperation = collectOperation('run-resume-options');
       const resumed = runtime.runClaudeTurn({
+        ...startOptions({ permissionMode: 'acceptEdits', thinkingMode: 'medium' }),
         command: 'continue',
         agentSessionId: 'expected-session',
         chatId: 'chat-1',
@@ -2126,7 +2129,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       const start = runtime.startClaudeCliSession(startOptions());
       await enqueueResult(fake);
       await start;
-      runtime.setInternalThinkingMode('expected-session', 'high');
+      const input = configurationRequest();
+      delete input.expected.nativeSession.value.path;
+      input.next.thinkingMode = 'high';
+      const target = await configurationTarget(runtime, input);
+      const updating = runtime.sessionConfiguration.commit(target, input.signal);
+      await Promise.resolve();
       globalThis.setTimeout = mock((callback) => {
         queueMicrotask(callback);
         return 1;
@@ -2140,6 +2148,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         nativePath: '/config/projects/tmp/expected-session.jsonl',
       })).resolves.toBeUndefined();
 
+      expect(await updating).toEqual({ kind: 'applied' });
       expect(fake.proc.kill.mock.calls).toEqual([
         [],
         ['SIGKILL'],
@@ -2302,6 +2311,518 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       runtime?.shutdown();
       Bun.spawn = originalSpawn;
     }
+  });
+});
+
+function configurationRequest(overrides = {}) {
+  const configuration = { model: 'sonnet', permissionMode: 'default', thinkingMode: 'none',
+    settings: { ownerId: 'claude', schemaVersion: 1, values: { claudeThinkingMode: 'auto' } }, endpoint: null };
+  return {
+    expected: { chatId: 'chat-1', agentSessionId: 'expected-session', projectPath: '/tmp',
+      nativeSession: createPathNativeSessionCodec('claude').encode({ path: '/synthetic/session.jsonl',
+        agentSessionId: 'expected-session', modelEndpointId: null }) },
+    previous: structuredClone(configuration), next: { ...configuration, permissionMode: 'acceptEdits' },
+    signal: new AbortController().signal, ...overrides,
+  };
+}
+
+async function configurationTarget(runtime, input = configurationRequest()) {
+  const prepared = await runtime.sessionConfiguration.prepare(input);
+  expect(prepared.kind).toBe('prepared');
+  return prepared.target;
+}
+
+function permissionControls(fake) {
+  return fake.proc.stdin.write.mock.calls.map(([line]) => JSON.parse(line))
+    .filter(message => message.type === 'control_request' && message.request.subtype === 'set_permission_mode');
+}
+
+async function withConfigurationRuntime(options, test) {
+  const originalSpawn = Bun.spawn;
+  const fake = createFakeClaudeProcess(options);
+  const runtime = createRuntime(createLogger(), options.dependencies);
+  Bun.spawn = mock(() => fake.proc);
+  const request = startOptions({ nativePath: '/synthetic/session.jsonl' });
+  try {
+    const started = runtime.startClaudeCliSession(request);
+    await enqueueResult(fake);
+    await started;
+    await test({ runtime, fake, request });
+  } finally {
+    fake.exit(0);
+    await runtime.shutdown();
+    Bun.spawn = originalSpawn;
+  }
+}
+
+describe('ClaudeCliRuntime configuration captures', () => {
+  for (const [label, change] of [
+    ['model', { model: 'synthetic-next-model' }], ['thinking', { thinkingMode: 'high' }],
+    ['provider thinking', { settings: { ownerId: 'claude', schemaVersion: 1, values: { claudeThinkingMode: 'on' } } }],
+    ['no change', {}],
+  ]) {
+    it(`defers active ${label} configuration without claiming native application`, async () => {
+      await withConfigurationRuntime({}, async ({ runtime, fake, request }) => {
+        const running = runtime.runClaudeTurn({ ...request, command: 'Synthetic active input' });
+        const startedInput = await enqueueInputStarted(fake);
+        try {
+          const input = configurationRequest();
+          input.next = { ...input.previous, ...change };
+          const target = await configurationTarget(runtime, input);
+          const writes = fake.proc.stdin.write.mock.calls.length;
+          expect(await runtime.sessionConfiguration.commit(target, input.signal)).toEqual({ kind: 'not-required' });
+          expect(fake.proc.stdin.write.mock.calls).toHaveLength(writes);
+          expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+          expect(Bun.spawn).toHaveBeenCalledOnce();
+          expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
+        } finally {
+          enqueueAssistantAndResult(fake, startedInput.uuid, 'done');
+          enqueueProviderState(fake, 'idle');
+          await running;
+        }
+      });
+    });
+  }
+
+  it('defers an idle model update without writing native controls or retiring the process', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake }) => {
+      const input = configurationRequest();
+      input.next = { ...input.previous, model: 'synthetic-next-model' };
+      const target = await configurationTarget(runtime, input);
+      const writes = fake.proc.stdin.write.mock.calls.length;
+      expect(await runtime.sessionConfiguration.commit(target, input.signal)).toEqual({ kind: 'not-required' });
+      expect(fake.proc.stdin.write.mock.calls).toHaveLength(writes);
+      expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+    });
+  });
+
+  it('preserves an active configuration capture when a concurrent resume is refused as busy', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake, request }) => {
+      const running = runtime.runClaudeTurn({ ...request, command: 'Synthetic active input' });
+      const startedInput = await enqueueInputStarted(fake);
+      try {
+        const input = configurationRequest();
+        const target = await configurationTarget(runtime, input);
+        const writes = fake.proc.stdin.write.mock.calls.length;
+        await expect(runtime.runClaudeTurn({ ...request, command: 'Synthetic refused input' }))
+          .rejects.toThrow('already has an active turn');
+        expect(fake.proc.stdin.write.mock.calls).toHaveLength(writes);
+        expect(await runtime.sessionConfiguration.commit(target, input.signal)).toEqual({ kind: 'applied' });
+        expect(permissionControls(fake)).toHaveLength(1);
+        expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
+      } finally {
+        enqueueAssistantAndResult(fake, startedInput.uuid, 'done');
+        enqueueProviderState(fake, 'idle');
+        await running;
+      }
+    });
+  });
+
+  it('preserves the original control failure when resume setup fails before delivery', async () => {
+    await withConfigurationRuntime({ dependencies: { controlTimeoutMs: 4321 } }, async ({ runtime, fake, request }) => {
+      const originalSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay === 4321) { queueMicrotask(callback); return 0; }
+        return originalSetTimeout(callback, delay, ...args);
+      };
+      try {
+        await expect(runtime.runClaudeTurn({ ...request, permissionMode: 'acceptEdits', command: 'next' }))
+          .rejects.toThrow('Claude CLI set_permission_mode control request timed out');
+        expect(permissionControls(fake)).toEqual([]);
+      } finally { globalThis.setTimeout = originalSetTimeout; }
+    });
+  });
+
+  it('excludes project relocation while resume owns asynchronous preparation', async () => {
+    const probe = deferred();
+    const versionProbe = { assertCompatible: mock(() => Promise.resolve([2, 1, 220])) };
+    await withConfigurationRuntime({ dependencies: { versionProbe } }, async ({ runtime, fake, request }) => {
+      const controller = new AbortController();
+      versionProbe.assertCompatible.mockImplementationOnce(() => probe.promise);
+      const resumed = runtime.runClaudeTurn({ ...request, executionAdmission: {
+        signal: controller.signal, markStarted: async () => {},
+      } }).then(() => null, error => error);
+      try {
+        await expect(runtime.prepareClaudeProjectPathUpdate({ chatId: request.chatId, agentSessionId: request.agentSessionId,
+          previousProjectPath: request.projectPath, nextProjectPath: '/synthetic/next', nativePath: request.nativePath }))
+          .rejects.toThrow('preparing');
+        expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+        probe.resolve([2, 1, 220]);
+        await enqueueResult(fake);
+        expect(await resumed).toBeNull();
+      } finally { controller.abort(); probe.resolve([2, 1, 220]); await resumed; }
+    });
+  });
+
+  it('excludes resume while project relocation owns process retirement', async () => {
+    const versionProbe = { assertCompatible: mock(() => Promise.resolve([2, 1, 220])) };
+    await withConfigurationRuntime({ onEnd: () => null, dependencies: { versionProbe } }, async ({ runtime, fake, request }) => {
+      const controller = new AbortController();
+      const moving = runtime.prepareClaudeProjectPathUpdate({ chatId: request.chatId, agentSessionId: request.agentSessionId,
+        previousProjectPath: request.projectPath, nextProjectPath: '/synthetic/next', nativePath: request.nativePath });
+      const probed = versionProbe.assertCompatible.mock.calls.length;
+      const resumed = runtime.runClaudeTurn({ ...request, executionAdmission: {
+        signal: controller.signal, markStarted: async () => {},
+      } }).then(() => null, error => error);
+      try {
+        await new Promise(resolve => setImmediate(resolve));
+        expect(versionProbe.assertCompatible).toHaveBeenCalledTimes(probed);
+        expect((await resumed)?.message).toContain('preparing');
+      } finally { controller.abort(); fake.exit(0); await moving; await resumed; }
+    });
+  });
+
+  it('retains confirmed permissions when a waiting admission advances the capture epoch', async () => {
+    await withConfigurationRuntime({ autoPermission: false }, async ({ runtime, fake, request }) => {
+      const target = await configurationTarget(runtime);
+      const commit = runtime.sessionConfiguration.commit(target, new AbortController().signal);
+      for (let attempt = 0; attempt < 100 && permissionControls(fake).length === 0; attempt++) await Promise.resolve();
+      const [control] = permissionControls(fake);
+      const replacement = createFakeClaudeProcess();
+      Bun.spawn.mockImplementationOnce(() => replacement.proc);
+      try {
+        const resumed = runtime.runClaudeTurn({ ...request, permissionMode: 'acceptEdits', command: 'next' });
+        enqueueCliMessage(fake, { type: 'control_response', response: { subtype: 'success', request_id: control.request_id, response: {} } });
+        expect(await commit).toEqual({ kind: 'applied' });
+        await new Promise(resolve => setImmediate(resolve));
+        await enqueueResult(Bun.spawn.mock.calls.length === 1 ? fake : replacement);
+        await resumed;
+        expect(Bun.spawn).toHaveBeenCalledTimes(1);
+        expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+      } finally { replacement.exit(0); }
+    });
+  });
+
+  it('rejects a control timeout before the native write queue invokes its delivery guard', async () => {
+    await withConfigurationRuntime({ dependencies: { controlTimeoutMs: 4321 } }, async ({ runtime, fake, request }) => {
+      const written = deferred();
+      const flush = deferred();
+      fake.proc.stdin.flush.mockImplementationOnce(() => { written.resolve(); return flush.promise; });
+      const resumed = runtime.runClaudeTurn({ ...request, command: 'active' });
+      await enqueueInputStarted(fake);
+      await written.promise;
+      const originalSetTimeout = globalThis.setTimeout;
+      let expire;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay === 4321) { expire = callback; return 0; }
+        return originalSetTimeout(callback, delay, ...args);
+      };
+      try {
+        const target = await configurationTarget(runtime);
+        const commit = runtime.sessionConfiguration.commit(target, new AbortController().signal).catch(error => error);
+        for (let attempt = 0; attempt < 100 && !expire; attempt++) await Promise.resolve();
+        expect(expire).toBeDefined();
+        expire();
+        flush.resolve();
+        expect(await commit).toEqual({ kind: 'rejected', reason: 'target-changed' });
+        expect(permissionControls(fake)).toEqual([]);
+      } finally {
+        globalThis.setTimeout = originalSetTimeout;
+        flush.resolve();
+        enqueueAssistantAndResult(fake, writtenUserMessage(fake).uuid, 'done');
+        enqueueProviderState(fake, 'idle');
+        await resumed;
+      }
+    });
+  });
+
+  it('holds successor startup after process exit until retired native I/O settles', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake, request }) => {
+      const written = deferred();
+      const flush = deferred();
+      fake.proc.stdin.flush.mockImplementationOnce(() => { written.resolve(); return flush.promise; });
+      const resumed = runtime.runClaudeTurn({ ...request, command: 'active' });
+      await enqueueInputStarted(fake);
+      await written.promise;
+      enqueueAssistantAndResult(fake, writtenUserMessage(fake).uuid, 'done');
+      enqueueProviderState(fake, 'idle');
+      await new Promise(resolve => setImmediate(resolve));
+      fake.stdout.enqueue(encoder.encode('{invalid-json}\n'));
+      await new Promise(resolve => setImmediate(resolve));
+      const replacement = createFakeClaudeProcess();
+      Bun.spawn.mockImplementationOnce(() => replacement.proc);
+      fake.exit(0);
+      await fake.proc.exited;
+      await new Promise(resolve => setImmediate(resolve));
+      const successor = runtime.runClaudeTurn({ ...request, command: 'successor' });
+      let prematurelySpawned;
+      try {
+        await new Promise(resolve => setImmediate(resolve));
+        prematurelySpawned = Bun.spawn.mock.calls.length;
+      } finally {
+        flush.resolve();
+        await resumed;
+        await enqueueResult(replacement);
+        await successor;
+        replacement.exit(0);
+      }
+      expect(prematurelySpawned).toBe(1);
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('prepares without mutation and waits for an exact permission reply through cancellation', async () => {
+    await withConfigurationRuntime({ autoPermission: false }, async ({ runtime, fake }) => {
+      const controller = new AbortController();
+      const input = configurationRequest({ signal: controller.signal });
+      const target = await configurationTarget(runtime, input);
+      input.next.permissionMode = 'bypassPermissions';
+      expect(permissionControls(fake)).toEqual([]);
+      let settled = false;
+      const commit = runtime.sessionConfiguration.commit(target, controller.signal).finally(() => { settled = true; });
+      for (let attempt = 0; attempt < 100 && permissionControls(fake).length === 0; attempt++) await Promise.resolve();
+      const [control] = permissionControls(fake);
+      expect(control.request.mode).toBe('acceptEdits');
+      expect(settled).toBe(false);
+      controller.abort();
+      runtime.sessionConfiguration.cancel(target);
+      enqueueCliMessage(fake, { type: 'control_response', response: {
+        subtype: 'success', request_id: control.request_id, response: {},
+      } });
+      expect(await commit).toEqual({ kind: 'applied' });
+      expect(await runtime.sessionConfiguration.commit(target, new AbortController().signal))
+        .toEqual({ kind: 'rejected', reason: 'target-changed' });
+      expect(permissionControls(fake)).toHaveLength(1);
+    });
+  });
+
+  it('distinguishes absence from conflicting chat, project, and native identities', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake }) => {
+      const input = configurationRequest();
+      const mismatches = [
+        { ...input.expected, chatId: 'chat-other' },
+        { ...input.expected, projectPath: '/other' },
+        { ...input.expected, nativeSession: null },
+        ...[
+          { ownerId: 'codex' }, { schemaVersion: 2 },
+          { value: { agentSessionId: 'other' } },
+          { value: { agentSessionId: 'expected-session', path: '/other.jsonl' } },
+          { value: { ...input.expected.nativeSession.value, modelEndpointId: 'other-endpoint' } },
+        ].map(patch => ({ ...input.expected, nativeSession: { ...input.expected.nativeSession, ...patch } })),
+      ];
+      for (const expected of mismatches) {
+        expect(await runtime.sessionConfiguration.prepare({ ...input, expected }))
+          .toEqual({ kind: 'rejected', reason: 'target-conflict' });
+      }
+      expect(await runtime.sessionConfiguration.prepare({ ...input,
+        expected: { ...input.expected, chatId: 'absent-chat', agentSessionId: 'absent-session' } }))
+        .toEqual({ kind: 'not-required' });
+      expect(permissionControls(fake)).toEqual([]);
+    });
+  });
+
+  it('invalidates an idle capture when the same session starts and finishes another turn', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake, request }) => {
+      const target = await configurationTarget(runtime);
+      const resumed = runtime.runClaudeTurn({ ...request, command: 'next' });
+      await enqueueResult(fake);
+      await resumed;
+      expect(await runtime.sessionConfiguration.commit(target, new AbortController().signal))
+        .toEqual({ kind: 'rejected', reason: 'target-changed' });
+      expect(permissionControls(fake)).toEqual([]);
+    });
+  });
+
+  it('invalidates before an asynchronous admission and releases the fence after cancellation', async () => {
+    const probe = deferred();
+    const versionProbe = { assertCompatible: mock(() => Promise.resolve([2, 1, 220])) };
+    await withConfigurationRuntime({ dependencies: { versionProbe } }, async ({ runtime, fake, request }) => {
+      const target = await configurationTarget(runtime);
+      versionProbe.assertCompatible.mockImplementationOnce(() => probe.promise);
+      const controller = new AbortController();
+      const resumed = runtime.runClaudeTurn({ ...request, executionAdmission: {
+        signal: controller.signal, markStarted: async () => {},
+      } });
+      const refused = resumed.then(() => null, error => error);
+      expect(await runtime.sessionConfiguration.commit(target, new AbortController().signal))
+        .toEqual({ kind: 'rejected', reason: 'target-changed' });
+      expect(await runtime.sessionConfiguration.prepare(configurationRequest()))
+        .toEqual({ kind: 'rejected', reason: 'target-changed' });
+      controller.abort(new Error('cancelled admission'));
+      probe.resolve([2, 1, 220]);
+      expect((await refused)?.message).toBe('cancelled admission');
+      const fresh = await configurationTarget(runtime);
+      runtime.sessionConfiguration.cancel(fresh);
+      expect(permissionControls(fake)).toEqual([]);
+    });
+  });
+
+  it('releases the preparation owner after admission fails inside a begun turn', async () => {
+    const originalSpawn = Bun.spawn;
+    const first = createFakeClaudeProcess();
+    const second = createFakeClaudeProcess();
+    let runtime;
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      runtime = createRuntime();
+      const request = startOptions({ nativePath: '/synthetic/session.jsonl' });
+      const started = runtime.startClaudeCliSession(request);
+      await enqueueResult(first);
+      await started;
+      const entered = deferred();
+      const gate = deferred();
+      const controller = new AbortController();
+      const refused = runtime.runClaudeTurn({ ...request, command: 'refused', executionAdmission: {
+        signal: controller.signal,
+        markStarted: async () => { entered.resolve(); await gate.promise; controller.signal.throwIfAborted(); },
+      } }).then(() => null, error => error);
+      await entered.promise;
+      controller.abort(new Error('admission revoked'));
+      gate.resolve();
+      expect((await refused)?.message).toBe('admission revoked');
+      const target = await configurationTarget(runtime);
+      runtime.sessionConfiguration.cancel(target);
+      const resumed = runtime.runClaudeTurn({ ...request, command: 'after' });
+      await enqueueResult(second);
+      await resumed;
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      first.exit(0);
+      second.exit(0);
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('rejects explicit cancellation and relocation without a native settings call', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake }) => {
+      const cancelled = await configurationTarget(runtime);
+      const relocated = await configurationTarget(runtime);
+      runtime.sessionConfiguration.cancel(cancelled);
+      await runtime.prepareClaudeProjectPathUpdate({ chatId: 'chat-1', agentSessionId: 'expected-session',
+        previousProjectPath: '/tmp', nextProjectPath: '/next', nativePath: '/synthetic/session.jsonl' });
+      for (const target of [cancelled, relocated]) {
+        expect(await runtime.sessionConfiguration.commit(target, new AbortController().signal))
+          .toEqual({ kind: 'rejected', reason: 'target-changed' });
+      }
+      expect(permissionControls(fake)).toEqual([]);
+    });
+  });
+
+  it('revalidates inside the native write queue without failing the active turn', async () => {
+    await withConfigurationRuntime({}, async ({ runtime, fake, request }) => {
+      const written = deferred();
+      const flush = deferred();
+      fake.proc.stdin.flush.mockImplementationOnce(() => { written.resolve(); return flush.promise; });
+      const resumed = runtime.runClaudeTurn({ ...request, command: 'active' });
+      await enqueueInputStarted(fake);
+      await written.promise;
+      await Promise.resolve();
+      const controller = new AbortController();
+      const target = await configurationTarget(runtime);
+      const commit = runtime.sessionConfiguration.commit(target, controller.signal);
+      await Promise.resolve();
+      controller.abort();
+      flush.resolve();
+      expect(await commit).toEqual({ kind: 'rejected', reason: 'cancelled' });
+      expect(permissionControls(fake)).toEqual([]);
+      expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
+      enqueueAssistantAndResult(fake, writtenUserMessage(fake).uuid, 'done');
+      enqueueProviderState(fake, 'idle');
+      await resumed;
+    });
+  });
+
+  it('keeps idle thinking changes pending until the old process exits', async () => {
+    await withConfigurationRuntime({ onEnd: () => null }, async ({ runtime, fake }) => {
+      const input = configurationRequest();
+      input.next.thinkingMode = 'high';
+      const target = await configurationTarget(runtime, input);
+      let settled = false;
+      const commit = runtime.sessionConfiguration.commit(target, input.signal).finally(() => { settled = true; });
+      for (let attempt = 0; attempt < 100 && fake.proc.stdin.end.mock.calls.length === 0; attempt++) await Promise.resolve();
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+      fake.exit(0);
+      expect(await commit).toEqual({ kind: 'applied' });
+    });
+  });
+
+  it('reports unknown native failure and reconciles permissions before the next turn', async () => {
+    await withConfigurationRuntime({ autoPermission: false }, async ({ runtime, fake, request }) => {
+      const target = await configurationTarget(runtime);
+      const commit = runtime.sessionConfiguration.commit(target, new AbortController().signal);
+      for (let attempt = 0; attempt < 100 && permissionControls(fake).length === 0; attempt++) await Promise.resolve();
+      const [control] = permissionControls(fake);
+      enqueueCliMessage(fake, { type: 'control_response', response: {
+        subtype: 'error', request_id: control.request_id, error: 'synthetic refusal',
+      } });
+      expect(await commit).toEqual({ kind: 'unknown' });
+      const replacement = createFakeClaudeProcess();
+      Bun.spawn.mockImplementationOnce(() => replacement.proc);
+      try {
+        const resumed = runtime.runClaudeTurn({ ...request, permissionMode: 'default', command: 'next' });
+        await enqueueResult(replacement);
+        await resumed;
+        expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+        expect(permissionControls(replacement)).toEqual([]);
+        const args = Bun.spawn.mock.calls.at(-1)[0];
+        expect(args).not.toContain('--dangerously-skip-permissions');
+        expect(args).not.toContain('acceptEdits');
+      } finally {
+        replacement.exit(0);
+      }
+    });
+  });
+
+  it('settles stalled configuration and cancelled admission only after native write settlement', async () => {
+    await withConfigurationRuntime({ autoPermission: false, dependencies: { controlWriteTimeoutMs: 1234 } }, async ({ runtime, fake, request }) => {
+      const originalSetTimeout = globalThis.setTimeout;
+      const entered = deferred();
+      const native = deferred();
+      let expire;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay === 1234) { expire = callback; return 0; }
+        return originalSetTimeout(callback, delay, ...args);
+      };
+      fake.proc.stdin.write.mockImplementationOnce(() => { entered.resolve(); return native.promise; });
+      const target = await configurationTarget(runtime);
+      let committed = false;
+      let resumed = false;
+      const commit = runtime.sessionConfiguration.commit(target, new AbortController().signal)
+        .finally(() => { committed = true; });
+      try {
+        await entered.promise;
+        const controller = new AbortController();
+        const admission = runtime.runClaudeTurn({ ...request, command: 'cancelled', executionAdmission: {
+          signal: controller.signal, markStarted: async () => {},
+        } }).then(() => null, error => error).finally(() => { resumed = true; });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        controller.abort(new Error('cancelled admission'));
+        expire();
+        await fake.proc.exited;
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(fake.proc.kill).toHaveBeenCalledWith('SIGKILL');
+        expect(committed).toBe(false);
+        expect(resumed).toBe(false);
+        expect(await runtime.sessionConfiguration.prepare(configurationRequest()))
+          .toEqual({ kind: 'rejected', reason: 'target-changed' });
+
+        native.reject(new Error('synthetic EPIPE'));
+        expect(await commit).toEqual({ kind: 'unknown' });
+        expect((await admission)?.message).toBe('cancelled admission');
+        const fresh = await configurationTarget(runtime);
+        runtime.sessionConfiguration.cancel(fresh);
+        globalThis.setTimeout = originalSetTimeout;
+
+        const replacement = createFakeClaudeProcess();
+        Bun.spawn.mockImplementationOnce(() => replacement.proc);
+        try {
+          const successor = runtime.runClaudeTurn({ ...request, command: 'after' });
+          await enqueueResult(replacement);
+          await successor;
+          expect(Bun.spawn).toHaveBeenCalledTimes(2);
+          expect(permissionControls(replacement)).toEqual([]);
+        } finally {
+          replacement.exit(0);
+        }
+      } finally {
+        native.reject(new Error('synthetic teardown'));
+        fake.exit(137);
+        await commit;
+        globalThis.setTimeout = originalSetTimeout;
+      }
+    });
   });
 });
 

@@ -122,11 +122,12 @@ function withoutAllowedDirectRegistrations(relative, source) {
   if (relative !== 'server/agents/default-agent-integrations.ts') return source;
   let remaining = source;
   for (const { binding, packageName } of DIRECT_REGISTRATIONS) {
-    const importLine = `import ${binding} from '${packageName}';`;
-    const rosterLine = `  ${binding},`;
-    expect(occurrences(remaining, importLine), `${binding} import count`).toBe(1);
-    expect(occurrences(remaining, rosterLine), `${binding} roster count`).toBe(1);
-    remaining = remaining.replace(importLine, '').replace(rosterLine, '');
+    const agentId = packageName.slice('@garcon/server-agent-'.length);
+    for (const suffix of ['', '/native-environment']) {
+      const loaderLine = `  ['${agentId}', () => import('${packageName}${suffix}')],`;
+      expect(occurrences(remaining, loaderLine), `${binding}${suffix} loader count`).toBe(1);
+      remaining = remaining.replace(loaderLine, '');
+    }
   }
   return remaining;
 }

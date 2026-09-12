@@ -82,8 +82,8 @@ export class GoalControlDelivery {
           await afterPendingRegistered?.();
           validateOwner();
           committedHandoff.validate();
-          committedHandoff.commit();
           deliveryMayHaveStarted = true;
+          committedHandoff.commit();
         },
       );
       if (!handled && deliveryMayHaveStarted) {

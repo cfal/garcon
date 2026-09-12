@@ -19,6 +19,10 @@ import type {
 } from '../../execution-nodes/provider-execution.js';
 import { LocalProviderExecutionService } from '../local-provider-execution.js';
 import { LocalProviderConfigurationService } from '../local-provider-configuration.js';
+import { ExecutionOwnership } from '../../chat-execution/execution-ownership.js';
+import { QueueExecutionAttempt } from '../../chat-execution/execution-attempt.js';
+import { SteerInputDelivery } from '../../chat-execution/steer-input-delivery.js';
+import type { AgentTurnRunnerPort } from '../../chat-execution/types.js';
 
 function fixture() {
   const nativeHandle = Object.freeze({});
@@ -66,13 +70,14 @@ function fixture() {
   };
   const input: ProviderExecutionInput = { prompt: 'synthetic input', attachments: [], carriedContext: null };
   const controller = new AbortController();
+  const source = new AbortController();
   const events: AgentProducerEvent[] = [];
   const delivery = {
-    output: { emit(event: AgentProducerEvent) { events.push(event); } },
+    output: { signal: source.signal, emit(event: AgentProducerEvent) { source.signal.throwIfAborted(); events.push(event); } },
     admission: { signal: controller.signal, markStarted: mock(async () => {}) },
   } satisfies ProviderExecutionDelivery;
   const configuration = new LocalProviderConfigurationService(integration);
-  return { integration, configuration, request, input, controller, delivery, nativeHandle, events,
+  return { integration, configuration, request, input, controller, source, delivery, nativeHandle, events,
     service: new LocalProviderExecutionService(integration, configuration) };
 }
 
@@ -327,7 +332,7 @@ test('steering rejects targets from another occurrence or instance even when nat
   await f.service.dispatch(replacement, f.input, f.delivery);
   await expect(f.service.steer(replacement, target, input)).rejects.toThrow('target is invalid');
   await expect(f.service.steer(f.prepared, target, input)).resolves.toEqual({ kind: 'accepted' });
-  expect(input.prepareDelivery).toHaveBeenCalledOnce();
+  expect(input.prepareDelivery).toHaveBeenCalledTimes(1);
   await expect(f.service.steer(f.prepared, target, input)).rejects.toThrow('target is invalid');
   expect(other.integration.steering.steer).not.toHaveBeenCalled();
 });
@@ -343,6 +348,81 @@ test('a terminal between steering preparation and delivery prevents admission', 
     .toMatchObject({ kind: 'rejected', reason: 'turn-changed' });
   expect(prepareDelivery).not.toHaveBeenCalled();
   expect(f.integration.steering.steer).not.toHaveBeenCalled();
+});
+
+test.each(['before-preparation', 'during-preparation'] as const)('reports definite turn change %s without writing steering input', async (phase) => {
+  const f = await runningFixture();
+  const prepared = await f.service.prepareSteer(f.prepared, f.controller.signal);
+  if (prepared.kind !== 'ready') throw new Error('Synthetic steering target missing');
+  const terminal = () => f.published.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
+  const writes: string[] = [];
+  f.integration.steering.steer.mockImplementation(async (request) => {
+    if (phase === 'before-preparation') terminal();
+    await request.prepareDelivery();
+    writes.push(request.input);
+    return { kind: 'accepted' };
+  });
+  const prepareDelivery = mock(async () => { if (phase === 'during-preparation') terminal(); });
+  expect(await f.service.steer(f.prepared, prepared.target, {
+    input: 'synthetic steer', clientMessageId: 'synthetic-steer', prepareDelivery,
+  })).toMatchObject({ kind: 'rejected', reason: 'turn-changed' });
+  expect(writes).toEqual([]);
+  expect(prepareDelivery).toHaveBeenCalledTimes(phase === 'before-preparation' ? 0 : 1);
+});
+
+test.each(['preparation', 'native-write'] as const)('preserves an unrelated %s failure during steering', async (phase) => {
+  const f = await runningFixture();
+  const prepared = await f.service.prepareSteer(f.prepared, f.controller.signal);
+  if (prepared.kind !== 'ready') throw new Error('Synthetic steering target missing');
+  const failure = new Error('Synthetic delivery failure');
+  f.integration.steering.steer.mockImplementation(async (request) => {
+    await request.prepareDelivery();
+    throw failure;
+  });
+  await expect(f.service.steer(f.prepared, prepared.target, {
+    input: 'synthetic steer', clientMessageId: 'synthetic-steer',
+    prepareDelivery: async () => { if (phase === 'preparation') throw failure; },
+  })).rejects.toBe(failure);
+});
+
+test.each(['before-preparation', 'during-preparation'] as const)('controller reports STEER_TURN_CHANGED for a local terminal %s', async (phase) => {
+  const f = await runningFixture();
+  const prepared = await f.service.prepareSteer(f.prepared, f.controller.signal);
+  if (prepared.kind !== 'ready') throw new Error('Synthetic steering target missing');
+  const terminal = () => f.published.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
+  const writes: string[] = [];
+  f.integration.steering.steer.mockImplementation(async (request) => {
+    if (phase === 'before-preparation') terminal();
+    await request.prepareDelivery();
+    writes.push(request.input);
+    return { kind: 'accepted' };
+  });
+  const ownership = new ExecutionOwnership();
+  ownership.installAttempt(f.request.chatId, new QueueExecutionAttempt({ turnId: f.request.runId }, 'synthetic-entry'));
+  const target = Object.freeze({});
+  const unexpected = () => { throw new Error('Unexpected turn operation'); };
+  const runner = {
+    prepareTurn: unexpected, runAgentTurn: unexpected, submitGoalControl: unexpected,
+    abortSession: unexpected, isChatRunning: unexpected,
+    captureSteerTarget: () => target,
+    prepareSteerTarget: async () => () => {},
+    steerInput: (_chatId, input, options, _target, prepareDelivery) => f.service.steer(f.prepared, prepared.target, {
+      input, clientMessageId: options.clientMessageId,
+      prepareDelivery: async () => {
+        await prepareDelivery();
+        if (phase === 'during-preparation') terminal();
+      },
+    }),
+  } satisfies AgentTurnRunnerPort;
+  const delivery = new SteerInputDelivery({
+    ownership, turnRunner: runner, isShuttingDown: () => false,
+    admitInput: unexpected, discardPreparedInput: unexpected,
+  });
+  const captured = delivery.captureTarget(f.request.chatId);
+  if (!captured) throw new Error('Synthetic controller target missing');
+  await expect(delivery.deliverControl(f.request.chatId, 'synthetic steer', 'synthetic-view', captured))
+    .rejects.toMatchObject({ status: 409, code: 'STEER_TURN_CHANGED' });
+  expect(writes).toEqual([]);
 });
 
 test('start publication makes the exact native session available before its handle returns', async () => {
@@ -379,17 +459,55 @@ test('goal handoffs retain the occurrence output, admission and abort handle thr
   expect(await f.service.prepareSteer(f.prepared, f.controller.signal)).toMatchObject({ kind: 'ready' });
   expect(await f.service.abort(f.prepared)).toBe(true);
   expect(f.integration.execution.abort).toHaveBeenCalledWith(f.nativeHandle);
-  expect(f.integration.execution.resume).toHaveBeenCalledOnce();
+  expect(f.integration.execution.resume).toHaveBeenCalledTimes(1);
+});
+
+test('a throwing goal transfer retains the successor identity and exact native cancellation', async () => {
+  const f = await runningFixture();
+  f.integration.goals.submitControl.mockImplementationOnce(async (request) => {
+    await request.beforeDelivery({ validate() {}, commit() {
+      request.output.emit({ type: 'session', session: {
+        agentSessionId: 'synthetic-session', nativeSession: null, nativeSeedReceipt: null,
+      } });
+      throw new Error('synthetic post-transfer failure');
+    } });
+    return true;
+  });
+  await expect(f.service.submitGoalControl(f.prepared, {
+    ...f.input, runId: 'goal-run', configuration: f.request.configuration,
+    beforeDelivery: async (handoff) => { handoff.validate(); handoff.commit(); },
+  }, f.controller.signal)).rejects.toThrow('synthetic post-transfer failure');
+  f.published.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
+  expect(await f.service.prepareSteer(f.prepared, f.controller.signal)).toMatchObject({ kind: 'ready' });
+  expect(await f.service.abort(f.prepared)).toBe(true);
+  expect(f.integration.execution.abort).toHaveBeenCalledWith(f.nativeHandle);
 });
 
 test('matching terminal detaches admission cancellation while retaining inline late output', async () => {
   const f = await runningFixture();
+  const signal = Reflect.get(f.published, 'signal');
+  expect(signal).toBe(f.source.signal);
   f.published.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
   f.controller.abort(new Error('synthetic owner cleanup'));
   await Promise.resolve();
   expect(f.integration.execution.abort).not.toHaveBeenCalled();
   f.published.emit({ type: 'notice', runId: f.request.runId, content: 'synthetic late output' });
   expect(f.events.at(-1)).toMatchObject({ content: 'synthetic late output' });
+  expect(f.source.signal.aborted).toBe(false);
+  f.source.abort(new Error('synthetic producer closed'));
+  expect(signal.aborted).toBe(true);
+  expect(() => f.published.emit({ type: 'session', session: {
+    agentSessionId: 'synthetic-late-native', nativeSession: null, nativeSeedReceipt: null,
+  } })).toThrow('synthetic producer closed');
+});
+
+test('closed output cannot start a prepared operation even while its execution admission remains open', async () => {
+  const f = fixture();
+  const prepared = await f.service.prepare(f.request, f.controller.signal);
+  f.source.abort(new Error('synthetic producer closed'));
+  await expect(f.service.dispatch(prepared, f.input, f.delivery)).rejects.toThrow('synthetic producer closed');
+  expect(f.integration.execution.start).not.toHaveBeenCalled();
+  expect(f.controller.signal.aborted).toBe(false);
 });
 
 test('a terminal during goal configuration preparation prevents the native control and handoff', async () => {
@@ -406,4 +524,23 @@ test('a terminal during goal configuration preparation prevents the native contr
   expect(await pending).toBe(false);
   expect(f.integration.goals.submitControl).not.toHaveBeenCalled();
   expect(beforeDelivery).not.toHaveBeenCalled();
+});
+
+test('captures goal attachment values before asynchronous configuration resolution', async () => {
+  const f = await runningFixture();
+  const validation = Promise.withResolvers<void>();
+  const resolve = f.configuration.resolve.bind(f.configuration);
+  f.configuration.resolve = async (request, signal) => { await validation.promise; return resolve(request, signal); };
+  const attachment = { data: 'c3ludGhldGlj', mimeType: 'image/png', name: 'original' };
+  const beforeDelivery = mock(async (handoff: { commit(): void }) => handoff.commit());
+  const result = f.service.submitGoalControl(f.prepared, {
+    ...f.input, attachments: [attachment], runId: 'synthetic-goal', configuration: f.request.configuration, beforeDelivery,
+  }, f.controller.signal);
+  attachment.data = 'Y2hhbmdlZA==';
+  attachment.name = 'changed';
+  validation.resolve();
+  expect(await result).toBe(true);
+  expect(f.integration.goals.submitControl.mock.calls[0]![0].attachments)
+    .toEqual([{ data: 'c3ludGhldGlj', mimeType: 'image/png', name: 'original' }]);
+  expect(beforeDelivery).toHaveBeenCalledOnce();
 });

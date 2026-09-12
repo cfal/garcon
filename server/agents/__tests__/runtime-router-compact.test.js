@@ -32,17 +32,16 @@ function makeRouter(compaction, options = {}) {
     compaction,
     forking: null,
   };
-  const directory = {
-    require: mock(() => integration),
-    list: mock(() => [integration]),
-  };
+  const instances = createRuntimeInstanceFixture(integration);
+  instances.executionFor = mock(instances.executionFor);
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: {
       getChat: mock(() => entry),
       updateChat: mock(async () => entry),
     },
-    directory,
-    instances: { requireFor: directory.require, ...createRuntimeInstanceFixture(integration) },
+    providerIds: ['test'],
+    instances,
     endpointResolver: {
       resolveSelection: mock(() => ({
         model: 'model-a',
@@ -62,7 +61,7 @@ function makeRouter(compaction, options = {}) {
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
-  return { router, execution, integration, directory };
+  return { router, execution, integration, instances };
 }
 
 describe('AgentRuntimeRouter compaction', () => {
@@ -71,7 +70,7 @@ describe('AgentRuntimeRouter compaction', () => {
       const launched = Promise.withResolvers();
       const completed = Promise.withResolvers();
       const handle = { id: 'synthetic-compaction-handle' };
-      const { router, execution, integration, directory } = makeRouter({ compact: mock(() => {
+      const { router, execution, integration, instances } = makeRouter({ compact: mock(() => {
         launched.resolve();
         return delayed ? completed.promise : Promise.resolve(handle);
       }) });
@@ -79,9 +78,10 @@ describe('AgentRuntimeRouter compaction', () => {
       if (delayed) await launched.promise;
       else await dispatch;
       const replacementAbort = mock(async () => true);
-      directory.require.mockImplementation(() => ({
+      const replacement = createRuntimeInstanceFixture({
         ...integration, execution: { ...execution, abort: replacementAbort },
-      }));
+      });
+      instances.executionFor.mockReturnValue(replacement.executionFor());
 
       expect(await router.abortSession('chat-1')).toBe(true);
       completed.resolve(handle);

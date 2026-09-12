@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 import { createLocatedInstanceFixture, LOCATED_CHATS } from '../../agents/__tests__/located-instance-fixture.js';
 import { NativeTranscriptActivityService } from '../../ledger/native-activity.js';
@@ -21,7 +22,7 @@ test('native service caches qualify both node and instance while preserving null
       storageNamespace: 'instances/profile', default: true, removedAt: null },
     integration: f[profile].integration,
   }));
-  const directory = new AgentInstanceDirectory(entries);
+  const directory = new AgentInstanceDirectory(createLocalProviderInstances(entries));
   const ports = [];
   for (const profile of ['primary', 'secondary']) {
     const owner = { agentId: 'test', executionLocation: {
@@ -43,11 +44,11 @@ test('native service caches qualify both node and instance while preserving null
 
 test('native service selection refuses missing, removed and provider-mismatched owners without fallback', async () => {
   const f = await fixture();
-  const removed = new AgentInstanceDirectory([{
+  const removed = new AgentInstanceDirectory(createLocalProviderInstances([{
     configuration: { id: 'primary', nodeId: 'local-node', agentId: 'test', label: 'Removed',
       storageNamespace: 'instances/primary', default: true, removedAt: '2026-09-10T00:00:00.000Z' },
     integration: f.primary.integration,
-  }]);
+  }]));
   for (const [directory, agentId, nodeId, instanceId] of [
     [f.instances, 'test', 'local-node', 'missing'], [f.instances, 'test', 'offline-node', 'primary'],
     [f.instances, 'other-provider', 'local-node', 'primary'], [removed, 'test', 'local-node', 'primary'],

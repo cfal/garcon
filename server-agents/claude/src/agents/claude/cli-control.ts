@@ -7,6 +7,7 @@ const DEFAULT_CONTROL_TIMEOUT_MS = 10_000;
 interface ClaudeControlRequestOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  readonly beforeWrite?: () => void;
 }
 
 interface PendingControlRequest {
@@ -23,7 +24,7 @@ export class ClaudeControlBroker {
   readonly #pending = new Map<string, PendingControlRequest>();
 
   constructor(
-    private readonly write: (agentSessionId: string, jsonl: string) => Promise<void>,
+    private readonly write: (agentSessionId: string, jsonl: string, beforeWrite: () => void) => Promise<void>,
   ) {}
 
   request(
@@ -65,16 +66,22 @@ export class ClaudeControlBroker {
     });
     if (abortListener) options.signal!.addEventListener('abort', abortListener, { once: true });
 
-    void this.write(agentSessionId, JSON.stringify({
+    const written = Promise.resolve().then(() => this.write(agentSessionId, JSON.stringify({
       type: 'control_request',
       request_id: requestId,
       request,
+    }), () => {
+      if (!this.#pending.has(requestId)) throw new Error('Claude CLI control request is no longer pending');
+      options.beforeWrite?.();
     })).catch((error: unknown) => {
       const pending = this.#takePending(requestId);
       if (!pending) return;
       pending.reject(error instanceof Error ? error : new Error(errorMessage(error)));
     });
-    return response;
+    return Promise.allSettled([response, written]).then(([result]) => {
+      if (result.status === 'rejected') throw result.reason;
+      return result.value;
+    });
   }
 
   handleResponse(agentSessionId: string, message: ClaudeCLIMessage): boolean {

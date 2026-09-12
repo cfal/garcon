@@ -13,7 +13,7 @@ async function fixture() {
   /** @satisfies {import('../auth-service.js').AgentAuthServiceOptions['instances']} */
   const instances = {
     defaultFor: (nodeId, agentId) => f.instances.defaultFor(nodeId, agentId),
-    require: (ref) => f.instances.require(ref),
+    metadataForInstance: (ref) => f.instances.metadataForInstance(ref),
     authForInstance: (ref) => f.instances.authForInstance(ref),
   };
   const hasEndpointModels = mock(() => false);
@@ -23,7 +23,6 @@ async function fixture() {
 
 test('projects only the configured local default auth and login owner', async () => {
   const f = await fixture();
-  f.integrations.get = () => f.secondary.integration;
   f.primary.integration.auth.completeLogin = undefined;
   expect(f.service.supportsLogin('test')).toBe(true);
   expect(f.service.supportsLoginCompletion('test')).toBe(false);
@@ -47,17 +46,19 @@ test('separates native and controller-owned endpoint readiness without consultin
   expect(await f.service.readinessMap(undefined, signal)).toEqual({ test: {
     ready: true, nativeReady: true, endpointReady: false, reason: 'Native agent authentication is available.',
   } });
-  f.primary.integration.auth = null;
-  f.primary.integration.endpoints = { validate: async () => {} };
-  f.hasEndpointModels.mockReturnValue(true);
-  expect(await f.service.readinessMap(undefined, signal)).toEqual({ test: {
+  const endpoint = await fixture();
+  endpoint.primary.integration.auth = null;
+  endpoint.primary.integration.endpoints = { validate: async () => {} };
+  endpoint.hasEndpointModels.mockReturnValue(true);
+  expect(await endpoint.service.readinessMap(undefined, signal)).toEqual({ test: {
     ready: true, nativeReady: false, endpointReady: true,
     reason: 'At least one compatible API provider endpoint is configured.',
   } });
-  expect(await f.service.statusMap(signal)).toEqual({ test: {
+  expect(await endpoint.service.statusMap(signal)).toEqual({ test: {
     authenticated: false, canReauth: false, label: 'Synthetic provider', source: 'none',
   } });
   expect(f.secondary.integration.auth.status).not.toHaveBeenCalled();
+  expect(endpoint.secondary.integration.auth.status).not.toHaveBeenCalled();
 });
 
 test('reuses supplied default auth evidence without launching another auth read', async () => {

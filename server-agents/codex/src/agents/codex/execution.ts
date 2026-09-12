@@ -18,7 +18,6 @@ import {
   buildCodexHostEnvironment,
 } from './app-server/endpoint-runtime.js';
 import { codexOperation } from './app-server/operation-routes.js';
-import { mapThinkingModeToCodexEffort } from './app-server/request-builders.js';
 import type { CodexAppServerRuntime } from './app-server/runtime.js';
 import { parseCodexGoalCommand, type CodexGoalCommand } from './goal-command.js';
 import type {
@@ -120,44 +119,6 @@ export class CodexExecution implements AgentRuntimeExecution {
     }));
   }
 
-  async applySessionConfiguration(
-    agentSessionId: string,
-    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
-    previousConfiguration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[2],
-  ): Promise<void> {
-    const previousEffort = mapThinkingModeToCodexEffort(
-      previousConfiguration.thinkingMode,
-      previousConfiguration.model,
-    );
-    const nextEffort = mapThinkingModeToCodexEffort(
-      configuration.thinkingMode,
-      configuration.model,
-    );
-    if (!this.runtime.hasSource(agentSessionId)) return;
-    if (previousEffort !== undefined && nextEffort === undefined) {
-      // Defers the whole update because the runtime replaces explicit-effort sources before Default turns.
-      if (!this.runtime.isRunning(agentSessionId)) return;
-      throw new AgentIntegrationError(
-        'INVALID_SETTINGS',
-        'Codex cannot clear a concrete reasoning effort during an active turn',
-        false,
-      );
-    }
-    if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
-      if (!this.runtime.isRunning(agentSessionId)) return;
-      throw new AgentIntegrationError(
-        'INVALID_ENDPOINT',
-        'Cannot change the Codex endpoint while a session is running',
-        false,
-      );
-    }
-    await this.runtime.updateSessionSettings(agentSessionId, {
-      model: configuration.model,
-      permissionMode: configuration.permissionMode,
-      thinkingMode: configuration.thinkingMode,
-    });
-  }
-
   async #resume(
     request: AgentRuntimeResumeRequest,
     publish: AgentRuntimePublisher,
@@ -194,16 +155,6 @@ export class CodexExecution implements AgentRuntimeExecution {
   }
 }
 
-function sameEndpoint(
-  left: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
-  right: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
-): boolean {
-  if (!left || !right) return left === right;
-  return left.apiProviderId === right.apiProviderId
-    && left.endpointId === right.endpointId
-    && left.protocol === right.protocol;
-}
-
 function executionFields(
   request: AgentRuntimeExecutionContext,
 ) {
@@ -236,6 +187,7 @@ function prepareStartRequest(
   const carriedContext = request.carriedContext?.prefix ?? null;
   return {
     ...executionFields(request),
+    nativeModelEndpointId: request.endpoint?.selection.endpointId ?? null,
     operation: codexOperation(request, publish),
     command: goal?.objective ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
     images: request.attachments,
@@ -254,6 +206,7 @@ function prepareResumeRequest(
   const goal = parseCodexGoalCommand(request.prompt);
   return {
     ...executionFields(request),
+    nativeModelEndpointId: nativeSessions.decode(request.nativeSession).modelEndpointId,
     operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
     command: goalObjective(goal) ?? request.prompt,

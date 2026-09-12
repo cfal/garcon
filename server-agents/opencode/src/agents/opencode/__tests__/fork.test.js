@@ -1,3 +1,4 @@
+import { nativePermissionsFixture } from './native-permissions-fixture.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
 
@@ -736,7 +737,7 @@ describe('OpenCodeRuntime fork', () => {
       error: { name: 'NotFoundError', data: { message: 'Session not found: missing-session' } },
     }));
     const { runtime } = createRuntimeWithClient({
-      session: { prompt },
+      session: { ...nativePermissionsFixture(), prompt },
     });
 
     await expect(runtime.runTurn({

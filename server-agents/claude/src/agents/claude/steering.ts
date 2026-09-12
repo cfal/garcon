@@ -302,7 +302,6 @@ export class ClaudeSteeringController {
             captured.activeTurn.steering.markSubmitted(nativeInputId);
           },
           attemptTimeoutMs: this.#options.writeTimeoutMs,
-          killProcessAfterAttemptFailure: true,
         });
       } catch {
         captured.activeTurn.steering.removeSubmitted(nativeInputId);

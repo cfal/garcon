@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { AgentInstanceDirectory } from '../instance-directory.js';
@@ -35,25 +36,19 @@ function makeRouter(overrides = {}) {
       endpoint: { id: selection.endpointId, baseUrl: 'https://example.test/v1' },
     }) : null),
   };
-  const instances = new AgentInstanceDirectory([{
+  const instances = new AgentInstanceDirectory(createLocalProviderInstances([{
     configuration: {
       nodeId: 'local-node', id: 'configured-default', agentId: 'test', label: 'Synthetic profile',
       storageNamespace: 'synthetic', default: true, removedAt: null,
     },
     integration,
-  }]);
+  }]));
   const router = new AgentRuntimeRouter({
+    fileMentions: { resolve: async (command) => command },
     registry: { getChat: mock(() => null) },
     localNodeId: 'local-node',
     instances,
-    directory: {
-      require: mock((id) => {
-        if (id !== 'test') throw new Error(`Unknown integration: ${id}`);
-        return integration;
-      }),
-      get: mock((id) => id === 'test' ? integration : null),
-      list: mock(() => [integration]),
-    },
+    providerIds: ['test'],
     endpointResolver,
     events: {},
     projection: {},

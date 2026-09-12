@@ -30,6 +30,8 @@ import {
 } from './request-builders.js';
 import {
   adoptTurn,
+  clearActiveTurn,
+  commitGoalLifecycleHandoff,
   sessionForClientThread,
   TurnStartWaitCancelledError,
   waitForDifferentTurnStart,
@@ -271,6 +273,7 @@ export class RuntimeGoalCoordinator {
             this.#port.sessions.get(request.agentSessionId) !== session
             || hasTerminalPendingFinish(session)
             || isTerminalSessionStatus(session.status)
+            || session.activeTurnId !== null && session.terminalTurnIds.has(session.activeTurnId)
           ) {
             throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before goal control delivery');
           }
@@ -280,6 +283,8 @@ export class RuntimeGoalCoordinator {
         await beforeDelivery({
           validate,
           commit: () => {
+            validate();
+            commitGoalLifecycleHandoff(session, operation);
             committed = true;
           },
         });
@@ -429,7 +434,7 @@ export class RuntimeGoalCoordinator {
           continue;
         }
         if (noActiveTurn) {
-          if (session.activeTurnId === turnId) session.activeTurnId = null;
+          if (session.activeTurnId === turnId) clearActiveTurn(session);
           turnId = null;
           transitions += 1;
           continue;
@@ -470,7 +475,7 @@ export class RuntimeGoalCoordinator {
       && session.completedGoalTurn
       && !session.activeTurnId
     ) {
-      this.#port.finishSession(session, {}, session.lastTurnOperation ?? session.sourceOperation);
+      this.#port.finishSession(session, {}, session.goalOperation ?? session.lastTurnOperation ?? session.sourceOperation);
     }
   }
 
@@ -484,7 +489,7 @@ export class RuntimeGoalCoordinator {
     session.goal = null;
     session.goalAttachments.queueClear();
     if (session.managesGoalLifecycle && !session.activeTurnId) {
-      this.#port.finishSession(session, {}, session.lastTurnOperation ?? session.sourceOperation);
+      this.#port.finishSession(session, {}, session.goalOperation ?? session.lastTurnOperation ?? session.sourceOperation);
     }
   }
 

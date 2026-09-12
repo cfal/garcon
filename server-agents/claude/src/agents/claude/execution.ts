@@ -47,6 +47,8 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     const runtimeRequest = {
       ...executionFields(request),
       agentSessionId,
+      nativePath,
+      nativeModelEndpointId: request.endpoint?.selection.endpointId ?? null,
       command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
       images: request.attachments,
       envOverrides,
@@ -94,12 +96,14 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     request: Parameters<AgentRuntimeExecution['resume']>[0],
     publish: AgentRuntimePublisher,
   ): Promise<void> {
+    const native = this.nativeSessions.decode(request.nativeSession);
     await this.runtime.runClaudeTurn({
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
       command: request.prompt,
       images: request.attachments,
-      nativePath: this.nativeSessions.decode(request.nativeSession).path,
+      nativePath: native.path,
+      nativeModelEndpointId: native.modelEndpointId,
       envOverrides: this.#endpointEnvironment(request),
       operation: runtimeOperation(request.runId, publish),
     });
@@ -119,18 +123,6 @@ export class ClaudeExecution implements AgentRuntimeExecution {
       status: session.status,
       startedAt: session.startedAt,
     }));
-  }
-
-  async applySessionConfiguration(
-    agentSessionId: string,
-    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
-  ): Promise<void> {
-    this.runtime.setInternalPermissionMode(agentSessionId, configuration.permissionMode);
-    this.runtime.setInternalThinkingMode(agentSessionId, configuration.thinkingMode);
-    this.runtime.setInternalClaudeThinkingMode(
-      agentSessionId,
-      claudeThinkingMode(configuration.settings.values.claudeThinkingMode),
-    );
   }
 
   async prepareProjectPathUpdate(

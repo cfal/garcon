@@ -5,6 +5,13 @@ import os from 'os';
 import path from 'path';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { CodexExecution } from '../../execution.ts';
+import { LocalProviderExecutionService } from '../../../../../../../server/execution-node/local-provider-execution.ts';
+import { NodeOperationTable } from '../../../../../../../server/execution-node/operation-table.ts';
+import { NodeExecutionResources } from '../../../../../../../server/execution-node/execution-resources.ts';
+import { NodeSupervisor } from '../../../../../../../server/execution-node/supervisor.ts';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import {
   CodexAppServerClient,
@@ -2104,7 +2111,7 @@ describe('CodexAppServerRuntime', () => {
   async function startSettingsSession(runtimeOptions = {}, requestOverrides = {}) {
     const nativePath = path.join(tmpDir, 'settings-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({
+      startThread: async (params) => ({
         thread: makeThread({
           id: 'thread-1',
           path: nativePath,
@@ -2115,9 +2122,9 @@ describe('CodexAppServerRuntime', () => {
         modelProvider: 'openai',
         serviceTier: null,
         cwd: '/repo',
-        approvalPolicy: 'never',
+        approvalPolicy: params.approvalPolicy,
         approvalsReviewer: 'user',
-        sandbox: { type: 'workspaceWrite' },
+        sandbox: { type: params.sandbox === 'danger-full-access' ? 'dangerFullAccess' : 'workspaceWrite' },
         reasoningEffort: 'medium',
       }),
       startTurn: async () => {
@@ -2136,6 +2143,22 @@ describe('CodexAppServerRuntime', () => {
       operation: published.operation,
     }));
     return { fake, provider, published, started };
+  }
+
+  function configurationRequest(started, next = {}, previous = {}) {
+    const current = { model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'medium', endpoint: null,
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} } };
+    return { expected: { chatId: 'chat-1', projectPath: '/repo', agentSessionId: started.agentSessionId,
+      nativeSession: createPathNativeSessionCodec('codex').encode({ agentSessionId: started.agentSessionId, path: started.nativePath, modelEndpointId: null }) },
+    previous: { ...current, ...previous }, next: { ...current, permissionMode: 'manualBypass', ...next }, signal: new AbortController().signal };
+  }
+
+  async function updateSettings(provider, started, next, previous = {}) {
+    const request = configurationRequest(started, next, previous);
+    if (started.chatId) request.expected.chatId = started.chatId;
+    const prepared = await provider.sessionConfiguration.prepare(request);
+    expect(prepared.kind).toBe('prepared');
+    return provider.sessionConfiguration.commit(prepared.target, request.signal);
   }
 
   function emitThreadSettings(fake, overrides = {}, threadId = 'thread-1') {
@@ -5946,7 +5969,8 @@ describe('CodexAppServerRuntime', () => {
     });
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
-    const finished = published.waitForEvent(
+    const successor = collectOperation('chat-1', 'run-successor');
+    const finished = successor.waitForEvent(
       (event) => event.type === 'run-ended' && event.outcome === 'finished',
     );
     await provider.runTurn(makeRequest({
@@ -5961,6 +5985,7 @@ describe('CodexAppServerRuntime', () => {
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
       nativePath: null,
+      operation: successor.operation,
     }));
 
     expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'paused');
@@ -5970,7 +5995,8 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
-    await finished;
+    expect(await finished).toMatchObject({ runId: 'run-successor' });
+    expect(terminalEvents(published.events)).toEqual([]);
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
@@ -5989,7 +6015,8 @@ describe('CodexAppServerRuntime', () => {
     });
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
-    const finished = published.waitForEvent(
+    const successor = collectOperation('chat-1', 'run-successor');
+    const finished = successor.waitForEvent(
       (event) => event.type === 'run-ended' && event.outcome === 'finished',
     );
     await provider.runTurn(makeRequest({
@@ -6004,6 +6031,7 @@ describe('CodexAppServerRuntime', () => {
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: successor.operation,
     }));
     fake.emit('notification', {
       method: 'thread/goal/cleared',
@@ -6016,7 +6044,8 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
-    await finished;
+    expect(await finished).toMatchObject({ runId: 'run-successor' });
+    expect(terminalEvents(published.events)).toEqual([]);
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
@@ -7465,7 +7494,7 @@ describe('CodexAppServerRuntime', () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('sensitive-command-must-not-be-logged');
   });
 
-  it('cancels approvals for one native turn through its captured turn operation', async () => {
+  it('keeps approvals bound to their captured lifecycle operation across a goal handoff', async () => {
     const nativePath = path.join(tmpDir, 'approval-routing-thread.jsonl');
     let goal = null;
     let fake;
@@ -7528,7 +7557,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await Promise.resolve();
 
-    const requests = permissionEvents(first.events).filter(
+    const requests = permissionEvents([...first.events, ...second.events]).filter(
       (event) => event.lifecycle.kind === 'requested',
     );
     const requestByCommand = new Map(requests.map((event) => [
@@ -7537,9 +7566,10 @@ describe('CodexAppServerRuntime', () => {
     ]));
     expect(requestByCommand.has('command-a')).toBe(true);
     expect(requestByCommand.has('command-b')).toBe(true);
-    expect(permissionEvents(second.events)).toEqual([]);
+    expect(permissionEvents(first.events).map((event) => event.runId)).toEqual(['run-a', 'run-a']);
+    expect(permissionEvents(second.events).map((event) => event.runId)).toEqual(['run-b', 'run-b']);
 
-    const cancelledOccurrenceIds = permissionEvents(first.events)
+    const cancelledOccurrenceIds = permissionEvents([...first.events, ...second.events])
       .filter((event) => event.lifecycle.kind === 'cancelled')
       .map((event) => event.lifecycle.permissionOccurrenceId);
     expect(cancelledOccurrenceIds).toEqual([
@@ -7880,7 +7910,7 @@ describe('CodexAppServerRuntime', () => {
         params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
       });
     } else if (explicitSource === 'settings update') {
-      await provider.updateSessionSettings(started.agentSessionId, {
+      await updateSettings(provider, started, {
         model: 'gpt-5.4-codex',
         permissionMode: 'default',
         thinkingMode: 'high',
@@ -7992,6 +8022,42 @@ describe('CodexAppServerRuntime', () => {
     expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
     expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
     expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('releases resume preparation after a late turn notification advances the target epoch', async () => {
+    const { fake, provider, started, published } = await startSettingsSession();
+    const acknowledgement = createDeferred();
+    fake.interruptTurn.mockImplementation(() => acknowledgement.promise);
+    const controller = new AbortController();
+    let aborting;
+    try {
+      aborting = provider.abort(started.agentSessionId, published.operation.publish);
+      const request = makeRequest({ agentSessionId: started.agentSessionId, nativePath: started.nativePath,
+        operation: collectOperation('chat-1', 'cancelled-resume').operation });
+      const resumed = provider.runTurn({ ...request, executionAdmission: {
+        signal: controller.signal, markStarted: async () => {},
+      } }).then(() => null, error => error);
+      expect((await provider.sessionConfiguration.prepare(configurationRequest(started))).kind).toBe('rejected');
+      fake.emit('notification', {
+        method: 'turn/started',
+        params: { threadId: started.agentSessionId, turn: makeTurn({ id: 'late-turn', status: 'inProgress' }) },
+      });
+      controller.abort(new Error('resume admission revoked'));
+      expect(await resumed).toMatchObject({ message: 'resume admission revoked' });
+      const captured = await provider.sessionConfiguration.prepare(configurationRequest(started));
+      expect(captured.kind).toBe('prepared');
+      provider.sessionConfiguration.cancel(captured.target);
+      acknowledgement.resolve({});
+      await aborting;
+      fake.startTurn.mockImplementation(async () => ({ turn: makeTurn({ id: 'recovery-turn', status: 'inProgress' }) }));
+      await provider.runTurn({ ...request, operation: collectOperation('chat-1', 'recovered-resume').operation });
+      expect(fake.startTurn).toHaveBeenCalledTimes(2);
+      expect(fake.resumeThread).not.toHaveBeenCalled();
+    } finally {
+      acknowledgement.resolve({});
+      await aborting;
+      await provider.shutdown();
+    }
   });
 
   it('waits for interrupt acknowledgement before reusing the writer without awaiting its terminal event', async () => {
@@ -8117,19 +8183,15 @@ describe('CodexAppServerRuntime', () => {
     const request = makeRequest({ thinkingMode: 'none' });
     const started = await provider.startSession(request);
 
-    const aborting = provider.abort(started.agentSessionId, request.operation.publish);
-    const resumed = provider.runTurn(makeRequest({
-      agentSessionId: started.agentSessionId,
-      nativePath,
-      thinkingMode: 'none',
-    }));
-    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
-    const settingsUpdate = provider.updateSessionSettings(started.agentSessionId, {
-      model: 'gpt-5.4-codex',
-      permissionMode: 'default',
-      thinkingMode: 'high',
+    const settingsUpdate = updateSettings(provider, started, {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'high',
     });
     await waitForCondition(() => firstClient.updateThreadSettings.mock.calls.length === 1);
+    const aborting = provider.abort(started.agentSessionId, request.operation.publish);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId, nativePath, thinkingMode: 'none',
+    }));
+    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
     await Bun.sleep(0);
 
     interruptAcknowledgement.resolve();
@@ -8215,18 +8277,14 @@ describe('CodexAppServerRuntime', () => {
     const request = makeRequest({ thinkingMode: 'none' });
     const started = await provider.startSession(request);
 
+    await updateSettings(provider, started, {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'high',
+    });
     const aborting = provider.abort(started.agentSessionId, request.operation.publish);
     const resumed = provider.runTurn(makeRequest({
-      agentSessionId: started.agentSessionId,
-      nativePath: firstPath,
-      thinkingMode: 'none',
+      agentSessionId: started.agentSessionId, nativePath: firstPath, thinkingMode: 'none',
     }));
     await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
-    await provider.updateSessionSettings(started.agentSessionId, {
-      model: 'gpt-5.4-codex',
-      permissionMode: 'default',
-      thinkingMode: 'high',
-    });
     await provider.startSession(makeRequest({
       chatId: 'chat-1',
       command: 'Supersede the interrupted source',
@@ -8767,12 +8825,12 @@ describe('CodexAppServerRuntime', () => {
     });
     let settled = false;
 
-    const update = provider.updateSessionSettings(started.agentSessionId, {
+    const update = updateSettings(provider, started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'manualBypass',
       thinkingMode: 'high',
     }).finally(() => { settled = true; });
-    await Promise.resolve();
+    await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
 
     expect(fake.updateThreadSettings).toHaveBeenCalledWith({
       threadId: 'thread-1',
@@ -8792,7 +8850,7 @@ describe('CodexAppServerRuntime', () => {
     response.resolve();
     await update;
 
-    await provider.updateSessionSettings(started.agentSessionId, {
+    await updateSettings(provider, started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'manualBypass',
       thinkingMode: 'high',
@@ -8835,6 +8893,145 @@ describe('CodexAppServerRuntime', () => {
       .toBe('continued with confirmed settings');
   });
 
+  it('prepares a concrete Codex target without applying settings and preserves a confirmed late result', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    const caller = new AbortController(); const response = createDeferred(); const entered = createDeferred();
+    const request = configurationRequest(started);
+    const prepared = await provider.sessionConfiguration.prepare(request);
+    expect(prepared.kind).toBe('prepared'); expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+    fake.updateThreadSettings.mockImplementation(() => { entered.resolve(); return response.promise; });
+    const committed = provider.sessionConfiguration.commit(prepared.target, caller.signal);
+    await entered.promise;
+    caller.abort(new Error('Synthetic cancelled settings caller'));
+    emitThreadSettings(fake, { approvalPolicy: 'on-request' }); response.resolve({});
+    expect(await committed).toEqual({ kind: 'applied' });
+    expect(await provider.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+    await provider.shutdown();
+  });
+
+  it('does not select a Codex source through another chat or a mismatched native binding', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    const request = configurationRequest(started);
+    for (const expected of [
+      { ...request.expected, chatId: 'other-chat' }, { ...request.expected, projectPath: '/other-project' },
+      { ...request.expected, agentSessionId: 'other-thread' }, { ...request.expected, nativeSession: null },
+      ...[{ path: '/other-native' }, { agentSessionId: 'other-thread' }, { modelEndpointId: 'other-endpoint' }].map((change) => ({
+        ...request.expected, nativeSession: createPathNativeSessionCodec('codex').encode({ agentSessionId: started.agentSessionId,
+          path: started.nativePath, modelEndpointId: null, ...change }) })),
+    ]) expect(await provider.sessionConfiguration.prepare({ ...request, expected })).toEqual({ kind: 'rejected', reason: 'target-conflict' });
+    expect(await provider.sessionConfiguration.prepare({ ...request, expected: { ...request.expected, chatId: 'absent-chat', agentSessionId: 'absent-thread' } }))
+      .toEqual({ kind: 'not-required' });
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled(); await provider.shutdown();
+  });
+
+  it('preserves a configuration capture on an active source when resume is refused as busy', async () => {
+    const { fake, provider, started, published } = await startSettingsSession();
+    try {
+      const request = configurationRequest(started, { permissionMode: 'acceptEdits' });
+      const prepared = await provider.sessionConfiguration.prepare(request);
+      expect(prepared.kind).toBe('prepared');
+      await expect(provider.runTurn(makeRequest({ agentSessionId: started.agentSessionId,
+        nativePath: started.nativePath, operation: collectOperation('chat-1', 'refused-run').operation })))
+        .rejects.toMatchObject({ code: 'SESSION_BUSY', retryable: true });
+      expect(provider.isRunning(started.agentSessionId)).toBe(true);
+      expect(fake.resumeThread).not.toHaveBeenCalled();
+      expect(fake.interruptTurn).not.toHaveBeenCalled();
+      expect(published.events.filter(event => event.type === 'run-ended')).toEqual([]);
+      expect(await provider.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'applied' });
+    } finally {
+      fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) } });
+      await provider.shutdown();
+    }
+  });
+
+  it('invalidates a retained idle Codex target after the same source runs another turn', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) } });
+    const request = configurationRequest(started);
+    const prepared = await provider.sessionConfiguration.prepare(request);
+    expect(prepared.kind).toBe('prepared');
+    fake.startTurn.mockResolvedValueOnce({ turn: makeTurn({ id: 'turn-2', status: 'inProgress' }) });
+    await provider.runTurn(makeRequest({ agentSessionId: started.agentSessionId, nativePath: started.nativePath }));
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) } });
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+    expect(await provider.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled(); await provider.shutdown();
+  });
+
+  it('checks Codex queued captures before issuing a second mutation after source retirement', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    const response = createDeferred(); const entered = createDeferred();
+    fake.updateThreadSettings.mockImplementation(() => { entered.resolve(); return response.promise; });
+    const request = configurationRequest(started);
+    const first = await provider.sessionConfiguration.prepare(request);
+    const second = await provider.sessionConfiguration.prepare(configurationRequest(started, { thinkingMode: 'high' }));
+    expect(first.kind).toBe('prepared'); expect(second.kind).toBe('prepared');
+    const firstCommit = provider.sessionConfiguration.commit(first.target, request.signal);
+    await entered.promise;
+    const secondCommit = provider.sessionConfiguration.commit(second.target, request.signal);
+    await provider.shutdown();
+    response.resolve({});
+    expect(await firstCommit).toEqual({ kind: 'unknown' });
+    expect(await secondCommit).toEqual({ kind: 'rejected', reason: 'target-changed' });
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an unsettled Codex settings RPC after the confirmation deadline', async () => {
+    const { fake, provider, started } = await startSettingsSession({ settingsUpdateTimeoutMs: 5 });
+    const response = createDeferred(); const entered = createDeferred();
+    fake.updateThreadSettings.mockImplementation(() => { entered.resolve(); return response.promise; });
+    const request = configurationRequest(started);
+    const prepared = await provider.sessionConfiguration.prepare(request);
+    expect(prepared.kind).toBe('prepared');
+    let settled = false;
+    const committed = provider.sessionConfiguration.commit(prepared.target, request.signal).finally(() => { settled = true; });
+    await entered.promise;
+    await Bun.sleep(15);
+    expect(settled).toBe(false);
+    response.resolve({});
+    expect(await committed).toEqual({ kind: 'unknown' });
+    expect(await provider.sessionConfiguration.prepare(request)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+    await provider.shutdown();
+  });
+
+  it.each(['effort', 'endpoint'])('rejects an active %s transition and defers it only through an unchanged idle capture', async change => {
+    const { fake, provider, started } = await startSettingsSession();
+    const next = change === 'effort' ? { thinkingMode: 'none' } : { endpoint: {
+      apiProviderId: 'synthetic-api', endpointId: 'next', protocol: 'openai-responses',
+      providerLabel: 'Synthetic', baseUrl: 'https://synthetic.invalid', model: 'synthetic-model',
+      isLocal: false, capabilities: null, headers: {},
+    } };
+    const request = configurationRequest(started, next);
+    await expect(provider.sessionConfiguration.prepare(request)).rejects.toMatchObject({
+      code: change === 'effort' ? 'INVALID_SETTINGS' : 'INVALID_ENDPOINT', retryable: false,
+    });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
+    const prepared = await provider.sessionConfiguration.prepare(request);
+    expect(prepared.kind).toBe('prepared');
+    expect(await provider.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'not-required' });
+    const disappeared = await provider.sessionConfiguration.prepare(request);
+    await provider.shutdown();
+    expect(await provider.sessionConfiguration.commit(disappeared.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+    expect(await provider.sessionConfiguration.prepare(request)).toEqual({ kind: 'not-required' });
+  });
+
+  it.each(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol'])(
+    'switches provider-default effort from Astra to %s on the captured source', async model => {
+      const { fake, provider, started } = await startSettingsSession({}, { model: 'gpt-6-astra', thinkingMode: 'none' });
+      fake.updateThreadSettings.mockImplementation(async () => {
+        emitThreadSettings(fake, { model, approvalPolicy: 'on-request' });
+        return {};
+      });
+      expect(await updateSettings(provider, started, { model, thinkingMode: 'none' }, { model: 'gpt-6-astra', thinkingMode: 'none' }))
+        .toEqual({ kind: 'applied' });
+      expect(fake.updateThreadSettings).toHaveBeenCalledWith(expect.objectContaining({ model }));
+      expect(fake.updateThreadSettings.mock.calls[0][0]).not.toHaveProperty('effort');
+      await provider.shutdown();
+    },
+  );
+
   it('updates a retained idle source while preserving provider-default effort', async () => {
     const { fake, provider, started } = await startSettingsSession({}, { thinkingMode: 'none' });
     fake.emit('notification', {
@@ -8842,7 +9039,6 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
     });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(provider.hasSource('thread-1')).toBe(true);
     fake.updateThreadSettings.mockImplementation(async () => {
       emitThreadSettings(fake, {
         approvalPolicy: 'on-request',
@@ -8851,11 +9047,11 @@ describe('CodexAppServerRuntime', () => {
       return {};
     });
 
-    await provider.updateSessionSettings(started.agentSessionId, {
+    await updateSettings(provider, started, {
       model: 'gpt-5.4-codex',
       permissionMode: 'manualBypass',
       thinkingMode: 'none',
-    });
+    }, { thinkingMode: 'none' });
 
     expect(fake.updateThreadSettings).toHaveBeenCalledWith({
       threadId: 'thread-1',
@@ -8957,15 +9153,15 @@ describe('CodexAppServerRuntime', () => {
       createClient: () => clients[nextClient++],
       materializationTimeoutMs: 20,
     });
-    await provider.startSession(makeRequest({ chatId: 'chat-1' }));
+    const started = await provider.startSession(makeRequest({ chatId: 'chat-1' }));
     await provider.startSession(makeRequest({ chatId: 'chat-2' }));
     let settled = false;
-    const update = provider.updateSessionSettings('thread-1', {
+    const update = updateSettings(provider, started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'default',
       thinkingMode: 'high',
     }).finally(() => { settled = true; });
-    await Promise.resolve();
+    await waitForCondition(() => clients[0].updateThreadSettings.mock.calls.length === 1);
 
     emitThreadSettings(clients[1], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-1');
     emitThreadSettings(clients[0], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-2');
@@ -9004,17 +9200,17 @@ describe('CodexAppServerRuntime', () => {
 
   it('serializes settings updates for one app-server source', async () => {
     const { fake, provider, started } = await startSettingsSession();
-    const first = provider.updateSessionSettings(started.agentSessionId, {
+    const first = updateSettings(provider, started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'default',
       thinkingMode: 'high',
     });
-    const second = provider.updateSessionSettings(started.agentSessionId, {
+    const second = updateSettings(provider, started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'bypassPermissions',
       thinkingMode: 'low',
     });
-    await Promise.resolve();
+    await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
     expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
 
     emitThreadSettings(fake, { model: 'gpt-5.4-mini', effort: 'high' });
@@ -9030,25 +9226,24 @@ describe('CodexAppServerRuntime', () => {
     await second;
   });
 
-  it('changes approval behavior only after settings confirmation', async () => {
-    const { fake, provider, published, started } = await startSettingsSession();
-    const update = provider.updateSessionSettings(started.agentSessionId, {
+  it('keeps active approval policy when future thread settings are confirmed', async () => {
+    const { fake, provider, published, started } = await startSettingsSession({}, { permissionMode: 'manualBypass' });
+    const update = updateSettings(provider, started, {
       model: 'gpt-5.4-codex',
-      permissionMode: 'manualBypass',
+      permissionMode: 'default',
       thinkingMode: 'medium',
-    });
-    await Promise.resolve();
+    }, { permissionMode: 'manualBypass' });
+    await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
 
     fake.emit('serverRequest', {
       id: 'before-confirmation',
       method: 'item/commandExecution/requestApproval',
       params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-before', command: 'ls' },
     });
-    expect(fake.respond).not.toHaveBeenCalled();
-    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
-      .toEqual(['requested']);
+    expect(fake.respond).toHaveBeenCalledWith('before-confirmation', { decision: 'accept' });
+    expect(permissionEvents(published.events)).toEqual([]);
 
-    emitThreadSettings(fake, { approvalPolicy: 'on-request' });
+    emitThreadSettings(fake, { approvalPolicy: 'never' });
     await update;
     fake.emit('serverRequest', {
       id: 'after-confirmation',
@@ -9057,20 +9252,21 @@ describe('CodexAppServerRuntime', () => {
     });
 
     expect(fake.respond).toHaveBeenCalledWith('after-confirmation', { decision: 'accept' });
-    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
-      .toEqual(['requested']);
+    expect(permissionEvents(published.events)).toEqual([]);
+    await provider.shutdown();
   });
 
   it('rejects RPC failure and source exit while settings are pending', async () => {
     const first = await startSettingsSession();
     first.fake.updateThreadSettings.mockRejectedValue(new Error('settings rejected'));
-    await expect(first.provider.updateSessionSettings(first.started.agentSessionId, {
+    await expect(updateSettings(first.provider, first.started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'default',
       thinkingMode: 'high',
-    })).rejects.toThrow('settings rejected');
+    })).resolves.toEqual({ kind: 'unknown' });
 
     const secondPath = path.join(tmpDir, 'settings-exit-thread.jsonl');
+    const retiredRpc = createDeferred();
     const secondFake = new FakeClient({
       startThread: async () => ({
         thread: makeThread({ id: 'thread-exit', path: secondPath }),
@@ -9084,22 +9280,23 @@ describe('CodexAppServerRuntime', () => {
         await fs.writeFile(secondPath, '{}\n');
         return { turn: makeTurn({ id: 'turn-exit', status: 'inProgress' }) };
       },
-      updateThreadSettings: () => new Promise(() => {}),
+      updateThreadSettings: () => retiredRpc.promise,
     });
     const secondProvider = createRuntime({
       createClient: () => secondFake,
       materializationTimeoutMs: 20,
     });
-    await secondProvider.startSession(makeRequest({ chatId: 'chat-exit' }));
-    const pending = secondProvider.updateSessionSettings('thread-exit', {
+    const secondStarted = await secondProvider.startSession(makeRequest({ chatId: 'chat-exit' }));
+    const pending = updateSettings(secondProvider, { ...secondStarted, chatId: 'chat-exit' }, {
       model: 'gpt-5.4-mini',
       permissionMode: 'default',
       thinkingMode: 'high',
     });
-    await Promise.resolve();
+    await waitForCondition(() => secondFake.updateThreadSettings.mock.calls.length === 1);
     secondFake.emit('exit', 0);
+    retiredRpc.resolve({});
 
-    await expect(pending).rejects.toThrow('retired before settings were confirmed');
+    await expect(pending).resolves.toEqual({ kind: 'unknown' });
     expect(secondProvider.isRunning('thread-exit')).toBe(false);
   });
 
@@ -9116,11 +9313,11 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    await expect(provider.updateSessionSettings(started.agentSessionId, {
+    await expect(updateSettings(provider, started, {
       model: 'gpt-5.4-mini',
       permissionMode: 'default',
       thinkingMode: 'high',
-    })).rejects.toMatchObject({ code: 'TIMEOUT' });
+    })).resolves.toEqual({ kind: 'unknown' });
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
@@ -9178,3 +9375,152 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events)[0].content).toBe('Hi there');
   });
 });
+
+it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached', 'unknown-live', 'precommit-terminal'])(
+  'committed goal lifecycle ownership remains exact through %s in the node composition',
+  async (scenario) => {
+    let fake;
+    fake = new FakeClient({
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started', params: { threadId, turn: makeTurn({ status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async () => {
+        if (scenario === 'unknown-live') throw new Error('synthetic delivery reply lost');
+        return { turnId: 'synthetic-active-turn' };
+      },
+    });
+    const runtime = createRuntime({ createClient: () => fake });
+    const execution = new CodexExecution(runtime, createPathNativeSessionCodec('codex'), {
+      home: () => '/synthetic-home', openAiApiKey: () => null, openAiBaseUrl: () => null,
+    });
+    const started = Promise.withResolvers();
+    const resume = execution.resume.bind(execution);
+    execution.resume = async (...args) => { await resume(...args); started.resolve(); };
+    const adapter = createAgentProducerAdapter(execution, { warn() {}, info() {}, error() {}, debug() {} });
+    const configuration = {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'none',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} }, endpoint: null,
+    };
+    const nativeReturned = Promise.withResolvers();
+    const settleGoal = Promise.withResolvers();
+    let nativeCommits = 0;
+    let goalSubmission;
+    const failActiveTurn = () => fake.emit('notification', {
+      method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn({
+        id: 'synthetic-active-turn', status: 'failed', error: { message: 'synthetic turn failure' },
+      }) },
+    });
+    const integration = {
+      descriptor: { id: 'codex' }, execution: adapter.execution, compaction: null, steering: null,
+      goals: { submitControl: (request) => (goalSubmission = adapter.submitGoalControl(request, async (goal, publish) => {
+        try {
+          return await execution.submitGoalControl({
+            ...goal, beforeDelivery: (handoff) => goal.beforeDelivery({
+              validate: handoff.validate,
+              commit() {
+                handoff.commit();
+                nativeCommits += 1;
+                if (scenario === 'native-failure') queueMicrotask(failActiveTurn);
+                if (scenario === 'source-exit') queueMicrotask(() => fake.emit('exit', 7));
+              },
+            }),
+          }, publish);
+        } finally {
+          nativeReturned.resolve();
+          await settleGoal.promise;
+        }
+      })) },
+    };
+    const service = new LocalProviderExecutionService(integration, { resolve: async () => configuration });
+    const supervisor = new NodeSupervisor({ async cleanup() {} });
+    const session = supervisor.openSession('synthetic-controller');
+    const connection = supervisor.attach(session);
+    supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
+    const location = { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' };
+    const resources = new NodeExecutionResources(location.nodeId);
+    resources.register({ location, execution: service, projectPath: '/repo',
+      files: { inspectProject: async () => ({ kind: 'available', effectiveProjectKey: '/repo' }) },
+    });
+    const table = new NodeOperationTable({ connection, supervisor, resources, limits: { maxOperations: 1 } });
+    const request = {
+      kind: 'resume', chatId: 'synthetic-chat', runId: 'synthetic-original', agentSessionId: 'thread-1', nativeSession: null,
+      configuration: { model: configuration.model, settings: null, endpoint: null },
+    };
+    const signal = new AbortController().signal;
+    const events = [];
+    try {
+      const ticket = await table.prepare(connection, location, request, signal);
+      await table.dispatch(connection, ticket.identity, {
+        prompt: '/goal synthetic objective', attachments: [], carriedContext: null,
+      }, { signal, emit(event) { events.push(event); } });
+      await started.promise;
+      fake.emit('notification', {
+        method: 'turn/started', params: { threadId: 'thread-1', turn: makeTurn({ id: 'synthetic-active-turn', status: 'inProgress' }) },
+      });
+      const prepared = await table.prepareGoalControl(connection, ticket.identity, {
+        prompt: 'synthetic goal input', runId: 'synthetic-successor', attachments: [], configuration: request.configuration,
+      }, signal);
+      expect(prepared.kind).toBe('ready');
+      if (scenario === 'precommit-terminal') {
+        // Completion enters its async capacity path before the parked handoff can commit.
+        emitCapacityFailure(fake, 'synthetic-active-turn');
+        await expect(table.commitGoalControl(connection, ticket.identity, prepared.ticket.controlId))
+          .rejects.toThrow('Codex session ended before goal control delivery');
+        await nativeReturned.promise;
+        expect(nativeCommits).toBe(0);
+        expect(fake.steerTurn).not.toHaveBeenCalled();
+        expect(terminalEvents(events).map((event) => event.runId)).toEqual(['synthetic-original']);
+        expect(table.status(connection, ticket.identity)).toMatchObject({ value: { phase: 'ended', runId: 'synthetic-original' } });
+        await expect(table.prepare(connection, location, request, signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+        settleGoal.resolve();
+        await expect(goalSubmission).rejects.toThrow('Codex session ended before goal control delivery');
+        await expect(table.prepare(connection, location, request, signal)).resolves.toHaveProperty('identity');
+        return;
+      }
+      const committed = table.commitGoalControl(connection, ticket.identity, prepared.ticket.controlId);
+      await nativeReturned.promise;
+      if (scenario.startsWith('accepted') || scenario === 'unknown-live') {
+        if (scenario === 'accepted-detached') {
+          fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
+          expect(terminalEvents(events).map((event) => event.runId)).toEqual(['synthetic-original']);
+          expect(table.status(connection, ticket.identity)).toMatchObject({ value: { phase: 'dispatched' } });
+          expect(runtime.isRunning('thread-1')).toBe(true);
+        }
+        fake.emit('serverRequest', { id: 'synthetic-approval', method: 'item/commandExecution/requestApproval', params: {
+          threadId: 'thread-1', turnId: 'synthetic-active-turn', itemId: 'synthetic-item',
+          command: 'echo synthetic', cwd: '/repo', reason: null,
+        } });
+        expect(permissionEvents(events).at(-1)).toMatchObject({ runId: 'synthetic-successor', lifecycle: { kind: 'requested' } });
+        if (scenario === 'unknown-live') {
+          settleGoal.resolve();
+          expect(await committed).toEqual({ kind: 'failed', outcome: 'unknown' });
+          expect(runtime.isRunning('thread-1')).toBe(true);
+          expect(table.status(connection, ticket.identity)).toMatchObject({ value: { phase: 'dispatched', runId: 'synthetic-successor' } });
+          await expect(table.prepare(connection, location, request, signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+        }
+        failActiveTurn();
+      }
+      expect(runtime.isRunning('thread-1')).toBe(false);
+      expect(terminalEvents(events).at(-1)).toMatchObject({ runId: 'synthetic-successor', outcome: 'failed' });
+      expect(table.status(connection, ticket.identity)).toMatchObject({ value: { phase: 'ended', runId: 'synthetic-successor' } });
+      if (scenario !== 'unknown-live') {
+        await expect(table.prepare(connection, location, request, signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+      }
+      settleGoal.resolve();
+      expect(await committed).toEqual(scenario.startsWith('accepted') ? { kind: 'accepted' } : { kind: 'failed', outcome: 'unknown' });
+      await expect(table.prepare(connection, location, request, signal)).resolves.toHaveProperty('identity');
+      expect(fake.resumeThread).toHaveBeenCalledTimes(1);
+      expect(fake.startThread).not.toHaveBeenCalled();
+      expect(nativeCommits).toBe(1);
+    } finally {
+      settleGoal.resolve();
+      table.close();
+      resources.close();
+      await supervisor.shutdown();
+      await runtime.shutdown();
+    }
+  },
+);

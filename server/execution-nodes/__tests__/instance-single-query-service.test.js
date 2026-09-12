@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 import { createLocatedInstanceFixture } from '../../agents/__tests__/located-instance-fixture.js';
 
@@ -20,7 +21,7 @@ test.each(['same-node', 'same-instance-id'])('one-shot services isolate %s with 
     nodeId: placement === 'same-node' ? 'local-node' : `${profile}-node`,
     instanceId: placement === 'same-node' ? profile : 'profile',
   }));
-  const directory = new AgentInstanceDirectory(profiles.map((profile, index) => {
+  const directory = new AgentInstanceDirectory(createLocalProviderInstances(profiles.map((profile, index) => {
     f[profile].integration.singleQuery = {
       ...(profile === 'secondary' ? { runsToolsWithoutPermission: true } : {}),
       run: mock(async () => `${profile} response`),
@@ -32,7 +33,7 @@ test.each(['same-node', 'same-instance-id'])('one-shot services isolate %s with 
       },
       integration: f[profile].integration,
     };
-  }));
+  })));
   const services = references.map((reference) => directory.singleQueryForInstance(reference));
   expect(services[0]).not.toBe(services[1]);
   for (const [index, profile] of profiles.entries()) {
@@ -76,13 +77,13 @@ test.each([null, false, true])('the registry reads the tool policy from the sele
 
 test('unavailable and removed instances reject before checking capability absence', async () => {
   const f = await fixture();
-  const removed = new AgentInstanceDirectory([{
+  const removed = new AgentInstanceDirectory(createLocalProviderInstances([{
     configuration: {
       nodeId: 'local-node', id: 'primary', agentId: 'test', label: 'Removed',
       storageNamespace: 'instances/primary', default: true, removedAt: '2026-09-10T00:00:00.000Z',
     },
     integration: f.primary.integration,
-  }]);
+  }]));
   for (const [directory, nodeId, instanceId] of [
     [f.instances, 'local-node', 'missing'], [f.instances, 'offline-node', 'primary'],
     [removed, 'local-node', 'primary'],

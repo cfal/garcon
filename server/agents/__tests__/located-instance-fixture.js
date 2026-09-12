@@ -1,4 +1,5 @@
 import { mock } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,7 +71,11 @@ function createIntegration(profile) {
       discard: mock(async () => {}),
     },
     projectPathUpdates: { prepare: mock(async () => preparation) },
-    sessionConfiguration: { apply: mock(async () => {}) },
+    sessionConfiguration: {
+      prepare: mock(async () => ({ kind: 'prepared', target })),
+      commit: mock(async () => ({ kind: 'applied' })),
+      cancel: mock(() => {}),
+    },
     legacyHistoryImport: { load: legacyLoad },
     nativeHistoryImport: { load: nativeLoad },
     nativeSessions: {
@@ -98,13 +103,13 @@ export async function createLocatedInstanceFixture(extraInstances = []) {
   const chats = new ChatRegistry(root);
   await chats.init();
   const profiles = { primary: createIntegration('primary'), secondary: createIntegration('secondary') };
-  const instances = new AgentInstanceDirectory([...Object.entries(profiles).map(([profile, { integration }]) => ({
+  const instances = new AgentInstanceDirectory(createLocalProviderInstances([...Object.entries(profiles).map(([profile, { integration }]) => ({
     configuration: {
       nodeId: 'local-node', id: profile, agentId: 'test', label: profile,
       storageNamespace: `instances/${profile}`, default: profile === 'primary', removedAt: null,
     },
     integration,
-  })), ...extraInstances]);
+  })), ...extraInstances]));
   for (const [profile, id] of Object.entries(LOCATED_CHATS)) {
     chats.addChat({
       id, agentId: 'test', agentSessionId: 'colliding-session', nativeSession,
@@ -120,20 +125,21 @@ export async function createLocatedInstanceFixture(extraInstances = []) {
     ledger, registry: chats, instances,
     getCarryOverRevision: () => 'synthetic-revision', loadFrozenPrefix: async () => [],
   });
-  /** @satisfies {Pick<import('../integration-registry.js').IntegrationRegistry, 'has' | 'get' | 'require' | 'list'>} */
-  const integrations = {
+  /** @satisfies {Pick<import('../type-registry.js').AgentTypeRegistry, 'has' | 'get' | 'require' | 'list'>} */
+  const types = {
     has: (id) => id === 'test',
-    get: (id) => id === 'test' ? profiles.primary.integration : null,
+    get: (id) => id === 'test' ? profiles.primary.integration.descriptor : null,
     require: (id) => {
       if (id !== 'test') throw new Error('Unknown synthetic provider');
-      return profiles.primary.integration;
+      return profiles.primary.integration.descriptor;
     },
-    list: () => [profiles.primary.integration],
+    list: () => [profiles.primary.integration.descriptor],
   };
   const chatMutationLock = new KeyedPromiseLock();
   const agents = new AgentRegistry({
+    fileMentions: { resolve: async (command) => command },
     localNodeId: 'local-node',
-    registry: chats, integrations, instances, ledger, adoption, chatMutationLock,
+    registry: chats, types, instances, ledger, adoption, chatMutationLock,
     endpointResolver: new ApiProviderEndpointResolver(() => []),
     getCarryOverRevision: () => 'synthetic-revision',
     createCarriedContext: async () => ({ kind: 'no-history' }),
@@ -154,7 +160,7 @@ export async function createLocatedInstanceFixture(extraInstances = []) {
   });
   const readFork = createForkNativeHistoryReader({ instances, carryOver: { revision: () => 'synthetic-revision' } });
   return {
-    root, chats, ledger, adoption, agents, integrations, instances, reload, readFork, ...profiles,
+    root, chats, ledger, adoption, agents, types, instances, reload, readFork, ...profiles,
     async dispose() {
       ledger.close();
       await chats.flush();

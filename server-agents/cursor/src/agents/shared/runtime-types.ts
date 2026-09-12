@@ -34,11 +34,6 @@ export interface AcpStartedSession {
   readonly nativePath: string | null;
 }
 
-export interface AcpSessionSettingsPatch {
-  readonly permissionMode?: PermissionMode;
-  readonly thinkingMode?: ThinkingMode;
-  readonly model?: string;
-}
 
 export interface AcpProjectPathUpdateRequest {
   readonly chatId: string;

@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { createLocalProviderInstances } from '../../execution-node/local-provider-instance.js';
 import { AgentInstanceDirectory } from '../../agents/instance-directory.js';
 
 function instance(nodeId, id, defaults = false) {
@@ -11,15 +12,28 @@ function instance(nodeId, id, defaults = false) {
   };
 }
 
-describe('instance-qualified executable directory', () => {
+describe('instance-qualified service directory', () => {
+  test('separately composed local registrations retain one executable binding', () => {
+    const first = instance('first-node', 'first');
+    const second = { ...instance('second-node', 'second'), integration: first.integration };
+    const original = createLocalProviderInstances([first]);
+    const alias = createLocalProviderInstances([second]);
+    expect(() => new AgentInstanceDirectory([...original, ...alias])).toThrow('share one');
+    expect(original[0].services.binding).toBe(alias[0].services.binding);
+    expect(Object.keys(original[0].services.binding)).toEqual([]);
+    expect(() => new AgentInstanceDirectory(original)).not.toThrow();
+    expect(() => new AgentInstanceDirectory(alias)).not.toThrow();
+  });
+
   test('resolves multiple instances of the same provider without cross-node fallback', () => {
     const local = instance('local', 'default', true);
     const work = instance('node-a', 'work', true);
     const personal = instance('node-a', 'personal');
     const secondNode = instance('node-b', 'work', true);
-    const directory = new AgentInstanceDirectory([local, work, personal, secondNode]);
-    for (const entry of [local, work, personal, secondNode]) {
-      expect(directory.require({ nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id })).toBe(entry.integration);
+    const registrations = createLocalProviderInstances([local, work, personal, secondNode]);
+    const directory = new AgentInstanceDirectory(registrations);
+    for (const entry of registrations) {
+      expect(directory.require({ nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id })).toBe(entry.services);
     }
     expect(directory.defaultFor('node-a', 'synthetic-provider')).toEqual({ nodeId: 'node-a', instanceId: 'work' });
     expect(directory.defaultFor('missing-node', 'synthetic-provider')).toBeNull();
@@ -31,22 +45,22 @@ describe('instance-qualified executable directory', () => {
   test('rejects duplicate identity, default, shared executable, shared storage and provider mismatch', () => {
     const work = instance('node-a', 'work', true);
     const personal = instance('node-a', 'personal');
-    expect(() => new AgentInstanceDirectory([work, work])).toThrow('Duplicate configured');
-    expect(() => new AgentInstanceDirectory([work, instance('node-a', 'personal', true)])).toThrow('Duplicate default');
-    expect(() => new AgentInstanceDirectory([work, { ...personal, integration: work.integration }])).toThrow('share one executable');
-    expect(() => new AgentInstanceDirectory([work, {
+    expect(() => new AgentInstanceDirectory(createLocalProviderInstances([work, instance('node-a', 'work', true)]))).toThrow('Duplicate configured');
+    expect(() => new AgentInstanceDirectory(createLocalProviderInstances([work, instance('node-a', 'personal', true)]))).toThrow('Duplicate default');
+    expect(() => new AgentInstanceDirectory(createLocalProviderInstances([work, { ...personal, integration: work.integration }]))).toThrow('share one executable');
+    expect(() => new AgentInstanceDirectory(createLocalProviderInstances([work, {
       ...personal, configuration: { ...personal.configuration, storageNamespace: work.configuration.storageNamespace },
-    }])).toThrow('share one storage');
-    expect(() => new AgentInstanceDirectory([{
+    }]))).toThrow('share one storage');
+    expect(() => new AgentInstanceDirectory(createLocalProviderInstances([{
       ...personal, integration: { descriptor: { id: 'different-provider' } },
-    }])).toThrow('provider type');
+    }]))).toThrow('provider type');
   });
 
   test('captures configuration and keeps removed defaults unavailable rather than substituting another profile', () => {
     const work = instance('node-a', 'work', true);
     const personal = instance('node-a', 'personal');
     work.configuration.removedAt = '2026-09-09T00:00:00.000Z';
-    const directory = new AgentInstanceDirectory([work, personal]);
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances([work, personal]));
     work.configuration.removedAt = null;
     expect(directory.defaultFor('node-a', 'synthetic-provider')).toBeNull();
     expect(directory.get({ nodeId: 'node-a', instanceId: 'work' })).toBeNull();
@@ -58,11 +72,12 @@ describe('instance-qualified executable directory', () => {
   test('checks the exact chat owner instead of resolving by its provider type', () => {
     const work = instance('node-a', 'work', true);
     const personal = instance('node-a', 'personal');
-    const directory = new AgentInstanceDirectory([work, personal]);
+    const registrations = createLocalProviderInstances([work, personal]);
+    const directory = new AgentInstanceDirectory(registrations);
     const owner = { agentId: 'synthetic-provider', executionLocation: {
       nodeId: 'node-a', instanceId: 'personal', workspaceId: 'workspace-a',
     } };
-    expect(directory.requireFor(owner)).toBe(personal.integration);
+    expect(directory.requireFor(owner)).toBe(registrations[1].services);
     expect(() => directory.requireFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
     expect(() => directory.requireFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
       .toThrow('unavailable');
@@ -79,7 +94,7 @@ describe('instance-qualified executable directory', () => {
         parse: (value) => value,
       };
     }
-    const directory = new AgentInstanceDirectory([work, personal]);
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances([work, personal]));
     const owner = { agentId: 'synthetic-provider', executionLocation: {
       nodeId: 'node-a', instanceId: 'personal', workspaceId: 'workspace-a',
     } };
@@ -90,6 +105,78 @@ describe('instance-qualified executable directory', () => {
     expect(() => directory.configurationFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
     expect(() => directory.configurationFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
       .toThrow('unavailable');
+  });
+
+  test('caches an immutable metadata snapshot per instance while checking availability on every lookup', () => {
+    const entries = [instance('node-a', 'work'), instance('node-a', 'personal'), instance('node-b', 'work')];
+    const removed = instance('node-a', 'removed');
+    removed.configuration.removedAt = '2026-09-09T00:00:00.000Z';
+    for (const entry of entries) {
+      entry.integration.settings = {
+        describe: mock(() => []),
+        defaults: mock(() => ({ ownerId: 'synthetic-provider', schemaVersion: 1,
+          values: { nested: { profile: entry.configuration.id } } })),
+      };
+    }
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances([...entries, removed]));
+    const snapshots = [];
+    for (const entry of entries) {
+      const ref = { nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id };
+      directory.assertAvailableForInstance(ref);
+      expect(entry.integration.settings.describe).not.toHaveBeenCalled();
+      const metadata = directory.metadataForInstance(ref);
+      const owner = { agentId: 'synthetic-provider', executionLocation: { ...ref, workspaceId: 'workspace' } };
+      expect(directory.metadataFor(owner)).toBe(metadata);
+      expect(directory.metadataForInstance({ ...ref })).toBe(metadata);
+      expect(entry.integration.settings.describe).toHaveBeenCalledTimes(1);
+      expect(entry.integration.settings.defaults).toHaveBeenCalledTimes(1);
+      expect(metadata.defaultSettings.values).toEqual({ nested: { profile: entry.configuration.id } });
+      expect(Object.isFrozen(metadata)).toBe(true);
+      expect(Object.isFrozen(metadata.defaultSettings.values.nested)).toBe(true);
+      expect(() => directory.metadataFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
+      snapshots.push(metadata);
+    }
+    expect(new Set(snapshots).size).toBe(3);
+    for (const ref of [
+      { nodeId: 'node-a', instanceId: 'removed' }, { nodeId: 'node-a', instanceId: 'missing' },
+    ]) {
+      expect(() => directory.metadataForInstance(ref)).toThrow('unavailable');
+      expect(() => directory.assertAvailableForInstance(ref)).toThrow('unavailable');
+    }
+  });
+
+  test('binds project-path preparation to exact instances and permits absent native preparation', async () => {
+    const entries = [instance('node-a', 'work'), instance('node-a', 'personal'), instance('node-b', 'work')];
+    for (const entry of entries) {
+      entry.integration.settings = { parse: (value) => value };
+      entry.integration.projectPathUpdates = { prepare: mock(async () => ({ rollback: async () => {} })) };
+    }
+    const noPreparation = instance('node-a', 'without-preparation');
+    noPreparation.integration.projectPathUpdates = null;
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances([...entries, noPreparation]));
+    const services = [];
+    for (const entry of entries) {
+      const owner = { agentId: 'synthetic-provider', executionLocation: {
+        nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id, workspaceId: 'workspace',
+      } };
+      const service = directory.projectPathUpdatesFor(owner);
+      expect(directory.projectPathUpdatesFor(structuredClone(owner))).toBe(service);
+      await service.prepare({ chat: { chatId: 'synthetic-chat', agentId: 'synthetic-provider', agentSessionId: 'colliding-session',
+        projectPath: '/source', nativeSession: null, carryOverRevision: 'synthetic-revision',
+        settings: { ownerId: 'synthetic-provider', schemaVersion: 1, values: { profile: entry.configuration.id } },
+      }, nextProjectPath: '/destination' }, new AbortController().signal);
+      expect(entry.integration.projectPathUpdates.prepare).toHaveBeenCalledTimes(1);
+      expect(entry.integration.projectPathUpdates.prepare.mock.calls[0][0].chat.settings.values)
+        .toEqual({ profile: entry.configuration.id });
+      expect(() => directory.projectPathUpdatesFor({ ...owner, agentId: 'other-provider' })).toThrow('provider');
+      expect(() => directory.projectPathUpdatesFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
+        .toThrow('unavailable');
+      services.push(service);
+    }
+    expect(new Set(services).size).toBe(3);
+    expect(directory.projectPathUpdatesFor({ agentId: 'synthetic-provider', executionLocation: {
+      nodeId: 'node-a', instanceId: 'without-preparation', workspaceId: 'workspace',
+    } })).toBeNull();
   });
 
   test('binds catalogs to the exact node and instance without provider fallback', async () => {
@@ -107,7 +194,7 @@ describe('instance-qualified executable directory', () => {
         }),
       };
     }
-    const directory = new AgentInstanceDirectory([work, personal, otherNode, removed]);
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances([work, personal, otherNode, removed]));
     const signal = new AbortController().signal;
     for (const entry of [work, personal, otherNode]) {
       const ref = { nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id };
@@ -140,7 +227,7 @@ describe('instance-qualified executable directory', () => {
       };
       entry.integration.compaction = null;
     }
-    const directory = new AgentInstanceDirectory(entries);
+    const directory = new AgentInstanceDirectory(createLocalProviderInstances(entries));
     const services = [];
     for (const entry of entries) {
       const owner = { agentId: 'synthetic-provider', executionLocation: {
@@ -156,7 +243,7 @@ describe('instance-qualified executable directory', () => {
         configuration: { model: 'synthetic-model', settings: null, endpoint: null },
       }, new AbortController().signal);
       const content = { prompt: 'synthetic input', attachments: [], carriedContext: null };
-      const delivery = { output: { emit() {} }, admission: { signal: new AbortController().signal, async markStarted() {} } };
+      const delivery = { output: { signal: new AbortController().signal, emit() {} }, admission: { signal: new AbortController().signal, async markStarted() {} } };
       for (const other of services) {
         await expect(other.dispatch(operation, content, delivery)).rejects.toThrow('operation is invalid');
         await expect(other.abort(operation)).rejects.toThrow('operation is invalid');

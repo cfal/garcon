@@ -12,6 +12,7 @@ import { CursorAcpEventConverter } from '../cursor-acp-event-converter.js';
 import { createCursorAcpPolicy } from '../cursor-acp-policy.js';
 import { runSingleQuery } from '../run-single-query.js';
 import { extractGarconCommands } from '../../../../../../common/garcon-commands.js';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 
 const TEST_CURSOR_CONFIG = {
   binary: () => 'cursor-agent',
@@ -348,7 +349,7 @@ function startRequest(overrides = {}) {
 
 function createRuntimeHarness(options = {}) {
   const acp = createAcpHarness(options);
-  const runtime = new AcpAgentRuntime(createCursorAcpPolicy(TEST_CURSOR_CONFIG), {
+  const runtime = new AcpAgentRuntime({ ...createCursorAcpPolicy(TEST_CURSOR_CONFIG), ...options.policy }, {
     converter: new CursorAcpEventConverter(),
     createTransport: acp.createTransport,
     logger: options.logger,
@@ -358,6 +359,14 @@ function createRuntimeHarness(options = {}) {
     acp,
     runtime,
   };
+}
+
+function configurationRequest(started) {
+  const configuration = { model: 'default', permissionMode: 'default', thinkingMode: 'none',
+    settings: { ownerId: 'cursor', schemaVersion: 1, values: {} }, endpoint: null };
+  return { expected: { chatId: 'chat-1', agentSessionId: started.agentSessionId, projectPath: '/tmp/project',
+    nativeSession: createPathNativeSessionCodec('cursor').encode({ path: started.nativePath, agentSessionId: started.agentSessionId, modelEndpointId: null }) },
+  previous: configuration, next: { ...configuration, permissionMode: 'manualBypass' }, signal: new AbortController().signal };
 }
 
 describe('Cursor ACP runtime', () => {
@@ -844,7 +853,9 @@ describe('Cursor ACP runtime', () => {
     const started = await runtime.startSession(startRequest({ operation: published.operation }));
     await acp.waitForClientMethod('session/prompt');
 
-    runtime.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
+    const prepared = await runtime.sessionConfiguration.prepare(configurationRequest(started));
+    expect(prepared.kind).toBe('prepared');
+    expect(await runtime.sessionConfiguration.commit(prepared.target, new AbortController().signal)).toEqual({ kind: 'applied' });
     acp.serverRequest({
       id: 'permission-updated',
       method: 'session/request_permission',
@@ -867,6 +878,118 @@ describe('Cursor ACP runtime', () => {
 
     acp.finishPrompt();
     runtime.shutdown();
+  });
+
+  it.each(['active', 'idle'])('defers model-only configuration on an %s Cursor session', async (phase) => {
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('configuration-deferral');
+    try {
+      const started = await runtime.startSession(startRequest({ operation: published.operation }));
+      await acp.waitForClientMethod('session/prompt');
+      if (phase === 'idle') {
+        acp.finishPrompt();
+        await published.waitForEvent(event => event.type === 'run-ended');
+      }
+      const request = configurationRequest(started);
+      request.next = { ...request.previous, model: 'synthetic-next-model', thinkingMode: 'high' };
+      const prepared = await runtime.sessionConfiguration.prepare(request);
+      expect(prepared.kind).toBe('prepared');
+      expect(await runtime.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'not-required' });
+      if (phase === 'active') acp.finishPrompt();
+    } finally { runtime.shutdown(); }
+  });
+
+  it('defers an idle permission update until the next turn selects its policy', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('idle-permission-deferral');
+    try {
+      const started = await runtime.startSession(startRequest({ operation: published.operation }));
+      acp.finishPrompt(); await published.waitForEvent(event => event.type === 'run-ended');
+      const request = configurationRequest(started);
+      const prepared = await runtime.sessionConfiguration.prepare(request);
+      expect(prepared.kind).toBe('prepared');
+      expect(await runtime.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'not-required' });
+    } finally { runtime.shutdown(); }
+  });
+
+  it('rejects conflicting configuration bindings without treating a mapped source as absent', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    try {
+      const started = await runtime.startSession(startRequest());
+      const request = configurationRequest(started);
+      for (const expected of [
+        { ...request.expected, chatId: 'other-chat' }, { ...request.expected, projectPath: '/other-project' },
+        { ...request.expected, nativeSession: null },
+        { ...request.expected, nativeSession: { ...request.expected.nativeSession, ownerId: 'other-provider' } },
+        ...[{ path: '/other-native-path' }, { agentSessionId: 'other-session' }, { modelEndpointId: 'other-endpoint' }]
+          .map((change) => ({ ...request.expected, nativeSession: createPathNativeSessionCodec('cursor').encode({
+            path: started.nativePath, agentSessionId: started.agentSessionId, modelEndpointId: null, ...change }) })),
+      ]) expect(await runtime.sessionConfiguration.prepare({ ...request, expected })).toEqual({ kind: 'rejected', reason: 'target-conflict' });
+      expect(await runtime.sessionConfiguration.prepare({ ...request, expected: { ...request.expected, agentSessionId: 'absent' } })).toEqual({ kind: 'not-required' });
+      acp.finishPrompt();
+    } finally { runtime.shutdown(); }
+  });
+
+  it('invalidates an idle configuration capture when the same session starts and finishes another turn', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    try {
+      const first = collectOperation('configuration-first');
+      const started = await runtime.startSession(startRequest({ operation: first.operation }));
+      acp.finishPrompt(); await first.waitForEvent((event) => event.type === 'run-ended');
+      const request = configurationRequest(started);
+      const prepared = await runtime.sessionConfiguration.prepare(request);
+      expect(prepared.kind).toBe('prepared');
+      const second = runtime.runTurn(startRequest({ agentSessionId: started.agentSessionId, command: 'second synthetic turn' }));
+      await acp.waitForWrite((message) => message.method === 'session/prompt' && message.params.prompt[0].text === 'second synthetic turn');
+      acp.finishPrompt(); await second;
+      expect(await runtime.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+      const current = await runtime.sessionConfiguration.prepare(request);
+      expect(current.kind).toBe('prepared');
+      expect(await runtime.sessionConfiguration.commit(current.target, request.signal)).toEqual({ kind: 'not-required' });
+    } finally { runtime.shutdown(); }
+  });
+
+  it('blocks configuration during successor admission and releases that gate after admission fails', async () => {
+    const entered = deferred(); const release = deferred(); let calls = 0;
+    const { acp, runtime } = createRuntimeHarness({ policy: { async configureSession() {
+      if (++calls === 2) { entered.resolve(); await release.promise; }
+      return [];
+    } } });
+    try {
+      const first = collectOperation('configuration-before-admission');
+      const started = await runtime.startSession(startRequest({ operation: first.operation }));
+      acp.finishPrompt(); await first.waitForEvent((event) => event.type === 'run-ended');
+      const request = configurationRequest(started);
+      const prepared = await runtime.sessionConfiguration.prepare(request);
+      expect(prepared.kind).toBe('prepared');
+      const admission = new AbortController();
+      const second = runtime.runTurn(startRequest({ agentSessionId: started.agentSessionId,
+        executionAdmission: { signal: admission.signal, markStarted: async () => {} } })).catch((error) => error);
+      await entered.promise;
+      expect(await runtime.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+      expect(await runtime.sessionConfiguration.prepare(request)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+      admission.abort(new Error('Synthetic cancelled admission')); release.resolve();
+      expect(await second).toBeInstanceOf(Error);
+      const recovered = await runtime.sessionConfiguration.prepare(request);
+      expect(recovered.kind).toBe('prepared');
+      runtime.sessionConfiguration.cancel(recovered.target);
+      expect(await runtime.sessionConfiguration.commit(recovered.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+    } finally { release.resolve(); runtime.shutdown(); }
+  });
+
+  it('rejects a prepared configuration after native session retirement', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    try {
+      const operation = collectOperation('configuration-retirement');
+      const started = await runtime.startSession(startRequest({ operation: operation.operation }));
+      const request = configurationRequest(started);
+      const prepared = await runtime.sessionConfiguration.prepare(request);
+      expect(prepared.kind).toBe('prepared');
+      expect(runtime.abort(started.agentSessionId, operation.operation.publish)).toBe(true);
+      expect(await runtime.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'rejected', reason: 'target-changed' });
+      expect(await runtime.sessionConfiguration.prepare(request)).toEqual({ kind: 'not-required' });
+      acp.finishPrompt();
+    } finally { runtime.shutdown(); }
   });
 
   it('emits Cursor ask-question requests and forwards answered responses', async () => {

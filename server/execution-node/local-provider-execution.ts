@@ -23,9 +23,11 @@ import type {
 } from '../execution-nodes/provider-execution.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
-import type { ProviderConfigurationService } from '../execution-nodes/provider-configuration.js';
+import type { ProviderConfigurationResolver } from '../execution-nodes/provider-configuration.js';
 
 const logger = createLogger('execution-node:provider-execution');
+
+class SteerTurnChangedError extends Error {}
 
 interface LocalExecutionOperation {
   readonly request: ProviderExecutionRequest;
@@ -55,7 +57,7 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
 
   constructor(
     private readonly integration: Pick<AgentIntegration, 'descriptor' | 'execution' | 'compaction' | 'steering' | 'goals'>,
-    private readonly configuration: Pick<ProviderConfigurationService, 'resolve'>,
+    private readonly configuration: ProviderConfigurationResolver,
   ) {}
 
   async prepare(input: ProviderExecutionRequest, signal: AbortSignal): Promise<ProviderExecutionOperation> {
@@ -95,6 +97,7 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
     execution.phase = 'dispatched';
     let handle: AgentExecutionHandle | null = null;
     try {
+      delivery.output.signal.throwIfAborted();
       const { request } = execution;
       const content = {
         prompt: input.prompt,
@@ -119,6 +122,7 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
       signal.throwIfAborted();
       execution.delivery = {
         output: {
+          signal: delivery.output.signal,
           emit: (event) => {
             const session = event.type === 'session' ? {
               agentSessionId: event.session.agentSessionId,
@@ -212,15 +216,20 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
     if (!this.#live(execution) || !steering) {
       return { kind: 'rejected', reason: 'turn-changed', message: 'Provider execution ended before steering delivery' };
     }
-    return steering.steer({
-      chatId: execution.request.chatId, projectPath: execution.request.projectPath,
-      ...prepared.session, target: prepared.target, ...input,
-      prepareDelivery: async () => {
-        if (!this.#live(execution)) throw new Error('Provider execution ended before steering delivery');
-        await input.prepareDelivery();
-        if (!this.#live(execution)) throw new Error('Provider execution ended during steering preparation');
-      },
-    });
+    try {
+      return await steering.steer({
+        chatId: execution.request.chatId, projectPath: execution.request.projectPath,
+        ...prepared.session, target: prepared.target, ...input,
+        prepareDelivery: async () => {
+          if (!this.#live(execution)) throw new SteerTurnChangedError('Provider execution ended before steering delivery');
+          await input.prepareDelivery();
+          if (!this.#live(execution)) throw new SteerTurnChangedError('Provider execution ended during steering preparation');
+        },
+      });
+    } catch (error) {
+      if (error instanceof SteerTurnChangedError) return { kind: 'rejected', reason: 'turn-changed', message: error.message };
+      throw error;
+    }
   }
 
   async submitGoalControl(operation: ProviderExecutionOperation, input: ProviderGoalControlInput, signal: AbortSignal): Promise<boolean> {
@@ -228,7 +237,7 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
     const execution = this.#require(operation);
     const { goals, delivery } = execution;
     if (!this.#live(execution) || !goals || !delivery || !execution.session) return false;
-    const request = { ...input, configuration: structuredClone(input.configuration), attachments: [...input.attachments] };
+    const request = { ...input, configuration: structuredClone(input.configuration), attachments: structuredClone(input.attachments) };
     const session = structuredClone(execution.session);
     let expectedRunId = execution.runId;
     const configuration = await this.configuration.resolve(request.configuration, signal);
@@ -249,8 +258,8 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
           validate,
           commit: () => {
             validate();
-            handoff.commit();
             execution.runId = expectedRunId = request.runId;
+            handoff.commit();
           },
         });
       },

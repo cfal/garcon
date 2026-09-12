@@ -45,6 +45,7 @@ export class OpenCodeIdleLifecycle {
       sessions: options.sessions,
       isRunning: (session) => (
         session.status === 'running'
+        || session.configurationPreparing
         || session.providerWorkRequiresQuiescence
         || session.pendingSteeringRevertMessageId !== null
       ),

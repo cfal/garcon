@@ -15,6 +15,10 @@ export interface OpenCodeOperationRoute {
   readonly requestAbortController: AbortController;
 }
 
+interface OwnedOpenCodeOperationRoute extends OpenCodeOperationRoute {
+  permissionMode: PermissionMode;
+}
+
 export type OpenCodeOperationEventSource =
   | { readonly kind: 'operation'; readonly sessionId: string }
   | { readonly kind: 'task-child'; readonly sessionId: string };
@@ -28,7 +32,7 @@ export type OpenCodeCompactionPartAdoption =
 export class OpenCodeOperationRoutes {
   readonly #byPart = new Map<string, OpenCodeOperationRoute>();
   readonly #byMessage = new Map<string, OpenCodeOperationRoute>();
-  readonly #byTurn = new Map<OpenCodeTurnContext, OpenCodeOperationRoute>();
+  readonly #byTurn = new Map<OpenCodeTurnContext, OwnedOpenCodeOperationRoute>();
   readonly #byTaskChildSession = new Map<string, OpenCodeOperationRoute>();
   readonly #latestBoundOrdinalBySession = new Map<string, number>();
   #nextRegistrationOrdinal = 1;
@@ -215,6 +219,17 @@ export class OpenCodeOperationRoutes {
 
   isRegistered(route: OpenCodeOperationRoute): boolean {
     return this.#byTurn.get(route.turn) === route;
+  }
+
+  forTurn(turn: OpenCodeTurnContext): OpenCodeOperationRoute | null {
+    return this.#byTurn.get(turn) ?? null;
+  }
+
+  updatePermissionMode(route: OpenCodeOperationRoute, mode: PermissionMode): boolean {
+    const current = this.#byTurn.get(route.turn);
+    if (current !== route) return false;
+    current.permissionMode = mode;
+    return true;
   }
 
   activateFromResponse(route: OpenCodeOperationRoute, providerMessageId: string): boolean {
