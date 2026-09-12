@@ -4,12 +4,14 @@ import type { TranscriptProducerLease } from './service.js';
 
 export class ProducerLease implements TranscriptProducerLease {
   #closed = false;
+  readonly #lifetime = new AbortController();
 
   readonly sink: AgentProducerSink;
 
   constructor(
     publish: (event: AgentProducerEvent) => void,
     private readonly onClose: () => void,
+    private readonly onRetired: () => void,
   ) {
     this.sink = Object.freeze({
       publish: (event: AgentProducerEvent) => {
@@ -23,9 +25,17 @@ export class ProducerLease implements TranscriptProducerLease {
     return this.#closed;
   }
 
+  get signal(): AbortSignal {
+    return this.#lifetime.signal;
+  }
+
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.onClose();
+    try { this.onClose(); }
+    finally {
+      try { this.#lifetime.abort(new TranscriptSinkClosedError()); }
+      finally { this.onRetired(); }
+    }
   }
 }

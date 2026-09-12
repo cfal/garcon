@@ -13,11 +13,53 @@ import { transcriptViewId } from '../contracts.ts';
 import { LedgerFencedError, PermissionNotActionableError } from '../errors.ts';
 import { TranscriptLedgerService, TranscriptSinkClosedError } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
+import { ProducerLease } from '../producer-lease.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptLedgerService', () => {
+  it('fences reentrant admission during producer retirement and rejects old publication after replacement', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const old = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'old-run');
+      const retired = mock(() => {
+        expect(old.closed).toBe(true);
+        expect(ledger.activeRunId('chat-1')).toBeNull();
+        expect(() => ledger.openProducer('chat-1', 'test')).toThrow();
+        expect(() => ledger.beginRun('chat-1', 'reentrant-run')).toThrow();
+        ledger.closeProducer('chat-1');
+      });
+      old.signal.addEventListener('abort', retired, { once: true });
+      ledger.closeProducer('chat-1');
+      expect(retired).toHaveBeenCalledOnce();
+      const next = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'next-run');
+      expect(() => old.sink.publish({ type: 'run-ended', runId: 'next-run', outcome: 'finished' }))
+        .toThrow(TranscriptSinkClosedError);
+      expect(ledger.activeRunId('chat-1')).toBe('next-run');
+      ledger.interruptRun('chat-1');
+      expect(next.signal.aborted).toBe(false);
+      next.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(TS, 'Synthetic permitted late output') }] });
+      expect(ledger.conversationMessages('chat-1').at(-1).content).toBe('Synthetic permitted late output');
+    });
+  });
+
+  it('aborts the producer lifetime and releases its creation fence even if local cleanup throws', () => {
+    const failure = new Error('Synthetic cleanup failure');
+    const retired = mock(() => {});
+    const lease = new ProducerLease(() => {}, () => { throw failure; }, retired);
+    const aborted = mock(() => { expect(lease.closed).toBe(true); });
+    lease.signal.addEventListener('abort', aborted, { once: true });
+    expect(() => lease.close()).toThrow(failure);
+    expect(lease.signal.aborted).toBe(true);
+    expect(aborted).toHaveBeenCalledOnce();
+    expect(retired).toHaveBeenCalledOnce();
+    lease.close();
+    expect(retired).toHaveBeenCalledOnce();
+  });
+
   describe('chat ID discovery requests', () => {
     it('[TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01] commits and strips the marker before starting immediate delivery', async () => {
       const requests = mock(() => undefined);

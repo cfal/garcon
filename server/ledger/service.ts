@@ -67,6 +67,7 @@ export class TranscriptSinkClosedError extends Error {
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
+  readonly signal: AbortSignal;
   close(): void;
   readonly closed: boolean;
 }
@@ -215,16 +216,18 @@ export class TranscriptLedgerService {
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
     const existing = this.#leases.get(chatId);
-    if (existing && !existing.closed) {
+    if (existing) {
       throw new TypeError(`Transcript producer sink is already open for ${chatId}`);
     }
     const lease = new ProducerLease((event) => {
       if (this.#leases.get(chatId) !== lease) throw new TranscriptSinkClosedError();
       this.#publish(chatId, view.viewId, ownerAgentId, event);
     }, () => {
-      if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
       this.#activeRuns.delete(chatId);
       this.#clearChatPermissions(chatId);
+    }, () => {
+      // Keeps producer creation fenced through synchronous retirement listeners.
+      if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
     });
     this.#leases.set(chatId, lease);
     return lease;
@@ -236,7 +239,8 @@ export class TranscriptLedgerService {
 
   beginRun(chatId: string, runId = this.#createRunId()): string {
     if (!runId) throw new TypeError('Run ID is required');
-    if (!this.#leases.has(chatId)) throw new TranscriptSinkClosedError();
+    const lease = this.#leases.get(chatId);
+    if (!lease || lease.closed) throw new TranscriptSinkClosedError();
     if (this.#activeRuns.has(chatId)) {
       throw new TypeError(`Transcript run is already active for ${chatId}`);
     }
