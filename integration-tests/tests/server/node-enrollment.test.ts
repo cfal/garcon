@@ -80,7 +80,7 @@ async function fixture(certificate: TestCertificate | null, trust: ControllerTls
       return parsed!;
     },
     async stop(retain = false): Promise<void> {
-      child.send({ id: ++sequence, command: { kind: 'stop' } } satisfies EnrollmentFixtureRequest);
+      if (child.exitCode === null) child.send({ id: ++sequence, command: { kind: 'stop' } } satisfies EnrollmentFixtureRequest);
       const timer = setTimeout(() => child.kill(), 5000);
       try { expect(await child.exited).toBe(0); await diagnostic; }
       finally { clearTimeout(timer); if (!retain) await rm(directory, { recursive: true, force: true }); }
@@ -92,6 +92,42 @@ const signal = () => AbortSignal.timeout(5000);
 const exchange = (bundle: NodeEnrollmentBundle) => ({ version: bundle.version, controllerId: bundle.controllerId, nodeId: bundle.nodeId, token: bundle.token });
 
 describe('node enrollment across HTTPS, account authorization, and private persistence', () => {
+  test.each(['issue', 'exchange'] as const)('does not publish authority revoked during the final %s persistence', async (operation) => {
+    const f = await fixture(leaf, leaf.trust);
+    try {
+      const bundle = await f.issue();
+      await f.command({ kind: 'hold-write' });
+      const pending = operation === 'issue'
+        ? f.post('/api/v1/execution-nodes/enrollment', { nodeId: f.nodeId }, f.accountToken)
+        : f.post('/api/v1/execution-nodes/enroll', exchange(bundle));
+      await f.command({ kind: 'wait-for-write' });
+      await f.command({ kind: 'disable-administration' });
+      await f.command({ kind: 'release-write' });
+      const response = await pending;
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ errorCode: 'NODE_PAIRING_UNAVAILABLE', retryable: false });
+      const stored = JSON.parse(await readFile(join(f.workspace, 'execution-node-pairing.json'), 'utf8'));
+      expect(stored.nodes).toEqual([]);
+      expect(stored.enrollments).toEqual([]);
+      await f.stop(true);
+      const restarted = await fixture(leaf, leaf.trust, { directory: f.directory });
+      try {
+        await expect(enrollExecutionNode({ ...bundle, controllerUrl: restarted.baseUrl }, signal()))
+          .rejects.toMatchObject({ code: 'NODE_ENROLLMENT_INVALID', retryable: false });
+      } finally { await restarted.stop(true); }
+    } finally { await f.stop(); }
+  });
+
+  test('a refused native connection preserves explicit same-bundle retry guidance', async () => {
+    const server = Bun.serve({ hostname: '0.0.0.0', port: 0, fetch: () => new Response() });
+    const port = server.port;
+    await server.stop(true);
+    const bundle: NodeEnrollmentBundle = { version: 1, controllerId: 'controller', nodeId: 'node',
+      controllerUrl: `https://127.0.0.1:${port}`, trust: leaf.trust,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(), token: `enroll.token.${'A'.repeat(43)}` };
+    await expect(enrollExecutionNode(bundle, signal())).rejects.toMatchObject({ code: 'NODE_PAIRING_UNAVAILABLE', retryable: true });
+  });
+
   test('pairs through self-signed or private-CA trust and persists only verifiers', async () => {
     for (const [certificate, trust] of [[leaf, leaf.trust], [issued, root.trust]] as const) {
       const f = await fixture(certificate, trust);

@@ -37,7 +37,7 @@ export async function enrollExecutionNode(
   let trust;
   try { trust = verifyControllerTlsTrust(captured.trust); }
   catch { throw new NodeEnrollmentClientError('NODE_TLS_UNTRUSTED', 'Controller certificate trust or fingerprint is invalid', { tlsReason: 'certificate-untrusted' }); }
-  if (signal.aborted) throw new NodeEnrollmentClientError('NODE_ENROLLMENT_CANCELLED', 'Node enrollment cancelled before transmission');
+  if (signal.aborted) throw cancelledBeforeTransmission();
   if (Date.now() >= Date.parse(captured.expiresAt)) {
     throw new NodeEnrollmentClientError('NODE_ENROLLMENT_EXPIRED', 'Node enrollment expired; request a new bundle');
   }
@@ -45,7 +45,8 @@ export async function enrollExecutionNode(
   const timeout = setTimeout(() => deadline.abort(new Error('Enrollment timed out')), NODE_ENROLLMENT_TIMEOUT_MS);
   const requestSignal = AbortSignal.any([signal, deadline.signal]);
   const cancelled = Promise.withResolvers<never>();
-  const abort = () => cancelled.reject(unknownEnrollment());
+  let fetchEntered = false;
+  const abort = () => cancelled.reject(fetchEntered ? unknownEnrollment() : cancelledBeforeTransmission());
   requestSignal.addEventListener('abort', abort, { once: true });
   let response: Response | undefined;
   try {
@@ -53,10 +54,17 @@ export async function enrollExecutionNode(
       version: 1, controllerId: captured.controllerId, nodeId: captured.nodeId, token: captured.token,
     };
     const pending = Promise.resolve().then(() => {
-      requestSignal.throwIfAborted();
+      if (requestSignal.aborted) throw cancelledBeforeTransmission();
+      fetchEntered = true;
       return (options.fetch ?? fetch)(`${captured.controllerUrl}/api/v1/execution-nodes/enroll`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
         tls: controllerTlsOptions(trust), redirect: 'error', signal: requestSignal,
+      }).catch((error: unknown) => {
+        if (isRecord(error) && ['ConnectionRefused', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(String(error.code))) {
+          throw new NodeEnrollmentClientError('NODE_PAIRING_UNAVAILABLE',
+            'Could not connect to the controller; try this bundle again after restoring connectivity', { retryable: true });
+        }
+        throw error;
       });
     }).then((received) => {
       if (requestSignal.aborted) {
@@ -109,4 +117,8 @@ function tlsFailureReason(error: unknown): NodeTlsFailureReason | null {
 function unknownEnrollment(): NodeEnrollmentClientError {
   return new NodeEnrollmentClientError('NODE_PAIRING_UNAVAILABLE',
     'Node enrollment outcome is unknown; revoke and reissue the bundle before retrying');
+}
+
+function cancelledBeforeTransmission(): NodeEnrollmentClientError {
+  return new NodeEnrollmentClientError('NODE_ENROLLMENT_CANCELLED', 'Node enrollment cancelled before transmission');
 }

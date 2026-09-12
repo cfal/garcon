@@ -11,9 +11,11 @@ import { createNodeEnrollmentRoutes } from '../../server/routes/execution-node-e
 import { wrapRoutes } from '../../server/lib/http-route.js';
 import { NODE_ENROLLMENT_TTL_MS } from '../../common/execution-node-config.js';
 import { parseControllerTlsTrust } from '../../common/controller-tls.js';
+import { writeJsonFileAtomic } from '../../server/lib/json-file-store.js';
 
 export type EnrollmentFixtureCommand =
   | { readonly kind: 'inspect' | 'revoke' | 'expire' | 'drop-reply' | 'stop' }
+  | { readonly kind: 'hold-write' | 'wait-for-write' | 'release-write' | 'disable-administration' }
   | { readonly kind: 'authenticate'; readonly credential: string };
 export interface EnrollmentFixtureRequest { readonly id: number; readonly command: EnrollmentFixtureCommand }
 export interface EnrollmentFixtureReply {
@@ -34,7 +36,17 @@ if (import.meta.main) {
   let now = Date.now();
   let exchanges = 0;
   let dropReply = false;
-  const pairings = new NodePairingStore(config.workspaceDir, { now: () => now });
+  let administrationEnabled = true;
+  let holdWrite = false;
+  let writeBarrier = { entered: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() };
+  const pairings = new NodePairingStore(config.workspaceDir, { now: () => now, write: async (...args) => {
+    await writeJsonFileAtomic(...args);
+    if (holdWrite) {
+      holdWrite = false;
+      writeBarrier.entered.resolve();
+      await writeBarrier.release.promise;
+    }
+  } });
   const localCapability = randomBytes(32).toString('base64url');
   const trust = parseControllerTlsTrust(JSON.parse(process.env.GARCON_ENROLLMENT_TEST_TRUST ?? 'null'));
   if (!trust) throw new Error('Missing synthetic controller trust');
@@ -57,11 +69,11 @@ if (import.meta.main) {
   });
   const enrollment = new NodeEnrollmentService({
     pairings, nodes, controller: { controllerUrl: `https://127.0.0.1:${server.port}`, trust },
-    isAdministrationEnabled: async () => !isAuthDisabled() && !await needsSetup(),
+    isAdministrationEnabled: async () => administrationEnabled && !isAuthDisabled() && !await needsSetup(),
   });
   const raw = createNodeEnrollmentRoutes({ enrollment, transport: new NodeEnrollmentTransport({ listenerUsesTls: config.tls !== null }) });
   routes = wrapRoutes(raw, { localCapability });
-  process.on('disconnect', async () => { await server.stop(true); process.exit(0); });
+  process.on('disconnect', async () => { writeBarrier.release.resolve(); await server.stop(true); process.exit(0); });
   process.on('message', async (request: EnrollmentFixtureRequest) => {
     let authenticated: boolean | null = null;
     switch (request.command.kind) {
@@ -70,7 +82,14 @@ if (import.meta.main) {
       case 'drop-reply': dropReply = true; break;
       case 'authenticate': await pairings.init(); authenticated = pairings.authenticate(request.command.credential) !== null; break;
       case 'inspect': break;
-      case 'stop': await server.stop(true); process.exit(0);
+      case 'hold-write':
+        await pairings.init();
+        writeBarrier = { entered: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() };
+        holdWrite = true; break;
+      case 'wait-for-write': await writeBarrier.entered.promise; break;
+      case 'release-write': writeBarrier.release.resolve(); break;
+      case 'disable-administration': administrationEnabled = false; break;
+      case 'stop': writeBarrier.release.resolve(); await server.stop(true); process.exit(0);
     }
     process.send?.({ type: 'reply', id: request.id, exchanges, authenticated } satisfies EnrollmentFixtureReply);
   });

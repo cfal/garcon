@@ -36,6 +36,11 @@ export interface PairedNodePrincipal {
   readonly nodeId: string;
 }
 
+export interface PairedNodeConnection {
+  readonly principal: PairedNodePrincipal;
+  validate(): void;
+}
+
 /** Owns credential authority only. Resource registrations and grants stay in the node directory. */
 export class NodePairingStore {
   readonly #filePath: string;
@@ -45,6 +50,8 @@ export class NodePairingStore {
   #snapshot: PairingState | null = null;
   #uncertain = false;
   #writing = false;
+  readonly #credentialLifetimes = new Map<string, AbortController>();
+  readonly #pendingRevocations = new Map<string, number>();
 
   constructor(workspaceDirectory: string, options: { write?: typeof writeJsonFileAtomic; now?: () => number } = {}) {
     this.#filePath = join(workspaceDirectory, 'execution-node-pairing.json');
@@ -77,6 +84,7 @@ export class NodePairingStore {
     if (!isExecutionIdentity(nodeId)) throw new TypeError('Invalid enrollment node identity');
     return this.#lock.runExclusive(this.#filePath, async () => {
       await authorize();
+      this.#requireUnrevoked(nodeId);
       const current = this.#current();
       const now = this.#time();
       const enrollments = current.enrollments.filter((entry) => entry.nodeId !== nodeId && Date.parse(entry.expiresAt) > now);
@@ -94,11 +102,11 @@ export class NodePairingStore {
       const id = randomUUID();
       const token = secret('enroll', id);
       const expiresAt = new Date(now + NODE_ENROLLMENT_TTL_MS).toISOString();
-      await this.#commit({
+      await this.#commitAuthorized(nodeId, {
         ...current,
         nodes: node ? nodes : [...nodes, { nodeId, verifier: null }],
         enrollments: [...enrollments, { id, nodeId, verifier: digest(token).toString('hex'), expiresAt }],
-      });
+      }, authorize);
       return { version: 1, controllerId: current.controllerId, nodeId, token, expiresAt };
     });
   }
@@ -108,6 +116,7 @@ export class NodePairingStore {
     if (!captured) throw invalidEnrollment();
     return this.#lock.runExclusive(this.#filePath, async () => {
       await authorize();
+      this.#requireUnrevoked(captured.nodeId);
       const current = this.#current();
       if (captured.controllerId !== current.controllerId) throw invalidEnrollment();
       const tokenId = parsePairingSecret(captured.token, 'enroll')!.id;
@@ -117,12 +126,12 @@ export class NodePairingStore {
         throw new DomainError('NODE_ENROLLMENT_EXPIRED', 'Node enrollment expired; request a new bundle', 401);
       }
       const credential = secret('node', enrollment.nodeId);
-      await this.#commit({
+      await this.#commitAuthorized(captured.nodeId, {
         ...current,
         nodes: current.nodes.map((node) => node.nodeId === enrollment.nodeId
           ? { ...node, verifier: digest(credential).toString('hex') } : node),
         enrollments: current.enrollments.filter((entry) => entry !== enrollment),
-      });
+      }, authorize);
       return { version: 1, controllerId: current.controllerId, nodeId: enrollment.nodeId, credential };
     });
   }
@@ -131,26 +140,93 @@ export class NodePairingStore {
     const current = this.#current();
     const parsed = parsePairingSecret(credential, 'node');
     if (!parsed) return null;
+    if (this.#pendingRevocations.has(parsed.id)) return null;
     const node = current.nodes.find((entry) => entry.nodeId === parsed.id);
     return node?.verifier && matches(credential, node.verifier)
       ? { controllerId: current.controllerId, nodeId: node.nodeId } : null;
   }
 
+  authenticateConnection(credential: string): PairedNodeConnection | null {
+    const principal = this.authenticate(credential);
+    if (!principal) return null;
+    const verifier = this.#current().nodes.find((entry) => entry.nodeId === principal.nodeId)!.verifier;
+    let lifetime = this.#credentialLifetimes.get(principal.nodeId);
+    if (!lifetime) {
+      lifetime = new AbortController();
+      this.#credentialLifetimes.set(principal.nodeId, lifetime);
+    }
+    const signal = lifetime.signal;
+    return Object.freeze({ principal: Object.freeze(principal), validate: () => {
+      const current = this.#committed();
+      if (signal.aborted || current.controllerId !== principal.controllerId
+        || current.nodes.find((entry) => entry.nodeId === principal.nodeId)?.verifier !== verifier) {
+        throw new DomainError('NODE_SESSION_EXPIRED', 'Node credential authority is no longer current', 401);
+      }
+    } });
+  }
+
   async revoke(nodeId: string): Promise<void> {
     if (!isExecutionIdentity(nodeId)) throw new TypeError('Invalid revoked node identity');
-    await this.#lock.runExclusive(this.#filePath, async () => {
-      const current = this.#current();
-      const node = current.nodes.find((entry) => entry.nodeId === nodeId);
-      if (!node) return;
-      await this.#commit({
-        ...current,
-        nodes: current.nodes.filter((entry) => entry !== node),
-        enrollments: current.enrollments.filter((entry) => entry.nodeId !== nodeId),
+    this.#pendingRevocations.set(nodeId, (this.#pendingRevocations.get(nodeId) ?? 0) + 1);
+    this.#retireCredential(nodeId);
+    try {
+      await this.#lock.runExclusive(this.#filePath, async () => {
+        const current = this.#current();
+        if (!current.nodes.some((entry) => entry.nodeId === nodeId)) return;
+        await this.#removePairing(nodeId);
       });
+    } finally {
+      const remaining = this.#pendingRevocations.get(nodeId)! - 1;
+      if (remaining) this.#pendingRevocations.set(nodeId, remaining);
+      else this.#pendingRevocations.delete(nodeId);
+    }
+  }
+
+  #requireUnrevoked(nodeId: string): void {
+    if (this.#pendingRevocations.has(nodeId)) throw invalidEnrollment();
+  }
+
+  #retireCredential(nodeId: string): void {
+    this.#credentialLifetimes.get(nodeId)?.abort();
+    this.#credentialLifetimes.delete(nodeId);
+  }
+
+  #removePairing(nodeId: string): Promise<void> {
+    this.#retireCredential(nodeId);
+    const current = this.#committed();
+    return this.#commit({
+      ...current,
+      nodes: current.nodes.filter((entry) => entry.nodeId !== nodeId),
+      enrollments: current.enrollments.filter((entry) => entry.nodeId !== nodeId),
     });
   }
 
+  async #commitAuthorized(nodeId: string, candidate: PairingState, authorize: () => Promise<void>): Promise<void> {
+    await this.#commit(candidate);
+    try {
+      await authorize();
+      this.#requireUnrevoked(nodeId);
+    } catch (error) {
+      try {
+        await this.#removePairing(nodeId);
+      } catch (cleanupError) {
+        this.#uncertain = true;
+        throw new DomainError('NODE_PAIRING_UNAVAILABLE',
+          'Node enrollment authorization changed and credential cleanup failed; restart before issuing a new bundle', 503, false,
+          { cause: new AggregateError([error, cleanupError], 'Node enrollment authorization and cleanup failed') });
+      }
+      throw new DomainError('NODE_PAIRING_UNAVAILABLE',
+        'Node enrollment authorization changed during persistence; issue a new bundle', 409, false, { cause: error });
+    }
+  }
+
   #current(): PairingState {
+    const current = this.#committed();
+    if (this.#writing) throw new DomainError('NODE_PAIRING_UNAVAILABLE', 'Node credential mutation is in progress', 503);
+    return current;
+  }
+
+  #committed(): PairingState {
     this.#assertCertain();
     if (!this.#snapshot) throw new Error('Node pairing is not initialized');
     return this.#snapshot;
@@ -168,7 +244,6 @@ export class NodePairingStore {
     if (this.#uncertain) {
       throw new DomainError('NODE_PAIRING_UNAVAILABLE', 'Node credential durability is unknown; restart before pairing or authenticating nodes', 503);
     }
-    if (this.#writing) throw new DomainError('NODE_PAIRING_UNAVAILABLE', 'Node credential mutation is in progress', 503);
   }
 
   async #commit(candidate: PairingState): Promise<void> {

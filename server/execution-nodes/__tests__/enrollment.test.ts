@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { NodeEnrollmentBundle, NodeEnrollmentIssueRequest } from '../../../common/execution-node-config.js';
 import { LOCAL_SERVER_PRINCIPAL, type ServerPrincipal } from '../../lib/http-route-types.js';
-import { writeJsonFileAtomic } from '../../lib/json-file-store.js';
+import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../lib/json-file-store.js';
 import { DomainError } from '../../lib/domain-error.js';
 import { NodeEnrollmentService } from '../enrollment.js';
 import { NodePairingStore } from '../pairing-store.js';
@@ -121,6 +121,42 @@ describe('node enrollment administration', () => {
 
   for (const operation of ['issue', 'enroll'] as const) {
     test.each(['remove', 'disable', ...(operation === 'issue' ? ['expire' as const] : [])] as const)(
+      `revokes the persisted candidate when %s changes during the final ${operation} write`, async (change) => {
+        const written = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        let hold = false;
+        const f = await fixture(async (...args) => {
+          await writeJsonFileAtomic(...args);
+          if (hold) { hold = false; written.resolve(); await release.promise; }
+        });
+        await f.pairings.init();
+        const issued = await f.pairings.issueEnrollment('remote-node');
+        const input = { version: issued.version, controllerId: issued.controllerId, nodeId: issued.nodeId, token: issued.token };
+        const otherIssue = await f.pairings.issueEnrollment('other-node');
+        const other = await f.pairings.enroll({ version: otherIssue.version, controllerId: otherIssue.controllerId,
+          nodeId: otherIssue.nodeId, token: otherIssue.token });
+        const now = Date.now();
+        const clock = spyOn(Date, 'now').mockReturnValue(now);
+        hold = true;
+        const pending = operation === 'issue' ? f.service.issue(issue(), account()) : f.service.enroll(input);
+        const result = pending.then(() => null, (error: unknown) => error);
+        try {
+          await written.promise;
+          if (change === 'expire') clock.mockReturnValue(now + 60_001);
+          else f[change]();
+          release.resolve();
+          expect(await result).toMatchObject({ code: 'NODE_PAIRING_UNAVAILABLE', retryable: false, status: 409,
+            cause: expect.objectContaining({ code: change === 'remove' ? 'NODE_REMOVED' : 'NODE_ADMIN_REQUIRED' }) });
+          const stored = JSON.parse(await readFile(f.file, 'utf8'));
+          expect(stored.nodes.map((node: { nodeId: string }) => node.nodeId)).toEqual(['other-node']);
+          expect(stored.enrollments).toEqual([]);
+          expect(f.pairings.authenticate(other.credential)?.nodeId).toBe('other-node');
+          await expect(f.pairings.enroll(input)).rejects.toMatchObject({ code: 'NODE_ENROLLMENT_INVALID' });
+        } finally { release.resolve(); await result; clock.mockRestore(); }
+      },
+    );
+
+    test.each(['remove', 'disable', ...(operation === 'issue' ? ['expire' as const] : [])] as const)(
       `rechecks %s after ${operation} waits for an initialized store's mutation lock`, async (change) => {
         const entered = Promise.withResolvers<void>();
         const release = Promise.withResolvers<void>();
@@ -159,6 +195,34 @@ describe('node enrollment administration', () => {
       },
     );
   }
+
+  test('retains authorization loss and failed credential cleanup with a durability fence', async () => {
+    const written = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let phase: 'normal' | 'hold' | 'cleanup' = 'normal';
+    const f = await fixture(async (...args) => {
+      if (phase === 'cleanup') throw new AtomicJsonWriteError('Synthetic cleanup failure', false);
+      await writeJsonFileAtomic(...args);
+      if (phase === 'hold') { phase = 'cleanup'; written.resolve(); await release.promise; }
+    });
+    await f.pairings.init();
+    phase = 'hold';
+    const result = f.service.issue(issue(), account()).catch((error: unknown) => error);
+    try {
+      await written.promise;
+      f.disable();
+      release.resolve();
+      const error = await result;
+      expect(error).toMatchObject({ code: 'NODE_PAIRING_UNAVAILABLE', retryable: false, status: 503 });
+      if (!(error instanceof Error) || !(error.cause instanceof AggregateError)) throw new Error('Expected authorization and cleanup errors');
+      expect(error.cause.errors).toEqual([
+        expect.objectContaining({ code: 'NODE_ADMIN_REQUIRED' }),
+        expect.objectContaining({ message: 'Synthetic cleanup failure' }),
+      ]);
+      expect(() => f.pairings.authenticate('')).toThrow('durability is unknown');
+      await expect(f.pairings.issueEnrollment('other-node')).rejects.toMatchObject({ code: 'NODE_PAIRING_UNAVAILABLE' });
+    } finally { release.resolve(); await result; }
+  });
 
   test('snapshots the requested node and account before initialization yields', async () => {
     const entered = Promise.withResolvers<void>();

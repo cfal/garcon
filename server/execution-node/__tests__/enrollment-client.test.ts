@@ -63,6 +63,32 @@ describe('single-use node enrollment client', () => {
     await expect(enrollExecutionNode(bundle(), signal(), { fetch: fetcher })).rejects.toMatchObject({ code: 'NODE_ENROLLMENT_EXPIRED' });
   });
 
+  test('types cancellation before the deferred fetch without claiming a transmitted exchange', async () => {
+    const fetcher = mock(async () => Response.json(paired()));
+    const controller = new AbortController();
+    const pending = enrollExecutionNode(bundle(), controller.signal, { fetch: fetcher });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'NODE_ENROLLMENT_CANCELLED' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  test.each(['ConnectionRefused', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'])(
+    'permits an explicit retry for %s only before a response has been received', async (code) => {
+      const error = Object.assign(new Error('Synthetic private connection detail'), { code });
+      const fetcher = mock(async () => { throw error; });
+      const refusal = await enrollExecutionNode(bundle(), signal(), { fetch: fetcher }).catch((error: unknown) => error);
+      expect(refusal).toMatchObject({ code: 'NODE_PAIRING_UNAVAILABLE', retryable: true });
+      expect(String(refusal)).toContain('try this bundle again');
+      expect(String(refusal)).not.toContain('private connection');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const response = new Response(new ReadableStream({ start(controller) { controller.error(error); } }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await expect(enrollExecutionNode(bundle(), signal(), { fetch: async () => response }))
+        .rejects.toMatchObject({ code: 'NODE_PAIRING_UNAVAILABLE', retryable: false });
+    },
+  );
+
   test('cancellation rejects an abort-ignoring fetch and cancels its late response', async () => {
     const entered = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<Response>();

@@ -18,7 +18,7 @@ export type NodeOperationResult<T, Code extends string> =
 
 export const NODE_ERROR_CODES = [
   'NODE_UNAVAILABLE', 'NODE_REPLAY_GAP', 'NODE_SESSION_EXPIRED', 'NODE_INCOMPATIBLE',
-  'NODE_TLS_UNTRUSTED', 'NODE_REMOVED', 'NODE_CAPACITY', 'NODE_OPERATION_UNKNOWN',
+  'NODE_TLS_UNTRUSTED', 'NODE_REMOVED', 'NODE_CAPACITY', 'NODE_OPERATION_UNKNOWN', 'NODE_UNAUTHORIZED',
 ] as const;
 export type NodeErrorCode = typeof NODE_ERROR_CODES[number];
 
@@ -28,9 +28,20 @@ export function isNodeErrorCode(value: unknown): value is NodeErrorCode {
 
 export function parseNodeSessionIdentity(value: unknown): NodeSessionIdentity | null {
   if (!isRecord(value) || Object.keys(value).length !== 3
+    || !['controllerBootId', 'nodeBootId', 'logicalSessionId'].every((key) => Object.hasOwn(value, key))
     || !isExecutionIdentity(value.controllerBootId) || !isExecutionIdentity(value.nodeBootId)
     || !isExecutionIdentity(value.logicalSessionId)) return null;
   return { controllerBootId: value.controllerBootId, nodeBootId: value.nodeBootId, logicalSessionId: value.logicalSessionId };
+}
+
+export function parseNodeOperationIdentity(value: unknown): NodeOperationIdentity | null {
+  if (!isRecord(value) || Object.keys(value).length !== 4
+    || !['controllerBootId', 'nodeBootId', 'logicalSessionId', 'operationId'].every((key) => Object.hasOwn(value, key))
+    || !isExecutionIdentity(value.operationId)) return null;
+  const session = parseNodeSessionIdentity({
+    controllerBootId: value.controllerBootId, nodeBootId: value.nodeBootId, logicalSessionId: value.logicalSessionId,
+  });
+  return session ? { ...session, operationId: value.operationId } : null;
 }
 
 export function sameNodeSession(a: NodeSessionIdentity, b: NodeSessionIdentity): boolean {
