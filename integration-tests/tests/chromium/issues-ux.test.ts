@@ -188,7 +188,11 @@ test("Issues toolbar stays aligned and search retains the board until results ar
       }
       await card.waitFor({ state: "hidden" });
       await page.setViewportSize({ width: 390, height: 844 });
-      const chipGeometry = await page
+      const mobileIssuesPanel = page.locator(
+        '[id="mobile-panel-singleton:issues"][aria-hidden="false"]',
+      );
+      await mobileIssuesPanel.waitFor();
+      const chipGeometry = await mobileIssuesPanel
         .locator(".issue-filter-footer")
         .evaluate((footer) => {
           const strip = footer.querySelector(".issue-filter-chip-scroll")!;
