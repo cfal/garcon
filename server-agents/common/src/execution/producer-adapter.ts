@@ -9,10 +9,11 @@ import {
   type AgentResumeRequestV5,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
-import type {
-  AgentRuntimeEvent,
-  AgentRuntimePublisher,
-  AgentRuntimeExecution,
+import {
+  AgentRuntimeAdmissionRejectedError,
+  type AgentRuntimeEvent,
+  type AgentRuntimePublisher,
+  type AgentRuntimeExecution,
 } from './runtime-events.js';
 
 interface RuntimeHandle {
@@ -25,12 +26,16 @@ interface ControlOccurrence {
   agentSessionId: string | null;
   runId: string;
   readonly publish: AgentRuntimePublisher;
+  readonly order: number;
+  phase: 'preparing' | 'admitted' | 'retired';
 }
 
 interface ProducerBinding {
   readonly output: AgentEmissionSink;
   publishedSession: AgentEstablishedSession | null;
   currentControlOccurrence: ControlOccurrence | null;
+  occurrenceOrder: number;
+  controlOrder: number;
 }
 
 export interface AgentProducerAdapter {
@@ -63,7 +68,9 @@ export function createAgentProducerAdapter(
   function bindingFor(output: AgentEmissionSink): ProducerBinding {
     const existing = bindings.get(output);
     if (existing) return existing;
-    const created: ProducerBinding = { output, publishedSession: null, currentControlOccurrence: null };
+    const created: ProducerBinding = {
+      output, publishedSession: null, currentControlOccurrence: null, occurrenceOrder: 0, controlOrder: 0,
+    };
     bindings.set(output, created);
     return created;
   }
@@ -78,10 +85,6 @@ export function createAgentProducerAdapter(
     agentSessionId: string | null,
   ): ControlOccurrence {
     const publish: AgentRuntimePublisher = (event) => {
-      if (event.type === 'session') occurrence.agentSessionId = event.session.agentSessionId;
-      if (event.type === 'run-ended' && event.runId === occurrence.runId) {
-        retireControlOccurrence(binding, occurrence);
-      }
       if (event.type === 'permission' && !validRunId(event.runId)) {
         logger.warn('Dropped an unnamed provider permission event', {
           chatId,
@@ -89,6 +92,11 @@ export function createAgentProducerAdapter(
           reason: 'missing operation run ID',
         });
         return;
+      }
+      admitControlOccurrence(binding, occurrence);
+      if (event.type === 'session') occurrence.agentSessionId = event.session.agentSessionId;
+      if (event.type === 'run-ended' && event.runId === occurrence.runId) {
+        retireControlOccurrence(binding, occurrence);
       }
       try {
         emitRuntimeEvent(binding, event);
@@ -101,9 +109,25 @@ export function createAgentProducerAdapter(
         });
       }
     };
-    const occurrence: ControlOccurrence = { chatId, runId, agentSessionId, publish };
-    binding.currentControlOccurrence = occurrence;
+    const occurrence: ControlOccurrence = {
+      chatId, runId, agentSessionId, publish, order: ++binding.occurrenceOrder, phase: 'preparing',
+    };
     return occurrence;
+  }
+
+  function runtimeRequest<T extends AgentResumeRequestV5 | Parameters<AgentExecutionV5['start']>[0]>(
+    request: T, binding: ProducerBinding, occurrence: ControlOccurrence,
+  ): Omit<T, 'output'> {
+    return {
+      ...withoutOutput(request),
+      admission: {
+        signal: request.admission.signal,
+        markStarted: () => {
+          admitControlOccurrence(binding, occurrence);
+          return request.admission.markStarted();
+        },
+      },
+    };
   }
 
   const execution: AgentExecutionV5 = {
@@ -111,7 +135,8 @@ export function createAgentProducerAdapter(
       const binding = bindingFor(request.output);
       const occurrence = occurrenceFor(binding, request.chatId, request.runId, null);
       try {
-        const session = await runtime.start(withoutOutput(request), occurrence.publish);
+        const session = await runtime.start(runtimeRequest(request, binding, occurrence), occurrence.publish);
+        admitControlOccurrence(binding, occurrence);
         occurrence.agentSessionId = session.agentSessionId;
         if (!sameSession(binding.publishedSession, session)) {
           binding.output.emit({ type: 'session', session });
@@ -119,7 +144,7 @@ export function createAgentProducerAdapter(
         }
         return handle(session.agentSessionId, occurrence.publish);
       } catch (error) {
-        retireControlOccurrence(binding, occurrence);
+        failControlOccurrence(binding, occurrence, error);
         throw error;
       }
     },
@@ -128,8 +153,9 @@ export function createAgentProducerAdapter(
       const binding = bindingFor(request.output);
       const occurrence = occurrenceFor(binding, request.chatId, request.runId, request.agentSessionId);
       try {
-        const completion = runtime.resume(withoutOutput(request), occurrence.publish);
-        void completion.catch((error) => {
+        const completion = runtime.resume(runtimeRequest(request, binding, occurrence), occurrence.publish);
+        void completion.then(() => admitControlOccurrence(binding, occurrence), (error) => {
+          failControlOccurrence(binding, occurrence, error);
           occurrence.publish({
             type: 'run-ended',
             runId: occurrence.runId,
@@ -139,7 +165,7 @@ export function createAgentProducerAdapter(
         });
         return handle(request.agentSessionId, occurrence.publish);
       } catch (error) {
-        retireControlOccurrence(binding, occurrence);
+        failControlOccurrence(binding, occurrence, error);
         throw error;
       }
     },
@@ -157,10 +183,11 @@ export function createAgentProducerAdapter(
     const binding = bindingFor(request.output);
     const occurrence = occurrenceFor(binding, request.chatId, request.runId, request.agentSessionId);
     try {
-      await operation(withoutOutput(request), occurrence.publish);
+      await operation(runtimeRequest(request, binding, occurrence), occurrence.publish);
+      admitControlOccurrence(binding, occurrence);
       return handle(request.agentSessionId, occurrence.publish);
     } catch (error) {
-      retireControlOccurrence(binding, occurrence);
+      failControlOccurrence(binding, occurrence, error);
       throw error;
     }
   };
@@ -186,9 +213,9 @@ export function createAgentProducerAdapter(
           validate,
           commit: () => {
             validate();
-            handoff.commit();
             occurrence.runId = request.runId;
             expectedRunId = request.runId;
+            handoff.commit();
           },
         });
       },
@@ -199,7 +226,26 @@ export function createAgentProducerAdapter(
 }
 
 function retireControlOccurrence(binding: ProducerBinding, occurrence: ControlOccurrence): void {
+  occurrence.phase = 'retired';
   if (binding.currentControlOccurrence === occurrence) binding.currentControlOccurrence = null;
+}
+
+function admitControlOccurrence(binding: ProducerBinding, occurrence: ControlOccurrence): void {
+  if (occurrence.phase !== 'preparing') return;
+  occurrence.phase = 'admitted';
+  if (occurrence.order <= binding.controlOrder) return;
+  binding.controlOrder = occurrence.order;
+  binding.currentControlOccurrence = occurrence;
+}
+
+function failControlOccurrence(binding: ProducerBinding, occurrence: ControlOccurrence, error: unknown): void {
+  if (!(error instanceof AgentRuntimeAdmissionRejectedError) || occurrence.phase !== 'preparing') {
+    if (occurrence.order > binding.controlOrder) {
+      binding.controlOrder = occurrence.order;
+      binding.currentControlOccurrence = null;
+    }
+  }
+  retireControlOccurrence(binding, occurrence);
 }
 
 function validRunId(value: unknown): value is string {

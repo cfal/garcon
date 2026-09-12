@@ -9,6 +9,14 @@ import type {
   AgentStartRequestV5,
 } from '@garcon/server-agent-interface';
 import { providerMetadata } from '../native-session/provider-metadata.js';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
+
+/** Refuses admission before taking native control or publishing an event for the attempted turn. */
+export class AgentRuntimeAdmissionRejectedError extends AgentIntegrationError {
+  constructor(message: string) {
+    super('SESSION_BUSY', message, true);
+  }
+}
 
 export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'output'>;
 export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'output'>;

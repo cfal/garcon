@@ -4,7 +4,7 @@ import type {
   AgentProducerEvent, AgentResumeRequestV5,
 } from '@garcon/server-agent-interface';
 import { createAgentProducerAdapter } from '../producer-adapter.js';
-import type { AgentRuntimeExecution, AgentRuntimePublisher } from '../runtime-events.js';
+import { AgentRuntimeAdmissionRejectedError, type AgentRuntimeExecution, type AgentRuntimePublisher } from '../runtime-events.js';
 
 const session: AgentEstablishedSession = {
   agentSessionId: 'native-session', nativeSession: null, nativeSeedReceipt: null,
@@ -20,8 +20,8 @@ function fixture() {
     active = publish;
   };
   const runtime = {
-    async start(_request, publish) { activate(publish); return session; },
-    async resume(_request, publish) { activate(publish); },
+    async start(request, publish) { await request.admission.markStarted(); activate(publish); return session; },
+    async resume(request, publish) { await request.admission.markStarted(); activate(publish); },
     abort: mock(async (agentSessionId: string, publish: AgentRuntimePublisher) => (
       agentSessionId === session.agentSessionId && publish === active
     )),
@@ -50,6 +50,92 @@ function fixture() {
 }
 
 describe('producer execution occurrences', () => {
+  it('preserves the admitted controls while a later attempt waits and then definitely refuses', async () => {
+    const f = fixture();
+    const handle = await f.adapter.execution.resume(f.request);
+    const refusal = Promise.withResolvers<void>();
+    f.runtime.resume = async () => refusal.promise;
+    await f.adapter.execution.resume({ ...f.request, runId: 'refused-run' });
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-2'), f.goal)).toBe(true);
+    refusal.reject(new AgentRuntimeAdmissionRejectedError('synthetic busy admission'));
+    await refusal.promise.catch(() => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.events).toContainEqual({ type: 'run-ended', runId: 'refused-run', outcome: 'failed',
+      error: { code: 'SESSION_BUSY', message: 'synthetic busy admission' },
+    });
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-3'), f.goal)).toBe(true);
+    expect(await f.adapter.execution.abort(handle)).toBe(true);
+    expect(f.publishers).toHaveLength(1);
+  });
+
+  it.each(['start', 'compact'] as const)('preserves controls after a definitely refused %s', async (kind) => {
+    const f = fixture();
+    const handle = await f.adapter.execution.resume(f.request);
+    const refuse = async () => { throw new AgentRuntimeAdmissionRejectedError('synthetic busy admission'); };
+    f.runtime.start = refuse;
+    const pending = kind === 'start'
+      ? f.adapter.execution.start({ ...f.request, runId: 'refused', carriedContext: null })
+      : f.adapter.compact({ ...f.request, runId: 'refused' }, refuse);
+    await expect(pending).rejects.toBeInstanceOf(AgentRuntimeAdmissionRejectedError);
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-2'), f.goal)).toBe(true);
+    expect(await f.adapter.execution.abort(handle)).toBe(true);
+  });
+
+  it.each(['unknown', 'marked', 'published'] as const)('never restores previous controls after %s transfer evidence', async (mode) => {
+    const f = fixture();
+    await f.adapter.execution.resume(f.request);
+    f.runtime.resume = async (request, publish) => {
+      if (mode === 'marked') await request.admission.markStarted();
+      if (mode === 'published') publish({ type: 'session', session });
+      throw mode === 'unknown'
+        ? new Error('synthetic uncertain admission')
+        : new AgentRuntimeAdmissionRejectedError('synthetic late refusal');
+    };
+    await f.adapter.execution.resume({ ...f.request, runId: 'attempted-run' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-3'), f.goal)).toBe(false);
+  });
+
+  it('does not revive a delayed older admission after its successor has ended', async () => {
+    const f = fixture();
+    const older = Promise.withResolvers<void>();
+    f.runtime.resume = async (request, publish) => {
+      if (request.runId === 'run-1') await older.promise;
+      await request.admission.markStarted();
+      publish({ type: 'session', session });
+      if (request.runId === 'run-2') publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    };
+    await f.adapter.execution.resume(f.request);
+    await f.adapter.execution.resume({ ...f.request, runId: 'run-2' });
+    older.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-3'), f.goal)).toBe(false);
+    expect(f.events.at(-1)).toEqual({ type: 'session', session });
+  });
+  it.each(['run-1', 'run-2'] as const)('attributes a terminal published inside goal commit for %s', async (terminalRunId) => {
+    const f = fixture();
+    await f.adapter.execution.resume(f.request);
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-2'), async (request, publish) => {
+      await request.beforeDelivery({ validate() {}, commit() {
+        publish({ type: 'run-ended', runId: terminalRunId, outcome: 'finished' });
+      } });
+      return true;
+    })).toBe(true);
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-3'), f.goal)).toBe(terminalRunId === 'run-1');
+  });
+
+  it('does not restore predecessor controls after a native goal transfer throws', async () => {
+    const f = fixture();
+    const handle = await f.adapter.execution.resume(f.request);
+    await expect(f.adapter.submitGoalControl(f.goalRequest('run-2'), async (request) => {
+      await request.beforeDelivery({ validate() {}, commit() { throw new Error('synthetic post-transfer failure'); } });
+      return true;
+    })).rejects.toThrow('synthetic post-transfer failure');
+    f.publishers[0]!({ type: 'run-ended', runId: 'run-1', outcome: 'finished' });
+    expect(await f.adapter.submitGoalControl(f.goalRequest('run-3'), f.goal)).toBe(true);
+    expect(await f.adapter.execution.abort(handle)).toBe(true);
+  });
+
   it('issues frozen opaque handles and rejects structural or foreign handles', async () => {
     const owner = fixture();
     const foreign = fixture();
@@ -174,7 +260,7 @@ describe('producer execution occurrences', () => {
   it('retires the goal target on asynchronous resume failure without dropping late session facts', async () => {
     const f = fixture();
     const completion = Promise.withResolvers<void>();
-    f.runtime.resume = async (_request, publish) => { f.activate(publish); return completion.promise; };
+    f.runtime.resume = async (request, publish) => { await request.admission.markStarted(); f.activate(publish); return completion.promise; };
     await f.adapter.execution.resume(f.request);
     completion.reject(new Error('synthetic launch failure'));
     await completion.promise.catch(() => {});
@@ -187,7 +273,7 @@ describe('producer execution occurrences', () => {
   it('asynchronous resume failure ends its handed-off run and retires goal control', async () => {
     const f = fixture();
     const completion = Promise.withResolvers<void>();
-    f.runtime.resume = async (_request, publish) => { f.activate(publish); return completion.promise; };
+    f.runtime.resume = async (request, publish) => { await request.admission.markStarted(); f.activate(publish); return completion.promise; };
     await f.adapter.execution.resume(f.request);
     await expect(f.adapter.submitGoalControl(f.goalRequest('run-2'), f.goal)).resolves.toBe(true);
     completion.reject(new Error('synthetic launch failure'));
