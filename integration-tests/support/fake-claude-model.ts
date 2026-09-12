@@ -355,25 +355,27 @@ export class FakeClaudeModel {
       receivedAt: Date.now(),
     };
     this.#requests.push(recorded);
-    const turn = this.#turns.shift();
-    if (!turn) {
+    const queuedTurn = this.#turns.shift();
+    if (!queuedTurn) {
       this.#issues.push(
         `Request ${recorded.id} arrived with no scripted turn (lastUserText: ${JSON.stringify(recorded.lastUserText)})`,
       );
       return sseResponse(errorEvents('no scripted turn available'));
     }
-    if (turn.kind !== 'turn') {
-      if (turn.kind === 'http-error') {
+    if (queuedTurn.kind !== 'turn') {
+      if (queuedTurn.kind === 'http-error') {
         return Response.json({
-          error: { type: 'api_error', message: turn.message },
-        }, { status: turn.status });
+          error: { type: 'api_error', message: queuedTurn.message },
+        }, { status: queuedTurn.status });
       }
-      if (turn.kind === 'stream-error') {
-        return sseResponse(errorEvents(turn.message));
+      if (queuedTurn.kind === 'stream-error') {
+        return sseResponse(errorEvents(queuedTurn.message));
       }
       return sseResponse(turnEvents([], recorded).slice(0, 1));
     }
-    const blocks = typeof turn.turn === 'function' ? await turn.turn(recorded) : turn.turn;
-    return sseResponse(turnEvents(blocks, recorded, turn.inputTokens));
+    const blocks = typeof queuedTurn.turn === 'function'
+      ? await queuedTurn.turn(recorded)
+      : queuedTurn.turn;
+    return sseResponse(turnEvents(blocks, recorded, queuedTurn.inputTokens));
   }
 }

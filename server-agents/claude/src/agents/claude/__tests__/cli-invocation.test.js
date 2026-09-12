@@ -3,8 +3,12 @@ import { buildClaudeCLIArgs, runSingleQuery } from '../cli-invocation.js';
 import { buildClaudeCLIEnvironment } from '../cli-environment.js';
 
 describe('Claude model context invocation', () => {
-  for (const sessionOptions of [{}, { streamJson: true, sessionId: 'session-context' }, { streamJson: true, resumeSessionId: 'session-context' }]) {
-    it(`translates a numeric suffix for ${JSON.stringify(sessionOptions)}`, () => {
+  for (const [scenario, sessionOptions] of [
+    ['a one-shot query', {}],
+    ['a new session', { streamJson: true, sessionId: 'session-context' }],
+    ['a resumed session', { streamJson: true, resumeSessionId: 'session-context' }],
+  ]) {
+    it(`translates a numeric suffix for ${scenario}`, () => {
       const args = buildClaudeCLIArgs({ ...sessionOptions, model: 'custom[922k]' });
       expect(args[args.indexOf('--model') + 1]).toBe('custom[1m]');
       expect(args[args.indexOf('--autocompact') + 1]).toBe('922k');
@@ -12,9 +16,15 @@ describe('Claude model context invocation', () => {
     });
   }
 
-  it('leaves native [1m] compaction behavior unchanged', () => {
-    const args = buildClaudeCLIArgs({ model: 'custom[1m]' });
-    expect(args).toContain('custom[1m]');
+  it.each(['custom', 'custom[1m]', 'custom[preview]'])('leaves compaction policy unchanged for %s', (model) => {
+    const args = buildClaudeCLIArgs({ model });
+    expect(args[args.indexOf('--model') + 1]).toBe(model);
+    expect(args).not.toContain('--autocompact');
+  });
+
+  it.each([undefined, ''])('adds no model or compaction flags when the selection is %j', (model) => {
+    const args = buildClaudeCLIArgs({ model });
+    expect(args).not.toContain('--model');
     expect(args).not.toContain('--autocompact');
   });
 
