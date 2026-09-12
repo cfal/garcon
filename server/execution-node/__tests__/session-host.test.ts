@@ -31,7 +31,7 @@ function fixture(initial: NodeSessionHostMarker | null = null) {
     return { exited: finished.promise, closeInput() { calls.push('close-input'); }, kill() { calls.push('kill-waiter'); finished.resolve(0); } };
   });
   const exited = mock<NodeSessionHostOptions['exited']>(() => {});
-  const owner = new NodeSessionHostOwner({ nodeId: 'synthetic-node', marker: store, command: ['/synthetic/bun', '--synthetic-worker'], spawn, helper, exited });
+  const owner = new NodeSessionHostOwner({ nodeId: 'synthetic-node', marker: store, helperWorkingDirectory: '/synthetic/helper-cwd', command: ['/synthetic/bun', '--synthetic-worker'], spawn, helper, exited });
   return { owner, store, helper, spawn, exited, finished, calls, marker: () => marker };
 }
 
@@ -46,7 +46,9 @@ test('launch evidence precedes spawn and full identity precedes session binding'
   f.owner.bind(host, session);
   expect(f.calls).toEqual(['read', 'record-launch', 'spawn', 'inspect', 'record-identity']);
   expect(f.marker()?.identity).toEqual(unitIdentity(host.launch.identity));
+  expect(f.helper.mock.calls[0]?.[1]).toEqual({ workingDirectory: '/synthetic/helper-cwd' });
   await f.owner.cleanup(session);
+  expect(f.helper.mock.calls.at(-1)?.[1]).toEqual({ workingDirectory: '/synthetic/helper-cwd' });
   expect(f.calls.slice(-4)).toEqual(['close-input', 'stop', 'kill-waiter', 'clear']);
   expect(f.exited).not.toHaveBeenCalled();
 });
@@ -159,7 +161,7 @@ test('an unconfirmed host retires only its inert launch and reaps a stuck waiter
   expect(f.marker()).not.toBeNull();
   retired.resolve({ kind: 'retired-inert' });
   await stopping;
-  expect(f.helper.mock.calls[0]).toEqual([{ kind: 'retire-inert', launch: host.launch.identity }]);
+  expect(f.helper.mock.calls[0]).toEqual([{ kind: 'retire-inert', launch: host.launch.identity }, { workingDirectory: '/synthetic/helper-cwd' }]);
   expect(f.calls.slice(-2)).toEqual(['kill-waiter', 'clear']);
   expect(f.marker()).toBeNull();
 });

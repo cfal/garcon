@@ -30,7 +30,7 @@ describe.skipIf(!available)('execution-node supervised coordinator', () => {
         instances: ['synthetic-first', 'synthetic-second'].map((id) => ({ id, agentId: 'direct-anthropic-compatible', label: id,
           homeDirectory: path.join(storage, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 })),
         workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY },
-      host: { nodeId, marker, command: nodeWorkerCommand('session'),
+      host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: nodeWorkerCommand('session'),
         launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
         spawn(launch) {
           const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });

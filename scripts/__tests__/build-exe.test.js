@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { compileOptionsForTarget, createVirtualMainEntrypoint } from '../build-exe.js';
 import { systemdHelperCommand } from '../../server/execution-node/systemd/helper-process.js';
@@ -48,6 +50,30 @@ describe('compiled entrypoint roles', () => {
   });
   test('private source dispatch reaches containment without controller or provider storage', async () => {
     await smokeSystemdHelper(systemdHelperCommand());
+  });
+  test.skipIf(process.platform === 'win32')('private helper smoke launches a relative executable from the invoking directory', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'garcon-relative-helper-'));
+    const marker = path.join(directory, 'launched.json');
+    try {
+      await writeFile(path.join(directory, 'helper'), `#!${process.execPath}
+const request = JSON.parse(await Bun.stdin.text());
+await Bun.write(${JSON.stringify(marker)}, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));
+console.log(JSON.stringify(request.kind === 'inspect'
+  ? { kind: 'failed', code: 'NODE_CONTAINMENT_UNAVAILABLE' } : { kind: 'stopped' }));
+`, { mode: 0o700 });
+      const child = Bun.spawn([process.execPath, path.join(import.meta.dir, '../smoke-systemd-helper.js'), './helper'], {
+        cwd: directory, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 10_000,
+      });
+      const [code, output, diagnostic] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      expect(code, diagnostic).toBe(0);
+      expect(output).toContain('Private compiled helper smoke passed');
+      const launch = JSON.parse(await readFile(marker, 'utf8'));
+      expect(launch.args).toEqual(['--internal-systemd-helper']);
+      expect(launch.cwd).not.toBe(directory);
+      expect(path.basename(launch.cwd)).toStartWith('garcon-private-helper-smoke-');
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
   test.each([null, 'synthetic', 'foreign'])('compiled provider setup runs only for the selected provider (%p)', async (agentId) => {
     const moduleUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;

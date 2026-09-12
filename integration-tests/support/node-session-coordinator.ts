@@ -14,7 +14,7 @@ const marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory, controlle
   onCompromised() { process.exit(2); } });
 const directory = await createNodeWorkerWorkingDirectory(runtimeDirectory);
 const pipes: { child: NodeWorkerProcessPort | null } = { child: null };
-const owner = new NodeSessionHostOwner({ nodeId, marker,
+const owner = new NodeSessionHostOwner({ nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory,
   command: nodeWorkerCommand('session'),
   launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
   spawn(launch) {
@@ -27,7 +27,7 @@ const host = await owner.launch();
 if (!pipes.child) throw new Error('Worker process was not captured');
 const peer = new NodeWorkerPeer(pipes.child, { role: 'session', signal: AbortSignal.timeout(15_000), validate() {}, failed() { process.exit(2); } });
 const workerPid = await peer.hello;
-const inspected = phase === 'launch-only' ? await runSystemdHelper({ kind: 'inspect', launch: host.launch.identity })
+const inspected = phase === 'launch-only' ? await runSystemdHelper({ kind: 'inspect', launch: host.launch.identity }, { workingDirectory: marker.helperWorkingDirectory })
   : { kind: 'ready' as const, identity: await owner.confirm(host) };
 if (inspected.kind !== 'ready') throw new Error('Synthetic worker has no containment identity');
 if (workerPid !== inspected.identity.mainPid) throw new Error('Worker hello does not match containment identity');

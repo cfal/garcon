@@ -28,6 +28,7 @@ describe.skipIf(!available)('execution-node coordinator crash containment', () =
     const frames = readNodeWorkerFrames(coordinator.stdout, 8192, AbortSignal.timeout(10_000));
     let marker: NodeSessionMarkerFile | null = null;
     let identity: SystemdUnitIdentity | null = null;
+    let helperWorkingDirectory: string | undefined;
     try {
       const ready = await frames.next();
       if (ready.done) throw new Error(`Synthetic coordinator exited: ${await diagnostics}`);
@@ -35,6 +36,7 @@ describe.skipIf(!available)('execution-node coordinator crash containment', () =
       if (typeof announced !== 'object' || announced === null || !('identity' in announced) || !('markerPath' in announced)
         || typeof announced.markerPath !== 'string' || !('childPids' in announced) || !Array.isArray(announced.childPids)
         || !announced.childPids.every((pid) => Number.isSafeInteger(pid) && pid > 0)) throw new Error('Invalid synthetic coordinator announcement');
+      helperWorkingDirectory = path.join(path.dirname(announced.markerPath), 'helper-cwd');
       identity = parseSystemdIdentity(announced.identity);
       if (!identity) throw new Error('Invalid synthetic containment identity');
       const before = parseNodeSessionHostMarker(JSON.parse(await readFile(announced.markerPath, 'utf8')));
@@ -56,7 +58,7 @@ describe.skipIf(!available)('execution-node coordinator crash containment', () =
       marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory, controllerId: 'synthetic-controller', nodeId, onCompromised() {} });
       const directory = await createNodeWorkerWorkingDirectory(runtimeDirectory);
       const outputs: { stream: ReadableStream<Uint8Array> | null } = { stream: null };
-      const owner = new NodeSessionHostOwner({ nodeId, marker,
+      const owner = new NodeSessionHostOwner({ nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory,
         command: nodeWorkerCommand('session'),
         launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
         spawn(launch) {
@@ -88,7 +90,7 @@ describe.skipIf(!available)('execution-node coordinator crash containment', () =
       coordinator.kill();
       await coordinator.exited;
       await frames.return(undefined);
-      if (identity) await runSystemdHelper({ kind: 'stop', identity }).catch(() => {});
+      if (identity) await runSystemdHelper({ kind: 'stop', identity }, { workingDirectory: helperWorkingDirectory }).catch(() => {});
       await marker?.release();
       await rm(runtimeDirectory, { recursive: true, force: true });
     }

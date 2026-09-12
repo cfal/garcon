@@ -22,7 +22,7 @@ describe.skipIf(!available)('execution-node private worker composition', () => {
     const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-boot', logicalSessionId: 'synthetic-session' };
     const marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory: storage, controllerId: 'synthetic-controller', nodeId, onCompromised() {} });
     const processPort: { child: Subprocess<'pipe', 'pipe', 'ignore'> | null } = { child: null };
-    const owner = new NodeSessionHostOwner({ nodeId, marker, command: nodeWorkerCommand('session'),
+    const owner = new NodeSessionHostOwner({ nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: nodeWorkerCommand('session'),
       launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
       spawn(launch) {
         const child = processPort.child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });

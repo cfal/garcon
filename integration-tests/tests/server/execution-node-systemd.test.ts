@@ -1,16 +1,21 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { systemdExecutionLaunch } from '../../../server/execution-node/systemd/launch.js';
-import { runSystemdHelper } from '../../../server/execution-node/systemd/helper-process.js';
-import type { SystemdUnitIdentity } from '../../../server/execution-node/systemd/contracts.js';
+import { runSystemdHelper as runHelper } from '../../../server/execution-node/systemd/helper-process.js';
+import type { SystemdHelperRequest, SystemdUnitIdentity } from '../../../server/execution-node/systemd/contracts.js';
 
 const available = process.platform === 'linux' && spawnSync('systemctl', ['--user', 'is-system-running'], {
   stdio: 'ignore', timeout: 2_000,
 }).status === 0;
 const processFixture = `${import.meta.dir}/../../support/systemd-owned-process.ts`;
+
+let helperWorkingDirectory: string;
+function runSystemdHelper(request: SystemdHelperRequest) { return runHelper(request, { workingDirectory: helperWorkingDirectory }); }
 
 async function start(nodeId: string) {
   const launch = systemdExecutionLaunch(nodeId, process.execPath, [processFixture]);
@@ -57,6 +62,8 @@ async function start(nodeId: string) {
 }
 
 describe.skipIf(!available)('execution-node systemd containment (requires Linux user manager)', () => {
+  beforeEach(async () => { helperWorkingDirectory = await mkdtemp(path.join(homedir(), 'garcon-systemd-cwd-')); });
+  afterEach(async () => { await rm(helperWorkingDirectory, { recursive: true, force: true }); });
   test('a never-created inert launch retires without confusing absence with a failed bus', async () => {
     const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath, [processFixture, 'inert']);
     expect(await runSystemdHelper({ kind: 'retire-inert', launch: launch.identity })).toEqual({ kind: 'retired-inert' });

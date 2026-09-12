@@ -24,7 +24,7 @@ function fixture(request = { kind: 'inspect', launch }) {
   };
   return { options,
     send(content) { output.enqueue(new TextEncoder().encode(content)); },
-    close() { output.close(); }, exit: (code = 0) => exit.resolve(code), expire: () => expire(),
+    close() { output.close(); }, exit: (code = 0) => exit.resolve(code), rejectExit: (error) => exit.reject(error), expire: () => expire(),
     killed: () => killed, cancelled: () => cancelled,
   };
 }
@@ -79,6 +79,40 @@ describe('systemd helper process boundary', () => {
     f.close();
     f.exit(137);
     expect(await result).toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+  });
+
+  test.each([false, true])('rejected exit observation retains the cleanup fence when kill throws: %s', async (killThrows) => {
+    const f = fixture();
+    const spawn = f.options.spawn;
+    f.options.spawn = (request) => {
+      const child = spawn(request);
+      return { ...child, kill() { child.kill(); if (killThrows) throw new Error('synthetic private kill error'); } };
+    };
+    let settled = false;
+    void runSystemdHelper({ kind: 'inspect', launch }, f.options).then(() => { settled = true; }, () => { settled = true; });
+    f.send(JSON.stringify({ kind: 'ready', identity })); f.close();
+    f.rejectExit(new Error('synthetic private exit error'));
+    await new Promise(setImmediate);
+    expect(f.killed()).toBe(1);
+    expect(settled).toBe(false);
+    f.expire();
+    await new Promise(setImmediate);
+    expect(settled).toBe(false);
+    expect(f.cancelled()).toBe(0);
+  });
+
+  test('a throwing kill cannot escape the typed timeout after subsequent confirmed exit', async () => {
+    const f = fixture();
+    const spawn = f.options.spawn;
+    f.options.spawn = (request) => ({ ...spawn(request), kill() { throw new Error('synthetic private kill error'); } });
+    let settled = false;
+    const result = runSystemdHelper({ kind: 'inspect', launch }, f.options).catch((error) => { settled = true; return error; });
+    f.expire();
+    await new Promise(setImmediate);
+    expect(settled).toBe(false);
+    f.close(); f.exit(137);
+    expect(await result).toMatchObject({ code: 'NODE_CLEANUP_TIMEOUT' });
+    expect(f.cancelled()).toBe(1);
   });
 
   test.each([

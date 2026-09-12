@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { statfsSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { runSystemdHelper } from '../server/execution-node/systemd/helper-process.js';
 import { isControlGroup, SYSTEMD_HELPER_FLAG } from '../server/execution-node/systemd/contracts.js';
 
@@ -19,7 +19,7 @@ export async function smokeSystemdHelper(command, { probeManager = probeUserMana
       await runSystemdHelper({ kind: 'inspect', launch: {
         unitName: `garcon-exec-${'a'.repeat(64)}.service`, launchId: 'b'.repeat(32),
       } }, {
-        spawn: helperSpawner(command, {
+        spawn: helperSpawner(command, directory, {
           ...environment, DBUS_SESSION_BUS_ADDRESS: `unix:path=${join(directory, 'absent-bus')}`,
         }),
       });
@@ -31,7 +31,7 @@ export async function smokeSystemdHelper(command, { probeManager = probeUserMana
       await runSystemdHelper({ kind: 'stop', identity: {
         unitName, launchId: randomBytes(16).toString('hex'), invocationId: randomBytes(16).toString('hex'),
         controlGroup: `${managerControlGroup}/${unitName}`, mainPid: process.pid,
-      } }, { spawn: helperSpawner(command, {
+      } }, { spawn: helperSpawner(command, directory, {
         ...environment, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
         DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
       }) });
@@ -45,10 +45,11 @@ export async function smokeSystemdHelper(command, { probeManager = probeUserMana
   }
 }
 
-function helperSpawner(command, environment) {
+function helperSpawner(command, directory, environment) {
   return (request) => {
     const child = Bun.spawn(command, {
-      stdin: new TextEncoder().encode(request), stdout: 'pipe', stderr: 'ignore', env: environment,
+      stdin: new TextEncoder().encode(request), stdout: 'pipe', stderr: 'ignore', cwd: directory,
+      env: { ...environment, BUN_OPTIONS: '--config=/dev/null' },
     });
     return { output: child.stdout, exited: child.exited, kill: () => child.kill('SIGKILL') };
   };
@@ -69,6 +70,6 @@ function probeUserManager() {
 if (import.meta.main) {
   const executable = process.argv[2];
   if (!executable) throw new Error('Expected the compiled Garcon executable path');
-  await smokeSystemdHelper([executable, SYSTEMD_HELPER_FLAG]);
+  await smokeSystemdHelper([resolve(executable), SYSTEMD_HELPER_FLAG]);
   console.log('Private compiled helper smoke passed');
 }

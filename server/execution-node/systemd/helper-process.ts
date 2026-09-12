@@ -1,5 +1,6 @@
 import { readTextStreamWithLimit } from '../../lib/bounded-text-stream.js';
 import { serverSelfCommand } from '../../lib/self-command.js';
+import { validateSystemdHelperWorkingDirectory } from './helper-cwd.js';
 import {
   parseSystemdHelperReply, parseSystemdHelperRequest, SYSTEMD_HELPER_FLAG, SYSTEMD_HELPER_MAX_BYTES,
   SYSTEMD_HELPER_TIMEOUT_MS, SystemdContainmentError, type SystemdHelperReply, type SystemdHelperRequest,
@@ -12,6 +13,7 @@ export interface SystemdHelperProcess {
 }
 
 export interface SystemdHelperOptions {
+  readonly workingDirectory?: string;
   readonly spawn?: (request: string) => SystemdHelperProcess;
   readonly scheduleTimeout?: (callback: () => void, delay: number) => { cancel(): void };
 }
@@ -30,19 +32,21 @@ export async function runSystemdHelper(
   if (Buffer.byteLength(serialized) > SYSTEMD_HELPER_MAX_BYTES) throw invalid();
   let child: SystemdHelperProcess;
   try {
-    child = (options.spawn ?? spawnHelper)(serialized);
+    child = options.spawn ? options.spawn(serialized) : spawnHelper(serialized, options.workingDirectory);
   } catch {
     throw new SystemdContainmentError('NODE_CONTAINMENT_UNAVAILABLE');
   }
   let exited = false;
-  const reaped = child.exited.then((code) => { exited = true; return code; });
+  const exitProof = Promise.withResolvers<number>();
+  const observedExit = child.exited.then((code) => { exited = true; exitProof.resolve(code); return code; },
+    () => { throw new SystemdContainmentError('NODE_CLEANUP_FAILED'); });
   const deadline = Promise.withResolvers<never>();
   const timer = (options.scheduleTimeout ?? scheduleTimeout)(() => {
     deadline.reject(new SystemdContainmentError('NODE_CLEANUP_TIMEOUT'));
   }, SYSTEMD_HELPER_TIMEOUT_MS);
   try {
     const [output, code] = await Promise.race([
-      Promise.all([readTextStreamWithLimit(child.output, SYSTEMD_HELPER_MAX_BYTES, invalid), reaped]),
+      Promise.all([readTextStreamWithLimit(child.output, SYSTEMD_HELPER_MAX_BYTES, invalid), observedExit]),
       deadline.promise,
     ]);
     if (code !== 0) throw new SystemdContainmentError('NODE_CLEANUP_FAILED');
@@ -56,7 +60,8 @@ export async function runSystemdHelper(
     return reply;
   } catch (error) {
     if (!exited) {
-      try { child.kill(); } finally { await reaped; }
+      try { child.kill(); } catch { /* A failed termination request cannot establish exit. */ }
+      await exitProof.promise;
     }
     throw error instanceof SystemdContainmentError ? error : invalid();
   } finally {
@@ -65,13 +70,20 @@ export async function runSystemdHelper(
 }
 
 export function systemdHelperCommand(): string[] {
-  return serverSelfCommand([SYSTEMD_HELPER_FLAG]);
+  const command = serverSelfCommand([SYSTEMD_HELPER_FLAG]);
+  return Reflect.get(globalThis, Symbol.for('garcon.compiled-mode')) === true
+    ? command : [command[0], '--no-env-file', '--config=/dev/null', ...command.slice(1)];
 }
 
-function spawnHelper(serialized: string): SystemdHelperProcess {
+export const SYSTEMD_HELPER_BUN_OPTIONS = '--config=/dev/null';
+
+function spawnHelper(serialized: string, directory: string | undefined): SystemdHelperProcess {
+  validateSystemdHelperWorkingDirectory(directory);
   const child = Bun.spawn(systemdHelperCommand(), {
+    cwd: directory,
     stdin: new TextEncoder().encode(serialized), stdout: 'pipe', stderr: 'ignore',
-    env: { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS },
+    env: { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+      BUN_OPTIONS: SYSTEMD_HELPER_BUN_OPTIONS },
   });
   return { output: child.stdout, exited: child.exited, kill: () => child.kill('SIGKILL') };
 }

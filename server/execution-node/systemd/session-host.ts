@@ -20,6 +20,7 @@ export interface NodeSessionHost {
 export interface NodeSessionHostOptions {
   readonly nodeId: string;
   readonly marker: NodeSessionMarkerStore;
+  readonly helperWorkingDirectory?: string;
   readonly command: readonly [string, ...string[]];
   readonly launchOptions?: SystemdExecutionLaunchOptions;
   readonly helper?: typeof runSystemdHelper;
@@ -134,18 +135,18 @@ export class NodeSessionHostOwner {
   }
 
   async #inspect(launch: SystemdExecutionLaunch['identity']): Promise<SystemdUnitIdentity> {
-    const reply = await (this.options.helper ?? runSystemdHelper)({ kind: 'inspect', launch });
+    const reply = await (this.options.helper ?? runSystemdHelper)({ kind: 'inspect', launch }, { workingDirectory: this.options.helperWorkingDirectory });
     if (reply.kind !== 'ready' || reply.identity.unitName !== launch.unitName || reply.identity.launchId !== launch.launchId) throw unavailable();
     return reply.identity;
   }
 
   async #stopIdentity(identity: SystemdUnitIdentity): Promise<void> {
-    const reply = await (this.options.helper ?? runSystemdHelper)({ kind: 'stop', identity });
+    const reply = await (this.options.helper ?? runSystemdHelper)({ kind: 'stop', identity }, { workingDirectory: this.options.helperWorkingDirectory });
     if (reply.kind !== 'stopped') throw unavailable();
   }
 
   async #retireInert(launch: SystemdExecutionLaunch['identity']): Promise<void> {
-    const reply = await (this.options.helper ?? runSystemdHelper)({ kind: 'retire-inert', launch });
+    const reply = await (this.options.helper ?? runSystemdHelper)({ kind: 'retire-inert', launch }, { workingDirectory: this.options.helperWorkingDirectory });
     if (reply.kind !== 'retired-inert') throw unavailable();
   }
 

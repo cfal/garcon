@@ -9,6 +9,8 @@ export async function runSystemdHelperMain(): Promise<void> {
   let reply: SystemdHelperReply;
   try {
     if (process.argv.length !== 3 || process.argv[2] !== SYSTEMD_HELPER_FLAG) throw invalid();
+    const { armSystemdHelperDeadline } = await import('./helper-deadline.js');
+    await armSystemdHelperDeadline();
     const input = await readTextStreamWithLimit(Bun.stdin.stream(), SYSTEMD_HELPER_MAX_BYTES, invalid);
     const request = parseSystemdHelperRequest(JSON.parse(input));
     if (!request) throw invalid();

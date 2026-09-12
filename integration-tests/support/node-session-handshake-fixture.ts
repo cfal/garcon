@@ -99,7 +99,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       instances: [{ id: 'synthetic-instance', agentId: options.instance?.agentId ?? 'direct-anthropic-compatible', label: 'Synthetic', homeDirectory: path.join(storage, 'native'),
         environment: options.instance?.environment ?? {}, workspaceIds: ['synthetic-workspace'], maxOperations: options.maxOperations ?? 1 }],
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] },
-    host: { nodeId, marker, command: nodeWorkerCommand('session'),
+    host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: nodeWorkerCommand('session'),
       launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
       spawn(launch) {
         const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });

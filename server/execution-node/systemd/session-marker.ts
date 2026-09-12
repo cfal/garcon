@@ -6,6 +6,7 @@ import lockfile from 'proper-lockfile';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseSystemdHelperRequest, parseSystemdIdentity, SystemdContainmentError, type SystemdLaunchIdentity, type SystemdUnitIdentity } from './contracts.js';
 import { systemdExecutionUnitName } from './launch.js';
+import { validateSystemdHelperWorkingDirectory } from './helper-cwd.js';
 
 const MAX_MARKER_BYTES = 16_384;
 
@@ -46,6 +47,7 @@ export function parseNodeSessionHostMarker(value: unknown): NodeSessionHostMarke
 /** Stores cleanup evidence under an exclusive node namespace; it never restores execution authority. */
 export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
   readonly filePath: string;
+  readonly helperWorkingDirectory: string;
   readonly #directory: string;
   #compromised = false;
   #released = false;
@@ -55,6 +57,7 @@ export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
   private constructor(private readonly options: NodeSessionMarkerOptions, directory: string, private readonly releaseLock: () => Promise<void>) {
     this.#directory = directory;
     this.filePath = path.join(directory, 'session-host.json');
+    this.helperWorkingDirectory = path.join(directory, 'helper-cwd');
   }
 
   static async acquire(options: NodeSessionMarkerOptions): Promise<NodeSessionMarkerFile> {
@@ -78,9 +81,17 @@ export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
         options.onCompromised();
       },
     });
-    owner = new NodeSessionMarkerFile(options, directory, release);
-    owner.#compromised = compromised;
-    return owner;
+    try {
+      const helperDirectory = path.join(directory, 'helper-cwd');
+      await mkdir(helperDirectory, { mode: 0o700 }).catch(alreadyExists);
+      validateSystemdHelperWorkingDirectory(helperDirectory);
+      if (compromised) throw invalid();
+      owner = new NodeSessionMarkerFile(options, directory, release);
+      return owner;
+    } catch (error) {
+      await release();
+      throw error;
+    }
   }
 
   read(): Promise<NodeSessionHostMarker | null> { return this.#serialize(() => this.#read()); }

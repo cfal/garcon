@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmod, link, lstat, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { NodeSessionMarkerFile, parseNodeSessionHostMarker } from '../systemd/session-marker.js';
@@ -135,4 +135,46 @@ test('marker parsing requires exact own fields and one matching full incarnation
     { ...marker, launch: Object.assign(Object.create({ unitName: launch.unitName }), { launchId: launch.launchId, foreign: true }) }]) {
     expect(parseNodeSessionHostMarker(value)).toBeNull();
   }
+});
+
+test('one empty private helper cwd survives evidence cleanup and namespace reopening', async () => {
+  const f = await fixture();
+  const directory = f.file.helperWorkingDirectory;
+  const before = await lstat(directory);
+  expect(path.dirname(directory)).toBe(path.dirname(f.file.filePath));
+  expect(before.mode & 0o777).toBe(0o700);
+  expect(await readdir(directory)).toEqual([]);
+  await f.file.recordLaunch(launch);
+  await f.file.clear(launch);
+  await f.file.release();
+  const reopened = await NodeSessionMarkerFile.acquire(f.options);
+  disposals.push(() => reopened.release());
+  expect(reopened.helperWorkingDirectory).toBe(directory);
+  expect((await lstat(directory)).ino).toBe(before.ino);
+  expect((await readdir(path.dirname(directory))).sort()).toEqual(['.coordinator.lock', 'helper-cwd']);
+});
+
+test.each(['contents', 'symlink', 'permissions'])('unsafe helper cwd %s is preserved and its newly acquired lock is released', async (kind) => {
+  const f = await fixture();
+  const directory = f.file.helperWorkingDirectory;
+  await f.file.release();
+  const foreign = path.join(f.directory, 'foreign');
+  if (kind === 'contents') await writeFile(path.join(directory, '.env'), 'SYNTHETIC=retained');
+  else if (kind === 'permissions') await chmod(directory, 0o755);
+  else { await mkdir(foreign, { mode: 0o700 }); await rm(directory, { recursive: true }); await symlink(foreign, directory); }
+  await expect(NodeSessionMarkerFile.acquire(f.options)).rejects.toThrow();
+  expect(await readdir(path.dirname(directory))).toEqual(['helper-cwd']);
+  if (kind === 'contents') {
+    expect(await readFile(path.join(directory, '.env'), 'utf8')).toBe('SYNTHETIC=retained');
+    await unlink(path.join(directory, '.env'));
+  } else if (kind === 'permissions') {
+    expect((await lstat(directory)).mode & 0o777).toBe(0o755);
+    await chmod(directory, 0o700);
+  } else {
+    expect((await lstat(directory)).isSymbolicLink()).toBe(true);
+    await unlink(directory); await mkdir(directory, { mode: 0o700 });
+  }
+  const repaired = await NodeSessionMarkerFile.acquire(f.options);
+  disposals.push(() => repaired.release());
+  expect(await repaired.read()).toBeNull();
 });
