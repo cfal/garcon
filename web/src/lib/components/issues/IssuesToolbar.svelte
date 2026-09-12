@@ -32,6 +32,15 @@
 	let filterError = $state(false);
 	let filtersOpen = $state(false);
 	const filtersId = $props.id();
+	const saveFeedback = $derived(controller.saveFeedback);
+	const searchBusy = $derived(controller.loading || saveFeedback === 'saving');
+	const assigneeLabel = $derived.by(() => {
+		const assignee = controller.query.assignee;
+		if (!assignee) return null;
+		if (assignee === 'unassigned') return m.issues_unassigned();
+		if (assignee.kind === 'chat') return assignee.chatId;
+		return assignee.username;
+	});
 	function apply(event: SubmitEvent) {
 		event.preventDefault();
 		const data = new FormData(event.currentTarget as HTMLFormElement);
@@ -101,15 +110,12 @@
 				class="issue-button issue-icon-button"
 				type="submit"
 				data-issue-search-button
-				aria-busy={controller.loading || controller.saveFeedback === 'saving'}
+				aria-busy={searchBusy}
 				aria-label={m.issues_filter_apply()}
 				title={m.issues_filter_apply()}
 			>
-				{#if controller.loading || controller.saveFeedback === 'saving'}<LoaderCircle
-						size={16}
-						class="animate-spin"
-					/>
-				{:else if controller.saveFeedback === 'saved'}<Check size={16} />
+				{#if searchBusy}<LoaderCircle size={16} class="animate-spin" />
+				{:else if saveFeedback === 'saved'}<Check size={16} />
 				{:else}<Search size={16} />{/if}
 			</button>
 			<IssueViewSettings {controller} />
@@ -138,13 +144,7 @@
 								>{issuePriorityLabel(controller.query.priority)}</span
 							>{/if}
 						{#if controller.query.label}<span>{controller.query.label}</span>{/if}
-						{#if controller.query.assignee}<span
-								>{controller.query.assignee === 'unassigned'
-									? m.issues_unassigned()
-									: controller.query.assignee.kind === 'chat'
-										? controller.query.assignee.chatId
-										: controller.query.assignee.username}</span
-							>{/if}
+						{#if controller.query.assignee}<span>{assigneeLabel}</span>{/if}
 						{#if controller.query.ready}<span>{m.issues_ready()}</span>{/if}
 						{#if controller.query.includeClosed}<span>{m.issues_include_closed()}</span>{/if}
 						<button
@@ -158,8 +158,8 @@
 					</div>{/if}
 			</div>
 			<span class="issue-save-feedback issue-muted" role="status">
-				{#if controller.saveFeedback === 'saving'}{m.issues_saving()}
-				{:else if controller.saveFeedback === 'saved'}{m.issues_saved()}{/if}
+				{#if saveFeedback === 'saving'}{m.issues_saving()}
+				{:else if saveFeedback === 'saved'}{m.issues_saved()}{/if}
 			</span>
 		</div>
 		<div id={filtersId} class="issue-filter-options" hidden={!filtersOpen}>

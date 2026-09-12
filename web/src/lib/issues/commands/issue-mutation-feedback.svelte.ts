@@ -110,30 +110,29 @@ export class IssueMutationFeedback {
 			if (included(original)) counts[original.status] = Math.max(0, counts[original.status] - 1);
 			if (included(projected)) counts[projected.status]++;
 		}
-		const windows = Object.fromEntries(
-			keys.map((key) => {
-				const window = collection.windows[key]!;
-				let items = window.items
-					.map(
-						(issue) => changes.find(({ original }) => original.id === issue.id)?.projected ?? issue,
+		const windows: IssueCollection['windows'] = {};
+		for (const key of keys) {
+			const window = collection.windows[key]!;
+			let items = window.items
+				.map(
+					(issue) => changes.find(({ original }) => original.id === issue.id)?.projected ?? issue,
+				)
+				.filter((issue) => (key === 'list' ? included(issue) : issue.status === key));
+			if (key !== 'list' && window.pageIndex === 0) {
+				const incoming = changes
+					.filter(
+						({ original, projected }) =>
+							original.status !== projected.status && projected.status === key,
 					)
-					.filter((issue) => (key === 'list' ? included(issue) : issue.status === key));
-				if (key !== 'list' && window.pageIndex === 0) {
-					const incoming = changes
-						.filter(
-							({ original, projected }) =>
-								original.status !== projected.status && projected.status === key,
-						)
-						.map(({ projected }) => projected)
-						.filter((issue) => !items.some((item) => item.id === issue.id));
-					if (incoming.length)
-						items = [...items, ...incoming]
-							.sort((a, b) => b.number - a.number)
-							.slice(0, issueWindowLimit(key));
-				}
-				return [key, { ...window, items }];
-			}),
-		);
+					.map(({ projected }) => projected)
+					.filter((issue) => !items.some((item) => item.id === issue.id));
+				if (incoming.length)
+					items = [...items, ...incoming]
+						.sort((a, b) => b.number - a.number)
+						.slice(0, issueWindowLimit(key));
+			}
+			windows[key] = { ...window, items };
+		}
 		return { counts: { ...collection.counts, counts }, windows };
 	}
 }

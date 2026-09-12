@@ -143,6 +143,23 @@ describe('Issues stable, immediate interactions', () => {
 		await controller.refresh();
 	});
 
+	it('updates assignee filter chips without substituting display names', async () => {
+		const { controller, view } = await mount();
+		const assignees = [
+			['unassigned', 'Unassigned'],
+			[{ kind: 'chat', chatId: '1000000000000001' }, '1000000000000001'],
+			[{ kind: 'user', username: 'synthetic-user' }, 'synthetic-user'],
+		] as const;
+		for (const [assignee, label] of assignees) {
+			controller.setQuery({ assignee });
+			await tick();
+			expect(view.container.querySelector('.issue-filter-chips span')?.textContent).toBe(label);
+		}
+		controller.setQuery({});
+		await tick();
+		expect(view.container.querySelector('.issue-filter-chips')).toBeNull();
+	});
+
 	it('removes create-another and explains free-form project labels', async () => {
 		await mount(false, ['/synthetic/project']);
 		await fireEvent.click(screen.getByRole('button', { name: 'New issue' }));

@@ -21,11 +21,14 @@
 	const collection = $derived(controller.displayedCollection);
 	function items(key: IssueWindowKey) {
 		const entries = collection?.windows[key]?.items ?? [];
-		return pinned?.key === key &&
-			!controller.mutations.busy(pinned.issue.id) &&
-			!entries.some((issue) => issue.id === pinned!.issue.id)
-			? [pinned.issue, ...entries.slice(0, issueWindowLimit(key) - 1)]
-			: entries;
+		if (!pinned || pinned.key !== key) return entries;
+		const pinnedIssue = pinned.issue;
+		if (
+			controller.mutations.busy(pinnedIssue.id) ||
+			entries.some((issue) => issue.id === pinnedIssue.id)
+		)
+			return entries;
+		return [pinnedIssue, ...entries.slice(0, issueWindowLimit(key) - 1)];
 	}
 </script>
 
