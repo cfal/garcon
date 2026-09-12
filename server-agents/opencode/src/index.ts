@@ -55,6 +55,7 @@ const OPENCODE_DESCRIPTOR = {
 } as const;
 
 export default class OpenCodeAgentIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = 'opencode';
   static readonly apiVersion = 5 as const;
   readonly descriptor = OPENCODE_DESCRIPTOR;

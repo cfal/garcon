@@ -46,6 +46,7 @@ const FACTORY_DESCRIPTOR = {
 } as const;
 
 export default class FactoryAgentIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = 'factory';
   static readonly apiVersion = 5 as const;
   readonly descriptor = FACTORY_DESCRIPTOR;

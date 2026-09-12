@@ -55,6 +55,7 @@ const PI_DESCRIPTOR = {
 } as const;
 
 export default class PiAgentIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = 'pi';
   static readonly apiVersion = 5 as const;
   readonly descriptor = PI_DESCRIPTOR;

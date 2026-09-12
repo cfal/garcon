@@ -80,14 +80,15 @@ export class AgentSessionSettingsService {
         ? integration.settings.applyPatch(currentSettings, patch.agentSettingsPatch)
         : currentSettings;
 
+      const configuration = {
+        model: next.model,
+        permissionMode,
+        thinkingMode,
+        settings,
+        endpoint,
+      };
+      await integration.configurationValidation?.validate(configuration);
       if (entry.agentSessionId && integration.sessionConfiguration) {
-        const configuration = {
-          model: next.model,
-          permissionMode,
-          thinkingMode,
-          settings,
-          endpoint,
-        };
         await integration.sessionConfiguration.apply(
           entry.agentSessionId,
           configuration,

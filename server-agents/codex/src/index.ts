@@ -65,6 +65,7 @@ const CODEX_DESCRIPTOR = {
 } as const;
 
 export default class CodexAgentIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = 'codex';
   static readonly apiVersion = 5 as const;
   readonly descriptor = CODEX_DESCRIPTOR;

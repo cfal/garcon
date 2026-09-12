@@ -32,6 +32,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     nativeHistoryImport: null,
     nativeActivity: null,
     nativeSessions: null,
+    configurationValidation: null,
     sessionConfiguration: null,
     projectPathUpdates: null,
     catalog: {

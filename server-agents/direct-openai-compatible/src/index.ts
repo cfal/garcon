@@ -39,6 +39,7 @@ const DESCRIPTOR = {
 } as const;
 
 export default class DirectOpenAiCompatibleIntegration implements AgentIntegration {
+  readonly configurationValidation = null;
   static readonly integrationId = DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;

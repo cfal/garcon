@@ -30,6 +30,7 @@ const integration = {
   nativeHistoryImport: null,
   nativeActivity: null,
   nativeSessions: null,
+  configurationValidation: null,
   sessionConfiguration: null,
   projectPathUpdates: null,
   catalog: {
@@ -118,6 +119,7 @@ describe('validateAgentIntegration', () => {
       'nativeHistoryImport',
       'nativeActivity',
       'nativeSessions',
+      'configurationValidation',
       'sessionConfiguration',
       'projectPathUpdates',
     ] as const;
@@ -155,6 +157,7 @@ describe('validateAgentIntegration', () => {
       ['nativeHistoryImport', {}],
       ['nativeActivity', {}],
       ['nativeSessions', { resolveNativeSession: async () => null }],
+      ['configurationValidation', {}],
       ['sessionConfiguration', {}],
       ['projectPathUpdates', {}],
     ] as const;
