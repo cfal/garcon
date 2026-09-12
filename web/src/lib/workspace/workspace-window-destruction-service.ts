@@ -192,10 +192,30 @@ export class WorkspaceWindowDestructionService {
 		if (surface.type === 'singleton' && surface.kind === 'commit') {
 			return !(this.deps.singletons.commitIfPresent()?.canClose ?? true);
 		}
+		if (surface.type === 'singleton' && surface.kind === 'issues')
+			return this.deps.singletons.issuesIfPresent()?.drafts.pending ?? false;
 		return false;
 	}
 
 	async #confirmDestruction(descriptors: readonly SurfaceDescriptor[]): Promise<boolean> {
+		const issueSurface = descriptors.find(
+			(surface) => surface.type === 'singleton' && surface.kind === 'issues',
+		);
+		if (issueSurface) {
+			const issues = this.deps.singletons.issuesIfPresent();
+			if (issues?.drafts.pending) return false;
+			issues?.drafts.flush();
+			if (
+				issues?.drafts.needsExitGuard &&
+				!(await this.deps.confirmClose({
+					surfaceId: issueSurface.id,
+					title: m.issues_close_surface_title(),
+					description: m.issues_close_surface_description(),
+					confirmLabel: m.issues_close_surface(),
+				}))
+			)
+				return false;
+		}
 		const commit = descriptors.find(
 			(surface): surface is Extract<SurfaceDescriptor, { type: 'singleton'; kind: 'commit' }> =>
 				surface.type === 'singleton' && surface.kind === 'commit',

@@ -1061,6 +1061,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+			m.workspace_open_surface({ surface: m.issues_title() }),
 			m.workspace_chat_views(),
 			m.workspace_new_terminal(),
 		];
@@ -1102,7 +1103,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(8),
+			).toHaveLength(9),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
@@ -1255,7 +1256,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(7),
+			).toHaveLength(8),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
@@ -1312,6 +1313,7 @@ describe('WorkspaceWindowTitleBar', () => {
 
 	it('restores plus and menu-item focus to the sole inline terminal menu', async () => {
 		const kinds = [
+			'issues',
 			'git',
 			'git-history',
 			'git-compare',
@@ -1409,6 +1411,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+			m.workspace_open_surface({ surface: m.issues_title() }),
 			m.workspace_chat_views(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));

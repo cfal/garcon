@@ -31,11 +31,13 @@
 	const chatBoardRenderer = lazyRenderer(
 		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
 	);
+	const issuesRenderer = lazyRenderer(() => import('$lib/components/issues/IssuesPanel.svelte'));
 </script>
 
 <script lang="ts">
 	import {
 		getChatSessions,
+		getAuth,
 		getFileSessions,
 		getGhCapability,
 		getSingletonSurfaces,
@@ -77,6 +79,7 @@
 	const singletonSurfaces = getSingletonSurfaces();
 	const files = getFileSessions();
 	const sessions = getChatSessions();
+	const auth = getAuth();
 	const projectState = $derived(workspaceContext.projectState);
 </script>
 
@@ -220,6 +223,16 @@
 		{@const controller = singletonSurfaces.chatCanvas()}
 		{#await chatCanvasRenderer() then ChatCanvasSurface}
 			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'issues'}
+		{@const controller = singletonSurfaces.issues()}
+		{#await issuesRenderer() then IssuesPanel}
+			<IssuesPanel {controller} {visible} chats={sessions.orderedChats}
+				username={auth.user?.username ?? 'local'} directory={workspaceContext.current?.projectPath ?? null}
+				onOpenChat={(chatId) => {
+					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
+					else void workspace.showChatInWindow(chatId, presentation);
+				}} />
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'chat-board'}
 		{@const controller = singletonSurfaces.chatBoard()}

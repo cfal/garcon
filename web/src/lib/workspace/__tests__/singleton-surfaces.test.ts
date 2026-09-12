@@ -11,6 +11,7 @@ import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controll
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
+import { issueTestHarness } from '$lib/components/issues/__tests__/issue-test-harness';
 
 const registries: SingletonSurfaceRegistry[] = [];
 
@@ -134,6 +135,61 @@ function createRegistry() {
 }
 
 describe('SingletonSurfaceRegistry', () => {
+	it('constructs Issues lazily and retains its global controller across visibility and project changes', async () => {
+		const harness = issueTestHarness();
+		const createIssues = vi.fn(() => harness.controller);
+		const gitDeps = createGitSurfaceTestDeps();
+		const registry = new SingletonSurfaceRegistry({
+			...gitDeps,
+			createIssues,
+			createCommit: () => new CommitController(gitDeps),
+			createPullRequests: () => new PullRequestsStore(),
+		});
+		registries.push(registry);
+		expect(registry.issuesIfPresent()).toBeNull();
+		expect(createIssues).not.toHaveBeenCalled();
+		registry.setPresentationVisible('issues', true);
+		const issues = registry.issues();
+		await issues.refresh();
+		expect(harness.api.bootstrap).toHaveBeenCalledOnce();
+		expect(registry.hasVisibleProjectSurface).toBe(false);
+		registry.setPresentationVisible('issues', false);
+		expect(registry.issues()).toBe(issues);
+		const dispose = vi.spyOn(issues, 'dispose');
+		registry.disposeSurface('issues');
+		expect(dispose).toHaveBeenCalledOnce();
+		expect(registry.issuesIfPresent()).toBeNull();
+	});
+	it('retains the Issues exit guard after closing a renderer with old-store recovery', () => {
+		const harness = issueTestHarness();
+		const gitDeps = createGitSurfaceTestDeps();
+		const registry = new SingletonSurfaceRegistry({
+			...gitDeps,
+			createIssues: () => harness.controller,
+			createCommit: () => new CommitController(gitDeps),
+			createPullRequests: () => new PullRequestsStore(),
+		});
+		registries.push(registry);
+		const issues = registry.issues();
+		issues.drafts.oldEntries = [
+			{
+				partition: {
+					storeId: '22222222-2222-4222-8222-222222222222',
+					viewerKey: 'synthetic-viewer',
+				},
+				entry: { key: 'synthetic-old-recovery', raw: 'Synthetic old-store draft', draft: null },
+			},
+		];
+		registry.disposeSurface('issues');
+		expect(registry.issuesIfPresent()).toBe(issues);
+		const exit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(exit);
+		expect(exit.defaultPrevented).toBe(true);
+		registry.destroy();
+		const destroyedExit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(destroyedExit);
+		expect(destroyedExit.defaultPrevented).toBe(false);
+	});
 	it('protects recovered drafts before opening Canvas', () => {
 		browserCanvasRecovery.write(canvas());
 		const { registry } = createRegistry();

@@ -136,6 +136,7 @@
 		terminalIdentity,
 		ws,
 		chatBoardInvalidations,
+		issuesInvalidations,
 		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;

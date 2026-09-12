@@ -209,6 +209,12 @@
 }
 
 :root {
+	--issue-open: hsl(var(--muted-foreground));
+	--issue-progress: oklch(0.52 0.14 255);
+	--issue-review: oklch(0.5 0.16 305);
+	--issue-done: oklch(0.46 0.1 160);
+	--issue-urgent: hsl(var(--destructive));
+	--issue-high: oklch(0.48 0.11 65);
 	--chat-board-shadow: 0 1px 2px color-mix(in oklab, hsl(var(--foreground)) 10%, transparent);
 	--safe-area-inset-top: env(safe-area-inset-top);
 	--safe-area-inset-right: env(safe-area-inset-right);
@@ -265,6 +271,13 @@
 	border-color: color-mix(in oklab, var(--cli-presentation-accent) 45%, hsl(var(--border)));
 	background-color: color-mix(in oklab, var(--cli-presentation-accent) 12%, hsl(var(--card)));
 	color: hsl(var(--foreground));
+}
+
+.dark {
+	--issue-progress: oklch(0.77 0.11 255);
+	--issue-review: oklch(0.79 0.11 305);
+	--issue-done: oklch(0.75 0.11 160);
+	--issue-high: oklch(0.8 0.12 65);
 }
 
 .dark .cli-presentation-custom {

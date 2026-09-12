@@ -11,6 +11,7 @@
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import Columns3 from '@lucide/svelte/icons/columns-3';
+	import CircleDot from '@lucide/svelte/icons/circle-dot';
 	import type { ActiveSurfaceKind } from '$lib/workspace/surface-types.js';
 
 	let {
@@ -29,5 +30,6 @@
 {:else if kind === 'chat-map'}<Waypoints class={className} />
 {:else if kind === 'chat-canvas'}<PanelsTopLeft class={className} />
 {:else if kind === 'chat-board'}<Columns3 class={className} />
+{:else if kind === 'issues'}<CircleDot class={className} />
 {:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal class={className} />
 {:else}<FileCode class={className} />{/if}
