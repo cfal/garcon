@@ -2,6 +2,13 @@ export class LedgerError extends Error {
   override readonly name: string = 'LedgerError';
 }
 
+export class TranscriptSinkClosedError extends Error {
+  constructor() {
+    super('Transcript producer sink is closed');
+    this.name = 'TranscriptSinkClosedError';
+  }
+}
+
 export class LedgerFencedError extends LedgerError {
   override readonly name = 'LedgerFencedError';
 

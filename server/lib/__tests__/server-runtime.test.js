@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -6,6 +6,7 @@ import {
   advertisedServerUrl,
   createServerRuntimeState,
   listeningServerUrl,
+  logServerReady,
   publishServerRuntime,
   removeServerRuntime,
 } from '../server-runtime.js';
@@ -53,5 +54,22 @@ describe('server runtime publication', () => {
   it('reports the actual listener address', () => {
     expect(listeningServerUrl('0.0.0.0', 8080)).toBe('http://0.0.0.0:8080');
     expect(listeningServerUrl('::', 8080)).toBe('http://[::]:8080');
+  });
+
+  it('reports readiness and warns only for unauthenticated non-localhost listeners', () => {
+    for (const bindAddress of ['127.0.0.1', 'localhost', '0.0.0.0', '::']) {
+      for (const authDisabled of [false, true]) {
+        const logger = { info: mock(), warn: mock() };
+        logServerReady(logger, { bindAddress, port: 4321, authDisabled });
+        expect(logger.info.mock.calls).toEqual([
+          [`Started at ${listeningServerUrl(bindAddress, 4321)}`],
+          [`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`],
+        ]);
+        const expectedWarning = authDisabled && !['127.0.0.1', 'localhost'].includes(bindAddress);
+        expect(logger.warn.mock.calls).toEqual(expectedWarning
+          ? [['WARNING: authentication is disabled while bound to a non-localhost address.']]
+          : []);
+      }
+    }
   });
 });

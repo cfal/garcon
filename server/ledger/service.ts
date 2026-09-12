@@ -54,17 +54,10 @@ import {
   type AgentStopRequestSink,
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
-import { PermissionNotActionableError } from './errors.js';
+import { PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { TranscriptLedgerStore } from './store.js';
-
-export class TranscriptSinkClosedError extends Error {
-  constructor() {
-    super('Transcript producer sink is closed');
-    this.name = 'TranscriptSinkClosedError';
-  }
-}
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;

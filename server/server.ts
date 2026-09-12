@@ -129,7 +129,7 @@ import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-leas
 import {
   advertisedServerUrl,
   createServerRuntimeState,
-  listeningServerUrl,
+  logServerReady,
   publishServerRuntime,
   removeServerRuntime,
 } from './lib/server-runtime.js';
@@ -985,19 +985,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    logger.info(
-      `Started at ${listeningServerUrl(bindAddress, actualPort)}`,
-    );
-    logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
-    if (
-      authDisabled &&
-      bindAddress !== '127.0.0.1' &&
-      bindAddress !== 'localhost'
-    ) {
-      logger.warn(
-        'WARNING: authentication is disabled while bound to a non-localhost address.',
-      );
-    }
+    logServerReady(logger, { bindAddress, port: actualPort, authDisabled });
   } catch (error) {
     await workspaceLease?.release().catch((releaseError) => {
       logger.warn('Failed to release workspace lease:', errorMessage(releaseError));
