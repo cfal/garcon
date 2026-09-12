@@ -470,7 +470,9 @@ describe("Chromium Issues interaction", () => {
         page.locator('.issue-lane[data-status="in-review"] h3'),
       );
       await page
-        .locator('.issue-lane[data-status="in-review"] [data-issue-id="ISS-1"]')
+        .locator(
+          '.issue-lane[data-status="in-review"] [data-issue-id="ISS-1"][aria-busy="false"]',
+        )
         .waitFor();
       const current = parseIssueDetail(
         await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
