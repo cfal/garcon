@@ -44,7 +44,7 @@ test('session output chunks retain exact bytes and one physical attempt while yi
   try {
     const sent = f.sender.send(f.record, f.tokens[0]!); await tick();
     expect(f.written).toHaveLength(1);
-    const pulse = f.writer.send('synthetic pulse', 'control');
+    const pulse = f.writer.send('synthetic pulse', 'control', 'lifecycle');
     f.written[0]!.finished.resolve(); await tick();
     expect(f.written[1]!.text).toBe('synthetic pulse');
     f.written[1]!.finished.resolve(); await pulse; await tick();

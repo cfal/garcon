@@ -30,7 +30,7 @@ test.each(['request', 'reply', 'cancel'] as const)('saturated execution %s frame
     void overflow.then(refused);
     await tick();
     expect(refused).toHaveBeenCalledWith({ kind: 'rejected', code: 'NODE_CAPACITY' });
-    const pulse = f.writer.send('pulse', 'control');
+    const pulse = f.writer.send('pulse', 'control', 'lifecycle');
     f.written[0]!.drained.resolve();
     await tick();
     expect(f.written[1]!.text).toBe('pulse');
@@ -42,7 +42,7 @@ test.each(['request', 'reply', 'cancel'] as const)('saturated execution %s frame
 
 function fixture(limits = { ...NODE_WORKER_WRITER_LIMITS,
   maxFrameBytes: 4096, maxQueuedBytes: 16384, maxQueuedFrames: 4, reservedControlBytes: 4096, reservedControlFrames: 1,
-  reservedUrgentFrames: 0, reservedUrgentBytes: 0, writeTimeoutMs: 1000 }) {
+  reservedApplicationFrames: 0, reservedApplicationBytes: 0, writeTimeoutMs: 1000 }) {
   const authority = new AbortController();
   const connection = new AbortController();
   const written: { text: string; drained: PromiseWithResolvers<void> }[] = [];
@@ -84,6 +84,32 @@ function fixture(limits = { ...NODE_WORKER_WRITER_LIMITS,
   };
 }
 
+test.each(['abort', 'status', 'release'] as const)('reserved %s admission reaches the receiver after an earlier queued request', async (method) => {
+  const f = fixture({ ...NODE_WORKER_WRITER_LIMITS, maxFrameBytes: 4096, maxQueuedBytes: 16384, maxQueuedFrames: 4,
+    reservedControlBytes: 4096, reservedControlFrames: 1, reservedApplicationBytes: 1024, reservedApplicationFrames: 1 });
+  const expected: NodeExecutionResult = method === 'abort' ? { kind: 'abort-result', requested: true }
+    : method === 'release' ? { kind: 'released' } : { kind: 'status', receipt: null };
+  f.execute.mockImplementation(async (command) => command.method === 'dispatch'
+    ? { kind: 'dispatched' } : expected);
+  try {
+    const hold = f.writer.send('hold', 'data', 'data');
+    const first = f.client.call(dispatch, f.connection.signal);
+    expect(await f.client.call(dispatch, f.connection.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    const control = f.client.call({ method, identity: operation }, f.connection.signal);
+    const pulse = f.writer.send('pulse', 'control', 'lifecycle');
+    await f.deliver(0); await hold;
+    expect(f.written[1]!.text).toBe('pulse');
+    await f.deliver(1); await pulse;
+    await f.deliver(2);
+    expect(await first).toEqual({ kind: 'dispatched' });
+    await f.deliver(3);
+    expect(await control).toEqual(expected);
+    expect(f.execute.mock.calls.map(([command]) => command.method)).toEqual(['dispatch', method]);
+    expect(f.frames().map((frame) => frame.requestId)).toEqual([1, 3]);
+    expect(f.native.close).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
 test('production limits deliver a full channel reply burst without dropping replies', async () => {
   const f = fixture(NODE_WORKER_WRITER_LIMITS);
   const total = NODE_WORKER_EXECUTION_LIMITS.maxRequests + NODE_WORKER_EXECUTION_LIMITS.reservedControlRequests;
@@ -92,7 +118,7 @@ test('production limits deliver a full channel reply burst without dropping repl
       expect(f.transport.send(serializeNodeExecutionReply({ type: 'node-execution-result', version: 1,
         session, requestId, result: { kind: 'status', receipt: null } }))).toBe(true);
     }
-    const pulse = f.writer.send('pulse', 'control');
+    const pulse = f.writer.send('pulse', 'control', 'lifecycle');
     await f.deliver(0);
     expect(f.written[1]!.text).toBe('pulse');
     await f.deliver(1); await pulse;
@@ -107,7 +133,7 @@ test.each(['cancel', 'timeout'] as const)('worker request %s before submission s
   const f = fixture();
   const cancellation = new AbortController();
   try {
-    const hold = f.writer.send('hold', 'data');
+    const hold = f.writer.send('hold', 'data', 'data');
     const first = f.client.call(dispatch, cancellation.signal);
     if (cause === 'cancel') cancellation.abort(); else f.callbacks[0]!();
     expect(await first).toEqual({ kind: 'unknown' });
@@ -153,13 +179,13 @@ test('cancellation inside native submission still sends the exact request cancel
 test('a replaced physical connection drops queued commands while preserving the shared worker pipe', async () => {
   const f = fixture();
   try {
-    const hold = f.writer.send('hold', 'data');
+    const hold = f.writer.send('hold', 'data', 'data');
     const first = f.client.call(dispatch, new AbortController().signal);
     f.connection.abort();
     expect(await first).toEqual({ kind: 'unknown' });
     await f.deliver(0); await hold;
     expect(f.frames()).toEqual([]);
-    const next = f.writer.send('next', 'control');
+    const next = f.writer.send('next', 'control', 'lifecycle');
     await f.deliver(1); await next;
     expect(f.native.close).not.toHaveBeenCalled();
     expect(f.writer.bufferedBytes).toBe(0);
@@ -170,7 +196,7 @@ test('worker queue capacity rejects only the definitely unsent call and leaves n
   const f = fixture();
   const cancellation = new AbortController();
   try {
-    const fills = Array.from({ length: 4 }, () => f.writer.send('fill', 'control'));
+    const fills = Array.from({ length: 4 }, () => f.writer.send('fill', 'control', 'lifecycle'));
     expect(await f.client.call(dispatch, cancellation.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
     cancellation.abort();
     for (let index = 0; index < fills.length; index++) await f.deliver(index);

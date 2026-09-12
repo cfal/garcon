@@ -64,7 +64,8 @@ export class NodeWorkerBulkPort {
     this.#validate(); signal.throwIfAborted(); validate();
     const text = serializeNodeWorkerBulk({ type: 'node-worker-bulk', version: NODE_WIRE_VERSION, session: this.#session,
       connectionId: this.options.connectionId, instanceId: this.options.instanceId, payload });
-    const submission = this.writer.submit(text, priority, { signal, validate: () => { this.#validate(); validate(); } });
+    const submission = this.writer.submit(text, priority, { signal, validate: () => { this.#validate(); validate(); } },
+      priority === 'data' ? 'data' : 'application');
     void submission.drained.catch((error) => { if (!signal.aborted && !(error instanceof NodeBulkError)) this.close(); });
     return submission;
   }

@@ -22,7 +22,7 @@ test('native worker pipes reserve stdout before imports and exit on parent EOF',
     reservedControlFrames: 1, writeTimeoutMs: 1000, failed });
   try {
     expect(await f.frames.next()).toMatchObject({ done: false, value: 'synthetic hello' });
-    await writer.send('synthetic echo 界', 'data');
+    await writer.send('synthetic echo 界', 'data', 'data');
     expect(await f.frames.next()).toMatchObject({ done: false, value: 'synthetic echo 界' });
     await f.process.stdin.end();
     expect(await f.frames.next()).toMatchObject({ done: true });
@@ -65,7 +65,7 @@ test('native blocked writes keep their bytes accounted until the child has actua
     scheduleTimeout(callback) { timer.callback = callback; return { cancel() { timer.callback = null; } }; }, failed });
   try {
     expect((await f.frames.next()).value).toBe('synthetic hello');
-    const sent = writer.send('x'.repeat(size), 'data').catch((error: unknown) => error);
+    const sent = writer.send('x'.repeat(size), 'data', 'data').catch((error: unknown) => error);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(writer.bufferedBytes).toBe(size + 4);
     if (!timer.callback) throw new Error('Synthetic native write did not start');

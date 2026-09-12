@@ -11,6 +11,7 @@ export interface NodeSocketWriterOptions {
   readonly maxFrameBytes: number;
   readonly maxBufferedBytes: number;
   readonly reservedControlBytes: number;
+  readonly reservedLifecycleBytes: number;
   readonly maxDrainWaiters: number;
   /** Bounds any observed native backlog, including automatic protocol replies on an idle channel. */
   readonly drainTimeoutMs: number;
@@ -46,12 +47,14 @@ export class NodeSocketWriter {
   #lastBuffered = 0;
 
   constructor(private readonly port: NodeSocketPort, private readonly options: NodeSocketWriterOptions) {
-    for (const value of [options.maxFrameBytes, options.maxBufferedBytes, options.reservedControlBytes, options.maxDrainWaiters, options.drainTimeoutMs]) {
+    for (const value of [options.maxFrameBytes, options.maxBufferedBytes, options.reservedControlBytes, options.reservedLifecycleBytes,
+      options.maxDrainWaiters, options.drainTimeoutMs]) {
       if (!Number.isSafeInteger(value) || value < 1) throw new TypeError('Invalid node socket limits');
     }
     const frameBytes = port.bufferedFrameBytes(options.maxFrameBytes);
     if (!Number.isSafeInteger(options.maxBufferedBytes + NODE_SOCKET_PROTOCOL_ALLOWANCE_BYTES)
       || !Number.isSafeInteger(frameBytes) || frameBytes < options.maxFrameBytes
+      || options.reservedLifecycleBytes > options.reservedControlBytes
       || frameBytes > options.maxBufferedBytes - options.reservedControlBytes) throw new TypeError('Node frame limit exceeds data capacity');
     this.options = Object.freeze({ ...options });
     const close = () => this.close();
@@ -71,6 +74,10 @@ export class NodeSocketWriter {
     return this.#send(serialized, this.options.reservedControlBytes);
   }
 
+  sendApplication(serialized: string): boolean {
+    return this.#send(serialized, this.options.reservedLifecycleBytes);
+  }
+
   #send(serialized: string, reservedBytes: number): boolean {
     const buffered = this.#observeBuffer();
     const length = Buffer.byteLength(serialized);
@@ -86,16 +93,24 @@ export class NodeSocketWriter {
     return true;
   }
 
-  async sendWhenWritable(serialized: string, signal: AbortSignal, validate: () => void): Promise<void> {
+  sendWhenWritable(serialized: string, signal: AbortSignal, validate: () => void): Promise<void> {
+    return this.#sendWhenWritable(serialized, signal, validate, this.options.reservedControlBytes);
+  }
+
+  sendApplicationWhenWritable(serialized: string, signal: AbortSignal, validate: () => void): Promise<void> {
+    return this.#sendWhenWritable(serialized, signal, validate, this.options.reservedLifecycleBytes);
+  }
+
+  async #sendWhenWritable(serialized: string, signal: AbortSignal, validate: () => void, reservedBytes: number): Promise<void> {
     signal.throwIfAborted();
     const length = Buffer.byteLength(serialized);
     if (length > this.options.maxFrameBytes) throw new NodeSocketWriteError('NODE_SOCKET_CAPACITY');
-    const throughBytes = this.options.maxBufferedBytes - this.options.reservedControlBytes - this.#frameBytes(length);
+    const throughBytes = this.options.maxBufferedBytes - reservedBytes - this.#frameBytes(length);
     while (true) {
       signal.throwIfAborted();
       validate();
       signal.throwIfAborted();
-      if (this.sendData(serialized)) return;
+      if (this.#send(serialized, reservedBytes)) return;
       await this.#waitForBuffer(throughBytes, signal);
     }
   }

@@ -23,7 +23,7 @@ function fixture(maxDrainWaiters = 32) {
     terminate: mock(() => {}),
   } satisfies NodeSocketPort;
   const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 2048, maxBufferedBytes: 4096,
-    reservedControlBytes: 1024, maxDrainWaiters, drainTimeoutMs: 1000, schedulePoll: () => ({ cancel() {} }) });
+    reservedControlBytes: 1024, reservedLifecycleBytes: 256, maxDrainWaiters, drainTimeoutMs: 1000, schedulePoll: () => ({ cancel() {} }) });
   const options = { session, signal: physical.signal, validate() { physical.signal.throwIfAborted(); },
     scheduleTimeout(callback: () => void) { const timer = { callback, cancelled: false }; timers.push(timer); return { cancel() { timer.cancelled = true; } }; } };
   return { writer, port, physical, frames, timers, options, buffer(bytes: number) { buffered = bytes; writer.drain(); }, maximum: () => maximum };

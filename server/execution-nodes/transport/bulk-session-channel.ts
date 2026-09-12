@@ -44,7 +44,7 @@ export class NodeBulkSessionChannel {
   #started = false;
   #active = false;
 
-  constructor(private readonly writer: Pick<NodeSocketWriter, 'send' | 'sendData' | 'sendWhenWritable' | 'close'>,
+  constructor(private readonly writer: Pick<NodeSocketWriter, 'send' | 'sendData' | 'sendApplication' | 'sendWhenWritable' | 'sendApplicationWhenWritable' | 'close'>,
     private readonly options: NodeBulkSessionOptions) {
     this.options = Object.freeze(options.side === 'controller'
       ? { ...options, principal: Object.freeze({ ...options.principal }) } : { ...options });
@@ -110,15 +110,17 @@ export class NodeBulkSessionChannel {
     this.#assertActive();
     const text = JSON.stringify(frame);
     const parsed = this.#parse(text, this.options.side === 'controller' ? 'request' : 'reply');
-    return isData(parsed.bulk) ? this.writer.sendData(text) : this.writer.send(text);
+    return isData(parsed.bulk) ? this.writer.sendData(text) : this.writer.sendApplication(text);
   }
 
   async sendWhenWritable(frame: NodeWorkerBulkFrame, signal: AbortSignal): Promise<void> {
     this.#assertActive(); signal.throwIfAborted();
     const text = JSON.stringify(frame);
     const parsed = this.#parse(text, this.options.side === 'controller' ? 'request' : 'reply');
-    if (!isData(parsed.bulk) && this.writer.send(text)) return;
-    await this.writer.sendWhenWritable(text, AbortSignal.any([signal, this.#closing.signal]), () => this.#assertActive());
+    const caller = AbortSignal.any([signal, this.#closing.signal]);
+    const validate = () => this.#assertActive();
+    if (isData(parsed.bulk)) await this.writer.sendWhenWritable(text, caller, validate);
+    else await this.writer.sendApplicationWhenWritable(text, caller, validate);
   }
 
   close(): void { this.#close(new NodeWorkerTransportError('NODE_WORKER_CLOSED')); }

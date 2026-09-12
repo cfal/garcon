@@ -17,7 +17,7 @@ function fixture() {
     scheduleTimeout: () => ({ cancel() {} }) });
   const timers: { callback(): void; cancelled: boolean }[] = [];
   const relay = new NodeWorkerRetirementRelay({
-    send: (frame, signal) => writer.submit(serializeNodeWorkerOutputRetirement(frame), 'urgent', { signal, validate() {} }).drained,
+    send: (frame, signal) => writer.submit(serializeNodeWorkerOutputRetirement(frame), 'urgent', { signal, validate() {} }, 'application').drained,
     waitForRelease: (signal) => writer.waitForRelease(signal), failed,
     scheduleTimeout(callback) {
       const timer = { callback, cancelled: false }; timers.push(timer);
@@ -26,7 +26,7 @@ function fixture() {
   });
   const submitted: Promise<unknown>[] = [];
   for (let i = 0; i < 112 + 8; i += 1) submitted.push(writer.submit('held', i < 112 ? 'data' : 'urgent',
-    { signal: lifetime.signal, validate() {} }).drained.catch((error: unknown) => error));
+    { signal: lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
   const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance',
     stream: { ...session, streamId: 'synthetic-stream' } } as const;
   return { relay, frame, writer, native, written, failed, timers,

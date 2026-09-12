@@ -18,7 +18,7 @@ import { tick } from '../worker/__tests__/lifecycle-fixture.js';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 const limits = { maxFrameBytes: 2 * 1024 * 1024, maxBufferedBytes: 4 * 1024 * 1024,
-  reservedControlBytes: 16 * 1024, maxDrainWaiters: 64, drainTimeoutMs: 5000 };
+  reservedControlBytes: 16 * 1024, reservedLifecycleBytes: 4 * 1024, maxDrainWaiters: 64, drainTimeoutMs: 5000 };
 
 function fixture() {
   let now = 0;
@@ -132,7 +132,7 @@ test('replacement recovery cancels a parked retirement barrier without closing t
   const replyBytes = Buffer.byteLength(JSON.stringify({ type: 'node-worker-service-result', version: 1, session: f.session,
     connectionId: 1, requestId: 1, result: { kind: 'rejected', code: 'NODE_UNAVAILABLE' } })) + 10;
   expect(Buffer.byteLength(JSON.stringify(retirement)) + 10).toBeGreaterThan(replyBytes);
-  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedControlBytes - replyBytes);
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes - replyBytes);
   const previous = link.call({ method: 'begin-output-recovery' });
   await tick();
   const replacement = link.call({ method: 'begin-output-recovery' });
@@ -290,12 +290,21 @@ test('writer capacity before submission is rejected while reply loss after submi
 
 test('lost mutation result on a saturated socket closes only the physical hop', async () => {
   const f = fixture(); const link = f.connect(); await link.recover();
-  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedControlBytes);
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
   expect(await link.client.execution('synthetic-instance').call(f.dispatch, link.physical.signal)).toEqual({ kind: 'unknown' });
   expect(f.execution.call).toHaveBeenCalledTimes(1);
   expect(link.physical.signal.aborted).toBe(true);
   expect(link.connection.lease.authoritySignal.aborted).toBe(false);
   expect(f.supervisor.status).toBe('reconnecting');
+});
+
+test('execution replies use application reserve when ordinary socket capacity is full', async () => {
+  const f = fixture(); const link = f.connect(); await link.recover();
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedControlBytes);
+  expect(await link.client.execution('synthetic-instance').call(f.dispatch, link.physical.signal)).toEqual({ kind: 'dispatched' });
+  expect(f.execution.call).toHaveBeenCalledTimes(1);
+  expect(link.physical.signal.aborted).toBe(false);
+  expect(f.supervisor.status).toBe('online');
 });
 
 test('worker suspension closes parent admission before notifying the controller', async () => {
@@ -392,7 +401,7 @@ test.each(['refused', 'queued'] as const)('a %s controller retirement survives p
   }, close() { native.resolve(); } }, { signal: first.connection.lease.authoritySignal, maxFrameBytes: 4096,
     maxQueuedBytes: 16384, maxQueuedFrames: admission === 'refused' ? 2 : 3, reservedControlBytes: 4096,
     reservedControlFrames: 1, writeTimeoutMs: 1000, failed() {} });
-  f.peer.forward.mockImplementation((frame, signal) => writer.submit(JSON.stringify(frame), 'urgent', { signal, validate() {} }));
+  f.peer.forward.mockImplementation((frame, signal) => writer.submit(JSON.stringify(frame), 'urgent', { signal, validate() {} }, 'application'));
   f.peer.waitForRelease.mockImplementation((signal) => writer.waitForRelease(signal));
   try {
     const held = writer.send('synthetic pipe backlog', 'data');

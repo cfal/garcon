@@ -12,7 +12,7 @@ test('real bulk channels transfer both ways while a blocked bulk sender leaves c
   const authority = new AbortController();
   const physical = new AbortController();
   const writerOptions = { signal: physical.signal, maxFrameBytes: MAX_NODE_BULK_FRAME_BYTES,
-    maxBufferedBytes: 1024 * 1024 - 1024, reservedControlBytes: 4096, maxDrainWaiters: 32, drainTimeoutMs: 2_000 };
+    maxBufferedBytes: 1024 * 1024 - 1024, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 32, drainTimeoutMs: 2_000 };
   const owner = Object.freeze({});
   const nodeTransfers = new NodeBulkTransfers({ session, authoritySignal: authority.signal });
   const controllerTransfers = new NodeBulkTransfers({ session, authoritySignal: authority.signal });

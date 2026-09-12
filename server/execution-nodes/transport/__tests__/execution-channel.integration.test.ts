@@ -16,7 +16,7 @@ test('a lost WebSocket dispatch reply reconciles the same native occurrence thro
   let nextConnection = f.connection;
   let dropDispatchReply = true;
   const writerLimits = { maxFrameBytes: MAX_NODE_EXECUTION_FRAME_BYTES,
-    maxBufferedBytes: 2 * MAX_NODE_EXECUTION_FRAME_BYTES - 1024, reservedControlBytes: 4096, maxDrainWaiters: 4, drainTimeoutMs: 1_000 };
+    maxBufferedBytes: 2 * MAX_NODE_EXECUTION_FRAME_BYTES - 1024, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 4, drainTimeoutMs: 1_000 };
   const writerOptions = (signal: AbortSignal) => ({ ...writerLimits, signal });
   const server = Bun.serve<NodeConnectionLease>({
     hostname: '0.0.0.0', port: 0,

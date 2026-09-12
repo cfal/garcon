@@ -25,7 +25,7 @@ function fixture() {
   }, close: mock(() => {}) } satisfies NodeWorkerWritePort;
   const writer = new NodeWorkerWriter(native, { signal: lifetime.signal,
     maxFrameBytes: 4096, maxQueuedBytes: 16384, maxQueuedFrames: 4, reservedControlBytes: 4096, reservedControlFrames: 1,
-    reservedUrgentFrames: 1, reservedUrgentBytes: 1024,
+    reservedApplicationFrames: 1, reservedApplicationBytes: 1024,
     writeTimeoutMs: 1000, failed });
   const port = new NodeWorkerBulkPort(writer, { session, instanceId: 'synthetic-instance', connectionId: 1,
     signal: connection.signal, validate() { connection.signal.throwIfAborted(); }, closed });
@@ -37,7 +37,7 @@ function fixture() {
 test('worker bulk awaits native chunk drain while control replies overtake queued data', async () => {
   const f = fixture();
   try {
-    const held = f.writer.send('held', 'data');
+    const held = f.writer.send('held', 'data', 'data');
     const pending = f.port.sendWhenWritable(chunk, f.connection.signal);
     let drained = false;
     void pending.then(() => { drained = true; });
@@ -62,7 +62,7 @@ test('worker bulk capacity refuses one transfer while preserving the control res
     await expect(f.port.sendWhenWritable(chunk, f.connection.signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
     expect(f.port.send(reply)).toBe(true);
     expect(f.port.send(reply)).toBe(false);
-    const pulse = f.writer.send('pulse', 'control');
+    const pulse = f.writer.send('pulse', 'control', 'lifecycle');
     expect(f.closed).not.toHaveBeenCalled();
     await f.drain(0);
     expect(f.written[1]!.text).toBe('pulse');
@@ -75,14 +75,14 @@ test('worker bulk capacity refuses one transfer while preserving the control res
 test.each(['caller', 'connection'] as const)('a %s cancellation drops queued bulk bytes without closing the shared pipe', async (kind) => {
   const f = fixture();
   try {
-    const held = f.writer.send('held', 'control');
+    const held = f.writer.send('held', 'control', 'lifecycle');
     const caller = new AbortController();
     const pending = f.port.sendWhenWritable(chunk, caller.signal).catch((error: unknown) => error);
     if (kind === 'caller') caller.abort(); else f.connection.abort();
     expect(await pending).toBeInstanceOf(Error);
     await f.drain(0); await held;
     expect(f.written).toHaveLength(1);
-    const next = f.writer.send('next', 'control');
+    const next = f.writer.send('next', 'control', 'lifecycle');
     await f.drain(1); await next;
     expect(f.native.close).not.toHaveBeenCalled();
     expect(f.closed).toHaveBeenCalledTimes(kind === 'connection' ? 1 : 0);
@@ -92,7 +92,7 @@ test.each(['caller', 'connection'] as const)('a %s cancellation drops queued bul
 test('transfer revocation before native submission remains local to that transfer', async () => {
   const f = fixture();
   try {
-    const held = f.writer.send('held', 'control');
+    const held = f.writer.send('held', 'control', 'lifecycle');
     let live = true;
     const pending = f.port.sendWhenWritable(chunk, f.connection.signal, () => {
       if (!live) throw new NodeBulkError('NODE_BULK_UNAVAILABLE', 'Synthetic transfer retired');

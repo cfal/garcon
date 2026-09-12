@@ -100,7 +100,8 @@ export class NodeWorkerServiceClient {
         providerRequest ? this.#options.providerRequestTimeoutMs : this.#options.requestTimeoutMs);
       signal.throwIfAborted();
       pending.submitting = true;
-      const submission = this.writer.submit(text, 'data', { signal: authority, validate: () => { if (!this.#validate()) throw protocol(); } });
+      const submission = this.writer.submit(text, 'data', { signal: authority, validate: () => { if (!this.#validate()) throw protocol(); } },
+        providerRequest === 'status' ? 'application' : 'data');
       pending.submission = submission; pending.submitting = false;
       if (pending.cancelled && submission.submitted) this.#cancel(requestId);
       const release = () => {
@@ -153,7 +154,7 @@ export class NodeWorkerServiceClient {
     if (!this.#validate()) return;
     try {
       const text = serializeNodeWorkerService({ ...this.#envelope(requestId), type: 'node-worker-service-cancel' });
-      const submitted = this.writer.submit(text, 'urgent', { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); } });
+      const submitted = this.writer.submit(text, 'urgent', { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); } }, 'application');
       void submitted.drained?.catch((error) => { if (!this.#closing.signal.aborted) this.#fail(error); });
     } catch (error) {
       if (!(error instanceof NodeWorkerTransportError && error.code === 'NODE_WORKER_CAPACITY')) this.#fail(error);
@@ -241,7 +242,7 @@ export class NodeWorkerServiceServer {
       let text: string;
       try { text = serializeNodeWorkerService({ ...envelope, result }); }
       catch { text = serializeNodeWorkerService({ ...envelope, result: { kind: 'unknown' } }); }
-      const submission = this.writer.submit(text, 'data', { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); } });
+      const submission = this.writer.submit(text, 'data', { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); } }, 'application');
       void submission.drained?.catch((error) => { if (!this.#closing.signal.aborted) this.#fail(error); });
     } catch (error) { this.#fail(error); }
   }

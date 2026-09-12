@@ -30,7 +30,7 @@ function fixture(authenticated = principal) {
   const controllerPort: NodeSocketPort = { get open() { return !controllerPhysical.signal.aborted; },
     get bufferedBytes() { return controllerBuffered; }, bufferedFrameBytes: (bytes) => bytes + 10,
     send(text) { queueMicrotask(() => node.receive(text)); return true; }, terminate() { controllerPhysical.abort(); } };
-  const limits = { maxFrameBytes: 256 * 1024, maxBufferedBytes: 512 * 1024, reservedControlBytes: 4096,
+  const limits = { maxFrameBytes: 256 * 1024, maxBufferedBytes: 512 * 1024, reservedControlBytes: 4096, reservedLifecycleBytes: 1024,
     maxDrainWaiters: 8, drainTimeoutMs: 5000 };
   const nodeWriter = new NodeSocketWriter(nodePort, { ...limits, signal: nodePhysical.signal });
   const controllerWriter = new NodeSocketWriter(controllerPort, { ...limits, signal: controllerPhysical.signal });

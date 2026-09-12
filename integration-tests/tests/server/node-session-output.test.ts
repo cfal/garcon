@@ -46,6 +46,29 @@ function model(respond: (index: number) => Promise<string>) {
 }
 
 describe.skipIf(!nodeSessionSystemdAvailable)('contained worker output over authenticated WSS', () => {
+  test('status replies cross both worker hops while ordinary socket admission is held', async () => {
+    const provider = model(async () => 'synthetic reserve output');
+    const f = await createNodeSessionOutputFixture(certificate);
+    const lifetime = new AbortController();
+    let pressure: { release(): void } | undefined;
+    try {
+      await f.recover();
+      const output = await f.install('synthetic-reserve-output', { signal: lifetime.signal, emit() {} });
+      const started = await f.start(output, '1789000000000098', 'synthetic-reserve-run', provider.configuration, 'synthetic input');
+      expect(started.result).toEqual({ kind: 'dispatched' });
+      await f.waitFor(output, (event) => event.type === 'run-ended');
+      pressure = f.host.holdOrdinarySocketAdmission();
+      expect(await f.controller.client.execution('synthetic-instance').call({ method: 'status', identity: started.identity }, f.signal))
+        .toMatchObject({ kind: 'status', receipt: { phase: 'ended' } });
+      expect(await f.controller.client.service.call({ method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' }, f.signal))
+        .toMatchObject({ kind: 'provider-auth-status' });
+      expect(f.controller.signal.aborted).toBe(false);
+      expect(f.connection.lease.authoritySignal.aborted).toBe(false);
+      expect(f.failures).toEqual([]);
+      expect(provider.requests).toHaveLength(1);
+    } finally { pressure?.release(); lifetime.abort(); await f.dispose(); provider.close(); }
+  });
+
   test('sustained output ACKs and status RPCs do not allocate whole-socket drain waiters', async () => {
     const provider = model(async () => 'synthetic output');
     const f = await createNodeSessionOutputFixture(certificate);

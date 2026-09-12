@@ -1,6 +1,7 @@
 import { encodeNodeWorkerFrame, NODE_WORKER_FRAME_HEADER_BYTES, NodeWorkerTransportError } from './framing.js';
 
 export type NodeWorkerFramePriority = 'control' | 'urgent' | 'data';
+export type NodeFrameAdmission = 'lifecycle' | 'application' | 'data';
 
 export interface NodeWorkerWritePort {
   /** Settles only after these bytes have left the local stream buffer. */
@@ -15,8 +16,8 @@ export interface NodeWorkerWriterOptions {
   readonly maxQueuedFrames: number;
   readonly reservedControlBytes: number;
   readonly reservedControlFrames: number;
-  readonly reservedUrgentBytes?: number;
-  readonly reservedUrgentFrames?: number;
+  readonly reservedApplicationBytes?: number;
+  readonly reservedApplicationFrames?: number;
   readonly writeTimeoutMs: number;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   failed(error: NodeWorkerTransportError): void;
@@ -35,7 +36,7 @@ export interface NodeFrameSubmission {
 }
 
 export interface NodeFrameWriter {
-  submit(text: string, priority: NodeWorkerFramePriority, authority: NodeWorkerWriteAuthority): NodeFrameSubmission;
+  submit(text: string, priority: NodeWorkerFramePriority, authority: NodeWorkerWriteAuthority, admission: NodeFrameAdmission): NodeFrameSubmission;
 }
 
 export interface NodeWorkerSubmission extends NodeFrameSubmission {
@@ -45,6 +46,7 @@ export interface NodeWorkerSubmission extends NodeFrameSubmission {
 interface PendingFrame {
   readonly bytes: Uint8Array;
   readonly priority: NodeWorkerFramePriority;
+  readonly admission: NodeFrameAdmission;
   readonly result: PromiseWithResolvers<void>;
   readonly authority: NodeWorkerWriteAuthority;
   readonly detach: () => void;
@@ -70,12 +72,12 @@ export class NodeWorkerWriter {
 
   constructor(private readonly port: NodeWorkerWritePort, private readonly options: NodeWorkerWriterOptions) {
     const { maxFrameBytes, maxQueuedBytes, maxQueuedFrames, reservedControlBytes, reservedControlFrames, writeTimeoutMs } = options;
-    const { reservedUrgentBytes = 0, reservedUrgentFrames = 0 } = options;
+    const { reservedApplicationBytes = 0, reservedApplicationFrames = 0 } = options;
     if (![maxFrameBytes, maxQueuedBytes, maxQueuedFrames, reservedControlBytes, reservedControlFrames, writeTimeoutMs]
       .every((value) => Number.isSafeInteger(value) && value > 0)
-      || ![reservedUrgentBytes, reservedUrgentFrames].every((value) => Number.isSafeInteger(value) && value >= 0)
-      || maxFrameBytes > 0xffff_ffff || maxFrameBytes + NODE_WORKER_FRAME_HEADER_BYTES > maxQueuedBytes - reservedControlBytes - reservedUrgentBytes
-      || reservedControlFrames >= maxQueuedFrames - reservedUrgentFrames) throw new TypeError('Invalid worker writer limits');
+      || ![reservedApplicationBytes, reservedApplicationFrames].every((value) => Number.isSafeInteger(value) && value >= 0)
+      || maxFrameBytes > 0xffff_ffff || maxFrameBytes + NODE_WORKER_FRAME_HEADER_BYTES > maxQueuedBytes - reservedControlBytes - reservedApplicationBytes
+      || reservedControlFrames >= maxQueuedFrames - reservedApplicationFrames) throw new TypeError('Invalid worker writer limits');
     this.options = Object.freeze({ ...options });
     const close = () => this.close();
     options.signal.addEventListener('abort', close, { once: true });
@@ -83,11 +85,11 @@ export class NodeWorkerWriter {
     if (options.signal.aborted) this.close();
   }
 
-  async send(text: string, priority: NodeWorkerFramePriority): Promise<void> {
-    return this.submit(text, priority, { signal: this.options.signal, validate() {} }).drained;
+  async send(text: string, priority: NodeWorkerFramePriority, admission: NodeFrameAdmission): Promise<void> {
+    return this.submit(text, priority, { signal: this.options.signal, validate() {} }, admission).drained;
   }
 
-  submit(text: string, priority: NodeWorkerFramePriority, authority: NodeWorkerWriteAuthority): NodeWorkerSubmission {
+  submit(text: string, priority: NodeWorkerFramePriority, authority: NodeWorkerWriteAuthority, admission: NodeFrameAdmission): NodeWorkerSubmission {
     if (this.#failure) throw this.#failure;
     authority.signal.throwIfAborted();
     const size = Buffer.byteLength(text) + NODE_WORKER_FRAME_HEADER_BYTES;
@@ -95,19 +97,19 @@ export class NodeWorkerWriter {
       throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
     }
     if (this.#frames >= this.options.maxQueuedFrames || size > this.options.maxQueuedBytes - this.#bytes
-      || priority !== 'control' && (this.#applicationFrames >= this.options.maxQueuedFrames - this.options.reservedControlFrames
+      || admission !== 'lifecycle' && (this.#applicationFrames >= this.options.maxQueuedFrames - this.options.reservedControlFrames
         || size > this.options.maxQueuedBytes - this.options.reservedControlBytes - this.#applicationBytes)
-      || priority === 'data' && (this.#dataFrames >= this.options.maxQueuedFrames - this.options.reservedControlFrames - (this.options.reservedUrgentFrames ?? 0)
-        || size > this.options.maxQueuedBytes - this.options.reservedControlBytes - (this.options.reservedUrgentBytes ?? 0) - this.#dataBytes)) {
+      || admission === 'data' && (this.#dataFrames >= this.options.maxQueuedFrames - this.options.reservedControlFrames - (this.options.reservedApplicationFrames ?? 0)
+        || size > this.options.maxQueuedBytes - this.options.reservedControlBytes - (this.options.reservedApplicationBytes ?? 0) - this.#dataBytes)) {
       throw new NodeWorkerTransportError('NODE_WORKER_CAPACITY');
     }
     const cancel = () => this.#cancel(frame);
-    const frame: PendingFrame = { bytes: encodeNodeWorkerFrame(text, this.options.maxFrameBytes), priority, result: Promise.withResolvers<void>(),
+    const frame: PendingFrame = { bytes: encodeNodeWorkerFrame(text, this.options.maxFrameBytes), priority, admission, result: Promise.withResolvers<void>(),
       authority, submitted: false, detach: () => authority.signal.removeEventListener('abort', cancel) };
     this.#bytes += size;
     this.#frames += 1;
-    if (priority !== 'control') { this.#applicationBytes += size; this.#applicationFrames += 1; }
-    if (priority === 'data') { this.#dataBytes += size; this.#dataFrames += 1; }
+    if (admission !== 'lifecycle') { this.#applicationBytes += size; this.#applicationFrames += 1; }
+    if (admission === 'data') { this.#dataBytes += size; this.#dataFrames += 1; }
     this.#queue(priority).push(frame);
     authority.signal.addEventListener('abort', cancel, { once: true });
     if (!this.#current) void this.#write();
@@ -196,8 +198,8 @@ export class NodeWorkerWriter {
     const size = frame.bytes.byteLength;
     this.#bytes -= size;
     this.#frames -= 1;
-    if (frame.priority !== 'control') { this.#applicationBytes -= size; this.#applicationFrames -= 1; }
-    if (frame.priority === 'data') { this.#dataBytes -= size; this.#dataFrames -= 1; }
+    if (frame.admission !== 'lifecycle') { this.#applicationBytes -= size; this.#applicationFrames -= 1; }
+    if (frame.admission === 'data') { this.#dataBytes -= size; this.#dataFrames -= 1; }
     frame.bytes.fill(0);
     for (const settle of this.#waiting) settle();
   }

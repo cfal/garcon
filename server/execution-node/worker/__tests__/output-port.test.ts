@@ -108,7 +108,7 @@ test('one outstanding chunk leaves lifecycle frames ahead of the rest of the rec
     first.output.emit(event()); second.output.emit(event('synthetic sibling'));
     await Promise.resolve();
     expect(f.submissions).toHaveLength(1);
-    const pulse = f.writer.send('synthetic pulse', 'control');
+    const pulse = f.writer.send('synthetic pulse', 'control', 'lifecycle');
     f.written[0]!.finished.resolve(); await f.submissions[0]!.drained;
     expect(f.written[1]!.text).toBe('synthetic pulse');
     f.written[1]!.finished.resolve(); await pulse;
@@ -234,9 +234,9 @@ test('refusing a critical retirement notice fails the entire instance port befor
   const pending: Promise<unknown>[] = [];
   try {
     owner.output.emit(event()); sibling.output.emit(permission); await Promise.resolve();
-    const available = NODE_WORKER_WRITER_LIMITS.maxQueuedFrames - NODE_WORKER_WRITER_LIMITS.reservedControlFrames - NODE_WORKER_WRITER_LIMITS.reservedUrgentFrames - 1;
-    for (let i = 0; i < available; i += 1) pending.push(f.writer.send('x', 'data').catch((error: unknown) => error));
-    for (let i = 0; i < 8; i += 1) pending.push(f.writer.send('x', 'urgent').catch((error: unknown) => error));
+    const available = NODE_WORKER_WRITER_LIMITS.maxQueuedFrames - NODE_WORKER_WRITER_LIMITS.reservedControlFrames - NODE_WORKER_WRITER_LIMITS.reservedApplicationFrames - 1;
+    for (let i = 0; i < available; i += 1) pending.push(f.writer.send('x', 'data', 'data').catch((error: unknown) => error));
+    for (let i = 0; i < 8; i += 1) pending.push(f.writer.send('x', 'urgent', 'application').catch((error: unknown) => error));
     owner.cancellation.abort();
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sibling.output.retired).toBe(true); expect(sibling.handles.size).toBe(0);

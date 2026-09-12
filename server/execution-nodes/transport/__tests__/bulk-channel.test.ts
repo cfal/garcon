@@ -317,7 +317,7 @@ test('concurrent bulk senders share real writer headroom without terminating or 
     terminate: mock(() => {}),
   } satisfies NodeSocketPort;
   const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: MAX_NODE_BULK_FRAME_BYTES,
-    maxBufferedBytes: 1024 * 1024, reservedControlBytes: 4096, maxDrainWaiters: 32, drainTimeoutMs: 1_000, schedulePoll: () => ({ cancel() {} }) });
+    maxBufferedBytes: 1024 * 1024, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 32, drainTimeoutMs: 1_000, schedulePoll: () => ({ cancel() {} }) });
   const channel = new NodeBulkChannel(writer, { append() {}, complete() {}, cancel() {} }, { session, signal: physical.signal, validate() {} });
   try {
     const calls = Array.from({ length: 32 }, (_, i) => channel.sendChunk(serializeNodeBulkChunk({ ...session, transferId: `synthetic-transfer-${i}` },
@@ -344,7 +344,7 @@ test.each(['buffer', 'frame', 'protocol backlog'] as const)('fatal %s failure cl
     send: mock(() => true), terminate: mock(() => {}),
   } satisfies NodeSocketPort;
   const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: MAX_NODE_BULK_FRAME_BYTES,
-    maxBufferedBytes: MAX_NODE_BULK_FRAME_BYTES + 4096 + 10, reservedControlBytes: 4096,
+    maxBufferedBytes: MAX_NODE_BULK_FRAME_BYTES + 4096 + 10, reservedControlBytes: 4096, reservedLifecycleBytes: 1024,
     maxDrainWaiters: 2, drainTimeoutMs: 1_000, schedulePoll: () => ({ cancel() {} }),
   });
   const channel = new NodeBulkChannel(writer, { append() {}, complete() {}, cancel() {} }, {
@@ -387,7 +387,7 @@ test.each(['replaced', 'failed'] as const)('a %s bulk grant cannot write after w
   let bufferedBytes = MAX_NODE_BULK_FRAME_BYTES;
   const port = { open: true, get bufferedBytes() { return bufferedBytes; }, bufferedFrameBytes: (length: number) => length + 10, send: mock(() => true), terminate: mock(() => {}) } satisfies NodeSocketPort;
   const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: MAX_NODE_BULK_FRAME_BYTES,
-    maxBufferedBytes: MAX_NODE_BULK_FRAME_BYTES + 4096 + 10, reservedControlBytes: 4096, maxDrainWaiters: 1, drainTimeoutMs: 1_000,
+    maxBufferedBytes: MAX_NODE_BULK_FRAME_BYTES + 4096 + 10, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 1, drainTimeoutMs: 1_000,
     schedulePoll: () => ({ cancel() {} }) });
   const channel = new NodeBulkChannel(writer, { append() {}, complete() {}, cancel() {} }, {
     session, signal: physical.signal, validate() { if (!current) throw new Error('Synthetic replaced channel'); },

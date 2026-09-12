@@ -38,7 +38,7 @@ export const nodeSessionSystemdAvailable = process.platform === 'linux'
   && spawnSync('systemctl', ['--user', 'is-system-running'], { stdio: 'ignore', timeout: 2000 }).status === 0;
 
 const socketLimits = { maxFrameBytes: MAX_NODE_WORKER_LIFECYCLE_BYTES, maxBufferedBytes: 4 * 1024 * 1024,
-  reservedControlBytes: 16 * 1024, maxDrainWaiters: 64, drainTimeoutMs: 5000 };
+  reservedControlBytes: 16 * 1024, reservedLifecycleBytes: 4 * 1024, maxDrainWaiters: 64, drainTimeoutMs: 5000 };
 interface ControllerSocketData {
   readonly authority: AuthenticatedNodeChannel;
   readonly physical: AbortController;
@@ -80,6 +80,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   const nodeFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean | void>();
   const controllerFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean>();
   let outputPressure: { minimumRecordBytes: number; blocked: PromiseWithResolvers<void>; active: boolean } | null = null;
+  let socketBacklog: { bytes: number } | null = null;
   let nodeWriter: NodeSocketWriter | null = null;
   const controllers = new Map<string, PromiseWithResolvers<ControllerFixtureConnection>>();
   const controllerBindings = new Map<string, { binding: NodeBulkSessionBinding; connection: ControllerFixtureConnection;
@@ -218,8 +219,8 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       const port = clientNodeSocketPort(socket);
       const writer = nodeWriter = new NodeSocketWriter({
         get open() { return port.open; },
-        get bufferedBytes() { return outputPressure?.active
-          ? Math.max(port.bufferedBytes, socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes) : port.bufferedBytes; },
+        get bufferedBytes() { return Math.max(port.bufferedBytes, socketBacklog?.bytes ?? 0,
+          outputPressure?.active ? socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes : 0); },
         bufferedFrameBytes: (bytes) => port.bufferedFrameBytes(bytes),
         send: (text) => port.send(text), terminate: () => port.terminate(),
       }, { ...socketLimits, signal: physical.signal });
@@ -290,6 +291,14 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       const pressure = outputPressure = { minimumRecordBytes, blocked: Promise.withResolvers<void>(), active: false };
       return { blocked: pressure.blocked.promise, release() {
         if (outputPressure === pressure) outputPressure = null;
+        nodeWriter?.drain();
+      } };
+    },
+    holdOrdinarySocketAdmission() {
+      if (socketBacklog) throw new Error('Synthetic socket pressure is already active');
+      const captured = socketBacklog = { bytes: socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes };
+      return { release() {
+        if (socketBacklog === captured) socketBacklog = null;
         nodeWriter?.drain();
       } };
     },

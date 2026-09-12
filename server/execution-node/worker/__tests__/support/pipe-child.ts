@@ -9,7 +9,7 @@ const writer = new NodeWorkerWriter(port, { signal: lifeline.signal, maxFrameByt
   maxQueuedBytes: 8192, maxQueuedFrames: 8, reservedControlBytes: 2048, reservedControlFrames: 2,
   writeTimeoutMs: 1000, failed(error) { process.exit(error.code === 'NODE_WORKER_CLOSED' ? 0 : 1); } });
 await import('./pipe-output.js');
-await writer.send('synthetic hello', 'control');
+await writer.send('synthetic hello', 'control', 'lifecycle');
 if (process.argv[2] === 'hold') {
   setInterval(() => {}, 1000);
   await new Promise(() => {});
@@ -17,7 +17,7 @@ if (process.argv[2] === 'hold') {
 try {
   for await (const text of readNodeWorkerFrames(Bun.stdin.stream(), 1024, lifeline.signal)) {
     lifeline.poll();
-    await writer.send(text, 'data');
+    await writer.send(text, 'data', 'data');
   }
   lifeline.close();
 } catch { process.exit(1); }

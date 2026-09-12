@@ -73,7 +73,7 @@ export class NodeSessionClient {
       || 'instanceId' in frame && !this.options.instanceIds.has(frame.instanceId)
       || 'connectionId' in frame && frame.connectionId !== this.options.connectionId) throw protocol();
     this.#validate(); signal.throwIfAborted();
-    return this.writer.send(text);
+    return this.writer.sendApplication(text);
   }
 
   receive(text: string): void {

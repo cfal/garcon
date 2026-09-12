@@ -6,17 +6,17 @@ export const NODE_WORKER_SERVICE_LIMITS = Object.freeze({
 });
 
 const RESERVED_CONTROL_FRAMES = 4;
-const RESERVED_URGENT_FRAMES = 8;
+const RESERVED_APPLICATION_FRAMES = 8;
 
 export const NODE_WORKER_WRITER_LIMITS = Object.freeze({
   maxFrameBytes: MAX_NODE_WORKER_LIFECYCLE_BYTES,
   maxQueuedBytes: 2 * MAX_NODE_WORKER_LIFECYCLE_BYTES,
   // The frame budget covers request/reply bursts plus cancellations; the byte cap may refuse larger payloads first.
   maxQueuedFrames: 2 * (NODE_WORKER_EXECUTION_LIMITS.maxRequests + NODE_WORKER_EXECUTION_LIMITS.reservedControlRequests
-    + NODE_WORKER_SERVICE_LIMITS.maxRequests) + RESERVED_CONTROL_FRAMES + RESERVED_URGENT_FRAMES,
+    + NODE_WORKER_SERVICE_LIMITS.maxRequests) + RESERVED_CONTROL_FRAMES + RESERVED_APPLICATION_FRAMES,
   reservedControlBytes: 4096,
   reservedControlFrames: RESERVED_CONTROL_FRAMES,
-  reservedUrgentBytes: 64 * 1024,
-  reservedUrgentFrames: RESERVED_URGENT_FRAMES,
+  reservedApplicationBytes: 64 * 1024,
+  reservedApplicationFrames: RESERVED_APPLICATION_FRAMES,
   writeTimeoutMs: 5000,
 });

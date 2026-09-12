@@ -59,7 +59,7 @@ export class NodeWorkerSessionServices {
     const validate = () => this.#validate();
     const failed = () => authority.retire();
     this.#upstream = new NodeWorkerRetirementRelay({
-      send: (frame, signal) => writer.submit(serializeNodeWorkerOutputRetirement(frame), 'urgent', { signal, validate }).drained,
+      send: (frame, signal) => writer.submit(serializeNodeWorkerOutputRetirement(frame), 'urgent', { signal, validate }, 'application').drained,
       waitForRelease: (signal) => writer.waitForRelease(signal), failed });
     for (const instanceId of instanceIds) this.#downstream.set(instanceId, new NodeWorkerRetirementRelay({
       send: (frame, signal) => options.child(instanceId).forward(frame, signal).drained,
@@ -236,7 +236,7 @@ export class NodeWorkerSessionServices {
     const connection = authority.connection(frame.connectionId);
     try {
       const submission = this.options.writer.submit(JSON.stringify(frame), 'urgent', { signal: connection.signal,
-        validate: () => authority.assertConnection(connection) });
+        validate: () => authority.assertConnection(connection) }, 'application');
       void submission.drained.catch(() => { if (!connection.signal.aborted) authority.retire(); });
     } catch (error) {
       // Lost bulk replies settle through the caller's bounded timeout; effects are never replayed.
@@ -274,7 +274,7 @@ export class NodeWorkerSessionServices {
     try {
       const text = serializeNodeWorkerOutputSuspension({ type: 'node-worker-output-suspended', version: NODE_WIRE_VERSION,
         session: authority.session, connectionId, generation: token.generation });
-      const submission = writer.submit(text, 'control', { signal: connection.signal, validate: () => authority.assertConnection(connection) });
+      const submission = writer.submit(text, 'control', { signal: connection.signal, validate: () => authority.assertConnection(connection) }, 'lifecycle');
       void submission.drained.catch(() => { if (!connection.signal.aborted) authority.retire(); });
     } catch { if (!connection.signal.aborted) authority.retire(); }
   }

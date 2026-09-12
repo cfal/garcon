@@ -2,14 +2,15 @@ import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeWorkerServiceClient, NodeWorkerServiceServer, type NodeWorkerServiceChannelOptions } from '../service-channel.js';
 import { parseNodeWorkerServiceText, type NodeWorkerServiceCommand, type NodeWorkerServiceFrame, type NodeWorkerServiceResult } from '../service-protocol.js';
-import { NodeWorkerWriter } from '../writer.js';
+import { NodeWorkerWriter, type NodeWorkerWriterOptions } from '../writer.js';
 import { NODE_WORKER_SERVICE_LIMITS, NODE_WORKER_WRITER_LIMITS } from '../limits.js';
 import { session, tick } from './lifecycle-fixture.js';
 
 const command = { method: 'begin-output-recovery' } as const;
 const recovered = { kind: 'output-recovery', generation: 1 } as const;
 
-function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOptions['scheduleTimeout']) {
+function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOptions['scheduleTimeout'],
+  writerLimits: Partial<Pick<NodeWorkerWriterOptions, 'maxQueuedFrames' | 'reservedControlFrames' | 'reservedApplicationFrames'>> = {}) {
   const lifetime = new AbortController();
   const failures = mock((_error: unknown) => {});
   const fail = (error: unknown) => { if (!lifetime.signal.aborted) { failures(error); lifetime.abort(); } };
@@ -26,7 +27,7 @@ function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOpt
     const frame = parseNodeWorkerServiceText(text)!;
     requests.push(frame); beforeReceive?.(); server.receive(frame);
     return hold ? native.promise : Promise.resolve();
-  }, close() { native.resolve(); } }, { ...NODE_WORKER_WRITER_LIMITS, signal: lifetime.signal, failed: fail });
+  }, close() { native.resolve(); } }, { ...NODE_WORKER_WRITER_LIMITS, ...writerLimits, signal: lifetime.signal, failed: fail });
   const serverWriter = new NodeWorkerWriter({ write(bytes) {
     if (replyFailure) return Promise.reject(new Error('Synthetic native reply failure'));
     const frame = parseNodeWorkerServiceText(Buffer.from(bytes.subarray(4)).toString())!;
@@ -40,6 +41,26 @@ function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOpt
     close() { lifetime.abort(); client.close(); server.close(); clientWriter.close(); serverWriter.close(); native.resolve(); },
   };
 }
+
+test('provider status uses reserved frames without overtaking a queued service request', async () => {
+  const f = fixture(16, undefined, { maxQueuedFrames: 4, reservedControlFrames: 1, reservedApplicationFrames: 1 });
+  const instanceId = 'synthetic-instance';
+  f.execute.mockImplementation(async () => ({ kind: 'unknown' }));
+  try {
+    const hold = f.clientWriter.send('synthetic-block', 'data', 'data');
+    const first = f.client.call({ method: 'provider-catalog', instanceId, strict: true }, f.lifetime.signal);
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    const status = f.client.call({ method: 'provider-auth', instanceId, operation: 'status' }, f.lifetime.signal);
+    const pulse = f.clientWriter.send('synthetic-block', 'control', 'lifecycle');
+    expect(f.requests).toEqual([]);
+    f.native.resolve(); await hold; await pulse;
+    expect(await first).toEqual({ kind: 'unknown' });
+    expect(await status).toEqual({ kind: 'unknown' });
+    expect(f.requests.map((frame) => frame.requestId)).toEqual([1, 3]);
+    expect(f.execute.mock.calls.map(([request]) => request.method)).toEqual(['provider-catalog', 'provider-auth']);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
 
 test('provider discovery has a separate request budget and cannot consume control capacity', async () => {
   const f = fixture();
@@ -143,7 +164,7 @@ test('private service requests dispatch once and correlate replies through real 
 test('cancelling a queued request prevents both its native dispatch and an overtaking cancellation', async () => {
   const f = fixture(); const caller = new AbortController();
   try {
-    const blocked = f.clientWriter.send('synthetic-block', 'data');
+    const blocked = f.clientWriter.send('synthetic-block', 'data', 'data');
     const pending = f.client.call(command, caller.signal);
     caller.abort();
     expect(await pending).toEqual({ kind: 'rejected', code: 'NODE_UNAVAILABLE' });
@@ -271,8 +292,8 @@ test('a shared cancellation burst cannot close a healthy channel when urgent cap
   const blocked: Promise<void>[] = [];
   try {
     const calls = Array.from({ length: 16 }, () => f.client.call(command, caller.signal)); await tick();
-    const dataFrames = NODE_WORKER_WRITER_LIMITS.maxQueuedFrames - NODE_WORKER_WRITER_LIMITS.reservedControlFrames - NODE_WORKER_WRITER_LIMITS.reservedUrgentFrames;
-    for (let i = 0; i < dataFrames; i++) blocked.push(f.clientWriter.send('synthetic-block', 'data').catch(() => {}));
+    const dataFrames = NODE_WORKER_WRITER_LIMITS.maxQueuedFrames - NODE_WORKER_WRITER_LIMITS.reservedControlFrames - NODE_WORKER_WRITER_LIMITS.reservedApplicationFrames;
+    for (let i = 0; i < dataFrames; i++) blocked.push(f.clientWriter.send('synthetic-block', 'data', 'data').catch(() => {}));
     caller.abort();
     expect(await Promise.all(calls)).toEqual(Array.from({ length: 16 }, () => ({ kind: 'unknown' })));
     expect(f.failures).not.toHaveBeenCalled();

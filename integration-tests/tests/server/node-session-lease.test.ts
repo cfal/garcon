@@ -39,7 +39,7 @@ test('WSS lease renewals survive six-second round trips and stale replies cannot
   const monitor = new NodeSessionLeaseMonitor({ authoritySignal: connection.authoritySignal, supervisor, schedulePoll,
     failed() { throw new Error('Synthetic lease clock failed'); } });
   const physical = new AbortController();
-  const limits = { maxFrameBytes: 4096, maxBufferedBytes: 16_384, reservedControlBytes: 4096,
+  const limits = { maxFrameBytes: 4096, maxBufferedBytes: 16_384, reservedControlBytes: 4096, reservedLifecycleBytes: 1024,
     maxDrainWaiters: 4, drainTimeoutMs: 10_000, signal: physical.signal };
   let challengeSource!: ReadableStreamDefaultController<string>;
   let renewalSource!: ReadableStreamDefaultController<string>;

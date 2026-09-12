@@ -1,4 +1,7 @@
 import { expect, mock, test } from 'bun:test';
+import { MAX_EXECUTION_IDENTITY_LENGTH } from '../../../../common/execution-location.js';
+import { NODE_CHALLENGE_INTERVAL_MS, NODE_CONTROLLER_LEASE_MS } from '../../../execution-node/supervisor.js';
+import { MAX_NODE_LEASE_FRAME_BYTES, serializeNodeLeaseFrame } from '../lease-wire.js';
 import { NodeSocketWriter, NODE_SOCKET_PROTOCOL_ALLOWANCE_BYTES, type NodeSocketPort } from '../socket-writer.js';
 
 function fixture(maxBufferedBytes = 20) {
@@ -14,7 +17,7 @@ function fixture(maxBufferedBytes = 20) {
     send: mock((serialized: string) => { bufferedBytes += Buffer.byteLength(serialized) + 2; return true; }),
     terminate: mock(() => { open = false; }),
   } satisfies NodeSocketPort;
-  const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 8, maxBufferedBytes, reservedControlBytes: 10,
+  const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 8, maxBufferedBytes, reservedControlBytes: 10, reservedLifecycleBytes: 4,
     maxDrainWaiters: 2, drainTimeoutMs: 100, now: () => now,
     schedulePoll(callback, delayMs) { intervals.push(delayMs); scheduled = callback; return { cancel() { scheduled = null; } }; },
   });
@@ -44,6 +47,76 @@ test('synchronous data refusal preserves the control reserve and never queues a 
   expect(f.port.send).toHaveBeenCalledTimes(2);
   expect(f.port.terminate).not.toHaveBeenCalled();
   f.writer.close();
+});
+
+test('application traffic uses reserved headroom while preserving framed lifecycle capacity', () => {
+  const f = fixture(40);
+  try {
+    f.buffer(30);
+    expect(f.writer.sendData('x')).toBe(false);
+    expect(f.writer.sendApplication('next')).toBe(true);
+    expect(f.port.bufferedBytes).toBe(36);
+    expect(f.writer.sendApplication('x')).toBe(false);
+    expect(f.writer.send('go')).toBe(true);
+    expect(f.port.bufferedBytes).toBe(40);
+    expect(f.port.send.mock.calls).toEqual([['next'], ['go']]);
+    expect(f.port.terminate).not.toHaveBeenCalled();
+  } finally { f.writer.close(); }
+});
+
+test.each(['node-lease-challenge', 'node-lease-renewal'] as const)('the 4 KiB lifecycle reserve fits a legal %s burst with framing', (type) => {
+  const maxBufferedBytes = 64 * 1024;
+  const reservedLifecycleBytes = 4 * 1024;
+  let bufferedBytes = maxBufferedBytes - reservedLifecycleBytes;
+  const port = { open: true, get bufferedBytes() { return bufferedBytes; },
+    bufferedFrameBytes: (length: number) => length + 14,
+    send: mock((text: string) => { bufferedBytes += Buffer.byteLength(text) + 14; return true; }), terminate: mock(() => {}),
+  } satisfies NodeSocketPort;
+  const writer = new NodeSocketWriter(port, { signal: new AbortController().signal,
+    maxFrameBytes: MAX_NODE_LEASE_FRAME_BYTES, maxBufferedBytes, reservedControlBytes: 16 * 1024, reservedLifecycleBytes,
+    maxDrainWaiters: 1, drainTimeoutMs: 100, schedulePoll: () => ({ cancel() {} }) });
+  const identity = 'x'.repeat(MAX_EXECUTION_IDENTITY_LENGTH);
+  const session = { controllerBootId: identity, nodeBootId: identity, logicalSessionId: identity };
+  const burst = Math.ceil(NODE_CONTROLLER_LEASE_MS / NODE_CHALLENGE_INTERVAL_MS);
+  try {
+    expect(writer.sendApplication('x')).toBe(false);
+    for (let index = 0; index < burst; index++) {
+      expect(writer.send(serializeNodeLeaseFrame({ type, version: 1, session,
+        challengeId: String(index).padStart(MAX_EXECUTION_IDENTITY_LENGTH, 'x') }))).toBe(true);
+    }
+    expect(port.send).toHaveBeenCalledTimes(burst);
+    expect(bufferedBytes).toBeLessThanOrEqual(maxBufferedBytes);
+    expect(port.terminate).not.toHaveBeenCalled();
+  } finally { writer.close(); }
+});
+
+test('application writable waiting sends after enough partial drain and retains lifecycle headroom', async () => {
+  const f = fixture(40);
+  try {
+    f.buffer(40);
+    const sent = f.writer.sendApplicationWhenWritable('next', f.physical.signal, () => {});
+    f.buffer(31); f.writer.drain(); await Promise.resolve();
+    expect(f.port.send).not.toHaveBeenCalled();
+    f.buffer(30); f.writer.drain(); await sent;
+    expect(f.port.bufferedBytes).toBe(36);
+    expect(f.writer.sendData('x')).toBe(false);
+    expect(f.writer.send('go')).toBe(true);
+    expect(f.port.send.mock.calls).toEqual([['next'], ['go']]);
+  } finally { f.writer.close(); }
+});
+
+test('cancelling an application writable wait prevents delivery after later drainage', async () => {
+  const f = fixture(40);
+  const caller = new AbortController();
+  try {
+    f.buffer(40);
+    const sent = f.writer.sendApplicationWhenWritable('next', caller.signal, () => {}).catch((error: unknown) => error);
+    caller.abort();
+    expect(await sent).toBe(caller.signal.reason);
+    f.buffer(0); f.writer.drain(); await Promise.resolve();
+    expect(f.port.send).not.toHaveBeenCalled();
+    expect(f.port.terminate).not.toHaveBeenCalled();
+  } finally { f.writer.close(); }
 });
 
 test('drain observes the physical queue without retransmitting accepted frames', async () => {

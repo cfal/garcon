@@ -19,7 +19,7 @@ test('Bun server backpressure drains its captured physical writer without retran
       terminate() { socket.terminate(); },
     } satisfies NodeSocketPort;
     writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 64 * 1024,
-      maxBufferedBytes: 512 * 1024, reservedControlBytes: 4096, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
+      maxBufferedBytes: 512 * 1024, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
     });
     const frame = 'x'.repeat(64 * 1024);
     while (!socket.getBufferedAmount() && sends < 1024) writer.send(frame);
@@ -56,7 +56,7 @@ test('Bun server frame headers participate in exact native-buffer admission', as
     const before = port.bufferedBytes;
     const maxBufferedBytes = before + 65_536;
     writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 65_536,
-      maxBufferedBytes, reservedControlBytes: 4096, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
+      maxBufferedBytes, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
     });
     expect(writer.send(frame)).toBe(false);
     expect(port.bufferedBytes).toBe(before);
@@ -90,7 +90,7 @@ test('Bun client buffering drains through polling when the remote TCP reader res
       terminate() { socket.terminate(); },
     } satisfies NodeSocketPort;
     writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 64 * 1024,
-      maxBufferedBytes: 512 * 1024, reservedControlBytes: 4096, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
+      maxBufferedBytes: 512 * 1024, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
     });
     const frame = 'x'.repeat(64 * 1024);
     while (!socket.bufferedAmount && sends < 1024) writer.send(frame);
@@ -126,7 +126,7 @@ test('Bun client masked headers participate in exact native-buffer admission', a
     const before = port.bufferedBytes;
     const maxBufferedBytes = before + 65_536;
     writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 65_536,
-      maxBufferedBytes, reservedControlBytes: 4096, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
+      maxBufferedBytes, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
     });
     expect(writer.send(frame)).toBe(false);
     expect(port.bufferedBytes).toBe(before);
@@ -156,7 +156,7 @@ for (const side of ['server', 'client'] as const) {
     const port = 'server' in fixture ? serverNodeSocketPort(fixture.socket) : clientNodeSocketPort(fixture.socket);
     const maxBufferedBytes = 512 * 1024;
     const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: 65_536,
-      maxBufferedBytes, reservedControlBytes: 4096, maxDrainWaiters: 1, drainTimeoutMs: 2_000 });
+      maxBufferedBytes, reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 1, drainTimeoutMs: 2_000 });
     try {
       let observedPongBacklog = false;
       for (let attempt = 0; attempt < 32 && !observedPongBacklog; attempt += 1) {
@@ -202,7 +202,7 @@ test('idle Bun client automatic pongs remain bounded without any application sen
   const polls: { callback(): void; delayMs: number; cancelled: boolean }[] = [];
   const maxBufferedBytes = 1024;
   const writer = new NodeSocketWriter(port, { signal: new AbortController().signal, maxFrameBytes: 512,
-    maxBufferedBytes, reservedControlBytes: 128, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
+    maxBufferedBytes, reservedControlBytes: 128, reservedLifecycleBytes: 32, maxDrainWaiters: 1, drainTimeoutMs: 2_000,
     schedulePoll(callback, delayMs) {
       const poll = { callback, delayMs, cancelled: false };
       polls.push(poll);

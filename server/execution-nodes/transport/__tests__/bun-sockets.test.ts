@@ -9,7 +9,7 @@ test.each([WebSocket.CLOSING, WebSocket.CLOSED])('a client closing during send c
     send: mock(() => { readyState = closing; }), terminate: mock(() => {}),
   } satisfies Pick<NodeClientSocket, 'readyState' | 'bufferedAmount' | 'send' | 'terminate'>;
   const writer = new NodeSocketWriter(clientNodeSocketPort(socket), {
-    signal: new AbortController().signal, maxFrameBytes: 1024, maxBufferedBytes: 2048, reservedControlBytes: 512,
+    signal: new AbortController().signal, maxFrameBytes: 1024, maxBufferedBytes: 2048, reservedControlBytes: 512, reservedLifecycleBytes: 128,
     maxDrainWaiters: 1, drainTimeoutMs: 1_000,
   });
   expect(() => writer.send('synthetic frame')).toThrow('unavailable');

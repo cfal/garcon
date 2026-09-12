@@ -95,7 +95,7 @@ export class NodeWorkerPeer {
       void this.#sendControl('node-worker-pulse', this.#connectionId).catch(() => this.#fail());
     }, NODE_WORKER_PULSE_INTERVAL_MS);
     this.#pulse.unref();
-    try { await this.#writer.send(text, 'control'); }
+    try { await this.#writer.send(text, 'control', 'lifecycle'); }
     catch { this.#fail(); }
     return this.#ready.promise;
   }
@@ -147,7 +147,7 @@ export class NodeWorkerPeer {
     const bulk = frame.type === 'node-worker-bulk' ? parseNodeBulkFrameText(frame.payload)! : null;
     // Relay completion stays behind chunks even when the upstream hop has already drained them.
     const priority = bulk?.type === 'node-bulk-chunk' || bulk?.type === 'node-bulk-complete' ? 'data' : 'urgent';
-    const submission = this.#writer.submit(text, priority, { signal, validate });
+    const submission = this.#writer.submit(text, priority, { signal, validate }, priority === 'data' ? 'data' : 'application');
     void submission.drained.catch(() => { if (!signal.aborted) this.#fail(); });
     return submission;
   }
@@ -243,7 +243,7 @@ export class NodeWorkerPeer {
         this.#service = null;
       }
     }
-    try { await this.#writer.send(text, 'control'); }
+    try { await this.#writer.send(text, 'control', 'lifecycle'); }
     catch (error) { this.#fail(); throw error; }
     this.#validate();
   }

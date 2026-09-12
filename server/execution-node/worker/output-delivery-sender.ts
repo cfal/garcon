@@ -40,7 +40,7 @@ export class NodeWorkerOutputDeliverySender {
         validate();
         const text = serializeNodeWorkerOutputDelivery({ type: 'node-worker-output-delivery', version: NODE_WIRE_VERSION,
           session: this.#session, connectionId: this.options.connectionId, generation: attempt.generation, payload });
-        await this.writer.submit(text, 'data', { signal, validate }).drained;
+        await this.writer.submit(text, 'data', { signal, validate }, 'data').drained;
       }
     } finally { bytes?.fill(0); completed.abort(); }
   }

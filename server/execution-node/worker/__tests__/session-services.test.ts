@@ -105,7 +105,7 @@ function fixture() {
     return () => { if (direction === 'inbound') inboundGate = null; else outboundGate = null; gate.resolve(); };
   };
   const retire = (frame: NodeWorkerOutputRetirement) => inbound.submit(serializeNodeWorkerOutputRetirement(frame), 'urgent',
-    { signal: lifetime.signal, validate() {} }).drained;
+    { signal: lifetime.signal, validate() {} }, 'application').drained;
   return { authority, services, router, call, output, childExecute, forwards, released, failed, emit, recovery, hold, retire, outbound, lifetime,
     observeOutput(observer: (frame: NodeWorkerApplicationFrame, text: string) => void) { observers.add(observer); },
     close() { lifetime.abort(); services.close(); router.close(); parent.close(); for (const writer of allWriters) writer.close(); } };
@@ -373,7 +373,7 @@ test('bulk reply and cancellation saturation preserves the session and permits l
     const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId: first,
       stream: { ...stream, streamId: 'synthetic-filler' } });
     for (let i = 0; i < 120; i += 1) drains.push(f.outbound.submit(filler, i < 112 ? 'data' : 'urgent',
-      { signal: f.lifetime.signal, validate() {} }).drained.catch((error: unknown) => error));
+      { signal: f.lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
     const frame = { type: 'node-worker-bulk', version: 1, instanceId: first, session, connectionId: 1,
       payload: serializeNodeBulkFrame({ type: 'node-bulk-result', command: 'node-bulk-complete', version: 1, session, requestId: 1, result: 'completed' }) } as const;
     expect(() => f.services.receiveChild(first, frame, JSON.stringify(frame))).not.toThrow();
@@ -435,7 +435,7 @@ test('delivery saturation signals recovery through lifecycle capacity while pres
     const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId: first,
       stream: { ...stream, streamId: 'synthetic-filler' } });
     for (let i = 0; i < 120; i += 1) drains.push(f.outbound.submit(filler, i < 112 ? 'data' : 'urgent',
-      { signal: f.lifetime.signal, validate() {} }).drained.catch((error: unknown) => error));
+      { signal: f.lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
     f.emit(); f.emit(first, sibling); await tick();
     expect(f.authority.signal.aborted).toBe(false);
     f.emit(first, stream, 2, 'synthetic output while suspended');
@@ -492,7 +492,7 @@ test('the coordinator gates saturated output and automatically replays both stre
     const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId: first,
       stream: { ...stream, streamId: 'synthetic-filler' } });
     for (let i = 0; i < 120; i++) drains.push(f.outbound.submit(filler, i < 112 ? 'data' : 'urgent',
-      { signal: f.lifetime.signal, validate() {} }).drained.catch((error: unknown) => error));
+      { signal: f.lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
     f.emit(); f.emit(first, sibling); await tick();
     f.emit(first, stream, 2, 'synthetic output emitted during suspension');
     release(); await Promise.all(drains); await done.promise;

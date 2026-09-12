@@ -42,7 +42,7 @@ function socket(signal: AbortSignal, receive: (text: string) => void, disconnect
     terminate() { open = false; disconnect(); },
   } satisfies NodeSocketPort;
   const writer = new NodeSocketWriter(port, { signal, maxFrameBytes: 4096, maxBufferedBytes: 16_384,
-    reservedControlBytes: 4096, maxDrainWaiters: 2, drainTimeoutMs: 100, now: () => now,
+    reservedControlBytes: 4096, reservedLifecycleBytes: 1024, maxDrainWaiters: 2, drainTimeoutMs: 100, now: () => now,
     schedulePoll() { return { cancel() {} }; },
   });
   const drained = spyOn(writer, 'drained');
@@ -92,6 +92,23 @@ test('ACKs and both RPC families tolerate a progressing never-empty socket witho
     expect(f.physical.signal.aborted).toBe(false);
     f.outgoing.stall();
     expect(f.physical.signal.aborted).toBe(true);
+  } finally { f.close(); }
+});
+
+test('socket reconciliation, status and ACKs use application reserve without admitting ordinary work', async () => {
+  const f = fixture();
+  f.executeService.mockImplementation(async () => ({ kind: 'unknown' }));
+  try {
+    f.outgoing.progress(16_384 - 4096); f.returning.progress(16_384 - 4096);
+    expect(await f.client.service.call(command, f.physical.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    expect(await f.client.execution(instanceId).call(status, f.physical.signal)).toEqual({ kind: 'status', receipt: null });
+    expect(await f.client.service.call({ method: 'provider-auth', instanceId, operation: 'status' }, f.physical.signal))
+      .toEqual({ kind: 'unknown' });
+    expect(f.executeService).toHaveBeenCalledTimes(1);
+    expect(f.client.admitOutputAck(ack(1), f.physical.signal)).toBe(true);
+    expect(f.outgoing.drained).not.toHaveBeenCalled();
+    expect(f.returning.drained).not.toHaveBeenCalled();
+    expect(f.physical.signal.aborted).toBe(false);
   } finally { f.close(); }
 });
 

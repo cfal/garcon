@@ -150,7 +150,7 @@ export class NodeWorkerOutputPort {
             this.#validateOwner(record.owner);
             if (this.#closed) break;
             await this.writer.submit(text, 'data', { signal: record.owner.cancellation.signal,
-              validate: () => { this.prune(); this.#validateOwner(record.owner); } }).drained;
+              validate: () => { this.prune(); this.#validateOwner(record.owner); } }, 'data').drained;
           }
         } catch (error) {
           if (!record.owner.cancellation.signal.aborted && !this.#closed) {
@@ -191,7 +191,7 @@ export class NodeWorkerOutputPort {
         this.#retirements.delete(stream);
         const text = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
           instanceId: this.options.instanceId, stream });
-        await this.writer.submit(text, 'urgent', { signal: this.options.signal, validate: () => { this.#validate(); } }).drained;
+        await this.writer.submit(text, 'urgent', { signal: this.options.signal, validate: () => { this.#validate(); } }, 'application').drained;
       }
     } catch (error) { this.#failPipe(error); }
   }

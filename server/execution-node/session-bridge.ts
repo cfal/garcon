@@ -129,12 +129,14 @@ export class NodeSessionBridge {
         return NODE_SESSION_OUTPUT_ADMISSION_MS - elapsed;
       };
       const remaining = validateDelivery();
-      if (frame.type === 'node-worker-output-delivery' ? this.writer.sendData(text) : this.writer.send(text)) return;
+      if (frame.type === 'node-worker-output-delivery' ? this.writer.sendData(text) : this.writer.sendApplication(text)) return;
       const timeout = new AbortController();
       const timer = (this.options.scheduleOutputTimeout ?? scheduleTimeout)(
         () => timeout.abort(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT')), remaining);
       try {
-        await this.writer.sendWhenWritable(text, AbortSignal.any([this.#closing.signal, timeout.signal]), validateDelivery);
+        const lifetime = AbortSignal.any([this.#closing.signal, timeout.signal]);
+        if (frame.type === 'node-worker-output-delivery') await this.writer.sendWhenWritable(text, lifetime, validateDelivery);
+        else await this.writer.sendApplicationWhenWritable(text, lifetime, validateDelivery);
       } finally { timer.cancel(); }
     } catch (error) { this.#close(error); }
   }
@@ -189,7 +191,7 @@ export class NodeSessionBridge {
       if (result.generation <= this.#lastGeneration || result.generation < this.#suspendedGeneration) throw protocol();
       this.#lastGeneration = result.generation;
       recovery.generation = result.generation;
-      await this.options.retirements.replay((frame, active) => this.writer.sendWhenWritable(JSON.stringify(frame), active, () => this.#validate()), lifetime);
+      await this.options.retirements.replay((frame, active) => this.writer.sendApplicationWhenWritable(JSON.stringify(frame), active, () => this.#validate()), lifetime);
       this.#validate(); lifetime.throwIfAborted();
       return this.#recovery === recovery ? result : unavailable();
     } catch (error) {
@@ -204,7 +206,7 @@ export class NodeSessionBridge {
     const { connection, coordinator } = this.options;
     const server = new NodeExecutionServer({
       send: (payload) => {
-        const accepted = this.writer.sendData(serializeNodeWorkerExecution({ type: 'node-worker-execution', version: NODE_WIRE_VERSION,
+        const accepted = this.writer.sendApplication(serializeNodeWorkerExecution({ type: 'node-worker-execution', version: NODE_WIRE_VERSION,
           session: connection.lease.session, connectionId: connection.connectionId, instanceId, payload }));
         if (!accepted) this.close();
         return accepted;

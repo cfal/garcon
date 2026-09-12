@@ -26,7 +26,7 @@ export async function runNodeWorkerMain(role: NodeWorkerRole): Promise<never> {
   };
   const lifeline = new NodeWorkerLifeline({ retired: stop });
   const writer = new NodeWorkerWriter(port, { ...NODE_WORKER_WRITER_LIMITS, signal: lifeline.signal, failed: stop });
-  bootstrap = new NodeWorkerBootstrap({ role, lifeline, send: (text) => writer.send(text, 'control'), failed: stop,
+  bootstrap = new NodeWorkerBootstrap({ role, lifeline, send: (text) => writer.send(text, 'control', 'lifecycle'), failed: stop,
     async start(context) {
       lifeline.poll();
       if (role === 'session') {
@@ -37,7 +37,7 @@ export async function runNodeWorkerMain(role: NodeWorkerRole): Promise<never> {
       return startNodeInstanceRuntime(context, writer);
     } });
   try {
-    await writer.send(serializeNodeWorkerChild({ type: 'node-worker-hello', version: NODE_WIRE_VERSION, role, pid: process.pid }), 'control');
+    await writer.send(serializeNodeWorkerChild({ type: 'node-worker-hello', version: NODE_WIRE_VERSION, role, pid: process.pid }), 'control', 'lifecycle');
     for await (const text of readNodeWorkerFrames(Bun.stdin.stream(), MAX_NODE_WORKER_LIFECYCLE_BYTES, lifeline.signal)) bootstrap.receive(text);
     stop(new NodeWorkerTransportError('NODE_WORKER_CLOSED'));
   } catch { stop(new NodeWorkerTransportError('NODE_WORKER_PROTOCOL')); }
