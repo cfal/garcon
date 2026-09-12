@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { chmodSync, mkdirSync, statSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, renameSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { issueFixture, caller } from './fixture.js';
 import { IssueStore, configureIssueDatabase } from '../store.js';
@@ -20,20 +20,58 @@ test('verifies requested durability settings and refuses a VFS that cannot provi
   finally { memory.close(); }
 });
 
-test('does not alter the journal or contents of an unrecognized SQLite database', () => {
+test.each([0, 1])('does not alter the journal or contents of an unrecognized SQLite database at version %s', (version) => {
   const directory = join(fixture.directory, 'foreign');
   mkdirSync(directory);
   const path = join(directory, 'issues.sqlite');
   const original = new Database(path);
   original.exec("CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES ('Synthetic data');");
+  original.exec(`PRAGMA user_version=${version}`);
   original.close();
   expect(() => new IssueStore(directory)).toThrow(expect.objectContaining({ code: 'ISSUE_STORAGE_UNAVAILABLE' }));
   const reopened = new Database(path);
   try {
     expect(reopened.query('PRAGMA journal_mode').get().journal_mode).toBe('delete');
-    expect(reopened.query('PRAGMA user_version').get().user_version).toBe(0);
+    expect(reopened.query('PRAGMA user_version').get().user_version).toBe(version);
     expect(reopened.query('SELECT value FROM unrelated').get().value).toBe('Synthetic data');
   } finally { reopened.close(); }
+});
+
+test('fences a regular-file replacement between SQLite open and pathname validation before journal changes', () => {
+  const directory = join(fixture.directory, 'replacement');
+  mkdirSync(directory);
+  const path = join(directory, 'issues.sqlite');
+  const replacedPath = join(directory, 'original.sqlite');
+  expect(() => new IssueStore(directory, { afterDatabaseOpen() {
+    renameSync(path, replacedPath);
+    const replacement = new Database(path);
+    replacement.exec("CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES ('Synthetic replacement');");
+    replacement.close();
+  } })).toThrow(expect.objectContaining({ code: 'ISSUE_STORAGE_UNAVAILABLE' }));
+  for (const candidate of [path, replacedPath]) {
+    const database = new Database(candidate);
+    try {
+      expect(database.query('PRAGMA journal_mode').get().journal_mode).toBe('delete');
+      expect(database.query("SELECT count(*) AS count FROM sqlite_schema WHERE name='issue_meta'").get().count).toBe(0);
+    } finally { database.close(); }
+  }
+});
+
+test('rejects an incomplete issue schema and invalid sentinel before persistent journal conversion', () => {
+  for (const fault of ['schema', 'sentinel']) {
+    const directory = join(fixture.directory, fault);
+    mkdirSync(directory);
+    new IssueStore(directory).close();
+    const path = join(directory, 'issues.sqlite');
+    const damaged = new Database(path);
+    damaged.exec('PRAGMA journal_mode=DELETE');
+    damaged.exec(fault === 'schema' ? 'DROP TABLE issue_activity' : "UPDATE issue_meta SET store_id='invalid'");
+    damaged.close();
+    expect(() => new IssueStore(directory)).toThrow(expect.objectContaining({ code: 'ISSUE_STORAGE_UNAVAILABLE' }));
+    const reopened = new Database(path);
+    try { expect(reopened.query('PRAGMA journal_mode').get().journal_mode).toBe('delete'); }
+    finally { reopened.close(); }
+  }
 });
 
 test.each(['missing', 'extra'])('fences a %s normalized label without repairing canonical records', (kind) => {

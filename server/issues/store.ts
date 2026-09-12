@@ -10,7 +10,7 @@ import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('issue-store');
 
-function secureFile(path: string, mode: 'create' | 'required' | 'optional'): void {
+function secureFile(path: string, mode: 'create' | 'required' | 'optional'): number | null {
   let fd: number;
   try {
     const flags = constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -18,19 +18,29 @@ function secureFile(path: string, mode: 'create' | 'required' | 'optional'): voi
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (mode === 'create' && code === 'EEXIST') return secureFile(path, 'required');
-    if (mode === 'optional' && code === 'ENOENT') return;
+    if (mode === 'optional' && code === 'ENOENT') return null;
     throw error;
   }
   try {
     if (!fstatSync(fd).isFile()) throw issueStorageUnavailable();
     fchmodSync(fd, 0o600);
-  } finally {
+    return fd;
+  } catch (error) {
     closeSync(fd);
+    throw error;
+  }
+}
+
+function secureSidecars(path: string): void {
+  for (const suffix of ['-wal', '-shm']) {
+    const fd = secureFile(`${path}${suffix}`, 'optional');
+    if (fd !== null) closeSync(fd);
   }
 }
 
 export interface IssueStoreOptions {
   readonly beforeCommit?: () => void;
+  readonly afterDatabaseOpen?: () => void;
 }
 
 export class IssueStore {
@@ -39,13 +49,23 @@ export class IssueStore {
 
   constructor(workspaceDir: string, private readonly options: IssueStoreOptions = {}) {
     const path = join(workspaceDir, 'issues.sqlite');
+    let securedFile: number | null = null;
     try {
-      secureFile(path, 'create');
-      secureFile(`${path}-wal`, 'optional');
-      secureFile(`${path}-shm`, 'optional');
+      securedFile = secureFile(path, 'create');
+      if (securedFile === null) throw issueStorageUnavailable();
+      const originalFile = fstatSync(securedFile);
+      secureSidecars(path);
       const database = new Database(path, { strict: true, readwrite: true, create: false });
       this.#database = database;
-      secureFile(path, 'required');
+      options.afterDatabaseOpen?.();
+      const openedFile = secureFile(path, 'required');
+      if (openedFile === null) throw issueStorageUnavailable();
+      try {
+        const currentFile = fstatSync(openedFile);
+        if (currentFile.dev !== originalFile.dev || currentFile.ino !== originalFile.ino) {
+          throw issueStorageUnavailable();
+        }
+      } finally { closeSync(openedFile); }
       const version = database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version;
       if (version === 0) {
         const existing = database.query<{ count: number }, []>(
@@ -54,6 +74,10 @@ export class IssueStore {
         if (existing?.count !== 0) throw issueStorageUnavailable();
       } else if (version !== 1) {
         throw issueStorageUnavailable();
+      } else {
+        requireIssueSchema(database);
+        readStoreId(database);
+        requireConsistentLabels(database);
       }
       configureIssueDatabase(database);
       if (version === 0) {
@@ -62,18 +86,14 @@ export class IssueStore {
           database.query('INSERT INTO issue_meta VALUES (1, ?, 0)').run(crypto.randomUUID());
         }).immediate();
       }
-      const meta = database.query<{ store_id: string; revision: number }, []>(
-        'SELECT store_id, revision FROM issue_meta WHERE singleton=1',
-      ).get();
-      this.storeId = issueUuid(meta?.store_id, 'storeId');
-      issueInteger(meta?.revision, 'collectionRevision', 0);
-      requireConsistentLabels(database);
-      secureFile(`${path}-wal`, 'optional');
-      secureFile(`${path}-shm`, 'optional');
+      this.storeId = readStoreId(database);
+      secureSidecars(path);
     } catch (error) {
       logger.warn('Issue storage open failed.', { errorCode: diagnosticErrorCode(error) });
       this.close();
       throw issueStorageUnavailable();
+    } finally {
+      if (securedFile !== null) closeSync(securedFile);
     }
   }
 
@@ -103,6 +123,25 @@ export class IssueStore {
     try { database?.close(); }
     catch { /* A failed connection stays fenced even if close also fails. */ }
   }
+}
+
+function readStoreId(database: Database): string {
+  const meta = database.query<{ store_id: string; revision: number }, []>(
+    'SELECT store_id, revision FROM issue_meta WHERE singleton=1',
+  ).get();
+  issueInteger(meta?.revision, 'collectionRevision', 0);
+  return issueUuid(meta?.store_id, 'storeId');
+}
+
+function requireIssueSchema(database: Database): void {
+  const expected = ISSUE_SCHEMA.split(';').map((statement) => statement.trim())
+    .filter((statement) => statement.startsWith('CREATE ')).sort();
+  const actual = database.query<{ sql: string }, []>(
+    "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+  ).all().map((row) => row.sql?.trim()).sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Unrecognized issue schema.');
+  const integrity = database.query<{ quick_check: string }, []>('PRAGMA quick_check(1)').get();
+  if (integrity?.quick_check !== 'ok') throw new Error('Invalid issue database integrity.');
 }
 
 export function configureIssueDatabase(database: Database): void {
