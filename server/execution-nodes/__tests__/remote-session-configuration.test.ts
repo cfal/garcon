@@ -22,7 +22,7 @@ function fixture() {
   const request: ProviderSessionConfigurationRequest = {
     executionLocation: { nodeId: 'synthetic-node', instanceId, workspaceId: 'synthetic-workspace' },
     expected: { chatId: '1789000000000001', agentSessionId: 'synthetic-native', nativeSession: null, projectPath: '/synthetic/project' },
-    previous: snapshot, next: { ...snapshot, permissionMode: 'manualBypass' },
+    permissionModeIntent: 'apply', previous: snapshot, next: { ...snapshot, permissionMode: 'manualBypass' },
   };
   const prepare = async () => {
     const result = await service.prepareApply(request, signal);
@@ -76,11 +76,13 @@ test('captures the sender source and request values before asynchronous delivery
     expect(command).toMatchObject({ operation: 'prepare', stream: original });
     if (command.method !== 'provider-session-configuration' || command.operation !== 'prepare') throw new Error('Unexpected request');
     expect(command.request.expected.agentSessionId).toBe('synthetic-native');
+    expect(command.request.permissionModeIntent).toBe('apply');
     return { kind: 'provider-session-configuration-prepared', instanceId: f.instanceId, preparation: { kind: 'prepared', identity: f.identity } };
   });
   const pending = f.service.prepareApply(f.request, f.signal);
   f.stream.streamId = 'synthetic-replacement';
   Object.assign(f.request.expected, { agentSessionId: 'synthetic-replacement' });
+  Object.assign(f.request, { permissionModeIntent: 'preserve' });
   deliver.resolve();
   expect((await pending).kind).toBe('prepared');
   expect(f.captureSource).toHaveBeenCalledTimes(1);

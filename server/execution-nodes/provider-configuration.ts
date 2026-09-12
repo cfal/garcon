@@ -4,7 +4,7 @@ import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { ExecutionLocation } from '../../common/execution-location.js';
 import type { AgentAdmittedEndpoint, AgentPreparedProviderConfiguration, AgentSessionConfiguration,
-  AgentSessionConfigurationIdentity, AgentSessionConfigurationCommitResult, AgentSessionConfigurationRejection } from '@garcon/server-agent-interface';
+  AgentSessionConfigurationPrepareRequest, AgentSessionConfigurationCommitResult, AgentSessionConfigurationRejection } from '@garcon/server-agent-interface';
 
 export interface ProviderConfigurationRequest {
   readonly model: string;
@@ -29,11 +29,8 @@ export interface ProviderConfigurationUpdate {
   readonly next: AgentSessionConfiguration;
 }
 
-export interface ProviderSessionConfigurationRequest {
+export interface ProviderSessionConfigurationRequest extends Omit<AgentSessionConfigurationPrepareRequest, 'signal'> {
   readonly executionLocation: ExecutionLocation;
-  readonly expected: AgentSessionConfigurationIdentity;
-  readonly previous: AgentSessionConfiguration;
-  readonly next: AgentSessionConfiguration;
 }
 
 declare const providerSessionConfigurationOperation: unique symbol;

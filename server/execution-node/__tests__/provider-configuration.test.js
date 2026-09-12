@@ -167,8 +167,9 @@ describe('instance-owned provider configuration', () => {
     const prepared = await first.service.prepareApply(input, new AbortController().signal);
     expect(prepared.kind).toBe('prepared');
     input.next.settings.values.profile = 'caller-mutated';
+    input.permissionModeIntent = 'apply';
     expect(facet.prepare.mock.calls[0][0]).toEqual({ expected: expected.expected, previous: expected.previous, next: expected.next,
-      signal: expect.any(AbortSignal) });
+      permissionModeIntent: expected.permissionModeIntent, signal: expect.any(AbortSignal) });
     expect(facet.commit).not.toHaveBeenCalled();
     first.integration.sessionConfiguration = configurationFacet();
     let settled = false;
@@ -292,6 +293,6 @@ async function applicationRequest(instance) {
     executionLocation: { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' },
     expected: { chatId: 'chat-1', agentSessionId: 'shared-session', nativeSession: null, projectPath: '/synthetic-project' },
     previous,
-    next: { ...structuredClone(previous), model: 'changed-model' },
+    permissionModeIntent: 'preserve', next: { ...structuredClone(previous), model: 'changed-model' },
   };
 }

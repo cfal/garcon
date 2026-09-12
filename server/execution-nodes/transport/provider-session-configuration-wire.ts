@@ -57,7 +57,8 @@ export function parseNodeSessionConfigurationCommand(value: unknown): NodeSessio
 }
 
 export function parseNodeSessionConfigurationRequest(value: unknown): ProviderSessionConfigurationRequest | null {
-  if (!bounded(value) || !exactNodeFields(value, ['executionLocation', 'expected', 'previous', 'next'])
+  if (!bounded(value) || !exactNodeFields(value, ['executionLocation', 'expected', 'previous', 'next', 'permissionModeIntent'])
+    || value.permissionModeIntent !== 'preserve' && value.permissionModeIntent !== 'apply'
     || !exactNodeFields(value.expected, ['chatId', 'agentSessionId', 'projectPath', 'nativeSession'])
     || !isExecutionIdentity(value.expected.agentSessionId)
     || !isStoredProjectPath(value.expected.projectPath)) return null;
@@ -68,8 +69,17 @@ export function parseNodeSessionConfigurationRequest(value: unknown): ProviderSe
     const chatId = parseChatId(value.expected.chatId);
     const { nativeSession } = snapshotEstablishedSession({ agentSessionId: value.expected.agentSessionId,
       nativeSession: value.expected.nativeSession, nativeSeedReceipt: null });
-    return { executionLocation, expected: { chatId, agentSessionId: value.expected.agentSessionId,
-      projectPath: value.expected.projectPath, nativeSession }, ...configuration };
+    return {
+      executionLocation,
+      permissionModeIntent: value.permissionModeIntent,
+      expected: {
+        chatId,
+        agentSessionId: value.expected.agentSessionId,
+        projectPath: value.expected.projectPath,
+        nativeSession,
+      },
+      ...configuration,
+    };
   } catch { return null; }
 }
 

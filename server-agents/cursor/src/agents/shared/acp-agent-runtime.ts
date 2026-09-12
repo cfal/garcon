@@ -172,7 +172,7 @@ export class AcpAgentRuntime {
   readonly sessionConfiguration = new SessionConfigurationPreparations((request) => this.#captureConfiguration(request));
 
   #captureConfiguration(request: AgentSessionConfigurationPrepareRequest) {
-    const { expected, previous, next } = request;
+    const { expected, next } = request;
     const session = this.#sessions.get(expected.agentSessionId);
     if (!session) return null;
     const conflict = { kind: 'rejected', reason: 'target-conflict' } as const;
@@ -189,7 +189,9 @@ export class AcpAgentRuntime {
         && session.configurationEpoch === epoch && session.client === client && session.remoteSessionId === remoteSessionId
         && session.chatId === expected.chatId && session.projectPath === expected.projectPath,
       async deliver(beforeMutation: () => void) {
-        if (previous.permissionMode === next.permissionMode || !session.activeTurn?.running) {
+        if (request.permissionModeIntent !== 'apply'
+          || session.sourceTurn?.permissionMode === next.permissionMode
+          || !session.activeTurn?.running) {
           return 'not-required' as const;
         }
         beforeMutation();

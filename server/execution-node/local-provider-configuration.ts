@@ -80,7 +80,13 @@ export class LocalProviderConfigurationService implements ProviderConfigurationR
     if (!facet) return { kind: 'unsupported' };
     const request = structuredClone(input);
     assertNativeChatOwner(this.integration, { agentId: this.integration.descriptor.id, nativeSession: request.expected.nativeSession });
-    const result = await facet.prepare({ expected: request.expected, previous: request.previous, next: request.next, signal });
+    const result = await facet.prepare({
+      expected: request.expected,
+      previous: request.previous,
+      next: request.next,
+      permissionModeIntent: request.permissionModeIntent,
+      signal,
+    });
     if (result.kind !== 'prepared') return result;
     const operation = Object.freeze({}) as ProviderSessionConfigurationOperation;
     this.#pending.set(operation, { facet, target: result.target, signal });

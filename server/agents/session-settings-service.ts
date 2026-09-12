@@ -79,6 +79,7 @@ export class AgentSessionSettingsService {
             },
             next: configuration.next,
             previous: configuration.previous,
+            permissionModeIntent: patch.permissionMode === undefined ? 'preserve' : 'apply',
           }, controller.signal).catch(configurationPreparationFailed);
           if (prepared.kind === 'prepared') operation = prepared.operation;
           if (prepared.kind === 'rejected') throw configurationTargetChanged();

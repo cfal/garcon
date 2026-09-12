@@ -66,6 +66,8 @@ export interface AgentSessionConfigurationPrepareRequest {
   readonly expected: AgentSessionConfigurationIdentity;
   readonly previous: AgentSessionConfiguration;
   readonly next: AgentSessionConfiguration;
+  /** Distinguishes an explicit reselection from an omitted permission patch. */
+  readonly permissionModeIntent: 'preserve' | 'apply';
   readonly signal: AbortSignal;
 }
 

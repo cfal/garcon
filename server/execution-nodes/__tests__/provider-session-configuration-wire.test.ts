@@ -10,13 +10,14 @@ const snapshot = { model: 'synthetic-model', permissionMode: 'default', thinking
   settings: { ownerId: 'synthetic', schemaVersion: 1, values: {} }, endpoint: null };
 const request = { executionLocation: { nodeId: 'synthetic-node', instanceId, workspaceId: 'synthetic-workspace' },
   expected: { chatId: '1789000000000001', agentSessionId: 'synthetic-native', nativeSession: null, projectPath: '/synthetic/project' },
-  previous: snapshot, next: { ...snapshot, permissionMode: 'manualBypass' } };
+  permissionModeIntent: 'apply', previous: snapshot, next: { ...snapshot, permissionMode: 'manualBypass' } };
 const envelope = { version: NODE_WIRE_VERSION, session, requestId: 1, connectionId: 1 };
 const stream = { ...session, streamId: 'synthetic-source' };
 const command = { method: 'provider-session-configuration', instanceId, operation: 'prepare', stream, request };
 
 test('configuration commands and body-free receipts round-trip through the worker envelope', () => {
-  for (const value of [command, { ...command, stream: null }, ...['commit', 'status', 'cancel'].map(operation => ({ method: command.method, instanceId, operation, identity }))]) {
+  for (const value of [command, { ...command, request: { ...request, permissionModeIntent: 'preserve' } },
+    { ...command, stream: null }, ...['commit', 'status', 'cancel'].map(operation => ({ method: command.method, instanceId, operation, identity }))]) {
     expect(parseNodeSessionConfigurationCommand(value)).toEqual(value);
     expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', command: value })))
       .toMatchObject({ command: value });
@@ -37,6 +38,7 @@ test('rejects foreign authority, malformed identities, credentials and oversized
   for (const invalid of [
     { ...command, unexpected: true }, { ...command, instanceId: 'foreign' },
     { ...command, stream: undefined }, { ...command, stream: { ...stream, streamId: '' } },
+    ...[undefined, null, true, 'inherit'].map(permissionModeIntent => ({ ...command, request: { ...request, permissionModeIntent } })),
     { ...command, request: { ...request, expected: { ...request.expected, chatId: 'invalid' } } },
     { ...command, request: { ...request, expected: { ...request.expected, nativeSession: { ownerId: 'synthetic', schemaVersion: 'invalid', value: {} } } } },
     { ...command, request: { ...request, next: { ...snapshot, endpoint: { credential: 'synthetic-secret' } } } },

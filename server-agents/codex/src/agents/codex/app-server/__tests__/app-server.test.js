@@ -2150,7 +2150,7 @@ describe('CodexAppServerRuntime', () => {
       settings: { ownerId: 'codex', schemaVersion: 1, values: {} } };
     return { expected: { chatId: 'chat-1', projectPath: '/repo', agentSessionId: started.agentSessionId,
       nativeSession: createPathNativeSessionCodec('codex').encode({ agentSessionId: started.agentSessionId, path: started.nativePath, modelEndpointId: null }) },
-    previous: { ...current, ...previous }, next: { ...current, permissionMode: 'manualBypass', ...next }, signal: new AbortController().signal };
+    permissionModeIntent: 'apply', previous: { ...current, ...previous }, next: { ...current, permissionMode: 'manualBypass', ...next }, signal: new AbortController().signal };
   }
 
   async function updateSettings(provider, started, next, previous = {}) {

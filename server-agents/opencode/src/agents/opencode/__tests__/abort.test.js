@@ -238,7 +238,7 @@ async function prepareConfiguration(runtime) {
   };
   return runtime.sessionConfiguration.prepare({
     expected: { chatId: 'chat-1', agentSessionId: 'session-1', projectPath: '/repo', nativeSession: null },
-    previous: configuration, next: configuration, signal: new AbortController().signal,
+    permissionModeIntent: 'apply', previous: configuration, next: configuration, signal: new AbortController().signal,
   });
 }
 

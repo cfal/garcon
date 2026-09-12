@@ -7,7 +7,7 @@ function request(signal = new AbortController().signal): AgentSessionConfigurati
     settings: { ownerId: 'synthetic-provider', schemaVersion: 1, values: { nested: { value: 'saved' } } }, endpoint: null };
   return { expected: { chatId: '1000000000000001', agentSessionId: 'synthetic-session',
     projectPath: '/synthetic/project', nativeSession: { ownerId: 'synthetic-provider', schemaVersion: 1, value: { id: 'synthetic-native' } } },
-    previous: structuredClone(configuration), next: structuredClone(configuration), signal };
+    permissionModeIntent: 'apply', previous: structuredClone(configuration), next: structuredClone(configuration), signal };
 }
 
 async function prepare(service: SessionConfigurationPreparations, input = request()) {
@@ -26,6 +26,8 @@ test('configuration preparation owns snapshots and performs no mutation before c
   });
   const target = await prepare(service, input);
   input.next.settings.values.nested = { value: 'changed' };
+  Object.assign(input, { permissionModeIntent: 'preserve' });
+  expect(captured?.permissionModeIntent).toBe('apply');
   expect(captured?.next.settings.values.nested).toEqual({ value: 'saved' });
   expect(captured?.signal).toBe(input.signal);
   expect(mutation).not.toHaveBeenCalled();

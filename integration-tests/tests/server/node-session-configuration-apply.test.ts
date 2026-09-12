@@ -49,7 +49,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('captured session configuration th
       const request = { executionLocation: { nodeId: f.host.pairing.nodeId, instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' },
         expected: { chatId, agentSessionId: established.session.agentSessionId,
           nativeSession: established.session.nativeSession, projectPath: f.host.storage },
-        previous, next: { ...previous, permissionMode: 'manualBypass' as const } };
+        permissionModeIntent: 'apply' as const, previous, next: { ...previous, permissionMode: 'manualBypass' as const } };
       const pending = service.prepareApply(request, f.signal);
       void pending.catch(() => {});
       await entered.promise;
@@ -101,7 +101,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('captured session configuration th
         nodeId: f.host.pairing.nodeId, instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace',
       }, expected: { chatId, agentSessionId: established.session.agentSessionId,
         nativeSession: established.session.nativeSession, projectPath: f.host.storage },
-      previous, next: { ...previous, permissionMode: 'manualBypass' } }, f.signal);
+      permissionModeIntent: 'apply' as const, previous, next: { ...previous, permissionMode: 'manualBypass' } }, f.signal);
       if (prepared.kind !== 'prepared') throw new Error(`Missing configuration ticket: ${JSON.stringify(prepared)}`);
       if (action === 'prepared-reconnect') {
         await f.disconnect(); await f.reconnect();

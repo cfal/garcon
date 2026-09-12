@@ -129,6 +129,7 @@ describe('instance-qualified controls', () => {
     }));
     expect(fixture.secondary.integration.sessionConfiguration.prepare).toHaveBeenCalledWith({
       expected: { chatId, agentSessionId: 'colliding-session', nativeSession: owner.nativeSession, projectPath: owner.projectPath },
+      permissionModeIntent: 'preserve',
       next: expect.objectContaining({ model: 'changed-model' }),
       previous: expect.objectContaining({ model: 'synthetic-model' }),
       signal: expect.any(AbortSignal),

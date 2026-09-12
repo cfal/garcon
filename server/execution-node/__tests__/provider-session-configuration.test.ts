@@ -32,7 +32,7 @@ function fixture(maxProviderRequests = 2, maxReceipts = 1) {
     settings: { ownerId: 'synthetic', schemaVersion: 1, values: {} }, endpoint: null };
   const request: ProviderSessionConfigurationRequest = { executionLocation: f.location,
     expected: { chatId: f.request.chatId, agentSessionId: 'synthetic-native', nativeSession: null, projectPath: '/synthetic/project' },
-    previous: snapshot, next: { ...snapshot, permissionMode: 'manualBypass' } };
+    permissionModeIntent: 'apply', previous: snapshot, next: { ...snapshot, permissionMode: 'manualBypass' } };
   const call = (command: NodeSessionConfigurationCommand, signal = new AbortController().signal, connection = f.connection) => host.execute(connection, command, signal);
   const command = { method: 'provider-session-configuration' as const, instanceId: f.location.instanceId };
   const prepare = async () => {

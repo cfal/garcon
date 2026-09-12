@@ -442,6 +442,46 @@ describe('provider configuration through HTTP', () => {
     } finally { await gate.close(); }
   }, 30_000);
 
+  test('distinguishes explicit permission re-selection from model-only HTTP settings patches', async () => {
+    const gate = sessionApplicationGate();
+    try {
+      await withIntegrationFixture('configuration-permission-intent', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const agent = fixture.directAgents.openAi;
+        const started = await fixture.client.startDirectChat({
+          chatId, agent, projectPath: fixture.dirs.project, content: 'synthetic initial input',
+        });
+        await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+        await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: agent.agentId });
+        const original = await persistedChat(fixture, chatId);
+        for (const permissionModeIntent of ['preserve', 'apply'] as const) {
+          const application = gate.holdNext();
+          const pending = permissionModeIntent === 'preserve'
+            ? fixture.client.patch('/api/v1/chats/model', { chatId, model: agent.provider.model })
+            : fixture.client.patch('/api/v1/chats/execution-settings', { chatId, permissionMode: original.permissionMode });
+          void pending.catch(() => undefined);
+          try {
+            expect(await withTimeout(application.entered.promise, 5_000, () => 'Settings did not reach the instance service'))
+              .toMatchObject({ permissionModeIntent, previous: { permissionMode: original.permissionMode },
+                next: { permissionMode: original.permissionMode } });
+            application.release.resolve({ kind: 'not-required' });
+            expect(await pending).toMatchObject({ success: true, chatId });
+            expect((await persistedChat(fixture, chatId)).permissionMode).toBe(original.permissionMode);
+          } finally {
+            application.release.resolve({ kind: 'unknown' });
+            await pending.catch(() => undefined);
+          }
+        }
+        expect(gate.calls()).toBe(2);
+        expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+      }, {
+        authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/provider-session-configuration-preload.ts', import.meta.url))],
+        serverEnvironment: { GARCON_TEST_SESSION_CONFIGURATION_GATE: gate.url },
+      });
+    } finally { await gate.close(); }
+  }, 30_000);
+
   test('keeps settings unchanged on rejected or unknown commits and persists only a confirmed instance result', async () => {
     const gate = sessionApplicationGate();
     try {

@@ -30,7 +30,7 @@ function captureFixture() {
   const controller = new AbortController();
   const request: AgentSessionConfigurationPrepareRequest = {
     expected: { chatId: 'chat-1', agentSessionId: 'session-1', projectPath: '/repo', nativeSession: null },
-    previous: configuration, next: { ...configuration, permissionMode: 'manualBypass' }, signal: controller.signal,
+    permissionModeIntent: 'apply', previous: configuration, next: { ...configuration, permissionMode: 'manualBypass' }, signal: controller.signal,
   };
   return { service, session, sessions, routes, route, request, controller,
     retire: () => { generation += 1; } };

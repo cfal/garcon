@@ -35,7 +35,15 @@ export class SessionConfigurationPreparations implements AgentSessionConfigurati
 
   async prepare(input: AgentSessionConfigurationPrepareRequest): Promise<AgentSessionConfigurationPreparation> {
     input.signal.throwIfAborted();
-    const request = { ...structuredClone({ expected: input.expected, previous: input.previous, next: input.next }), signal: input.signal };
+    const request = {
+      ...structuredClone({
+        expected: input.expected,
+        previous: input.previous,
+        next: input.next,
+        permissionModeIntent: input.permissionModeIntent,
+      }),
+      signal: input.signal,
+    };
     const captured = this.capture(request);
     request.signal.throwIfAborted();
     if (!captured) return { kind: 'not-required' };

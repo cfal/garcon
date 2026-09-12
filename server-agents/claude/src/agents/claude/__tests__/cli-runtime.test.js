@@ -2321,7 +2321,7 @@ function configurationRequest(overrides = {}) {
     expected: { chatId: 'chat-1', agentSessionId: 'expected-session', projectPath: '/tmp',
       nativeSession: createPathNativeSessionCodec('claude').encode({ path: '/synthetic/session.jsonl',
         agentSessionId: 'expected-session', modelEndpointId: null }) },
-    previous: structuredClone(configuration), next: { ...configuration, permissionMode: 'acceptEdits' },
+    permissionModeIntent: 'apply', previous: structuredClone(configuration), next: { ...configuration, permissionMode: 'acceptEdits' },
     signal: new AbortController().signal, ...overrides,
   };
 }

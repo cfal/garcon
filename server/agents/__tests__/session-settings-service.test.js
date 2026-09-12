@@ -105,6 +105,7 @@ describe('AgentSessionSettingsService', () => {
     });
     expect(facet.prepare).toHaveBeenCalledWith({
       expected: { chatId: 'chat-1', agentSessionId: 'session-1', nativeSession: null, projectPath: entry.projectPath },
+      permissionModeIntent: 'apply',
       next: {
         model: 'large', permissionMode: 'manualBypass', thinkingMode: 'medium',
         settings: { ownerId: 'amp', schemaVersion: 2, values: {} }, endpoint: null,
@@ -170,6 +171,7 @@ describe('AgentSessionSettingsService', () => {
     });
     expect(facet.commit).toHaveBeenCalledTimes(1);
     expect(facet.prepare).toHaveBeenCalledWith({ expected,
+      permissionModeIntent: 'preserve',
       previous: expect.objectContaining({ model: 'medium' }),
       next: expect.objectContaining({ model: 'changed-model' }), signal: expect.any(AbortSignal),
     });
@@ -207,6 +209,7 @@ describe('AgentSessionSettingsService', () => {
     await pending;
     expect(configurationService.prepareApply).toHaveBeenCalledWith({
       executionLocation: entry.executionLocation,
+      permissionModeIntent: 'preserve',
       expected: { chatId: 'chat-1', agentSessionId: 'original-session', nativeSession: null, projectPath: entry.projectPath },
       next: expect.objectContaining({ model: 'normalized-model' }),
       previous: expect.objectContaining({ model: 'medium' }),

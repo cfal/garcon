@@ -1,4 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   BashToolUseMessage,
@@ -13,6 +16,12 @@ import { createCursorAcpPolicy } from '../cursor-acp-policy.js';
 import { runSingleQuery } from '../run-single-query.js';
 import { extractGarconCommands } from '../../../../../../common/garcon-commands.js';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import CursorAgentIntegration from '../../../index.js';
+import { AgentSessionSettingsService } from '../../../../../../server/agents/session-settings-service.js';
+import { ApiProviderEndpointResolver } from '../../../../../../server/api-providers/endpoint-resolver.js';
+import { ChatRegistry } from '../../../../../../server/chats/store.js';
+import { LocalProviderConfigurationService } from '../../../../../../server/execution-node/local-provider-configuration.js';
 
 const TEST_CURSOR_CONFIG = {
   binary: () => 'cursor-agent',
@@ -366,7 +375,67 @@ function configurationRequest(started) {
     settings: { ownerId: 'cursor', schemaVersion: 1, values: {} }, endpoint: null };
   return { expected: { chatId: 'chat-1', agentSessionId: started.agentSessionId, projectPath: '/tmp/project',
     nativeSession: createPathNativeSessionCodec('cursor').encode({ path: started.nativePath, agentSessionId: started.agentSessionId, modelEndpointId: null }) },
-  previous: configuration, next: { ...configuration, permissionMode: 'manualBypass' }, signal: new AbortController().signal };
+  permissionModeIntent: 'apply', previous: configuration, next: { ...configuration, permissionMode: 'manualBypass' }, signal: new AbortController().signal };
+}
+
+async function withSettingsHarness(permissionMode, run) {
+  const directory = await mkdtemp(join(homedir(), '.garcon-cursor-settings-'));
+  const chatId = '1111111111111111';
+  const registry = new ChatRegistry(directory);
+  const { acp, runtime } = createRuntimeHarness();
+  const published = collectOperation('settings-initial-turn');
+  try {
+    const started = await runtime.startSession(startRequest({ chatId, permissionMode, operation: published.operation }));
+    await acp.waitForClientMethod('session/prompt');
+    const request = configurationRequest(started);
+    await registry.init();
+    registry.addChat({
+      id: chatId, agentId: 'cursor', model: 'default', projectPath: request.expected.projectPath,
+      executionLocation: { nodeId: 'local', instanceId: 'cursor-default', workspaceId: 'project' },
+      agentSessionId: started.agentSessionId, nativeSession: request.expected.nativeSession,
+      permissionMode, thinkingMode: 'none',
+      agentSettingsById: { cursor: request.previous.settings },
+      preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChat: null,
+    });
+    await registry.flush();
+    const configuration = new LocalProviderConfigurationService({
+      descriptor: CursorAgentIntegration.descriptor, endpoints: null,
+      settings: createVersionedSettings({ ownerId: 'cursor', schemaVersion: 1, defaults: {}, descriptors: [] }),
+      sessionConfiguration: runtime.sessionConfiguration,
+    });
+    /** @satisfies {Pick<import('../../../../../../server/agents/instance-directory.js').AgentInstanceDirectory, 'assertAvailableFor' | 'configurationFor'>} */
+    const instances = { assertAvailableFor() {}, configurationFor: () => configuration };
+    const service = new AgentSessionSettingsService({
+      registry, instances, endpointResolver: new ApiProviderEndpointResolver(() => []),
+    });
+    const askPermission = (id) => acp.serverRequest({
+      id, method: 'session/request_permission',
+      params: {
+        sessionId: started.agentSessionId,
+        toolCall: { toolCallId: id, toolName: 'Bash', rawInput: { command: 'echo synthetic' } },
+        options: [{ optionId: 'allow-once' }, { optionId: 'reject-once' }],
+      },
+    });
+    await run({ directory, chatId, registry, acp, runtime, published, started, service, askPermission });
+  } finally {
+    runtime.shutdown();
+    try { await registry.flush(); }
+    finally { await rm(directory, { recursive: true, force: true }); }
+  }
+}
+
+async function expectPermissionDecision(acp, published, requestId) {
+  const observed = await Promise.race([
+    published.waitForEvent(event => event.type === 'permission' && event.lifecycle.kind === 'requested')
+      .then(event => ({ kind: 'decision', event })),
+    acp.waitForWrite(message => message.id === requestId && message.result)
+      .then(message => ({ kind: 'automatic-response', message })),
+  ]);
+  expect(observed.kind).toBe('decision');
+  expect(acp.writes.some(message => message.id === requestId && message.result)).toBe(false);
+  await observed.event.decision.respond({ allow: false });
+  const denied = await acp.waitForWrite(message => message.id === requestId && message.result);
+  expect(denied.result.outcome.optionId).toBe('reject-once');
 }
 
 describe('Cursor ACP runtime', () => {
@@ -880,6 +949,56 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('restores live permission decisions after a settings save fails and the saved mode is selected again', async () => {
+    await withSettingsHarness('default', async ({ directory, chatId, registry, acp, runtime, published, started, service, askPermission }) => {
+      const saveRegistry = registry.saveRegistry.bind(registry);
+      registry.saveRegistry = mock(async (...args) => saveRegistry(...args));
+      registry.saveRegistry.mockImplementationOnce(async () => { throw new Error('Synthetic registry save failure'); });
+      await expect(service.updateSessionSettings(chatId, { permissionMode: 'manualBypass' }))
+        .rejects.toMatchObject({ code: 'SESSION_SETTINGS_PARTIAL' });
+      expect(registry.getChat(chatId).permissionMode).toBe('default');
+      expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+
+      askPermission('permission-before-restore');
+      const bypassed = await acp.waitForWrite(message => message.id === 'permission-before-restore' && message.result);
+      expect(bypassed.result.outcome.optionId).toBe('allow-once');
+      expect(published.events.some(event => event.type === 'permission')).toBe(false);
+
+      const restored = await service.updateSessionSettings(chatId, { permissionMode: 'default' });
+      expect(restored.permissionMode).toBe('default');
+      expect(JSON.parse(await readFile(join(directory, 'chats.json'), 'utf8')).sessions[chatId].permissionMode).toBe('default');
+      askPermission('permission-after-restore');
+      await expectPermissionDecision(acp, published, 'permission-after-restore');
+      acp.finishPrompt();
+    });
+  });
+
+  it('preserves a stricter turn permission override during a model-only settings update', async () => {
+    await withSettingsHarness('manualBypass', async ({ chatId, registry, acp, runtime, published, started, service, askPermission }) => {
+      acp.finishPrompt();
+      await published.waitForEvent(event => event.type === 'run-ended');
+      const nextTurn = collectOperation('settings-permission-override');
+      const resumed = runtime.runTurn(startRequest({ chatId, agentSessionId: started.agentSessionId,
+        command: 'synthetic stricter turn', permissionMode: 'default', operation: nextTurn.operation }));
+      void resumed.catch(() => undefined);
+      try {
+        await acp.waitForWrite(message => message.method === 'session/prompt'
+          && message.params.prompt[0].text === 'synthetic stricter turn');
+        expect(registry.getChat(chatId).permissionMode).toBe('manualBypass');
+        const updated = await service.updateSessionSettings(chatId, { model: 'synthetic-next-model' });
+        expect(updated.model).toBe('synthetic-next-model');
+        expect(updated.permissionMode).toBe('manualBypass');
+        askPermission('permission-after-model-update');
+        await expectPermissionDecision(acp, nextTurn, 'permission-after-model-update');
+        acp.finishPrompt();
+        await resumed;
+      } finally {
+        runtime.shutdown();
+        await Promise.allSettled([resumed]);
+      }
+    });
+  });
+
   it.each(['active', 'idle'])('defers model-only configuration on an %s Cursor session', async (phase) => {
     const { acp, runtime } = createRuntimeHarness();
     const published = collectOperation('configuration-deferral');
@@ -892,6 +1011,7 @@ describe('Cursor ACP runtime', () => {
       }
       const request = configurationRequest(started);
       request.next = { ...request.previous, model: 'synthetic-next-model', thinkingMode: 'high' };
+      request.permissionModeIntent = 'preserve';
       const prepared = await runtime.sessionConfiguration.prepare(request);
       expect(prepared.kind).toBe('prepared');
       expect(await runtime.sessionConfiguration.commit(prepared.target, request.signal)).toEqual({ kind: 'not-required' });
