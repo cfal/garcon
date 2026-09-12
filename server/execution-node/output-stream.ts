@@ -1,23 +1,8 @@
-import {
-  encodeWireProducerEvent,
-  MAX_NODE_OUTPUT_SEQUENCE,
-  parseProducerStreamIdentity,
-  serializeNodeOutputFrame,
-  type AgentEmissionSink,
-  type AgentPermissionResponseCapability,
-  type AgentProducerEvent,
-  type NodePermissionHandleRegistrar,
-  type ProducerStreamIdentity,
-} from '@garcon/server-agent-interface';
-import { NodeReplayCache } from './replay-cache.js';
+import type { AgentEmissionSink, AgentProducerEvent, ProducerStreamIdentity } from '@garcon/server-agent-interface';
+import { NodeOutputEncoder, type NodeOutputPermissionHandles } from './output-encoder.js';
+import type { NodeReplayCache } from './replay-cache.js';
 
-export interface NodeOutputPermissionHandles {
-  createHandle(): string;
-  /** Applies the registrar's atomic, registry-lifetime unique binding contract to this stream. */
-  register(stream: ProducerStreamIdentity, handle: string, decision: AgentPermissionResponseCapability, runId: string): void;
-  /** Invalidates all authority for exactly this stream synchronously without throwing. */
-  retire(stream: ProducerStreamIdentity): void;
-}
+export type { NodeOutputPermissionHandles } from './output-encoder.js';
 
 export interface NodeOutputStreamOptions {
   readonly identity: ProducerStreamIdentity;
@@ -32,75 +17,47 @@ export interface OutputRecoveryAttempt {
 }
 
 export class NodeOutputStream implements AgentEmissionSink {
-  readonly identity: ProducerStreamIdentity;
-  readonly #cache: NodeReplayCache;
-  readonly #permissionHandles: NodeOutputPermissionHandles;
-  readonly #permissionRegistrar: NodePermissionHandleRegistrar;
-  readonly #onOutputFailure: NodeOutputStreamOptions['onOutputFailure'];
-  readonly #onTransportFailure: NodeOutputStreamOptions['onTransportFailure'];
+  readonly #encoder: NodeOutputEncoder;
   #sender: ((serialized: string) => void) | null = null;
   #attempt: OutputRecoveryAttempt | null = null;
-  #produced = 0;
-  #retired = false;
 
   constructor(options: NodeOutputStreamOptions) {
-    const identity = parseProducerStreamIdentity(options.identity);
-    if (!identity) throw new TypeError('Invalid producer stream');
-    this.identity = Object.freeze(identity);
-    this.#cache = options.cache;
-    this.#permissionHandles = options.permissionHandles;
-    this.#permissionRegistrar = {
-      createHandle: () => this.#permissionHandles.createHandle(),
-      register: (handle, decision, runId) => {
-        this.#assertOpen();
-        this.#permissionHandles.register(this.identity, handle, decision, runId);
+    const { cache, onTransportFailure } = options;
+    this.#encoder = new NodeOutputEncoder({ ...options,
+      accept: (serialized, sequence) => cache.append(this.identity, sequence, serialized),
+      retire: () => {
+        this.#sender = null;
+        this.#attempt = null;
+        cache.retire(this.identity);
       },
-    };
-    this.#onOutputFailure = options.onOutputFailure;
-    this.#onTransportFailure = options.onTransportFailure;
-    this.#cache.register(this.identity);
+      accepted: (serialized) => {
+        const attempt = this.#attempt;
+        try { this.#sender?.(serialized); }
+        catch (error) {
+          if (attempt && this.suspend(attempt)) {
+            try { onTransportFailure(error); } catch { /* Observer failures cannot reject retained output. */ }
+          }
+        }
+      },
+    });
+    cache.register(this.identity);
   }
 
-  emit(event: AgentProducerEvent): void {
-    this.#assertOpen();
-    let serialized: string;
-    try {
-      const sequence = this.#produced + 1;
-      // Reserves a safe integer for the first-retained cursor of a fully evicted stream.
-      if (sequence > MAX_NODE_OUTPUT_SEQUENCE) throw new RangeError('Producer sequence exhausted');
-      serialized = serializeNodeOutputFrame({
-        type: 'node-output', stream: this.identity, sequence,
-        event: encodeWireProducerEvent(event, this.#permissionRegistrar),
-      });
-      this.#cache.append(this.identity, sequence, serialized);
-      this.#produced = sequence;
-    } catch (error) {
-      let failure = error;
-      try {
-        this.retire();
-      } catch (cleanupError) {
-        failure = new AggregateError([error, cleanupError], 'Producer output and retirement failed', { cause: error });
-      }
-      notifyFailure(this.#onOutputFailure, failure);
-      throw error;
-    }
-    const attempt = this.#attempt;
-    try {
-      this.#sender?.(serialized);
-    } catch (error) {
-      if (attempt && this.suspend(attempt)) notifyFailure(this.#onTransportFailure, error);
-    }
-  }
+  get identity(): ProducerStreamIdentity { return this.#encoder.identity; }
+  get producedSequence(): number { return this.#encoder.producedSequence; }
+
+  emit(event: AgentProducerEvent): void { this.#encoder.emit(event); }
+  forOperation(isRunLive: (runId: string) => boolean): AgentEmissionSink { return this.#encoder.forOperation(isRunLive); }
 
   beginRecovery(): OutputRecoveryAttempt | null {
-    if (this.#retired) return null;
+    if (this.#encoder.retired) return null;
     this.#sender = null;
     this.#attempt = Object.freeze({ token: Symbol('output-recovery') });
     return this.#attempt;
   }
 
   suspend(attempt: OutputRecoveryAttempt): boolean {
-    if (this.#retired || this.#attempt === null || attempt !== this.#attempt) return false;
+    if (this.#encoder.retired || this.#attempt === null || attempt !== this.#attempt) return false;
     this.#sender = null;
     this.#attempt = null;
     return true;
@@ -108,39 +65,13 @@ export class NodeOutputStream implements AgentEmissionSink {
 
   /** Binds live delivery only after the caller synchronously catches up to the produced watermark. */
   resumeLive(attempt: OutputRecoveryAttempt, throughSequence: number, sender: (serialized: string) => void): boolean {
-    if (this.#retired || this.#attempt === null || attempt !== this.#attempt) return false;
+    if (this.#encoder.retired || this.#attempt === null || attempt !== this.#attempt) return false;
     this.#sender = null;
-    if (throughSequence !== this.#produced) return false;
+    if (throughSequence !== this.producedSequence) return false;
     this.#sender = sender;
     return true;
   }
 
   /** Invalidates the publisher grant; physical disconnects suspend without discarding output. */
-  retire(): void {
-    if (this.#retired) return;
-    this.#retired = true;
-    this.#sender = null;
-    this.#attempt = null;
-    try {
-      this.#cache.retire(this.identity);
-    } finally {
-      this.#permissionHandles.retire(this.identity);
-    }
-  }
-
-  get producedSequence(): number {
-    return this.#produced;
-  }
-
-  #assertOpen(): void {
-    if (this.#retired) throw new Error('Producer output stream is retired');
-  }
-}
-
-function notifyFailure(observer: (error: unknown) => void, error: unknown): void {
-  try {
-    observer(error);
-  } catch {
-    // Observer failures cannot change local emission's outcome.
-  }
+  retire(): void { this.#encoder.retire(); }
 }

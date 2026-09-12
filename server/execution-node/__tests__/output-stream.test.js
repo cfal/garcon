@@ -421,3 +421,47 @@ describe('remote provider emission', () => {
     expect(failures).toEqual([]);
   });
 });
+
+test.each(['event capture', 'registration', 'admission'])('reentrant %s fences the stream without duplicate sequences', (phase) => {
+  const { output, cache, permissionHandles, failures, permissions } = fixture();
+  const reenter = () => { try { output.emit(event('nested')); } catch {} };
+  let value = event('outer');
+  if (phase === 'event capture') value = { type: 'rows', get rows() { reenter(); return []; } };
+  if (phase === 'registration') { permissionHandles.register = reenter; value = permissionEvent(); }
+  if (phase === 'admission') cache.append = reenter;
+  expect(() => output.emit(value)).toThrow('retired');
+  expect(failures).toHaveLength(1);
+  expect(output.producedSequence).toBe(0);
+  expect(cache.streamCount).toBe(0);
+  expect(permissions.size).toBe(0);
+});
+
+test('inline delivery may emit again after the preceding record advances its sequence', () => {
+  const { output, failures } = fixture();
+  const sequences = [];
+  output.resumeLive(output.beginRecovery(), 0, (text) => {
+    const frame = parseNodeOutputText(text);
+    sequences.push(frame.sequence);
+    if (frame.sequence === 1) output.emit(event('second'));
+  });
+  output.emit(event('first'));
+  expect(sequences).toEqual([1, 2]);
+  expect(output.producedSequence).toBe(2);
+  expect(failures).toEqual([]);
+});
+
+test('a post-admission callback failure preserves its sequence and retires the encoder before notification', async () => {
+  const { NodeOutputEncoder } = await import('../output-encoder.js');
+  const f = fixture(); const failures = [];
+  const failure = new Error('Synthetic delivery callback');
+  let closed = false;
+  const encoder = new NodeOutputEncoder({ identity, permissionHandles: f.permissionHandles,
+    accept() {}, retire() { closed = true; }, accepted() { throw failure; },
+    onOutputFailure(error) { expect(closed).toBe(true); failures.push(error); },
+  });
+  expect(() => encoder.emit(permissionEvent())).toThrow(failure);
+  expect(encoder.producedSequence).toBe(1);
+  expect(f.permissions.size).toBe(0); expect(failures).toEqual([failure]);
+  expect(() => encoder.emit(event('late'))).toThrow('retired');
+  f.output.retire();
+});

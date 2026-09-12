@@ -21,6 +21,10 @@ export const DEFAULT_NODE_REPLAY: NodeReplayOptions = Object.freeze({
 // Includes retired grants; reaching the limit rejects new grants without evicting live publishers.
 export const MAX_NODE_STREAM_IDENTITIES = 16_384;
 
+export class NodeStreamIdentityExhaustedError extends RangeError {
+  constructor() { super('Node stream identity limit reached; a fresh execution session is required for new grants'); }
+}
+
 export class NodeReplayUnavailableError extends Error {
   readonly code = 'NODE_REPLAY_GAP';
 
@@ -75,7 +79,7 @@ export class NodeReplayCache {
     const key = producerStreamKey(identity);
     if (this.#streams.has(key)) throw new Error('Producer stream already registered');
     if (this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) {
-      throw new RangeError('Node stream identity limit reached; a fresh execution session is required for new grants');
+      throw new NodeStreamIdentityExhaustedError();
     }
     this.#streams.set(key, { identity: Object.freeze(identity), records: new Map(), produced: 0 });
     this.#liveStreams += 1;
