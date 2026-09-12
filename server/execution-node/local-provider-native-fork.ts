@@ -22,9 +22,10 @@ export class LocalProviderNativeForkService implements ProviderNativeForkService
     signal.throwIfAborted();
     const request = structuredClone(input);
     assertNativeChatOwner(this.integration, request.source);
+    const sourceInput = { ...request.source, settings: structuredClone(request.source.settings ?? this.integration.settings.defaults()) };
     const configuration = await this.#configuration.resolve(request.configuration, signal);
     signal.throwIfAborted();
-    const source = parseNativeChatReference(this.integration, request.source);
+    const source = parseNativeChatReference(this.integration, sourceInput);
     signal.throwIfAborted();
     let result: AgentNativeForkOutcome;
     try {
@@ -41,9 +42,16 @@ export class LocalProviderNativeForkService implements ProviderNativeForkService
       throw error;
     }
     let artifact: AgentEstablishedSession | undefined;
+    let cleanupFailure: { error: unknown } | null = null;
     try {
       if (result !== null && (typeof result === 'object' || typeof result === 'function')
-        && 'session' in result) artifact = result.session;
+        && 'session' in result) {
+        try { artifact = structuredClone(result.session); }
+        catch (error) {
+          cleanupFailure = { error: new Error('Native fork cleanup is unconfirmed because its artifact could not be captured', { cause: error }) };
+          throw error;
+        }
+      }
       if (!isRecord(result)) throw new TypeError('Invalid native fork outcome');
       const kind = result.kind;
       const prototype = Object.getPrototypeOf(result);
@@ -61,7 +69,6 @@ export class LocalProviderNativeForkService implements ProviderNativeForkService
       // Cancellation cannot hide an artifact that the controller still needs to discard.
       return { kind: 'materialized', session };
     } catch (error) {
-      let cleanupFailure: { error: unknown } | null = null;
       try {
         if (artifact !== undefined) await this.forking.discard(artifact, new AbortController().signal);
       } catch (cleanupError) {

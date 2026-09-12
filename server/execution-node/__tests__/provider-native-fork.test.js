@@ -1,5 +1,10 @@
 import { expect, mock, test } from 'bun:test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { createJsonlNativeForking } from '../../../server-agents/common/src/forking/jsonl-forking.js';
+import { createPathNativeSessionCodec } from '../../../server-agents/common/src/native-session/path-native-session.js';
 import { createNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { LocalProviderNativeForkService } from '../local-provider-native-fork.js';
 
@@ -175,14 +180,73 @@ test.each([false, true])('returns a private materialized artifact even after can
   expect(f.forking.discard).not.toHaveBeenCalled();
 });
 
-test.each(['owner', 'snapshot'])('discards a materialized artifact when its %s cannot cross the service boundary', async (failure) => {
+test('discards a captured materialized artifact when its owner cannot cross the service boundary', async () => {
   const f = fixture();
-  if (failure === 'owner') f.session.nativeSession.ownerId = 'foreign';
-  else f.session.nativeSession.value.invalid = () => {};
+  f.session.nativeSession.ownerId = 'foreign';
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow();
   expect(f.forking.discard).toHaveBeenCalledOnce();
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
   expect(f.forking.discard.mock.calls[0][1].aborted).toBe(false);
+});
+
+test.each([false, true])('reports unconfirmed cleanup when the artifact cannot be captured (cancelled: %s)', async (cancelled) => {
+  const f = fixture();
+  const cancellation = new Error('Synthetic cancellation after materialization');
+  f.session.nativeSession.value.invalid = () => {};
+  f.forking.fork = async () => {
+    if (cancelled) f.controller.abort(cancellation);
+    return { kind: 'materialized', session: f.session };
+  };
+  const failure = await f.service.fork(f.request, f.controller.signal).catch(error => error);
+  expect(failure).toBeInstanceOf(AggregateError);
+  if (cancelled) expect(failure.errors[0]).toBe(cancellation);
+  else expect(failure.errors[0].name).toBe('DataCloneError');
+  expect(failure.errors[1].message).toContain('cleanup is unconfirmed');
+  expect(f.forking.discard).not.toHaveBeenCalled();
+});
+
+test('uses one captured native path for validation and actual JSONL cleanup', async () => {
+  const f = fixture();
+  const directory = await mkdtemp(join(tmpdir(), 'garcon-fork-cleanup-'));
+  const created = join(directory, 'created.jsonl');
+  const unrelated = join(directory, 'unrelated.jsonl');
+  const codec = createPathNativeSessionCodec('synthetic');
+  let reads = 0;
+  try {
+    await writeFile(created, 'Synthetic created artifact');
+    await writeFile(unrelated, 'Synthetic unrelated artifact');
+    const session = { agentSessionId: 'synthetic-fork', get nativeSession() {
+      return codec.encode({ path: ++reads === 1 ? created : unrelated, agentSessionId: 'synthetic-fork', modelEndpointId: null });
+    } };
+    f.forking.fork = async () => ({ kind: 'materialized', session });
+    f.forking.discard = createJsonlNativeForking({
+      nativeSessions: codec,
+      nativeEvidence: {
+        load: async () => { throw new Error('Unexpected native read'); },
+        resolveNativeSession: async () => { throw new Error('Unexpected native resolution'); },
+      },
+    }).discard;
+    await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid established session');
+    expect(reads).toBe(1);
+    await expect(readFile(created)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(unrelated, 'utf8')).toBe('Synthetic unrelated artifact');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('captures source and destination defaults before asynchronous endpoint validation', async () => {
+  const f = fixture();
+  const validation = Promise.withResolvers();
+  f.integration.endpoints.validate = () => validation.promise;
+  const result = f.service.fork(f.request, f.controller.signal);
+  f.defaults.values.profile = 'changed during preparation';
+  validation.resolve();
+  await result;
+  const request = f.forking.fork.mock.calls[0][0];
+  expect(request.settings.values.profile).toBe('secondary');
+  expect(request.source.settings.values.profile).toBe('secondary');
 });
 
 const invalidSessions = [
@@ -215,7 +279,8 @@ test.each(invalidSessions)('discards a cloneable artifact with %s exactly once',
   invalidate(f.session);
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid established session');
   expect(f.forking.discard).toHaveBeenCalledTimes(1);
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
   expect(f.forking.discard.mock.calls[0][1].aborted).toBe(false);
 });
 
@@ -224,7 +289,8 @@ test.each(['unexpected', 'unmaterialized'])('discards an artifact returned under
   f.forking.fork = async () => ({ kind, session: f.session });
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid native fork outcome');
   expect(f.forking.discard).toHaveBeenCalledTimes(1);
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
 });
 
 test.each(['hidden-session', 'symbol-field', 'custom-prototype'])('rejects an invalid %s outcome and discards its artifact', async (invalid) => {
@@ -237,7 +303,8 @@ test.each(['hidden-session', 'symbol-field', 'custom-prototype'])('rejects an in
   f.forking.fork = async () => result;
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid native fork outcome');
   expect(f.forking.discard).toHaveBeenCalledTimes(1);
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
   expect(f.forking.discard.mock.calls[0][1].aborted).toBe(false);
 });
 
@@ -248,7 +315,8 @@ test.each(['array', 'function'])('cleans up the artifact carried by a non-record
   });
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid native fork outcome');
   expect(f.forking.discard).toHaveBeenCalledOnce();
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
   expect(f.forking.discard.mock.calls[0][1].aborted).toBe(false);
 });
 
@@ -263,7 +331,8 @@ test('captures the artifact once before validation and cleanup', async () => {
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid established session');
   expect(reads).toBe(1);
   expect(f.forking.discard).toHaveBeenCalledTimes(1);
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
 });
 
 test('rejects an inherited outcome discriminator while cleaning up the supplied artifact', async () => {
@@ -271,7 +340,8 @@ test('rejects an inherited outcome discriminator while cleaning up the supplied 
   f.forking.fork = async () => Object.assign(Object.create({ kind: 'materialized' }), { session: f.session, extra: true });
   await expect(f.service.fork(f.request, f.controller.signal)).rejects.toThrow('Invalid native fork outcome');
   expect(f.forking.discard).toHaveBeenCalledTimes(1);
-  expect(f.forking.discard.mock.calls[0][0]).toBe(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).toEqual(f.session);
+  expect(f.forking.discard.mock.calls[0][0]).not.toBe(f.session);
 });
 
 test.each([null, {}, { kind: 'unexpected' }, { kind: 'materialized' }])('rejects a malformed outcome without a cleanup artifact: %j', async (result) => {

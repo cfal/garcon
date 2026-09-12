@@ -1,4 +1,5 @@
 import {
+  isNormalizedJsonObject,
   snapshotNormalizedMessage,
   type AgentHistoryImport,
   type AgentImportedTranscriptRow,
@@ -20,7 +21,10 @@ export class LocalProviderHistoryImportService implements ProviderHistoryImportS
 
   read(request: ProviderHistoryImportRequest, signal: AbortSignal): AsyncIterable<readonly AgentImportedTranscriptRow[]> {
     signal.throwIfAborted();
-    return this.#read(structuredClone(request.chat), signal);
+    const chat = structuredClone(request.chat);
+    assertNativeChatOwner(this.integration, chat);
+    const settings = structuredClone(chat.settings ?? this.integration.settings.defaults());
+    return this.#read({ ...chat, settings }, signal);
   }
 
   async *#read(input: ProviderNativeChatReference, signal: AbortSignal): AsyncIterable<readonly AgentImportedTranscriptRow[]> {
@@ -41,8 +45,9 @@ export class LocalProviderHistoryImportService implements ProviderHistoryImportS
           if (completed) break;
           const batch = result.value;
           if (!Array.isArray(batch)) throw new TypeError('Invalid history import batch');
-          for (let start = 0; start < batch.length; start += PROVIDER_HISTORY_IMPORT_MAX_BATCH_ROWS) {
-            const rows = batch.slice(start, start + PROVIDER_HISTORY_IMPORT_MAX_BATCH_ROWS).map(snapshotRow);
+          const snapshot = Array.from(batch, snapshotRow);
+          for (let start = 0; start < snapshot.length; start += PROVIDER_HISTORY_IMPORT_MAX_BATCH_ROWS) {
+            const rows = snapshot.slice(start, start + PROVIDER_HISTORY_IMPORT_MAX_BATCH_ROWS);
             signal.throwIfAborted();
             yield rows;
             signal.throwIfAborted();
@@ -75,8 +80,10 @@ export class LocalProviderHistoryImportService implements ProviderHistoryImportS
 }
 
 function snapshotRow(row: AgentImportedTranscriptRow): AgentImportedTranscriptRow {
+  const providerMeta = structuredClone(row.providerMeta);
+  if (providerMeta !== undefined && !isNormalizedJsonObject(providerMeta)) throw new TypeError('Invalid history provider metadata');
   return {
     message: snapshotNormalizedMessage(row.message),
-    ...(row.providerMeta === undefined ? {} : { providerMeta: structuredClone(row.providerMeta) }),
+    ...(providerMeta === undefined ? {} : { providerMeta }),
   };
 }

@@ -3,7 +3,7 @@ import type { ProviderNativeChatReference } from '../execution-nodes/provider-na
 
 export function assertNativeChatOwner(
   integration: Pick<AgentIntegration, 'descriptor'>,
-  chat: ProviderNativeChatReference,
+  chat: Pick<ProviderNativeChatReference, 'agentId' | 'nativeSession'>,
 ): void {
   const agentId = integration.descriptor.id;
   if (chat.agentId !== agentId || (chat.nativeSession !== null && chat.nativeSession.ownerId !== agentId)) {

@@ -84,6 +84,25 @@ test('snapshots messages, nested attachments and provider metadata before advanc
   expect(providerMeta.position.item).toBe('changed');
 });
 
+test.each(['mutate', 'truncate', 'append'])('owns the complete source batch before yielding its first partition (%s)', async (change) => {
+  const rows = Array.from({ length: 257 }, (_, index) => ({
+    message: new UserMessage(AT, `Synthetic row ${index}`), providerMeta: { position: { index } },
+  }));
+  const f = fixture(async function* () { yield rows; });
+  const iterator = f.service.read(f.request, f.controller.signal)[Symbol.asyncIterator]();
+  expect((await iterator.next()).value).toHaveLength(256);
+  if (change === 'mutate') {
+    rows[256].message.content = 'Changed';
+    rows[256].providerMeta.position.index = -1;
+  } else if (change === 'truncate') rows.length = 256;
+  else rows.push({ message: new UserMessage(AT, 'Appended') });
+  const last = await iterator.next();
+  expect(last.done).toBe(false);
+  expect(last.value).toHaveLength(1);
+  expect(last.value[0]).toMatchObject({ message: { content: 'Synthetic row 256' }, providerMeta: { position: { index: 256 } } });
+  expect(await iterator.next()).toEqual({ done: true, value: undefined });
+});
+
 test.each([false, true])('captures requests before iteration and parses a private settings envelope (saved: %s)', async (saved) => {
   const f = fixture();
   if (saved) f.request.chat.settings = structuredClone(f.defaults);
@@ -114,6 +133,27 @@ test.each(['agentId', 'nativeSession'])('rejects a foreign %s before settings pa
   await expect(collect(f.service, f.request, f.controller.signal)).rejects.toThrow('Native session owner mismatch');
   expect(f.source.load).not.toHaveBeenCalled();
   expect(f.integration.settings.parse).not.toHaveBeenCalled();
+});
+
+test('captures effective defaults when read is requested before iteration begins', async () => {
+  const f = fixture();
+  const stream = f.service.read(f.request, f.controller.signal);
+  f.defaults.values.profile = 'changed before iteration';
+  for await (const _batch of stream) throw new Error('Unexpected rows');
+  expect(f.source.load.mock.calls[0][0].chat.settings.values.profile).toBe('secondary');
+});
+
+test.each([
+  ['date', new Date(0)], ['map', new Map()], ['bigint', 1n], ['nonfinite number', NaN],
+  ['undefined', undefined], ['sparse array', new Array(1)],
+])('rejects %s metadata values and closes the import', async (_label, invalid) => {
+  let closed = false;
+  const f = fixture(async function* () {
+    try { yield [{ message: new UserMessage(AT, 'Synthetic input'), providerMeta: { invalid } }]; }
+    finally { closed = true; }
+  });
+  await expect(collect(f.service, f.request, f.controller.signal)).rejects.toThrow('Invalid history provider metadata');
+  expect(closed).toBe(true);
 });
 
 test.each(['before-read', 'before-iteration'])('cancellation %s never enters the provider', async (phase) => {

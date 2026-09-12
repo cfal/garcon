@@ -1,14 +1,31 @@
 import DirectOpenAiCompatibleIntegration from '../../server-agents/direct-openai-compatible/src/index.js';
-import type { AgentHost } from '../../server-agents/interface/src/index.js';
-import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+import type { AgentHost, AgentImportedTranscriptRow } from '../../server-agents/interface/src/index.js';
+import { loadDefaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
 import { TranscriptReloadService } from '../../server/ledger/reload.js';
+import { LocalProviderHistoryImportService } from '../../server/execution-node/local-provider-history-import.js';
+import { AssistantMessage } from '../../common/chat-types.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const mode = process.env.GARCON_TEST_HISTORY_IMPORT;
-if (mode !== 'mutate' && mode !== 'cancel-empty' && mode !== 'cancel-rows' && mode !== 'fail-cleanup') {
+if (mode !== 'mutate' && mode !== 'cancel-empty' && mode !== 'cancel-rows' && mode !== 'fail-cleanup'
+  && mode !== 'partition-mutate' && mode !== 'partition-truncate') {
   throw new Error('History import fixture requires an explicit fault mode');
 }
 
 const controllers = new WeakMap<AbortSignal, AbortController>();
+const providerBatches = new WeakMap<AbortSignal, AgentImportedTranscriptRow[]>();
+const read = LocalProviderHistoryImportService.prototype.read;
+LocalProviderHistoryImportService.prototype.read = async function* (request, signal) {
+  for await (const rows of read.call(this, request, signal)) {
+    yield rows;
+    const source = providerBatches.get(signal);
+    if (!source) continue;
+    providerBatches.delete(signal);
+    if (mode === 'partition-truncate') source.length = 256;
+    else source[256] = { message: new AssistantMessage('2026-09-01T00:00:00.000Z', 'Synthetic unowned mutation') };
+  }
+};
 const reload = TranscriptReloadService.prototype.reload;
 TranscriptReloadService.prototype.reload = async function (chatId, signal) {
   const controller = new AbortController();
@@ -22,6 +39,17 @@ class FaultedHistoryIntegration extends DirectOpenAiCompatibleIntegration {
   constructor(host: AgentHost) {
     super(host);
     const load = this.nativeHistoryImport.load.bind(this.nativeHistoryImport);
+    if (mode === 'partition-mutate' || mode === 'partition-truncate') {
+      this.nativeHistoryImport.load = async function* ({ signal }) {
+        const batch = Array.from({ length: 257 }, (_, index) => ({
+          message: new AssistantMessage('2026-09-01T00:00:00.000Z', `Synthetic imported row ${index + 1}`),
+        }));
+        providerBatches.set(signal, batch);
+        try { yield batch; }
+        finally { providerBatches.delete(signal); }
+      };
+      return;
+    }
     if (mode === 'fail-cleanup') {
       let failNextImport = true;
       this.nativeHistoryImport.load = (request) => {

@@ -9,7 +9,7 @@ import { reloadUntilNativeContains, waitForVisibleResponse } from '../../support
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
-test.each(['session-shape', 'hidden-artifact', 'non-record-artifact'])('rejects native fork %s before publication, deletes its artifact, and allows a fresh fork', async (invalid) => {
+test.each(['session-shape', 'hidden-artifact', 'non-record-artifact', 'changing-native-reference'])('rejects native fork %s before publication, deletes its artifact, and allows a fresh fork', async (invalid) => {
   const environment = await startScriptedClaudeTestEnvironment();
   const reply = 'Synthetic native fork source reply';
   environment.model.scriptTurn([claudeText(reply)]);
@@ -30,10 +30,15 @@ test.each(['session-shape', 'hidden-artifact', 'non-record-artifact'])('rejects 
       await expect(fixture.client.forkChat({ sourceChatId, chatId })).rejects.toMatchObject({ status: 500 });
       const diagnostics = JSON.parse(await readFile(join(fixture.dirs.root, 'native-fork-diagnostics.json'), 'utf8')) as {
         forks: number; discards: number; discardedPath: string; existedBeforeDiscard: boolean;
+        nativeReferenceReads: number; unrelatedPath: string;
       };
       expect(diagnostics).toMatchObject({ forks: 1, discards: 1, existedBeforeDiscard: true });
       expect(diagnostics.discardedPath.startsWith(fixture.dirs.root)).toBe(true);
       await expect(access(diagnostics.discardedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      if (invalid === 'changing-native-reference') {
+        expect(diagnostics.nativeReferenceReads).toBe(1);
+        expect(await readFile(diagnostics.unrelatedPath, 'utf8')).toBe('Synthetic unrelated artifact');
+      }
       expect(await fixture.client.listChats()).toEqual(chats);
       expect(await fixture.client.getMessages(sourceChatId)).toEqual(source);
 

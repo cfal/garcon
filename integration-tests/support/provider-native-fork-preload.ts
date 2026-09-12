@@ -1,15 +1,20 @@
 import { existsSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import ClaudeIntegration from '../../server-agents/claude/src/index.js';
 import type { AgentHost } from '../../server-agents/interface/src/index.js';
-import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+import { loadDefaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
+
+const defaultAgentIntegrations = await loadDefaultAgentIntegrations();
 
 const diagnosticsPath = process.env.GARCON_TEST_NATIVE_FORK_DIAGNOSTICS ?? '';
 if (!diagnosticsPath) throw new Error('Native fork fixture requires a diagnostics path');
 const invalid = process.env.GARCON_TEST_NATIVE_FORK_INVALID;
-if (invalid !== 'session-shape' && invalid !== 'hidden-artifact' && invalid !== 'non-record-artifact') {
+if (invalid !== 'session-shape' && invalid !== 'hidden-artifact' && invalid !== 'non-record-artifact'
+  && invalid !== 'changing-native-reference') {
   throw new Error('Native fork fixture requires an invalid outcome mode');
 }
-const diagnostics = { forks: 0, discards: 0, discardedPath: '', existedBeforeDiscard: false };
+const diagnostics = { forks: 0, discards: 0, discardedPath: '', existedBeforeDiscard: false,
+  nativeReferenceReads: 0, unrelatedPath: '' };
 
 class InvalidNativeForkIntegration extends ClaudeIntegration {
   constructor(host: AgentHost) {
@@ -27,6 +32,21 @@ class InvalidNativeForkIntegration extends ClaudeIntegration {
           }
           if (invalid === 'non-record-artifact') return Object.assign([], result);
           Object.assign(result.session, { nativeSeedReceipt: undefined });
+          if (invalid === 'changing-native-reference') {
+            const native = structuredClone(result.session.nativeSession);
+            if (!native) throw new Error('Synthetic fork has no native reference');
+            diagnostics.unrelatedPath = join(dirname(diagnosticsPath), 'unrelated-fork.jsonl');
+            writeFileSync(diagnostics.unrelatedPath, 'Synthetic unrelated artifact');
+            Object.defineProperty(result.session, 'nativeSession', {
+              enumerable: true,
+              get() {
+                diagnostics.nativeReferenceReads += 1;
+                writeFileSync(diagnosticsPath, JSON.stringify(diagnostics));
+                return diagnostics.nativeReferenceReads === 1 ? native
+                  : { ...native, value: { ...native.value, path: diagnostics.unrelatedPath } };
+              },
+            });
+          }
         }
       }
       return result;
