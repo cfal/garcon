@@ -29,6 +29,20 @@ function fixture(cleanup, options = {}) {
 }
 
 describe('remote controller supervision', () => {
+  test('reconciliation requires the current physical connection without reopening admissions', async () => {
+    const { supervisor, identity, connection } = fixture();
+    expect(() => supervisor.assertConnection(connection)).not.toThrow();
+    supervisor.disconnect(connection);
+    expect(() => supervisor.assertConnection(connection)).toThrow();
+    const replacement = supervisor.attach(identity);
+    expect(() => supervisor.assertConnection(replacement)).not.toThrow();
+    expect(() => supervisor.assertAdmission(replacement)).toThrow('still recovering');
+    expect(() => supervisor.assertConnection(connection)).toThrow();
+    await supervisor.revoke();
+    expect(() => supervisor.assertConnection(replacement)).toThrow();
+    await supervisor.shutdown();
+  });
+
   test.each([false, true])('production cleanup deadline is cancelled after settlement (failed: %s)', async (fail) => {
     const schedule = spyOn(globalThis, 'setTimeout');
     const cancel = spyOn(globalThis, 'clearTimeout');
@@ -137,11 +151,11 @@ describe('remote controller supervision', () => {
     expect(f.cleanups.map(({ reason }) => reason)).toEqual(['revoked']);
   });
 
-  test.each([4_999, 5_000, 9_000])('challenge validity ends at five seconds, not the lease deadline (%ims)', async (age) => {
+  test.each([4_999, 5_000, 9_000, 14_999, 15_000])('challenge validity ends at its lease deadline (%ims)', async (age) => {
     const { supervisor, connection, advance } = fixture();
     const challenge = supervisor.issueChallenge(connection);
     advance(age);
-    expect(supervisor.renew(connection, challenge)).toBe(age < 5_000);
+    expect(supervisor.renew(connection, challenge)).toBe(age < NODE_CONTROLLER_LEASE_MS);
     expect(supervisor.renew(connection, challenge)).toBe(false);
     await supervisor.shutdown();
   });
@@ -193,7 +207,7 @@ describe('remote controller supervision', () => {
     advance(NODE_CHALLENGE_INTERVAL_MS);
     const second = supervisor.issueChallenge(connection);
     expect(second).not.toBe(first);
-    expect(supervisor.renew(connection, first)).toBe(false);
+    expect(supervisor.renew(connection, first)).toBe(true);
     expect(supervisor.renew(connection, second)).toBe(true);
     advance(NODE_CONTROLLER_LEASE_MS - 1);
     expect(supervisor.renew(connection, second)).toBe(false);

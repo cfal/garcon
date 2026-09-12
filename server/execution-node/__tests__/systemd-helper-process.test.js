@@ -3,7 +3,7 @@ import { runSystemdHelper } from '../systemd/helper-process.js';
 import { SYSTEMD_HELPER_MAX_BYTES, SYSTEMD_HELPER_TIMEOUT_MS } from '../systemd/contracts.js';
 import { identity, launch } from './systemd-fixture.js';
 
-function fixture() {
+function fixture(request = { kind: 'inspect', launch }) {
   let output;
   let expire;
   let killed = 0;
@@ -12,8 +12,8 @@ function fixture() {
   const stream = new ReadableStream({ start(controller) { output = controller; } });
   /** @satisfies {import('../systemd/helper-process.js').SystemdHelperOptions} */
   const options = {
-    spawn: (request) => {
-      expect(JSON.parse(request)).toEqual({ kind: 'inspect', launch });
+    spawn: (text) => {
+      expect(JSON.parse(text)).toEqual(request);
       return { output: stream, exited: exit.promise, kill() { killed += 1; } };
     },
     scheduleTimeout(callback, delay) {
@@ -84,7 +84,7 @@ describe('systemd helper process boundary', () => {
   test.each([
     { kind: 'ready', identity: { ...identity, launchId: 'd'.repeat(32) } },
     { kind: 'ready', identity: { ...identity, unitName: `garcon-exec-${'d'.repeat(64)}.service` } },
-    { kind: 'stopped' }, { kind: 'failed', code: 'invented' }, { kind: 'ready', identity, extra: true },
+    { kind: 'stopped' }, { kind: 'retired-inert' }, { kind: 'failed', code: 'invented' }, { kind: 'ready', identity, extra: true },
   ])('rejects a mismatching or malformed reply: %j', async (reply) => {
     const f = fixture();
     const result = runSystemdHelper({ kind: 'inspect', launch }, f.options);
@@ -103,5 +103,15 @@ describe('systemd helper process boundary', () => {
     await expect(runSystemdHelper({ kind: 'stop', identity: { ...identity, mainPid: 0 } }, {
       spawn() { throw new Error('must not spawn'); },
     })).rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+  });
+
+  test.each([
+    [{ kind: 'stop', identity }, { kind: 'retired-inert' }],
+    [{ kind: 'retire-inert', launch }, { kind: 'stopped' }],
+  ])('inert retirement and configured-work cleanup cannot substitute for each other', async (request, reply) => {
+    const f = fixture(request);
+    const result = runSystemdHelper(request, f.options);
+    f.send(JSON.stringify(reply)); f.close(); f.exit();
+    await expect(result).rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
   });
 });

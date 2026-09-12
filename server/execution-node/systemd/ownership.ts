@@ -26,7 +26,7 @@ export async function runSystemdOwnershipRequest(
   try {
     const request = parseSystemdHelperRequest(input);
     if (!request) throw mismatch();
-    const launch = request.kind === 'inspect' ? request.launch : request.identity;
+    const launch = request.kind === 'stop' ? request.identity : request.launch;
     const referenced = bus.refUnit(launch.unitName);
     if (request.kind === 'inspect') {
       if (!referenced) throw new SystemdContainmentError('NODE_CONTAINMENT_UNAVAILABLE');
@@ -38,6 +38,10 @@ export async function runSystemdOwnershipRequest(
       requireRunning(requireIncarnation(bus.snapshot(launch.unitName), identity));
       bus.unrefUnit(launch.unitName);
       return { kind: 'ready', identity };
+    }
+    if (request.kind === 'retire-inert') {
+      await retireInert(launch, referenced, bus, groups, wait);
+      return { kind: 'retired-inert' };
     }
 
     const identity = request.identity;
@@ -64,6 +68,41 @@ export async function runSystemdOwnershipRequest(
   }
 }
 
+/** Never authorizes cleanup of configured work; a delayed inert launch still competes for the same exclusive unit name. */
+async function retireInert(
+  launch: SystemdLaunchIdentity, referenced: boolean, bus: SystemdUnitBus, groups: CgroupReader, wait: SystemdCleanupWait,
+): Promise<void> {
+  const started = wait.now();
+  if (!Number.isFinite(started)) throw timedOut();
+  if (referenced) {
+    let invocationId: string | null = null;
+    let mainPid: number | null = null;
+    let controlGroup: string | null = null;
+    let group: ReturnType<CgroupReader['observe']> | null = null;
+    const observe = (): SystemdUnitSnapshot => {
+      const current = requireFingerprint(bus.snapshot(launch.unitName), launch);
+      if (current.invocationId !== '0'.repeat(32)) {
+        if (!isInvocationId(current.invocationId) || invocationId !== null && invocationId !== current.invocationId) throw mismatch();
+        invocationId = current.invocationId;
+      } else if (invocationId !== null) throw mismatch();
+      if (current.mainPid) {
+        if (mainPid !== null && mainPid !== current.mainPid) throw mismatch();
+        mainPid = current.mainPid;
+      }
+      if (current.controlGroup) {
+        if (controlGroup !== null && controlGroup !== current.controlGroup) throw mismatch();
+        if (!group) group = groups.observe(current.controlGroup, bus.managerControlGroup());
+        controlGroup = current.controlGroup;
+      } else if (controlGroup !== null && !terminal(current)) throw mismatch();
+      return current;
+    };
+    if (!terminal(observe())) bus.stopUnit(launch.unitName);
+    await until(() => terminal(observe()) && (group?.isEmpty() ?? true), wait, started);
+    bus.unrefUnit(launch.unitName);
+  }
+  await until(() => !bus.exists(launch.unitName), wait, started);
+}
+
 async function until(predicate: () => boolean, wait: SystemdCleanupWait, started: number): Promise<void> {
   for (let attempt = 0; attempt < MAX_POLLS; attempt += 1) {
     const elapsed = wait.now() - started;
@@ -85,8 +124,14 @@ function requireRunning(snapshot: SystemdUnitSnapshot): void {
 }
 
 function requireSnapshot(snapshot: SystemdUnitSnapshot | null, launch: SystemdLaunchIdentity): SystemdUnitSnapshot {
+  const current = requireFingerprint(snapshot, launch);
+  if (!isInvocationId(current.invocationId)) throw mismatch();
+  return current;
+}
+
+function requireFingerprint(snapshot: SystemdUnitSnapshot | null, launch: SystemdLaunchIdentity): SystemdUnitSnapshot {
   if (!snapshot || snapshot.id !== launch.unitName || snapshot.description !== systemdUnitDescription(launch.launchId)
-    || !isInvocationId(snapshot.invocationId) || snapshot.loadState !== 'loaded' || !snapshot.transient
+    || snapshot.loadState !== 'loaded' || !snapshot.transient
     || snapshot.collectMode !== 'inactive-or-failed' || snapshot.serviceType !== 'exec'
     || snapshot.killMode !== 'control-group' || !snapshot.sendSigkill
     || snapshot.timeoutStopUsec !== SYSTEMD_STOP_TIMEOUT_USEC || snapshot.restart !== 'no'

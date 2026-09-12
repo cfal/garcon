@@ -5,6 +5,14 @@ if (process.argv[2] === 'argv') {
   process.exit(0);
 }
 
+if (process.argv[2] === 'inert') {
+  const timeout = setTimeout(() => process.exit(1), 15_000);
+  console.log(JSON.stringify({ mainPid: process.pid }));
+  for await (const _ of Bun.stdin.stream()) { /* An inert fixture never interprets configuration or starts children. */ }
+  clearTimeout(timeout);
+  process.exit(0);
+}
+
 process.on('SIGTERM', () => {});
 setTimeout(() => process.exit(0), 15_000);
 

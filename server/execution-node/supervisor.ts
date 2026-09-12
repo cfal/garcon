@@ -1,20 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isExecutionIdentity, type ExecutionNodeStatus } from '../../common/execution-location.js';
-import { sameNodeSession, type NodeSessionIdentity } from '../../common/node-operation.js';
+import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../common/node-operation.js';
 import { SuspendAwareLeaseClock, type LeaseClock } from './lease-clock.js';
 
 export const NODE_CHALLENGE_INTERVAL_MS = 5_000;
+export const NODE_SESSION_LEASE_POLL_INTERVAL_MS = 100;
 export const NODE_CONTROLLER_LEASE_MS = 15_000;
 export const NODE_RECOVERY_TIMEOUT_MS = 15_000;
 export const NODE_CLEANUP_TIMEOUT_MS = 30_000;
 
 export type NodeRetirementReason =
-  | 'lease-expired' | 'recovery-expired' | 'clock-discontinuity' | 'revoked' | 'controller-shutdown' | 'node-shutdown';
+  | 'lease-expired' | 'recovery-expired' | 'clock-discontinuity' | 'worker-exited' | 'worker-protocol-failed'
+  | 'revoked' | 'controller-shutdown' | 'node-shutdown';
 
 const RETIREMENT_PRIORITY: Record<NodeRetirementReason, number> = {
   'lease-expired': 0, 'recovery-expired': 1, 'clock-discontinuity': 2,
-  revoked: 3, 'controller-shutdown': 4, 'node-shutdown': 5,
+  'worker-exited': 3, 'worker-protocol-failed': 4, revoked: 5, 'controller-shutdown': 6, 'node-shutdown': 7,
 };
 
 export interface NodeConnectionLease {
@@ -60,7 +62,7 @@ interface ActiveControllerSession {
   recoveryDeadline: number | null;
   deadline: number;
   lastChallengeAt: number;
-  challenge: string | null;
+  readonly challenges: Map<string, number>;
 }
 
 interface RetiredControllerSession {
@@ -107,7 +109,7 @@ export class NodeSupervisor {
     this.#active = {
       identity, controller: new AbortController(), connection: null, phase: 'recovering',
       recovery: null, recoveryDeadline: now + NODE_RECOVERY_TIMEOUT_MS,
-      deadline: now + NODE_CONTROLLER_LEASE_MS, lastChallengeAt: -Infinity, challenge: null,
+      deadline: now + NODE_CONTROLLER_LEASE_MS, lastChallengeAt: -Infinity, challenges: new Map(),
     };
     return identity;
   }
@@ -125,7 +127,7 @@ export class NodeSupervisor {
     active.phase = 'recovering';
     active.recovery = null;
     active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
-    active.challenge = null;
+    active.challenges.clear();
     active.lastChallengeAt = -Infinity;
     previous?.controller.abort(expired());
     return connection;
@@ -137,7 +139,7 @@ export class NodeSupervisor {
     if (!active || active.connection?.lease !== connection) return;
     const detached = active.connection;
     active.connection = null;
-    active.challenge = null;
+    active.challenges.clear();
     active.phase = 'reconnecting';
     active.recovery = null;
     active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
@@ -168,24 +170,29 @@ export class NodeSupervisor {
     }
   }
 
+  /** Allows exact-session reconciliation while new admissions remain suspended. */
+  assertConnection(connection: NodeConnectionLease): void {
+    this.#requireConnection(connection);
+  }
+
   issueChallenge(connection: NodeConnectionLease): string | null {
     const { active, now } = this.#requireConnection(connection);
     if (now - active.lastChallengeAt < NODE_CHALLENGE_INTERVAL_MS) return null;
     active.lastChallengeAt = now;
-    active.challenge = randomUUID();
-    return active.challenge;
+    for (const [challenge, expiresAt] of active.challenges) if (now >= expiresAt) active.challenges.delete(challenge);
+    const challenge = randomUUID();
+    active.challenges.set(challenge, now + NODE_CONTROLLER_LEASE_MS);
+    return challenge;
   }
 
   renew(connection: NodeConnectionLease, challenge: string): boolean {
     const now = this.poll();
     const active = this.#active;
-    if (!active || active.connection?.lease !== connection || active.challenge === null) return false;
-    if (now - active.lastChallengeAt >= NODE_CHALLENGE_INTERVAL_MS) {
-      active.challenge = null;
-      return false;
-    }
-    if (active.challenge !== challenge) return false;
-    active.challenge = null;
+    if (!active || active.connection?.lease !== connection) return false;
+    const expiresAt = active.challenges.get(challenge);
+    if (expiresAt === undefined) return false;
+    active.challenges.delete(challenge);
+    if (now >= expiresAt) return false;
     active.deadline = now + NODE_CONTROLLER_LEASE_MS;
     return true;
   }
@@ -217,6 +224,17 @@ export class NodeSupervisor {
 
   controllerShutdown(connection: NodeConnectionLease): Promise<boolean> {
     return this.#retireConnection(connection, 'controller-shutdown');
+  }
+
+  executionHostExited(identity: NodeSessionIdentity, cause: 'worker-exited' | 'worker-protocol-failed'): Promise<boolean> {
+    const reentry = this.#rejectCleanupReentry();
+    if (reentry) return reentry;
+    this.poll();
+    const session = parseNodeSessionIdentity(identity);
+    const current = this.#active?.identity ?? this.#retired?.identity;
+    if (!session || !current || !sameNodeSession(session, current)) return Promise.resolve(false);
+    this.#retire(cause);
+    return this.retryCleanup();
   }
 
   retryCleanup(): Promise<boolean> {

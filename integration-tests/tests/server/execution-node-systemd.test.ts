@@ -57,6 +57,48 @@ async function start(nodeId: string) {
 }
 
 describe.skipIf(!available)('execution-node systemd containment (requires Linux user manager)', () => {
+  test('a never-created inert launch retires without confusing absence with a failed bus', async () => {
+    const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath, [processFixture, 'inert']);
+    expect(await runSystemdHelper({ kind: 'retire-inert', launch: launch.identity })).toEqual({ kind: 'retired-inert' });
+  }, 10_000);
+
+  test('an inert launch is retired on its exact nonce without requiring persisted running identity', async () => {
+    const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath, [processFixture, 'inert']);
+    const waiter = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
+    const reader = waiter.stdout.getReader();
+    try {
+      const { done, value } = await reader.read();
+      expect(done).toBe(false);
+      expect(new TextDecoder().decode(value)).toContain('mainPid');
+      await expect(runSystemdHelper({ kind: 'retire-inert', launch: { ...launch.identity, launchId: 'd'.repeat(32) } }))
+        .rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+      expect(waiter.exitCode).toBeNull();
+      expect(await runSystemdHelper({ kind: 'retire-inert', launch: launch.identity })).toEqual({ kind: 'retired-inert' });
+      await waiter.exited;
+      expect(await runSystemdHelper({ kind: 'retire-inert', launch: launch.identity })).toEqual({ kind: 'retired-inert' });
+    } finally {
+      reader.releaseLock();
+      waiter.stdin.end();
+      await runSystemdHelper({ kind: 'retire-inert', launch: launch.identity });
+      await waiter.exited;
+    }
+  }, 30_000);
+
+  test('a delayed inert launch cannot replace an already confirmed successor after absence reconciliation', async () => {
+    const nodeId = `synthetic-${randomUUID()}`;
+    const old = systemdExecutionLaunch(nodeId, process.execPath, [processFixture, 'inert']);
+    expect(await runSystemdHelper({ kind: 'retire-inert', launch: old.identity })).toEqual({ kind: 'retired-inert' });
+    const next = await start(nodeId);
+    try {
+      const late = Bun.spawn([...old.argv], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+      expect(await late.exited).not.toBe(0);
+      expect(next.waiter.exitCode).toBeNull();
+      expect(await runSystemdHelper({ kind: 'inspect', launch: next.launch.identity })).toEqual({ kind: 'ready', identity: next.identity });
+      await expect(runSystemdHelper({ kind: 'retire-inert', launch: old.identity }))
+        .rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+    } finally { await next.dispose(); }
+  }, 30_000);
+
   test('passes launch arguments without systemd environment expansion', async () => {
     const args = ['literal;$(command)', '${GARCON_SYNTHETIC_UNSET}', '$GARCON_SYNTHETIC_UNSET', 'argument with spaces', ''];
     const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath,

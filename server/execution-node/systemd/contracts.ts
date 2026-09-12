@@ -49,10 +49,12 @@ export interface SystemdUnitBus {
 
 export type SystemdHelperRequest =
   | { readonly kind: 'inspect'; readonly launch: SystemdLaunchIdentity }
+  | { readonly kind: 'retire-inert'; readonly launch: SystemdLaunchIdentity }
   | { readonly kind: 'stop'; readonly identity: SystemdUnitIdentity };
 
 export type SystemdHelperReply =
   | { readonly kind: 'ready'; readonly identity: SystemdUnitIdentity }
+  | { readonly kind: 'retired-inert' }
   | { readonly kind: 'stopped' }
   | { readonly kind: 'failed'; readonly code: SystemdContainmentErrorCode };
 
@@ -96,8 +98,8 @@ export function parseSystemdIdentity(value: unknown): SystemdUnitIdentity | null
 
 export function parseSystemdHelperRequest(value: unknown): SystemdHelperRequest | null {
   if (!isRecord(value) || Object.keys(value).length !== 2) return null;
-  if (value.kind === 'inspect' && isLaunch(value.launch) && Object.keys(value.launch).length === 2) {
-    return { kind: 'inspect', launch: { unitName: value.launch.unitName, launchId: value.launch.launchId } };
+  if ((value.kind === 'inspect' || value.kind === 'retire-inert') && isLaunch(value.launch) && Object.keys(value.launch).length === 2) {
+    return { kind: value.kind, launch: { unitName: value.launch.unitName, launchId: value.launch.launchId } };
   }
   if (value.kind === 'stop') {
     const identity = parseSystemdIdentity(value.identity);
@@ -113,6 +115,7 @@ export function parseSystemdHelperReply(value: unknown): SystemdHelperReply | nu
     if (identity) return { kind: 'ready', identity };
   }
   if (value.kind === 'stopped' && Object.keys(value).length === 1) return { kind: 'stopped' };
+  if (value.kind === 'retired-inert' && Object.keys(value).length === 1) return { kind: 'retired-inert' };
   if (value.kind === 'failed' && Object.keys(value).length === 2
     && FAILURE_CODES.some((code) => code === value.code)) {
     return { kind: 'failed', code: value.code as SystemdContainmentErrorCode };

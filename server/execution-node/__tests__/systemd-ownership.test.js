@@ -147,3 +147,87 @@ describe('systemd incarnation ownership', () => {
       .rejects.toMatchObject({ code: 'NODE_CLEANUP_TIMEOUT' });
   });
 });
+
+describe('systemd launch-qualified inert retirement', () => {
+  test('pins the exact inert launch through stop, cgroup emptiness, and unload', async () => {
+    const f = fixture();
+    expect(await runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait)).toEqual({ kind: 'retired-inert' });
+    expect(f.calls.map(([method]) => method)).toEqual([
+      'ref', 'snapshot', 'manager', 'observe', 'stop', 'snapshot', 'snapshot', 'empty', 'unref', 'exists', 'close',
+    ]);
+  });
+
+  test('absent inert launch needs no fabricated running identity or cgroup witness', async () => {
+    const f = fixture(); f.setLoaded(false);
+    expect(await runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait)).toEqual({ kind: 'retired-inert' });
+    expect(f.calls.map(([method]) => method)).toEqual(['ref', 'exists', 'close']);
+  });
+
+  test('a launch that appears after a failed ref cannot be stopped without another exact pinned attempt', async () => {
+    const f = fixture(); f.setLoaded(false); f.bus.exists = () => true;
+    await expect(runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait))
+      .rejects.toMatchObject({ code: 'NODE_CLEANUP_TIMEOUT' });
+    expect(f.calls.some(([method]) => method === 'stop')).toBe(false);
+    expect(f.calls.at(-1)).toEqual(['close']);
+  });
+
+  test.each(['inactive', 'failed'])('terminal %s inert unit with released cgroup retires without configured-work proof', async (activeState) => {
+    const f = fixture();
+    f.change({ activeState, subState: activeState === 'inactive' ? 'dead' : 'failed', mainPid: 0, jobId: 0, controlGroup: '' });
+    expect(await runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait)).toEqual({ kind: 'retired-inert' });
+    expect(f.calls.some(([method]) => method === 'stop' || method === 'observe')).toBe(false);
+  });
+
+  test('an activating inert launch may not have an invocation, PID, or cgroup yet', async () => {
+    const f = fixture();
+    f.change({ activeState: 'activating', subState: 'start', mainPid: 0, jobId: 1, invocationId: '0'.repeat(32), controlGroup: '' });
+    expect(await runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait)).toEqual({ kind: 'retired-inert' });
+    expect(f.calls.filter(([method]) => method === 'stop')).toHaveLength(1);
+  });
+
+  test('a newly visible cgroup is latched and must empty before inert retirement succeeds', async () => {
+    const f = fixture();
+    f.change({ activeState: 'activating', subState: 'start', mainPid: 0, jobId: 1, invocationId: '0'.repeat(32), controlGroup: '' });
+    let polls = 0;
+    f.wait.pause = async () => {
+      polls += 1;
+      f.change({ activeState: 'inactive', subState: 'dead', mainPid: 0, jobId: 0,
+        invocationId: identity.invocationId, controlGroup: identity.controlGroup });
+      if (polls === 2) f.setEmpty(true);
+    };
+    expect(await runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait)).toEqual({ kind: 'retired-inert' });
+    expect(polls).toBe(2);
+    expect(f.calls).toContainEqual(['observe', identity.controlGroup, managerGroup]);
+  });
+
+  test.each([
+    ['id', 'foreign.service'], ['description', 'foreign launch'], ['loadState', 'not-found'],
+    ['serviceType', 'forking'], ['killMode', 'process'], ['sendSigkill', false], ['timeoutStopUsec', 6_000_000n],
+    ['restart', 'always'], ['restarts', 1], ['transient', false], ['collectMode', 'inactive'],
+  ])('a mismatched %s cannot be adopted or stopped by launch identity', async (field, value) => {
+    const f = fixture(); f.change({ [field]: value });
+    await expect(runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait))
+      .rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+    expect(f.calls.some(([method]) => method === 'stop')).toBe(false);
+    expect(f.calls.at(-1)).toEqual(['close']);
+  });
+
+  test.each([
+    { invocationId: 'd'.repeat(32) }, { mainPid: 5678 }, { controlGroup: '/foreign/group' },
+  ])('an incarnation change during retirement never reports completion: %j', async (fields) => {
+    const f = fixture();
+    f.wait.pause = async () => f.change(fields);
+    await expect(runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait))
+      .rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+    expect(f.calls.filter(([method]) => method === 'stop')).toHaveLength(1);
+    expect(f.calls.some(([method]) => method === 'unref')).toBe(false);
+  });
+
+  test('a terminal inert unit with a populated cgroup remains fenced', async () => {
+    const f = fixture(); f.change({ activeState: 'inactive', subState: 'dead', mainPid: 0 });
+    f.wait.pause = async () => {};
+    await expect(runSystemdOwnershipRequest({ kind: 'retire-inert', launch }, f.bus, f.groups, f.wait))
+      .rejects.toMatchObject({ code: 'NODE_CLEANUP_TIMEOUT' });
+    expect(f.calls.some(([method]) => method === 'unref')).toBe(false);
+  });
+});

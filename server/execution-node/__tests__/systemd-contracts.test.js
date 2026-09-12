@@ -5,11 +5,11 @@ import { identity, launch } from './systemd-fixture.js';
 
 describe('systemd helper contracts', () => {
   test('round-trips exact requests and replies without private or executable payloads', () => {
-    for (const request of [{ kind: 'inspect', launch }, { kind: 'stop', identity }]) {
+    for (const request of [{ kind: 'inspect', launch }, { kind: 'stop', identity }, { kind: 'retire-inert', launch }]) {
       expect(parseSystemdHelperRequest(JSON.parse(JSON.stringify(request)))).toEqual(request);
       expect(parseSystemdHelperRequest({ ...request, command: ['sh'] })).toBeNull();
     }
-    for (const reply of [{ kind: 'ready', identity }, { kind: 'stopped' }, { kind: 'failed', code: 'NODE_CLEANUP_FAILED' }]) {
+    for (const reply of [{ kind: 'ready', identity }, { kind: 'stopped' }, { kind: 'retired-inert' }, { kind: 'failed', code: 'NODE_CLEANUP_FAILED' }]) {
       expect(parseSystemdHelperReply(reply)).toEqual(reply);
       expect(parseSystemdHelperReply({ ...reply, secret: 'synthetic' })).toBeNull();
     }
@@ -48,5 +48,18 @@ describe('systemd helper contracts', () => {
     expect(result.argv.slice(-4)).toEqual(args);
     expect(() => systemdExecutionLaunch('synthetic-node', 'garcon', args)).toThrow();
     expect(() => systemdExecutionLaunch('synthetic-node', '/opt/garcon', ['\0'])).toThrow();
+  });
+
+  test('worker bootstrap selects an explicit working directory and literal process environment', () => {
+    const options = { workingDirectory: '/synthetic/private cwd', environment: { BUN_OPTIONS: '--config=/dev/null' } };
+    const launch = systemdExecutionLaunch('synthetic-node', '/synthetic/garcon', ['--internal-node-session-worker'], options);
+    expect(launch.argv).toContain('--working-directory=/synthetic/private cwd');
+    expect(launch.argv).toContain('--setenv=BUN_OPTIONS=--config=/dev/null');
+    options.environment.BUN_OPTIONS = 'replacement';
+    expect(launch.argv).not.toContain('--setenv=BUN_OPTIONS=replacement');
+    for (const invalid of [{ workingDirectory: 'relative' }, { workingDirectory: '/synthetic\0' },
+      { environment: { 'INVALID=KEY': 'value' } }, { environment: { KEY: 'value\0' } }]) {
+      expect(() => systemdExecutionLaunch('synthetic-node', '/synthetic/garcon', [], invalid)).toThrow();
+    }
   });
 });

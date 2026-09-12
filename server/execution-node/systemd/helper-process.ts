@@ -1,5 +1,5 @@
-import { fileURLToPath } from 'node:url';
 import { readTextStreamWithLimit } from '../../lib/bounded-text-stream.js';
+import { serverSelfCommand } from '../../lib/self-command.js';
 import {
   parseSystemdHelperReply, parseSystemdHelperRequest, SYSTEMD_HELPER_FLAG, SYSTEMD_HELPER_MAX_BYTES,
   SYSTEMD_HELPER_TIMEOUT_MS, SystemdContainmentError, type SystemdHelperReply, type SystemdHelperRequest,
@@ -52,7 +52,7 @@ export async function runSystemdHelper(
     if (request.kind === 'inspect') {
       if (reply.kind !== 'ready' || reply.identity.unitName !== request.launch.unitName
         || reply.identity.launchId !== request.launch.launchId) throw invalid();
-    } else if (reply.kind !== 'stopped') throw invalid();
+    } else if (reply.kind !== (request.kind === 'stop' ? 'stopped' : 'retired-inert')) throw invalid();
     return reply;
   } catch (error) {
     if (!exited) {
@@ -65,9 +65,7 @@ export async function runSystemdHelper(
 }
 
 export function systemdHelperCommand(): string[] {
-  return Reflect.get(globalThis, Symbol.for('garcon.compiled-mode')) === true
-    ? [process.execPath, SYSTEMD_HELPER_FLAG]
-    : [process.execPath, fileURLToPath(new URL('../../main.ts', import.meta.url)), SYSTEMD_HELPER_FLAG];
+  return serverSelfCommand([SYSTEMD_HELPER_FLAG]);
 }
 
 function spawnHelper(serialized: string): SystemdHelperProcess {
