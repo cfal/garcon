@@ -127,13 +127,19 @@ for (const suffix of ['[922k]', '[1m]']) {
   }, 60_000);
 }
 
-test('Claude preserves the native session across context-cap changes and removal', async () => {
+test('Claude preserves the native session and only restarts when the context cap changes', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
   try {
     await withIntegrationFixture('claude-model-context-switch', async (fixture) => {
       const chatId = fixture.newChatId();
       let sessionId: string | undefined;
-      for (const [index, model] of ['first[922k]', 'second[850k]', 'third[1m]'].entries()) {
+      const selections = [
+        { model: 'first[922k]', expectedLaunches: 1 },
+        { model: 'second[922k]', expectedLaunches: 1 },
+        { model: 'second[850k]', expectedLaunches: 2 },
+        { model: 'third[1m]', expectedLaunches: 3 },
+      ];
+      for (const [index, { model, expectedLaunches }] of selections.entries()) {
         const reply = `Scripted model switch ${index} complete.`;
         environment.model.scriptTurn([claudeText(reply)]);
         const cursor = fixture.client.markEvents();
@@ -159,9 +165,11 @@ test('Claude preserves the native session across context-cap changes and removal
         expect(persisted.agentSessionId).toBe(sessionId);
         expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe(model);
         expect(environment.model.requests().at(-1)?.body.model).toBe(model.split('[')[0]);
+        const launches = fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'));
+        expect(launches).toHaveLength(expectedLaunches);
       }
       const transcript = await fixture.client.getMessages(chatId);
-      expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(3);
+      expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(4);
       await expect(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'third[99k]' }))
         .rejects.toThrow(/returned 422:.*context suffix/);
       expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('third[1m]');

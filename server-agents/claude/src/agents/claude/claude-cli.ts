@@ -773,7 +773,7 @@ class ClaudeCliRuntime {
 
     session.options = { ...session.options, thinkingMode: mode };
 
-    if (session.process && !session.activeTurn) {
+    if (session.process && !session.activeTurn && mode !== session.currentThinkingMode) {
       this.#retireSessionProcessInBackground(session);
     }
   }
@@ -784,7 +784,7 @@ class ClaudeCliRuntime {
 
     session.options = { ...session.options, claudeThinkingMode: mode };
 
-    if (session.process && !session.activeTurn) {
+    if (session.process && !session.activeTurn && mode !== session.currentClaudeThinkingMode) {
       this.#retireSessionProcessInBackground(session);
     }
   }

@@ -2055,6 +2055,9 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
       await enqueueResult(fake);
       await start;
+      runtime.setInternalThinkingMode('expected-session', 'none');
+      runtime.setInternalClaudeThinkingMode('expected-session', 'auto');
+      expect(fake.proc.stdin.end).not.toHaveBeenCalled();
       const switched = runtime.runClaudeTurn(startOptions({ model: 'second[922k]' }));
       await enqueueResult(fake);
       await switched;

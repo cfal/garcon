@@ -131,6 +131,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     agentSessionId: string,
     configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
   ): Promise<void> {
+    // Model-only patches reapply these options; unchanged values must preserve the process.
     this.runtime.setInternalPermissionMode(agentSessionId, configuration.permissionMode);
     this.runtime.setInternalThinkingMode(agentSessionId, configuration.thinkingMode);
     this.runtime.setInternalClaudeThinkingMode(
