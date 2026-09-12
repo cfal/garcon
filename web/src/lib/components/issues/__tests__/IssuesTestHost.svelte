@@ -9,7 +9,12 @@
 	let {
 		controller,
 		frame = new SurfaceFrameBridge(),
-	}: { controller: IssuesController; frame?: SurfaceFrameBridge } = $props();
+		pinnedProjectPaths = [],
+	}: {
+		controller: IssuesController;
+		frame?: SurfaceFrameBridge;
+		pinnedProjectPaths?: string[];
+	} = $props();
 	setSurfaceFrameBridge(() => frame);
 	onMount(() => {
 		void frame.activate(false);
@@ -19,6 +24,7 @@
 
 <IssuesPanel
 	{controller}
+	{pinnedProjectPaths}
 	visible
 	chats={[]}
 	username="local"

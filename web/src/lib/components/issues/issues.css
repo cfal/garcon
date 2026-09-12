@@ -20,16 +20,14 @@
 .issue-toolbar-heading {
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	margin-bottom: 12px;
-}
-.issue-toolbar-heading h2 {
-	display: flex;
-	align-items: center;
 	gap: 8px;
-	font-size: 15px;
-	font-weight: 650;
-	margin-right: auto;
+	margin-bottom: 10px;
+}
+.issue-toolbar-heading > .issue-project-field {
+	flex: 1;
+}
+.issue-toolbar-heading > :not(.issue-project-field) {
+	flex-shrink: 0;
 }
 .issue-layout-switch {
 	display: flex;
@@ -95,17 +93,72 @@
 	outline-offset: 2px;
 }
 .issue-filter-form {
-	display: flex;
-	gap: 8px;
-	align-items: flex-end;
-	flex-wrap: wrap;
+	display: block;
 }
-.issue-filter-form > .issue-field {
-	flex: 1 1 140px;
-	min-width: 0;
+.issue-search-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
 }
 .issue-search {
-	flex: 2 1 160px !important;
+	flex: 1;
+}
+.issue-icon-button {
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	flex-shrink: 0;
+}
+.issue-search input {
+	height: 36px;
+}
+.issue-filter-footer {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	height: 36px;
+}
+.issue-save-feedback {
+	flex: 0 0 auto;
+	min-width: 48px;
+	text-align: right;
+}
+.issue-filter-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+.issue-filter-chip-scroll {
+	min-width: 0;
+	max-height: 100%;
+	flex: 1;
+	overflow-x: auto;
+	scrollbar-width: thin;
+}
+.issue-filter-options[hidden] {
+	display: none;
+}
+.issue-project-control {
+	position: relative;
+	display: block;
+}
+.issue-project-control .issue-input {
+	padding-left: 32px;
+}
+.issue-project-icon {
+	position: absolute;
+	left: 10px;
+	top: 50%;
+	transform: translateY(-50%);
+	color: hsl(var(--muted-foreground));
+	pointer-events: none;
+}
+.issue-project-compact .issue-input {
+	height: 34px;
+	padding-top: 4px;
+	padding-bottom: 4px;
 }
 .issue-field {
 	display: flex;
@@ -140,15 +193,10 @@ textarea.issue-input {
 .issue-input::placeholder {
 	color: hsl(var(--muted-foreground));
 }
-.issue-filter-details summary,
 .issue-fields summary {
 	cursor: pointer;
 	padding: 8px 0;
 	color: hsl(var(--muted-foreground));
-}
-.issue-filter-details[open] {
-	flex-basis: 100%;
-	order: 2;
 }
 .issue-filter-options {
 	display: grid;
@@ -158,9 +206,8 @@ textarea.issue-input {
 }
 .issue-filter-chips {
 	display: flex;
-	flex-wrap: wrap;
+	width: max-content;
 	gap: 6px;
-	margin-top: 10px;
 	font-size: 11px;
 	align-items: center;
 }
@@ -200,6 +247,7 @@ textarea.issue-input {
 	scrollbar-gutter: stable;
 }
 .issue-row {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -253,7 +301,24 @@ textarea.issue-input {
 }
 .issue-selected {
 	background: hsl(var(--accent));
-	box-shadow: inset 3px 0 0 hsl(var(--primary));
+}
+.issue-open::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	cursor: pointer;
+	border-radius: inherit;
+}
+.issue-card-meta .issue-status,
+.issue-drag {
+	position: relative;
+	z-index: 2;
+}
+.issue-card:has(.issue-open:focus-visible),
+.issue-row:has(.issue-open:focus-visible) {
+	outline: 2px solid hsl(var(--ring));
+	outline-offset: -2px;
 }
 .issue-card-meta {
 	display: flex;
@@ -328,9 +393,8 @@ textarea.issue-input {
 	min-height: 0;
 }
 .issue-lane {
-	flex: 1 0 220px;
+	flex: 1 0 0;
 	min-width: 220px;
-	max-width: 440px;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
@@ -361,7 +425,7 @@ textarea.issue-input {
 	padding: 0 8px 8px;
 	overflow: auto;
 	min-height: 0;
-	scrollbar-gutter: stable;
+	scrollbar-gutter: stable both-edges;
 }
 .issue-card {
 	position: relative;
@@ -370,6 +434,10 @@ textarea.issue-input {
 	border: 1px solid hsl(var(--border));
 	border-radius: 8px;
 	margin-bottom: 8px;
+}
+.issue-card.issue-selected {
+	background: hsl(var(--accent));
+	border-color: color-mix(in oklab, hsl(var(--foreground)) 30%, hsl(var(--border)));
 }
 .issue-card .issue-open {
 	display: flex;
@@ -417,6 +485,15 @@ textarea.issue-input {
 	border-left: 1px solid hsl(var(--border));
 	background: hsl(var(--card));
 	scrollbar-gutter: stable;
+}
+.has-detail.detail-full .issue-collection {
+	display: none;
+}
+.detail-full .issue-detail {
+	width: 100%;
+	max-width: none;
+	min-width: 0;
+	border-left: 0;
 }
 .issue-detail-header {
 	display: flex;
@@ -630,9 +707,6 @@ textarea.issue-input {
 	}
 	.issue-toolbar-heading {
 		gap: 7px;
-	}
-	.issue-toolbar-heading h2 {
-		font-size: 14px;
 	}
 	.issue-toolbar-heading .issue-button {
 		padding: 6px 8px;

@@ -4,7 +4,10 @@ type DragModule = typeof import('@atlaskit/pragmatic-drag-and-drop/element/adapt
 let modulePromise: Promise<DragModule> | null = null;
 const load = () => (modulePromise ??= import('@atlaskit/pragmatic-drag-and-drop/element/adapter'));
 
-export function issueDraggable(node: HTMLElement, getIssue: () => IssueSummary) {
+export function issueDraggable(
+	node: HTMLElement,
+	options: { getIssue: () => IssueSummary; canDrag: () => boolean },
+) {
 	let disposed = false;
 	let cleanup = () => {};
 	const dragHandle = node.querySelector<HTMLElement>('[data-issue-drag]');
@@ -15,11 +18,15 @@ export function issueDraggable(node: HTMLElement, getIssue: () => IssueSummary) 
 				cleanup = draggable({
 					element: node,
 					dragHandle,
-					getInitialData: () => ({ type: 'garcon-issue', issue: getIssue() }),
+					canDrag: () => options.canDrag(),
+					getInitialData: () => ({ type: 'garcon-issue', issue: options.getIssue() }),
 				});
 			})
 			.catch(() => {});
 	return {
+		update(next: typeof options) {
+			options = next;
+		},
 		destroy() {
 			disposed = true;
 			cleanup();

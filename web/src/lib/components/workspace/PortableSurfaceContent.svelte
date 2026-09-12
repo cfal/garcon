@@ -39,6 +39,7 @@
 		getChatSessions,
 		getIssueSourceNavigation,
 		getAuth,
+		getRemoteSettings,
 		getFileSessions,
 		getGhCapability,
 		getSingletonSurfaces,
@@ -81,6 +82,7 @@
 	const files = getFileSessions();
 	const sessions = getChatSessions();
 	const auth = getAuth();
+	const remoteSettings = getRemoteSettings();
 	const issueSourceNavigation = getIssueSourceNavigation();
 	const projectState = $derived(workspaceContext.projectState);
 </script>
@@ -236,6 +238,7 @@
 				onOpenSource={(source) =>
 					void issueSourceNavigation.open(source, presentation, () => controller.bootstrap)}
 				username={auth.user?.username ?? 'local'}
+				pinnedProjectPaths={remoteSettings.snapshot?.paths.pinnedProjectPaths ?? []}
 				directory={workspaceContext.current?.projectPath ?? null}
 				onOpenChat={(chatId) => {
 					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);

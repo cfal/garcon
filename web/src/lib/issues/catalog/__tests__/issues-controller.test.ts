@@ -155,6 +155,130 @@ afterEach(() => {
 });
 
 describe('Issues controller', () => {
+	it('retains displayed results but never reuses their cursors for a new query at the same revision', async () => {
+		const { controller, api } = harness(
+			Array.from({ length: 550 }, (_, index) => issue(index + 1)),
+		);
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		await controller.page('list', 'next');
+		const previous = controller.collection;
+		const barrier = deferred<void>();
+		const counts = api.counts.getMockImplementation()!;
+		api.counts.mockImplementationOnce(async (...args) => {
+			await barrier.promise;
+			return counts(...args);
+		});
+		controller.setQuery({ project: 'A different query' });
+		expect(controller.collection).toBe(previous);
+		expect(controller.stale).toBe(true);
+		barrier.resolve();
+		await controller.refresh();
+		expect(api.list.mock.lastCall?.[0]).toMatchObject({ project: 'A different query' });
+		expect(api.list.mock.lastCall?.[0]).not.toHaveProperty('beforeNumber');
+		expect(controller.collection?.windows.list?.pageIndex).toBe(0);
+	});
+
+	it('persists full-width details through query and layout changes', () => {
+		const { controller, preferences } = harness();
+		controller.setDetailFullWidth(true);
+		controller.setQuery({ project: 'Release' });
+		controller.setLayout('board');
+		expect(preferences.write).toHaveBeenLastCalledWith({
+			layout: 'board',
+			query: { project: 'Release' },
+			detailFullWidth: true,
+		});
+		const restored = harness([], preferences.write.mock.lastCall![0]);
+		expect(restored.controller.detailFullWidth).toBe(true);
+	});
+
+	it.each(['mutation', 'fields'] as const)(
+		'bridges %s confirmation to authoritative refresh without changing server data',
+		async (kind) => {
+			const { controller, api, setItems, setRevision } = harness();
+			controller.setLayout('board');
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			const original = controller.collection;
+			const saved = deferred<IssueWriteResult>();
+			api.mutate.mockReturnValueOnce(saved.promise);
+			const payload = {
+				action: 'update',
+				issueId: 'ISS-1',
+				expectedRevision: 1,
+				patch: { status: 'in-review', title: 'New title' },
+			} as const;
+			const submitFields = async () => {
+				const draft = controller.drafts.open('fields', { issue: issue() })!;
+				draft.setField('title', 'New title');
+				await draft.submit(payload);
+				return !draft.error;
+			};
+			const pending = kind === 'fields' ? submitFields() : controller.mutate(issue(), payload);
+			expect(controller.displayedCollection?.windows['in-review']?.items[0]?.title).toBe(
+				'New title',
+			);
+			expect(controller.collection).toBe(original);
+			expect(original?.windows.open?.items[0]?.status).toBe('open');
+			expect(controller.displayedCollection?.counts.counts.open).toBe(0);
+			expect(controller.displayedCollection?.counts.counts['in-review']).toBe(1);
+			const updated = issue(1, { revision: 2, status: 'in-review', title: 'New title' });
+			setItems([updated]);
+			setRevision(2);
+			const refresh = deferred<void>();
+			const counts = api.counts.getMockImplementation()!;
+			api.counts.mockImplementationOnce(async (...args) => {
+				await refresh.promise;
+				return counts(...args);
+			});
+			saved.resolve({ success: true, storeId: STORE, collectionRevision: 2, issue: updated });
+			expect(await pending).toBe(true);
+			expect(controller.displayedCollection?.windows['in-review']?.items[0]?.title).toBe(
+				'New title',
+			);
+			expect(controller.collection).toBe(original);
+			expect(controller.mutations.busy('ISS-1')).toBe(true);
+			expect(await controller.mutate(issue(), payload)).toBe(false);
+			expect(api.mutate).toHaveBeenCalledTimes(1);
+			refresh.resolve();
+			await controller.refresh();
+			expect(controller.mutations.busy('ISS-1')).toBe(false);
+			expect(controller.displayedCollection).toBe(controller.collection);
+		},
+	);
+
+	it('rolls back an ambiguous preview without losing its exact retry and ignores it after authority replacement', async () => {
+		const { controller, api, invalidations } = harness();
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		api.mutate.mockRejectedValueOnce(new TypeError('Synthetic response lost'));
+		await controller.mutate(issue(), {
+			action: 'update',
+			issueId: 'ISS-1',
+			expectedRevision: 1,
+			patch: { title: 'Preview' },
+		});
+		const draft = controller.drafts.active.find((entry) => entry.current.kind === 'mutation')!;
+		expect(draft.canRetry).toBe(true);
+		expect(controller.displayedCollection?.windows.list?.items[0]?.title).toBe('Synthetic 1');
+		const request = draft.current.frozen!.request;
+		const retry = deferred<IssueWriteResult>();
+		api.mutate.mockReturnValueOnce(retry.promise);
+		const sending = draft.retry();
+		expect(api.mutate.mock.lastCall![0]).toEqual(request);
+		invalidations.publishAuthority(false);
+		retry.resolve({
+			success: true,
+			storeId: STORE,
+			collectionRevision: 2,
+			issue: issue(1, { title: 'Old retry', revision: 2 }),
+		});
+		await sending;
+		expect(controller.collection).toBeNull();
+		expect(controller.saveFeedback).toBeNull();
+		expect(controller.mutations.busy('ISS-1')).toBe(false);
+	});
 	it('uses both current endpoint revisions and invalidates both cached link projections', async () => {
 		const source = issue(1, { revision: 3 });
 		const target = issue(2, { revision: 7 });

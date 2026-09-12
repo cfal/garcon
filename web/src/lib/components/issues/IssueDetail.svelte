@@ -49,7 +49,8 @@
 	let composing = $state(false);
 	let scroll = $state<HTMLElement | null>(null);
 	let priorComments: IssueDetail['comments'] | null = null;
-	const issue = $derived(detail.issue);
+	const issue = $derived(controller.mutations.issue(detail.issue));
+	const saving = $derived(controller.mutations.busy(issue.id));
 	const ownAssignment = $derived(
 		issue.assignee?.kind === 'user' && issue.assignee.username === username,
 	);
@@ -133,7 +134,7 @@
 			onclick={() => void copyLink()}
 			aria-label={m.issues_copy_link()}><Copy size={14} /></button
 		>
-		<IssueStatusMenu {issue} {onStatus} />
+		<IssueStatusMenu {issue} {onStatus} disabled={saving} />
 	</div>
 	{#if copied}<p class="issue-muted" role="status">{copied}</p>{/if}
 	{#if editing}
@@ -186,10 +187,13 @@
 			{issue.title}
 		</h1>
 		<div class="issue-actions">
-			<button type="button" class="issue-button" onclick={edit}>{m.issues_edit()}</button>
+			<button type="button" class="issue-button" disabled={saving} onclick={edit}
+				>{m.issues_edit()}</button
+			>
 			{#if issue.status !== 'closed' && !issue.assignee}<button
 					type="button"
 					class="issue-button"
+					disabled={saving}
 					onclick={() =>
 						void controller.mutate(issue, {
 							action: 'claim',
@@ -200,6 +204,7 @@
 			{#if ownAssignment}<button
 					type="button"
 					class="issue-button"
+					disabled={saving}
 					onclick={() =>
 						void controller.mutate(issue, {
 							action: 'release',
@@ -210,6 +215,7 @@
 			<button
 				type="button"
 				class="issue-button"
+				disabled={saving}
 				onclick={() => onStatus(issue.status === 'closed' ? 'open' : 'closed')}
 				>{issue.status === 'closed' ? m.issues_reopen() : m.issues_close()}</button
 			>

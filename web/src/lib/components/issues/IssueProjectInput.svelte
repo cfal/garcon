@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import Folder from '@lucide/svelte/icons/folder';
 	let {
 		controller,
 		value,
@@ -8,7 +9,8 @@
 		onKeydown,
 		disabled = false,
 		label = m.issues_project(),
-		placeholder = '',
+		placeholder = m.issues_project(),
+		compact = false,
 	}: {
 		controller: IssuesController;
 		value: string;
@@ -16,6 +18,7 @@
 		disabled?: boolean;
 		label?: string;
 		placeholder?: string;
+		compact?: boolean;
 		onKeydown?: (event: KeyboardEvent) => void;
 	} = $props();
 	const id = $props.id();
@@ -44,21 +47,24 @@
 	});
 </script>
 
-<label class="issue-field" for={id}
-	>{label}
-	<input
-		{id}
-		list={`${id}-projects`}
-		class="issue-input"
-		{value}
-		{disabled}
-		{placeholder}
-		title={value}
-		onkeydown={onKeydown}
-		oninput={(event) => onChange(event.currentTarget.value)}
-		onfocus={() => (focused = true)}
-		onblur={() => (focused = false)}
-	/>
+<label class="issue-field issue-project-field" class:issue-project-compact={compact} for={id}>
+	<span class="sr-only">{label}</span>
+	<span class="issue-project-control">
+		<Folder class="issue-project-icon" size={15} aria-hidden="true" />
+		<input
+			{id}
+			list={`${id}-projects`}
+			class="issue-input"
+			{value}
+			{disabled}
+			{placeholder}
+			title={value}
+			onkeydown={onKeydown}
+			oninput={(event) => onChange(event.currentTarget.value)}
+			onfocus={() => (focused = true)}
+			onblur={() => (focused = false)}
+		/>
+	</span>
 </label>
 <datalist id={`${id}-projects`}
 	>{#each suggestions as project (project)}<option value={project}></option>{/each}</datalist

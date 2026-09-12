@@ -6,7 +6,9 @@
 	let { controller }: { controller: IssuesController } = $props();
 	let message = $state('');
 	let discardKey = $state<string | null>(null);
-	const retained = $derived(controller.drafts.active.filter((draft) => draft.needsExitGuard));
+	const retained = $derived(
+		controller.drafts.active.filter((draft) => draft.needsExitGuard && !draft.pending),
+	);
 	const unreadable = $derived(controller.drafts.entries.filter((entry) => !entry.draft));
 	const memoryOnly = $derived(
 		controller.drafts.oldStoreDrafts.filter(

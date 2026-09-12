@@ -24,6 +24,7 @@
 		directory,
 		onOpenChat,
 		onOpenSource,
+		pinnedProjectPaths = [],
 	}: {
 		controller: IssuesController;
 		visible: boolean;
@@ -32,6 +33,7 @@
 		directory: string | null;
 		onOpenChat: (id: string) => void;
 		onOpenSource: (source: IssueSource) => void;
+		pinnedProjectPaths?: string[];
 	} = $props();
 	const frame = getSurfaceFrameBridge();
 	let root = $state<HTMLElement | null>(null);
@@ -51,6 +53,8 @@
 	);
 	const createdOutside = $derived(
 		controller.createdIssueId !== null &&
+			controller.collection !== null &&
+			!controller.stale &&
 			!allItems.some((issue) => issue.id === controller.createdIssueId),
 	);
 	async function open(issue: IssueSummary) {
@@ -58,7 +62,7 @@
 		controller.select(issue.id);
 		await controller.refresh();
 		await tick();
-		if (root && root.clientWidth < 900)
+		if (root && (root.clientWidth < 900 || controller.detailFullWidth))
 			root.querySelector<HTMLElement>('.issue-detail-title')?.focus();
 	}
 	async function back() {
@@ -70,15 +74,20 @@
 		issue: Pick<IssueSummary, 'id' | 'revision' | 'status'>,
 		next: IssueStatus,
 	) {
-		if (issue.status === next) return;
+		if (issue.status === next || controller.mutations.busy(issue.id)) return;
+		const partition = controller.bootstrap;
+		if (!partition) return;
 		if (next === 'closed') {
 			panel.rememberInvoker();
 			controller.closeDraft = controller.drafts.open('close', { issue }, { resolution: 'done' });
 			return;
 		}
 		const bookmark = captureIssueFocus(document.activeElement);
-		const partition = controller.bootstrap;
-		if (!partition) return;
+		const previousLane = controller.activeLane;
+		const query = controller.query;
+		const layout = controller.layout;
+		if (controller.layout === 'board' && controller.lanes.includes(next))
+			controller.activeLane = next;
 		const completion = {
 			issueId: issue.id,
 			bookmark,
@@ -100,11 +109,23 @@
 					},
 		);
 		if (
-			!changed ||
 			controller.bootstrap?.storeId !== partition.storeId ||
 			controller.bootstrap.viewerKey !== partition.viewerKey
 		)
 			return;
+		if (!changed) {
+			if (
+				layout === 'board' &&
+				controller.layout === layout &&
+				controller.query === query &&
+				controller.activeLane === next
+			) {
+				controller.activeLane = previousLane;
+				await tick();
+				if (panel.retainsFocus(bookmark)) panel.restore(bookmark, completion.fallbackIndex);
+			}
+			return;
+		}
 		memory.pendingStatusMove = completion;
 		void controller.refresh();
 	}
@@ -159,6 +180,7 @@
 	bind:this={root}
 	class="issues-surface"
 	class:has-detail={hasDetail}
+	class:detail-full={controller.detailFullWidth}
 	aria-label={m.issues_title()}
 	data-issues-panel={memory.id}
 >
@@ -192,11 +214,10 @@
 			>
 		</div>{/if}
 	<div class="issues-body">
-		<div class="issue-collection">
-			{#if !controller.collection && controller.loading}<p class="issue-empty" role="status">
-					{m.issues_loading()}
-				</p>
-			{:else if controller.collection && allItems.length === 0}<div class="issue-empty">
+		<div class="issue-collection" aria-busy={controller.loading}>
+			{#if controller.layout === 'list' && controller.collection && !controller.stale && allItems.length === 0}<div
+					class="issue-empty"
+				>
 					<h3>
 						{Object.values(controller.query).some((value) => value !== false && value !== undefined)
 							? m.issues_empty_filter()
@@ -234,6 +255,7 @@
 			{controller}
 			{chats}
 			{username}
+			{pinnedProjectPaths}
 			ownerId={memory.id}
 			onClose={() => void panel.restoreInvoker()}
 		/>{/if}

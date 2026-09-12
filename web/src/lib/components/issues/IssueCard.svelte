@@ -12,6 +12,7 @@
 		board = false,
 		selected,
 		showProject,
+		pending = false,
 		onOpen,
 		onStatus,
 	}: {
@@ -19,6 +20,7 @@
 		board?: boolean;
 		selected: boolean;
 		showProject: boolean;
+		pending?: boolean;
 		onOpen: (issue: IssueSummary) => void;
 		onStatus: (issue: IssueSummary, status: IssueStatus) => void;
 	} = $props();
@@ -29,7 +31,8 @@
 	class:issue-row={!board}
 	class:issue-selected={selected}
 	data-issue-id={issue.id}
-	use:issueDraggable={() => issue}
+	aria-busy={pending}
+	use:issueDraggable={{ getIssue: () => issue, canDrag: () => !pending }}
 >
 	{#if board}<button
 			type="button"
@@ -57,7 +60,7 @@
 		<span class="issue-priority" data-priority={issue.priority}
 			>{issuePriorityLabel(issue.priority)}</span
 		>
-		<IssueStatusMenu {issue} onStatus={(status) => onStatus(issue, status)} />
+		<IssueStatusMenu {issue} disabled={pending} onStatus={(status) => onStatus(issue, status)} />
 		{#if issue.blockedByCount}<span class="issue-indicator" title={m.issues_blocked_by()}
 				><Link2 size={12} />{issue.blockedByCount}</span
 			>{/if}

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import type { IssueChatSummary } from './issue-presentation.js';
@@ -13,12 +12,14 @@
 		username,
 		ownerId,
 		onClose,
+		pinnedProjectPaths = [],
 	}: {
 		controller: IssuesController;
 		chats: readonly IssueChatSummary[];
 		username: string;
 		ownerId: string;
 		onClose: () => void;
+		pinnedProjectPaths?: string[];
 	} = $props();
 	const draft = $derived(controller.createDraft);
 	let content = $state<HTMLElement | null>(null);
@@ -33,10 +34,6 @@
 	async function submit() {
 		if (!draft || !canSubmit) return;
 		await submitIssueForm(draft);
-		if (controller.createDraft && !draft.dirty) {
-			await tick();
-			content?.querySelector<HTMLInputElement>('.issue-title-input')?.focus();
-		}
 	}
 </script>
 
@@ -70,7 +67,14 @@
 				oncompositionstart={() => (composing = true)}
 				oncompositionend={() => (composing = false)}
 			>
-				<IssueFieldsEditor {controller} {draft} {chats} {username} onSubmit={() => void submit()} />
+				<IssueFieldsEditor
+					{controller}
+					{draft}
+					{chats}
+					{username}
+					{pinnedProjectPaths}
+					onSubmit={() => void submit()}
+				/>
 				{#if controller.projectDefault}<p class="issue-muted">
 						{controller.projectDefault.kind === 'repository'
 							? m.issues_default_repo()
@@ -106,13 +110,6 @@
 						</div>
 					</div>{/if}
 				<Dialog.Footer>
-					<label class="issue-check"
-						><input
-							type="checkbox"
-							bind:checked={controller.createAnother}
-							disabled={draft.pending}
-						/>{m.issues_create_another()}</label
-					>
 					<button type="button" class="issue-button" disabled={draft.pending} onclick={requestClose}
 						>{m.issues_cancel()}</button
 					>

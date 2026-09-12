@@ -8,6 +8,7 @@
 	import IssueProjectInput from './IssueProjectInput.svelte';
 	import IssueLabelsInput from './IssueLabelsInput.svelte';
 	import IssueMarkdown from './IssueMarkdown.svelte';
+	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		controller,
@@ -15,12 +16,14 @@
 		chats,
 		username,
 		onSubmit,
+		pinnedProjectPaths = [],
 	}: {
 		controller: IssuesController;
 		draft: IssueDraftState;
 		chats: readonly IssueChatSummary[];
 		username: string;
 		onSubmit: () => void;
+		pinnedProjectPaths?: string[];
 	} = $props();
 	let preview = $state(false);
 	function keydown(event: KeyboardEvent) {
@@ -87,6 +90,15 @@
 		onChange={(value) => draft.setField('project', value)}
 		onKeydown={keydown}
 	/>
+	{#if draft.current.kind === 'create'}
+		<p class="issue-muted">{m.issues_project_hint()}</p>
+		<ProjectPinnedPathList
+			{pinnedProjectPaths}
+			selectedPath={draft.field('project')}
+			disabled={!draft.canEdit}
+			onSelect={(path) => draft.setField('project', path)}
+		/>
+	{/if}
 	<details open={draft.current.kind !== 'create'}>
 		<summary>{m.issues_more_details()}</summary>
 		<div class="issue-properties">

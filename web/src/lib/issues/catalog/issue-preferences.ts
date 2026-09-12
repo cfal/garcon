@@ -5,6 +5,7 @@ import type { IssueLayout } from './issue-collection.js';
 export interface IssuePreferences {
 	readonly layout: IssueLayout;
 	readonly query: IssueListQuery;
+	readonly detailFullWidth?: boolean;
 }
 export interface IssuePreferencesPort {
 	read(): IssuePreferences;
@@ -23,7 +24,7 @@ export const browserIssuePreferences: IssuePreferencesPort = {
 				limit: _limit,
 				...query
 			} = parseIssueListQuery(raw.query);
-			return { layout: raw.layout, query };
+			return { layout: raw.layout, query, detailFullWidth: raw.detailFullWidth === true };
 		} catch {
 			return { layout: 'list', query: {} };
 		}

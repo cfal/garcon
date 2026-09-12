@@ -18,9 +18,12 @@
 		onStatus: (issue: IssueSummary, status: IssueStatus) => void;
 		pinned?: { key: IssueWindowKey; issue: IssueSummary } | null;
 	} = $props();
+	const collection = $derived(controller.displayedCollection);
 	function items(key: IssueWindowKey) {
-		const entries = controller.collection?.windows[key]?.items ?? [];
-		return pinned?.key === key && !entries.some((issue) => issue.id === pinned!.issue.id)
+		const entries = collection?.windows[key]?.items ?? [];
+		return pinned?.key === key &&
+			!controller.mutations.busy(pinned.issue.id) &&
+			!entries.some((issue) => issue.id === pinned!.issue.id)
 			? [pinned.issue, ...entries.slice(0, issueWindowLimit(key) - 1)]
 			: entries;
 	}
@@ -33,7 +36,8 @@
 				{issue}
 				board={controller.layout === 'board'}
 				selected={controller.detail.selectedId === issue.id}
-				showProject={!controller.query.project}
+				showProject={!controller.collectionQuery.project}
+				pending={controller.mutations.busy(issue.id)}
 				{onOpen}
 				{onStatus}
 			/>
@@ -64,10 +68,7 @@
 		{#if controller.collection}<p class="issue-counts">
 				{m.issues_counts({
 					loaded: items('list').length,
-					total: Object.values(controller.collection.counts.counts).reduce(
-						(sum, count) => sum + count,
-						0,
-					),
+					total: Object.values(collection!.counts.counts).reduce((sum, count) => sum + count, 0),
 				})}
 			</p>{/if}
 	</div>
@@ -77,7 +78,7 @@
 				class="issue-button"
 				aria-pressed={controller.activeLane === status}
 				onclick={() => (controller.activeLane = status)}
-				>{issueStatusLabel(status)} · {controller.collection?.counts.counts[status] ?? 0}</button
+				>{issueStatusLabel(status)} · {collection?.counts.counts[status] ?? 0}</button
 			>{/each}
 	</nav>
 	<div class="issue-board">
@@ -95,7 +96,7 @@
 						class="issue-counts"
 						>{m.issues_counts({
 							loaded: items(status).length,
-							total: controller.collection?.counts.counts[status] ?? 0,
+							total: collection?.counts.counts[status] ?? 0,
 						})}</span
 					>
 				</h3>

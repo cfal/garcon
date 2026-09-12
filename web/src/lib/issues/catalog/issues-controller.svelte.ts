@@ -14,6 +14,7 @@ import { issuesApi, type IssuesApi } from '$lib/api/issues.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import { IssueDetailState } from '../detail/issue-detail-state.svelte.js';
+import { IssueMutationFeedback } from '../commands/issue-mutation-feedback.svelte.js';
 import { IssueDraftStore } from '../drafts/issue-draft-store.svelte.js';
 import { attachIssueDraftExitGuard } from '../drafts/issue-draft-exit-guard.js';
 import {
@@ -54,10 +55,12 @@ export interface IssueCloseConfirmation extends IssueDraftPartition {
 export class IssuesController implements PortableSingletonController {
 	readonly detail = new IssueDetailState();
 	readonly drafts: IssueDraftStore;
+	readonly mutations: IssueMutationFeedback;
 	bootstrap = $state.raw<IssueBootstrap | null>(null);
 	collection = $state.raw<IssueCollection | null>(null);
 	query = $state.raw<IssueListQuery>({});
 	layout = $state<IssueLayout>('list');
+	detailFullWidth = $state(false);
 	visible = $state(false);
 	loading = $state(false);
 	stale = $state(true);
@@ -69,7 +72,6 @@ export class IssuesController implements PortableSingletonController {
 	projectDefault = $state.raw<IssueProjectDefault | null>(null);
 	projectDefaultError = $state<string | null>(null);
 	createdIssueId = $state<string | null>(null);
-	createAnother = $state(false);
 	activeLane = $state<'open' | 'in-progress' | 'in-review' | 'closed'>('open');
 	readonly #api: IssuesApi;
 	readonly #preferences: IssuePreferencesPort;
@@ -85,6 +87,7 @@ export class IssuesController implements PortableSingletonController {
 	#request: AbortController | null = null;
 	#pageRequest: AbortController | null = null;
 	#createRequest: AbortController | null = null;
+	#collectionQuery = $state.raw<IssueListQuery | null>(null);
 
 	constructor(deps: IssuesControllerDeps) {
 		this.#api = deps.api ?? issuesApi;
@@ -92,6 +95,7 @@ export class IssuesController implements PortableSingletonController {
 		const preferences = this.#preferences.read();
 		this.layout = preferences.layout;
 		this.query = preferences.query;
+		this.detailFullWidth = preferences.detailFullWidth ?? false;
 		this.activeLane = this.lanes[0]!;
 		this.drafts = new IssueDraftStore({
 			api: this.#api,
@@ -113,6 +117,7 @@ export class IssuesController implements PortableSingletonController {
 				this.#supersede();
 			},
 		});
+		this.mutations = new IssueMutationFeedback(() => this.drafts.active);
 		this.#releaseExitGuard = attachIssueDraftExitGuard(this.drafts);
 		this.#authenticated = deps.invalidations.authenticationAvailable !== false;
 		this.#unsubscribe = deps.invalidations.subscribe((event) => {
@@ -121,6 +126,7 @@ export class IssuesController implements PortableSingletonController {
 				this.#needsBootstrap = true;
 				this.#knownRevision = 0;
 				this.bootstrap = null;
+				this.mutations.reset();
 				this.collection = null;
 				this.detail.reset();
 				this.#anchors = {};
@@ -160,7 +166,28 @@ export class IssuesController implements PortableSingletonController {
 	}
 
 	get lanes() {
-		return issueLanes(this.query);
+		return issueLanes(this.collection ? (this.#collectionQuery ?? this.query) : this.query);
+	}
+	get collectionQuery() {
+		return this.#collectionQuery ?? this.query;
+	}
+	get saveFeedback() {
+		return this.mutations.status;
+	}
+	displayedCollection = $derived.by(() =>
+		this.mutations.collection(this.collection, this.collectionQuery),
+	);
+
+	setDetailFullWidth(value: boolean): void {
+		this.detailFullWidth = value;
+		this.#persistPreferences();
+	}
+	#persistPreferences(): void {
+		this.#preferences.write({
+			layout: this.layout,
+			query: this.query,
+			detailFullWidth: this.detailFullWidth,
+		});
 	}
 
 	setQuery(input: IssueListQuery): void {
@@ -172,10 +199,8 @@ export class IssuesController implements PortableSingletonController {
 		} = parseIssueListQuery(input);
 		this.query = query;
 		this.#anchors = {};
-		this.collection = null;
 		this.createdIssueId = null;
-		if (!this.lanes.includes(this.activeLane)) this.activeLane = this.lanes[0]!;
-		this.#preferences.write({ layout: this.layout, query });
+		this.#persistPreferences();
 		this.#supersede();
 	}
 
@@ -185,7 +210,7 @@ export class IssuesController implements PortableSingletonController {
 		if (!this.lanes.includes(this.activeLane)) this.activeLane = this.lanes[0]!;
 		this.collection = null;
 		this.#anchors = {};
-		this.#preferences.write({ layout, query: this.query });
+		this.#persistPreferences();
 		this.#supersede();
 	}
 
@@ -276,6 +301,7 @@ export class IssuesController implements PortableSingletonController {
 							(this.bootstrap.storeId !== bootstrap.storeId ||
 								this.bootstrap.viewerKey !== bootstrap.viewerKey);
 						if (changed) {
+							this.mutations.reset();
 							this.collection = null;
 							this.detail.reset();
 							this.#anchors = {};
@@ -292,6 +318,7 @@ export class IssuesController implements PortableSingletonController {
 					}
 					const storeId = this.bootstrap!.storeId;
 					const selectedId = this.detail.selectedId;
+					const query = this.query;
 					const collection = await loadIssueCollection(
 						this.#api,
 						this.query,
@@ -299,7 +326,7 @@ export class IssuesController implements PortableSingletonController {
 						storeId,
 						this.#anchors,
 						request.signal,
-						this.collection,
+						this.#collectionQuery === query ? this.collection : null,
 					);
 					let detail: IssueDetail | null = null;
 					let detailError: string | null = null;
@@ -324,7 +351,10 @@ export class IssuesController implements PortableSingletonController {
 					if (epoch !== this.#epoch || !this.visible) continue;
 					if (detail) requireIssueVersion(detail, storeId, collection.counts.collectionRevision);
 					if (collection.counts.collectionRevision < this.#knownRevision) continue;
+					this.#collectionQuery = query;
 					this.collection = collection;
+					this.mutations.reconcile(collection.counts.collectionRevision);
+					if (!this.lanes.includes(this.activeLane)) this.activeLane = this.lanes[0]!;
 					this.#knownRevision = collection.counts.collectionRevision;
 					if (detail) this.detail.accept(detail);
 					if (detailError && selectedId) {
@@ -582,7 +612,7 @@ export class IssuesController implements PortableSingletonController {
 		issue: Pick<Issue, 'id' | 'revision'>,
 		payload: IssueMutationPayload,
 	): Promise<boolean> {
-		if (!this.bootstrap) return false;
+		if (!this.bootstrap || this.mutations.busy(issue.id)) return false;
 		const draft = this.drafts.open('mutation', { issue });
 		if (!draft) return false;
 		if (draft.needsExitGuard) {
@@ -639,13 +669,14 @@ export class IssuesController implements PortableSingletonController {
 		}
 	}
 
-	#acceptConfirmation({ draft, result, cleared }: IssueDraftConfirmation): void {
+	#acceptConfirmation({ draft, result, cleared, reused }: IssueDraftConfirmation): void {
 		if (
 			this.#disposed ||
 			this.bootstrap?.storeId !== draft.current.storeId ||
 			this.bootstrap.viewerKey !== draft.current.viewerKey
 		)
 			return;
+		this.mutations.confirm({ draft, result, cleared, reused }, this.#knownRevision);
 		if (cleared) {
 			if (this.closeDraft === draft) {
 				this.closeDraft = null;
@@ -669,17 +700,14 @@ export class IssuesController implements PortableSingletonController {
 		]);
 		if (draft.current.kind === 'create') {
 			this.createdIssueId = result.issue.id;
-			if (cleared) {
-				if (this.createAnother && this.createDraft === draft)
-					draft.beginEditing({ project: result.issue.project, priority: '2' }, null);
-				else this.closeCreate();
-			}
+			if (cleared) this.closeCreate();
 			this.detail.select(result.issue.id);
 		}
 		this.#supersede();
 	}
 
 	dispose(): void {
+		this.mutations.reset();
 		this.#disposed = true;
 		this.#epoch++;
 		this.#request?.abort();
