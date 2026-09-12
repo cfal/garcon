@@ -7,6 +7,16 @@ let fixture;
 beforeEach(() => { fixture = issueFixture(); });
 afterEach(() => { fixture.cleanup(); });
 
+test('searches literal descriptions after NUL with ASCII-only case folding', () => {
+  const first = fixture.create({ description: 'Prefix\0NeEdLe_%\\suffix Ä' }).issue;
+  fixture.create({ description: 'Other needle without punctuation' });
+  for (const query of ['needle_%', 'NeEdLe_%', '\\suffix', 'Ä']) {
+    expect(fixture.service.list({ query }).items.map((issue) => issue.id)).toEqual([first.id]);
+    expect(fixture.service.counts({ query }).counts.open).toBe(1);
+  }
+  expect(fixture.service.list({ query: 'ä' }).items).toEqual([]);
+});
+
 test('filters by project, owner, status, priority, and literal search/label without wildcard leakage', () => {
   const first = fixture.create({ title: 'A_100% match', project: 'Release', priority: 1, labels: ['label'],
     assignee: { kind: 'user', username: 'local' } }).issue;

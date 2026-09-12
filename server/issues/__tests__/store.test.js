@@ -3,11 +3,55 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, mkdirSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { issueFixture, caller } from './fixture.js';
-import { IssueStore } from '../store.js';
+import { IssueStore, configureIssueDatabase } from '../store.js';
 
 let fixture;
 beforeEach(() => { fixture = issueFixture(); });
 afterEach(() => { fixture.cleanup(); });
+
+test('verifies requested durability settings and refuses a VFS that cannot provide WAL', () => {
+  fixture.store.read((database) => {
+    expect(database.query('PRAGMA journal_mode').get().journal_mode).toBe('wal');
+    expect(database.query('PRAGMA foreign_keys').get().foreign_keys).toBe(1);
+    expect(database.query('PRAGMA synchronous').get().synchronous).toBe(2);
+  });
+  const memory = new Database(':memory:');
+  try { expect(() => configureIssueDatabase(memory)).toThrow('Unsupported issue durability configuration'); }
+  finally { memory.close(); }
+});
+
+test('does not alter the journal or contents of an unrecognized SQLite database', () => {
+  const directory = join(fixture.directory, 'foreign');
+  mkdirSync(directory);
+  const path = join(directory, 'issues.sqlite');
+  const original = new Database(path);
+  original.exec("CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES ('Synthetic data');");
+  original.close();
+  expect(() => new IssueStore(directory)).toThrow(expect.objectContaining({ code: 'ISSUE_STORAGE_UNAVAILABLE' }));
+  const reopened = new Database(path);
+  try {
+    expect(reopened.query('PRAGMA journal_mode').get().journal_mode).toBe('delete');
+    expect(reopened.query('PRAGMA user_version').get().user_version).toBe(0);
+    expect(reopened.query('SELECT value FROM unrelated').get().value).toBe('Synthetic data');
+  } finally { reopened.close(); }
+});
+
+test.each(['missing', 'extra'])('fences a %s normalized label without repairing canonical records', (kind) => {
+  const first = fixture.create({ labels: ['Canonical'] });
+  fixture.store.read((database) => {
+    if (kind === 'missing') database.query('DELETE FROM issue_labels WHERE issue_number=?').run(first.issue.number);
+    else database.query('INSERT INTO issue_labels VALUES (?,?)').run(first.issue.number, 'Unexpected');
+  });
+  fixture.service.close();
+  expect(() => new IssueStore(fixture.directory)).toThrow(expect.objectContaining({ code: 'ISSUE_STORAGE_UNAVAILABLE' }));
+});
+
+test('continues monotonically allocated issue numbers after closing and reopening', () => {
+  const first = fixture.create().issue;
+  fixture.write({ action: 'close', issueId: first.id, expectedRevision: first.revision });
+  fixture.reopen();
+  expect(fixture.create().issue.number).toBe(first.number + 1);
+});
 
 test('reopen preserves immutable identity and creates or repairs private file modes', () => {
   const initial = fixture.service.bootstrap(caller.authority);

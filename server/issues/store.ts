@@ -5,16 +5,20 @@ import { issueInteger, issueUuid } from '../../common/issue-validation.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ISSUE_SCHEMA } from './schema.js';
 import { issueStorageUnavailable } from './errors.js';
+import { diagnosticErrorCode } from '../lib/errors.js';
+import { createLogger } from '../lib/log.js';
 
-function secureFile(path: string, create: boolean): void {
+const logger = createLogger('issue-store');
+
+function secureFile(path: string, mode: 'create' | 'required' | 'optional'): void {
   let fd: number;
   try {
     const flags = constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-    fd = openSync(path, create ? flags | constants.O_CREAT | constants.O_EXCL : flags, 0o600);
+    fd = openSync(path, mode === 'create' ? flags | constants.O_CREAT | constants.O_EXCL : flags, 0o600);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (create && code === 'EEXIST') return secureFile(path, false);
-    if (!create && code === 'ENOENT') return;
+    if (mode === 'create' && code === 'EEXIST') return secureFile(path, 'required');
+    if (mode === 'optional' && code === 'ENOENT') return;
     throw error;
   }
   try {
@@ -36,33 +40,38 @@ export class IssueStore {
   constructor(workspaceDir: string, private readonly options: IssueStoreOptions = {}) {
     const path = join(workspaceDir, 'issues.sqlite');
     try {
-      secureFile(path, true);
-      secureFile(`${path}-wal`, false);
-      secureFile(`${path}-shm`, false);
-      const database = new Database(path, { strict: true });
+      secureFile(path, 'create');
+      secureFile(`${path}-wal`, 'optional');
+      secureFile(`${path}-shm`, 'optional');
+      const database = new Database(path, { strict: true, readwrite: true, create: false });
       this.#database = database;
-      database.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+      secureFile(path, 'required');
       const version = database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version;
       if (version === 0) {
+        const existing = database.query<{ count: number }, []>(
+          "SELECT count(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+        ).get();
+        if (existing?.count !== 0) throw issueStorageUnavailable();
+      } else if (version !== 1) {
+        throw issueStorageUnavailable();
+      }
+      configureIssueDatabase(database);
+      if (version === 0) {
         database.transaction(() => {
-          const existing = database.query<{ count: number }, []>(
-            "SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-          ).get();
-          if (existing?.count !== 0) throw issueStorageUnavailable();
           database.exec(ISSUE_SCHEMA);
           database.query('INSERT INTO issue_meta VALUES (1, ?, 0)').run(crypto.randomUUID());
         }).immediate();
-      } else if (version !== 1) {
-        throw issueStorageUnavailable();
       }
       const meta = database.query<{ store_id: string; revision: number }, []>(
         'SELECT store_id, revision FROM issue_meta WHERE singleton=1',
       ).get();
       this.storeId = issueUuid(meta?.store_id, 'storeId');
       issueInteger(meta?.revision, 'collectionRevision', 0);
-      secureFile(`${path}-wal`, false);
-      secureFile(`${path}-shm`, false);
-    } catch {
+      requireConsistentLabels(database);
+      secureFile(`${path}-wal`, 'optional');
+      secureFile(`${path}-shm`, 'optional');
+    } catch (error) {
+      logger.warn('Issue storage open failed.', { errorCode: diagnosticErrorCode(error) });
       this.close();
       throw issueStorageUnavailable();
     }
@@ -73,6 +82,7 @@ export class IssueStore {
     try { return operation(this.#database); }
     catch (error) {
       if (error instanceof DomainError) throw error;
+      logger.warn('Issue storage fenced.', { errorCode: diagnosticErrorCode(error) });
       this.close();
       throw issueStorageUnavailable();
     }
@@ -93,4 +103,27 @@ export class IssueStore {
     try { database?.close(); }
     catch { /* A failed connection stays fenced even if close also fails. */ }
   }
+}
+
+export function configureIssueDatabase(database: Database): void {
+  database.exec('PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;');
+  const journal = database.query<{ journal_mode: string }, []>('PRAGMA journal_mode=WAL').get();
+  const foreignKeys = database.query<{ foreign_keys: number }, []>('PRAGMA foreign_keys').get();
+  const synchronous = database.query<{ synchronous: number }, []>('PRAGMA synchronous').get();
+  if (journal?.journal_mode !== 'wal' || foreignKeys?.foreign_keys !== 1 || synchronous?.synchronous !== 2) {
+    throw new Error('Unsupported issue durability configuration.');
+  }
+}
+
+function requireConsistentLabels(database: Database): void {
+  const mismatch = database.query<{ inconsistent: number }, []>(`
+    SELECT 1 AS inconsistent WHERE EXISTS (
+      SELECT issue_number,label FROM issue_labels
+      EXCEPT SELECT i.number,j.value FROM issues i,json_each(i.payload_json,'$.labels') j
+    ) OR EXISTS (
+      SELECT i.number,j.value FROM issues i,json_each(i.payload_json,'$.labels') j
+      EXCEPT SELECT issue_number,label FROM issue_labels
+    )
+  `).get();
+  if (mismatch) throw new Error('Inconsistent issue label index.');
 }

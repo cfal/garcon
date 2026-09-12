@@ -63,10 +63,9 @@ function listFilter(query: IssueListQuery): { sql: string; values: (string | num
     conditions.push(query.ready ? ready : `NOT ${ready}`);
   }
   if (query.query !== undefined) {
-    conditions.push(`(json_extract(i.payload_json,'$.title') LIKE ? ESCAPE '\\'
-      OR json_extract(i.payload_json,'$.description') LIKE ? ESCAPE '\\' OR 'ISS-'||i.number=?)`);
-    const search = `%${literalLike(query.query)}%`;
-    values.push(search, search, query.query);
+    conditions.push(`(instr(lower(json_extract(i.payload_json,'$.title')), lower(?))>0
+      OR instr(lower(json_extract(i.payload_json,'$.description')), lower(?))>0 OR 'ISS-'||i.number=?)`);
+    values.push(query.query, query.query, query.query);
   }
   if (query.beforeNumber !== undefined) add('i.number<?', query.beforeNumber);
   return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', values };

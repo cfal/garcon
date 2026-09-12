@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { MarkupIssueMutationPayload, IssueMutationPayload } from '../../common/issue-commands.js';
 import type { IssueActor, IssueOwner, IssueSource } from '../../common/issues.js';
 import type { ServerPrincipal } from '../lib/http-route-types.js';
+import { issueActor, issueInvalid, issueOwner } from '../../common/issue-validation.js';
+import { validateIssueInput } from './errors.js';
 
 export type IssueAuthority =
   | { readonly kind: 'chat'; readonly chatId: string }
@@ -32,7 +34,18 @@ export function deriveIssueCaller(principal: ServerPrincipal, fromChatId?: strin
   const owner: IssueOwner = fromChatId
     ? { kind: 'chat', chatId: fromChatId }
     : { kind: 'user', username: principal.username };
-  return { actor, authority, owner };
+  return validateIssueCaller({ actor, authority, owner });
+}
+
+export function validateIssueCaller(caller: IssueCaller): IssueCaller {
+  return validateIssueInput(() => {
+    const actor = issueActor(caller.actor);
+    const owner = issueOwner(caller.owner);
+    if (actor.kind === 'user' && caller.actor.kind === 'user' && actor.username !== caller.actor.username) {
+      return issueInvalid('The authenticated username must be a canonical issue identity.');
+    }
+    return { authority: caller.authority, actor, owner };
+  });
 }
 
 export function issueFingerprint(payload: IssueMutationPayload | MarkupIssueMutationPayload, actor: IssueActor): string {

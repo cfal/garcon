@@ -4,7 +4,7 @@ import { parseIssueCommentsQuery, parseIssueHistoryQuery, parseIssueListQuery, p
 import { issueInteger, issueRecord, issueString } from '../../common/issue-validation.js';
 import type { IssueBootstrap, IssueOwner, IssueWriteResult } from '../../common/issues.js';
 import { createLogger } from '../lib/log.js';
-import { issueAuthorityKey, issueFingerprint, type IssueAuthority, type IssueCaller, type IssueMutationContext } from './contracts.js';
+import { issueAuthorityKey, issueFingerprint, validateIssueCaller, type IssueAuthority, type IssueCaller, type IssueMutationContext } from './contracts.js';
 import { IssueDomainError, nextIssueCounter, validateIssueInput } from './errors.js';
 import { mutateIssue } from './mutations.js';
 import { countIssues, HTTP_ISSUE_BUDGET, issueFacets, listIssues, readIssueComments,
@@ -48,8 +48,9 @@ export class IssueService {
     return this.execute(request.payload, context);
   }
 
-  execute(value: IssueMutationPayload, context: IssueMutationContext): IssueWriteResult {
+  execute(value: IssueMutationPayload, inputContext: IssueMutationContext): IssueWriteResult {
     const payload = validateIssueInput(() => parseIssueMutationPayload(value));
+    const context = { ...inputContext, ...validateIssueCaller(inputContext) };
     this.#admit(context);
     const committed = this.store.transaction((database) => {
       this.#admit(context);
