@@ -89,14 +89,15 @@ describe('Claude against a scripted model', () => {
     });
   });
 
-  test('pins subagents to the selected custom endpoint model', async () => {
+  test.each(['', '[922k]'])('pins subagents to the selected custom endpoint model with suffix %j', async (suffix) => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const childPrompt = `Inspect the scripted project ${crypto.randomUUID()}.`;
     const childReply = `SCRIPTED_CHILD_${crypto.randomUUID().replaceAll('-', '')}`;
     const reply = `SCRIPTED_PARENT_${crypto.randomUUID().replaceAll('-', '')}`;
     // An unknown custom ID reproduces Claude Code's Opus fallback; a Haiku alias cannot.
-    const selectedModel = 'integration-custom-claude-model';
+    const wireModel = 'integration-custom-claude-model';
+    const selectedModel = `${wireModel}${suffix}`;
     const requestStart = testEnvironment.model.markRequests();
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_scripted_agent', 'Agent', {
@@ -151,8 +152,8 @@ describe('Claude against a scripted model', () => {
       const requests = testEnvironment.model.requestsSince(requestStart);
       const childRequest = requests.find((candidate) => candidate.lastUserText.includes(childPrompt));
       if (!childRequest) throw new Error('The scripted subagent never reached the fake model.');
-      expect(childRequest.body.model).toBe(selectedModel);
-      expect(requests[0]?.body.model).toBe(selectedModel);
+      expect(childRequest.body.model).toBe(wireModel);
+      expect(requests[0]?.body.model).toBe(wireModel);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

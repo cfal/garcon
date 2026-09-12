@@ -18,7 +18,7 @@ let heldInput: {
 let heldAbortPoll: ReturnType<typeof setInterval> | null = null;
 
 if (args.includes('--version')) {
-  console.log('2.1.220 (Claude Code)');
+  console.log('2.1.238 (Claude Code)');
 } else if (args[0] === 'auth' && args[1] === 'status') {
   console.log(JSON.stringify({ loggedIn: true, authMethod: 'api_key' }));
 } else {

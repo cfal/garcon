@@ -25,6 +25,7 @@ const NULLABLE_FACET_METHODS = {
   nativeHistoryImport: ['load'],
   nativeActivity: ['lastActivity'],
   nativeSessions: ['resolveNativeSession', 'describeSource', 'release'],
+  configurationValidation: ['validate'],
   sessionConfiguration: ['apply'],
   projectPathUpdates: ['prepare'],
 } as const;

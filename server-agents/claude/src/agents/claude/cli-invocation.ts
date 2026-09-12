@@ -8,6 +8,7 @@ import { providerStartupPermissionMode } from '@garcon/server-agent-common/execu
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { ClaudeCliVersionProbe } from './cli-version.js';
+import { resolveClaudeModel } from './model-context.js';
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
 
 const NOOP_LOGGER: AgentLogger = {
@@ -83,7 +84,13 @@ export function buildClaudeCLIArgs({
       ]
     : ['--print', '--no-session-persistence'];
 
-  if (model) args.push('--model', model);
+  if (model) {
+    const resolved = resolveClaudeModel(model);
+    args.push('--model', resolved.model);
+    if (resolved.autoCompactWindow !== null) {
+      args.push('--autocompact', `${resolved.autoCompactWindow / 1_000}k`);
+    }
+  }
 
   const effectiveMode = permissionMode || 'default';
   const providerMode = providerStartupPermissionMode(effectiveMode);
@@ -145,6 +152,7 @@ export async function runSingleQuery(
     return runClaudeSingleQueryProcess({
       binary: claudeBinary,
       args,
+      model,
       cwd: cwd || process.cwd(),
       signal: querySignal,
       envOverrides,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-let versionProbe = () => Promise.resolve([2, 1, 220]);
+let versionProbe = () => Promise.resolve([2, 1, 238]);
 
 import { ClaudeCliRuntime } from '../claude-cli.js';
 
@@ -201,7 +201,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     spawnMock = mock();
     Bun.spawn = spawnMock;
-    versionProbe = () => Promise.resolve([2, 1, 220]);
+    versionProbe = () => Promise.resolve([2, 1, 238]);
 
     scheduled = [];
     cleared = [];
@@ -795,7 +795,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     await flush();
     expect(secondPublished.events).toEqual([]);
 
-    resolveProbe([2, 1, 220]);
+    resolveProbe([2, 1, 238]);
     await flush();
     expect(spawnMock).toHaveBeenCalledTimes(2);
 

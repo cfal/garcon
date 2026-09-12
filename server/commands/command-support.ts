@@ -98,6 +98,7 @@ export type AgentRegistryDep = Pick<
   | 'getAgentReadinessMap'
   | 'getAgentCatalogEntries'
   | 'assertExecutionModeSelectionSupported'
+  | 'validateConfiguration'
   | 'normalizeThinkingModeForAgent'
   | 'runSingleQuery'
   | 'supportsFork'

@@ -16,6 +16,7 @@ import type {
 } from './services.js';
 import type { AgentNativeFork } from './native-fork.js';
 import type {
+  AgentConfigurationValidation,
   AgentProjectPathUpdates,
   AgentSessionConfigurationUpdates,
 } from './execution.js';
@@ -46,6 +47,7 @@ export interface AgentIntegration {
   readonly nativeHistoryImport: AgentHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;
   readonly nativeSessions: AgentNativeSessionAccess | null;
+  readonly configurationValidation: AgentConfigurationValidation | null;
   readonly sessionConfiguration: AgentSessionConfigurationUpdates | null;
   readonly projectPathUpdates: AgentProjectPathUpdates | null;
 }
