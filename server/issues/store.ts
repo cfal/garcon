@@ -3,7 +3,7 @@ import { closeSync, constants, fchmodSync, fstatSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { issueInteger, issueUuid } from '../../common/issue-validation.js';
 import { DomainError } from '../lib/domain-error.js';
-import { ISSUE_SCHEMA } from './schema.js';
+import { ISSUE_SCHEMA_V1 } from './schema.js';
 import { issueStorageUnavailable } from './errors.js';
 import { diagnosticErrorCode } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
@@ -53,7 +53,7 @@ export class IssueStore {
     try {
       securedFile = secureFile(path, 'create');
       if (securedFile === null) throw issueStorageUnavailable();
-      const originalFile = fstatSync(securedFile);
+      const originalFile = fstatSync(securedFile, { bigint: true });
       secureSidecars(path);
       const database = new Database(path, { strict: true, readwrite: true, create: false });
       this.#database = database;
@@ -61,7 +61,8 @@ export class IssueStore {
       const openedFile = secureFile(path, 'required');
       if (openedFile === null) throw issueStorageUnavailable();
       try {
-        const currentFile = fstatSync(openedFile);
+        // Detects pathname replacement; SQLite does not expose its fd to exclude a swap-and-restore by another workspace writer.
+        const currentFile = fstatSync(openedFile, { bigint: true });
         if (currentFile.dev !== originalFile.dev || currentFile.ino !== originalFile.ino) {
           throw issueStorageUnavailable();
         }
@@ -82,7 +83,7 @@ export class IssueStore {
       configureIssueDatabase(database);
       if (version === 0) {
         database.transaction(() => {
-          database.exec(ISSUE_SCHEMA);
+          database.exec(ISSUE_SCHEMA_V1.join(';\n'));
           database.query('INSERT INTO issue_meta VALUES (1, ?, 0)').run(crypto.randomUUID());
         }).immediate();
       }
@@ -134,8 +135,7 @@ function readStoreId(database: Database): string {
 }
 
 function requireIssueSchema(database: Database): void {
-  const expected = ISSUE_SCHEMA.split(';').map((statement) => statement.trim())
-    .filter((statement) => statement.startsWith('CREATE ')).sort();
+  const expected = ISSUE_SCHEMA_V1.filter((statement) => statement.startsWith('CREATE ')).toSorted();
   const actual = database.query<{ sql: string }, []>(
     "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
   ).all().map((row) => row.sql?.trim()).sort();
