@@ -1,3 +1,5 @@
+import { immediateNodeReplies } from '../transport/reply-port.js';
+import { nodeWorkerReplies } from '../../execution-node/worker/reply-port.js';
 import { expect, mock, spyOn, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from '../../execution-node/worker/application-protocol.js';
@@ -68,9 +70,9 @@ function fixture() {
   const options = { session, connectionId: 1, signal: physical.signal, validate() {}, failed };
   const submissions = new NodeSessionSocketWriter(returning.writer, physical.signal);
   const executeService = mock(async (): Promise<NodeWorkerServiceResult> => recovered);
-  const service = new NodeWorkerServiceServer(submissions, executeService, options);
+  const service = new NodeWorkerServiceServer(nodeWorkerReplies(submissions), executeService, options);
   const port = new NodeWorkerExecutionPort(submissions, { ...options, instanceId, closed: () => physical.abort() });
-  const execution = new NodeExecutionServer(port, { async execute() { return { kind: 'status', receipt: null }; } }, options);
+  const execution = new NodeExecutionServer(immediateNodeReplies(port), { async execute() { return { kind: 'status', receipt: null }; } }, options);
   return { client, outgoing, returning, physical, failed, executeService,
     progress() { outgoing.progress(); returning.progress(); },
     close() { physical.abort(); outgoing.drained.mockRestore(); returning.drained.mockRestore(); },

@@ -7,6 +7,7 @@ import {
 } from './execution-wire.js';
 import { parseNodeExecutionReplyText, serializeNodeExecutionReply, type NodeExecutionResult } from './execution-receipt-wire.js';
 import type { NodeSocketWriter } from './socket-writer.js';
+import type { NodeReplyAuthority, NodeReplyPort } from './reply-port.js';
 
 export interface NodeExecutionChannelOptions {
   readonly session: NodeSessionIdentity;
@@ -159,17 +160,19 @@ export class NodeExecutionServer {
   readonly #pending = new Map<number, AbortController>();
   readonly #closing = new AbortController();
   readonly #detach: () => void;
+  readonly #replyAuthority: NodeReplyAuthority;
   #ordinary = 0;
   #received = 0;
   #closed = false;
 
   constructor(
-    private readonly writer: Pick<NodeSocketWriter, 'send' | 'close'>,
+    private readonly replies: NodeReplyPort,
     private readonly handler: NodeExecutionRequestHandler,
     private readonly options: NodeExecutionChannelOptions,
   ) {
     this.#session = sessionIdentity(options.session);
     this.#limits = channelLimits(options);
+    this.#replyAuthority = { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw new Error('Node reply authority is closed'); }, failed: () => this.close() };
     const close = () => this.close();
     options.signal.addEventListener('abort', close, { once: true });
     this.#detach = () => options.signal.removeEventListener('abort', close);
@@ -183,6 +186,7 @@ export class NodeExecutionServer {
       const cancel = parseNodeExecutionCancellationText(serialized);
       if (!cancel || !sameNodeSession(cancel.session, this.#session) || cancel.requestId > this.#received) { this.close(); return; }
       this.#pending.get(cancel.requestId)?.abort(new DOMException('Node request cancelled', 'AbortError'));
+      this.replies.cancel(cancel.requestId);
       return;
     }
     if (!sameNodeSession(call.session, this.#session) || call.requestId <= this.#received) { this.close(); return; }
@@ -212,14 +216,15 @@ export class NodeExecutionServer {
     this.#closed = true;
     this.#detach();
     this.#closing.abort(new DOMException('Node connection closed', 'AbortError'));
-    this.writer.close();
+    this.replies.close();
   }
 
   async #execute(call: NodeExecutionCall, cancellation: AbortController, priority: boolean, release: (() => void) | null): Promise<void> {
+    const signal = AbortSignal.any([cancellation.signal, this.#closing.signal, this.options.signal]);
     try {
-      const result = await this.handler.execute(call.command, AbortSignal.any([cancellation.signal, this.#closing.signal, this.options.signal]));
-      if (!cancellation.signal.aborted) this.#reply(call.requestId, result);
-    } catch { if (!cancellation.signal.aborted) this.#reply(call.requestId, { kind: 'unknown' }); }
+      const result = await this.handler.execute(call.command, signal);
+      if (!signal.aborted) this.#reply(call.requestId, result, signal);
+    } catch { if (!signal.aborted) this.#reply(call.requestId, { kind: 'unknown' }, signal); }
     finally {
       this.#pending.delete(call.requestId);
       if (!priority) this.#ordinary -= 1;
@@ -227,7 +232,7 @@ export class NodeExecutionServer {
     }
   }
 
-  #reply(requestId: number, result: NodeExecutionResult): void {
+  #reply(requestId: number, result: NodeExecutionResult, signal = this.#closing.signal): void {
     if (!this.#validate()) return;
     let serialized: string;
     try { serialized = serializeNodeExecutionReply({ type: 'node-execution-result', version: NODE_WIRE_VERSION,
@@ -236,8 +241,8 @@ export class NodeExecutionServer {
       serialized = serializeNodeExecutionReply({ type: 'node-execution-result', version: NODE_WIRE_VERSION,
         session: this.#session, requestId, result: { kind: 'unknown' } });
     }
-    try { this.writer.send(serialized); }
-    catch { this.close(); }
+    try { this.replies.enqueue(requestId, serialized, { ...this.#replyAuthority, signal }); }
+    catch { if (!signal.aborted) this.close(); }
   }
 
   #validate(): boolean {

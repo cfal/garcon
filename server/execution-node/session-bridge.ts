@@ -5,7 +5,8 @@ import type { NodeExecutionClient } from '../execution-nodes/transport/execution
 import type { NodeBulkSessionChannel } from '../execution-nodes/transport/bulk-session-channel.js';
 import { isNodeExecutionReconciliation } from '../execution-nodes/transport/execution-wire.js';
 import { isNodeSessionConfigurationReconciliation } from '../execution-nodes/transport/provider-session-configuration-wire.js';
-import { NodeSessionSocketWriter } from '../execution-nodes/transport/session-socket-writer.js';
+import { NodeSocketReplyOutbox } from '../execution-nodes/transport/reply-outbox.js';
+import type { NodeSocketReplyOutboxOptions } from '../execution-nodes/transport/reply-outbox.js';
 import type { NodeSocketWriter } from '../execution-nodes/transport/socket-writer.js';
 import type { NodeOutputRetirements } from './output-retirements.js';
 import type { NodeHostedConnection, NodeSessionCoordinator } from './session-coordinator.js';
@@ -31,6 +32,7 @@ export interface NodeSessionBridgeOptions {
   readonly retirements: NodeOutputRetirements;
   readonly bulk: Pick<NodeBulkSessionChannel, 'send' | 'close'>;
   readonly scheduleOutputTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
+  readonly replyLimits?: Pick<NodeSocketReplyOutboxOptions, 'maxEntries' | 'maxBytes' | 'maxAgeMs' | 'scheduleTimeout'>;
   /** Uses the same monotonic origin as NodeWorkerPeer's performance.now() timestamps. */
   readonly now?: () => number;
   validate(): void;
@@ -51,7 +53,7 @@ export class NodeSessionBridge {
   readonly #detach: () => void;
   readonly #execution = new Map<string, NodeExecutionServer>();
   readonly #executionBudget = new NodeExecutionRequestBudget();
-  readonly #submissions: NodeSessionSocketWriter;
+  readonly #replies: NodeSocketReplyOutbox;
   #service: NodeWorkerServiceServer | null = null;
   #recovery: BridgeRecovery | null = null;
   #lastGeneration = 0;
@@ -59,11 +61,12 @@ export class NodeSessionBridge {
 
   constructor(private readonly writer: NodeSocketWriter, private readonly options: NodeSessionBridgeOptions) {
     this.options = Object.freeze({ ...options, instanceIds: new Set(options.instanceIds) });
-    this.#submissions = new NodeSessionSocketWriter(writer, this.#closing.signal);
+    this.#replies = new NodeSocketReplyOutbox(writer, { ...options.replyLimits, signal: this.#closing.signal, now: options.now,
+      validate: () => this.#validate(), failed: (error) => this.#close(error) });
     const close = () => this.close();
     this.#detach = () => options.signal.removeEventListener('abort', close);
     options.signal.addEventListener('abort', close, { once: true });
-    this.#service = new NodeWorkerServiceServer(this.#submissions, (command, signal) => this.#call(command, signal), {
+    this.#service = new NodeWorkerServiceServer(this.#replies.channel(), (command, signal) => this.#call(command, signal), {
       session: options.connection.lease.session, connectionId: options.connection.connectionId, signal: this.#closing.signal,
       validate: () => this.#validate(), failed: (error) => this.#close(error),
     });
@@ -204,15 +207,9 @@ export class NodeSessionBridge {
     const existing = this.#execution.get(instanceId);
     if (existing) return existing;
     const { connection, coordinator } = this.options;
-    const server = new NodeExecutionServer({
-      send: (payload) => {
-        const accepted = this.writer.sendApplication(serializeNodeWorkerExecution({ type: 'node-worker-execution', version: NODE_WIRE_VERSION,
-          session: connection.lease.session, connectionId: connection.connectionId, instanceId, payload }));
-        if (!accepted) this.close();
-        return accepted;
-      },
-      close: () => this.close(),
-    }, { execute: async (command, signal) => {
+    const replies = this.#replies.channel((payload) => serializeNodeWorkerExecution({ type: 'node-worker-execution', version: NODE_WIRE_VERSION,
+      session: connection.lease.session, connectionId: connection.connectionId, instanceId, payload }));
+    const server = new NodeExecutionServer(replies, { execute: async (command, signal) => {
       this.#validate(); signal.throwIfAborted();
       if (!isNodeExecutionReconciliation(command)) {
         try { coordinator.supervisor.assertAdmission(connection.lease); }

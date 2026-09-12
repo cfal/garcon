@@ -14,6 +14,7 @@ import { NodeWorkerWriter } from '../worker/writer.js';
 import { NODE_WORKER_WRITER_LIMITS } from '../worker/limits.js';
 import { encodeNodeWorkerFrame, readNodeWorkerFrames } from '../worker/framing.js';
 import { tick } from '../worker/__tests__/lifecycle-fixture.js';
+import type { NodeExecutionResult } from '../../execution-nodes/transport/execution-receipt-wire.js';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
@@ -54,7 +55,7 @@ function fixture() {
     completeRecovery: mock<NodeSessionBridgeOptions['coordinator']['completeRecovery']>(async (connection, attempt) => supervisor.completeRecovery(connection.lease, attempt)),
   } satisfies NodeSessionBridgeOptions['coordinator'];
   const closeLinks: (() => void)[] = [];
-  function connect(scheduleOutputTimeout?: NodeSessionBridgeOptions['scheduleOutputTimeout']) {
+  function connect(scheduleOutputTimeout?: NodeSessionBridgeOptions['scheduleOutputTimeout'], replyLimits?: NodeSessionBridgeOptions['replyLimits']) {
     const connection: NodeHostedConnection = { connectionId: ++connectionId,
       lease: connectionId === 1 ? initial : supervisor.attach(session), ready: Promise.resolve([]) };
     const physical = new AbortController();
@@ -79,7 +80,7 @@ function fixture() {
       validate() {}, received: (frame) => received.push(frame), disconnected: close });
     const bulk = { send: mock(() => true), close: mock(() => {}) };
     const bridge = new NodeSessionBridge(nodeWriter, { connection, instanceIds, signal: physical.signal, coordinator, retirements,
-      bulk, scheduleOutputTimeout, now: () => now,
+      bulk, scheduleOutputTimeout, replyLimits, now: () => now,
       validate() {}, disconnected(error) { failures.push(error); close(); } });
     const call = (command: Parameters<NodeWorkerServiceClient['call']>[0], signal = physical.signal) => client.service.call(command, signal);
     const recover = async () => {
@@ -288,14 +289,116 @@ test('writer capacity before submission is rejected while reply loss after submi
   expect(link.connection.lease.authoritySignal.aborted).toBe(false);
 });
 
-test('lost mutation result on a saturated socket closes only the physical hop', async () => {
+test('a completed mutation waits for partial socket headroom without retaining its handler or repeating the effect', async () => {
   const f = fixture(); const link = f.connect(); await link.recover();
   link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
-  expect(await link.client.execution('synthetic-instance').call(f.dispatch, link.physical.signal)).toEqual({ kind: 'unknown' });
+  const pending = link.client.execution('synthetic-instance').call(f.dispatch, link.physical.signal);
+  await tick();
+  expect(link.physical.signal.aborted).toBe(false);
   expect(f.execution.call).toHaveBeenCalledTimes(1);
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes - 1024);
+  expect(await pending).toEqual({ kind: 'dispatched' });
+  expect(f.execution.call).toHaveBeenCalledTimes(1);
+  expect(link.failures).toEqual([]);
+});
+
+test('sequential completed execution and service handlers share the bounded socket reply outbox', async () => {
+  const f = fixture(); const link = f.connect(undefined, { maxEntries: 2 }); await link.recover();
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
+  const first = link.client.execution('synthetic-instance').call(f.dispatch, link.physical.signal);
+  await tick();
+  const second = link.call({ method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' });
+  await tick();
+  expect(link.physical.signal.aborted).toBe(false);
+  const overflow = link.client.execution('synthetic-second').call(f.dispatch, link.physical.signal);
+  expect(await Promise.all([first, second, overflow])).toEqual([{ kind: 'unknown' }, { kind: 'unknown' }, { kind: 'unknown' }]);
+  expect(f.execution.call).toHaveBeenCalledTimes(2);
+  expect(f.service.call).toHaveBeenCalledTimes(3);
   expect(link.physical.signal.aborted).toBe(true);
   expect(link.connection.lease.authoritySignal.aborted).toBe(false);
   expect(f.supervisor.status).toBe('reconnecting');
+  expect(link.failures).toHaveLength(1);
+});
+
+test('capacity rejection replies consume the same outbox budget without owning handler slots', async () => {
+  const f = fixture(); const link = f.connect(undefined, { maxEntries: 2 }); await link.recover();
+  const held = Promise.withResolvers<NodeWorkerServiceResult>();
+  f.service.call.mockImplementation(() => held.promise);
+  const permission = { stream: f.frame().stream, handle: 'synthetic-handle', runId: 'synthetic-run',
+    permissionOccurrenceId: '00000000-0000-4000-8000-000000000001' };
+  const command = { method: 'permission', command: { method: 'permission-status', permission } } as const;
+  const receive = (requestId: number) => link.bridge.receive(JSON.stringify({ type: 'node-worker-service-request', version: 1,
+    session: f.session, connectionId: 1, requestId, command }));
+  try {
+    link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
+    for (let requestId = 3; requestId < 19; requestId++) receive(requestId);
+    expect(f.service.call).toHaveBeenCalledTimes(18);
+    receive(19); receive(20);
+    expect(link.physical.signal.aborted).toBe(false);
+    receive(21);
+    expect(f.service.call).toHaveBeenCalledTimes(18);
+    expect(link.physical.signal.aborted).toBe(true);
+    expect(link.connection.lease.authoritySignal.aborted).toBe(false);
+    expect(link.failures).toHaveLength(1);
+  } finally { held.resolve({ kind: 'unknown' }); await tick(); }
+});
+
+test.each(['service', 'execution'] as const)('a cancelled %s reply is removed after its handler has completed', async (family) => {
+  const f = fixture(); const link = f.connect(); await link.recover();
+  const caller = new AbortController();
+  const call = (signal: AbortSignal) => family === 'execution'
+    ? link.client.execution('synthetic-instance').call(f.dispatch, signal)
+    : link.call({ method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' }, signal);
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
+  const sent = link.nodePort.send.mock.calls.length;
+  const pending = call(caller.signal);
+  await tick();
+  if (family === 'execution') expect(f.execution.call).toHaveBeenCalledTimes(1);
+  else expect(f.service.call).toHaveBeenCalledTimes(3);
+  caller.abort();
+  expect(await pending).toEqual({ kind: 'unknown' });
+  await tick();
+  link.nodeBuffer(0); await tick();
+  expect(link.nodePort.send.mock.calls).toHaveLength(sent);
+  expect(link.failures).toEqual([]);
+  expect(await call(link.physical.signal)).toEqual(family === 'execution' ? { kind: 'dispatched' } : { kind: 'unknown' });
+});
+
+test('execution admission rejections share the reply budget across instance channels', async () => {
+  const f = fixture(); const link = f.connect(undefined, { maxEntries: 2 }); await link.recover();
+  const held = Promise.withResolvers<NodeExecutionResult>();
+  f.execution.call.mockImplementation(() => held.promise);
+  const receive = (requestId: number, instanceId = 'synthetic-instance') => link.bridge.receive(JSON.stringify({
+    type: 'node-worker-execution', version: 1, session: f.session, connectionId: 1, instanceId,
+    payload: JSON.stringify({ type: 'node-execution-request', version: 1, session: f.session, requestId, command: f.dispatch }),
+  }));
+  try {
+    link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
+    for (let requestId = 1; requestId <= 32; requestId++) receive(requestId);
+    expect(f.execution.call).toHaveBeenCalledTimes(32);
+    receive(33); receive(1, 'synthetic-second');
+    expect(link.physical.signal.aborted).toBe(false);
+    receive(34);
+    expect(f.execution.call).toHaveBeenCalledTimes(32);
+    expect(link.physical.signal.aborted).toBe(true);
+    expect(link.connection.lease.authoritySignal.aborted).toBe(false);
+    expect(link.failures).toHaveLength(1);
+  } finally { held.resolve({ kind: 'unknown' }); await tick(); }
+});
+
+test('a queued reply expires without repeating its completed mutation or retiring logical worker authority', async () => {
+  const f = fixture(); const timers: { callback(): void; cancelled: boolean }[] = [];
+  const link = f.connect(undefined, { maxAgeMs: 100, scheduleTimeout(callback) {
+    const timer = { callback, cancelled: false }; timers.push(timer); return { cancel() { timer.cancelled = true; } };
+  } });
+  await link.recover();
+  link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
+  const pending = link.client.execution('synthetic-instance').call(f.dispatch, link.physical.signal);
+  await tick(); f.advance(100); timers.find((timer) => !timer.cancelled)!.callback();
+  expect(await pending).toEqual({ kind: 'unknown' });
+  expect(f.execution.call).toHaveBeenCalledTimes(1);
+  expect(link.physical.signal.aborted).toBe(true);
+  expect(link.connection.lease.authoritySignal.aborted).toBe(false);
 });
 
 test('execution replies use application reserve when ordinary socket capacity is full', async () => {

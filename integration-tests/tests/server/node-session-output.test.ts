@@ -3,7 +3,7 @@ import path from 'node:path';
 import { MAX_NODE_OUTPUT_BYTES } from '../../../server-agents/interface/src/index.js';
 import { DEFAULT_NODE_REPLAY } from '../../../server/execution-node/replay-cache.js';
 import { parseNodeWorkerOutputText } from '../../../server/execution-node/worker/output-protocol.js';
-import type { NodeWorkerApplicationFrame } from '../../../server/execution-node/worker/application-protocol.js';
+import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from '../../../server/execution-node/worker/application-protocol.js';
 import type { ProviderConfigurationRequest } from '../../../server/execution-nodes/provider-configuration.js';
 import { parseNodeExecutionReplyText } from '../../../server/execution-nodes/transport/execution-receipt-wire.js';
 import { NodeSocketWriter } from '../../../server/execution-nodes/transport/socket-writer.js';
@@ -46,6 +46,82 @@ function model(respond: (index: number) => Promise<string>) {
 }
 
 describe.skipIf(!nodeSessionSystemdAvailable)('contained worker output over authenticated WSS', () => {
+  test.each(['execution', 'service'] as const)('%s replies survive held application admission and partial socket drainage', async (family) => {
+    const provider = model(async () => 'synthetic queued reply output');
+    const f = await createNodeSessionOutputFixture(certificate);
+    const lifetime = new AbortController();
+    let pressure: ReturnType<typeof f.host.holdApplicationSocketAdmission> | undefined;
+    let waiting: ReturnType<typeof spyOn<NodeSocketWriter, 'sendApplicationWhenWritable'>> | undefined;
+    try {
+      await f.recover();
+      const output = await f.install(`synthetic-outbox-${family}`, { signal: lifetime.signal, emit() {} });
+      const started = await f.start(output, '1789000000000096', `synthetic-outbox-${family}`, provider.configuration, 'synthetic input');
+      expect(started.result).toEqual({ kind: 'dispatched' });
+      await f.waitFor(output, (event) => event.type === 'run-ended');
+      const parked = Promise.withResolvers<string>();
+      const send = NodeSocketWriter.prototype.sendApplicationWhenWritable;
+      waiting = spyOn(NodeSocketWriter.prototype, 'sendApplicationWhenWritable').mockImplementation(function (this: NodeSocketWriter, text, signal, validate) {
+        parked.resolve(text);
+        return send.call(this, text, signal, validate);
+      });
+      pressure = f.host.holdApplicationSocketAdmission();
+      const reply = family === 'execution'
+        ? f.controller.client.execution('synthetic-instance').call({ method: 'status', identity: started.identity }, f.signal)
+        : f.controller.client.service.call({ method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' }, f.signal);
+      const parkedFrame = parseNodeWorkerApplicationText(await withTimeout(parked.promise, 5000, () => 'Synthetic reply did not reach the socket outbox'));
+      expect(parkedFrame).toMatchObject({ connectionId: f.connection.connectionId,
+        type: family === 'execution' ? 'node-worker-execution' : 'node-worker-service-result' });
+      if (parkedFrame?.type === 'node-worker-execution') expect(parseNodeExecutionReplyText(parkedFrame.payload)).toMatchObject({ result: { kind: 'status' } });
+      else expect(parkedFrame).toMatchObject({ result: { kind: 'provider-auth-status' } });
+      expect(f.controller.signal.aborted).toBe(false);
+      pressure.drain(1024);
+      expect(pressure.remainingBytes).toBeGreaterThan(0);
+      expect(await reply).toMatchObject(family === 'execution' ? { kind: 'status', receipt: { phase: 'ended' } } : { kind: 'provider-auth-status' });
+      expect(waiting).toHaveBeenCalledTimes(1);
+      expect(f.controller.signal.aborted).toBe(false);
+      expect(f.connection.lease.authoritySignal.aborted).toBe(false);
+      expect(f.failures).toEqual([]); expect(provider.requests).toHaveLength(1);
+    } finally { waiting?.mockRestore(); pressure?.release(); lifetime.abort(); await f.dispose(); await provider.close(); }
+  });
+
+  test('a disconnected queued reply cannot reach the replacement physical connection', async () => {
+    const provider = model(async () => 'synthetic reply replacement');
+    const f = await createNodeSessionOutputFixture(certificate);
+    const lifetime = new AbortController();
+    let pressure: ReturnType<typeof f.host.holdApplicationSocketAdmission> | undefined;
+    let waiting: ReturnType<typeof spyOn<NodeSocketWriter, 'sendApplicationWhenWritable'>> | undefined;
+    try {
+      await f.recover();
+      const output = await f.install('synthetic-outbox-replacement', { signal: lifetime.signal, emit() {} });
+      const started = await f.start(output, '1789000000000095', 'synthetic-outbox-replacement', provider.configuration, 'synthetic input');
+      expect(started.result).toEqual({ kind: 'dispatched' });
+      await f.waitFor(output, (event) => event.type === 'run-ended');
+      const parked = Promise.withResolvers<string>();
+      const send = NodeSocketWriter.prototype.sendApplicationWhenWritable;
+      waiting = spyOn(NodeSocketWriter.prototype, 'sendApplicationWhenWritable').mockImplementation(function (this: NodeSocketWriter, text, signal, validate) {
+        parked.resolve(text); return send.call(this, text, signal, validate);
+      });
+      pressure = f.host.holdApplicationSocketAdmission();
+      const previousId = f.connection.connectionId;
+      const reply = f.controller.client.execution('synthetic-instance').call({ method: 'status', identity: started.identity }, f.signal);
+      const parkedFrame = parseNodeWorkerApplicationText(await withTimeout(parked.promise, 5000, () => 'Synthetic reply did not reach the socket outbox'));
+      expect(parkedFrame).toMatchObject({ type: 'node-worker-execution', connectionId: previousId });
+      await f.disconnect();
+      expect(await reply).toEqual({ kind: 'unknown' });
+      waiting.mockRestore(); waiting = undefined;
+      const receivedConnections: number[] = [];
+      f.host.controllerFrames.add((frame) => { if ('connectionId' in frame) receivedConnections.push(frame.connectionId); return true; });
+      await f.reconnect(); await f.recover();
+      pressure.release(); pressure = undefined;
+      expect(f.connection.connectionId).toBeGreaterThan(previousId);
+      expect(await f.controller.client.execution('synthetic-instance').call({ method: 'status', identity: started.identity }, f.signal))
+        .toMatchObject({ kind: 'status', receipt: { phase: 'ended' } });
+      expect(receivedConnections.length).toBeGreaterThan(0);
+      expect(receivedConnections.every((id) => id === f.connection.connectionId)).toBe(true);
+      expect(f.failures).toEqual([]); expect(provider.requests).toHaveLength(1);
+    } finally { waiting?.mockRestore(); pressure?.release(); lifetime.abort(); await f.dispose(); await provider.close(); }
+  });
+
   test('status replies cross both worker hops while ordinary socket admission is held', async () => {
     const provider = model(async () => 'synthetic reserve output');
     const f = await createNodeSessionOutputFixture(certificate);

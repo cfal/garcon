@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../../execution-node/worker/reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { NodeProviderCapacity } from '../../execution-node/provider-capacity.js';
 import type { AgentCatalogSnapshot } from '@garcon/server-agent-interface';
@@ -35,7 +36,7 @@ function fixture() {
     client.receive({ ...frame, result: alter(frame.result) });
   }, close() {} }, writerOptions);
   const client = new NodeWorkerServiceClient(requestWriter, options);
-  const server = new NodeWorkerServiceServer(replyWriter, async (command, signal) => {
+  const server = new NodeWorkerServiceServer(nodeWorkerReplies(replyWriter), async (command, signal) => {
     if (command.method !== 'provider-catalog') return { kind: 'rejected', code: 'VALIDATION_FAILED' };
     const owner = hosts.get(command.instanceId);
     return owner ? owner.snapshot({ strict: command.strict }, signal) : { kind: 'rejected', code: 'VALIDATION_FAILED' };

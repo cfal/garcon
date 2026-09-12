@@ -1,3 +1,4 @@
+import { immediateNodeReplies } from '../reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeExecutionClient, NodeExecutionServer } from '../execution-channel.js';
@@ -73,7 +74,7 @@ test('concurrent large calls and repeated timeout cancellation cannot overrun or
 test('a refused execution reply leaves the operation unknown and the physical channel available', async () => {
   const f = fixture();
   const executed = Promise.withResolvers<void>();
-  const server = new NodeExecutionServer(f.writer, { async execute() { executed.resolve(); return { kind: 'unknown' }; } }, f.options);
+  const server = new NodeExecutionServer(immediateNodeReplies(f.writer), { async execute() { executed.resolve(); return { kind: 'unknown' }; } }, f.options);
   try {
     f.buffer(4096);
     server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: 1, command: prepare }));

@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../worker/reply-port.js';
 import { expect, mock, spyOn, test } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { ProviderConfigurationService, ProviderSessionConfigurationOperation, ProviderSessionConfigurationRequest, ProviderSessionConfigurationResult } from '../../execution-nodes/provider-configuration.js';
@@ -166,7 +167,7 @@ test('acknowledged cancellation releases the wire status slot while all native w
     client.receive(frame);
   }, close() {} }, { ...NODE_WORKER_WRITER_LIMITS, ...options });
   const client = new NodeWorkerServiceClient(requests, options);
-  const server = new NodeWorkerServiceServer(replies, (command, signal) => command.method === 'provider-session-configuration'
+  const server = new NodeWorkerServiceServer(nodeWorkerReplies(replies), (command, signal) => command.method === 'provider-session-configuration'
     ? f.host.execute(f.connection, command, signal) : Promise.resolve({ kind: 'rejected', code: 'VALIDATION_FAILED' }), options);
   try {
     const identities = [];

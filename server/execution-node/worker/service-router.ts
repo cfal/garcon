@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from './reply-port.js';
 import { sameNodeSession } from '../../../common/node-operation.js';
 import type { NodeConnectionLease } from '../supervisor.js';
 import type { NodeWorkerAuthority } from './authority.js';
@@ -31,7 +32,7 @@ export class NodeWorkerServiceRouter {
     if (!this.#channel) {
       const signal = AbortSignal.any([connection.signal, this.#closing.signal]);
       const connectionId = frame.connectionId;
-      this.#channel = new NodeWorkerServiceServer(this.options.writer,
+      this.#channel = new NodeWorkerServiceServer(nodeWorkerReplies(this.options.writer),
         (command, caller) => this.options.execute(connectionId, connection, command, caller), {
           session: authority.session, connectionId, signal, validate: () => authority.assertConnection(connection),
           failed() { if (!signal.aborted) authority.retire(); },

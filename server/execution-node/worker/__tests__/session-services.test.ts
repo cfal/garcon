@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { parseNodeOutputText, serializeNodeOutputFrame } from '@garcon/server-agent-interface';
 import { NodeWorkerAuthority } from '../authority.js';
@@ -70,7 +71,7 @@ function fixture() {
       const options = { session, connectionId, signal: authority.connection(connectionId).signal, validate() {}, failed };
       const request = writer((text) => server.receive(parseNodeWorkerServiceText(text)!));
       const reply = writer((text) => client!.receive(parseNodeWorkerServiceText(text)!));
-      const server = new NodeWorkerServiceServer(reply, (command) => childExecute(instanceId, command), options);
+      const server = new NodeWorkerServiceServer(nodeWorkerReplies(reply), (command) => childExecute(instanceId, command), options);
       client = new NodeWorkerServiceClient(request, options); channels.set(connectionId, client); return client;
     } });
   }

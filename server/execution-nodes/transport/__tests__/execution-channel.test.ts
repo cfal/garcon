@@ -1,3 +1,4 @@
+import { immediateNodeReplies } from '../reply-port.js';
 import { afterEach, expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeExecutionClient, NodeExecutionRequestBudget, NodeExecutionServer, type NodeExecutionRequestHandler } from '../execution-channel.js';
@@ -32,7 +33,7 @@ function fixture(maxRequests = 1) {
   const clientWriter = { send(text: string) { sent.push(text); server.receive(text); return true; }, close: mock(() => {}) };
   const serverWriter = { send(text: string) { replies.push(text); if (!holdReplies) client.receive(text); return true; }, close: mock(() => {}) };
   const client = new NodeExecutionClient(clientWriter, options);
-  const server = new NodeExecutionServer(serverWriter, { execute }, options);
+  const server = new NodeExecutionServer(immediateNodeReplies(serverWriter), { execute }, options);
   closes.push(() => { client.close(); server.close(); });
   return { client, server, execute, sent, replies, timers, physical, clientWriter, serverWriter,
     replace() { current = false; }, holdReplies() { holdReplies = true; } };
@@ -303,8 +304,8 @@ test('shared server capacity survives cancellation and physical replacement unti
   const firstExecute = mock<NodeExecutionRequestHandler['execute']>(() => native.promise);
   const nextExecute = mock<NodeExecutionRequestHandler['execute']>(async (command) => command.method === 'status'
     ? { kind: 'status', receipt: null } : { kind: 'prepared', ticket });
-  const first = new NodeExecutionServer(writer, { execute: firstExecute }, { session, signal: firstPhysical.signal, budget, validate() {} });
-  const next = new NodeExecutionServer(writer, { execute: nextExecute }, { session, signal: nextPhysical.signal, budget, validate() {} });
+  const first = new NodeExecutionServer(immediateNodeReplies(writer), { execute: firstExecute }, { session, signal: firstPhysical.signal, budget, validate() {} });
+  const next = new NodeExecutionServer(immediateNodeReplies(writer), { execute: nextExecute }, { session, signal: nextPhysical.signal, budget, validate() {} });
   const call = (server: NodeExecutionServer, requestId: number, command: NodeExecutionCommand) => server.receive(serializeNodeExecutionCall({
     type: 'node-execution-request', version: 1, session, requestId, command }));
   try {

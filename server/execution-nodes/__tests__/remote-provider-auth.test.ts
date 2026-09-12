@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../../execution-node/worker/reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { NodeProviderCapacity } from '../../execution-node/provider-capacity.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
@@ -47,7 +48,7 @@ function fixture() {
       else physical.abort(new Error('Synthetic lost reply'));
     }, close() {} }, writerOptions);
     const client = new NodeWorkerServiceClient(requests, options);
-    const server = new NodeWorkerServiceServer(replies, async (command, signal) => {
+    const server = new NodeWorkerServiceServer(nodeWorkerReplies(replies), async (command, signal) => {
       if (command.method !== 'provider-auth') return { kind: 'rejected', code: 'VALIDATION_FAILED' };
       const host = hosts.get(command.instanceId);
       return host ? host.execute(command, signal) : { kind: 'rejected', code: 'VALIDATION_FAILED' };

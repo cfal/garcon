@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeWorkerServiceClient, NodeWorkerServiceServer, type NodeWorkerServiceChannelOptions } from '../service-channel.js';
@@ -35,7 +36,7 @@ function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOpt
   }, close() {} }, { ...NODE_WORKER_WRITER_LIMITS, signal: lifetime.signal, failed: fail });
   const options = { session, connectionId: 1, signal: lifetime.signal, validate() {}, failed: fail, maxRequests, scheduleTimeout };
   const client = new NodeWorkerServiceClient(clientWriter, options);
-  const server = new NodeWorkerServiceServer(serverWriter, execute, options);
+  const server = new NodeWorkerServiceServer(nodeWorkerReplies(serverWriter), execute, options);
   return { client, server, clientWriter, serverWriter, execute, failures, requests, replies, lifetime, native,
     hold() { hold = true; }, before(callback: () => void) { beforeReceive = callback; }, failReply() { replyFailure = true; },
     close() { lifetime.abort(); client.close(); server.close(); clientWriter.close(); serverWriter.close(); native.resolve(); },

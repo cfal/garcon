@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../../execution-node/worker/reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { NodeProviderCapacity } from '../../execution-node/provider-capacity.js';
@@ -40,7 +41,7 @@ function fixture() {
     client.receive({ ...frame, result: alter(frame.result) });
   }, close() {} }, writerOptions);
   const client = new NodeWorkerServiceClient(requests, options);
-  const server = new NodeWorkerServiceServer(replies, (command, signal) => command.method === 'provider-configuration'
+  const server = new NodeWorkerServiceServer(nodeWorkerReplies(replies), (command, signal) => command.method === 'provider-configuration'
     ? host.prepareUpdate(command, signal) : Promise.resolve({ kind: 'output-recovery', generation: 1 }), options);
   const channel = { session: options.session, service: client };
   const service = new RemoteProviderConfigurationService({ captureSource: () => null, instanceId: 'synthetic-instance', session: options.session, channel: () => channel });

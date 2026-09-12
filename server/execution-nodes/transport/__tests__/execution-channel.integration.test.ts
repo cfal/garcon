@@ -1,3 +1,4 @@
+import { immediateNodeReplies } from '../reply-port.js';
 import { expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import type { NodeConnectionLease } from '../../../execution-node/supervisor.js';
@@ -32,7 +33,7 @@ test('a lost WebSocket dispatch reply reconciles the same native occurrence thro
         sockets.add(socket);
         const connection = socket.data;
         const writer = new NodeSocketWriter(serverNodeSocketPort(socket), writerOptions(connection.signal));
-        const channel = new NodeExecutionServer({
+        const channel = new NodeExecutionServer(immediateNodeReplies({
           send(serialized) {
             if (dropDispatchReply && parseNodeExecutionReplyText(serialized)?.result.kind === 'dispatched') {
               dropDispatchReply = false;
@@ -42,7 +43,7 @@ test('a lost WebSocket dispatch reply reconciles the same native occurrence thro
             return writer.send(serialized);
           },
           close() { writer.close(); },
-        }, { execute: (command, signal) => f.adapter.execute(connection, command, signal) }, {
+        }), { execute: (command, signal) => f.adapter.execute(connection, command, signal) }, {
           session: f.session, signal: connection.signal, validate: () => f.supervisor.assertConnection(connection),
         });
         endpoints.set(socket, { channel, writer });

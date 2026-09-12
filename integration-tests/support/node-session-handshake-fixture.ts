@@ -80,7 +80,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   const nodeFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean | void>();
   const controllerFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean>();
   let outputPressure: { minimumRecordBytes: number; blocked: PromiseWithResolvers<void>; active: boolean } | null = null;
-  let socketBacklog: { bytes: number } | null = null;
+  let socketBacklog: { bytes: number; writer: NodeSocketWriter } | null = null;
   let nodeWriter: NodeSocketWriter | null = null;
   const controllers = new Map<string, PromiseWithResolvers<ControllerFixtureConnection>>();
   const controllerBindings = new Map<string, { binding: NodeBulkSessionBinding; connection: ControllerFixtureConnection;
@@ -217,9 +217,9 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     const deadline = setTimeout(() => { ready.reject(new Error('Synthetic node handshake timeout')); physical.abort(); socket.terminate(); }, 8000);
     socket.addEventListener('open', () => {
       const port = clientNodeSocketPort(socket);
-      const writer = nodeWriter = new NodeSocketWriter({
+      const writer: NodeSocketWriter = nodeWriter = new NodeSocketWriter({
         get open() { return port.open; },
-        get bufferedBytes() { return Math.max(port.bufferedBytes, socketBacklog?.bytes ?? 0,
+        get bufferedBytes() { return Math.max(port.bufferedBytes, socketBacklog?.writer === writer ? socketBacklog.bytes : 0,
           outputPressure?.active ? socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes : 0); },
         bufferedFrameBytes: (bytes) => port.bufferedFrameBytes(bytes),
         send: (text) => port.send(text), terminate: () => port.terminate(),
@@ -295,11 +295,22 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       } };
     },
     holdOrdinarySocketAdmission() {
-      if (socketBacklog) throw new Error('Synthetic socket pressure is already active');
-      const captured = socketBacklog = { bytes: socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes };
+      if (socketBacklog || !nodeWriter) throw new Error('Synthetic socket pressure is unavailable');
+      const captured = socketBacklog = { bytes: socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes, writer: nodeWriter };
       return { release() {
         if (socketBacklog === captured) socketBacklog = null;
-        nodeWriter?.drain();
+        captured.writer.drain();
+      } };
+    },
+    holdApplicationSocketAdmission() {
+      if (socketBacklog || !nodeWriter) throw new Error('Synthetic socket pressure is unavailable');
+      const captured = socketBacklog = { bytes: socketLimits.maxBufferedBytes - socketLimits.reservedLifecycleBytes, writer: nodeWriter };
+      return { get remainingBytes() { return captured.bytes; }, drain(bytes: number) {
+        if (!Number.isSafeInteger(bytes) || bytes < 1 || socketBacklog !== captured) throw new Error('Invalid synthetic socket drainage');
+        captured.bytes = Math.max(0, captured.bytes - bytes); captured.writer.drain();
+      }, release() {
+        if (socketBacklog === captured) socketBacklog = null;
+        captured.writer.drain();
       } };
     },
     controller(connection: NodeHostedConnection) { return controllerFor(connection.lease.session, connection.connectionId).promise; },

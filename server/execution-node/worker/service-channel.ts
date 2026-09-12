@@ -7,6 +7,7 @@ import {
   parseNodeWorkerServiceText, serializeNodeWorkerService, type NodeWorkerServiceCommand, type NodeWorkerServiceFrame, type NodeWorkerServiceResult,
 } from './service-protocol.js';
 import type { NodeFrameSubmission, NodeFrameWriter } from './writer.js';
+import type { NodeReplyAuthority, NodeReplyPort } from '../../execution-nodes/transport/reply-port.js';
 
 export interface NodeWorkerServiceChannelOptions {
   readonly session: NodeSessionIdentity;
@@ -182,12 +183,14 @@ export class NodeWorkerServiceServer {
   readonly #pending = new Map<number, { readonly cancellation: AbortController; readonly releaseProvider: (() => void) | null }>();
   readonly #closing = new AbortController();
   readonly #detach: () => void;
+  readonly #replyAuthority: NodeReplyAuthority;
   #received = 0;
 
-  constructor(private readonly writer: NodeFrameWriter,
+  constructor(private readonly replies: NodeReplyPort,
     private readonly execute: (command: NodeWorkerServiceCommand, signal: AbortSignal) => Promise<NodeWorkerServiceResult>,
     private readonly options: NodeWorkerServiceChannelOptions) {
     this.#options = configuration(options);
+    this.#replyAuthority = { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); }, failed: (error) => this.#fail(error) };
     this.#providerCapacity = new NodeProviderCapacity(this.#options.maxProviderRequests);
     const close = () => this.close();
     this.#detach = () => options.signal.removeEventListener('abort', close);
@@ -200,7 +203,10 @@ export class NodeWorkerServiceServer {
     if (!matches(frame, this.#options) || frame.type === 'node-worker-service-result') { this.#fail(protocol()); return; }
     if (frame.type === 'node-worker-service-cancel') {
       if (frame.requestId > this.#received) this.#fail(protocol());
-      else this.#pending.get(frame.requestId)?.cancellation.abort(protocol());
+      else {
+        this.#pending.get(frame.requestId)?.cancellation.abort(protocol());
+        this.replies.cancel(frame.requestId);
+      }
       return;
     }
     if (frame.requestId <= this.#received) { this.#fail(protocol()); return; }
@@ -219,6 +225,7 @@ export class NodeWorkerServiceServer {
   close(): void {
     if (this.#closing.signal.aborted) return;
     this.#detach(); this.#closing.abort(protocol());
+    this.replies.close();
   }
 
   async #execute(frame: Extract<NodeWorkerServiceFrame, { type: 'node-worker-service-request' }>, cancellation: AbortController): Promise<void> {
@@ -227,14 +234,14 @@ export class NodeWorkerServiceServer {
       let result: NodeWorkerServiceResult;
       try { result = await this.execute(frame.command, signal); }
       catch { result = { kind: 'unknown' }; }
-      if (!signal.aborted) this.#reply(frame.requestId, result);
+      if (!signal.aborted) this.#reply(frame.requestId, result, signal);
     } finally {
       this.#pending.get(frame.requestId)?.releaseProvider?.();
       this.#pending.delete(frame.requestId);
     }
   }
 
-  #reply(requestId: number, result: NodeWorkerServiceResult): void {
+  #reply(requestId: number, result: NodeWorkerServiceResult, signal = this.#closing.signal): void {
     if (!this.#validate()) return;
     const envelope = { type: 'node-worker-service-result', version: NODE_WIRE_VERSION,
       session: this.#options.session, connectionId: this.#options.connectionId, requestId } as const;
@@ -242,9 +249,8 @@ export class NodeWorkerServiceServer {
       let text: string;
       try { text = serializeNodeWorkerService({ ...envelope, result }); }
       catch { text = serializeNodeWorkerService({ ...envelope, result: { kind: 'unknown' } }); }
-      const submission = this.writer.submit(text, 'data', { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); } }, 'application');
-      void submission.drained?.catch((error) => { if (!this.#closing.signal.aborted) this.#fail(error); });
-    } catch (error) { this.#fail(error); }
+      this.replies.enqueue(requestId, text, { ...this.#replyAuthority, signal });
+    } catch (error) { if (!signal.aborted) this.#fail(error); }
   }
 
   #validate(): boolean {

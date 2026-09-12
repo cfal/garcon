@@ -1,3 +1,4 @@
+import { immediateNodeReplies } from '../../execution-nodes/transport/reply-port.js';
 import { sameNodeSession } from '../../../common/node-operation.js';
 import { NodeExecutionRequestBudget, NodeExecutionServer } from '../../execution-nodes/transport/execution-channel.js';
 import type { NodeExecutionCommand } from '../../execution-nodes/transport/execution-wire.js';
@@ -45,7 +46,7 @@ export class NodeWorkerExecutionRouter {
         instanceId: frame.instanceId, signal, validate,
         closed() { if (!signal.aborted) authority.retire(); } });
       const { instanceId, connectionId } = frame;
-      channel = new NodeExecutionServer(port, {
+      channel = new NodeExecutionServer(immediateNodeReplies(port), {
         execute: (command, signal) => this.options.execute(instanceId, connectionId, connection, command, signal),
       }, { ...NODE_WORKER_EXECUTION_LIMITS, session: authority.session, signal, budget: this.#budget, validate });
       this.#channels.set(instanceId, channel);

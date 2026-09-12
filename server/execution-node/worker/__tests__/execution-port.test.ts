@@ -1,3 +1,4 @@
+import { immediateNodeReplies } from '../../../execution-nodes/transport/reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { NodeExecutionClient, NodeExecutionServer } from '../../../execution-nodes/transport/execution-channel.js';
 import type { NodeExecutionCommand } from '../../../execution-nodes/transport/execution-wire.js';
@@ -62,7 +63,7 @@ function fixture(limits = { ...NODE_WORKER_WRITER_LIMITS,
   const client = new NodeExecutionClient(transport, { session, signal: connection.signal, validate() {},
     scheduleTimeout(callback) { callbacks.push(callback); return { cancel() {} }; } });
   const execute = mock(async (_command: NodeExecutionCommand, _signal: AbortSignal): Promise<NodeExecutionResult> => ({ kind: 'dispatched' }));
-  const server = new NodeExecutionServer({ send(payload) { client.receive(payload); return true; }, close() {} }, { execute },
+  const server = new NodeExecutionServer(immediateNodeReplies({ send(payload) { client.receive(payload); return true; }, close() {} }), { execute },
     { session, signal: connection.signal, validate() {} });
   const frames = () => written.flatMap(({ text }) => {
     const frame = parseNodeWorkerExecutionText(text);

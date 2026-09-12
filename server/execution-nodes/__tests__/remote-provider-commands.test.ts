@@ -1,3 +1,4 @@
+import { nodeWorkerReplies } from '../../execution-node/worker/reply-port.js';
 import { expect, mock, test } from 'bun:test';
 import { NodeWorkerServiceClient, NodeWorkerServiceServer } from '../../execution-node/worker/service-channel.js';
 import { NODE_WORKER_SERVICE_LIMITS, NODE_WORKER_WRITER_LIMITS } from '../../execution-node/worker/limits.js';
@@ -27,7 +28,7 @@ function fixture() {
     client.receive({ ...frame, result: alter(frame.result) });
   }, close() {} }, writerOptions);
   const client = new NodeWorkerServiceClient(requests, options);
-  const server = new NodeWorkerServiceServer(replies, execute, options);
+  const server = new NodeWorkerServiceServer(nodeWorkerReplies(replies), execute, options);
   const workspaceFor = mock((projectPath: string) => projectPath === '/synthetic/first'
     ? { nodeId: 'node', workspaceId: 'first-workspace' } : projectPath === '/synthetic/second'
       ? { nodeId: 'node', workspaceId: 'second-workspace' } : null);
