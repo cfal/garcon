@@ -1611,6 +1611,8 @@
 	"settings_enable_resume_agent": "Enable child lifecycle commands",
 	"settings_resume_agent_description": "Allow agents to resume, stop, or remove their directly delegated children. Resume uses the child's current settings.",
 	"settings_enable_schedule": "Enable scheduling",
+	"settings_enable_issues": "Enable issue commands",
+	"settings_issues_description": "Allow agents to read, create, discuss, and manage workspace issues. Human management remains available.",
 	"settings_schedule_description": "Schedule prompts only in the requesting chat, without changing its configuration.",
 	"settings_transcript_search": "Transcript search",
 	"settings_transcript_search_enabled_description": "A local transcript index is being kept for this workspace.",

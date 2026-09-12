@@ -309,6 +309,7 @@ export async function startServer(): Promise<void> {
       agentResumes: agentCommands.agentResumes,
       agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
+      issueCommands: agentCommands.issueCommands,
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
@@ -404,7 +405,7 @@ export async function startServer(): Promise<void> {
       chatExists: (chatId) => chatRegistry.hasChat(chatId),
       commandsEnabled: () => {
         const commands = settings.getFeatureSettings().agentCommands;
-        return commands.enabled;
+        return commands.enabled && commands.issues;
       },
       onInvalidated: (revision) => eventWiring?.broadcastIssuesInvalidated(revision),
     });
@@ -652,6 +653,7 @@ export async function startServer(): Promise<void> {
       turns: commandLedger,
       chatIds,
       scheduler: scheduledPrompts,
+      issues,
     });
 
     const snippetStore = new SnippetStore(workspaceDir);

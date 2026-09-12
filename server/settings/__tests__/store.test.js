@@ -824,6 +824,7 @@ describe('settings store', () => {
             startAgent: true,
             resumeAgent: true,
             schedule: true,
+            issues: true,
           },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
@@ -1478,6 +1479,13 @@ describe('settings store', () => {
   });
 
   describe('feature settings', () => {
+    it('persists the independent issue command gate', async () => {
+      await writeRaw({ features: { agentCommands: { issues: false } } });
+      expect(store.getFeatureSettings().agentCommands.issues).toBe(false);
+      expect(store.getFeatureSettings().agentCommands.enabled).toBe(true);
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.features.agentCommands.issues).toBe(false);
+    });
     it('removes unknown fields from persisted command settings', async () => {
       await writeRaw({
         features: {
@@ -1489,6 +1497,7 @@ describe('settings store', () => {
             startAgent: true,
             resumeAgent: true,
             schedule: true,
+            issues: true,
             removedCommand: true,
           },
         },
@@ -1501,6 +1510,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
+        issues: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual(
@@ -1524,6 +1534,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
+          issues: true,
         },
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -1536,6 +1547,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
+          issues: true,
         },
       });
     });
@@ -1555,6 +1567,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
+        issues: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual({
@@ -1564,6 +1577,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
+        issues: true,
       });
       expect(persisted.features.chatIdDiscovery).toBeUndefined();
     });
@@ -1581,6 +1595,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
+          issues: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1597,6 +1612,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
+          issues: true,
         },
       });
     });
@@ -1612,6 +1628,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
+          issues: true,
         },
       });
 
@@ -1624,6 +1641,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
+          issues: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1638,6 +1656,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
+        issues: true,
       });
     });
   });

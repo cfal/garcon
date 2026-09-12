@@ -11,10 +11,12 @@ import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js
 import type { GarconResumeAgentCommand } from '../../common/garcon-resume-agent.js';
 import type { GarconStopAgentCommand } from '../../common/garcon-stop-agent.js';
 import type { GarconScheduleCommand } from '../../common/garcon-schedule.js';
+import type { GarconIssueCommand } from '../../common/garcon-issue-command.js';
 import {
   chatIdRequestNoticeDraft,
   agentActionRequestNoticeDraft,
   interAgentSendRequestNoticeDraft,
+  issueCommandRequestNoticeDraft,
 } from './garcon-command-request.js';
 
 export interface ChatIdRequestSink {
@@ -48,6 +50,10 @@ export interface AgentStopRequestSink {
 
 export interface AgentScheduleRequestSink {
   request(source: AgentCommandSource, command: GarconScheduleCommand): void;
+}
+
+export interface IssueCommandRequestSink {
+  request(source: AgentCommandSource, command: GarconIssueCommand): void;
 }
 
 export interface InterAgentMessageRequestSink {
@@ -96,6 +102,9 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
     for (const command of transformed.commands) {
       commands.push({ command, at: row.message.timestamp, requestDraftIndex: drafts.length });
       switch (command.type) {
+        case 'issue':
+          drafts.push(issueCommandRequestNoticeDraft(row.message.timestamp, command));
+          break;
         case 'start-agent':
         case 'resume-agent':
         case 'stop-agent':
@@ -140,6 +149,7 @@ export function dispatchGarconCommands(
     readonly agentResumes: AgentResumeRequestSink;
     readonly agentStops: AgentStopRequestSink;
     readonly agentSchedules: AgentScheduleRequestSink;
+    readonly issueCommands: IssueCommandRequestSink;
     readonly committedRows: readonly LedgerRow[];
   },
 ): void {
@@ -148,6 +158,7 @@ export function dispatchGarconCommands(
       case 'start-agent':
       case 'resume-agent':
       case 'stop-agent':
+      case 'issue':
       case 'schedule': {
         const requestRow = options.committedRows[requestDraftIndex];
         if (!requestRow) throw new Error('Committed Garcon request row is missing');
@@ -156,6 +167,7 @@ export function dispatchGarconCommands(
         if (command.type === 'start-agent') options.agentStarts.request(source, command);
         else if (command.type === 'resume-agent') options.agentResumes.request(source, command);
         else if (command.type === 'stop-agent') options.agentStops.request(source, command);
+        else if (command.type === 'issue') options.issueCommands.request(source, command);
         else options.agentSchedules.request(source, command);
         break;
       }

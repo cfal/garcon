@@ -39,10 +39,11 @@ export function readProviderActivityWatermark(
             'agent-resume-request',
             'agent-stop-request',
             'agent-schedule-request',
+            'issue-command-request',
             'inter-agent-message-received'
           )
           OR (
-            json_extract(payload_json, '$.value.detail.type') IN ('agent-start-outcome', 'agent-resume-outcome', 'agent-schedule-outcome')
+            json_extract(payload_json, '$.value.detail.type') IN ('agent-start-outcome', 'agent-resume-outcome', 'agent-schedule-outcome', 'issue-command-outcome')
             AND json_type(payload_json, '$.value.detail.nativeResultInput') = 'true'
           )
           OR (

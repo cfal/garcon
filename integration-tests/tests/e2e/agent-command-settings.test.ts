@@ -104,6 +104,7 @@ describe('Lightpanda agent command settings', () => {
         startAgent: false,
         resumeAgent: false,
         schedule: false,
+        issues: true,
       });
       fixture.assertNoBrowserErrors();
     });

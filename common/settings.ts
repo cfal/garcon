@@ -145,6 +145,7 @@ export const AGENT_COMMAND_SETTING_KEYS = [
   'startAgent',
   'resumeAgent',
   'schedule',
+  'issues',
 ] as const;
 
 export type AgentCommandSettingKey = typeof AGENT_COMMAND_SETTING_KEYS[number];
@@ -164,6 +165,7 @@ export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
     startAgent: true,
     resumeAgent: true,
     schedule: true,
+    issues: true,
   },
 };
 
@@ -539,6 +541,9 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
         : true,
       schedule: typeof agentCommands?.schedule === 'boolean'
         ? agentCommands.schedule
+        : true,
+      issues: typeof agentCommands?.issues === 'boolean'
+        ? agentCommands.issues
         : true,
     },
   };
