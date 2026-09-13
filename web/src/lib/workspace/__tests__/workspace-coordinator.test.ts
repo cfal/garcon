@@ -261,7 +261,7 @@ describe('WorkspaceCoordinator', () => {
 			}
 		},
 	);
-	it.each(['tab', 'window', 'other-windows'] as const)(
+	it.each(['tab', 'window', 'other-windows', 'mobile'] as const)(
 		'awaits Canvas preservation before closing %s',
 		async (kind) => {
 			const admission = deferred<(() => void) | null>();
@@ -271,9 +271,13 @@ describe('WorkspaceCoordinator', () => {
 				'prepareClose'
 			>;
 			const { coordinator, layout, singletons } = createHarness({ canvas });
-			await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
+			if (kind === 'mobile') {
+				await coordinator.enterMobilePresentation();
+				await coordinator.focusMobileSingleton('chat-canvas');
+			} else await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
 			let closing: Promise<boolean>;
-			if (kind === 'tab') closing = coordinator.closeSurface('singleton:chat-canvas');
+			if (kind === 'tab' || kind === 'mobile')
+				closing = coordinator.closeSurface('singleton:chat-canvas');
 			else if (kind === 'window') closing = coordinator.closeWindow('window-files');
 			else closing = coordinator.closeOtherWindows('window-main');
 			expect(canvas.prepareClose).toHaveBeenCalledOnce();
@@ -287,7 +291,7 @@ describe('WorkspaceCoordinator', () => {
 		},
 	);
 
-	it.each(['tab', 'window', 'other-windows'] as const)(
+	it.each(['tab', 'window', 'other-windows', 'mobile'] as const)(
 		'retains Canvas when preservation denies closing %s',
 		async (kind) => {
 			const canvas = { prepareClose: vi.fn(async () => null) } satisfies Pick<
@@ -295,14 +299,20 @@ describe('WorkspaceCoordinator', () => {
 				'prepareClose'
 			>;
 			const { coordinator, layout, singletons } = createHarness({ canvas });
-			await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
+			if (kind === 'mobile') {
+				await coordinator.enterMobilePresentation();
+				await coordinator.focusMobileSingleton('chat-canvas');
+			} else await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
 			let closed: boolean;
-			if (kind === 'tab') closed = await coordinator.closeSurface('singleton:chat-canvas');
+			if (kind === 'tab' || kind === 'mobile')
+				closed = await coordinator.closeSurface('singleton:chat-canvas');
 			else if (kind === 'window') closed = await coordinator.closeWindow('window-files');
 			else closed = await coordinator.closeOtherWindows('window-main');
 			expect(closed).toBe(false);
 			expect(layout.surface('singleton:chat-canvas')).not.toBeNull();
 			expect(singletons.disposeSurface).not.toHaveBeenCalledWith('chat-canvas');
+			if (kind === 'mobile')
+				expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:chat-canvas');
 		},
 	);
 
@@ -1690,13 +1700,14 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.isMobile).toBe(false);
 	});
 
-	it.each(['git-history', 'git-compare'] as const)(
+	it.each(['git-history', 'git-compare', 'chat-map', 'chat-canvas', 'pull-requests'] as const)(
 		'closes mobile-only %s and returns to Chat',
 		async (kind) => {
 			const { coordinator, layout, singletons } = createHarness();
+			const surfaceId = `singleton:${kind}`;
+			if (layout.surface(surfaceId)) await coordinator.closeSurface(surfaceId);
 			await coordinator.enterMobilePresentation();
 			await coordinator.focusMobileSingleton(kind);
-			const surfaceId = `singleton:${kind}`;
 
 			expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 			expect(layout.snapshot.mobileOnlySurfaceIds).toContain(surfaceId);
@@ -1705,6 +1716,8 @@ describe('WorkspaceCoordinator', () => {
 			expect(layout.surface(surfaceId)).toBeNull();
 			expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 			expect(singletons.disposeSurface).toHaveBeenCalledWith(kind);
+			await coordinator.focusMobileSingleton(kind);
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 		},
 	);
 

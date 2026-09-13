@@ -634,7 +634,7 @@ describe('AppShell responsive workspace binding', () => {
 		);
 	});
 
-	it.each(['git-history', 'git-compare'] as const)(
+	it.each(['git-history', 'git-compare', 'chat-map', 'chat-canvas', 'pull-requests'] as const)(
 		'hides the mobile bottom bar for transient %s',
 		async (kind) => {
 			const workspace = installContext();
@@ -660,17 +660,21 @@ describe('AppShell responsive workspace binding', () => {
 	);
 
 	it.each([
-		{ kind: 'chat-map', label: 'Map' },
-		{ kind: 'chat-canvas', label: 'Canvas' },
+		{ kind: 'git', label: 'Git' },
+		{ kind: 'files', label: 'Files' },
 	] as const)(
 		'keeps $label in the persistent mobile navigation and marks it active',
 		async ({ kind, label }) => {
 			const workspace = installContext();
 			const mobile = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{
-					type: 'register-surface',
-					surface: portableSingletonDescriptor(kind),
-				},
+				...(workspace.layout.surface(`singleton:${kind}`)
+					? []
+					: [
+							{
+								type: 'register-surface' as const,
+								surface: portableSingletonDescriptor(kind),
+							},
+						]),
 				{
 					type: 'set-mobile-presentation',
 					activeId: `singleton:${kind}`,

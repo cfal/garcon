@@ -17,7 +17,7 @@ async function openCanvas({ page, integration }: ChromiumFixture) {
 }
 
 async function reopenCanvas(page: Page) {
-  await clickWorkspaceWindowAddAction(page, 'Open canvas', 'window-files');
+  await clickWorkspaceWindowAddAction(page, 'Open Canvas', 'window-files');
   await page.getByRole('button', { name: 'Rename canvas', exact: true }).waitFor();
 }
 

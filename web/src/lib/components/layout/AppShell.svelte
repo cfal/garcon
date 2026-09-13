@@ -35,7 +35,6 @@
 		getNotifications,
 		getSidebarSearch,
 		getSidebarProjectCollapse,
-		getGhCapability,
 		getWorkspaceCoordinator,
 		getSingletonSurfaces,
 		getTransientLayers,
@@ -80,7 +79,6 @@
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
 	const minuteClock = getMinuteClock();
-	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
 	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
@@ -184,9 +182,6 @@
 		if (surface?.type === 'terminal' || surface?.type === 'terminal-launcher') return 'terminal';
 		if (surface?.type === 'chat') return 'chat';
 		if (surface?.type === 'singleton') {
-			if (surface.kind === 'pull-requests') return 'pull-requests';
-			if (surface.kind === 'chat-map') return 'chat-map';
-			if (surface.kind === 'chat-canvas') return 'chat-canvas';
 			if (surface.kind === 'git' || surface.kind === 'files') {
 				return surface.kind;
 			}
@@ -197,6 +192,9 @@
 		mobileActiveDescriptor?.type === 'file' ||
 			(mobileActiveDescriptor?.type === 'singleton' &&
 				(mobileActiveDescriptor.kind === 'commit' ||
+					mobileActiveDescriptor.kind === 'chat-map' ||
+					mobileActiveDescriptor.kind === 'chat-canvas' ||
+					mobileActiveDescriptor.kind === 'pull-requests' ||
 					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'tickets' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
@@ -807,7 +805,6 @@
 			{#if isMobile && !mobileKeyboardVisible && !mobileTransientSurface}
 				<BottomTabBar
 					activeItem={mobileActiveTab}
-					pullRequestsAvailable={ghCapability.available}
 					onTabChange={handleMobileTabChange}
 					onMenuClick={toggleMobileSidebar}
 				/>

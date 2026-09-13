@@ -345,6 +345,9 @@
 	const mobileChatPresentation = $derived(
 		resolveChatSurfacePresentation(mobileChat, sessions.isLoadingChats),
 	);
+	const liveChatLayerVisible = $derived(
+		composerBound || Boolean(mobileChatSurface && mobileChatPresentation === 'empty'),
+	);
 	const mobileChatIsComposerAnchor = $derived(
 		Boolean(
 			mobileChatSurface?.chatId &&
@@ -616,10 +619,10 @@
 
 	<div
 		class="pointer-events-none absolute z-30 overflow-hidden"
-		class:invisible={!composerBound}
+		class:invisible={!liveChatLayerVisible}
 		style={liveLayerRectStyle}
-		aria-hidden={!composerBound}
-		inert={!composerBound}
+		aria-hidden={!liveChatLayerVisible}
+		inert={!liveChatLayerVisible}
 	>
 		<div
 			class={cn(
@@ -650,7 +653,7 @@
 			<ChatSurface
 				{isMobile}
 				isVisible={composerBound}
-				isInteractive={composerBound && workspace.isChatInteractive}
+				isInteractive={liveChatLayerVisible && workspace.isChatInteractive}
 				{onRegisterReload}
 				onRegisterSubmit={(submit) => (chatSubmit = submit)}
 				onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>

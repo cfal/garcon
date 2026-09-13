@@ -46,7 +46,7 @@ describe('Chromium canvas recovery', () => {
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       await saved(page);
       await page.getByLabel('Choose canvas').selectOption('damaged');
       await page.locator('.svelte-flow__node[data-id="research"]').waitFor();
@@ -119,7 +119,7 @@ describe('Chromium canvas recovery', () => {
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       await page.locator('[data-canvas-flow]').waitFor();
       await page.getByText('Some saved canvases could not be read.', { exact: false }).waitFor();
 

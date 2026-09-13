@@ -35,7 +35,7 @@ test('commits a grouped selection drag as one ordered, undoable edit', async () 
       waitUntil: 'domcontentloaded',
     });
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     await page
       .locator('.svelte-flow__node[data-id="b"]')
       .waitFor({ state: 'visible' });

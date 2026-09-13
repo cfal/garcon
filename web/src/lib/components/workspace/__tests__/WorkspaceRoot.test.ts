@@ -1138,6 +1138,36 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByTestId('chat-surface-stub').dataset.visible).toBe('true');
 	});
 
+	it('keeps empty mobile chat chrome interactive without binding the composer', async () => {
+		const { layout } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-window-chat', windowId: 'window-main', chatId: null },
+			]),
+		);
+		const { container } = renderRoot(true);
+		const chatSurface = screen.getByTestId('chat-surface-stub');
+		const layer = container.querySelector('[data-workspace-live-chat-body]')?.parentElement;
+		expect(chatSurface.dataset.visible).toBe('false');
+		expect(chatSurface.dataset.interactive).toBe('true');
+		expect(layer?.getAttribute('aria-hidden')).toBe('false');
+		expect(layer?.hasAttribute('inert')).toBe(false);
+
+		const map = portableSingletonDescriptor('chat-map');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'register-surface', surface: map },
+				{ type: 'set-mobile-presentation', activeId: map.id, returnStack: [] },
+			]),
+		);
+		await tick();
+		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
+		expect(chatSurface.dataset.interactive).toBe('false');
+		expect(layer?.hasAttribute('inert')).toBe(true);
+	});
+
 	it('replaces the active mobile Chat panel with a transient singleton', async () => {
 		const { layout } = installContext();
 		const { container } = renderRoot(true);
@@ -1164,24 +1194,50 @@ describe('WorkspaceRoot', () => {
 		).not.toBeNull();
 	});
 
-	it('gives the transient mobile Chat Board explicit Back and Close controls', async () => {
-		const { layout, workspace } = installContext();
-		const board = portableSingletonDescriptor('chat-board');
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{ type: 'register-surface', surface: board },
-				{ type: 'set-mobile-presentation', activeId: board.id, returnStack: [] },
-			]),
-		);
-		renderRoot(true);
+	it.each(['chat-board', 'chat-map', 'chat-canvas', 'pull-requests'] as const)(
+		'gives mobile %s explicit Back and Close controls',
+		async (kind) => {
+			const { layout, workspace } = installContext();
+			const surface = portableSingletonDescriptor(kind);
+			layout.publish(
+				layout.revision,
+				reduceWorkspaceLayout(layout.snapshot, [
+					{ type: 'register-surface', surface },
+					{ type: 'set-mobile-presentation', activeId: surface.id, returnStack: [] },
+				]),
+			);
+			renderRoot(true);
 
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_back() }));
-		expect(workspace.mobileBack).toHaveBeenCalledOnce();
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_back() }));
+			expect(workspace.mobileBack).toHaveBeenCalledOnce();
 
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_close_view() }));
-		expect(workspace.closeSurface).toHaveBeenCalledWith(board.id);
-	});
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_close_view() }));
+			expect(workspace.closeSurface).toHaveBeenCalledWith(surface.id);
+		},
+	);
+
+	it.each(['chat-map', 'chat-canvas', 'pull-requests'] as const)(
+		'disables mobile %s Close while destruction is blocked',
+		async (kind) => {
+			const { layout, workspace } = installContext();
+			const surface = portableSingletonDescriptor(kind);
+			workspace.isSurfaceCloseBlocked = () => true;
+			layout.publish(
+				layout.revision,
+				reduceWorkspaceLayout(layout.snapshot, [
+					{ type: 'register-surface', surface },
+					{ type: 'set-mobile-presentation', activeId: surface.id, returnStack: [] },
+				]),
+			);
+			renderRoot(true);
+			const close = screen.getByRole<HTMLButtonElement>('button', {
+				name: m.workspace_close_view(),
+			});
+			expect(close.disabled).toBe(true);
+			await fireEvent.click(close);
+			expect(workspace.closeSurface).not.toHaveBeenCalled();
+		},
+	);
 
 	it('fullscreen hides other windows and restores their exact keyed layout on exit', async () => {
 		const { layout } = installContext();
