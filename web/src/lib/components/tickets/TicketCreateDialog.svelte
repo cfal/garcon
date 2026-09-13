@@ -31,8 +31,13 @@
 	);
 	function requestClose() {
 		if (draft?.pending) return;
+		if (draft?.canEdit && !draft.field('title').trim() && !draft.field('description').trim())
+			draft.discard();
 		if (draft?.needsExitGuard) closeRequested = true;
-		else controller.closeCreate();
+		else {
+			closeRequested = false;
+			controller.closeCreate();
+		}
 	}
 	async function submit() {
 		if (!draft || !canSubmit) return;
@@ -48,6 +53,7 @@
 		data-ticket-dialog-owner={ownerId}
 		onOpenAutoFocus={(event) => {
 			event.preventDefault();
+			closeRequested = false;
 			content?.querySelector<HTMLInputElement>('.ticket-title-input')?.focus();
 		}}
 		onCloseAutoFocus={(event) => {
@@ -79,8 +85,8 @@
 					onSubmit={() => void submit()}
 					onRefinementPendingChange={(pending) => (refining = pending)}
 				/>
-				{#if !draft.field('project')}<p class="ticket-muted">
-						{controller.projectDefaultError ?? m.tickets_project_required()}
+				{#if !draft.field('project') && controller.projectDefaultError}<p class="ticket-muted">
+						{controller.projectDefaultError}
 					</p>{/if}
 				<TicketDraftFeedback {draft} />
 				{#if closeRequested}<div class="ticket-notice">
