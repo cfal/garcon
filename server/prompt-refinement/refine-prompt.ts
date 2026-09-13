@@ -40,6 +40,12 @@ const SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT = [
   'Supported tokens are {{arguments}}, {{project_path}}, and {{chat_id}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}.',
   'Do not add, remove, reorder, escape, or unescape these tokens.',
 ].join(' ');
+const ISSUE_DESCRIPTION_REFINEMENT_CONSTRAINT = [
+  'The draft is an issue description, not a chat prompt.',
+  'Improve its clarity and organization while preserving its facts, requirements, Markdown, and issue references.',
+  'Do not invent requirements, claim completed work, or execute the described task.',
+  'Return only the revised description.',
+].join(' ');
 
 type PromptRefinementErrorCode =
   | 'PROMPT_REFINEMENT_INVALID_REQUEST'
@@ -125,9 +131,11 @@ function renderTemplate(template: string, draft: string): string {
 }
 
 function templateForTarget(template: string, target: RefinePromptRequest['target']): string {
-  return target === 'snippet-template'
-    ? `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`
-    : template;
+  switch (target) {
+    case 'snippet-template': return `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`;
+    case 'issue-description': return `${template}\n\n${ISSUE_DESCRIPTION_REFINEMENT_CONSTRAINT}`;
+    case 'prompt': return template;
+  }
 }
 
 function classifyPromptRefinementError(error: unknown): PromptRefinementError {

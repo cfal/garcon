@@ -1,10 +1,11 @@
 import { isRecord } from './json.js';
 import { SNIPPET_TEMPLATE_MAX_LENGTH } from './snippets.js';
+import { ISSUE_LIMITS } from './issues.js';
 
 export const PROMPT_REFINEMENT_DRAFT_MAX_LENGTH = 64_000;
 export const PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH = 64_000;
 
-export type PromptRefinementTarget = 'prompt' | 'snippet-template';
+export type PromptRefinementTarget = 'prompt' | 'snippet-template' | 'issue-description';
 
 export interface RefinePromptRequest {
   draft: string;
@@ -17,16 +18,18 @@ export interface RefinePromptResponse {
 }
 
 export function isPromptRefinementTarget(value: unknown): value is PromptRefinementTarget {
-  return value === 'prompt' || value === 'snippet-template';
+  return value === 'prompt' || value === 'snippet-template' || value === 'issue-description';
 }
 
 export function promptRefinementTargetMaxLength(target: PromptRefinementTarget): number {
+  if (target === 'issue-description') return ISSUE_LIMITS.bodyBytes;
   return target === 'snippet-template'
     ? SNIPPET_TEMPLATE_MAX_LENGTH
     : PROMPT_REFINEMENT_DRAFT_MAX_LENGTH;
 }
 
 export function promptRefinementTargetOutputMaxLength(target: PromptRefinementTarget): number {
+  if (target === 'issue-description') return ISSUE_LIMITS.bodyBytes;
   return target === 'snippet-template'
     ? SNIPPET_TEMPLATE_MAX_LENGTH
     : PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH;
@@ -40,7 +43,8 @@ export function normalizeRefinePromptRequest(value: unknown): RefinePromptReques
   ) {
     return null;
   }
-  if (!value.draft.trim() || value.draft.length > promptRefinementTargetMaxLength(value.target)) {
+  if (!value.draft.trim() || value.draft.length > promptRefinementTargetMaxLength(value.target)
+    || !fitsIssueDescription(value.draft, value.target)) {
     return null;
   }
   return { draft: value.draft, target: value.target };
@@ -54,8 +58,14 @@ export function normalizeRefinePromptResponse(
     return null;
   }
   const refinedPrompt = value.refinedPrompt.trim();
-  if (!refinedPrompt || refinedPrompt.length > promptRefinementTargetOutputMaxLength(target)) {
+  if (!refinedPrompt || refinedPrompt.length > promptRefinementTargetOutputMaxLength(target)
+    || !fitsIssueDescription(refinedPrompt, target)) {
     return null;
   }
   return { success: true, refinedPrompt };
+}
+
+function fitsIssueDescription(text: string, target: PromptRefinementTarget): boolean {
+  return target !== 'issue-description'
+    || (text.isWellFormed() && new TextEncoder().encode(text).byteLength <= ISSUE_LIMITS.bodyBytes);
 }
