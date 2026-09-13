@@ -1,7 +1,6 @@
 <script lang="ts">
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import PanelTop from '@lucide/svelte/icons/panel-top';
 	import X from '@lucide/svelte/icons/x';
@@ -255,12 +254,6 @@
 		<menu.Separator />
 	{/if}
 	{@render surfaceMenuItems?.(surfaceId, menu)}
-	{#if surface?.type === 'file'}
-		<menu.Item onSelect={() => void workspace.popOutFile(surface.id)}>
-			<Maximize2 />
-			{m.workspace_pop_out()}
-		</menu.Item>
-	{/if}
 {/snippet}
 
 {#if menu.kind === 'dropdown'}

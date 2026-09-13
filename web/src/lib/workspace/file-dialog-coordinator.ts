@@ -7,7 +7,6 @@ import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svel
 import {
 	fileSurfaceId,
 	type WorkspaceWindowId,
-	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
 import { windowNodeById } from './window-tree.js';
@@ -30,7 +29,6 @@ interface FileDialogCoordinatorDeps {
 	responsiveGeneration(): number;
 	defaultActiveId(): string;
 	lastFocusedSurfaceId(): string;
-	windowOf(surfaceId: string): WorkspaceWindowId | null;
 	eligibleDesktopReturn(surfaceId: string | null): string | null;
 	present(surfaceId: string): void;
 	placeOnMobile(
@@ -38,13 +36,6 @@ interface FileDialogCoordinatorDeps {
 		surfaceId: string,
 		publication?: WorkspacePublication,
 	): Promise<FilePlacementResult>;
-}
-
-interface DialogOccupantReplacementPlan {
-	occupantChangedMessage: string;
-	mutations(occupantId: string | null): readonly WorkspaceLayoutMutation[];
-	publication?: WorkspacePublication;
-	onCurrent(): void;
 }
 
 export class FileDialogCoordinator {
@@ -65,18 +56,6 @@ export class FileDialogCoordinator {
 		return this.#queue.enqueue(() =>
 			this.#placeNew(sessionId, fileSurfaceId(sessionId), publication),
 		);
-	}
-
-	pop(surfaceId: string): Promise<boolean> {
-		if (this.deps.isMobile() || this.deps.reservations.has(surfaceId)) {
-			return Promise.resolve(false);
-		}
-		this.deps.reservations.add(surfaceId);
-		return this.#queue
-			.enqueue(() => this.#pop(surfaceId))
-			.finally(() => {
-				this.deps.reservations.delete(surfaceId);
-			});
 	}
 
 	moveToWindow(destination: WorkspaceWindowId): Promise<void> {
@@ -117,53 +96,6 @@ export class FileDialogCoordinator {
 		const returnSurfaceId =
 			this.deps.eligibleDesktopReturn(this.deps.lastFocusedSurfaceId()) ??
 			this.deps.defaultActiveId();
-		return this.#replaceDialogOccupant(responsiveGeneration, {
-			occupantChangedMessage: 'The dialog occupant changed before replacement',
-			mutations: (occupantId) => [
-				...(occupantId ? [{ type: 'remove-surface', surfaceId: occupantId } as const] : []),
-				{
-					type: 'register-surface',
-					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-				},
-				{ type: 'place-in-dialog', surfaceId },
-			],
-			publication,
-			onCurrent: () => {
-				this.#returnSurfaceId = returnSurfaceId;
-				this.deps.present(surfaceId);
-			},
-		});
-	}
-
-	async #pop(surfaceId: string): Promise<boolean> {
-		if (this.deps.isMobile()) return false;
-		const responsiveGeneration = this.deps.responsiveGeneration();
-		const sourceWindowId = this.deps.windowOf(surfaceId);
-		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
-		if (occupantId === surfaceId) return true;
-		const result = await this.#replaceDialogOccupant(responsiveGeneration, {
-			occupantChangedMessage: 'The dialog occupant changed before pop out',
-			mutations: (currentOccupantId) => [
-				...(currentOccupantId
-					? [{ type: 'remove-surface', surfaceId: currentOccupantId } as const]
-					: []),
-				{ type: 'place-in-dialog', surfaceId },
-			],
-			onCurrent: () => {
-				this.#returnSurfaceId =
-					(sourceWindowId
-						? windowNodeById(this.deps.layout.snapshot.desktopRoot, sourceWindowId)?.tabs.activeId
-						: null) ?? this.deps.defaultActiveId();
-				this.deps.present(surfaceId);
-			},
-		});
-		return result === 'placed';
-	}
-
-	async #replaceDialogOccupant(
-		responsiveGeneration: number,
-		plan: DialogOccupantReplacementPlan,
-	): Promise<FilePlacementResult> {
 		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
 		const occupant = occupantId ? this.deps.layout.surface(occupantId) : null;
 		let occupantSessionId: string | null = null;
@@ -186,14 +118,24 @@ export class FileDialogCoordinator {
 			const current = await this.deps.commit(
 				(latest) => {
 					if (latest.dialogFileSurfaceId !== occupantId) {
-						throw new Error(plan.occupantChangedMessage);
+						throw new Error('The dialog occupant changed before replacement');
 					}
-					return plan.mutations(occupantId);
+					return [
+						...(occupantId ? [{ type: 'remove-surface', surfaceId: occupantId } as const] : []),
+						{
+							type: 'register-surface',
+							surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+						},
+						{ type: 'place-in-dialog', surfaceId },
+					];
 				},
-				{ publication: plan.publication },
+				{ publication },
 			);
 			if (occupantSessionId) await this.deps.files.destroy(occupantSessionId);
-			if (current) plan.onCurrent();
+			if (current) {
+				this.#returnSurfaceId = returnSurfaceId;
+				this.deps.present(surfaceId);
+			}
 			return 'placed';
 		} finally {
 			releaseFileClose?.();

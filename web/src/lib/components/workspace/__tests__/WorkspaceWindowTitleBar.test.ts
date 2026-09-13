@@ -1564,7 +1564,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(document.querySelector('[data-workspace-copy-item]')).toBeNull();
 		await fireEvent.keyDown(document, { key: 'Escape' });
 		await waitFor(() =>
-			expect(screen.queryByRole('menuitem', { name: m.workspace_pop_out() })).toBeNull(),
+			expect(document.querySelector('[data-workspace-window-tab-menu="dropdown"]')).toBeNull(),
 		);
 
 		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
@@ -1574,7 +1574,6 @@ describe('WorkspaceWindowTitleBar', () => {
 		const contextMenu = projectPathItem.closest<HTMLElement>(
 			`[data-workspace-window-tab-context-menu="${chatSurface.id}"]`,
 		)!;
-		expect(within(contextMenu).queryByRole('menuitem', { name: m.workspace_pop_out() })).toBeNull();
 		expect(
 			Array.from(
 				contextMenu.querySelectorAll<HTMLElement>('[data-workspace-window-tab-action]'),
@@ -1585,6 +1584,24 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(projectPathItem);
 		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(projectPath));
 	});
+
+	it.each([chatSurface, fileSurface, gitSurface, terminalSurface])(
+		'omits Pop out for $type tabs while keeping maximize',
+		async (surface) => {
+			runtime.surfaces[surface.id] = surface;
+			renderTitleBar(workspaceWindow([surface.id]));
+			expect(screen.getByRole('button', { name: m.workspace_fullscreen() })).toBeTruthy();
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+			expect(screen.queryByRole('menuitem', { name: 'Pop out' })).toBeNull();
+			await fireEvent.keyDown(document, { key: 'Escape' });
+			await waitFor(() =>
+				expect(document.querySelector('[data-workspace-window-tab-menu="dropdown"]')).toBeNull(),
+			);
+			await fireEvent.contextMenu(screen.getByRole('tab'));
+			await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
+			expect(screen.queryByRole('menuitem', { name: 'Pop out' })).toBeNull();
+		},
+	);
 
 	it('closes the active movable tab from the window menu', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id));

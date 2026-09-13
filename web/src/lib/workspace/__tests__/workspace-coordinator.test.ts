@@ -1323,15 +1323,12 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 	});
 
-	it('restores the dialog return surface when an inactive popped-out file closes', async () => {
+	it('restores the dialog return surface when a file dialog closes', async () => {
 		const { coordinator, appShell, layout } = createHarness();
 		await coordinator.placeFileSession('inactive-dialog', {
-			type: 'window',
-			windowId: 'window-main',
+			type: 'dialog',
 		});
 		const surfaceId = fileSurfaceId('inactive-dialog');
-		await coordinator.focusChat();
-		await expect(coordinator.popOutFile(surfaceId)).resolves.toBe(true);
 		expect(coordinator.focusOwner).toEqual({
 			kind: 'surface',
 			surfaceId: CANONICAL_CHAT_SURFACE_ID,
@@ -3444,22 +3441,6 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
-	});
-
-	it('reserves a dialog source while a dirty collision is pending', async () => {
-		const confirmation = deferred<boolean>();
-		const confirmDestructive = vi.fn(() => confirmation.promise);
-		const { coordinator, layout } = createHarness({ confirmDestructive });
-		await coordinator.placeFileSession('dialog', { type: 'dialog' });
-		await coordinator.placeFileSession('source', { type: 'window', windowId: 'window-main' });
-
-		const popOut = coordinator.popOutFile(fileSurfaceId('source'));
-		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledOnce());
-		await expect(coordinator.closeSurface(fileSurfaceId('source'))).resolves.toBe(false);
-		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(fileSurfaceId('source'));
-
-		confirmation.resolve(false);
-		await expect(popOut).resolves.toBe(false);
 	});
 
 	it('transfers a dialog renderer through mobile and back to the dialog frame', async () => {

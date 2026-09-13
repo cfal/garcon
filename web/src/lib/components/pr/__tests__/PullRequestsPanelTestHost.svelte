@@ -10,7 +10,6 @@
 		isSurfaceCloseBlocked: () => false,
 		moveSurface: async () => undefined,
 		closeSurface: async () => true,
-		popOutFile: async () => undefined,
 	} as unknown as WorkspaceCoordinator);
 </script>
 

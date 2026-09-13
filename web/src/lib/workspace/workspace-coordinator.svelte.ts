@@ -155,7 +155,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			responsiveGeneration: () => this.#presentation.responsiveGeneration,
 			defaultActiveId: () => this.defaultActiveId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
-			windowOf: (surfaceId) => this.#presentation.windowOf(surfaceId),
 			eligibleDesktopReturn: (surfaceId) => this.#presentation.eligibleDesktopReturn(surfaceId),
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 			placeOnMobile: (sessionId, surfaceId, publication) =>
@@ -849,12 +848,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			return;
 		}
 		await this.focusSurface(surfaceId);
-	}
-
-	async popOutFile(surfaceId: string): Promise<boolean> {
-		const surface = this.layout.surface(surfaceId);
-		if (!surface || surface.type !== 'file') return false;
-		return this.#fileDialog.pop(surfaceId);
 	}
 
 	async moveDialogFileToWindow(destinationWindowId: WorkspaceWindowId): Promise<void> {
