@@ -5,6 +5,7 @@
 		DropdownMenuTrigger,
 		DropdownMenuContent,
 		DropdownMenuCheckboxItem,
+		DropdownMenuSeparator,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -20,6 +21,19 @@
 		<Settings size={16} />
 	</DropdownMenuTrigger>
 	<DropdownMenuContent align="end">
+		<DropdownMenuCheckboxItem
+			checked={controller.layout === 'list'}
+			onCheckedChange={() => controller.setLayout('list')}
+		>
+			{m.issues_list()}
+		</DropdownMenuCheckboxItem>
+		<DropdownMenuCheckboxItem
+			checked={controller.layout === 'board'}
+			onCheckedChange={() => controller.setLayout('board')}
+		>
+			{m.issues_board()}
+		</DropdownMenuCheckboxItem>
+		<DropdownMenuSeparator />
 		<DropdownMenuCheckboxItem
 			checked={controller.detailFullWidth}
 			onCheckedChange={(value) => controller.setDetailFullWidth(value)}

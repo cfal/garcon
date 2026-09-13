@@ -33,10 +33,14 @@ describe("Chromium Issues interaction", () => {
       });
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
-      await page.getByRole("button", { name: "Board", exact: true }).click();
       await page
-        .getByRole("button", { name: "Open G-2", exact: true })
+        .getByRole("button", { name: "Issue view settings", exact: true })
         .click();
+      await page
+        .getByRole("menuitemcheckbox", { name: "Board", exact: true })
+        .click();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Open G-2", exact: true }).click();
       await page.getByRole("button", { name: "Edit", exact: true }).click();
       const title = page.getByLabel("Title", { exact: true });
       await title.fill("Newer unsaved title");
@@ -457,7 +461,13 @@ describe("Chromium Issues interaction", () => {
       });
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
-      await page.getByRole("button", { name: "Board", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Issue view settings", exact: true })
+        .click();
+      await page
+        .getByRole("menuitemcheckbox", { name: "Board", exact: true })
+        .click();
+      await page.keyboard.press("Escape");
       const handle = page.locator('[data-issue-id="G-1"] [data-issue-drag]');
       await handle.waitFor();
       await page.waitForFunction(
@@ -523,7 +533,7 @@ describe("Chromium Issues interaction", () => {
         .click();
       await page.getByRole("dialog").waitFor({ state: "hidden" });
       const refreshError = page
-        .locator(".issues-surface > .issue-notice")
+        .locator(".issue-browser > .issue-notice")
         .filter({
           hasText: "Synthetic authoritative refresh unavailable",
         });

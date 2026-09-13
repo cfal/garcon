@@ -25,6 +25,7 @@
 		onOpenUserMessageNavigator?: () => void;
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
+		onOpenIssues?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -46,6 +47,7 @@
 		onOpenUserMessageNavigator,
 		onOpenGitHistory,
 		onOpenGitCompare,
+		onOpenIssues,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -78,6 +80,7 @@
 			{onOpenUserMessageNavigator}
 			{onOpenGitHistory}
 			{onOpenGitCompare}
+			{onOpenIssues}
 			{onConfigurePreambles}
 			{onRename}
 			{onDetails}

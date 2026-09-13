@@ -7,7 +7,7 @@
 	import { isIssueSubmitKey } from '$lib/issues/commands/issue-form.js';
 	import IssueProjectInput from './IssueProjectInput.svelte';
 	import IssueLabelsInput from './IssueLabelsInput.svelte';
-	import IssueMarkdown from './IssueMarkdown.svelte';
+	import IssueDescriptionEditor from './IssueDescriptionEditor.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
@@ -16,6 +16,8 @@
 		chats,
 		username,
 		onSubmit,
+		onRefinementPendingChange,
+		active = true,
 		pinnedProjectPaths = [],
 	}: {
 		controller: IssuesController;
@@ -23,9 +25,10 @@
 		chats: readonly IssueChatSummary[];
 		username: string;
 		onSubmit: () => void;
+		onRefinementPendingChange: (pending: boolean) => void;
+		active?: boolean;
 		pinnedProjectPaths?: string[];
 	} = $props();
-	let preview = $state(false);
 	function keydown(event: KeyboardEvent) {
 		if (
 			isIssueSubmitKey(
@@ -59,46 +62,30 @@
 			required
 		/>
 	</label>
-	<div class="issue-actions">
-		<span class="issue-field-label">{m.issues_description()}</span><button
-			type="button"
-			class="issue-text-button"
-			aria-pressed={preview}
-			onclick={() => (preview = !preview)}>{preview ? m.issues_write() : m.issues_preview()}</button
-		>
-	</div>
-	{#if preview}<IssueMarkdown text={draft.field('description')} />
-	{:else}<label class="issue-field"
-			><span class="sr-only">{m.issues_description()}</span>
-			<textarea
-				class="issue-input"
-				rows="6"
-				value={draft.field('description')}
-				onkeydown={keydown}
-				data-issue-focus={JSON.stringify({
-					kind: 'draft',
-					draftId: draft.current.id,
-					field: 'description',
-				})}
-				data-draft-version={draft.current.version}
-				oninput={(event) => draft.setField('description', event.currentTarget.value)}></textarea>
-		</label>{/if}
-	<IssueProjectInput
-		{controller}
-		value={draft.field('project')}
-		disabled={!draft.canEdit}
-		onChange={(value) => draft.setField('project', value)}
-		onKeydown={keydown}
+	<IssueDescriptionEditor
+		{draft}
+		{active}
+		onkeydown={keydown}
+		onPendingChange={onRefinementPendingChange}
 	/>
-	{#if draft.current.kind === 'create'}
-		<p class="issue-muted">{m.issues_project_hint()}</p>
-		<ProjectPinnedPathList
-			{pinnedProjectPaths}
-			selectedPath={draft.field('project')}
+	<div class="issue-project-editor">
+		<IssueProjectInput
+			{controller}
+			value={draft.field('project')}
 			disabled={!draft.canEdit}
-			onSelect={(path) => draft.setField('project', path)}
+			onChange={(value) => draft.setField('project', value)}
+			onKeydown={keydown}
 		/>
-	{/if}
+		{#if draft.current.kind === 'create'}
+			<p class="issue-muted">{m.issues_project_hint()}</p>
+			<ProjectPinnedPathList
+				{pinnedProjectPaths}
+				selectedPath={draft.field('project')}
+				disabled={!draft.canEdit}
+				onSelect={(path) => draft.setField('project', path)}
+			/>
+		{/if}
+	</div>
 	<details open={draft.current.kind !== 'create'}>
 		<summary>{m.issues_more_details()}</summary>
 		<div class="issue-properties">

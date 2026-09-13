@@ -8,6 +8,148 @@ import {
 import { Deferred, withTimeout } from "../../support/deferred.js";
 import type { Route } from "playwright";
 
+test("mobile Issues opens from the chat menu, fills the panel and closes back to chat", async () => {
+  await withChromiumFixture(
+    "issues-mobile-navigation",
+    async ({ page, context, integration, browserErrors }) => {
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic mobile Issues navigation",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      const bootstrap = parseIssueBootstrap(
+        await integration.client.get("/api/v1/issues/bootstrap"),
+      );
+      await integration.client.post("/api/v1/issues/mutate", {
+        requestId: crypto.randomUUID(),
+        expectedStoreId: bootstrap.storeId,
+        payload: {
+          action: "create",
+          input: {
+            title: "Synthetic mobile issue",
+            project: "Release",
+            labels: ["bug"],
+          },
+        },
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await page.locator("[data-mobile-current-chat-menu] button").click();
+      await page
+        .getByRole("menuitem", { name: "Open Issues", exact: true })
+        .click();
+      const panel = page.locator(
+        '[id="mobile-panel-singleton:issues"][aria-hidden="false"]',
+      );
+      await panel.getByRole("button", { name: "Open G-1" }).waitFor();
+      expect(
+        await panel.getByRole("button", { name: "Back", exact: true }).count(),
+      ).toBe(0);
+      expect(await panel.getByPlaceholder("Search issues…").isVisible()).toBe(
+        false,
+      );
+      const compactGeometry = await panel
+        .locator(".issue-toolbar-heading")
+        .evaluate((heading) => {
+          const controls = [
+            ...heading.querySelectorAll("input, button"),
+          ].filter((item) => item.getBoundingClientRect().width > 0);
+          const bounds = heading.getBoundingClientRect();
+          return controls.every((item) => {
+            const rect = item.getBoundingClientRect();
+            return (
+              rect.left >= bounds.left &&
+              rect.right <= bounds.right + 1 &&
+              Math.abs(
+                rect.top + rect.height / 2 - (bounds.top + bounds.height / 2),
+              ) < 1
+            );
+          });
+        });
+      expect(compactGeometry).toBe(true);
+      const rowGutters = await panel.locator(".issue-row").evaluate((row) => {
+        const bounds = row.getBoundingClientRect();
+        const list = row.parentElement!.getBoundingClientRect();
+        return {
+          left: bounds.left - list.left,
+          right: list.right - bounds.right,
+        };
+      });
+      expect(rowGutters.left).toBe(0);
+      expect(rowGutters.right).toBeLessThanOrEqual(16);
+      await panel.getByRole("button", { name: "Search", exact: true }).click();
+      await panel.getByLabel("Label", { exact: true }).fill("bug");
+      await panel.getByPlaceholder("Search issues…").press("Enter");
+      await panel.getByRole("button", { name: "Hide search options" }).click();
+      const captured = new Deferred<Route>();
+      await context.route("**/api/v1/issues/detail?*", async (route) => {
+        if (!captured.resolve(route)) await route.continue();
+      });
+      await panel.getByRole("button", { name: "Open G-1" }).click();
+      const held = await withTimeout(
+        captured.promise,
+        20_000,
+        () => "Issue detail request was not captured",
+      );
+      try {
+        await panel.locator(".issue-detail-status").waitFor();
+        expect(await panel.locator(".issues-toolbar").isVisible()).toBe(false);
+        const loadingGeometry = await panel
+          .locator(".issue-detail-status")
+          .evaluate((status) => {
+            const region = status.getBoundingClientRect();
+            const spinner = status
+              .querySelector("svg")!
+              .getBoundingClientRect();
+            return {
+              x: spinner.x + spinner.width / 2 - region.x - region.width / 2,
+              y: spinner.y + spinner.height / 2 - region.y - region.height / 2,
+            };
+          });
+        expect(Math.abs(loadingGeometry.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(loadingGeometry.y)).toBeLessThanOrEqual(1);
+      } finally {
+        await held.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            error: "Synthetic detail unavailable",
+            errorCode: "ISSUE_STORAGE_UNAVAILABLE",
+            retryable: true,
+          }),
+        });
+      }
+      await panel
+        .locator(".issue-detail-status")
+        .getByText("Synthetic detail unavailable")
+        .waitFor();
+      expect(await panel.locator(".issue-detail-status svg").count()).toBe(0);
+      expect(await panel.locator(".issues-toolbar").isVisible()).toBe(false);
+      await panel
+        .locator(".issue-detail-status")
+        .getByRole("button", { name: "Refresh" })
+        .click();
+      await panel.locator(".issue-detail-title").waitFor();
+      expect(await panel.locator(".issues-toolbar").isVisible()).toBe(false);
+      await panel.getByRole("button", { name: "Back to issues" }).click();
+      await panel.getByRole("button", { name: "Search", exact: true }).click();
+      expect(
+        await panel.getByLabel("Label", { exact: true }).inputValue(),
+      ).toBe("bug");
+      await panel.getByRole("button", { name: "Close Issues" }).click();
+      await panel.waitFor({ state: "hidden" });
+      await page.locator("[data-mobile-current-chat-menu]").waitFor();
+      expect(browserErrors.filter((error) => !error.includes("503"))).toEqual(
+        [],
+      );
+    },
+  );
+});
+
 test("a rejected optimistic move restores the visible mobile lane", async () => {
   await withChromiumFixture(
     "issues-ux-move-rollback",
@@ -26,7 +168,13 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(integration.garcon.baseUrl);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
-      await page.getByRole("button", { name: "Board", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Issue view settings", exact: true })
+        .click();
+      await page
+        .getByRole("menuitemcheckbox", { name: "Board", exact: true })
+        .click();
+      await page.keyboard.press("Escape");
       await page
         .getByRole("button", { name: "Open G-1", exact: true })
         .waitFor();
@@ -34,9 +182,7 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
       await context.route("**/api/v1/issues/mutate", async (route) => {
         if (!started.resolve(route)) await route.continue();
       });
-      await page
-        .getByRole("button", { name: "Change status of G-1" })
-        .click();
+      await page.getByRole("button", { name: "Change status of G-1" }).click();
       await page
         .getByRole("menuitem", { name: "In review", exact: true })
         .click();
@@ -108,7 +254,13 @@ test("Issues toolbar stays aligned and search retains the board until results ar
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
-      await page.getByRole("button", { name: "Board", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Issue view settings", exact: true })
+        .click();
+      await page
+        .getByRole("menuitemcheckbox", { name: "Board", exact: true })
+        .click();
+      await page.keyboard.press("Escape");
       const card = page.locator('.issue-card[data-issue-id="G-1"]');
       await card.waitFor();
       const geometry = await page
@@ -120,7 +272,7 @@ test("Issues toolbar stays aligned and search retains the board until results ar
           const lanes = [...panel.querySelectorAll(".issue-lane")].map((lane) =>
             lane.getBoundingClientRect(),
           );
-          const search = rect(".issue-search input");
+          const search = rect(".issue-project-control input");
           const button = rect("[data-issue-search-button]");
           const scroll = rect(".issue-lane-scroll");
           const item = rect(".issue-card");
@@ -146,16 +298,22 @@ test("Issues toolbar stays aligned and search retains the board until results ar
       expect(
         Math.abs(geometry.paddingLeft - geometry.paddingRight),
       ).toBeLessThanOrEqual(1);
-      const filters = page.getByRole("button", {
-        name: "Filters",
+      const searchToggle = page.getByRole("button", {
+        name: "Search",
         exact: true,
       });
-      const beforeFilter = await filters.boundingBox();
-      await filters.click();
-      const afterFilter = await filters.boundingBox();
-      expect(afterFilter?.x).toBe(beforeFilter?.x);
-      expect(afterFilter?.y).toBe(beforeFilter?.y);
-      await filters.click();
+      const beforeToggle = await searchToggle.boundingBox();
+      await searchToggle.click();
+      const afterToggle = await page
+        .getByRole("button", { name: "Hide search options" })
+        .boundingBox();
+      expect(afterToggle?.x).toBe(beforeToggle?.x);
+      expect(afterToggle?.y).toBe(beforeToggle?.y);
+      expect(
+        await page
+          .getByRole("button", { name: "Filters", exact: true })
+          .count(),
+      ).toBe(0);
       const started = new Deferred<Route>();
       await context.route("**/api/v1/issues/counts?*", async (route) => {
         if (!started.resolve(route)) await route.continue();
@@ -164,7 +322,7 @@ test("Issues toolbar stays aligned and search retains the board until results ar
         .getByPlaceholder("Search issues…")
         .fill("No matching synthetic issue ".repeat(6));
       const beforeBoard = await page.locator(".issue-board").boundingBox();
-      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await page.getByPlaceholder("Search issues…").press("Enter");
       const held = await withTimeout(
         started.promise,
         20_000,
@@ -176,7 +334,10 @@ test("Issues toolbar stays aligned and search retains the board until results ar
           beforeBoard,
         );
         expect(
-          await page.getByText("Loading issues…", { exact: true }).count(),
+          await page
+            .locator(".issue-collection")
+            .getByText("Loading issues…", { exact: true })
+            .count(),
         ).toBe(0);
         expect(
           await page
@@ -187,11 +348,22 @@ test("Issues toolbar stays aligned and search retains the board until results ar
         await held.continue();
       }
       await card.waitFor({ state: "hidden" });
+      await page
+        .getByRole("combobox", { name: "Status", exact: true })
+        .selectOption("in-review");
+      await page
+        .getByRole("combobox", { name: "Priority", exact: true })
+        .selectOption("1");
       await page.setViewportSize({ width: 390, height: 844 });
       const mobileIssuesPanel = page.locator(
         '[id="mobile-panel-singleton:issues"][aria-hidden="false"]',
       );
       await mobileIssuesPanel.waitFor();
+      const mobileSearch = mobileIssuesPanel.locator(
+        "[data-issue-search-button]",
+      );
+      if ((await mobileSearch.getAttribute("aria-expanded")) === "false")
+        await mobileSearch.click();
       const chipGeometry = await mobileIssuesPanel
         .locator(".issue-filter-footer")
         .evaluate((footer) => {
@@ -232,20 +404,45 @@ test("card whitespace opens details and full-width detail preference survives re
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
-      await page.getByRole("button", { name: "Board", exact: true }).click();
+      expect(
+        await page
+          .getByRole("button", { name: "Close Issues", exact: true })
+          .count(),
+      ).toBe(0);
+      await page
+        .getByRole("button", { name: "Issue view settings", exact: true })
+        .click();
+      await page
+        .getByRole("menuitemcheckbox", { name: "Board", exact: true })
+        .click();
+      await page.keyboard.press("Escape");
       const card = page.locator('.issue-card[data-issue-id="G-1"]');
-      await card.click({ position: { x: 5, y: 5 } });
-      await page.locator(".issue-detail-title").waitFor();
       await page
         .getByRole("button", { name: "Issue view settings", exact: true })
         .click();
       await page
         .getByRole("menuitemcheckbox", {
-          name: "Always open details full width",
+          name: "Always expand details",
         })
         .click();
       await page.keyboard.press("Escape");
+      await card.click({ position: { x: 5, y: 5 } });
+      await page.locator(".issue-detail-title").waitFor();
       expect(await page.locator(".issue-collection").isVisible()).toBe(false);
+      expect(await page.locator(".issues-toolbar").isVisible()).toBe(false);
+      const expandedGeometry = await page
+        .locator(".issues-surface")
+        .evaluate((panel) => {
+          const detail = panel
+            .querySelector(".issue-detail")!
+            .getBoundingClientRect();
+          const bounds = panel.getBoundingClientRect();
+          return {
+            top: detail.top - bounds.top,
+            height: detail.height - bounds.height,
+          };
+        });
+      expect(expandedGeometry).toEqual({ top: 0, height: 0 });
       await page.getByRole("button", { name: "Back to issues" }).click();
       expect(await card.isVisible()).toBe(true);
       await page.reload();
@@ -253,6 +450,7 @@ test("card whitespace opens details and full-width detail preference survives re
       await card.click({ position: { x: 5, y: 5 } });
       await page.locator(".issue-detail-title").waitFor();
       expect(await page.locator(".issue-collection").isVisible()).toBe(false);
+      expect(await page.locator(".issues-toolbar").isVisible()).toBe(false);
       assertNoBrowserErrors();
     },
   );

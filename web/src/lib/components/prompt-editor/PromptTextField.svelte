@@ -16,6 +16,7 @@
 		rows?: number;
 		textareaClass?: string;
 		describedBy?: string;
+		dataAttributes?: Record<`data-${string}`, string | number>;
 		canExpand: boolean;
 		expandLabel: string;
 		canRefinePrompt: boolean;
@@ -36,6 +37,7 @@
 		rows = 4,
 		textareaClass = '',
 		describedBy = '',
+		dataAttributes = {},
 		canExpand,
 		expandLabel,
 		canRefinePrompt,
@@ -55,6 +57,7 @@
 	aria-busy={isPromptRefinementPending}
 >
 	<textarea
+		{...dataAttributes}
 		bind:this={ref}
 		bind:value
 		{id}

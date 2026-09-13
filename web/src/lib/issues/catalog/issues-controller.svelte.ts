@@ -281,7 +281,6 @@ export class IssuesController implements PortableSingletonController {
 
 	async #refresh(): Promise<void> {
 		this.loading = true;
-		this.error = null;
 		try {
 			for (
 				let pass = 0;
@@ -290,6 +289,8 @@ export class IssuesController implements PortableSingletonController {
 			) {
 				this.#cancelPage();
 				const epoch = this.#epoch;
+				this.error = null;
+				this.detail.error = null;
 				const request = new AbortController();
 				this.#request = request;
 				try {

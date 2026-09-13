@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Copy from '@lucide/svelte/icons/copy';
 	import type { IssueDetail, IssueSource, IssueStatus } from '$shared/issues';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
@@ -17,8 +16,10 @@
 		type IssueChatSummary,
 	} from './issue-presentation.js';
 	import IssueStatusMenu from './IssueStatusMenu.svelte';
+	import IssueDetailHeader from './IssueDetailHeader.svelte';
 	import IssueFieldsEditor from './IssueFieldsEditor.svelte';
 	import IssueDraftFeedback from './IssueDraftFeedback.svelte';
+	import IssueMutationErrors from './IssueMutationErrors.svelte';
 	import IssueDiscussion from './IssueDiscussion.svelte';
 	import IssueActivity from './IssueActivity.svelte';
 	import IssueRelationships from './IssueRelationships.svelte';
@@ -27,26 +28,35 @@
 	let {
 		controller,
 		detail,
+		error,
 		chats,
 		username,
 		onOpenChat,
 		onOpenSource,
 		onBack,
+		onClose,
+		closeDisabled = false,
+		visible = true,
 		onStatus,
 	}: {
 		controller: IssuesController;
 		detail: IssueDetail;
+		error: string | null;
 		chats: readonly IssueChatSummary[];
 		username: string;
 		onOpenChat: (id: string) => void;
 		onOpenSource: (source: IssueSource) => void;
 		onBack: () => void;
+		onClose?: () => void;
+		closeDisabled?: boolean;
+		visible?: boolean;
 		onStatus: (status: IssueStatus) => void;
 	} = $props();
 	const editing = $derived(controller.detail.fieldsDraft);
 	let copied = $state('');
 	let cancelRequested = $state(false);
 	let composing = $state(false);
+	let refining = $state(false);
 	let scroll = $state<HTMLElement | null>(null);
 	let priorComments: IssueDetail['comments'] | null = null;
 	const issue = $derived(controller.mutations.issue(detail.issue));
@@ -68,7 +78,7 @@
 		else controller.detail.fieldsDraft = null;
 	}
 	async function save() {
-		if (!editing || composing || !canSubmitIssueForm(editing)) return;
+		if (!editing || composing || refining || !canSubmitIssueForm(editing)) return;
 		await submitIssueForm(editing);
 	}
 	async function copyLink() {
@@ -114,28 +124,22 @@
 	bind:this={scroll}
 	data-issue-scroll={`detail:${issue.id}`}
 >
-	{#if controller.detail.error}<div class="issue-notice" role="alert">
-			<p>{controller.detail.error}</p>
-			<button class="issue-button" onclick={() => void controller.refresh()}
-				>{m.issues_retry()}</button
-			>
-		</div>{/if}
-	<div class="issue-detail-header">
+	<IssueDetailHeader issueId={issue.id} {onBack} {onClose} {closeDisabled}>
 		<button
-			type="button"
-			class="issue-button issue-back"
-			onclick={onBack}
-			data-issue-focus={JSON.stringify({ kind: 'toolbar', control: 'back' })}
-			><ArrowLeft size={15} />{m.issues_back()}</button
-		>
-		<span class="issue-id">{issue.id}</span><button
 			type="button"
 			class="issue-text-button"
 			onclick={() => void copyLink()}
 			aria-label={m.issues_copy_link()}><Copy size={14} /></button
 		>
 		<IssueStatusMenu {issue} {onStatus} disabled={saving} />
-	</div>
+	</IssueDetailHeader>
+	{#if error}<div class="issue-notice" role="alert">
+			<p>{error}</p>
+			<button class="issue-button" onclick={() => void controller.refresh()}
+				>{m.issues_retry()}</button
+			>
+		</div>{/if}
+	<IssueMutationErrors drafts={controller.drafts.active} />
 	{#if copied}<p class="issue-muted" role="status">{copied}</p>{/if}
 	{#if editing}
 		<form
@@ -152,14 +156,16 @@
 				draft={editing}
 				{chats}
 				{username}
+				active={visible}
 				onSubmit={() => void save()}
+				onRefinementPendingChange={(pending) => (refining = pending)}
 			/><IssueDraftFeedback draft={editing} />
 			<div class="issue-actions">
 				<button type="button" class="issue-button" disabled={editing.pending} onclick={cancel}
 					>{m.issues_cancel()}</button
 				><button
 					class="issue-button issue-primary"
-					disabled={!canSubmitIssueForm(editing) || composing}
+					disabled={!canSubmitIssueForm(editing) || composing || refining}
 					>{editing.pending ? m.issues_saving() : m.issues_save()}</button
 				>
 			</div>

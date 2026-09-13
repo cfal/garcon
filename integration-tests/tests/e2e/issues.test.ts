@@ -282,7 +282,15 @@ describe("Lightpanda Issues", () => {
       await app.fill(".issue-detail input[list]", "Reassigned project");
       await app.clickButton("Save changes");
       await app.waitForText("Reassigned project");
-      await app.clickButton("Board");
+      await app.clickButton("Back to issues");
+      await app.clickButton("Issue view settings");
+      await fixture.page.waitForSelector('[role="menuitemcheckbox"]');
+      await fixture.page.evaluate(() => {
+        const board = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]
+          .find((item) => item.textContent?.trim() === 'Board');
+        if (!board) throw new Error('Missing Board view option');
+        board.click();
+      });
       await fixture.page.waitForSelector(".issue-board");
       await fixture.page.waitForFunction(() =>
         localStorage

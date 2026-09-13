@@ -100,10 +100,12 @@ describe('CurrentChatMenu', () => {
 	it('renders mobile Git view commands before chat actions and invokes each callback', async () => {
 		const openHistory = vi.fn();
 		const openCompare = vi.fn();
+		const openIssues = vi.fn();
 		render(CurrentChatMenu, {
 			...props(),
 			onOpenGitHistory: openHistory,
 			onOpenGitCompare: openCompare,
+			onOpenIssues: openIssues,
 		});
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 		const history = screen.getByRole('menuitem', {
@@ -117,6 +119,8 @@ describe('CurrentChatMenu', () => {
 
 		expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
 		expect(items.indexOf(compare)).toBeLessThan(items.indexOf(share));
+		const issues = screen.getByRole('menuitem', { name: m.workspace_open_issues() });
+		expect(items.indexOf(issues)).toBe(items.indexOf(compare) + 1);
 		expect(screen.queryByRole('menuitem', { name: m.workspace_fullscreen() })).toBeNull();
 		await fireEvent.click(history);
 		expect(openHistory).toHaveBeenCalledOnce();
@@ -124,6 +128,9 @@ describe('CurrentChatMenu', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_compare() }));
 		expect(openCompare).toHaveBeenCalledOnce();
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_issues() }));
+		expect(openIssues).toHaveBeenCalledOnce();
 	});
 
 	it('omits Git view commands when mobile callbacks are not supplied', async () => {
@@ -132,5 +139,6 @@ describe('CurrentChatMenu', () => {
 
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_compare() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_issues() })).toBeNull();
 	});
 });

@@ -29,6 +29,78 @@ function hold() {
 }
 
 describe('Issues stable, immediate interactions', () => {
+	it.each([false, true])(
+		'keeps refresh errors and retry inside selected details (loaded: %s)',
+		async (loaded) => {
+			const { controller, api, view } = await mount();
+			if (loaded) {
+				await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
+				await controller.refresh();
+			}
+			api.counts.mockRejectedValueOnce(new ApiError(503, 'Synthetic refresh unavailable'));
+			if (!loaded) controller.select('G-1');
+			await controller.refresh();
+			const detail = within(view.container.querySelector<HTMLElement>('.issue-detail')!);
+			expect(detail.getByText('Synthetic refresh unavailable')).toBeTruthy();
+			expect(detail.queryByText('Loading issue…')).toBeNull();
+			expect(view.container.querySelector('.issue-browser')?.textContent).not.toContain(
+				'Synthetic refresh unavailable',
+			);
+			await fireEvent.click(detail.getByRole('button', { name: 'Refresh' }));
+			await controller.refresh();
+			expect(screen.getByRole('heading', { name: 'Synthetic issue 1' })).toBeTruthy();
+			expect(screen.queryByText('Synthetic refresh unavailable')).toBeNull();
+		},
+	);
+
+	it.each([1, 2])(
+		'keeps a failed mutation visible while another view loads (issue %s)',
+		async (number) => {
+			const { controller, api, view } = await mount();
+			const message = 'Save not confirmed. Retry the same request or copy the draft.';
+			const readBarrier = hold();
+			const mutationBarrier = hold();
+			const read = api.read.getMockImplementation()!;
+			api.read.mockImplementationOnce(async (...args) => {
+				await readBarrier.promise;
+				return read(...args);
+			});
+			api.mutate.mockImplementationOnce(async () => {
+				await mutationBarrier.promise;
+				throw new Error('Synthetic connection loss');
+			});
+			const issue = syntheticIssue(number);
+			const mutation = controller.mutate(issue, {
+				action: 'update',
+				issueId: issue.id,
+				expectedRevision: issue.revision,
+				patch: { priority: 1 },
+			});
+			await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
+			await waitFor(() => expect(api.read).toHaveBeenCalled());
+			mutationBarrier.release();
+			await mutation;
+			await tick();
+			expect(
+				within(view.container.querySelector<HTMLElement>('.issue-detail-placeholder')!).getByText(
+					message,
+				),
+			).toBeTruthy();
+			expect(view.container.querySelector('.issue-browser > .issue-notice')).toBeNull();
+			readBarrier.release();
+			await controller.refresh();
+			await tick();
+			expect(
+				within(screen.getByRole('region', { name: 'Issue details' })).getByText(message),
+			).toBeTruthy();
+			await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }));
+			expect(view.container.querySelector('.issue-browser > .issue-notice')?.textContent).toContain(
+				message,
+			);
+			expect(view.container.querySelector('.issue-detail')).toBeNull();
+		},
+	);
+
 	it('leaves an empty board plain and removes the redundant heading', async () => {
 		const { controller, view } = await mount(true);
 		controller.setLayout('board');
@@ -47,6 +119,7 @@ describe('Issues stable, immediate interactions', () => {
 			controller.setLayout(layout);
 			await controller.refresh();
 			const barrier = hold();
+			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 			const counts = api.counts.getMockImplementation()!;
 			api.counts.mockImplementationOnce(async (...args) => {
 				await barrier.promise;
@@ -57,7 +130,9 @@ describe('Issues stable, immediate interactions', () => {
 			});
 			await fireEvent.submit(screen.getByPlaceholderText('Search issues…').closest('form')!);
 			expect(view.container.querySelector('[data-issue-id="G-1"]')).not.toBeNull();
-			expect(screen.queryByText('Loading issues…')).toBeNull();
+			expect(view.container.querySelector('.issue-collection')?.textContent).not.toContain(
+				'Loading issues…',
+			);
 			expect(
 				view.container.querySelector('[data-issue-search-button]')?.getAttribute('aria-busy'),
 			).toBe('true');
@@ -118,9 +193,7 @@ describe('Issues stable, immediate interactions', () => {
 			expect(
 				view.container.querySelector('[data-status="in-review"] [data-issue-id="G-1"]'),
 			).not.toBeNull();
-			expect(
-				view.container.querySelector('[data-status="open"] [data-issue-id="G-1"]'),
-			).toBeNull();
+			expect(view.container.querySelector('[data-status="open"] [data-issue-id="G-1"]')).toBeNull();
 			expect(controller.activeLane).toBe('in-review');
 			if (changedLane) controller.activeLane = 'in-progress';
 			barrier.release();
@@ -135,12 +208,45 @@ describe('Issues stable, immediate interactions', () => {
 
 	it('preserves filter values when the filter options are collapsed', async () => {
 		const { controller } = await mount();
-		await fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 		await fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in-review' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide search options' }));
 		await fireEvent.submit(screen.getByPlaceholderText('Search issues…').closest('form')!);
 		expect(controller.query.status).toBe('in-review');
 		await controller.refresh();
+	});
+
+	it('normalizes search fields without dropping urgent priority or explicit filter flags', async () => {
+		const { controller } = await mount();
+		controller.setQuery({ ready: false, includeClosed: true });
+		await controller.refresh();
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+		await fireEvent.input(screen.getByLabelText('Project'), {
+			target: { value: '  Release  ' },
+		});
+		await fireEvent.input(screen.getByPlaceholderText('Search issues…'), {
+			target: { value: '  Synthetic issue  ' },
+		});
+		await fireEvent.input(screen.getByLabelText('Label'), { target: { value: '  frontend  ' } });
+		await fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in-review' } });
+		await fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '0' } });
+		await fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'user:local' } });
+		await fireEvent.submit(screen.getByPlaceholderText('Search issues…').closest('form')!);
+		expect(controller.query).toEqual({
+			project: 'Release',
+			query: 'Synthetic issue',
+			label: 'frontend',
+			status: 'in-review',
+			priority: 0,
+			assignee: { kind: 'user', username: 'local' },
+			ready: false,
+			includeClosed: true,
+		});
+		await fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '' } });
+		expect(controller.query).not.toHaveProperty('priority');
+		expect(controller.query).toMatchObject({ ready: false, includeClosed: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+		expect(controller.query).toEqual({});
 	});
 
 	it('updates assignee filter chips without substituting display names', async () => {

@@ -519,6 +519,72 @@ describe('Issues controller', () => {
 		expect(draft.field('title')).toBe('Retained local edit');
 	});
 
+	it('replaces an old detail error with the current refresh outcome', async () => {
+		const { controller, api } = harness();
+		const unavailable = new ApiError(413, 'Detail unavailable', 'ISSUE_RESULT_TOO_LARGE');
+		api.read.mockRejectedValueOnce(unavailable);
+		controller.select('G-1');
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		expect(controller.detail.error).toBe('Detail unavailable');
+
+		api.counts.mockRejectedValueOnce(new ApiError(503, 'Synthetic connection unavailable'));
+		const retry = controller.refresh();
+		expect(controller.detail.error).toBeNull();
+		await retry;
+		expect(controller.error).toBe('Synthetic connection unavailable');
+		expect(controller.detail.error).toBeNull();
+
+		api.read.mockRejectedValueOnce(unavailable);
+		await controller.refresh();
+		expect(controller.error).toBeNull();
+		expect(controller.detail.error).toBe('Detail unavailable');
+
+		await controller.refresh();
+		expect(controller.detail.error).toBeNull();
+		expect(controller.detail.current?.issue.id).toBe('G-1');
+	});
+
+	it.each(['failure', 'exhaustion'] as const)(
+		'clears a superseded detail error when the next refresh pass ends in %s',
+		async (outcome) => {
+			const { controller, api, invalidations } = harness();
+			controller.select('G-1');
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			controller.detail.tab = 'activity';
+			const historyStarted = deferred<void>();
+			const releaseHistory = deferred<void>();
+			api.read.mockRejectedValueOnce(
+				new ApiError(413, 'Detail unavailable', 'ISSUE_RESULT_TOO_LARGE'),
+			);
+			api.history.mockImplementationOnce(async () => {
+				historyStarted.resolve();
+				await releaseHistory.promise;
+				return { storeId: STORE, collectionRevision: 1, items: [], nextBeforeSequence: null };
+			});
+			const refresh = controller.refresh();
+			await historyStarted.promise;
+			try {
+				expect(controller.detail.error).toBe('Detail unavailable');
+				const error =
+					outcome === 'failure'
+						? new ApiError(503, 'Counts unavailable')
+						: new ApiError(409, 'Collection changed', 'ISSUE_COLLECTION_CHANGED');
+				api.counts.mockRejectedValue(error);
+				invalidations.publishReconnect();
+			} finally {
+				releaseHistory.resolve();
+				await refresh;
+			}
+			expect(api.bootstrap).toHaveBeenCalledTimes(2);
+			expect(controller.error).toBe(outcome === 'failure' ? 'Counts unavailable' : null);
+			expect(controller.detail.error).toBeNull();
+			expect(controller.stale).toBe(true);
+			expect(controller.detail.selectedId).toBe('G-1');
+		},
+	);
+
 	it('preserves a loaded collection window through invalidation and same-issue selection', async () => {
 		const { controller, setRevision, invalidations } = harness(
 			Array.from({ length: 550 }, (_, index) => issue(index + 1)),

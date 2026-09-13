@@ -25,7 +25,10 @@
 	let content = $state<HTMLElement | null>(null);
 	let closeRequested = $state(false);
 	let composing = $state(false);
-	const canSubmit = $derived(draft !== null && canSubmitIssueForm(draft) && !composing);
+	let refining = $state(false);
+	const canSubmit = $derived(
+		draft !== null && canSubmitIssueForm(draft) && !composing && !refining,
+	);
 	function requestClose() {
 		if (draft?.pending) return;
 		if (draft?.needsExitGuard) closeRequested = true;
@@ -74,6 +77,7 @@
 					{username}
 					{pinnedProjectPaths}
 					onSubmit={() => void submit()}
+					onRefinementPendingChange={(pending) => (refining = pending)}
 				/>
 				{#if controller.projectDefault}<p class="issue-muted">
 						{controller.projectDefault.kind === 'repository'

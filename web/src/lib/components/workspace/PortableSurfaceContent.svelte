@@ -234,6 +234,10 @@
 			<IssuesPanel
 				{controller}
 				{visible}
+				onClose={presentation === 'mobile'
+					? () => void workspace.closeSurface(surface.id)
+					: undefined}
+				closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
 				chats={sessions.orderedChats}
 				onOpenSource={(source) =>
 					void issueSourceNavigation.open(source, presentation, () => controller.bootstrap)}

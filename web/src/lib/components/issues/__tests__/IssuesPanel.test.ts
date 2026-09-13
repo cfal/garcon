@@ -170,9 +170,7 @@ describe('Issues surface', () => {
 			expect(screen.queryByText('This issue is outside the current filters.')).toBeNull();
 			api.counts.mockImplementation(counts);
 			await controller.refresh();
-			await waitFor(() =>
-				expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull(),
-			);
+			await waitFor(() => expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull());
 			expect(await screen.findByText('This issue is outside the current filters.')).toBeTruthy();
 			expect(document.activeElement).toBe(
 				view.container.querySelector('.issue-lane[data-status="open"] h3'),
@@ -270,9 +268,7 @@ describe('Issues surface', () => {
 			focused.focus();
 			release();
 			await controller.refresh();
-			await waitFor(() =>
-				expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull(),
-			);
+			await waitFor(() => expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull());
 			expect(document.activeElement).toBe(focused);
 		},
 	);
@@ -466,13 +462,19 @@ describe('Issues surface', () => {
 		},
 	);
 
-	it('omits readiness unless checked and labels the layout button group', async () => {
+	it('omits readiness unless checked and offers checkable view and filter menus', async () => {
 		const { controller } = await mount();
-		expect(screen.getByRole('group', { name: 'Issues' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Issue view settings' }));
+		expect(
+			screen.getByRole('menuitemcheckbox', { name: 'List' }).getAttribute('aria-checked'),
+		).toBe('true');
+		await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'List' }));
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 		await fireEvent.submit(screen.getByPlaceholderText('Search issues…').closest('form')!);
 		expect(controller.query).not.toHaveProperty('ready');
-		await fireEvent.click(screen.getByLabelText('Ready to pick up'));
-		await fireEvent.submit(screen.getByPlaceholderText('Search issues…').closest('form')!);
+		await fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+		await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Ready to pick up' }));
 		expect(controller.query.ready).toBe(true);
 	});
 
@@ -627,7 +629,8 @@ describe('Issues surface', () => {
 		await tick();
 		expect(screen.getByLabelText('Title')).toBe(title);
 		expect(title.value).toBe('Unsaved human title');
-		await fireEvent.click(screen.getByRole('button', { name: 'Board' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Issue view settings' }));
+		await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Board' }));
 		await controller.refresh();
 		expect(controller.detail.selectedId).toBe('G-1');
 		expect(title.value).toBe('Unsaved human title');
