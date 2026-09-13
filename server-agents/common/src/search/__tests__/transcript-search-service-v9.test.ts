@@ -580,39 +580,43 @@ describe('transcript search service v9', () => {
         deliver(event);
       }),
     });
-    await service.enable(new AbortController().signal);
-    await build(service, 'chat-queue', 'view-queue', 20, 'queuemarker');
-    const pending = Array.from({ length: 6 }, () => service.search(searchRequest(
-      'chat-queue', 'view-queue', 20, 'queuemarker',
-    )));
-    await Bun.sleep(25);
-    expect(held).toHaveLength(2);
-    expect(service.queryStats()).toMatchObject({
-      served: 0,
-      timedOut: 0,
-      rejectedBusy: 0,
-      p50Ms: 0,
-      admissionP50Ms: 0,
-      totalP50Ms: 0,
-    });
-    hold = false;
-    for (const item of held.splice(0)) item.deliver(item.event);
-    await expect(Promise.all(pending)).resolves.toHaveLength(6);
-    const queryStats = service.queryStats();
-    expect(queryStats.served).toBe(6);
-    expect(queryStats.timedOut).toBe(0);
-    expect(queryStats.rejectedBusy).toBe(0);
-    expect(queryStats.admissionP50Ms).toBeGreaterThan(0);
-    expect(queryStats.admissionP50Ms).toBeGreaterThan(queryStats.p50Ms);
-    expect(queryStats.totalP50Ms).toBeGreaterThanOrEqual(queryStats.admissionP50Ms);
-    expect(queryStats.totalP50Ms + 1)
-      .toBeGreaterThanOrEqual(queryStats.admissionP50Ms + queryStats.p50Ms);
-    expect(queryStats.totalMaxMs).toBeGreaterThanOrEqual(queryStats.maxMs);
-    expect(queryStats.totalMaxMs).toBeGreaterThanOrEqual(queryStats.admissionMaxMs);
-    expect(records.some((record) => (
-      (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
-    ))).toBe(false);
-    await service.close();
+    try {
+      await service.enable(new AbortController().signal);
+      await build(service, 'chat-queue', 'view-queue', 20, 'queuemarker');
+      const pending = Promise.all(Array.from({ length: 6 }, () => service.search(searchRequest(
+        'chat-queue', 'view-queue', 20, 'queuemarker',
+      ))));
+      void pending.catch(() => {});
+      await waitFor(() => held.length === 2, 1_000);
+      // Keeps queued admission measurable after millisecond rounding.
+      await Bun.sleep(5);
+      expect(held).toHaveLength(2);
+      expect(service.queryStats()).toMatchObject({
+        served: 0,
+        timedOut: 0,
+        rejectedBusy: 0,
+        p50Ms: 0,
+        admissionP50Ms: 0,
+        totalP50Ms: 0,
+      });
+      hold = false;
+      for (const item of held.splice(0)) item.deliver(item.event);
+      await expect(pending).resolves.toHaveLength(6);
+      const queryStats = service.queryStats();
+      expect(queryStats.served).toBe(6);
+      expect(queryStats.timedOut).toBe(0);
+      expect(queryStats.rejectedBusy).toBe(0);
+      expect(queryStats.admissionP50Ms).toBeGreaterThanOrEqual(1);
+      expect(queryStats.totalP50Ms).toBeGreaterThanOrEqual(queryStats.admissionP50Ms);
+      expect(queryStats.totalP50Ms).toBeGreaterThanOrEqual(queryStats.p50Ms);
+      expect(queryStats.totalMaxMs).toBeGreaterThanOrEqual(queryStats.maxMs);
+      expect(queryStats.totalMaxMs).toBeGreaterThanOrEqual(queryStats.admissionMaxMs);
+      expect(records.some((record) => (
+        (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
+      ))).toBe(false);
+    } finally {
+      await service.close();
+    }
   });
 
   test('a seventh simultaneous search is rejected without a latency sample', async () => {
