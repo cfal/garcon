@@ -5,6 +5,9 @@
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
 	import Tickets from '@lucide/svelte/icons/tickets';
+	import Waypoints from '@lucide/svelte/icons/waypoints';
+	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
+	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import Info from '@lucide/svelte/icons/info';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -29,6 +32,9 @@
 		onOpenGitHistory,
 		onOpenGitCompare,
 		onOpenTickets,
+		onOpenChatMap,
+		onOpenCanvas,
+		onOpenPullRequests,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -39,7 +45,7 @@
 		onDelete,
 	}: {
 		menu?: MenuPrimitives;
-		selectedChat: ChatSessionRecord;
+		selectedChat: ChatSessionRecord | null;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
 		canFork: boolean;
@@ -48,6 +54,9 @@
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
 		onOpenTickets?: () => void;
+		onOpenChatMap?: () => void;
+		onOpenCanvas?: () => void;
+		onOpenPullRequests?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -57,80 +66,111 @@
 		onFork: () => void;
 		onDelete: () => void;
 	} = $props();
+
+	const hasWorkspaceCommands = $derived(
+		Boolean(
+			onOpenGitHistory ||
+			onOpenGitCompare ||
+			onOpenTickets ||
+			onOpenChatMap ||
+			onOpenCanvas ||
+			onOpenPullRequests,
+		),
+	);
 </script>
 
-{#if onOpenGitHistory || onOpenGitCompare || onOpenTickets}
-	{#if onOpenGitHistory}
-		<menu.Item onSelect={onOpenGitHistory}>
-			<History />
-			{m.workspace_open_git_history()}
+{#if onOpenGitHistory}
+	<menu.Item onSelect={onOpenGitHistory}>
+		<History />
+		{m.workspace_open_git_history()}
+	</menu.Item>
+{/if}
+{#if onOpenGitCompare}
+	<menu.Item onSelect={onOpenGitCompare}>
+		<GitCompareArrows />
+		{m.workspace_open_git_compare()}
+	</menu.Item>
+{/if}
+{#if onOpenTickets}
+	<menu.Item onSelect={onOpenTickets}>
+		<Tickets />
+		{m.workspace_open_tickets()}
+	</menu.Item>
+{/if}
+{#if onOpenChatMap}
+	<menu.Item onSelect={onOpenChatMap}>
+		<Waypoints />
+		{m.workspace_open_chat_map()}
+	</menu.Item>
+{/if}
+{#if onOpenCanvas}
+	<menu.Item onSelect={onOpenCanvas}>
+		<PanelsTopLeft />
+		{m.workspace_open_chat_canvas()}
+	</menu.Item>
+{/if}
+{#if onOpenPullRequests}
+	<menu.Item onSelect={onOpenPullRequests}>
+		<GitPullRequest />
+		{m.workspace_open_pull_requests()}
+	</menu.Item>
+{/if}
+
+{#if selectedChat}
+	{#if hasWorkspaceCommands}
+		<menu.Separator />
+	{/if}
+	{#if onOpenUserMessageNavigator}
+		<menu.Item onSelect={onOpenUserMessageNavigator}>
+			<ListIcon />
+			{m.chat_user_message_navigator_menu()}
 		</menu.Item>
 	{/if}
-	{#if onOpenGitCompare}
-		<menu.Item onSelect={onOpenGitCompare}>
-			<GitCompareArrows />
-			{m.workspace_open_git_compare()}
+	<menu.Item onSelect={onShare}>
+		<Share2 />
+		{m.share_button()}
+	</menu.Item>
+	<menu.Item onSelect={onDetails}>
+		<Info />
+		{m.sidebar_chats_details()}
+	</menu.Item>
+	{#if onConfigurePreambles}
+		<menu.Item onSelect={onConfigurePreambles}>
+			<ListPlus />
+			{m.sidebar_chats_configure_preambles()}
 		</menu.Item>
 	{/if}
-	{#if onOpenTickets}
-		<menu.Item onSelect={onOpenTickets}>
-			<Tickets />
-			{m.workspace_open_tickets()}
+	{#if canFork}
+		<menu.Item disabled={!canForkNow} onSelect={() => canForkNow && onFork()}>
+			<GitFork />
+			{m.sidebar_chats_fork()}
+		</menu.Item>
+	{/if}
+	<menu.Item onSelect={onRename}>
+		<Edit2 />
+		{m.sidebar_tooltips_edit_chat_name()}
+	</menu.Item>
+	{#if canUpdateProjectPath}
+		<menu.Item
+			disabled={selectedChat.isProcessing}
+			onSelect={() => !selectedChat.isProcessing && onProjectPath()}
+		>
+			<FolderOpen />
+			{m.sidebar_project_path_menu_item()}
+		</menu.Item>
+	{/if}
+	{#if canReload}
+		<menu.Item
+			disabled={selectedChat.isProcessing}
+			onSelect={() => !selectedChat.isProcessing && onReload()}
+		>
+			<RefreshCw />
+			{m.sidebar_chats_reload()}
 		</menu.Item>
 	{/if}
 	<menu.Separator />
-{/if}
-
-{#if onOpenUserMessageNavigator}
-	<menu.Item onSelect={onOpenUserMessageNavigator}>
-		<ListIcon />
-		{m.chat_user_message_navigator_menu()}
+	<menu.Item variant="destructive" onSelect={onDelete}>
+		<Trash2 />
+		{m.sidebar_tooltips_delete_chat()}
 	</menu.Item>
 {/if}
-<menu.Item onSelect={onShare}>
-	<Share2 />
-	{m.share_button()}
-</menu.Item>
-<menu.Item onSelect={onDetails}>
-	<Info />
-	{m.sidebar_chats_details()}
-</menu.Item>
-{#if onConfigurePreambles}
-	<menu.Item onSelect={onConfigurePreambles}>
-		<ListPlus />
-		{m.sidebar_chats_configure_preambles()}
-	</menu.Item>
-{/if}
-{#if canFork}
-	<menu.Item disabled={!canForkNow} onSelect={() => canForkNow && onFork()}>
-		<GitFork />
-		{m.sidebar_chats_fork()}
-	</menu.Item>
-{/if}
-<menu.Item onSelect={onRename}>
-	<Edit2 />
-	{m.sidebar_tooltips_edit_chat_name()}
-</menu.Item>
-{#if canUpdateProjectPath}
-	<menu.Item
-		disabled={selectedChat.isProcessing}
-		onSelect={() => !selectedChat.isProcessing && onProjectPath()}
-	>
-		<FolderOpen />
-		{m.sidebar_project_path_menu_item()}
-	</menu.Item>
-{/if}
-{#if canReload}
-	<menu.Item
-		disabled={selectedChat.isProcessing}
-		onSelect={() => !selectedChat.isProcessing && onReload()}
-	>
-		<RefreshCw />
-		{m.sidebar_chats_reload()}
-	</menu.Item>
-{/if}
-<menu.Separator />
-<menu.Item variant="destructive" onSelect={onDelete}>
-	<Trash2 />
-	{m.sidebar_tooltips_delete_chat()}
-</menu.Item>

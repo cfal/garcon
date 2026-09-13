@@ -61,7 +61,7 @@ async function openBoard({ page, integration }: ChromiumFixture) {
   });
   await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
   await collapseCanonicalFilesWindow(page);
-  await clickWorkspaceWindowAddAction(page, 'Open canvas');
+  await clickWorkspaceWindowAddAction(page, 'Open Canvas');
   await page.locator('.svelte-flow__node[data-id="c"]').waitFor({ state: 'visible' });
   await settle(page);
 }
@@ -251,7 +251,7 @@ test('turning mobile editing off cancels an armed connection', async () => {
     const { page, integration } = fixture;
     await openBoard(fixture);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('button', { name: 'Canvas', exact: true }).click();
+    await page.locator('[data-canvas-panel]').waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Edit layout', exact: true }).click();
     await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
     await handle(page, 'a').click();

@@ -37,7 +37,7 @@ export function interactWithWorkspaceWindowAddAction({
         (element.getAttribute('aria-label') || element.textContent?.trim()) === expectedLabel,
     );
   const action = inlineAction ?? menuAction;
-  const isChatView = ['Open chat map', 'Open canvas', 'Open Chat Board'].includes(expectedLabel);
+  const isChatView = ['Open Chat Map', 'Open Canvas', 'Open Chat Board'].includes(expectedLabel);
   const chatViewsTrigger = isChatView
     ? addControls?.querySelector<HTMLButtonElement>(
         '[data-workspace-window-add-chat-views-trigger]',

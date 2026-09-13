@@ -4,6 +4,7 @@
 		getChatSessions,
 		getConversationPanels,
 		getGitViewLauncher,
+		getGhCapability,
 		getWorkspaceCoordinator,
 		getModelCatalog,
 		type WorkspaceChatActions,
@@ -66,6 +67,7 @@
 	const conversationPanels = getConversationPanels();
 	const modelCatalog = getModelCatalog();
 	const gitViews = getGitViewLauncher();
+	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
 	const transcriptCache =
 		untrack(() => providedTranscriptCache) ??
@@ -74,6 +76,7 @@
 	let prepareConversationHide: (() => void) | null = $state(null);
 
 	const selectedChat = $derived(sessions.selectedChat);
+	const mobileToolbarChat = $derived(isVisible ? selectedChat : null);
 	const hasUsableChatContext = $derived(Boolean(selectedChat));
 	const chatSurfacePresentation = $derived(
 		resolveChatSurfacePresentation(selectedChat, sessions.isLoadingChats),
@@ -117,41 +120,9 @@
 	}
 </script>
 
-{#snippet currentChatMenu(shadow: boolean)}
-	{#if selectedChat}
-		<CurrentChatMenu
-			{selectedChat}
-			isMobileLayout={isMobile}
-			canReload={canReloadSelectedChat}
-			canUpdateProjectPath={canUpdateSelectedProjectPath}
-			canFork={canForkSelectedChat}
-			canForkNow={canForkSelectedChatNow}
-			{shadow}
-			onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
-			onOpenGitHistory={isMobile
-				? () => void gitViews.openHistory({ presentation: 'mobile' })
-				: undefined}
-			onOpenGitCompare={isMobile
-				? () => void gitViews.openCompare({ presentation: 'mobile' })
-				: undefined}
-			onOpenTickets={isMobile ? () => void workspace.focusMobileSingleton('tickets') : undefined}
-			onRename={() => chatActions.requestRename(selectedChat)}
-			onDetails={() => chatActions.requestDetails(selectedChat)}
-			onReload={() => chatActions.reload(selectedChat)}
-			onShare={() => chatActions.requestShare(selectedChat)}
-			onConfigurePreambles={selectedTranscriptViewId
-				? () => chatActions.configurePreambles(selectedChat, selectedTranscriptViewId)
-				: undefined}
-			onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
-			onFork={() => chatActions.fork(selectedChat)}
-			onDelete={() => chatActions.requestDelete(selectedChat)}
-		/>
-	{/if}
-{/snippet}
-
 <div class="relative flex h-full flex-col" inert={!isInteractive}>
-	{#if isMobile && hasUsableChatContext}
-		{@const toolbarModel = subagentToolbar.model}
+	{#if isMobile}
+		{@const toolbarModel = mobileToolbarChat ? subagentToolbar.model : null}
 		<div
 			data-mobile-chat-toolbar
 			class="pointer-events-none absolute inset-x-3 top-3 z-20 flex min-w-0 items-start justify-between gap-2"
@@ -165,15 +136,45 @@
 				{/if}
 			</div>
 			<div data-mobile-current-chat-menu class="pointer-events-auto shrink-0">
-				{@render currentChatMenu(true)}
+				<CurrentChatMenu
+					selectedChat={mobileToolbarChat}
+					isMobileLayout
+					canReload={canReloadSelectedChat}
+					canUpdateProjectPath={canUpdateSelectedProjectPath}
+					canFork={canForkSelectedChat}
+					canForkNow={canForkSelectedChatNow}
+					shadow
+					onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
+					onOpenGitHistory={() => void gitViews.openHistory({ presentation: 'mobile' })}
+					onOpenGitCompare={() => void gitViews.openCompare({ presentation: 'mobile' })}
+					onOpenTickets={() => void workspace.focusMobileSingleton('tickets')}
+					onOpenChatMap={() => void workspace.focusMobileSingleton('chat-map')}
+					onOpenCanvas={() => void workspace.focusMobileSingleton('chat-canvas')}
+					onOpenPullRequests={ghCapability.available
+						? () => void workspace.focusMobileSingleton('pull-requests')
+						: undefined}
+					onRename={() => selectedChat && chatActions.requestRename(selectedChat)}
+					onDetails={() => selectedChat && chatActions.requestDetails(selectedChat)}
+					onReload={() => selectedChat && chatActions.reload(selectedChat)}
+					onShare={() => selectedChat && chatActions.requestShare(selectedChat)}
+					onConfigurePreambles={selectedTranscriptViewId
+						? () =>
+								selectedChat &&
+								chatActions.configurePreambles(selectedChat, selectedTranscriptViewId)
+						: undefined}
+					onProjectPath={() => selectedChat && chatActions.requestProjectPath(selectedChat)}
+					onFork={() => selectedChat && chatActions.fork(selectedChat)}
+					onDelete={() => selectedChat && chatActions.requestDelete(selectedChat)}
+				/>
 			</div>
 		</div>
 	{/if}
 
 	<div
 		class="relative min-h-0 flex-1 overflow-hidden"
-		inert={!canRenderConversation || !isInteractive}
-		aria-hidden={!canRenderConversation || !isVisible}
+		class:invisible={!conversationWorkspaceVisible}
+		inert={!conversationWorkspaceVisible || !isInteractive}
+		aria-hidden={!conversationWorkspaceVisible}
 		data-conversation-workspace-layer
 	>
 		<ConversationWorkspace

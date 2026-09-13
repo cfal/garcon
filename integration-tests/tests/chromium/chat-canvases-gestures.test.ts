@@ -18,7 +18,7 @@ test('reconciles a grouped drag that does not change the document', async () => 
     });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     const card = page.locator('.svelte-flow__node[data-id="card"]');
     await card.waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
@@ -59,7 +59,7 @@ test('fits a board after it loads while its view is hidden', async () => {
       await route.continue();
     });
     try {
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       await pending;
       await page.getByRole('tab').first().click();
       release();
@@ -79,7 +79,7 @@ test('a refresh already in flight cannot reset an active drag', async () => {
     await integration.client.post('/api/v1/chat-canvases', { id: 'diagram', content });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     const box = page.locator('.svelte-flow__node[data-id="box"]');
     await box.waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
@@ -133,7 +133,7 @@ test('reconciles movement after a graph gesture loses focus', async () => {
     });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     const card = page.locator('.svelte-flow__node[data-id="card"]');
     await card.waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
@@ -164,7 +164,7 @@ test('does not leave an unsaved connection when a handle drop hits the edge limi
     await integration.client.post('/api/v1/chat-canvases', { id: 'diagram', content: { title: 'Limit', nodes, connections } });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     await page.waitForFunction(() => document.querySelectorAll('.svelte-flow__edge').length === 2000);
     await page.locator('.svelte-flow__node[data-id="b"] [data-handleid="right"]').dragTo(page.locator('.svelte-flow__node[data-id="c"] [data-handleid="left"]'));
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -181,7 +181,7 @@ test('cancels a connection gesture on focus loss', async () => {
     await integration.client.post('/api/v1/chat-canvases', { id: 'diagram', content: { title: 'Limit', nodes, connections } });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     await page.locator('.svelte-flow__node[data-id="c"]').waitFor({ state: 'visible' });
     const source = (await page.locator('.svelte-flow__node[data-id="b"] [data-handleid="right"]').boundingBox())!;
     const target = (await page.locator('.svelte-flow__node[data-id="c"] [data-handleid="left"]').boundingBox())!;

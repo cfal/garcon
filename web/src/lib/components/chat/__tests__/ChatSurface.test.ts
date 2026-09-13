@@ -1,12 +1,19 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 import * as m from '$lib/paraglide/messages.js';
 import ChatSurface from '../ChatSurface.svelte';
+import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte';
+import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 
-const { sessions } = vi.hoisted(() => ({
+const { sessions, ghCapability, workspace } = vi.hoisted(() => ({
+	ghCapability: { available: true as boolean } satisfies Pick<GhCapabilityStore, 'available'>,
+	workspace: { focusMobileSingleton: vi.fn(async () => {}) } satisfies Pick<
+		WorkspaceCoordinator,
+		'focusMobileSingleton'
+	>,
 	sessions: {
 		selectedChat: null as ChatSessionRecord | null,
 		isLoadingChats: false,
@@ -20,10 +27,12 @@ vi.mock('$lib/context', () => ({
 	getConversationPanels: () => ({ composerPanel: null }),
 	getModelCatalog: () => ({
 		supportsFork: () => true,
+		supportsForkWhileRunning: () => false,
 		supportsUpdateProjectPath: () => true,
 	}),
 	getOptionalTransientLayers: () => null,
-	getWorkspaceCoordinator: () => ({ focusMobileSingleton: vi.fn() }),
+	getWorkspaceCoordinator: () => workspace,
+	getGhCapability: () => ghCapability,
 	getGitViewLauncher: () => ({
 		openHistory: vi.fn(),
 		openCompare: vi.fn(),
@@ -111,8 +120,74 @@ describe('ChatSurface mobile toolbar', () => {
 	afterEach(() => {
 		cleanup();
 		sessions.selectedChat = null;
+		ghCapability.available = true;
 		vi.clearAllMocks();
 	});
+
+	it('keeps workspace commands available without a selected chat', async () => {
+		const rendered = render(ChatSurface, props(new SubagentToolbarState()));
+		const conversation = rendered.container.querySelector('[data-conversation-workspace-layer]');
+		expect(conversation?.classList.contains('invisible')).toBe(true);
+		expect(conversation?.hasAttribute('inert')).toBe(true);
+		expect(conversation?.getAttribute('aria-hidden')).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		expect(screen.queryByRole('menuitem', { name: m.share_button() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.sidebar_chats_details() })).toBeNull();
+		expect(screen.getByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: m.workspace_open_pull_requests() })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_chat_canvas() }));
+		expect(workspace.focusMobileSingleton).toHaveBeenCalledWith('chat-canvas');
+	});
+
+	it('keeps chat actions out of the empty toolbar while global selection catches up', async () => {
+		sessions.selectedChat = chat();
+		const subagentToolbar = new SubagentToolbarState();
+		const rendered = render(ChatSurface, props(subagentToolbar, true, false));
+		const conversation = screen.getByTestId('conversation-workspace-stub');
+
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		expect(screen.queryByRole('menuitem', { name: m.share_button() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.sidebar_chats_details() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.sidebar_tooltips_delete_chat() })).toBeNull();
+		expect(screen.getByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeTruthy();
+
+		await rendered.rerender(props(subagentToolbar));
+		expect(screen.getByRole('menuitem', { name: m.share_button() })).toBeTruthy();
+		expect(screen.getByTestId('conversation-workspace-stub')).toBe(conversation);
+	});
+
+	it('keeps stale subagent controls out of the empty mobile toolbar', async () => {
+		sessions.selectedChat = chat();
+		const subagentToolbar = new SubagentToolbarState();
+		subagentToolbar.register({ model: subagentModel(), jumpToTool: vi.fn() });
+		const rendered = render(ChatSurface, props(subagentToolbar, true, false));
+
+		expect(screen.queryByRole('button', { name: /Agents/ })).toBeNull();
+		await rendered.rerender(props(subagentToolbar));
+		expect(screen.getByRole('button', { name: /Agents/ })).toBeTruthy();
+	});
+
+	it.each([true, false])(
+		'opens secondary views from the menu with GitHub available=%s',
+		async (available) => {
+			sessions.selectedChat = chat();
+			ghCapability.available = available;
+			render(ChatSurface, props(new SubagentToolbarState()));
+			for (const [kind, label] of [
+				['chat-map', m.workspace_open_chat_map()],
+				['chat-canvas', m.workspace_open_chat_canvas()],
+				['pull-requests', m.workspace_open_pull_requests()],
+			] as const) {
+				await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+				if (kind === 'pull-requests' && !available) {
+					expect(screen.queryByRole('menuitem', { name: label })).toBeNull();
+					continue;
+				}
+				await fireEvent.click(screen.getByRole('menuitem', { name: label }));
+				expect(workspace.focusMobileSingleton).toHaveBeenLastCalledWith(kind);
+			}
+		},
+	);
 
 	it('keeps Agents at the start and current-chat actions at the end', async () => {
 		sessions.selectedChat = chat();
@@ -171,6 +246,11 @@ describe('ChatSurface mobile toolbar', () => {
 		expect(workspace.getAttribute('data-prepare-hide-count')).toBe('0');
 		await rendered.rerender(props(subagentToolbar, true, false));
 		expect(workspace.getAttribute('data-prepare-hide-count')).toBe('1');
+		expect(screen.getByTestId('conversation-workspace-stub')).toBe(workspace);
+		const conversation = rendered.container.querySelector('[data-conversation-workspace-layer]');
+		expect(conversation?.classList.contains('invisible')).toBe(true);
+		expect(conversation?.hasAttribute('inert')).toBe(true);
+		expect(conversation?.getAttribute('aria-hidden')).toBe('true');
 	});
 
 	it('keeps row-owned transient UI visible while a modal makes the chat inert', async () => {

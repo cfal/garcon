@@ -32,7 +32,7 @@ describe("Lightpanda Chat Map", () => {
         relation: "fork",
       });
 
-      await app.selectWorkspaceWindowSurface("Open chat map");
+      await app.selectWorkspaceWindowSurface("Open Chat Map");
       await fixture.page.waitForSelector("[data-chat-map-panel]");
       const initialMap = await fixture.page.evaluate(
         ({ sourceId, childId }) => {
@@ -115,56 +115,39 @@ describe("Lightpanda Chat Map", () => {
       await fixture.page.waitForSelector(
         'nav[aria-label="Workspace navigation"]',
       );
-      await fixture.page.evaluate(() => {
-        const chat = [
-          ...document.querySelectorAll<HTMLButtonElement>(
-            'nav[aria-label="Workspace navigation"] button',
-          ),
-        ].find((button) => button.textContent?.trim() === "Chat");
-        if (!chat) throw new Error("Missing mobile Chat destination.");
-        chat.click();
-      });
-      await fixture.page.waitForFunction(
-        () =>
-          [
-            ...document.querySelectorAll<HTMLButtonElement>(
-              'nav[aria-label="Workspace navigation"] button',
-            ),
-          ].some(
-            (button) =>
-              button.textContent?.trim() === "Chat" &&
-              button.getAttribute("aria-current") === "page",
-          ),
-        { timeout: 20_000 },
+      await app.clickButton("Chat");
+      await app.waitForButton("Settings");
+      await app.clickButton("Settings");
+      await app.waitForMenuItemEnabled("Open Chat Map");
+      await app.clickMenuItem("Open Chat Map");
+      await fixture.page.waitForSelector(
+        '[data-chat-map-panel][data-presentation="mobile"]',
       );
-      await fixture.page.evaluate(() => {
-        const map = [
-          ...document.querySelectorAll<HTMLButtonElement>(
-            'nav[aria-label="Workspace navigation"] button',
-          ),
-        ].find((button) => button.textContent?.trim() === "Map");
-        if (!map) throw new Error("Missing mobile Map destination.");
-        map.click();
-      });
-      await fixture.page.waitForFunction(
-        () => {
-          const currentMap = [
-            ...document.querySelectorAll<HTMLButtonElement>(
-              'nav[aria-label="Workspace navigation"] button',
-            ),
-          ].some(
-            (button) =>
-              button.textContent?.trim() === "Map" &&
-              button.getAttribute("aria-current") === "page",
-          );
-          return (
-            currentMap &&
-            document.querySelector(
-              '[data-chat-map-panel][data-presentation="mobile"]',
-            ) !== null
-          );
-        },
-        { timeout: 20_000 },
+      await app.waitForAriaLabel("Back");
+      await app.waitForAriaLabel("Close view");
+      expect(
+        await fixture.page.$('nav[aria-label="Workspace navigation"]'),
+      ).toBeNull();
+
+      await app.clickButton("Close view");
+      await fixture.page.waitForSelector(
+        'nav[aria-label="Workspace navigation"]',
+      );
+      const mobileTabs = await fixture.page.$$eval(
+        'nav[aria-label="Workspace navigation"] button',
+        (buttons) => buttons.map((button) => button.textContent?.trim()),
+      );
+      expect(mobileTabs).toEqual(["Menu", "Chat", "Git", "Files", "Terminal"]);
+
+      await app.waitForButton("Settings");
+      await app.clickButton("Settings");
+      await app.waitForMenuItemEnabled("Open Chat Map");
+      await app.clickMenuItem("Open Chat Map");
+      await fixture.page.waitForSelector(
+        '[data-chat-map-panel][data-presentation="mobile"]',
+      );
+      await fixture.page.waitForSelector(
+        `[data-chat-map-missing-parent="${source.id}"]`,
       );
 
       fixture.assertNoBrowserErrors();

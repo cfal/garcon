@@ -42,7 +42,7 @@ test('suspends every Canvas modal when Chat activates and retains unfinished inp
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, {
         waitUntil: 'domcontentloaded',
       });
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       const dialog = page.getByRole('dialog');
       for (const action of [
         'Rename canvas',
@@ -137,7 +137,7 @@ test('keeps stale rename, selected-chat, and full-connection drafts reviewable',
       await page.goto(integration.garcon.baseUrl, {
         waitUntil: 'domcontentloaded',
       });
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       const dialog = page.getByRole('dialog');
       markPhase('renaming a box removed remotely');
       await page.locator('.svelte-flow__node[data-id="source"]').click();

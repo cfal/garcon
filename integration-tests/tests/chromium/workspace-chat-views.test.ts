@@ -3,8 +3,8 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const CHAT_VIEWS = [
-  { label: 'Open chat map', kind: 'chat-map' },
-  { label: 'Open canvas', kind: 'chat-canvas' },
+  { label: 'Open Chat Map', kind: 'chat-map' },
+  { label: 'Open Canvas', kind: 'chat-canvas' },
   { label: 'Open Chat Board', kind: 'chat-board' },
 ] as const;
 
@@ -64,7 +64,7 @@ describe('Chromium Chat Views navigation', () => {
         expect(
           (await viewsMenu.getByRole('menuitem').allTextContents()).map((label) => label.trim()),
         ).toEqual(CHAT_VIEWS.map((view) => view.label));
-        await viewsMenu.getByRole('menuitem', { name: 'Open canvas', exact: true }).focus();
+        await viewsMenu.getByRole('menuitem', { name: 'Open Canvas', exact: true }).focus();
         const otherLayout = layout === 'overflow' ? 'inline' : 'overflow';
         await setLayout(otherLayout);
         await page.waitForFunction(

@@ -47,6 +47,15 @@
 	const terminalSession = $derived(
 		surface.type === 'terminal' ? (terminals.sessions[surface.terminalId] ?? null) : null,
 	);
+	const showMobileNavigation = $derived(
+		presentation === 'mobile' &&
+			surface.type === 'singleton' &&
+			(surface.kind === 'commit' ||
+				surface.kind === 'chat-board' ||
+				surface.kind === 'chat-map' ||
+				surface.kind === 'chat-canvas' ||
+				surface.kind === 'pull-requests'),
+	);
 </script>
 
 <div
@@ -81,7 +90,7 @@
 			onClose={() => void workspace.closeSurface(surface.id)}
 			closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
 		/>
-	{:else if presentation === 'mobile' && surface.type === 'singleton' && (surface.kind === 'commit' || surface.kind === 'chat-board')}
+	{:else if showMobileNavigation}
 		<div class="flex h-full min-h-0 flex-col">
 			<div class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
 				<button

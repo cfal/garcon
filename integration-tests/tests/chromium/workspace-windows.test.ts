@@ -871,7 +871,7 @@ describe('Chromium workspace windows', () => {
       await fixture.page.keyboard.press('Escape');
       await renameDialog.waitFor({ state: 'detached' });
 
-      await clickWorkspaceWindowAddAction(fixture.page, 'Open chat map', windowId);
+      await clickWorkspaceWindowAddAction(fixture.page, 'Open Chat Map', windowId);
       await fixture.page.waitForFunction(
         (expectedWindowId) =>
           document.querySelectorAll(

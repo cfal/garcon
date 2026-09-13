@@ -22,7 +22,7 @@ describe('Lightpanda Chat Canvas', () => {
         (entry) => entry.preview.firstMessage === 'canvas-synthetic-chat',
       );
       if (!chat) throw new Error('Synthetic chat was not listed');
-      await app.selectWorkspaceWindowSurface('Open canvas');
+      await app.selectWorkspaceWindowSurface('Open Canvas');
       await fixture.page.waitForSelector('[data-canvas-panel]');
       await app.waitForText('Create canvas');
       await app.clickButton('Create canvas');
@@ -124,7 +124,7 @@ test('keeps unapplied connection labels scoped to the selected connection', asyn
     await app.setViewport(1440, 900);
     await app.open();
     await fixture.waitForSpaWebSocket();
-    await app.selectWorkspaceWindowSurface('Open canvas');
+    await app.selectWorkspaceWindowSurface('Open Canvas');
     await fixture.page.waitForSelector('[data-canvas-flow]');
     await app.clickButton('List');
     await app.clickButton('Research → Implementation');

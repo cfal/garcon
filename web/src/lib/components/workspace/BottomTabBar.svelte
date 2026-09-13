@@ -2,23 +2,15 @@
 	import Menu from '@lucide/svelte/icons/menu';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getMobileWorkspaceTabs, type MobileWorkspaceTabId } from './mobile-workspace-tabs';
+	import { MOBILE_WORKSPACE_TABS, type MobileWorkspaceTabId } from './mobile-workspace-tabs';
 
 	interface BottomTabBarProps {
 		activeItem: MobileWorkspaceTabId;
-		pullRequestsAvailable?: boolean;
 		onTabChange: (tab: MobileWorkspaceTabId) => void;
 		onMenuClick: () => void;
 	}
 
-	let {
-		activeItem,
-		pullRequestsAvailable = false,
-		onTabChange,
-		onMenuClick,
-	}: BottomTabBarProps = $props();
-
-	const tabs = $derived(getMobileWorkspaceTabs({ pullRequestsAvailable }));
+	let { activeItem, onTabChange, onMenuClick }: BottomTabBarProps = $props();
 </script>
 
 <nav
@@ -35,7 +27,7 @@
 			<span class="text-[10px] font-medium">{m.mobile_menu()}</span>
 		</button>
 
-		{#each tabs as tab (tab.id)}
+		{#each MOBILE_WORKSPACE_TABS as tab (tab.id)}
 			<button
 				type="button"
 				class={cn(

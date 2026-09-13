@@ -27,7 +27,7 @@ for (const interruption of ['blur', 'pointercancel', 'hide'] as const) {
           waitUntil: 'domcontentloaded',
         });
         await collapseCanonicalFilesWindow(page);
-        await clickWorkspaceWindowAddAction(page, 'Open canvas');
+        await clickWorkspaceWindowAddAction(page, 'Open Canvas');
         const handle = (id: string) =>
           page.locator(
             `.svelte-flow__node[data-id="${id}"] [data-handleid="right"]`,
@@ -117,7 +117,7 @@ for (const removal of ['delete', 'reload'] as const) {
       }
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       const node = (id: string) => page.locator(`.svelte-flow__node[data-id="${id}"]`);
       const handle = (id: string) => node(id).locator('[data-handleid="right"]');
       await node('a').click();

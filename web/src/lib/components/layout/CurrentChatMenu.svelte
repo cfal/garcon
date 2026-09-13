@@ -15,7 +15,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface CurrentChatMenuProps {
-		selectedChat: ChatSessionRecord;
+		selectedChat: ChatSessionRecord | null;
 		isMobileLayout: boolean;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
@@ -26,6 +26,9 @@
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
 		onOpenTickets?: () => void;
+		onOpenChatMap?: () => void;
+		onOpenCanvas?: () => void;
+		onOpenPullRequests?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -48,6 +51,9 @@
 		onOpenGitHistory,
 		onOpenGitCompare,
 		onOpenTickets,
+		onOpenChatMap,
+		onOpenCanvas,
+		onOpenPullRequests,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -81,6 +87,9 @@
 			{onOpenGitHistory}
 			{onOpenGitCompare}
 			{onOpenTickets}
+			{onOpenChatMap}
+			{onOpenCanvas}
+			{onOpenPullRequests}
 			{onConfigurePreambles}
 			{onRename}
 			{onDetails}
