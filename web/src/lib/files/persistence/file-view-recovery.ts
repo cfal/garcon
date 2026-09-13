@@ -49,6 +49,7 @@ export class FileViewRecovery {
 	readonly #restoredPlacements = new Map<PresentationHostId, PresentationHostId>();
 	readonly #pendingWrites = new Map<string, Set<Promise<void>>>();
 	readonly #closingViewIds = new Set<string>();
+	readonly #restoringViewIds = new Set<string>();
 
 	constructor(private readonly options: FileViewRecoveryOptions) {}
 
@@ -130,9 +131,12 @@ export class FileViewRecovery {
 	}
 
 	persistView(session: FileViewSession, origin?: PresentationHostId): Promise<void> {
-		if (this.#closingViewIds.has(session.id)) return Promise.resolve();
+		if (!this.#canPersistView(session)) return Promise.resolve();
 		const record = this.snapshotView(session, origin);
-		const operation = Promise.resolve().then(() => this.persistViewSnapshot(record));
+		const operation = Promise.resolve().then(() => {
+			if (!this.#canPersistView(session)) return;
+			return this.persistViewSnapshot(record);
+		});
 		let pending = this.#pendingWrites.get(session.id);
 		if (!pending) {
 			pending = new Set();
@@ -190,59 +194,69 @@ export class FileViewRecovery {
 	async #restoreViews(views: readonly SpaFileViewV1[]): Promise<void> {
 		for (const record of [...views].sort((first, second) => first.updatedAt - second.updatedAt)) {
 			if (this.options.isDestroyed()) return;
-			const key = this.options.identityKey(
-				record.canonicalFileRootPath,
-				record.normalizedRelativePath,
-			);
-			const recovered = this.options.findDocument(key);
-			if (recovered) await this.#probeRecoveredDocument(recovered);
-			const originalPlacement = record.placement;
-			const placement = this.#restoredPlacements.get(originalPlacement) ?? originalPlacement;
-			const restoredRecord = placement === originalPlacement ? record : { ...record, placement };
-			const restored = await this.options.openView(
-				restoredRecord,
-				recovered,
-				this.options.resolveRestoredPlacement(placement),
-			);
-			if (!restored) continue;
-			const actualPlacement = this.options.getPlacement(restored.id);
-			if (actualPlacement) this.#restoredPlacements.set(originalPlacement, actualPlacement);
-			restored.pinned = record.pinned;
-			restored.preview = record.preview;
-			restored.textScrollLeft = record.scrollLeft;
-			restored.textScrollTop = record.scrollTop;
-			restored.markdownScrollLeft = record.markdownScrollLeft ?? 0;
-			restored.markdownScrollTop = record.markdownScrollTop ?? 0;
-			restored.image = {
-				mode: record.imageMode ?? 'fit',
-				scale: record.imageScale ?? 1,
-				scrollLeft: record.imageScrollLeft ?? 0,
-				scrollTop: record.imageScrollTop ?? 0,
-			};
-			if (restored.loading) {
-				await new Promise<void>((resolve) => {
-					const check = () => {
-						if (!restored.loading) resolve();
-						else setTimeout(check, 10);
-					};
-					check();
-				});
+			this.#restoringViewIds.add(record.viewId);
+			let restored: FileViewSession | null = null;
+			try {
+				const key = this.options.identityKey(
+					record.canonicalFileRootPath,
+					record.normalizedRelativePath,
+				);
+				const recovered = this.options.findDocument(key);
+				if (recovered) await this.#probeRecoveredDocument(recovered);
+				const originalPlacement = record.placement;
+				const placement = this.#restoredPlacements.get(originalPlacement) ?? originalPlacement;
+				const restoredRecord = placement === originalPlacement ? record : { ...record, placement };
+				restored = await this.options.openView(
+					restoredRecord,
+					recovered,
+					this.options.resolveRestoredPlacement(placement),
+				);
+				if (!restored) continue;
+				this.#restoringViewIds.add(restored.id);
+				const actualPlacement = this.options.getPlacement(restored.id);
+				if (actualPlacement) this.#restoredPlacements.set(originalPlacement, actualPlacement);
+				restored.pinned = record.pinned;
+				restored.preview = record.preview;
+				restored.textScrollLeft = record.scrollLeft;
+				restored.textScrollTop = record.scrollTop;
+				restored.markdownScrollLeft = record.markdownScrollLeft ?? 0;
+				restored.markdownScrollTop = record.markdownScrollTop ?? 0;
+				restored.image = {
+					mode: record.imageMode ?? 'fit',
+					scale: record.imageScale ?? 1,
+					scrollLeft: record.imageScrollLeft ?? 0,
+					scrollTop: record.imageScrollTop ?? 0,
+				};
+				if (restored.loading) {
+					await new Promise<void>((resolve) => {
+						const check = () => {
+							if (!restored?.loading) resolve();
+							else setTimeout(check, 10);
+						};
+						check();
+					});
+				}
+				if (this.options.getSession(restored.id) !== restored) continue;
+				restored.pendingSourcePresentation = {
+					selection: {
+						line: record.line,
+						column: record.column,
+						endLine: record.endLine,
+						endColumn: record.endColumn,
+					},
+					folds: record.folds,
+				};
+				await this.options.ensureEditor(restored);
+				if (this.options.getSession(restored.id) !== restored) continue;
+				restored.requestedLine = null;
+				restored.requestedColumn = null;
+				restored.editor?.restorePendingPresentation();
+				this.#restoringViewIds.delete(restored.id);
+				await this.options.completeViewRestoration(restored).catch(() => undefined);
+			} finally {
+				this.#restoringViewIds.delete(record.viewId);
+				if (restored) this.#restoringViewIds.delete(restored.id);
 			}
-			const sourcePresentation = {
-				selection: {
-					line: record.line,
-					column: record.column,
-					endLine: record.endLine,
-					endColumn: record.endColumn,
-				},
-				folds: record.folds,
-			};
-			restored.pendingSourcePresentation = sourcePresentation;
-			await this.options.ensureEditor(restored);
-			restored.requestedLine = null;
-			restored.requestedColumn = null;
-			restored.editor?.restorePendingPresentation();
-			await this.options.completeViewRestoration(restored).catch(() => undefined);
 		}
 	}
 
@@ -346,5 +360,13 @@ export class FileViewRecovery {
 			await Promise.allSettled([...pending]);
 			pending = this.#pendingWrites.get(viewId);
 		}
+	}
+
+	#canPersistView(session: FileViewSession): boolean {
+		return (
+			this.options.getSession(session.id) === session &&
+			!this.#closingViewIds.has(session.id) &&
+			!this.#restoringViewIds.has(session.id)
+		);
 	}
 }

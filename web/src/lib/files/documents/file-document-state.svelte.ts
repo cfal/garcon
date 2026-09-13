@@ -22,6 +22,12 @@ export interface FileDocumentRuntimePort {
 	replaceFromDisk(content: string): void;
 }
 
+export interface FileDocumentPositionMap {
+	previousPosition(line: number, column: number): number;
+	mapRange(from: number, to: number): { from: number; to: number };
+	nextLocation(position: number): { line: number; column: number };
+}
+
 export class FileDocumentState {
 	readonly id: string;
 	readonly identityKey: string;
@@ -68,7 +74,7 @@ export class FileDocumentState {
 	refreshGeneration = 0;
 	editorRuntime: FileDocumentRuntimePort | null = null;
 	readonly viewIds = new Set<string>();
-	readonly #changeListeners = new Set<() => void>();
+	readonly #changeListeners = new Set<(positionMap?: FileDocumentPositionMap) => void>();
 
 	constructor(identity: CanonicalFileIdentity, identityKey: string, id = createRandomId()) {
 		this.id = id;
@@ -130,13 +136,13 @@ export class FileDocumentState {
 		this.#content = content;
 	}
 
-	onChange(listener: () => void): () => void {
+	onChange(listener: (positionMap?: FileDocumentPositionMap) => void): () => void {
 		this.#changeListeners.add(listener);
 		return () => this.#changeListeners.delete(listener);
 	}
 
-	notifyChanged(): void {
-		for (const listener of this.#changeListeners) listener();
+	notifyChanged(positionMap?: FileDocumentPositionMap): void {
+		for (const listener of this.#changeListeners) listener(positionMap);
 	}
 
 	attachView(viewId: string): void {

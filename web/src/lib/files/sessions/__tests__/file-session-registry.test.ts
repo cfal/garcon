@@ -1925,6 +1925,242 @@ describe('FileSessionRegistry', () => {
 		expect(restored.editor?.folds()).toEqual(view.folds);
 	});
 
+	it('does not persist incomplete presentation while a view is restoring', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'restoring-layout-view',
+			documentId: 'restoring-layout-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'README.md',
+			rendererMode: 'markdown',
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+			scrollLeft: 6,
+			scrollTop: 30,
+			folds: [{ from: 15, to: 26 }],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putView(view);
+		let checkpoint: SpaFileViewV1[] = [];
+		const harness = createHarness({
+			draftRepository: repository,
+			userNamespace: null,
+			onPublish: async (registry) => {
+				for (const session of registry.all) await registry.persistView(session.id);
+				checkpoint = await repository.getViews('test-user', 'test-deployment', 'test-session');
+			},
+		});
+		harness.readText.mockResolvedValue({
+			content: '# Heading\nbody\n\n## Next\nmore',
+			path: '/workspace/README.md',
+			revision: 'v1:markdown',
+		});
+
+		await harness.registry.initializeRecovery('test-user');
+
+		expect(checkpoint[0]).toMatchObject({
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+			scrollLeft: 6,
+			scrollTop: 30,
+			folds: view.folds,
+		});
+	});
+
+	it('does not recreate a closed view after delayed restoration completes', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'delayed-restoration-view',
+			documentId: 'delayed-restoration-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'src/restored.ts',
+			rendererMode: 'code',
+			line: 1,
+			column: 1,
+			endLine: 1,
+			endColumn: 1,
+			scrollLeft: 0,
+			scrollTop: 0,
+			folds: [],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putView(view);
+		const runtime = deferred<FileEditorRuntimeModule>();
+		const harness = createHarness({
+			draftRepository: repository,
+			userNamespace: null,
+			loadEditorRuntime: () => runtime.promise,
+		});
+
+		const recovery = harness.registry.initializeRecovery('test-user');
+		await vi.waitFor(() => expect(harness.registry.get(view.viewId)).not.toBeNull());
+		await harness.registry.destroy(view.viewId);
+		runtime.resolve(testEditorRuntime);
+		await recovery;
+
+		expect(
+			await repository.getViews('test-user', 'test-deployment', 'test-session'),
+		).toEqual([]);
+	});
+
+	it('does not recreate a closed Markdown view after delayed source initialization', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const runtime = deferred<FileEditorRuntimeModule>();
+		const harness = createHarness({
+			draftRepository: repository,
+			loadEditorRuntime: () => runtime.promise,
+		});
+		const opened = await harness.registry.open(request('README.md'));
+		if (!opened) throw new Error('Expected Markdown view');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+
+		const showing = harness.registry.showSource(opened.id);
+		await harness.registry.destroy(opened.id);
+		runtime.resolve(testEditorRuntime);
+		await showing;
+
+		expect(
+			await repository.getViews('test-user', 'test-deployment', 'test-session'),
+		).toEqual([]);
+	});
+
+	it('constructs one editor when restoration and document joining initialize concurrently', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'concurrent-editor-view',
+			documentId: 'concurrent-editor-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'src/restored.ts',
+			rendererMode: 'code',
+			line: 1,
+			column: 1,
+			endLine: 1,
+			endColumn: 1,
+			scrollLeft: 0,
+			scrollTop: 0,
+			folds: [{ from: 0, to: 3 }],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putView(view);
+		await repository.putDraft(
+			storedDraft({
+				documentId: view.documentId,
+				normalizedRelativePath: view.normalizedRelativePath,
+				content: 'abc\ndef',
+				baselineContent: 'abc\ndef',
+			}),
+		);
+		const runtime = deferred<FileEditorRuntimeModule>();
+		const harness = createHarness({
+			draftRepository: repository,
+			userNamespace: null,
+			loadEditorRuntime: () => runtime.promise,
+		});
+		const recovery = harness.registry.initializeRecovery('test-user');
+		await vi.waitFor(() =>
+			expect(harness.registry.get(view.viewId)?.pendingSourcePresentation).not.toBeNull(),
+		);
+		let constructors = 0;
+		runtime.resolve({
+			CodeEditorController: class extends testEditorRuntime.CodeEditorController {
+				constructor(
+					...args: ConstructorParameters<typeof testEditorRuntime.CodeEditorController>
+				) {
+					super(...args);
+					constructors += 1;
+				}
+			},
+		});
+
+		await recovery;
+
+		const restored = harness.registry.get(view.viewId);
+		expect(constructors).toBe(1);
+		expect(restored?.editor?.folds()).toEqual(view.folds);
+	});
+
+	it('maps deferred Markdown source presentation through shared document edits', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const content = '# Heading\nbody\n\n## Next\nmore';
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'mapped-preview-view',
+			documentId: 'mapped-preview-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'README.md',
+			rendererMode: 'markdown',
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+			scrollLeft: 0,
+			scrollTop: 0,
+			folds: [{ from: 15, to: 26 }],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putView(view);
+		const harness = createHarness({ draftRepository: repository, userNamespace: null });
+		harness.readText.mockResolvedValue({
+			content,
+			path: '/workspace/README.md',
+			revision: 'v1:markdown',
+		});
+		await harness.registry.initializeRecovery('test-user');
+		const preview = harness.registry.get(view.viewId);
+		if (!preview) throw new Error('Expected restored preview');
+		const source = await harness.registry.open({
+			...request('README.md'),
+			mode: 'code',
+			openToSide: true,
+		});
+		if (!source) throw new Error('Expected source view');
+		await vi.waitFor(() => expect(source.editor).not.toBeNull());
+		source.editor?.restorePresentation(view, view.folds);
+
+		source.document.applyUserEdit(`inserted\n${content}`);
+		const expected = {
+			selection: source.editor?.selectionLocation(),
+			folds: source.editor?.folds(),
+		};
+		await harness.registry.showSource(preview.id);
+
+		expect({
+			selection: preview.editor?.selectionLocation(),
+			folds: preview.editor?.folds(),
+		}).toEqual(expected);
+	});
+
 	it('persists Markdown and image presentation state with a file view', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const harness = createHarness({ draftRepository: repository });

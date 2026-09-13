@@ -12,6 +12,7 @@ import {
 } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type {
+	FileDocumentPositionMap,
 	FileDocumentRuntimePort,
 	FileDocumentState,
 } from '$lib/files/documents/file-document-state.svelte.js';
@@ -95,7 +96,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			this.#lastOrigin = adapter.id;
 			adapter.applySourceTransactions([transaction]);
 			this.#broadcast(adapter.id, canonicalTransaction, false);
-			this.#documentChanged();
+			this.#documentChanged(createPositionMap(canonicalTransaction));
 		}
 	}
 
@@ -119,7 +120,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = transaction.state;
 		this.#lastOrigin = null;
 		this.#broadcast('', transaction, false);
-		this.#documentChanged();
+		this.#documentChanged(createPositionMap(transaction));
 	}
 
 	synchronizeDocument(content: string): void {
@@ -132,8 +133,8 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			return;
 		}
 		Object.assign(this.document, metadata);
-		this.#replaceDocument(normalized.toString());
-		this.#documentChanged();
+		const positionMap = this.#replaceDocument(normalized.toString());
+		this.#documentChanged(positionMap);
 	}
 
 	acceptBaseline(content: string): void {
@@ -144,15 +145,16 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	replaceFromDisk(content: string): void {
 		Object.assign(this.document, fileTextMetadata(content));
 		this.document.baseline = content;
-		this.#replaceDocument(normalizeDocument(content).toString());
+		const positionMap = this.#replaceDocument(normalizeDocument(content).toString());
 		this.document.dirty = false;
 		this.document.bufferVersion += 1;
 		this.document.setStoredContent(this.content());
-		this.document.notifyChanged();
+		this.document.notifyChanged(positionMap);
 	}
 
-	#replaceDocument(content: string): void {
-		const changes = documentChanges(this.#canonical.doc.toString(), content);
+	#replaceDocument(content: string): FileDocumentPositionMap {
+		const previous = this.#canonical.doc;
+		const changes = documentChanges(previous.toString(), content);
 		this.#canonical = this.#createCanonicalState(content);
 		this.#lastOrigin = null;
 		for (const adapter of this.#views.values()) {
@@ -162,8 +164,9 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 				selection: current.selection.map(changes, 1),
 				annotations: [Transaction.addToHistory.of(false), mirroredDocumentChange.of('disk')],
 				filter: false,
-			});
+				});
 		}
+		return createPositionMap(previous, this.#canonical.doc, changes);
 	}
 
 	#runHistoryCommand(viewId: string, command: StateCommand): boolean {
@@ -181,7 +184,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = transaction.state;
 		this.#lastOrigin = viewId;
 		this.#broadcast(viewId, transaction, true);
-		this.#documentChanged();
+		this.#documentChanged(createPositionMap(transaction));
 		return true;
 	}
 
@@ -203,11 +206,11 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		}
 	}
 
-	#documentChanged(): void {
+	#documentChanged(positionMap: FileDocumentPositionMap): void {
 		this.document.bufferVersion += 1;
 		this.document.dirty = this.content() !== this.document.baseline;
 		this.document.setStoredContent(this.content());
-		this.document.notifyChanged();
+		this.document.notifyChanged(positionMap);
 	}
 
 	#clampSelection(selection: EditorSelection): EditorSelection {
@@ -261,6 +264,39 @@ function documentChanges(previous: string, next: string): ChangeSet {
 		{ from: prefix, to: previousEnd, insert: next.slice(prefix, nextEnd) },
 		previous.length,
 	);
+}
+
+function createPositionMap(transaction: Transaction): FileDocumentPositionMap;
+function createPositionMap(previous: Text, next: Text, changes: ChangeSet): FileDocumentPositionMap;
+function createPositionMap(
+	transactionOrPrevious: Transaction | Text,
+	next?: Text,
+	changes?: ChangeSet,
+): FileDocumentPositionMap {
+	const previous = transactionOrPrevious instanceof Transaction
+		? transactionOrPrevious.startState.doc
+		: transactionOrPrevious;
+	const mappedDocument = transactionOrPrevious instanceof Transaction ? transactionOrPrevious.newDoc : next;
+	const changeSet = transactionOrPrevious instanceof Transaction ? transactionOrPrevious.changes : changes;
+	if (!mappedDocument || !changeSet) throw new Error('Document position mapping requires both documents');
+	return {
+		previousPosition(line, column) {
+			const lineInfo = previous.line(Math.max(1, Math.min(line, previous.lines)));
+			return Math.min(lineInfo.from + Math.max(0, column - 1), lineInfo.to);
+		},
+		mapRange(from, to) {
+			const range = EditorSelection.range(
+				Math.max(0, Math.min(from, previous.length)),
+				Math.max(0, Math.min(to, previous.length)),
+			).map(changeSet);
+			return { from: range.from, to: range.to };
+		},
+		nextLocation(position) {
+			const mappedPosition = Math.max(0, Math.min(position, mappedDocument.length));
+			const lineInfo = mappedDocument.lineAt(mappedPosition);
+			return { line: lineInfo.number, column: mappedPosition - lineInfo.from + 1 };
+		},
+	};
 }
 
 export type FileDocumentViewAdapter = DocumentViewAdapter;

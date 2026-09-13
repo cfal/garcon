@@ -158,7 +158,7 @@ export class FileDocumentIoCoordinator {
 		if (session.rendererMode !== 'code' || session.editor) return;
 		try {
 			const runtime = await this.#loadEditorRuntime();
-			if (this.options.getSession(session.id) !== session) return;
+			if (this.options.getSession(session.id) !== session || session.editor) return;
 			const recovered = session.document.editorInitializationFailed;
 			session.editor = new runtime.CodeEditorController(session, this.options.getEditorSettings());
 			session.document.editorInitializationFailed = false;
