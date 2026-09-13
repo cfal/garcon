@@ -127,9 +127,9 @@ export class NodeWorkerSessionServices {
           this.#suspend();
           const sender = new NodeWorkerOutputDeliverySender(this.options.writer, { session: authority.session, connectionId,
             signal: connection.signal, validate: () => authority.assertConnection(connection) });
-          const token = this.#delivery.beginRecovery(async (record, attempt) => {
+          const token = this.#delivery.beginRecovery(async (record, attempt, progress) => {
             await this.#upstream.flush();
-            await sender.send(record, attempt);
+            await sender.send(record, attempt, progress);
           });
           const suspend = () => { if (this.#attempt?.token === token) this.#suspend(); };
           this.#attempt = { connectionId, connection, token, detach: () => connection.signal.removeEventListener('abort', suspend) };

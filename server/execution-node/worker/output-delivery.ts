@@ -24,7 +24,7 @@ export interface NodeOutputReplayCursor {
 }
 
 /** Releases record staging when the captured stream or attempt aborts; no sender owns replay history. */
-export type NodeOutputRecordSender = (record: NodeOutputDeliveryRecord, attempt: NodeOutputDeliveryAttempt) => Promise<void>;
+export type NodeOutputRecordSender = (record: NodeOutputDeliveryRecord, attempt: NodeOutputDeliveryAttempt, progress: () => void) => Promise<void>;
 
 interface StreamDelivery {
   readonly instanceId: string;
@@ -44,13 +44,14 @@ interface DeliveryAttempt {
   readonly replayed: Map<StreamDelivery, number>;
   live: boolean;
   busy: boolean;
+  lastProgressAt: number;
 }
 
 interface LiveRecord {
   readonly owner: StreamDelivery;
   readonly record: NodeOutputDeliveryRecord;
   readonly bytes: number;
-  readonly expiresAt: number;
+  readonly admittedAt: number;
 }
 
 export interface NodeWorkerOutputDeliveryOptions {
@@ -128,7 +129,7 @@ export class NodeWorkerOutputDelivery {
           throw new NodeWorkerTransportError('NODE_WORKER_CAPACITY');
         }
         pending = { owner, record: Object.freeze({ instanceId: owner.instanceId, stream: owner.stream, sequence, serialized, signal: owner.cancellation.signal }),
-          bytes, expiresAt: this.#lastTime + this.#limits.retentionMs };
+          bytes, admittedAt: this.#lastTime };
         this.#live.add(pending); this.#bytes += bytes;
       }
       this.#cache.append(owner.stream, sequence, serialized);
@@ -156,7 +157,7 @@ export class NodeWorkerOutputDelivery {
     if (this.#generation !== generation || this.#attempt) throw protocol();
     const cancellation = new AbortController();
     const token = Object.freeze({ generation, signal: cancellation.signal });
-    this.#attempt = { token, cancellation, sender, live: false, busy: false, replayed: new Map() };
+    this.#attempt = { token, cancellation, sender, live: false, busy: false, lastProgressAt: this.#lastTime, replayed: new Map() };
     return token;
   }
 
@@ -202,7 +203,7 @@ export class NodeWorkerOutputDelivery {
           if ('type' in read) {
             results.push(read); this.#failStream(owner, new NodeReplayUnavailableError()); complete = false; break;
           }
-          try { await attempt.sender({ instanceId: owner.instanceId, stream: owner.stream, sequence, serialized: read.serialized, signal: owner.cancellation.signal }, token); }
+          try { await attempt.sender({ instanceId: owner.instanceId, stream: owner.stream, sequence, serialized: read.serialized, signal: owner.cancellation.signal }, token, () => {}); }
           catch (error) {
             if (owner.retired) { complete = false; break; }
             this.#disconnect(attempt, error); return null;
@@ -269,7 +270,7 @@ export class NodeWorkerOutputDelivery {
     this.#validate();
     this.#cache.prune();
     for (const record of this.#live) {
-      if (record.expiresAt > this.#lastTime) break;
+      if (this.#deadline(record) > this.#lastTime) break;
       this.#failStream(record.owner, new NodeWorkerTransportError('NODE_WORKER_TIMEOUT'));
     }
     this.#schedule();
@@ -293,12 +294,13 @@ export class NodeWorkerOutputDelivery {
         this.prune();
         const record = this.#live.values().next().value;
         if (!record) break;
-        try { await attempt.sender(record.record, attempt.token); }
+        try { await attempt.sender(record.record, attempt.token, () => this.#progress(attempt, record)); }
         catch (error) {
           if (record.owner.retired) continue;
           this.#disconnect(attempt, error); return;
         }
         if (!this.#current(attempt.token)) return;
+        this.#progress(attempt, record);
         this.#discard(record);
       }
     } catch (error) { this.#fail(error); }
@@ -334,6 +336,18 @@ export class NodeWorkerOutputDelivery {
 
   #discard(record: LiveRecord): void { if (this.#live.delete(record)) this.#bytes -= record.bytes; }
 
+  #progress(attempt: DeliveryAttempt, record: LiveRecord): void {
+    if (!this.#current(attempt.token) || !this.#live.has(record)) return;
+    this.prune();
+    if (!this.#current(attempt.token) || !this.#live.has(record)) return;
+    attempt.lastProgressAt = this.#lastTime;
+    this.#schedule();
+  }
+
+  #deadline(record: LiveRecord): number {
+    return Math.max(record.admittedAt, this.#attempt?.lastProgressAt ?? record.admittedAt) + this.#limits.retentionMs;
+  }
+
   #validate(): void {
     if (this.#closed) throw protocol();
     try {
@@ -351,7 +365,7 @@ export class NodeWorkerOutputDelivery {
     this.#timer = (this.options.scheduleTimeout ?? scheduleTimeout)(() => {
       this.#timer = null;
       try { this.prune(); } catch (error) { this.#fail(error); }
-    }, Math.max(0, first.expiresAt - this.#lastTime));
+    }, Math.max(0, this.#deadline(first) - this.#lastTime));
   }
 }
 

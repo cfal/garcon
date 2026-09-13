@@ -9,6 +9,7 @@ import { NodeSocketReplyOutbox } from '../execution-nodes/transport/reply-outbox
 import type { NodeSocketReplyOutboxOptions } from '../execution-nodes/transport/reply-outbox.js';
 import type { NodeSocketWriter } from '../execution-nodes/transport/socket-writer.js';
 import type { NodeOutputRetirements } from './output-retirements.js';
+import { NodeSessionOutputRelay } from './output-relay.js';
 import type { NodeHostedConnection, NodeSessionCoordinator } from './session-coordinator.js';
 import { NodeAuthorityError, type NodeRecoveryAttempt } from './supervisor.js';
 import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from './worker/application-protocol.js';
@@ -34,7 +35,6 @@ export interface NodeSessionBridgeOptions {
   readonly bulk: Pick<NodeBulkSessionChannel, 'send' | 'close'>;
   readonly scheduleOutputTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   readonly replyLimits?: Pick<NodeSocketReplyOutboxOptions, 'maxEntries' | 'maxBytes' | 'maxAgeMs' | 'scheduleTimeout'>;
-  /** Uses the same monotonic origin as NodeWorkerPeer's performance.now() timestamps. */
   readonly now?: () => number;
   validate(): void;
   disconnected(error: unknown): void;
@@ -46,8 +46,6 @@ interface BridgeRecovery {
   readonly cancellation: AbortController;
 }
 
-export const NODE_SESSION_OUTPUT_ADMISSION_MS = 2000;
-
 /** Relays one authenticated physical session while worker authority and retirement metadata survive disconnects. */
 export class NodeSessionBridge {
   readonly #closing = new AbortController();
@@ -55,6 +53,7 @@ export class NodeSessionBridge {
   readonly #execution = new Map<string, NodeExecutionServer>();
   readonly #executionBudget = new NodeExecutionRequestBudget();
   readonly #replies: NodeSocketReplyOutbox;
+  readonly #output: NodeSessionOutputRelay;
   #service: NodeWorkerServiceServer | null = null;
   #recovery: BridgeRecovery | null = null;
   #lastGeneration = 0;
@@ -64,6 +63,8 @@ export class NodeSessionBridge {
     this.options = Object.freeze({ ...options, instanceIds: new Set(options.instanceIds) });
     this.#replies = new NodeSocketReplyOutbox(writer, { ...options.replyLimits, signal: this.#closing.signal, now: options.now,
       validate: () => this.#validate(), failed: (error) => this.#close(error) });
+    this.#output = new NodeSessionOutputRelay(writer, { signal: this.#closing.signal, now: options.now,
+      scheduleTimeout: options.scheduleOutputTimeout, validate: () => this.#validate(), failed: (error) => this.#close(error) });
     const close = () => this.close();
     this.#detach = () => options.signal.removeEventListener('abort', close);
     options.signal.addEventListener('abort', close, { once: true });
@@ -101,7 +102,7 @@ export class NodeSessionBridge {
   }
 
   /** The logical owner keeps this receiver attached to the worker even while its physical socket is closed. */
-  async receiveWorker(frame: NodeWorkerApplicationFrame, text: string, readAt: number): Promise<void> {
+  receiveWorker(frame: NodeWorkerApplicationFrame, text: string): void {
     try {
       if (frame.type === 'node-worker-output-retired') this.options.retirements.record(frame);
       if (this.#closing.signal.aborted) return;
@@ -123,25 +124,7 @@ export class NodeSessionBridge {
         const attempt = this.options.coordinator.beginRecovery(this.options.connection);
         if (recovery) recovery.attempt = attempt;
       } else if (frame.type !== 'node-worker-output-retired' && frame.type !== 'node-worker-output-delivery') throw protocol();
-      // A buffered native read may contain many frames; they share one admission deadline.
-      const validateDelivery = () => {
-        this.#validate();
-        const elapsed = (this.options.now ?? (() => performance.now()))() - readAt;
-        if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= NODE_SESSION_OUTPUT_ADMISSION_MS) {
-          throw new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
-        }
-        return NODE_SESSION_OUTPUT_ADMISSION_MS - elapsed;
-      };
-      const remaining = validateDelivery();
-      if (frame.type === 'node-worker-output-delivery' ? this.writer.sendData(text) : this.writer.sendApplication(text)) return;
-      const timeout = new AbortController();
-      const timer = (this.options.scheduleOutputTimeout ?? scheduleTimeout)(
-        () => timeout.abort(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT')), remaining);
-      try {
-        const lifetime = AbortSignal.any([this.#closing.signal, timeout.signal]);
-        if (frame.type === 'node-worker-output-delivery') await this.writer.sendWhenWritable(text, lifetime, validateDelivery);
-        else await this.writer.sendApplicationWhenWritable(text, lifetime, validateDelivery);
-      } finally { timer.cancel(); }
+      this.#output.enqueue(text, frame.type === 'node-worker-output-delivery' ? 'data' : 'application');
     } catch (error) { this.#close(error); }
   }
 
@@ -249,7 +232,3 @@ export class NodeSessionBridge {
 
 function protocol(): NodeWorkerTransportError { return new NodeWorkerTransportError('NODE_WORKER_PROTOCOL'); }
 function unavailable(): NodeWorkerServiceResult { return { kind: 'rejected', code: 'NODE_UNAVAILABLE' }; }
-function scheduleTimeout(callback: () => void, delayMs: number): { cancel(): void } {
-  const timer = setTimeout(callback, delayMs); timer.unref();
-  return { cancel: () => clearTimeout(timer) };
-}

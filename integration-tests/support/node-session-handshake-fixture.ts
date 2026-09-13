@@ -110,14 +110,14 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       const child = processes.get(host.process);
       if (!child) throw new Error('Synthetic worker missing');
       return new NodeWorkerPeer(child, options);
-    }, async received(frame, text, readAt) {
+    }, received(frame, text) {
       if (!output) throw new Error('Synthetic worker has no logical output owner');
       if (outputPressure && frame.type === 'node-worker-output-delivery'
         && parseNodeWorkerOutputText(frame.payload)!.descriptor.byteLength >= outputPressure.minimumRecordBytes) {
         outputPressure.active = true;
         outputPressure.blocked.resolve();
       }
-      if (output.bridge) await output.bridge.receiveWorker(frame, text, readAt);
+      if (output.bridge) output.bridge.receiveWorker(frame, text);
       else if (frame.type === 'node-worker-output-retired') output.retirements.record(frame);
       for (const listener of workerFrames) listener(frame);
     },

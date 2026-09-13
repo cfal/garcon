@@ -1,4 +1,4 @@
-import { expect, mock, spyOn, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 import { NodeWorkerPeer, type NodeWorkerProcessPort } from '../peer.js';
 import { encodeNodeWorkerFrame } from '../framing.js';
 import { MAX_NODE_WORKER_LIFECYCLE_BYTES, parseNodeWorkerParentText, serializeNodeWorkerChild, type NodeWorkerChildMessage } from '../protocol.js';
@@ -17,7 +17,7 @@ function fixture() {
   let blocked: Promise<void> | null = null;
   let valid = true;
   const failed = mock(() => {});
-  const received = mock((_frame: NodeWorkerApplicationFrame, _text: string, _readAt: number): void | Promise<void> => {});
+  const received = mock((_frame: NodeWorkerApplicationFrame, _text: string): void => {});
   const end = mock(() => 0);
   const processPort = {
     stdout: new ReadableStream<Uint8Array>({ start(controller) { readable = controller; } }), exited: exited.promise,
@@ -69,7 +69,7 @@ test('service replies use the captured physical client while retirement remains 
     const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId: 'synthetic-stream' } } as const;
     await f.peer.forward(frame, signal).drained;
     f.application(JSON.stringify(frame)); await tick();
-    expect(f.received).toHaveBeenCalledWith(frame, JSON.stringify(frame), expect.any(Number));
+    expect(f.received).toHaveBeenCalledWith(frame, JSON.stringify(frame));
     expect(f.sent.map(parseNodeWorkerApplicationText).filter(Boolean).map((frame) => frame?.type))
       .toEqual(['node-worker-service-request', 'node-worker-output-retired']);
     expect(f.failed).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ test('session suspension reaches the coordinator only on its captured physical c
     const frame = { type: 'node-worker-output-suspended', version: 1, session, connectionId: 1, generation: 3 } as const;
     const text = serializeNodeWorkerOutputSuspension(frame);
     f.application(text); await tick();
-    expect(f.received).toHaveBeenCalledWith(frame, text, expect.any(Number));
+    expect(f.received).toHaveBeenCalledWith(frame, text);
     await f.peer.attach(2);
     f.application(text); await tick();
     expect(f.received).toHaveBeenCalledTimes(1);
@@ -91,26 +91,22 @@ test('session suspension reaches the coordinator only on its captured physical c
   } finally { f.close(); }
 });
 
-test('application backpressure holds the pipe read boundary and preserves following frame order', async () => {
-  let elapsed = 0;
-  const clock = spyOn(performance, 'now').mockImplementation(() => elapsed);
-  const f = fixture(); const drained = Promise.withResolvers<void>();
+test('synchronous output admission leaves following service replies readable', async () => {
+  const f = fixture();
+  const pendingOutput: string[] = [];
   try {
     await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
-    f.received.mockImplementationOnce(() => drained.promise);
-    elapsed = 5;
+    f.received.mockImplementation((_frame, text) => { pendingOutput.push(text); });
+    const request = f.peer.service(1).call({ method: 'begin-output-recovery' }, new AbortController().signal);
     const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId: 'synthetic-first' } } as const;
-    f.batch([JSON.stringify(frame), JSON.stringify({ ...frame, stream: { ...session, streamId: 'synthetic-second' } })]);
-    await tick(); expect(f.received).toHaveBeenCalledTimes(1);
-    drained.resolve(); await tick(); expect(f.received).toHaveBeenCalledTimes(2);
-    expect(f.received.mock.calls[0]![2]).toBe(f.received.mock.calls[1]![2]);
-    expect(f.received.mock.calls[0]![2]).toBe(5);
-    elapsed = 10;
-    f.application(JSON.stringify({ ...frame, stream: { ...session, streamId: 'synthetic-third' } }));
-    await tick();
-    expect(f.received.mock.calls[2]![2]).toBe(10);
+    const output = JSON.stringify(frame);
+    f.batch([output, serializeNodeWorkerService({ type: 'node-worker-service-result', version: 1, session, connectionId: 1,
+      requestId: 1, result: { kind: 'output-recovery', generation: 1 } })]);
+    expect(await request).toEqual({ kind: 'output-recovery', generation: 1 });
+    expect(pendingOutput).toEqual([output]);
+    expect(f.received).toHaveBeenCalledWith(frame, output);
     expect(f.failed).not.toHaveBeenCalled();
-  } finally { drained.resolve(); f.close(); clock.mockRestore(); }
+  } finally { f.close(); }
 });
 
 test('relay completion cannot overtake chunks still queued on the next worker hop', async () => {

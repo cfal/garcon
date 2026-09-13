@@ -220,6 +220,30 @@ describe.skipIf(!nodeSessionSystemdAvailable)('contained worker output over auth
     } finally { pressure?.release(); lifetime.abort(); await f.dispose(); provider.close(); }
   });
 
+  test('held output admission leaves both worker hops readable for service replies', async () => {
+    const provider = model(async () => 'synthetic relay output '.repeat(12_000));
+    const f = await createNodeSessionOutputFixture(certificate);
+    let pressure: ReturnType<typeof f.host.holdOutputAdmission> | undefined;
+    try {
+      await f.recover();
+      const output = await f.install('synthetic-held-relay', { signal: f.signal, emit() {} });
+      pressure = f.host.holdOutputAdmission(64 * 1024);
+      const starting = f.start(output, '1789000000000097', 'synthetic-relay-run', provider.configuration, 'synthetic input');
+      void starting.catch(() => {});
+      await withTimeout(pressure.blocked, 5000, () => 'Synthetic output did not reach socket admission');
+      const status = f.controller.client.service.call({ method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' }, f.signal);
+      expect(await withTimeout(status, 1000, () => 'Service reply was blocked behind output admission'))
+        .toMatchObject({ kind: 'provider-auth-status' });
+      expect(output.events.some((event) => event.type === 'rows')).toBe(false);
+      expect(f.controller.signal.aborted).toBe(false);
+      pressure.release(); pressure = undefined;
+      expect((await starting).result).toEqual({ kind: 'dispatched' });
+      await f.waitFor(output, (event) => event.type === 'run-ended');
+      expect(f.failures).toEqual([]);
+      expect(provider.requests).toHaveLength(1);
+    } finally { pressure?.release(); await f.dispose(); provider.close(); }
+  });
+
   test('sustained output ACKs and status RPCs do not allocate whole-socket drain waiters', async () => {
     const provider = model(async () => 'synthetic output');
     const f = await createNodeSessionOutputFixture(certificate);

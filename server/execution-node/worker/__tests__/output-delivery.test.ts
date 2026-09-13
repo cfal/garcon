@@ -21,10 +21,10 @@ function fixture(settings: Pick<Partial<NodeWorkerOutputDeliveryOptions>, 'repla
     now: () => now, validate() {}, disconnected, failed, ...settings,
     scheduleTimeout(callback) { const timer = { callback, cancelled: false }; timers.push(timer); return { cancel() { timer.cancelled = true; } }; },
   });
-  const written: { record: NodeOutputDeliveryRecord; attempt: NodeOutputDeliveryAttempt; finished: PromiseWithResolvers<void> }[] = [];
-  const sender = (record: NodeOutputDeliveryRecord, attempt: NodeOutputDeliveryAttempt) => {
+  const written: { record: NodeOutputDeliveryRecord; attempt: NodeOutputDeliveryAttempt; progress(): void; finished: PromiseWithResolvers<void> }[] = [];
+  const sender = (record: NodeOutputDeliveryRecord, attempt: NodeOutputDeliveryAttempt, progress: () => void) => {
     const finished = Promise.withResolvers<void>();
-    written.push({ record, attempt, finished });
+    written.push({ record, attempt, progress, finished });
     const signal = AbortSignal.any([record.signal, attempt.signal]);
     const abort = () => finished.reject(signal.reason);
     signal.addEventListener('abort', abort, { once: true });
@@ -62,6 +62,68 @@ test('physical suspension drops the aggregate live FIFO while preserving the ses
     expect(f.delivery.retainedBytes).toBe(retained);
     await tick(); expect(f.written).toHaveLength(1);
     expect(owner.failure).not.toHaveBeenCalled(); expect(f.disconnected).not.toHaveBeenCalled();
+  } finally { f.delivery.close(); }
+});
+
+test('live progress extends queued delivery without extending replay retention', async () => {
+  const f = fixture({ limits: { retentionMs: 100 } });
+  const owner = f.install();
+  const sibling = f.install(siblingStream);
+  try {
+    await f.live([stream, siblingStream]);
+    owner.emit(1); sibling.emit(1);
+    await tick();
+    for (let index = 0; index < 3; index++) {
+      f.advance(60);
+      f.written[0]!.progress();
+      f.delivery.prune();
+      expect(owner.failure).not.toHaveBeenCalled();
+      expect(sibling.failure).not.toHaveBeenCalled();
+      expect(f.delivery.bufferedRecords).toBe(2);
+    }
+    expect(f.delivery.retainedBytes).toBe(0);
+    await f.drain(0);
+    expect(f.written[1]!.record.stream).toEqual(siblingStream);
+    f.advance(60);
+    await f.drain(1);
+    expect(f.delivery.bufferedBytes).toBe(0);
+    expect(f.disconnected).not.toHaveBeenCalled();
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.delivery.close(); }
+});
+
+test('a late progress callback cannot revive expired delivery', async () => {
+  const f = fixture({ limits: { retentionMs: 100 } });
+  const owner = f.install();
+  try {
+    await f.live();
+    owner.emit(1); await tick();
+    f.advance(100);
+    f.written[0]!.progress();
+    await tick();
+    expect(owner.failure).toHaveBeenCalledWith(expect.objectContaining({ code: 'NODE_WORKER_TIMEOUT' }));
+    expect(f.delivery.bufferedRecords).toBe(0);
+  } finally { f.delivery.close(); }
+});
+
+test('progress from a suspended attempt cannot extend its replacement delivery', async () => {
+  const f = fixture({ limits: { retentionMs: 100 } });
+  const owner = f.install();
+  try {
+    const original = await f.live();
+    owner.emit(1); await tick();
+    f.advance(50);
+    f.delivery.suspend(original);
+    const replacement = f.delivery.beginRecovery(f.sender);
+    await f.delivery.replay(replacement, [{ stream, afterSequence: 1 }]);
+    expect(f.delivery.resumeLive(replacement)).toBe(true);
+    owner.emit(2); await tick();
+    f.advance(60);
+    f.written[0]!.progress();
+    f.advance(40); f.delivery.prune();
+    await tick();
+    expect(owner.failure).toHaveBeenCalledWith(expect.objectContaining({ code: 'NODE_WORKER_TIMEOUT' }));
+    expect(f.delivery.bufferedRecords).toBe(0);
   } finally { f.delivery.close(); }
 });
 

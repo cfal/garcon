@@ -23,7 +23,7 @@ interface OutputRecord {
   readonly owner: OutputOwner;
   readonly sequence: number;
   readonly bytes: Buffer;
-  readonly expiresAt: number;
+  readonly admittedAt: number;
 }
 
 export interface NodeWorkerOutputPortOptions {
@@ -51,6 +51,7 @@ export class NodeWorkerOutputPort {
   #closed = false;
   #bytes = 0;
   #lastTime = 0;
+  #lastProgressAt = 0;
 
   constructor(private readonly writer: Pick<NodeWorkerWriter, 'submit'>, private readonly options: NodeWorkerOutputPortOptions) {
     const session = parseNodeSessionIdentity(options.session);
@@ -103,7 +104,7 @@ export class NodeWorkerOutputPort {
   prune(): void {
     const now = this.#validate();
     for (const record of [...this.#queue]) {
-      if (record.expiresAt > now) break;
+      if (this.#deadline(record) > now) break;
       if (!record.owner.cancellation.signal.aborted) this.#failOwner(record.owner, new NodeWorkerTransportError('NODE_WORKER_TIMEOUT'));
     }
     this.#schedule();
@@ -129,7 +130,7 @@ export class NodeWorkerOutputPort {
     if (this.#queue.length >= this.#limits.maxRecords || size > this.#limits.maxBytes - this.#bytes) {
       throw new NodeWorkerTransportError('NODE_WORKER_CAPACITY');
     }
-    const record = { owner, sequence, bytes: Buffer.from(serialized), expiresAt: this.#lastTime + this.#limits.retentionMs };
+    const record = { owner, sequence, bytes: Buffer.from(serialized), admittedAt: this.#lastTime };
     this.#queue.push(record); this.#bytes += size;
     this.#schedule();
     this.#wake();
@@ -151,6 +152,10 @@ export class NodeWorkerOutputPort {
             if (this.#closed) break;
             await this.writer.submit(text, 'data', { signal: record.owner.cancellation.signal,
               validate: () => { this.prune(); this.#validateOwner(record.owner); } }, 'data').drained;
+            this.prune();
+            this.#validateOwner(record.owner);
+            this.#lastProgressAt = this.#lastTime;
+            this.#schedule();
           }
         } catch (error) {
           if (!record.owner.cancellation.signal.aborted && !this.#closed) {
@@ -233,6 +238,10 @@ export class NodeWorkerOutputPort {
 
   #validateOwner(owner: OutputOwner): void { owner.cancellation.signal.throwIfAborted(); }
 
+  #deadline(record: OutputRecord): number {
+    return Math.max(record.admittedAt, this.#lastProgressAt) + this.#limits.retentionMs;
+  }
+
   #schedule(): void {
     this.#timer?.cancel(); this.#timer = null;
     const first = this.#queue.find((record) => !record.owner.cancellation.signal.aborted);
@@ -240,7 +249,7 @@ export class NodeWorkerOutputPort {
     this.#timer = (this.options.scheduleTimeout ?? scheduleTimeout)(() => {
       this.#timer = null;
       try { this.prune(); } catch (error) { this.#failPipe(error); }
-    }, Math.max(0, first.expiresAt - this.#lastTime));
+    }, Math.max(0, this.#deadline(first) - this.#lastTime));
   }
 }
 

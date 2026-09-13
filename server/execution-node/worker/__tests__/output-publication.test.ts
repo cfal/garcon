@@ -78,7 +78,7 @@ test('instance output crosses session replay and physical assembly into real V5 
   const output = port.install(stream, lifetime.signal, permissions, failed);
   const begin = (connectionId: number, afterSequence: number) => {
     const sender = new NodeWorkerOutputDeliverySender(sessionWriter, { session, connectionId, signal: lifetime.signal, validate() {} });
-    current = delivery.beginRecovery((record, attempt) => sender.send(record, attempt));
+    current = delivery.beginRecovery((record, attempt, progress) => sender.send(record, attempt, progress));
     const receiving = receiver.begin(connectionId, current.generation, [{ stream, afterSequence }], lifetime.signal);
     return { sending: current, receiving };
   };

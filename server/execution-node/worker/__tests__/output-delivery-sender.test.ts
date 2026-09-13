@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION, serializeNodeOutputFrame } from '@garcon/server-agent-interface';
 import { chunkNodeWorkerOutput, parseNodeWorkerOutputText } from '../output-protocol.js';
 import { MAX_NODE_WORKER_DELIVERY_CHUNK_BYTES, parseNodeWorkerOutputDeliveryText, serializeNodeWorkerOutputDelivery } from '../output-delivery-protocol.js';
@@ -22,9 +22,10 @@ function fixture() {
     ...NODE_WORKER_WRITER_LIMITS, signal: new AbortController().signal, failed() {}, scheduleTimeout: () => ({ cancel() {} }),
   });
   const sender = new NodeWorkerOutputDeliverySender(writer, { session, connectionId: 2, signal: lifetime.signal, validate() {} });
+  const progress = mock(() => {});
   const record = { instanceId: 'synthetic-instance', stream, sequence: 1, serialized, signal: streamLife.signal };
   const tokens = attempts.map((value, index) => ({ generation: index + 1, signal: value.signal }));
-  return { lifetime, streamLife, attempts, written, writer, sender, record, tokens };
+  return { lifetime, streamLife, attempts, written, writer, sender, record, tokens, progress };
 }
 
 test('delivery envelopes require exact session, physical connection and recovery-attempt fields', () => {
@@ -42,11 +43,13 @@ test('delivery envelopes require exact session, physical connection and recovery
 test('session output chunks retain exact bytes and one physical attempt while yielding to lifecycle writes', async () => {
   const f = fixture();
   try {
-    const sent = f.sender.send(f.record, f.tokens[0]!); await tick();
+    const sent = f.sender.send(f.record, f.tokens[0]!, f.progress); await tick();
     expect(f.written).toHaveLength(1);
+    expect(f.progress).not.toHaveBeenCalled();
     const pulse = f.writer.send('synthetic pulse', 'control', 'lifecycle');
     f.written[0]!.finished.resolve(); await tick();
     expect(f.written[1]!.text).toBe('synthetic pulse');
+    expect(f.progress).toHaveBeenCalledTimes(1);
     f.written[1]!.finished.resolve(); await pulse; await tick();
     expect(f.written).toHaveLength(3);
     f.written[2]!.finished.resolve(); await sent;
@@ -55,13 +58,14 @@ test('session output chunks retain exact bytes and one physical attempt while yi
     const bytes = Buffer.concat(envelopes.map((frame) => Buffer.from(parseNodeWorkerOutputText(frame.payload)!.chunk.data, 'base64')));
     expect(bytes.toString()).toBe(serialized);
     expect(f.writer.bufferedBytes).toBe(0);
+    expect(f.progress).toHaveBeenCalledTimes(2);
   } finally { f.writer.close(); }
 });
 
 test.each(['stream', 'attempt', 'connection'] as const)('%s cancellation stops the old record after its current native chunk', async (cause) => {
   const f = fixture();
   try {
-    const sent = f.sender.send(f.record, f.tokens[0]!); const result = sent.catch((error: unknown) => error); await tick();
+    const sent = f.sender.send(f.record, f.tokens[0]!, f.progress); const result = sent.catch((error: unknown) => error); await tick();
     if (cause === 'stream') f.streamLife.abort();
     else if (cause === 'attempt') f.attempts[0]!.abort(); else f.lifetime.abort();
     expect(await result).toBeInstanceOf(Error);
@@ -69,15 +73,16 @@ test.each(['stream', 'attempt', 'connection'] as const)('%s cancellation stops t
     expect(held).toBeGreaterThan(0); expect(f.written).toHaveLength(1);
     f.written[0]!.finished.resolve(); await tick();
     expect(f.written).toHaveLength(1); expect(f.writer.bufferedBytes).toBe(0);
+    expect(f.progress).not.toHaveBeenCalled();
   } finally { f.writer.close(); }
 });
 
 test('a synchronously superseded recovery attempt writes no chunks before the new attempt', async () => {
   const f = fixture();
   try {
-    const old = f.sender.send(f.record, f.tokens[0]!).catch((error: unknown) => error);
+    const old = f.sender.send(f.record, f.tokens[0]!, f.progress).catch((error: unknown) => error);
     f.attempts[0]!.abort();
-    const current = f.sender.send(f.record, f.tokens[1]!); await tick();
+    const current = f.sender.send(f.record, f.tokens[1]!, f.progress); await tick();
     expect(await old).toBeInstanceOf(Error);
     expect(f.written).toHaveLength(1);
     expect(parseNodeWorkerOutputDeliveryText(f.written[0]!.text)!.generation).toBe(f.tokens[1]!.generation);

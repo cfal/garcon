@@ -34,8 +34,8 @@ export interface NodeWorkerPeerOptions {
   /** Checks the parent authority before every local pulse; a pulse cannot extend a controller lease. */
   validate(): void;
   failed(error: NodeWorkerTransportError): void;
-  /** All frames decoded from one native read share its monotonic timestamp. */
-  received?(frame: NodeWorkerApplicationFrame, text: string, readAt: number): void | Promise<void>;
+  /** Admits output synchronously into its owner's bounded storage. */
+  received?(frame: NodeWorkerApplicationFrame, text: string): void;
 }
 
 /** Owns one captured pipe pair; replacement workers never inherit its pending initialization. */
@@ -175,9 +175,7 @@ export class NodeWorkerPeer {
 
   async #read(): Promise<void> {
     try {
-      let readAt = performance.now();
-      for await (const text of readNodeWorkerFrames(this.process.stdout, MAX_NODE_WORKER_LIFECYCLE_BYTES, this.#closing.signal,
-        () => { readAt = performance.now(); })) {
+      for await (const text of readNodeWorkerFrames(this.process.stdout, MAX_NODE_WORKER_LIFECYCLE_BYTES, this.#closing.signal)) {
         this.#validate();
         const message = parseNodeWorkerChildText(text);
         if (!message) {
@@ -199,8 +197,7 @@ export class NodeWorkerPeer {
             || frame.type === 'node-worker-output-suspended' && this.options.role === 'session'
             || frame.type === (this.options.role === 'instance' ? 'node-worker-output' : 'node-worker-output-delivery')) {
             if (!this.options.received) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
-            const received = this.options.received(frame, text, readAt);
-            if (received) await received;
+            this.options.received(frame, text);
           } else throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
           continue;
         }

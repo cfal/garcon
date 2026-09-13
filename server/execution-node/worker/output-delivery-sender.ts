@@ -23,7 +23,7 @@ export class NodeWorkerOutputDeliverySender {
     this.options = Object.freeze({ ...options });
   }
 
-  async send(record: NodeOutputDeliveryRecord, attempt: NodeOutputDeliveryAttempt): Promise<void> {
+  async send(record: NodeOutputDeliveryRecord, attempt: NodeOutputDeliveryAttempt, progress: () => void): Promise<void> {
     // Superseded synchronous recovery attempts allocate no record copy.
     await Promise.resolve();
     const completed = new AbortController();
@@ -41,6 +41,8 @@ export class NodeWorkerOutputDeliverySender {
         const text = serializeNodeWorkerOutputDelivery({ type: 'node-worker-output-delivery', version: NODE_WIRE_VERSION,
           session: this.#session, connectionId: this.options.connectionId, generation: attempt.generation, payload });
         await this.writer.submit(text, 'data', { signal, validate }, 'data').drained;
+        validate();
+        progress();
       }
     } finally { bytes?.fill(0); completed.abort(); }
   }

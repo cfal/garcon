@@ -4,7 +4,8 @@ import { NodeSocketWriter, type NodeSocketPort } from '../../execution-nodes/tra
 import { NodeSessionClient } from '../../execution-nodes/session-client.js';
 import { NodeOutputRetirements } from '../output-retirements.js';
 import { NodeOutputRetirementRelay } from '../output-retirement-relay.js';
-import { NodeSessionBridge, NODE_SESSION_OUTPUT_ADMISSION_MS, type NodeSessionBridgeOptions } from '../session-bridge.js';
+import { NodeSessionBridge, type NodeSessionBridgeOptions } from '../session-bridge.js';
+import { NODE_SESSION_OUTPUT_ADMISSION_MS } from '../output-relay.js';
 import type { NodeHostedConnection } from '../session-coordinator.js';
 import { NodeSupervisor } from '../supervisor.js';
 import type { NodeWorkerApplicationFrame } from '../worker/application-protocol.js';
@@ -122,7 +123,7 @@ test('only completed output recovery opens parent admission for worker RPC and p
 test('retirements produced while disconnected precede the replacement recovery reply', async () => {
   const f = fixture(); const first = f.connect();
   await first.recover(); first.close();
-  first.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()), 0);
+  first.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()));
   expect(first.connection.lease.authoritySignal.aborted).toBe(false);
   const second = f.connect();
   const begun = await second.call({ method: 'begin-output-recovery' });
@@ -151,7 +152,7 @@ test('replacement recovery cancels a parked retirement barrier without closing t
 
 test('retirement retention failure is confined to its physical bridge', async () => {
   const f = fixture(); const link = f.connect(); f.retirements.close();
-  await link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()), 0);
+  await link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()));
   expect(link.physical.signal.aborted).toBe(true);
   expect(link.connection.lease.authoritySignal.aborted).toBe(false);
 });
@@ -159,7 +160,7 @@ test('retirement retention failure is confined to its physical bridge', async ()
 test('worker frames wait for socket admission without repeating an admitted frame', async () => {
   const f = fixture(); const link = f.connect(); await link.recover();
   link.nodeBuffer(limits.maxBufferedBytes);
-  const delivered = link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()), 0);
+  const delivered = link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()));
   await tick();
   expect(link.received).toEqual([]); expect(link.physical.signal.aborted).toBe(false);
   link.nodeBuffer(0); await delivered; await tick();
@@ -174,7 +175,7 @@ test('output admission expires before native pipe failure and keeps logical reti
   });
   await link.recover();
   link.nodeBuffer(limits.maxBufferedBytes);
-  const delivered = link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()), 0);
+  const delivered = link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()));
   expect(timers[0]!.delayMs).toBe(NODE_SESSION_OUTPUT_ADMISSION_MS);
   expect(timers[0]!.delayMs).toBeLessThan(NODE_WORKER_WRITER_LIMITS.writeTimeoutMs);
   timers[0]!.callback(); await delivered;
@@ -187,7 +188,7 @@ test('output admission expires before native pipe failure and keeps logical reti
   expect(next.received).toEqual([f.frame()]);
 });
 
-test('several stalled frames in one native read share the deadline even after intermediate admissions succeed', async () => {
+test('frames from one native read each retain delivery time after preceding progress', async () => {
   const timers: { callback(): void; delayMs: number }[] = [];
   const f = fixture(); const link = f.connect((callback, delayMs) => {
     timers.push({ callback, delayMs }); return { cancel() {} };
@@ -201,35 +202,29 @@ test('several stalled frames in one native read share the deadline even after in
   let index = 0;
   for await (const text of readNodeWorkerFrames(source, 4096, new AbortController().signal, () => { reads++; })) {
     link.nodeBuffer(limits.maxBufferedBytes);
-    const delivered = link.bridge.receiveWorker(frames[index]!, text, 0);
-    expect(timers[index]!.delayMs).toBe(NODE_SESSION_OUTPUT_ADMISSION_MS - index * 900);
-    if (index < 2) { f.advance(900); link.nodeBuffer(0); }
-    else timers[index]!.callback();
-    await delivered; await tick(); index++;
+    link.bridge.receiveWorker(frames[index]!, text);
+    expect(timers[index]!.delayMs).toBe(NODE_SESSION_OUTPUT_ADMISSION_MS);
+    f.advance(900); link.nodeBuffer(0);
+    await tick(); index++;
   }
   expect(reads).toBe(1);
-  expect(link.received).toEqual(frames.slice(0, 2));
-  expect(link.failures).toHaveLength(1);
+  expect(link.received).toEqual(frames);
+  expect(link.failures).toEqual([]);
+  expect(link.physical.signal.aborted).toBe(false);
   expect(link.connection.lease.authoritySignal.aborted).toBe(false);
-  const next = f.connect(); await next.recover();
-  expect(next.received).toEqual(frames);
 });
 
-test.each(['immediate', 'drain'] as const)('an overdue %s cannot beat the delayed admission timer', async (mode) => {
+test.each(['arrival', 'drain'] as const)('an overdue output cannot beat its delayed timer through a new %s', async (mode) => {
   const f = fixture(); const scheduled = mock((_callback: () => void, _delayMs: number) => ({ cancel() {} }));
   const link = f.connect(scheduled); await link.recover();
   const frame = f.frame(); const text = JSON.stringify(frame);
-  if (mode === 'drain') {
-    link.nodeBuffer(limits.maxBufferedBytes);
-    const sending = link.bridge.receiveWorker(frame, text, 0);
-    f.advance(NODE_SESSION_OUTPUT_ADMISSION_MS);
-    link.nodeBuffer(0); await sending;
-    expect(scheduled).toHaveBeenCalledTimes(1);
-  } else {
-    f.advance(NODE_SESSION_OUTPUT_ADMISSION_MS);
-    await link.bridge.receiveWorker(frame, text, 0);
-    expect(scheduled).not.toHaveBeenCalled();
-  }
+  link.nodeBuffer(limits.maxBufferedBytes);
+  link.bridge.receiveWorker(frame, text);
+  f.advance(NODE_SESSION_OUTPUT_ADMISSION_MS);
+  if (mode === 'drain') link.nodeBuffer(0);
+  else link.bridge.receiveWorker(f.frame('later'), JSON.stringify(f.frame('later')));
+  await tick();
+  expect(scheduled).toHaveBeenCalledTimes(1);
   expect(link.received).toEqual([]);
   expect(link.physical.signal.aborted).toBe(true);
   expect(link.connection.lease.authoritySignal.aborted).toBe(false);
@@ -241,8 +236,8 @@ test('retirement and suspension use the control reserve while output data is sat
   const f = fixture(); const link = f.connect(); await link.recover();
   link.nodeBuffer(limits.maxBufferedBytes - limits.reservedControlBytes);
   const notice = { type: 'node-worker-output-suspended', version: 1, session: f.session, connectionId: 1, generation: 1 } as const;
-  await link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()), 0);
-  await link.bridge.receiveWorker(notice, JSON.stringify(notice), 0);
+  await link.bridge.receiveWorker(f.frame(), JSON.stringify(f.frame()));
+  await link.bridge.receiveWorker(notice, JSON.stringify(notice));
   await tick();
   expect(link.received).toEqual([f.frame(), notice]);
   expect(link.physical.signal.aborted).toBe(false);
@@ -418,7 +413,7 @@ test('execution replies use application reserve when ordinary socket capacity is
 test('worker suspension closes parent admission before notifying the controller', async () => {
   const f = fixture(); const link = f.connect(); await link.recover();
   const notice = { type: 'node-worker-output-suspended', version: 1, session: f.session, connectionId: 1, generation: 1 } as const;
-  link.bridge.receiveWorker(notice, JSON.stringify(notice), 0);
+  link.bridge.receiveWorker(notice, JSON.stringify(notice));
   expect(f.supervisor.status).toBe('recovering');
   await tick(); expect(link.received).toEqual([notice]);
   expect(await link.recover()).toEqual({ kind: 'output-live', live: true });
@@ -431,7 +426,7 @@ test('an early suspension preserves the begin reply and prevents its generation 
   const begun = link.call({ method: 'begin-output-recovery' });
   await tick();
   const notice = { type: 'node-worker-output-suspended', version: 1, session: f.session, connectionId: 1, generation: 1 } as const;
-  link.bridge.receiveWorker(notice, JSON.stringify(notice), 0);
+  link.bridge.receiveWorker(notice, JSON.stringify(notice));
   reply.resolve({ kind: 'output-recovery', generation: 1 });
   expect(await begun).toEqual({ kind: 'output-recovery', generation: 1 });
   expect(await link.call({ method: 'resume-output', generation: 1 })).toEqual({ kind: 'output-live', live: false });
@@ -448,12 +443,12 @@ test('a stale suspension cannot invalidate a pending begin or an already recover
   const begun = link.call({ method: 'begin-output-recovery' });
   await tick();
   const notice = { type: 'node-worker-output-suspended', version: 1, session: f.session, connectionId: 1, generation: 1 } as const;
-  link.bridge.receiveWorker(notice, JSON.stringify(notice), 0);
+  link.bridge.receiveWorker(notice, JSON.stringify(notice));
   reply.resolve({ kind: 'output-recovery', generation: 2 });
   expect(await begun).toEqual({ kind: 'output-recovery', generation: 2 });
   f.service.call.mockImplementationOnce(async () => ({ kind: 'output-live', live: true }));
   expect(await link.call({ method: 'resume-output', generation: 2 })).toEqual({ kind: 'output-live', live: true });
-  link.bridge.receiveWorker(notice, JSON.stringify(notice), 0);
+  link.bridge.receiveWorker(notice, JSON.stringify(notice));
   expect(f.supervisor.status).toBe('online');
   expect(link.received).toEqual([]);
 });
@@ -469,7 +464,7 @@ test('a suspension during worker admission invalidates the exact pending complet
   const resumed = link.call({ method: 'resume-output', generation: begun.generation });
   await tick();
   const notice = { type: 'node-worker-output-suspended', version: 1, session: f.session, connectionId: 1, generation: begun.generation } as const;
-  link.bridge.receiveWorker(notice, JSON.stringify(notice), 0);
+  link.bridge.receiveWorker(notice, JSON.stringify(notice));
   admitted.resolve();
   expect(await resumed).toEqual({ kind: 'output-live', live: false });
   expect(f.supervisor.status).toBe('recovering');
@@ -491,7 +486,7 @@ test('a saturated bulk socket cannot close the control hop or suspend worker adm
   link.bulk.send.mockReturnValue(false);
   const frame = { type: 'node-worker-bulk', version: 1, session: f.session, connectionId: 1, instanceId: 'synthetic-instance',
     payload: JSON.stringify({ type: 'node-bulk-result', command: 'node-bulk-complete', version: 1, session: f.session, requestId: 1, result: 'completed' }) } as const;
-  link.bridge.receiveWorker(frame, JSON.stringify(frame), 0);
+  link.bridge.receiveWorker(frame, JSON.stringify(frame));
   expect(link.bulk.close).toHaveBeenCalledTimes(1);
   expect(link.physical.signal.aborted).toBe(false);
   expect(f.supervisor.status).toBe('online');

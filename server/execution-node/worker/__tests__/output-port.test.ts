@@ -191,6 +191,30 @@ test('queue residence expires during a stalled write without retiring a newer si
   } finally { f.close(); }
 });
 
+test('chunk progress preserves a slow record and its queued sibling beyond their initial residence limit', async () => {
+  const f = fixture({ retentionMs: 100 });
+  const owner = f.install();
+  const sibling = f.install('synthetic-second');
+  try {
+    owner.output.emit(event('界'.repeat(60_000)));
+    sibling.output.emit(event('synthetic sibling'));
+    await Promise.resolve();
+    for (let index = 0; index < 3; index++) {
+      expect(parseNodeWorkerOutputText(f.written[index]!.text)!.stream).toEqual(stream);
+      f.advance(60);
+      await f.drain(index);
+      expect(owner.failure).not.toHaveBeenCalled();
+      expect(sibling.failure).not.toHaveBeenCalled();
+    }
+    expect(parseNodeWorkerOutputText(f.written[3]!.text)!.stream.streamId).toBe('synthetic-second');
+    f.advance(60);
+    await f.drain(3);
+    expect(f.port.bufferedBytes).toBe(0);
+    expect(f.port.bufferedRecords).toBe(0);
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
 test.each(['native failure', 'authority loss'] as const)('%s fences all instance output before notifying observers', async (cause) => {
   const f = fixture(); const first = f.install(); const second = f.install('synthetic-second');
   first.failure.mockImplementation(() => { expect(second.output.retired).toBe(true); });
