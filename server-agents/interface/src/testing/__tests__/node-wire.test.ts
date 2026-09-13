@@ -317,7 +317,7 @@ describe('node output wire contract', () => {
   });
 
   test('stops inspecting wide object properties as soon as the snapshot budget is exhausted', () => {
-    const names = Array.from({ length: 300_000 }, (_, index) => `field${index}`);
+    const names = Array.from({ length: 50_000 }, (_, index) => `field${index}${'x'.repeat(1024)}`);
     let descriptors = 0;
     const providerMeta = new Proxy({}, {
       ownKeys: () => names,
@@ -435,9 +435,12 @@ describe('node output wire contract', () => {
   });
 
   test('rejects permission frames over the UTF-8 or snapshot limit before allocating a handle', () => {
+    const excessiveLength = new Proxy([], { get(target, property, receiver) {
+      return property === 'length' ? MAX_NODE_OUTPUT_BYTES + 1 : Reflect.get(target, property, receiver);
+    } });
     const payloads = [
       { payload: '\u754c'.repeat(Math.ceil(MAX_NODE_OUTPUT_BYTES / 3)), error: 'frame limit' },
-      { payload: Array.from({ length: 262_100 }, () => 0), error: 'snapshot value limit' },
+      { payload: excessiveLength, error: 'snapshot value limit' },
     ];
     for (const { payload, error } of payloads) {
       let handles = 0;
@@ -487,7 +490,7 @@ describe('node output wire contract', () => {
   });
 
   test('bounds inherited enumerable properties on messages and nested permission tools', () => {
-    const prototype = Object.fromEntries(Array.from({ length: 262_145 }, (_, index) => [`inherited${index}`, null]));
+    const prototype = Object.fromEntries(Array.from({ length: 20_000 }, (_, index) => [`inherited${index}${'x'.repeat(1024)}`, null]));
     for (const permission of [false, true]) {
       const tool = new BashToolUseMessage(at, 'tool-a', 'pwd');
       const message = permission ? tool : new AssistantMessage(at, 'synthetic');
@@ -498,7 +501,7 @@ describe('node output wire contract', () => {
           kind: 'requested', permissionOccurrenceId, requestedTool: tool, options: [],
         }, decision: capability }
         : { type: 'rows', rows: [{ message }] };
-      expect(() => encodeWireProducerEvent(event, permissionHandles(() => { handles += 1; return 'decision-a'; }))).toThrow('snapshot value limit');
+      expect(() => encodeWireProducerEvent(event, permissionHandles(() => { handles += 1; return 'decision-a'; }))).toThrow('frame limit');
       expect(handles).toBe(0);
     }
   });
@@ -508,7 +511,7 @@ describe('node output wire contract', () => {
       let leaves = 0;
       let nested: Record<string, unknown> = { get leaf() {
         if (++leaves > 100_000) throw new Error('Unbounded message traversal');
-        return 'synthetic';
+        return 'synthetic'.repeat(1024);
       } };
       for (let depth = 0; depth < 30; depth += 1) nested = { left: nested, right: nested };
       const message = permission ? new BashToolUseMessage(at, 'tool-a', 'pwd') : new AssistantMessage(at, 'synthetic');
@@ -519,7 +522,7 @@ describe('node output wire contract', () => {
         }, decision: capability }
         : { type: 'rows', rows: [{ message }] };
       let handles = 0;
-      expect(() => encodeWireProducerEvent(event, permissionHandles(() => { handles += 1; return 'decision-a'; }))).toThrow('snapshot value limit');
+      expect(() => encodeWireProducerEvent(event, permissionHandles(() => { handles += 1; return 'decision-a'; }))).toThrow('frame limit');
       expect(handles).toBe(0);
       expect(leaves).toBeLessThan(100_000);
     }
@@ -529,12 +532,12 @@ describe('node output wire contract', () => {
     let leaves = 0;
     const nested = Array.from({ length: 20_000 }, () => ({ get leaf() {
       if (++leaves > 150_000) throw new Error('Per-message budget escaped its event');
-      return 'synthetic';
+      return 'synthetic'.repeat(16);
     } }));
     const rows = Array.from({ length: 20 }, () => ({
       message: Object.assign(new AssistantMessage(at, 'synthetic'), { nested }),
     }));
-    expect(() => encodeWireProducerEvent({ type: 'rows', rows }, permissionHandles())).toThrow('snapshot value limit');
+    expect(() => encodeWireProducerEvent({ type: 'rows', rows }, permissionHandles())).toThrow('frame limit');
     expect(leaves).toBeLessThan(150_000);
   });
 
@@ -543,7 +546,7 @@ describe('node output wire contract', () => {
       let leaves = 0;
       let providerMeta = { get leaf() {
         if (++leaves > 100_000) throw new Error('Unbounded snapshot traversal');
-        return 'synthetic';
+        return 'synthetic'.repeat(1024);
       } } as Record<string, unknown>;
       for (let depth = 0; depth < 30; depth += 1) providerMeta = { left: providerMeta, right: providerMeta };
       const message = new AssistantMessage(at, 'synthetic');
@@ -552,7 +555,7 @@ describe('node output wire contract', () => {
         : serializeNodeOutputFrame({ type: 'node-output', stream, sequence: 1,
           event: { type: 'rows', rows: [{ message: JSON.parse(JSON.stringify(message)), providerMeta }] },
         } as Parameters<typeof serializeNodeOutputFrame>[0]))
-        .toThrow('snapshot value limit');
+        .toThrow('frame limit');
       expect(leaves).toBeLessThan(100_000);
     }
   });

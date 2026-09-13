@@ -10,7 +10,7 @@ import type { AgentPermissionResponseCapability, AgentProducerEvent } from './co
 import { parseOwnedNodeMessage } from './node-wire-message.js';
 import { MAX_NODE_OUTPUT_BYTES, NodeWireSnapshot } from './node-wire-snapshot.js';
 import { parseOwnedEstablishedSession } from './established-session.js';
-import { isNormalizedJsonObject as jsonObject } from './normalized-json.js';
+import { isSnapshotJsonObject } from './normalized-json.js';
 
 export const NODE_WIRE_VERSION = 1;
 export { MAX_NODE_OUTPUT_BYTES } from './node-wire-snapshot.js';
@@ -124,7 +124,7 @@ function parseOwnedWireProducerEvent(value: unknown): WireProducerEvent | null {
       const rows: Extract<WireProducerEvent, { type: 'rows' }>['rows'][number][] = [];
       for (const row of value.rows) {
         if (!isRecord(row) || !keys(row, ['message', 'providerMeta'])
-          || (row.providerMeta !== null && !jsonObject(row.providerMeta))) return null;
+          || (row.providerMeta !== null && !isSnapshotJsonObject(row.providerMeta))) return null;
         const message = wireMessage(row.message);
         if (!message) return null;
         rows.push({ message, providerMeta: row.providerMeta });
@@ -202,7 +202,7 @@ function permissionRequest(value: unknown): Omit<WirePermissionRequest, 'decisio
   if (!tool || !isToolUseMessage(tool)) return null;
   const options = [];
   for (const option of lifecycle.options) {
-    if (!jsonObject(option) || !nonEmpty(option.id) || !nonEmpty(option.label)) return null;
+    if (!isSnapshotJsonObject(option) || !nonEmpty(option.id) || !nonEmpty(option.label)) return null;
     options.push({ ...option, id: option.id, label: option.label });
   }
   return { type: 'permission', runId: value.runId,
@@ -313,7 +313,7 @@ function capturePermissionCapability(value: unknown, occurrence: string, error: 
 }
 
 function wireMessage(value: unknown): JsonObject | null {
-  if (!jsonObject(value) || typeof value.type !== 'string' || typeof value.timestamp !== 'string') return null;
+  if (!isSnapshotJsonObject(value) || typeof value.type !== 'string' || typeof value.timestamp !== 'string') return null;
   try {
     const message = parseOwnedNodeMessage(value);
     if (!message) return null;

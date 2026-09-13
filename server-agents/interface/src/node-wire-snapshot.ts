@@ -1,8 +1,10 @@
 import { isRecord, type JsonObject } from '@garcon/common/json';
 
 export const MAX_NODE_OUTPUT_BYTES = 16 * 1024 * 1024;
-// Bounds traversal independently of bytes; dense JSON may reach this limit first.
-const MAX_NODE_SNAPSHOT_VALUES = 262_144;
+// JSON literals and punctuation cover each visit, even in a frame of single-digit array values.
+const MAX_NODE_SNAPSHOT_VALUES = MAX_NODE_OUTPUT_BYTES;
+// A proxy can claim a large length before its first element is validated.
+const MAX_PREALLOCATED_SNAPSHOT_VALUES = 64 * 1024;
 
 /** Bounds data traversal across one complete event, including repeated references. */
 export class NodeWireSnapshot {
@@ -34,12 +36,12 @@ export class NodeWireSnapshot {
     rejectCustomSerializer(value);
     const length = value.length;
     if (length > this.#values) throw new RangeError('Node output exceeds the snapshot value limit');
-    const result = [];
+    const result = snapshotArray<T>(length);
     for (let index = 0; index < length; index += 1) {
       this.#consumeValue(1);
-      result.push(copy(value[index]));
+      result[index] = copy(value[index]);
     }
-    return result;
+    return Object.setPrototypeOf(result, Array.prototype);
   }
 
   #value(value: unknown, depth: number): unknown {
@@ -53,9 +55,9 @@ export class NodeWireSnapshot {
       rejectCustomSerializer(value);
       const length = value.length;
       if (length > this.#values) throw new RangeError('Node output exceeds the snapshot value limit');
-      const items = [];
-      for (let index = 0; index < length; index += 1) items.push(this.#value(value[index], depth + 1));
-      return items;
+      const items = snapshotArray<unknown>(length);
+      for (let index = 0; index < length; index += 1) items[index] = this.#value(value[index], depth + 1);
+      return Object.setPrototypeOf(items, Array.prototype);
     }
     return this.#properties(value, (_key, child) => this.#value(child, depth + 1));
   }
@@ -96,6 +98,14 @@ export class NodeWireSnapshot {
     this.#characters -= count;
     if (this.#characters < 0) throw new RangeError('Node output exceeds the frame limit');
   }
+}
+
+function snapshotArray<T>(length: number): T[] {
+  const result = Number.isSafeInteger(length) && length >= 0
+    ? new Array<T>(Math.min(length, MAX_PREALLOCATED_SNAPSHOT_VALUES))
+    : [];
+  // Provider getters cannot intercept indexed writes while the private array has no prototype.
+  return Object.setPrototypeOf(result, null);
 }
 
 function requirePlainObject(value: object): void {
