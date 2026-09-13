@@ -31,13 +31,13 @@
 	const chatBoardRenderer = lazyRenderer(
 		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
 	);
-	const issuesRenderer = lazyRenderer(() => import('$lib/components/issues/IssuesPanel.svelte'));
+	const ticketsRenderer = lazyRenderer(() => import('$lib/components/tickets/TicketsPanel.svelte'));
 </script>
 
 <script lang="ts">
 	import {
 		getChatSessions,
-		getIssueSourceNavigation,
+		getTicketSourceNavigation,
 		getAuth,
 		getRemoteSettings,
 		getFileSessions,
@@ -83,7 +83,7 @@
 	const sessions = getChatSessions();
 	const auth = getAuth();
 	const remoteSettings = getRemoteSettings();
-	const issueSourceNavigation = getIssueSourceNavigation();
+	const ticketSourceNavigation = getTicketSourceNavigation();
 	const projectState = $derived(workspaceContext.projectState);
 </script>
 
@@ -228,10 +228,10 @@
 		{#await chatCanvasRenderer() then ChatCanvasSurface}
 			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
 		{/await}
-	{:else if surface.type === 'singleton' && surface.kind === 'issues'}
-		{@const controller = singletonSurfaces.issues()}
-		{#await issuesRenderer() then IssuesPanel}
-			<IssuesPanel
+	{:else if surface.type === 'singleton' && surface.kind === 'tickets'}
+		{@const controller = singletonSurfaces.tickets()}
+		{#await ticketsRenderer() then TicketsPanel}
+			<TicketsPanel
 				{controller}
 				{visible}
 				onClose={presentation === 'mobile'
@@ -240,7 +240,7 @@
 				closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
 				chats={sessions.orderedChats}
 				onOpenSource={(source) =>
-					void issueSourceNavigation.open(source, presentation, () => controller.bootstrap)}
+					void ticketSourceNavigation.open(source, presentation, () => controller.bootstrap)}
 				username={auth.user?.username ?? 'local'}
 				pinnedProjectPaths={remoteSettings.snapshot?.paths.pinnedProjectPaths ?? []}
 				directory={workspaceContext.current?.projectPath ?? null}

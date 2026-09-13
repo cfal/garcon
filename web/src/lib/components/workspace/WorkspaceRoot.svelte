@@ -20,7 +20,7 @@
 		getChatSessions,
 		getAuth,
 		getNotifications,
-		setIssueSourceNavigation,
+		setTicketSourceNavigation,
 		getFileSessions,
 		getGitBranchActions,
 		getGitQuickSummary,
@@ -38,7 +38,7 @@
 		type WorkspaceChatActions,
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
-	import { IssueSourceNavigationController } from '$lib/issues/navigation/issue-source-navigation-controller.js';
+	import { TicketSourceNavigationController } from '$lib/tickets/navigation/ticket-source-navigation-controller.js';
 	import type {
 		UserMessageNavigatorCommand,
 		UserMessageNavigatorRegistration,
@@ -124,19 +124,19 @@
 	});
 	setConversationPanels(conversationPanels);
 	const auth = getAuth();
-	const issueSourceNavigation = new IssueSourceNavigationController({
+	const ticketSourceNavigation = new TicketSourceNavigationController({
 		workspace,
 		panels: conversationPanels,
 		notifications: getNotifications(),
 		hasChat: (chatId) => !!sessions.byId[chatId],
 		authority: () => auth.token,
 	});
-	setIssueSourceNavigation(issueSourceNavigation);
+	setTicketSourceNavigation(ticketSourceNavigation);
 	$effect(() => {
 		void auth.token;
 		void workspace.focusOwnerRevision;
 		void sessions.byId;
-		untrack(() => issueSourceNavigation.reconcile());
+		untrack(() => ticketSourceNavigation.reconcile());
 	});
 	const unregisterChatSurfaceTransfers =
 		workspace.registerChatSurfaceTransferPort(conversationPanels);
@@ -391,7 +391,7 @@
 	});
 
 	onDestroy(() => {
-		issueSourceNavigation.invalidate();
+		ticketSourceNavigation.invalidate();
 		gitQuickSummary.setVisibleProjects([]);
 		gitQuickSummary.reconcilePolling();
 		unregisterChatSurfaceTransfers();
@@ -429,7 +429,7 @@
 			'chat-map': m.workspace_surface_chat_map(),
 			'chat-canvas': m.workspace_surface_chat_canvas(),
 			'chat-board': m.workspace_surface_chat_board(),
-			issues: m.issues_title(),
+			tickets: m.tickets_title(),
 		};
 		return labels[surface.kind];
 	}

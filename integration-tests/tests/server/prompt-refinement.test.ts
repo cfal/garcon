@@ -9,7 +9,7 @@ import {
 } from '../../support/integration-fixture.js';
 
 describe('prompt refinement', () => {
-  test.each(['prompt', 'issue-description', 'issue-comment'] as const)('refines %s using the saved target and complete template', async (refinementTarget) => {
+  test.each(['prompt', 'ticket-description', 'ticket-comment'] as const)('refines %s using the saved target and complete template', async (refinementTarget) => {
     const draft = 'private-refinement-draft-$&-must-not-persist';
     const refinedPrompt = 'Make the request precise and actionable.';
 
@@ -35,10 +35,10 @@ describe('prompt refinement', () => {
           () => draft,
         );
         let expectedModelPrompt = renderedPrompt;
-        if (refinementTarget === 'issue-description') {
-          expectedModelPrompt += '\n\nThe draft is an issue description, not a chat prompt. Improve its clarity and organization while preserving its facts, requirements, Markdown, and issue references. Do not invent requirements, claim completed work, or execute the described task. Return only the revised description.';
-        } else if (refinementTarget === 'issue-comment') {
-          expectedModelPrompt += '\n\nThe draft is an issue comment, not a chat prompt. Improve its clarity and organization while preserving its facts, progress, Markdown, and issue references. Do not invent facts, claim completed work, or execute the described task. Return only the revised comment.';
+        if (refinementTarget === 'ticket-description') {
+          expectedModelPrompt += '\n\nThe draft is a ticket description, not a chat prompt. Improve its clarity and organization while preserving its facts, requirements, Markdown, and ticket references. Do not invent requirements, claim completed work, or execute the described task. Return only the revised description.';
+        } else if (refinementTarget === 'ticket-comment') {
+          expectedModelPrompt += '\n\nThe draft is a ticket comment, not a chat prompt. Improve its clarity and organization while preserving its facts, progress, Markdown, and ticket references. Do not invent facts, claim completed work, or execute the described task. Return only the revised comment.';
         }
         const held = fixture.fakeProviders.openAi.holdNext({
           model: target.provider.model,

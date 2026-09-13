@@ -1061,7 +1061,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
-			m.workspace_open_surface({ surface: m.issues_title() }),
+			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
 			m.workspace_new_terminal(),
 		];
@@ -1313,7 +1313,7 @@ describe('WorkspaceWindowTitleBar', () => {
 
 	it('restores plus and menu-item focus to the sole inline terminal menu', async () => {
 		const kinds = [
-			'issues',
+			'tickets',
 			'git',
 			'git-history',
 			'git-compare',
@@ -1411,7 +1411,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
-			m.workspace_open_surface({ surface: m.issues_title() }),
+			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));

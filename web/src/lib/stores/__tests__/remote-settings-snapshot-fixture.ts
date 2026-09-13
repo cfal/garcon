@@ -25,7 +25,7 @@ export function makeRemoteSettingsSnapshot(
 				startAgent: true,
 				resumeAgent: true,
 				schedule: true,
-				issues: true,
+				tickets: true,
 			},
 		},
 		ui: {},

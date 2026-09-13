@@ -96,9 +96,9 @@
 	import { ThemeController } from '$lib/theme/theme-controller.svelte.js';
 	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.svelte.js';
-	import { IssuesRouter } from '$lib/events/issues-router.svelte.js';
-	import { IssuesInvalidationHub } from '$lib/issues/catalog/issues-invalidation-hub.js';
-	import { setIssuesInvalidations } from '$lib/context/issues-context.js';
+	import { TicketsRouter } from '$lib/events/tickets-router.svelte.js';
+	import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
+	import { setTicketsInvalidations } from '$lib/context/tickets-context.js';
 
 	let { children } = $props();
 
@@ -110,8 +110,8 @@
 	const preambles = createPreamblesStore();
 	const chatPreambleSelectionInvalidationHub = createChatPreambleSelectionInvalidationHub();
 	const chatBoardInvalidations = createChatBoardInvalidationHub();
-	const issuesInvalidations = new IssuesInvalidationHub();
-	setIssuesInvalidations(issuesInvalidations);
+	const ticketsInvalidations = new TicketsInvalidationHub();
+	setTicketsInvalidations(ticketsInvalidations);
 	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
@@ -136,7 +136,7 @@
 		terminalIdentity,
 		ws,
 		chatBoardInvalidations,
-		issuesInvalidations,
+		ticketsInvalidations,
 		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;
@@ -254,7 +254,7 @@
 		const authenticated = auth.isAuthenticated;
 		auth.token;
 		auth.authDisabled;
-		untrack(() => issuesInvalidations.publishAuthority(authenticated));
+		untrack(() => ticketsInvalidations.publishAuthority(authenticated));
 	});
 
 	let terminalsInitialized = false;
@@ -285,14 +285,14 @@
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
-	const issuesRouter = new IssuesRouter(ws, issuesInvalidations);
+	const ticketsRouter = new TicketsRouter(ws, ticketsInvalidations);
 	settingsRouter.start();
 	transcriptSearchStatusRouter.start();
 	scheduledPromptsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
 	chatBoardsRouter.start();
-	issuesRouter.start();
+	ticketsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
@@ -301,7 +301,7 @@
 		preamblesRouter.tick();
 		snippetsRouter.tick();
 		chatBoardsRouter.tick();
-		issuesRouter.tick();
+		ticketsRouter.tick();
 	});
 
 	$effect(() => {
@@ -319,7 +319,7 @@
 		// its dirty draft is preserved by the controller's refresh path.
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
 		untrack(() => chatBoardInvalidations.publishReconnect());
-		untrack(() => issuesInvalidations.publishReconnect());
+		untrack(() => ticketsInvalidations.publishReconnect());
 	});
 
 	onMount(() => {
@@ -411,7 +411,7 @@
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		chatBoardsRouter.destroy();
-		issuesRouter.destroy();
+		ticketsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		minuteClock.destroy();

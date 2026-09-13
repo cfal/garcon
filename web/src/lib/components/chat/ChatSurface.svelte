@@ -134,7 +134,7 @@
 			onOpenGitCompare={isMobile
 				? () => void gitViews.openCompare({ presentation: 'mobile' })
 				: undefined}
-			onOpenIssues={isMobile ? () => void workspace.focusMobileSingleton('issues') : undefined}
+			onOpenTickets={isMobile ? () => void workspace.focusMobileSingleton('tickets') : undefined}
 			onRename={() => chatActions.requestRename(selectedChat)}
 			onDetails={() => chatActions.requestDetails(selectedChat)}
 			onReload={() => chatActions.reload(selectedChat)}

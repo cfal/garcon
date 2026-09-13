@@ -40,15 +40,15 @@ const SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT = [
   'Supported tokens are {{arguments}}, {{project_path}}, and {{chat_id}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}.',
   'Do not add, remove, reorder, escape, or unescape these tokens.',
 ].join(' ');
-const ISSUE_DESCRIPTION_REFINEMENT_CONSTRAINT = [
-  'The draft is an issue description, not a chat prompt.',
-  'Improve its clarity and organization while preserving its facts, requirements, Markdown, and issue references.',
+const TICKET_DESCRIPTION_REFINEMENT_CONSTRAINT = [
+  'The draft is a ticket description, not a chat prompt.',
+  'Improve its clarity and organization while preserving its facts, requirements, Markdown, and ticket references.',
   'Do not invent requirements, claim completed work, or execute the described task.',
   'Return only the revised description.',
 ].join(' ');
-const ISSUE_COMMENT_REFINEMENT_CONSTRAINT = [
-  'The draft is an issue comment, not a chat prompt.',
-  'Improve its clarity and organization while preserving its facts, progress, Markdown, and issue references.',
+const TICKET_COMMENT_REFINEMENT_CONSTRAINT = [
+  'The draft is a ticket comment, not a chat prompt.',
+  'Improve its clarity and organization while preserving its facts, progress, Markdown, and ticket references.',
   'Do not invent facts, claim completed work, or execute the described task.',
   'Return only the revised comment.',
 ].join(' ');
@@ -139,8 +139,8 @@ function renderTemplate(template: string, draft: string): string {
 function templateForTarget(template: string, target: RefinePromptRequest['target']): string {
   switch (target) {
     case 'snippet-template': return `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`;
-    case 'issue-description': return `${template}\n\n${ISSUE_DESCRIPTION_REFINEMENT_CONSTRAINT}`;
-    case 'issue-comment': return `${template}\n\n${ISSUE_COMMENT_REFINEMENT_CONSTRAINT}`;
+    case 'ticket-description': return `${template}\n\n${TICKET_DESCRIPTION_REFINEMENT_CONSTRAINT}`;
+    case 'ticket-comment': return `${template}\n\n${TICKET_COMMENT_REFINEMENT_CONSTRAINT}`;
     case 'prompt': return template;
   }
 }

@@ -27,10 +27,10 @@ import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
 import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
 import { createProjectResolutionRoutes } from './project-resolution.js';
 import { createChatBoardRoutes } from './chat-boards.js';
-import { createIssueRoutes } from './issues.js';
-import { createChatIssueSourceRoutes } from './chat-issue-source.js';
-import type { IssueSourceReader } from '../chats/chat-message-reader.js';
-import type { IssueRuntime } from '../issues/setup.js';
+import { createTicketRoutes } from './tickets.js';
+import { createChatTicketSourceRoutes } from './chat-ticket-source.js';
+import type { TicketSourceReader } from '../chats/chat-message-reader.js';
+import type { TicketRuntime } from '../tickets/setup.js';
 import { createChatTagRoutes } from './chat-tags.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -75,7 +75,7 @@ export default function createAllRoutes(workspaceDir: string, {
   processing,
   metadata,
   chatViews,
-  issueSources,
+  ticketSources,
   shareSnapshots,
   agents,
   telegramNotifier,
@@ -91,7 +91,7 @@ export default function createAllRoutes(workspaceDir: string, {
   preambles,
   chatPreambleSelection,
   chatBoards,
-  issues,
+  tickets,
   chatTags,
   chatMutationLock,
   terminals,
@@ -111,7 +111,7 @@ export default function createAllRoutes(workspaceDir: string, {
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   chatViews: TranscriptPageReader;
-  issueSources: IssueSourceReader;
+  ticketSources: TicketSourceReader;
   shareSnapshots: ShareTranscriptSnapshotPort;
   agents: AgentRegistry;
   telegramNotifier: TelegramNotifier;
@@ -127,7 +127,7 @@ export default function createAllRoutes(workspaceDir: string, {
   preambles: PreambleService;
   chatPreambleSelection: ChatPreambleSelectionService;
   chatBoards: ChatBoardService;
-  issues: IssueRuntime;
+  tickets: TicketRuntime;
   chatTags: ChatTagMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
   terminals: TerminalManager;
@@ -177,8 +177,8 @@ export default function createAllRoutes(workspaceDir: string, {
     }),
     ...createChatTagRoutes(chatTags),
     ...createChatBoardRoutes(chatBoards),
-    ...createIssueRoutes(issues),
-    ...createChatIssueSourceRoutes(registry, issueSources),
+    ...createTicketRoutes(tickets),
+    ...createChatTicketSourceRoutes(registry, ticketSources),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),

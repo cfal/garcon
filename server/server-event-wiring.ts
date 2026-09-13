@@ -45,7 +45,7 @@ import {
   PreamblesInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
   ChatBoardsInvalidatedMessage,
-  IssuesInvalidatedMessage,
+  TicketsInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -93,7 +93,7 @@ export interface ServerEventWiring {
   // committed update notice's own chat-messages fanout.
   notifyChatPreamblesInvalidated(chatId: string, revision: number): void;
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
-  broadcastIssuesInvalidated(revision: number): void;
+  broadcastTicketsInvalidated(revision: number): void;
   waitForIdle(): Promise<void>;
 }
 
@@ -636,8 +636,8 @@ export function wireServerEvents({
     broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void {
       broadcast(new TranscriptSearchStatusMessage(status));
     },
-    broadcastIssuesInvalidated(revision: number): void {
-      broadcast(new IssuesInvalidatedMessage(revision));
+    broadcastTicketsInvalidated(revision: number): void {
+      broadcast(new TicketsInvalidatedMessage(revision));
     },
     waitForIdle,
   };

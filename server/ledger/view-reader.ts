@@ -5,8 +5,8 @@ import type {
 } from '../../common/chat-view.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../../common/chat-view.js';
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { IssueSource } from '../../common/issues.js';
-import type { IssueSourceResolution } from '../../common/issue-source-navigation.js';
+import type { TicketSource } from '../../common/tickets.js';
+import type { TicketSourceResolution } from '../../common/ticket-source-navigation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { TranscriptAdoptionService } from './adoption.js';
@@ -47,14 +47,14 @@ export class TranscriptViewReader {
     ));
   }
 
-  async resolveIssueSource(source: IssueSource, signal?: AbortSignal): Promise<IssueSourceResolution> {
+  async resolveTicketSource(source: TicketSource, signal?: AbortSignal): Promise<TicketSourceResolution> {
     return readWithFenceTranslation(async () => {
       signal?.throwIfAborted();
       const { chatId, transcriptViewId, ordinal } = source;
       const current = this.#ledger.existingCurrentView(chatId);
       if (!current) return { kind: 'outcome-unavailable', chatId };
       if (current.viewId !== transcriptViewId) return { kind: 'transcript-reloaded', chatId };
-      const outcomeOrdinal = this.#ledger.issueOutcomeOrdinal(chatId, current.viewId, ordinal);
+      const outcomeOrdinal = this.#ledger.ticketOutcomeOrdinal(chatId, current.viewId, ordinal);
       return outcomeOrdinal === null
         ? { kind: 'outcome-unavailable', chatId }
         : { kind: 'found', target: { chatId, transcriptViewId, ordinal: outcomeOrdinal } };

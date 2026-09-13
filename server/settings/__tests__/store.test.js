@@ -824,7 +824,7 @@ describe('settings store', () => {
             startAgent: true,
             resumeAgent: true,
             schedule: true,
-            issues: true,
+            tickets: true,
           },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
@@ -1479,12 +1479,12 @@ describe('settings store', () => {
   });
 
   describe('feature settings', () => {
-    it('persists the independent issue command gate', async () => {
-      await writeRaw({ features: { agentCommands: { issues: false } } });
-      expect(store.getFeatureSettings().agentCommands.issues).toBe(false);
+    it('persists the independent ticket command gate', async () => {
+      await writeRaw({ features: { agentCommands: { tickets: false } } });
+      expect(store.getFeatureSettings().agentCommands.tickets).toBe(false);
       expect(store.getFeatureSettings().agentCommands.enabled).toBe(true);
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
-      expect(persisted.features.agentCommands.issues).toBe(false);
+      expect(persisted.features.agentCommands.tickets).toBe(false);
     });
     it('removes unknown fields from persisted command settings', async () => {
       await writeRaw({
@@ -1497,7 +1497,7 @@ describe('settings store', () => {
             startAgent: true,
             resumeAgent: true,
             schedule: true,
-            issues: true,
+            tickets: true,
             removedCommand: true,
           },
         },
@@ -1510,7 +1510,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
-        issues: true,
+        tickets: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual(
@@ -1534,7 +1534,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
-          issues: true,
+          tickets: true,
         },
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -1547,7 +1547,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
-          issues: true,
+          tickets: true,
         },
       });
     });
@@ -1567,7 +1567,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
-        issues: true,
+        tickets: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual({
@@ -1577,7 +1577,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
-        issues: true,
+        tickets: true,
       });
       expect(persisted.features.chatIdDiscovery).toBeUndefined();
     });
@@ -1595,7 +1595,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
-          issues: true,
+          tickets: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1612,7 +1612,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
-          issues: true,
+          tickets: true,
         },
       });
     });
@@ -1628,7 +1628,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
-          issues: true,
+          tickets: true,
         },
       });
 
@@ -1641,7 +1641,7 @@ describe('settings store', () => {
           startAgent: true,
           resumeAgent: true,
           schedule: true,
-          issues: true,
+          tickets: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1656,7 +1656,7 @@ describe('settings store', () => {
         startAgent: true,
         resumeAgent: true,
         schedule: true,
-        issues: true,
+        tickets: true,
       });
     });
   });

@@ -192,26 +192,26 @@ export class WorkspaceWindowDestructionService {
 		if (surface.type === 'singleton' && surface.kind === 'commit') {
 			return !(this.deps.singletons.commitIfPresent()?.canClose ?? true);
 		}
-		if (surface.type === 'singleton' && surface.kind === 'issues')
-			return this.deps.singletons.issuesIfPresent()?.drafts.pending ?? false;
+		if (surface.type === 'singleton' && surface.kind === 'tickets')
+			return this.deps.singletons.ticketsIfPresent()?.drafts.pending ?? false;
 		return false;
 	}
 
 	async #confirmDestruction(descriptors: readonly SurfaceDescriptor[]): Promise<boolean> {
-		const issueSurface = descriptors.find(
-			(surface) => surface.type === 'singleton' && surface.kind === 'issues',
+		const ticketSurface = descriptors.find(
+			(surface) => surface.type === 'singleton' && surface.kind === 'tickets',
 		);
-		if (issueSurface) {
-			const issues = this.deps.singletons.issuesIfPresent();
-			if (issues?.drafts.pending) return false;
-			issues?.drafts.flush();
+		if (ticketSurface) {
+			const tickets = this.deps.singletons.ticketsIfPresent();
+			if (tickets?.drafts.pending) return false;
+			tickets?.drafts.flush();
 			if (
-				issues?.drafts.needsExitGuard &&
+				tickets?.drafts.needsExitGuard &&
 				!(await this.deps.confirmClose({
-					surfaceId: issueSurface.id,
-					title: m.issues_close_surface_title(),
-					description: m.issues_close_surface_description(),
-					confirmLabel: m.issues_close_surface(),
+					surfaceId: ticketSurface.id,
+					title: m.tickets_close_surface_title(),
+					description: m.tickets_close_surface_description(),
+					confirmLabel: m.tickets_close_surface(),
 				}))
 			)
 				return false;

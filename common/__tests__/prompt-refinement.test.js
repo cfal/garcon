@@ -7,11 +7,11 @@ import {
   promptRefinementTargetOutputMaxLength,
 } from '../prompt-refinement.js';
 import { SNIPPET_TEMPLATE_MAX_LENGTH } from '../snippets.js';
-import { ISSUE_LIMITS } from '../issues.js';
+import { TICKET_LIMITS } from '../tickets.js';
 
 describe('prompt refinement contracts', () => {
-  it.each(['issue-description', 'issue-comment'])('bounds %s by UTF-8 bytes on both sides', (target) => {
-    const text = 'é'.repeat(ISSUE_LIMITS.bodyBytes / 2);
+  it.each(['ticket-description', 'ticket-comment'])('bounds %s by UTF-8 bytes on both sides', (target) => {
+    const text = 'é'.repeat(TICKET_LIMITS.bodyBytes / 2);
     expect(normalizeRefinePromptRequest({ draft: text, target })).not.toBeNull();
     expect(normalizeRefinePromptRequest({ draft: `${text}a`, target })).toBeNull();
     expect(normalizeRefinePromptResponse({ success: true, refinedPrompt: text }, target)).not.toBeNull();

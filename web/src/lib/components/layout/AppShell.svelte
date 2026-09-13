@@ -44,7 +44,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
-	import { selectedIssueFromUrl } from '$lib/issues/catalog/issue-deep-link.js';
+	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileDialogHost from '../files/FileDialogHost.svelte';
@@ -75,8 +75,8 @@
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const singletonSurfaces = getSingletonSurfaces();
-	const routeIssueId = $derived(selectedIssueFromUrl(page.url));
-	let handledIssueLink: string | null = null;
+	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
+	let handledTicketLink: string | null = null;
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
 	const minuteClock = getMinuteClock();
@@ -198,7 +198,7 @@
 			(mobileActiveDescriptor?.type === 'singleton' &&
 				(mobileActiveDescriptor.kind === 'commit' ||
 					mobileActiveDescriptor.kind === 'chat-board' ||
-					mobileActiveDescriptor.kind === 'issues' ||
+					mobileActiveDescriptor.kind === 'tickets' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
@@ -245,19 +245,19 @@
 	});
 
 	$effect(() => {
-		const id = routeIssueId;
+		const id = routeTicketId;
 		if (!id) {
-			handledIssueLink = null;
+			handledTicketLink = null;
 			return;
 		}
-		if (id === handledIssueLink) return;
-		handledIssueLink = id;
+		if (id === handledTicketLink) return;
+		handledTicketLink = id;
 		let canceled = false;
 		untrack(() => {
 			void workspace
-				.openSingletonAsTab('issues', workspace.currentWindowId)
+				.openSingletonAsTab('tickets', workspace.currentWindowId)
 				.then(() => {
-					if (!canceled) singletonSurfaces.issues().select(id);
+					if (!canceled) singletonSurfaces.tickets().select(id);
 				})
 				.catch((error) =>
 					notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
@@ -269,7 +269,7 @@
 	});
 
 	$effect(() => {
-		if (routeIssueId) return;
+		if (routeTicketId) return;
 		const chatId = page.params.id as string | undefined;
 		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
 		if (selectedChatId === undefined) return;
@@ -277,7 +277,7 @@
 	});
 
 	$effect(() => {
-		if (routeIssueId) return;
+		if (routeTicketId) return;
 		const lastSelectedChatId = sessions.lastSelectedChatId;
 		const target = restoreChatIdForBareRoute({
 			pathname: page.url.pathname,

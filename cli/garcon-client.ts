@@ -87,12 +87,12 @@ import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
 import { probeRuntime, type RuntimeConnection } from './discovery.js';
-import type { HttpIssueMutationRequest } from '@garcon/common/issue-commands';
-import { issueSearchParams } from '@garcon/common/issue-query';
-import { parseIssueWriteResult } from '@garcon/common/issue-records';
-import { parseIssueBootstrap, parseIssueDetail, parseIssueHistoryPage, parseIssuePage,
-  parseIssueProjectDefault } from '@garcon/common/issue-responses';
-import type { IssueHistoryQuery, IssueListQuery, IssueReadQuery } from '@garcon/common/issues';
+import type { HttpTicketMutationRequest } from '@garcon/common/ticket-commands';
+import { ticketSearchParams } from '@garcon/common/ticket-query';
+import { parseTicketWriteResult } from '@garcon/common/ticket-records';
+import { parseTicketBootstrap, parseTicketDetail, parseTicketHistoryPage, parseTicketPage,
+  parseTicketProjectDefault } from '@garcon/common/ticket-responses';
+import type { TicketHistoryQuery, TicketListQuery, TicketReadQuery } from '@garcon/common/tickets';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HANDOFF_REQUEST_TIMEOUT_MS = 10 * 60_000;
@@ -982,50 +982,50 @@ export class GarconClient {
     throw new CliError('transport recovery', 'submission recovery exhausted unexpectedly', 3);
   }
 
-  async getIssueBootstrap(signal?: AbortSignal) {
-    return this.#issueResponse('GET', '/bootstrap', undefined, parseIssueBootstrap, signal);
+  async getTicketBootstrap(signal?: AbortSignal) {
+    return this.#ticketResponse('GET', '/bootstrap', undefined, parseTicketBootstrap, signal);
   }
 
-  async getIssueProjectDefault(directory: string, signal?: AbortSignal) {
-    return this.#issueResponse('POST', '/project-default', { directory }, parseIssueProjectDefault, signal);
+  async getTicketProjectDefault(directory: string, signal?: AbortSignal) {
+    return this.#ticketResponse('POST', '/project-default', { directory }, parseTicketProjectDefault, signal);
   }
 
-  async listIssues(query: IssueListQuery, signal?: AbortSignal) {
-    return this.#issueResponse('GET', `?${issueSearchParams(query)}`, undefined, parseIssuePage, signal);
+  async listTickets(query: TicketListQuery, signal?: AbortSignal) {
+    return this.#ticketResponse('GET', `?${ticketSearchParams(query)}`, undefined, parseTicketPage, signal);
   }
 
-  async readIssue(query: IssueReadQuery, signal?: AbortSignal) {
-    return this.#issueResponse('GET', `/detail?${issueSearchParams(query)}`, undefined, (value) => {
-      const detail = parseIssueDetail(value);
-      if (detail.issue.id !== query.issueId) throw new Error('Issue ID disagrees with the request');
+  async readTicket(query: TicketReadQuery, signal?: AbortSignal) {
+    return this.#ticketResponse('GET', `/detail?${ticketSearchParams(query)}`, undefined, (value) => {
+      const detail = parseTicketDetail(value);
+      if (detail.ticket.id !== query.ticketId) throw new Error('Ticket ID disagrees with the request');
       return detail;
     }, signal);
   }
 
-  async getIssueHistory(query: IssueHistoryQuery, signal?: AbortSignal) {
-    return this.#issueResponse('GET', `/history?${issueSearchParams(query)}`, undefined, (value) => {
-      const page = parseIssueHistoryPage(value);
-      if (page.items.some((item) => item.issueId !== query.issueId)) throw new Error('History belongs to another issue');
+  async getTicketHistory(query: TicketHistoryQuery, signal?: AbortSignal) {
+    return this.#ticketResponse('GET', `/history?${ticketSearchParams(query)}`, undefined, (value) => {
+      const page = parseTicketHistoryPage(value);
+      if (page.items.some((item) => item.ticketId !== query.ticketId)) throw new Error('History belongs to another ticket');
       return page;
     }, signal);
   }
 
-  async mutateIssue(request: HttpIssueMutationRequest, signal?: AbortSignal) {
-    return this.#issueResponse('POST', '/mutate', request, (value) => {
-      const result = parseIssueWriteResult(value);
+  async mutateTicket(request: HttpTicketMutationRequest, signal?: AbortSignal) {
+    return this.#ticketResponse('POST', '/mutate', request, (value) => {
+      const result = parseTicketWriteResult(value);
       if (result.storeId !== request.expectedStoreId
-        || (request.payload.action !== 'create' && result.issue.id !== request.payload.issueId)) {
+        || (request.payload.action !== 'create' && result.ticket.id !== request.payload.ticketId)) {
         throw new Error('Mutation result does not match the request');
       }
       return result;
     }, signal);
   }
 
-  async #issueResponse<T>(method: 'GET' | 'POST', route: string, body: unknown,
+  async #ticketResponse<T>(method: 'GET' | 'POST', route: string, body: unknown,
     parse: (value: unknown) => T, signal?: AbortSignal): Promise<T> {
-    const value = await this.#request('issues', method, `/api/v1/issues${route}`, body, signal);
+    const value = await this.#request('tickets', method, `/api/v1/tickets${route}`, body, signal);
     try { return parse(value); }
-    catch (error) { throw new CliError('issues', 'server returned an invalid issue response', 3, { cause: error }); }
+    catch (error) { throw new CliError('tickets', 'server returned an invalid ticket response', 3, { cause: error }); }
   }
 
   async #request(

@@ -22,8 +22,8 @@ import { createPullRequestsStore } from '$lib/git/pull-requests/pull-requests-st
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
-import { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
-import type { IssuesInvalidationHub } from '$lib/issues/catalog/issues-invalidation-hub.js';
+import { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
+import type { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 import type { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { chatBoardApi } from '$lib/api/chat-boards.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
@@ -97,7 +97,7 @@ export interface WorkspaceRootDependencies {
 	terminalIdentity: { readonly clientId: string | null };
 	ws: PrimaryWsConnectionPort;
 	chatBoardInvalidations: ChatBoardInvalidationHub;
-	issuesInvalidations: IssuesInvalidationHub;
+	ticketsInvalidations: TicketsInvalidationHub;
 	getRouteIdentity(): string;
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
@@ -276,7 +276,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
 	const comparisonPreferences = new LocalGitComparisonPreferences();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
-		createIssues: () => new IssuesController({ invalidations: deps.issuesInvalidations }),
+		createTickets: () => new TicketsController({ invalidations: deps.ticketsInvalidations }),
 		createChatBoard: () =>
 			new ChatBoardController({
 				api: chatBoardApi,

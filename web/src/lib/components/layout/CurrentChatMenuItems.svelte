@@ -4,7 +4,7 @@
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
-	import CircleDot from '@lucide/svelte/icons/circle-dot';
+	import Tickets from '@lucide/svelte/icons/tickets';
 	import Info from '@lucide/svelte/icons/info';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -28,7 +28,7 @@
 		onOpenUserMessageNavigator,
 		onOpenGitHistory,
 		onOpenGitCompare,
-		onOpenIssues,
+		onOpenTickets,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -47,7 +47,7 @@
 		onOpenUserMessageNavigator?: () => void;
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
-		onOpenIssues?: () => void;
+		onOpenTickets?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -59,7 +59,7 @@
 	} = $props();
 </script>
 
-{#if onOpenGitHistory || onOpenGitCompare || onOpenIssues}
+{#if onOpenGitHistory || onOpenGitCompare || onOpenTickets}
 	{#if onOpenGitHistory}
 		<menu.Item onSelect={onOpenGitHistory}>
 			<History />
@@ -72,10 +72,10 @@
 			{m.workspace_open_git_compare()}
 		</menu.Item>
 	{/if}
-	{#if onOpenIssues}
-		<menu.Item onSelect={onOpenIssues}>
-			<CircleDot />
-			{m.workspace_open_issues()}
+	{#if onOpenTickets}
+		<menu.Item onSelect={onOpenTickets}>
+			<Tickets />
+			{m.workspace_open_tickets()}
 		</menu.Item>
 	{/if}
 	<menu.Separator />

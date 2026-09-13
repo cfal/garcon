@@ -75,7 +75,7 @@ import {
   parseNativeSessionId,
 } from '@garcon/common/native-session-lookup';
 import { argumentError } from './errors.js';
-import { ISSUE_PARSE_OPTIONS, ISSUE_STRING_OPTIONS, parseIssueCliCommand, type IssueCliCommand } from './issue-args.js';
+import { TICKET_PARSE_OPTIONS, TICKET_STRING_OPTIONS, parseTicketCliCommand, type TicketCliCommand } from './ticket-args.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
   ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
@@ -83,7 +83,7 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
-  garcon-cli [connection options] issue <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [issue-id] [options]
+  garcon-cli [connection options] ticket <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [ticket-id] [options]
   garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] start-async [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
@@ -125,7 +125,7 @@ uses notice; a style without a title displays its CLI label. --color selects cus
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
 
-Issue management:
+Ticket management:
   create --title <text> [--description <text> | --stdin] [--project <text>]
     [--cwd <directory>] [--priority <0|1|2|3>] [--label <text>...] [--assignee <owner>] [--parent-id <G-n>]
   list [--project <text>] [--query <text>] [--status <open|in-progress|in-review|closed>]
@@ -466,12 +466,12 @@ export type ParsedCliCommand =
   | ChatsCliCommand
   | SearchCliCommand
   | ReadCliCommand
-  | IssueCliCommand
+  | TicketCliCommand
   | StartAsyncCliInvocation
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
-  ...ISSUE_STRING_OPTIONS,
+  ...TICKET_STRING_OPTIONS,
   'workspace',
   'config-dir',
   'server',
@@ -1406,7 +1406,7 @@ export function parseCliArgs(
       allowPositionals: true,
       strict: true,
       options: {
-        ...ISSUE_PARSE_OPTIONS,
+        ...TICKET_PARSE_OPTIONS,
         workspace: { type: 'string' },
         'config-dir': { type: 'string' },
         server: { type: 'string' },
@@ -1507,7 +1507,7 @@ export function parseCliArgs(
 
   const commandName = parsed.positionals[0];
   if (commandName === undefined) throw argumentError('a command is required');
-  if (commandName === 'issue') return parseIssueCliCommand(parsed.positionals, values, connection, currentDirectory);
+  if (commandName === 'ticket') return parseTicketCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'stop') return parseStop(parsed, values, connection);
   if (commandName === 'permission-decision') {

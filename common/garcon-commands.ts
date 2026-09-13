@@ -3,7 +3,7 @@ import { AssistantMessage, type ChatMessage } from './chat-types.js';
 import { normalizeGarconCommandBody } from './garcon-command-text.js';
 import { garconEnvelopeOpenerEnd, garconEnvelopeSpanAt, scanGarconEnvelopeSpans,
   type GarconEnvelopeCommand, type GarconEnvelopeSpan } from './garcon-command-envelope.js';
-import { parseGarconIssueCommand, type GarconIssueCommand } from './garcon-issue-command.js';
+import { parseGarconTicketCommand, type GarconTicketCommand } from './garcon-ticket-command.js';
 import { parseGarconStartAgent, type GarconStartAgentCommand } from './garcon-start-agent.js';
 import { parseGarconResumeAgent, type GarconResumeAgentCommand } from './garcon-resume-agent.js';
 import { parseGarconStopAgent, type GarconStopAgentCommand } from './garcon-stop-agent.js';
@@ -29,7 +29,7 @@ export type GarconEdgeCommand =
   | GarconResumeAgentCommand
   | GarconStopAgentCommand
   | GarconScheduleCommand
-  | GarconIssueCommand
+  | GarconTicketCommand
   | { readonly type: 'get-chat-id' }
   | {
       readonly type: 'send-message';
@@ -198,7 +198,7 @@ function parseEnvelopeSpan(content: string, span: GarconEnvelopeSpan): ParsedEdg
       command = parseSendMessage(envelope.slice(0, openerEnd), envelope.slice(openerEnd, -GARCON_SEND_MESSAGE_CLOSE.length));
       break;
     default:
-      command = parseGarconIssueCommand(envelope);
+      command = parseGarconTicketCommand(envelope);
   }
   return command
     ? { kind: 'valid', command, start: span.start, end: span.end }
