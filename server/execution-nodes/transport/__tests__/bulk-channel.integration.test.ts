@@ -7,7 +7,7 @@ import { MAX_NODE_BULK_CHUNK_BYTES, MAX_NODE_BULK_FRAME_BYTES } from '../bulk-wi
 import { clientNodeSocketPort, serverNodeSocketPort, type NodeClientSocket } from '../bun-sockets.js';
 import { NodeSocketWriter, NODE_SOCKET_PROTOCOL_ALLOWANCE_BYTES } from '../socket-writer.js';
 
-test('real bulk channels transfer both ways while a blocked bulk sender leaves control responsive', async () => {
+test.each(['drain', 'credit'] as const)('real bulk channels transfer both ways with %s while control stays responsive', async (delivery) => {
   const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
   const authority = new AbortController();
   const physical = new AbortController();
@@ -66,7 +66,7 @@ test('real bulk channels transfer both ways while a blocked bulk sender leaves c
     const release = Promise.withResolvers<void>();
     const toNode = new NodeBulkUploads({
       async reserve(descriptor) { return nodeTransfers.reserve(owner, descriptor, authority.signal); },
-      async sendChunk(text, signal) { await controllerChannel!.sendChunk(text, signal); blocked.resolve(); await release.promise; },
+      async sendChunk(text, signal) { await (delivery === 'credit' ? controllerChannel!.sendChunkWithCredit(text, signal) : controllerChannel!.sendChunk(text, signal)); blocked.resolve(); await release.promise; },
       complete: (identity, signal) => controllerChannel!.complete(identity, signal),
       cancel: (identity) => controllerChannel!.cancel(identity),
     }, { session, authoritySignal: authority.signal });
@@ -83,7 +83,7 @@ test('real bulk channels transfer both ways while a blocked bulk sender leaves c
     expect(nodeTransfers.take(received.identity, owner)).toEqual(body);
     const toController = new NodeBulkUploads({
       async reserve(descriptor) { return controllerTransfers.reserve(owner, descriptor, authority.signal); },
-      sendChunk: (text, signal) => nodeChannel!.sendChunk(text, signal),
+      sendChunk: (text, signal) => delivery === 'credit' ? nodeChannel!.sendChunkWithCredit(text, signal) : nodeChannel!.sendChunk(text, signal),
       complete: (identity, signal) => nodeChannel!.complete(identity, signal),
       cancel: (identity) => nodeChannel!.cancel(identity),
     }, { session, authoritySignal: authority.signal });

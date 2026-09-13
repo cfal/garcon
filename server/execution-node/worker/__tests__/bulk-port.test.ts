@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeBulkError } from '../../../execution-nodes/transport/bulk-transfers.js';
+import { NodeBulkChannel, type NodeBulkReceivePort } from '../../../execution-nodes/transport/bulk-channel.js';
 import { serializeNodeBulkChunk } from '../../../execution-nodes/transport/bulk-wire.js';
 import { serializeNodeBulkFrame } from '../../../execution-nodes/transport/bulk-channel-wire.js';
 import { NodeWorkerBulkPort } from '../bulk-port.js';
@@ -12,7 +13,7 @@ const transfer = { ...session, transferId: 'synthetic-transfer' };
 const chunk = serializeNodeBulkChunk(transfer, 0, new Uint8Array([1, 2, 3]));
 const reply = serializeNodeBulkFrame({ type: 'node-bulk-result', command: 'node-bulk-complete', version: NODE_WIRE_VERSION, session, requestId: 1, result: 'completed' });
 
-function fixture() {
+function fixture(maxQueuedFrames = 4) {
   const lifetime = new AbortController();
   const connection = new AbortController();
   const closed = mock(() => {});
@@ -24,7 +25,7 @@ function fixture() {
     await drain.promise;
   }, close: mock(() => {}) } satisfies NodeWorkerWritePort;
   const writer = new NodeWorkerWriter(native, { signal: lifetime.signal,
-    maxFrameBytes: 4096, maxQueuedBytes: 16384, maxQueuedFrames: 4, reservedControlBytes: 4096, reservedControlFrames: 1,
+    maxFrameBytes: 4096, maxQueuedBytes: 16384, maxQueuedFrames, reservedControlBytes: 4096, reservedControlFrames: 1,
     reservedApplicationFrames: 1, reservedApplicationBytes: 1024,
     writeTimeoutMs: 1000, failed });
   const port = new NodeWorkerBulkPort(writer, { session, instanceId: 'synthetic-instance', connectionId: 1,
@@ -54,6 +55,25 @@ test('worker bulk awaits native chunk drain while control replies overtake queue
   } finally { await f.close(); }
 });
 
+test('bulk completion stays behind queued chunks while replies retain their reserved priority', async () => {
+  const f = fixture(5);
+  const complete = serializeNodeBulkFrame({ type: 'node-bulk-complete', version: NODE_WIRE_VERSION, transfer, requestId: 1 });
+  try {
+    const held = f.writer.send('held', 'control', 'lifecycle');
+    const pending = f.port.sendWhenWritable(chunk, f.connection.signal);
+    expect(f.port.send(complete)).toBe(true);
+    expect(f.port.send(reply)).toBe(true);
+    await f.drain(0); await held;
+    expect(parseNodeWorkerBulkText(f.written[1]!.text)?.payload).toBe(reply);
+    await f.drain(1);
+    expect(parseNodeWorkerBulkText(f.written[2]!.text)?.payload).toBe(chunk);
+    await f.drain(2); await pending;
+    expect(parseNodeWorkerBulkText(f.written[3]!.text)?.payload).toBe(complete);
+    await f.drain(3);
+    expect(f.writer.bufferedBytes).toBe(0);
+  } finally { await f.close(); }
+});
+
 test('worker bulk capacity refuses one transfer while preserving the control reservation and pipe', async () => {
   const f = fixture();
   try {
@@ -70,6 +90,31 @@ test('worker bulk capacity refuses one transfer while preserving the control res
     await Promise.all([first, second, pulse]);
     expect(f.writer.bufferedBytes).toBe(0);
   } finally { await f.close(); }
+});
+
+test('refused chunk ACK admission preserves the shared worker and lifecycle reservation', async () => {
+  const f = fixture();
+  const receiver = { append: mock(() => {}), complete: mock(() => {}), cancel: mock(() => {}) } satisfies NodeBulkReceivePort;
+  const channel = new NodeBulkChannel(f.port, receiver, { session, signal: f.connection.signal, validate() {} });
+  try {
+    const first = f.port.sendWhenWritable(chunk, f.connection.signal);
+    const second = f.port.sendWhenWritable(chunk, f.connection.signal);
+    void first.catch(() => {}); void second.catch(() => {});
+    expect(f.port.send(reply)).toBe(true);
+    channel.receive(JSON.stringify({ ...JSON.parse(chunk), type: 'node-bulk-credit-chunk' }));
+    expect(receiver.append).toHaveBeenCalledTimes(1);
+    expect(receiver.complete).not.toHaveBeenCalled();
+    expect(f.closed).not.toHaveBeenCalled();
+    expect(f.native.close).not.toHaveBeenCalled();
+    const pulse = f.writer.send('pulse', 'control', 'lifecycle');
+    await f.drain(0);
+    expect(f.written[1]!.text).toBe('pulse');
+    await f.drain(1); await f.drain(2); await f.drain(3);
+    await Promise.all([first, second, pulse]);
+    expect(f.port.send(reply)).toBe(true);
+    await f.drain(4);
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { channel.close(); await f.close(); }
 });
 
 test.each(['caller', 'connection'] as const)('a %s cancellation drops queued bulk bytes without closing the shared pipe', async (kind) => {

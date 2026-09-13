@@ -8,6 +8,8 @@ import { session } from './lifecycle-fixture.js';
 const transfer = { ...session, transferId: 'synthetic-transfer' };
 const messages: NodeBulkFrame[] = [
   { type: 'node-bulk-chunk', version: NODE_WIRE_VERSION, transfer, offset: 0, data: 'YWJj' },
+  { type: 'node-bulk-credit-chunk', version: NODE_WIRE_VERSION, transfer, offset: 0, data: 'YWJj' },
+  { type: 'node-bulk-chunk-ack', version: NODE_WIRE_VERSION, transfer, nextOffset: 3 },
   { type: 'node-bulk-complete', version: NODE_WIRE_VERSION, transfer, requestId: 1 },
   { type: 'node-bulk-cancel', version: NODE_WIRE_VERSION, transfer, requestId: 2 },
   { type: 'node-bulk-result', command: 'node-bulk-complete', version: NODE_WIRE_VERSION, session, requestId: 1, result: 'completed' },

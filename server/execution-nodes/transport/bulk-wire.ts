@@ -15,13 +15,12 @@ export interface NodeBulkDescriptor {
   readonly sha256: string;
 }
 
-export interface NodeBulkChunk {
-  readonly type: 'node-bulk-chunk';
+export type NodeBulkChunk = {
   readonly version: typeof NODE_WIRE_VERSION;
   readonly transfer: NodeBulkIdentity;
   readonly offset: number;
   readonly data: string;
-}
+} & ({ readonly type: 'node-bulk-chunk' } | { readonly type: 'node-bulk-credit-chunk' });
 
 export function parseNodeBulkIdentity(value: unknown): NodeBulkIdentity | null {
   if (!isRecord(value) || Object.keys(value).length !== 4
@@ -48,10 +47,11 @@ export function parseNodeBulkChunkText(text: string): NodeBulkChunk | null {
 }
 
 export function parseNodeBulkChunk(value: unknown): NodeBulkChunk | null {
-  if (!isRecord(value) || Object.keys(value).length !== 5 || value.type !== 'node-bulk-chunk' || value.version !== NODE_WIRE_VERSION
+  if (!isRecord(value) || Object.keys(value).length !== 5
+    || value.type !== 'node-bulk-chunk' && value.type !== 'node-bulk-credit-chunk' || value.version !== NODE_WIRE_VERSION
     || !Number.isSafeInteger(value.offset) || (value.offset as number) < 0 || !validChunkData(value.data)) return null;
   const transfer = parseNodeBulkIdentity(value.transfer);
-  return transfer ? { type: 'node-bulk-chunk', version: NODE_WIRE_VERSION, transfer, offset: value.offset as number, data: value.data } : null;
+  return transfer ? { type: value.type, version: NODE_WIRE_VERSION, transfer, offset: value.offset as number, data: value.data } : null;
 }
 
 export function serializeNodeBulkChunk(transfer: NodeBulkIdentity, offset: number, chunk: Uint8Array): string {

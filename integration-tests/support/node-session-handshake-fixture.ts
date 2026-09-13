@@ -33,7 +33,7 @@ import { NodeSessionClient } from '../../server/execution-nodes/session-client.j
 import { NodeEnrollmentTransport } from '../../server/execution-nodes/trust.js';
 import { clientNodeSocketPort, serverNodeSocketPort, type NodeClientSocket } from '../../server/execution-nodes/transport/bun-sockets.js';
 import { NodeSocketWriter } from '../../server/execution-nodes/transport/socket-writer.js';
-import { NodeBulkSessionChannel, type NodeBulkSessionBinding } from '../../server/execution-nodes/transport/bulk-session-channel.js';
+import { NodeBulkSessionChannel, type NodeBulkControlBinding } from '../../server/execution-nodes/transport/bulk-session-channel.js';
 import type { NodeSessionAccepted } from '../../server/execution-nodes/transport/session-wire.js';
 import { DomainError } from '../../server/lib/domain-error.js';
 import type { TestCertificate } from './tls-certificates.js';
@@ -57,6 +57,7 @@ export interface ControllerFixtureConnection {
   readonly signal: AbortSignal;
   readonly received: Set<(frame: NodeWorkerApplicationFrame, text: string) => void>;
   readonly bulk: Promise<NodeBulkSessionChannel>;
+  readonly currentBulk: NodeBulkSessionChannel | null;
   readonly bulkReceived: Set<(frame: NodeWorkerBulkFrame) => void>;
   validate(): void;
 }
@@ -99,7 +100,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   let socketBacklog: { bytes: number; writer: NodeSocketWriter } | null = null;
   let nodeWriter: NodeSocketWriter | null = null;
   const controllers = new Map<string, PromiseWithResolvers<ControllerFixtureConnection>>();
-  const controllerBindings = new Map<string, { binding: NodeBulkSessionBinding; connection: ControllerFixtureConnection;
+  const controllerBindings = new Map<string, { binding: NodeBulkControlBinding; connection: ControllerFixtureConnection;
     ready: PromiseWithResolvers<NodeBulkSessionChannel>; channel: NodeBulkSessionChannel | null }>();
   const connectionKey = (session: NodeSessionIdentity, connectionId: number) =>
     JSON.stringify([session.controllerBootId, session.nodeBootId, session.logicalSessionId, connectionId]);
@@ -207,9 +208,9 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
               received(frame, text) { for (const listener of received) listener(frame, text); },
               disconnected() { physical.abort(); } });
             const bulk = Promise.withResolvers<NodeBulkSessionChannel>(); void bulk.promise.catch(() => {});
-            const fixtureConnection: ControllerFixtureConnection = { client, signal: physical.signal, received, validate,
-              bulk: bulk.promise, bulkReceived: new Set() };
             const key = connectionKey(connection.session, connection.connectionId);
+            const fixtureConnection: ControllerFixtureConnection = { client, signal: physical.signal, received, validate,
+              bulk: bulk.promise, bulkReceived: new Set(), get currentBulk() { return controllerBindings.get(key)?.channel ?? null; } };
             const owner = { binding: { principal: authority.principal, session: connection.session, connectionId: connection.connectionId, instanceIds,
               signal: physical.signal, validate }, connection: fixtureConnection, ready: bulk, channel: null };
             controllerBindings.set(key, owner);
@@ -248,6 +249,45 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     let handshake: NodeControllerHandshake | null = null;
     let bridge: NodeSessionBridge | null = null;
     let bulk: NodeBulkSessionChannel | null = null;
+    let bulkAttempt = 0;
+    const openBulk = (connection: NodeHostedConnection): Promise<NodeBulkSessionChannel> => {
+      const attempt = ++bulkAttempt;
+      const pending = Promise.withResolvers<NodeBulkSessionChannel>(); void pending.promise.catch(() => {});
+      const controlSignal = AbortSignal.any([physical.signal, connection.lease.signal]);
+      controlSignal.throwIfAborted();
+      const bulkSocket = createNodeBulkSocket(configured); clients.push(bulkSocket);
+      const bulkPhysical = new AbortController();
+      let channel: NodeBulkSessionChannel | null = null;
+      const closeBulk = () => {
+        bulkPhysical.abort(); bulkSocket.terminate();
+        pending.reject(new Error('Synthetic bulk connection closed'));
+      };
+      controlSignal.addEventListener('abort', closeBulk, { once: true });
+      bulkSocket.addEventListener('open', () => {
+        const bulkWriter = new NodeSocketWriter(clientNodeSocketPort(bulkSocket), { ...socketLimits, signal: bulkPhysical.signal });
+        const opened = channel = new NodeBulkSessionChannel(bulkWriter, { side: 'node', signal: bulkPhysical.signal,
+          binding: { principal: { controllerId: configured.controllerId, nodeId: configured.nodeId }, session: connection.lease.session,
+            connectionId: connection.connectionId, instanceIds, signal: controlSignal,
+            validate() { coordinator.supervisor.assertConnection(connection.lease); } },
+          validate() { bulkPhysical.signal.throwIfAborted(); }, disconnected: closeBulk,
+          received(frame) {
+            const submission = coordinator.peer(connection).forward(frame, bulkPhysical.signal);
+            void submission.drained.catch(closeBulk);
+          } });
+        void opened.ready.then(() => {
+          if (attempt !== bulkAttempt) { closeBulk(); return; }
+          bulk = opened; pending.resolve(opened);
+        }, closeBulk);
+        opened.start();
+      });
+      bulkSocket.addEventListener('message', (event) => {
+        if (typeof event.data !== 'string' || Buffer.byteLength(event.data) > MAX_NODE_WORKER_LIFECYCLE_BYTES) closeBulk();
+        else channel?.receive(event.data);
+      });
+      bulkSocket.addEventListener('error', closeBulk);
+      bulkSocket.addEventListener('close', () => { controlSignal.removeEventListener('abort', closeBulk); closeBulk(); });
+      return pending.promise;
+    };
     const deadline = setTimeout(() => { ready.reject(new Error('Synthetic node handshake timeout')); physical.abort(); socket.terminate(); }, 8000);
     socket.addEventListener('open', () => {
       const port = clientNodeSocketPort(socket);
@@ -273,29 +313,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
             signal: AbortSignal.any([physical.signal, connection.lease.signal]), validate() { physical.signal.throwIfAborted(); },
             disconnected() { physical.abort(); } });
           output!.bridge = bridge;
-          const bulkSocket = createNodeBulkSocket(configured); clients.push(bulkSocket);
-          const bulkPhysical = new AbortController();
-          const closeBulk = () => { bulkPhysical.abort(); bulkSocket.terminate(); };
-          const controlSignal = AbortSignal.any([physical.signal, connection.lease.signal]);
-          controlSignal.addEventListener('abort', closeBulk, { once: true });
-          bulkSocket.addEventListener('open', () => {
-            const bulkWriter = new NodeSocketWriter(clientNodeSocketPort(bulkSocket), { ...socketLimits, signal: bulkPhysical.signal });
-            bulk = new NodeBulkSessionChannel(bulkWriter, { side: 'node', signal: bulkPhysical.signal,
-              binding: { principal: { controllerId: configured.controllerId, nodeId: configured.nodeId }, session: connection.lease.session, connectionId: connection.connectionId, instanceIds, signal: controlSignal,
-                validate() { coordinator.supervisor.assertConnection(connection.lease); } },
-              validate() { bulkPhysical.signal.throwIfAborted(); }, disconnected: closeBulk,
-              received(frame) {
-                const submission = coordinator.peer(connection).forward(frame, bulkPhysical.signal);
-                void submission.drained.catch(closeBulk);
-              } });
-            bulk.start();
-          });
-          bulkSocket.addEventListener('message', (event) => {
-            if (typeof event.data !== 'string' || Buffer.byteLength(event.data) > MAX_NODE_WORKER_LIFECYCLE_BYTES) closeBulk();
-            else bulk?.receive(event.data);
-          });
-          bulkSocket.addEventListener('error', closeBulk);
-          bulkSocket.addEventListener('close', () => { controlSignal.removeEventListener('abort', closeBulk); bulkPhysical.abort(); });
+          void openBulk(connection).catch(() => {});
           ready.resolve(connection);
         }, disconnect(connection) { void coordinator.disconnect(connection).catch(ready.reject); },
         disconnected(error) { physical.abort(); ready.reject(error); } });
@@ -311,7 +329,8 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     socket.addEventListener('error', () => { ready.reject(new Error('Synthetic socket rejected')); physical.abort(); socket.terminate(); });
     socket.addEventListener('close', () => { clearTimeout(deadline); physical.abort(); handshake?.close(); ready.reject(new Error('Synthetic socket closed')); closed.resolve(); });
     void ready.promise.then(() => clearTimeout(deadline), () => clearTimeout(deadline));
-    return { ready: ready.promise, closed: closed.promise, socket, stop() { physical.abort(); socket.terminate(); } };
+    return { ready: ready.promise, closed: closed.promise, socket,
+      async replaceBulk() { return openBulk(await ready.promise); }, stop() { physical.abort(); socket.terminate(); } };
   };
   return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, sessionAdmissions, workerFrames, controllerFrames, nodeFrames, containmentRequests,
     async pairAnotherNode() {

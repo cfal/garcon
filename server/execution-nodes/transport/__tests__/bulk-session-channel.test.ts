@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import type { NodeSessionIdentity } from '../../../../common/node-operation.js';
 import type { NodeWorkerBulkFrame } from '../../../execution-node/worker/bulk-protocol.js';
-import { NodeBulkSessionChannel, type NodeBulkSessionBinding } from '../bulk-session-channel.js';
+import { NodeBulkSessionChannel, type NodeBulkControlBinding } from '../bulk-session-channel.js';
 import { serializeNodeBulkFrame } from '../bulk-channel-wire.js';
 import { serializeNodeBulkSessionFrame } from '../bulk-session-wire.js';
 import { NodeSocketWriter, type NodeSocketPort } from '../socket-writer.js';
@@ -20,7 +20,7 @@ function fixture(authenticated = principal) {
   const controllerReceived: NodeWorkerBulkFrame[] = [];
   const nodeFailed = mock((_error: unknown) => {});
   const controllerFailed = mock((_error: unknown) => {});
-  const binding: NodeBulkSessionBinding = { principal, session, connectionId, instanceIds: new Set(['synthetic-instance']),
+  const binding: NodeBulkControlBinding = { principal, session, connectionId, instanceIds: new Set(['synthetic-instance']),
     signal: control.signal, validate() { control.signal.throwIfAborted(); } };
   let nodeBuffered = 0;
   let controllerBuffered = 0;
@@ -34,7 +34,7 @@ function fixture(authenticated = principal) {
     maxDrainWaiters: 8, drainTimeoutMs: 5000 };
   const nodeWriter = new NodeSocketWriter(nodePort, { ...limits, signal: nodePhysical.signal });
   const controllerWriter = new NodeSocketWriter(controllerPort, { ...limits, signal: controllerPhysical.signal });
-  const capture = mock((_principal: typeof principal, _value: NodeSessionIdentity, _id: number) => binding);
+  const capture = mock((_principal: typeof principal, _value: NodeSessionIdentity, _id: number, _attempt: string) => binding);
   const controller = new NodeBulkSessionChannel(controllerWriter, { side: 'controller', principal: authenticated, signal: controllerPhysical.signal, capture,
     validate() {}, received: (frame) => controllerReceived.push(frame), disconnected: controllerFailed });
   const node = new NodeBulkSessionChannel(nodeWriter, { side: 'node', binding, signal: nodePhysical.signal,
@@ -65,6 +65,32 @@ test('a node-initiated bulk handshake captures the existing control session and 
   expect(f.control.signal.aborted).toBe(false);
 });
 
+test('bulk attempts have distinct identities and their captured signals end with the physical socket', async () => {
+  const first = fixture(); await first.connect();
+  const node = await first.node.ready;
+  const controller = await first.controller.ready;
+  expect(node.bulkAttemptId).toBe(controller.bulkAttemptId);
+  expect(first.capture).toHaveBeenCalledWith(principal, session, connectionId, node.bulkAttemptId);
+  first.node.close(); first.controller.close();
+  expect(node.signal.aborted).toBe(true);
+  expect(controller.signal.aborted).toBe(true);
+  expect(first.control.signal.aborted).toBe(false);
+  const second = fixture(); await second.connect();
+  expect((await second.node.ready).bulkAttemptId).not.toBe(node.bulkAttemptId);
+  expect((await second.node.ready).signal.aborted).toBe(false);
+});
+
+test('a ready frame from another bulk attempt cannot activate a replacement socket', async () => {
+  const first = fixture(); await first.connect();
+  const old = await first.node.ready;
+  const replacement = fixture(); replacement.node.start();
+  replacement.node.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-ready', version: 1,
+    session, connectionId, bulkAttemptId: old.bulkAttemptId }));
+  await expect(replacement.node.ready).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
+  expect(replacement.nodeReceived).toEqual([]);
+  expect(replacement.control.signal.aborted).toBe(false);
+});
+
 test('bulk backpressure waits without consuming control authority or losing its original frame', async () => {
   const f = fixture(); await f.connect(); f.saturateNode();
   expect(f.node.send(f.response)).toBe(false);
@@ -80,7 +106,7 @@ test.each(['nodeId', 'controllerId'] as const)('a bulk credential cannot capture
   const f = fixture(foreign);
   f.node.start();
   await expect(f.controller.ready).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
-  expect(f.capture).toHaveBeenCalledWith(foreign, session, connectionId);
+  expect(f.capture).toHaveBeenCalledWith(foreign, session, connectionId, expect.any(String));
   expect(f.nodeReceived).toEqual([]); expect(f.controllerReceived).toEqual([]);
   expect(f.control.signal.aborted).toBe(false);
 });
@@ -115,7 +141,7 @@ test('control replacement aborts its bulk connection and queued frames cannot en
 
 test('a stale handshake cannot capture or replace current control authority', async () => {
   const f = fixture();
-  f.controller.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1, session, connectionId: 1 }));
+  f.controller.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1, session, connectionId: 1, bulkAttemptId: 'synthetic-attempt' }));
   await expect(f.controller.ready).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
   expect(f.control.signal.aborted).toBe(false);
 });
@@ -134,7 +160,7 @@ test.each(['node', 'controller'] as const)('wrong-direction and foreign-instance
 test.each(['controllerBootId', 'nodeBootId', 'logicalSessionId'] as const)('bulk handshake cannot claim a foreign %s', async (key) => {
   const f = fixture();
   f.controller.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1,
-    session: { ...session, [key]: 'synthetic-foreign' }, connectionId }));
+    session: { ...session, [key]: 'synthetic-foreign' }, connectionId, bulkAttemptId: 'synthetic-attempt' }));
   await expect(f.controller.ready).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
   expect(f.control.signal.aborted).toBe(false);
 });
@@ -143,6 +169,6 @@ test('application data before handshake is rejected and duplicate handshakes can
   const first = fixture(); first.controller.receive(JSON.stringify(first.response));
   await expect(first.controller.ready).rejects.toThrow(); expect(first.capture).not.toHaveBeenCalled();
   const second = fixture(); await second.connect();
-  second.controller.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1, session, connectionId }));
+  second.controller.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1, session, connectionId, bulkAttemptId: 'synthetic-attempt' }));
   expect(second.controllerFailed).toHaveBeenCalledTimes(1); expect(second.capture).toHaveBeenCalledTimes(1);
 });

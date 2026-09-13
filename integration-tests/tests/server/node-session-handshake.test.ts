@@ -107,7 +107,8 @@ describe.skipIf(!nodeSessionSystemdAvailable)('authenticated session handshake o
       ]) {
         const socket = createNodeBulkSocket(pairing);
         const closed = Promise.withResolvers<void>();
-        socket.addEventListener('open', () => socket.send(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1, ...binding })));
+        socket.addEventListener('open', () => socket.send(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1,
+          ...binding, bulkAttemptId: 'synthetic-invalid-binding' })));
         socket.addEventListener('message', () => closed.reject(new Error('Synthetic invalid bulk binding was accepted')));
         socket.addEventListener('close', () => closed.resolve());
         socket.addEventListener('error', () => closed.reject(new Error('Synthetic bulk upgrade failed before binding validation')));
@@ -139,6 +140,49 @@ describe.skipIf(!nodeSessionSystemdAvailable)('authenticated session handshake o
       expect(replacement.lease.session).toEqual(connection.lease.session);
       expect(replacement.connectionId).toBe(connection.connectionId + 1);
       expect(f.processes.size).toBe(1);
+    } finally { await f.dispose(); }
+  }, 15_000);
+
+  test('bulk replacement retires the captured attempt while preserving control and worker ownership', async () => {
+    const f = await fixture();
+    try {
+      const node = f.connect(); const connection = await node.ready;
+      const controller = await f.controller(connection); const original = await controller.bulk;
+      const originalBinding = await original.ready;
+      const replacement = await withTimeout(node.replaceBulk(), 5000, () => 'Synthetic replacement bulk connection did not become ready');
+      const nodeBinding = await replacement.ready;
+      const current = controller.currentBulk!; const binding = await current.ready;
+      expect(current).not.toBe(original);
+      expect(binding.bulkAttemptId).not.toBe(originalBinding.bulkAttemptId);
+      expect(nodeBinding.bulkAttemptId).toBe(binding.bulkAttemptId);
+      expect(binding.session).toEqual(originalBinding.session);
+      expect(binding.connectionId).toBe(originalBinding.connectionId);
+      expect(originalBinding.signal.aborted).toBe(true);
+      expect(binding.signal.aborted).toBe(false);
+      expect(controller.signal.aborted).toBe(false);
+      expect(connection.lease.authoritySignal.aborted).toBe(false);
+      expect(f.processes.size).toBe(1); expect(f.upgrades()).toBe(1); expect(f.bulkUpgrades()).toBe(2);
+
+      const transfer = { ...binding.session, transferId: 'synthetic-replacement-transfer' };
+      const request: NodeWorkerBulkFrame = { type: 'node-worker-bulk', version: 1, session: binding.session,
+        connectionId: binding.connectionId, instanceId: 'synthetic-instance',
+        payload: serializeNodeBulkFrame({ type: 'node-bulk-cancel', version: 1, transfer, requestId: 1 }) };
+      expect(() => original.send(request)).toThrow();
+      const result = Promise.withResolvers<NodeBulkReply>();
+      const observe = (frame: NodeWorkerBulkFrame) => {
+        const reply = parseNodeBulkFrameText(frame.payload);
+        if (reply?.type === 'node-bulk-result' && reply.requestId === 1) result.resolve(reply);
+      };
+      controller.bulkReceived.add(observe);
+      try {
+        expect(current.send(request)).toBe(true);
+        expect(await withTimeout(result.promise, 5000, () => 'Synthetic replacement bulk transfer did not complete'))
+          .toMatchObject({ session: binding.session, result: 'cancelled' });
+      } finally { controller.bulkReceived.delete(observe); }
+      expect((await controller.client.service.call({ method: 'begin-output-recovery' }, controller.signal)).kind).toBe('output-recovery');
+      current.close();
+      expect(binding.signal.aborted).toBe(true);
+      expect(controller.signal.aborted).toBe(false);
     } finally { await f.dispose(); }
   }, 15_000);
 

@@ -29,7 +29,19 @@ interface PendingRequest {
   readonly timer: { cancel(): void };
 }
 
-interface OutgoingTransfer { failure: NodeBulkError | null }
+interface ChunkCredit {
+  readonly nextOffset: number;
+  readonly result: PromiseWithResolvers<void>;
+  readonly cancellation: AbortController;
+  readonly detach: () => void;
+  readonly timer: { cancel(): void };
+}
+
+interface OutgoingTransfer {
+  failure: NodeBulkError | null;
+  throughOffset: number;
+  credit: ChunkCredit | null;
+}
 
 /** Transfers only pre-reserved bodies; grants are installed through the authenticated control channel. */
 export class NodeBulkChannel {
@@ -72,20 +84,27 @@ export class NodeBulkChannel {
     let outgoing = this.#outgoing.get(chunk.transfer.transferId);
     if (!outgoing) {
       if (this.#outgoing.size >= this.#maxPending) throw new NodeBulkError('NODE_CAPACITY', 'Node bulk transfers are at capacity');
-      outgoing = { failure: null };
+      outgoing = { failure: null, throughOffset: 0, credit: null };
       this.#outgoing.set(chunk.transfer.transferId, outgoing);
     }
+    if (outgoing.credit) throw invalid();
+    const credit = chunk.type === 'node-bulk-credit-chunk' ? this.#reserveCredit(outgoing, chunk.offset, chunk.data, signal) : null;
+    const sending = credit ? AbortSignal.any([signal, credit.cancellation.signal]) : signal;
     try {
       if (outgoing.failure) throw outgoing.failure;
-      await this.writer.sendWhenWritable(serialized, signal, () => {
+      await this.writer.sendWhenWritable(serialized, sending, () => {
         this.#validate();
         if (outgoing.failure) throw outgoing.failure;
       });
-      await this.writer.writable(signal);
+      await this.writer.writable(sending);
       this.#validate();
       signal.throwIfAborted();
       if (outgoing.failure) throw outgoing.failure;
+      await credit?.result.promise;
+      this.#validate(); signal.throwIfAborted();
+      if (outgoing.failure) throw outgoing.failure;
     } catch (error) {
+      if (credit) this.#failOutgoing(outgoing, unavailable(), error);
       if (error instanceof NodeSocketWriteError && error.code === 'NODE_SOCKET_CAPACITY') {
         throw new NodeBulkError('NODE_CAPACITY', 'Node bulk writers are at capacity');
       }
@@ -94,10 +113,18 @@ export class NodeBulkChannel {
     }
   }
 
+  /** Waits for the receiving endpoint to append this chunk before allowing another chunk. */
+  sendChunkWithCredit(serialized: string, signal: AbortSignal): Promise<void> {
+    const chunk = parseNodeBulkChunkText(serialized);
+    if (!chunk) return Promise.reject(invalid());
+    return this.sendChunk(serializeNodeBulkFrame({ ...chunk, type: 'node-bulk-credit-chunk' }), signal);
+  }
+
   async complete(identity: NodeBulkIdentity, signal: AbortSignal): Promise<void> {
     const transfer = this.#transfer(identity);
+    const outgoing = this.#outgoing.get(transfer.transferId);
+    if (outgoing?.credit) throw invalid();
     try {
-      const outgoing = this.#outgoing.get(transfer.transferId);
       if (outgoing?.failure) throw outgoing.failure;
       await this.#request('node-bulk-complete', transfer, signal);
       if (outgoing?.failure) throw outgoing.failure;
@@ -107,7 +134,7 @@ export class NodeBulkChannel {
   async cancel(identity: NodeBulkIdentity): Promise<void> {
     const transfer = this.#transfer(identity);
     const outgoing = this.#outgoing.get(transfer.transferId);
-    if (outgoing) outgoing.failure = unavailable();
+    if (outgoing) this.#failOutgoing(outgoing, unavailable());
     this.#outgoing.delete(transfer.transferId);
     await this.#request('node-bulk-cancel', transfer, this.options.signal);
   }
@@ -128,11 +155,26 @@ export class NodeBulkChannel {
         else if (frame.result === 'NODE_BULK_INVALID' || frame.result === 'NODE_BULK_UNAVAILABLE') {
           this.#settle(key, new NodeBulkError(frame.result, 'Node rejected the bulk transfer'));
         } else throw invalid();
+      } else if (frame.type === 'node-bulk-chunk-ack') {
+        const outgoing = this.#outgoing.get(frame.transfer.transferId);
+        if (!outgoing || outgoing.failure || frame.nextOffset <= outgoing.throughOffset) return;
+        if (!outgoing.credit || frame.nextOffset !== outgoing.credit.nextOffset) throw invalid();
+        outgoing.throughOffset = frame.nextOffset;
+        this.#settleCredit(outgoing);
       } else if (frame.type === 'node-bulk-failed') {
         const outgoing = this.#outgoing.get(frame.transfer.transferId);
-        if (outgoing) outgoing.failure = new NodeBulkError(frame.code, 'Node rejected the bulk transfer');
-      } else if (frame.type === 'node-bulk-chunk') {
-        try { this.receiver.append(frame.transfer, frame.offset, Buffer.from(frame.data, 'base64')); }
+        if (outgoing) this.#failOutgoing(outgoing, new NodeBulkError(frame.code, 'Node rejected the bulk transfer'));
+      } else if (frame.type === 'node-bulk-chunk' || frame.type === 'node-bulk-credit-chunk') {
+        try {
+          const bytes = Buffer.from(frame.data, 'base64');
+          this.receiver.append(frame.transfer, frame.offset, bytes);
+          if (frame.type === 'node-bulk-credit-chunk') {
+            this.#validate();
+            // Refused ACK admission is a lost reply, not permission to retire the shared worker.
+            this.writer.send(serializeNodeBulkFrame({ type: 'node-bulk-chunk-ack', version: NODE_WIRE_VERSION,
+              transfer: frame.transfer, nextOffset: frame.offset + bytes.byteLength }));
+          }
+        }
         catch (error) {
           const code = error instanceof NodeBulkError && error.code === 'NODE_BULK_INVALID' ? error.code : 'NODE_BULK_UNAVAILABLE';
           this.#validate();
@@ -151,7 +193,7 @@ export class NodeBulkChannel {
     this.#closed = true;
     this.#detach();
     for (const key of this.#pending.keys()) this.#settle(key, unavailable());
-    for (const outgoing of this.#outgoing.values()) outgoing.failure = unavailable();
+    for (const outgoing of this.#outgoing.values()) this.#failOutgoing(outgoing, unavailable());
     this.#outgoing.clear();
     this.writer.close();
   }
@@ -206,6 +248,34 @@ export class NodeBulkChannel {
     pending.detach();
     if (error === undefined) pending.result.resolve();
     else pending.result.reject(error);
+  }
+
+  #reserveCredit(outgoing: OutgoingTransfer, offset: number, data: string, signal: AbortSignal): ChunkCredit {
+    if (outgoing.failure) throw outgoing.failure;
+    if (outgoing.throughOffset !== offset) throw invalid();
+    const nextOffset = offset + data.length / 4 * 3 - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+    if (!Number.isSafeInteger(nextOffset)) throw invalid();
+    const cancel = () => this.#failOutgoing(outgoing, unavailable(), signal.reason);
+    const credit: ChunkCredit = { nextOffset, result: Promise.withResolvers<void>(), cancellation: new AbortController(),
+      detach: () => signal.removeEventListener('abort', cancel),
+      timer: (this.options.scheduleTimeout ?? scheduleTimeout)(() => this.#failOutgoing(outgoing, unavailable()), this.#timeoutMs) };
+    outgoing.credit = credit;
+    signal.addEventListener('abort', cancel, { once: true });
+    void credit.result.promise.catch(() => {});
+    return credit;
+  }
+
+  #failOutgoing(outgoing: OutgoingTransfer, error: NodeBulkError, reason: unknown = error): void {
+    outgoing.failure = error;
+    this.#settleCredit(outgoing, reason);
+  }
+
+  #settleCredit(outgoing: OutgoingTransfer, error?: unknown): void {
+    const credit = outgoing.credit;
+    if (!credit) return;
+    outgoing.credit = null; credit.timer.cancel(); credit.detach();
+    if (error === undefined) credit.result.resolve();
+    else { credit.cancellation.abort(error); credit.result.reject(error); }
   }
 
   #validate(): void {

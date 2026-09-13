@@ -75,6 +75,130 @@ test('the typed channel exposes only fully verified bytes to the captured owner'
   expect(f.replies.every((text) => !text.includes('synthetic private body'))).toBe(true);
 });
 
+test('chunk credit waits for receiver append and an exact acknowledgement before advancing', async () => {
+  const f = fixture(); f.holdReplies();
+  const bytes = Buffer.from('synthetic body'); const transfer = f.reserve(bytes);
+  let advanced = false;
+  const first = f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 0, bytes.subarray(0, 4)), f.authority.signal)
+    .then(() => { advanced = true; });
+  await Promise.resolve();
+  expect(f.transfers.status(transfer)?.receivedBytes).toBe(4);
+  expect(advanced).toBe(false);
+  expect(parseNodeBulkFrameText(f.replies[0]!)).toMatchObject({ type: 'node-bulk-chunk-ack', transfer, nextOffset: 4 });
+  await expect(f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 4, bytes.subarray(4)), f.authority.signal))
+    .rejects.toMatchObject({ code: 'NODE_BULK_INVALID' });
+  await expect(f.client.complete(transfer, f.authority.signal)).rejects.toMatchObject({ code: 'NODE_BULK_INVALID' });
+  expect(f.outbound).toHaveLength(1);
+  f.client.receive(f.replies[0]!); await first;
+  advanced = false;
+  const second = f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 4, bytes.subarray(4)), f.authority.signal)
+    .then(() => { advanced = true; });
+  f.client.receive(f.replies[0]!); await Promise.resolve();
+  expect(advanced).toBe(false);
+  f.client.receive(f.replies[1]!); await second;
+  const completed = f.client.complete(transfer, f.authority.signal);
+  f.client.receive(f.replies[2]!); await completed;
+  expect(f.transfers.take(transfer, f.owner)).toEqual(bytes);
+  expect(f.timers.every((timer) => timer.cancelled)).toBe(true);
+});
+
+test('inline chunk acknowledgement cannot outrun installation of its credit waiter', async () => {
+  const f = fixture(); const bytes = Buffer.from('synthetic body'); const transfer = f.reserve(bytes);
+  await f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 0, bytes), f.authority.signal);
+  await f.client.complete(transfer, f.authority.signal);
+  expect(f.transfers.take(transfer, f.owner)).toEqual(bytes);
+  expect(f.replies.map((reply) => parseNodeBulkFrameText(reply)?.type)).toEqual(['node-bulk-chunk-ack', 'node-bulk-result']);
+  expect(f.timers.every((timer) => timer.cancelled)).toBe(true);
+});
+
+test.each(['timeout', 'abort', 'close'] as const)('lost chunk credit remains incomplete after %s without retransmission', async (cause) => {
+  const f = fixture(); f.holdReplies();
+  const bytes = Buffer.from('synthetic body'); const transfer = f.reserve(bytes); const caller = new AbortController();
+  const waiting = f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 0, bytes), caller.signal).catch((error) => error);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  if (cause === 'timeout') f.timers[0]!.callback();
+  else if (cause === 'abort') caller.abort(new Error('Synthetic caller cancellation'));
+  else f.client.close();
+  const outcome = await waiting;
+  if (cause === 'abort') expect(outcome).toBe(caller.signal.reason);
+  else expect(outcome).toMatchObject({ code: 'NODE_BULK_UNAVAILABLE' });
+  f.client.receive(f.replies[0]!);
+  expect(f.outbound).toHaveLength(1);
+  expect(f.transfers.status(transfer)?.phase).toBe('receiving');
+  expect(f.timers.every((timer) => timer.cancelled)).toBe(true);
+  expect(f.authority.signal.aborted).toBe(false);
+});
+
+test('incorrect chunk credit closes only its physical channel without completing bytes', async () => {
+  const f = fixture(); f.holdReplies();
+  const bytes = Buffer.from('synthetic body'); const transfer = f.reserve(bytes);
+  const waiting = f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 0, bytes), f.authority.signal).catch((error) => error);
+  f.client.receive(serializeNodeBulkFrame({ type: 'node-bulk-chunk-ack', version: NODE_WIRE_VERSION,
+    transfer, nextOffset: bytes.length + 1 }));
+  expect(await waiting).toBeInstanceOf(Error);
+  expect(f.clientWriter.close).toHaveBeenCalledTimes(1);
+  expect(() => f.transfers.take(transfer, f.owner)).toThrow();
+  expect(f.authority.signal.aborted).toBe(false);
+});
+
+test.each(['admission', 'post-submit'] as const)('credit expiry interrupts a pending %s writer wait before drainage', async (phase) => {
+  const physical = new AbortController();
+  let bufferedBytes = phase === 'admission' ? MAX_NODE_BULK_FRAME_BYTES : 0;
+  const port = { open: true, get bufferedBytes() { return bufferedBytes; }, bufferedFrameBytes: (length: number) => length + 10,
+    send: mock((text: string) => { bufferedBytes += Buffer.byteLength(text) + 10; return true; }), terminate: mock(() => {}) } satisfies NodeSocketPort;
+  const writer = new NodeSocketWriter(port, { signal: physical.signal, maxFrameBytes: MAX_NODE_BULK_FRAME_BYTES,
+    maxBufferedBytes: MAX_NODE_BULK_FRAME_BYTES + 4096 + 10, reservedControlBytes: 4096, reservedLifecycleBytes: 1024,
+    maxDrainWaiters: 2, drainTimeoutMs: 1000, schedulePoll: () => ({ cancel() {} }) });
+  const timers: (() => void)[] = [];
+  const channel = new NodeBulkChannel(writer, { append() {}, complete() {}, cancel() {} }, {
+    session, signal: physical.signal, validate() {}, scheduleTimeout(callback) { timers.push(callback); return { cancel() {} }; },
+  });
+  try {
+    let settled = false;
+    const transfer = { ...session, transferId: 'synthetic-credit-wait' };
+    const pending = channel.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 0, Buffer.from('synthetic')), physical.signal)
+      .catch((error: unknown) => { settled = true; return error; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(port.send).toHaveBeenCalledTimes(phase === 'admission' ? 0 : 1);
+    timers[0]!();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(true);
+    expect(await pending).toMatchObject({ code: 'NODE_BULK_UNAVAILABLE' });
+    bufferedBytes = 0; writer.drain();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(port.send).toHaveBeenCalledTimes(phase === 'admission' ? 0 : 1);
+    expect(port.terminate).not.toHaveBeenCalled();
+    await expect(channel.complete(transfer, physical.signal)).rejects.toMatchObject({ code: 'NODE_BULK_UNAVAILABLE' });
+  } finally { physical.abort(); channel.close(); }
+});
+
+test('append failure rejects chunk credit without acknowledging or poisoning a sibling transfer', async () => {
+  const f = fixture(); const transfer = f.reserve();
+  f.receiver.append.mockImplementationOnce(() => { throw new Error('Synthetic append failure'); });
+  await expect(f.client.sendChunkWithCredit(serializeNodeBulkChunk(transfer, 0, Buffer.from('synthetic body')), f.authority.signal))
+    .rejects.toMatchObject({ code: 'NODE_BULK_UNAVAILABLE' });
+  expect(f.replies.map((reply) => parseNodeBulkFrameText(reply)?.type)).toEqual(['node-bulk-failed']);
+  const bytes = Buffer.from('synthetic sibling'); const sibling = f.reserve(bytes);
+  await f.client.sendChunkWithCredit(serializeNodeBulkChunk(sibling, 0, bytes), f.authority.signal);
+  await f.client.complete(sibling, f.authority.signal);
+  expect(f.transfers.take(sibling, f.owner)).toEqual(bytes);
+  expect(f.clientWriter.close).not.toHaveBeenCalled();
+});
+
+test('chunk credit strictly validates both wire directions', () => {
+  const transfer = { ...session, transferId: 'synthetic-transfer' };
+  const ack = { type: 'node-bulk-chunk-ack', version: NODE_WIRE_VERSION, transfer, nextOffset: 4 } as const;
+  expect(parseNodeBulkFrameText(serializeNodeBulkFrame(ack))).toEqual(ack);
+  for (const nextOffset of [undefined, null, 0, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(parseNodeBulkFrameText(JSON.stringify({ ...ack, nextOffset }))).toBeNull();
+  }
+  expect(parseNodeBulkFrameText(JSON.stringify({ ...ack, extra: true }))).toBeNull();
+  const chunk = { ...JSON.parse(serializeNodeBulkChunk(transfer, 0, Buffer.from('data'))), type: 'node-bulk-credit-chunk' };
+  expect(parseNodeBulkFrameText(JSON.stringify(chunk))).toEqual(chunk);
+  expect(parseNodeBulkFrameText(JSON.stringify({ ...chunk, data: '?' }))).toBeNull();
+});
+
 test('a lost completion reply expires the physical request without a second completion', async () => {
   const f = fixture();
   f.holdReplies();

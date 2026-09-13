@@ -150,19 +150,19 @@ test('synchronous output admission leaves following service replies readable', a
   } finally { f.close(); }
 });
 
-test('relay completion cannot overtake chunks still queued on the next worker hop', async () => {
+test.each(['node-bulk-chunk', 'node-bulk-credit-chunk'] as const)('relay completion cannot overtake queued %s on the next worker hop', async (type) => {
   const f = fixture(); const drain = Promise.withResolvers<void>(); const signal = new AbortController().signal;
   try {
     await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
     f.block(drain.promise); const admitting = f.peer.admit(1);
     const transfer = { ...session, transferId: 'synthetic-transfer' };
     const envelope = { type: 'node-worker-bulk', version: 1, session, connectionId: 1, instanceId: 'synthetic-instance' } as const;
-    const chunk = f.peer.forward({ ...envelope, payload: serializeNodeBulkFrame({ type: 'node-bulk-chunk', version: 1,
+    const chunk = f.peer.forward({ ...envelope, payload: serializeNodeBulkFrame({ type, version: 1,
       transfer, offset: 0, data: Buffer.from('synthetic').toString('base64') }) }, signal);
     const complete = f.peer.forward({ ...envelope, payload: serializeNodeBulkFrame({ type: 'node-bulk-complete', version: 1, transfer, requestId: 1 }) }, signal);
     drain.resolve(); await Promise.all([admitting, chunk.drained, complete.drained]);
     expect(f.sent.map(parseNodeWorkerBulkText).filter(Boolean).map((frame) => parseNodeBulkFrameText(frame!.payload)?.type))
-      .toEqual(['node-bulk-chunk', 'node-bulk-complete']);
+      .toEqual([type, 'node-bulk-complete']);
     expect(f.failed).not.toHaveBeenCalled();
   } finally { drain.resolve(); f.close(); }
 });

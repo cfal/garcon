@@ -1,4 +1,5 @@
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
+import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { exactNodeFields, parsePrivateNodeJson } from './private-json.js';
 
@@ -9,15 +10,18 @@ export interface NodeBulkSessionFrame {
   readonly version: typeof NODE_WIRE_VERSION;
   readonly session: NodeSessionIdentity;
   readonly connectionId: number;
+  readonly bulkAttemptId: string;
 }
 
 export function parseNodeBulkSessionFrameText(text: string): NodeBulkSessionFrame | null {
   const value = parsePrivateNodeJson(text, MAX_NODE_BULK_SESSION_FRAME_BYTES);
-  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'])
+  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'bulkAttemptId'])
     || value.type !== 'node-bulk-session-hello' && value.type !== 'node-bulk-session-ready'
-    || value.version !== NODE_WIRE_VERSION || !Number.isSafeInteger(value.connectionId) || (value.connectionId as number) < 1) return null;
+    || value.version !== NODE_WIRE_VERSION || !isExecutionIdentity(value.bulkAttemptId)
+    || !Number.isSafeInteger(value.connectionId) || (value.connectionId as number) < 1) return null;
   const session = parseNodeSessionIdentity(value.session);
-  return session ? { type: value.type, version: NODE_WIRE_VERSION, session, connectionId: value.connectionId as number } : null;
+  return session ? { type: value.type, version: NODE_WIRE_VERSION, session,
+    connectionId: value.connectionId as number, bulkAttemptId: value.bulkAttemptId } : null;
 }
 
 export function serializeNodeBulkSessionFrame(frame: NodeBulkSessionFrame): string {

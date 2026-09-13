@@ -5,10 +5,13 @@ const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthet
 const kinds: NodeBulkSessionFrame['type'][] = ['node-bulk-session-hello', 'node-bulk-session-ready'];
 
 test.each(kinds)('round-trips the exact bulk-session envelope %s', (type) => {
-  const frame: NodeBulkSessionFrame = { type, version: 1, session, connectionId: 2 };
+  const frame: NodeBulkSessionFrame = { type, version: 1, session, connectionId: 2, bulkAttemptId: 'synthetic-attempt' };
   expect(parseNodeBulkSessionFrameText(serializeNodeBulkSessionFrame(frame))).toEqual(frame);
   for (const connectionId of [0, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, '2', null]) {
     expect(parseNodeBulkSessionFrameText(JSON.stringify({ ...frame, connectionId }))).toBeNull();
+  }
+  for (const bulkAttemptId of [undefined, null, 2, '', 'contains space', 'a'.repeat(129)]) {
+    expect(parseNodeBulkSessionFrameText(JSON.stringify({ ...frame, bulkAttemptId }))).toBeNull();
   }
   for (const altered of [{ ...frame, version: 2 }, { ...frame, credential: 'synthetic-secret' },
     { ...frame, session: { ...session, extra: true } }, { ...frame, type: 'node-session-ready' }]) {

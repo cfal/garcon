@@ -1,6 +1,6 @@
 import { NODE_WIRE_VERSION, parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { sameNodeSession } from '../../../common/node-operation.js';
-import { parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../execution-nodes/transport/bulk-channel-wire.js';
+import { isNodeBulkReply, parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../execution-nodes/transport/bulk-channel-wire.js';
 import { DEFAULT_NODE_BULK_LIMITS } from '../../execution-nodes/transport/bulk-transfers.js';
 import { MAX_NODE_STREAM_IDENTITIES, NodeReplayGapError, NodeStreamIdentityExhaustedError, type NodeReplayOptions } from '../replay-cache.js';
 import { NodeAuthorityError, type NodeConnectionLease } from '../supervisor.js';
@@ -179,7 +179,7 @@ export class NodeWorkerSessionServices {
     if (frame.type === 'node-worker-output-retired') { this.retirement(frame, 'instance'); return; }
     if (frame.type !== 'node-worker-bulk') throw protocol();
     const payload = parseNodeBulkFrameText(frame.payload);
-    if (payload?.type !== 'node-bulk-result' && payload?.type !== 'node-bulk-failed') throw protocol();
+    if (!payload || !isNodeBulkReply(payload)) throw protocol();
     if (payload.type === 'node-bulk-failed' && !this.#rememberBulkFailure(frame, payload.transfer.transferId)) return;
     this.#sendBulk(frame);
   }
@@ -190,14 +190,14 @@ export class NodeWorkerSessionServices {
     const connection = authority.connection(frame.connectionId);
     if (!sameNodeSession(frame.session, authority.session) || !this.options.instanceIds.has(frame.instanceId)) throw protocol();
     const payload = parseNodeBulkFrameText(frame.payload);
-    if (!payload || payload.type === 'node-bulk-result' || payload.type === 'node-bulk-failed') throw protocol();
+    if (!payload || isNodeBulkReply(payload)) throw protocol();
     this.#pruneBulkFailures();
     const key = JSON.stringify([frame.instanceId, payload.transfer.transferId]);
-    if (payload.type === 'node-bulk-chunk' && this.#bulkFailures.has(key)) return;
+    if ((payload.type === 'node-bulk-chunk' || payload.type === 'node-bulk-credit-chunk') && this.#bulkFailures.has(key)) return;
     try { this.options.child(frame.instanceId).forward(frame, connection.signal); }
     catch (error) {
       if (!(error instanceof NodeWorkerTransportError) || error.code !== 'NODE_WORKER_CAPACITY') throw error;
-      if (payload.type !== 'node-bulk-chunk') return;
+      if (payload.type !== 'node-bulk-chunk' && payload.type !== 'node-bulk-credit-chunk') return;
       if (!this.#rememberBulkFailure(frame, payload.transfer.transferId)) return;
       this.#sendBulk({ ...frame, payload: serializeNodeBulkFrame({ type: 'node-bulk-failed', version: NODE_WIRE_VERSION,
         transfer: payload.transfer, code: 'NODE_BULK_UNAVAILABLE' }) });

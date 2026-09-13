@@ -2,6 +2,7 @@ import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { NodeBulkError } from '../../execution-nodes/transport/bulk-transfers.js';
+import { isNodeBulkData, parseNodeBulkFrameText } from '../../execution-nodes/transport/bulk-channel-wire.js';
 import { NodeWorkerTransportError } from './framing.js';
 import { serializeNodeWorkerBulk } from './bulk-protocol.js';
 import type { NodeWorkerFramePriority, NodeWorkerSubmission, NodeWorkerWriter } from './writer.js';
@@ -33,7 +34,9 @@ export class NodeWorkerBulkPort {
   }
 
   send(payload: string): boolean {
-    try { this.#submit(payload, 'urgent', this.#closing.signal); return true; }
+    const frame = parseNodeBulkFrameText(payload);
+    if (!frame) throw new TypeError('Invalid worker bulk payload');
+    try { this.#submit(payload, isNodeBulkData(frame) ? 'data' : 'urgent', this.#closing.signal); return true; }
     catch (error) {
       if (error instanceof NodeWorkerTransportError && error.code === 'NODE_WORKER_CAPACITY') return false;
       throw error;

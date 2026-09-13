@@ -1,21 +1,26 @@
+import { randomUUID } from 'node:crypto';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { parseNodeWorkerBulkText, type NodeWorkerBulkFrame } from '../../execution-node/worker/bulk-protocol.js';
 import { NodeWorkerTransportError } from '../../execution-node/worker/framing.js';
-import { parseNodeBulkFrameText, type NodeBulkFrame } from './bulk-channel-wire.js';
+import { isNodeBulkData, isNodeBulkReply, parseNodeBulkFrameText, type NodeBulkFrame } from './bulk-channel-wire.js';
 import { parseNodeBulkSessionFrameText, serializeNodeBulkSessionFrame } from './bulk-session-wire.js';
 import { NODE_HANDSHAKE_TIMEOUT_MS } from './session-wire.js';
 import type { NodeSocketWriter } from './socket-writer.js';
 import type { PairedNodePrincipal } from '../pairing-store.js';
 
-export interface NodeBulkSessionBinding {
+export interface NodeBulkControlBinding {
   readonly principal: PairedNodePrincipal;
   readonly session: NodeSessionIdentity;
   readonly connectionId: number;
   readonly instanceIds: ReadonlySet<string>;
   readonly signal: AbortSignal;
   validate(): void;
+}
+
+export interface NodeBulkSessionBinding extends NodeBulkControlBinding {
+  readonly bulkAttemptId: string;
 }
 
 interface BulkSessionOptions {
@@ -27,10 +32,10 @@ interface BulkSessionOptions {
 }
 
 export type NodeBulkSessionOptions = BulkSessionOptions & (
-  | { readonly side: 'node'; readonly binding: NodeBulkSessionBinding }
+  | { readonly side: 'node'; readonly binding: NodeBulkControlBinding }
   | { readonly side: 'controller'; readonly principal: PairedNodePrincipal;
       /** Verifies the supplied principal against the current binding before any replacement or mutation. */
-      capture(principal: PairedNodePrincipal, session: NodeSessionIdentity, connectionId: number): NodeBulkSessionBinding }
+      capture(principal: PairedNodePrincipal, session: NodeSessionIdentity, connectionId: number, bulkAttemptId: string): NodeBulkControlBinding }
 );
 
 /** Binds a separately authenticated bulk socket to one current control connection without acquiring logical authority. */
@@ -56,7 +61,7 @@ export class NodeBulkSessionChannel {
     else {
       this.#timer = (options.scheduleTimeout ?? scheduleTimeout)(() => this.#close(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT')),
         NODE_HANDSHAKE_TIMEOUT_MS);
-      try { if (options.side === 'node') this.#bind(options.binding); }
+      try { if (options.side === 'node') this.#bind(options.binding, randomUUID()); }
       catch (error) { this.#close(error); }
     }
   }
@@ -69,9 +74,9 @@ export class NodeBulkSessionChannel {
     if (this.options.side !== 'node') return;
     try {
       this.#validate();
-      const { session, connectionId } = this.#binding!;
+      const { session, connectionId, bulkAttemptId } = this.#binding!;
       if (!this.writer.send(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: NODE_WIRE_VERSION,
-        session, connectionId }))) throw capacity();
+        session, connectionId, bulkAttemptId }))) throw capacity();
     } catch (error) { this.#close(error); }
   }
 
@@ -84,16 +89,16 @@ export class NodeBulkSessionChannel {
         if (!frame) throw protocol();
         if (this.options.side === 'controller') {
           if (frame.type !== 'node-bulk-session-hello') throw protocol();
-          const binding = this.options.capture(this.options.principal, frame.session, frame.connectionId);
+          const binding = this.options.capture(this.options.principal, frame.session, frame.connectionId, frame.bulkAttemptId);
           if (!sameNodeSession(frame.session, binding.session) || frame.connectionId !== binding.connectionId
             || binding.principal.nodeId !== this.options.principal.nodeId
             || binding.principal.controllerId !== this.options.principal.controllerId) throw protocol();
-          this.#bind(binding);
+          this.#bind(binding, frame.bulkAttemptId);
           this.#validate();
           if (!this.writer.send(serializeNodeBulkSessionFrame({ ...frame, type: 'node-bulk-session-ready' }))) throw capacity();
         } else {
           if (!this.#started || frame.type !== 'node-bulk-session-ready' || !sameNodeSession(frame.session, this.#binding!.session)
-            || frame.connectionId !== this.#binding!.connectionId) throw protocol();
+            || frame.connectionId !== this.#binding!.connectionId || frame.bulkAttemptId !== this.#binding!.bulkAttemptId) throw protocol();
         }
         this.#validate();
         this.#active = true;
@@ -110,7 +115,7 @@ export class NodeBulkSessionChannel {
     this.#assertActive();
     const text = JSON.stringify(frame);
     const parsed = this.#parse(text, this.options.side === 'controller' ? 'request' : 'reply');
-    return isData(parsed.bulk) ? this.writer.sendData(text) : this.writer.sendApplication(text);
+    return isNodeBulkData(parsed.bulk) ? this.writer.sendData(text) : this.writer.sendApplication(text);
   }
 
   async sendWhenWritable(frame: NodeWorkerBulkFrame, signal: AbortSignal): Promise<void> {
@@ -119,20 +124,21 @@ export class NodeBulkSessionChannel {
     const parsed = this.#parse(text, this.options.side === 'controller' ? 'request' : 'reply');
     const caller = AbortSignal.any([signal, this.#closing.signal]);
     const validate = () => this.#assertActive();
-    if (isData(parsed.bulk)) await this.writer.sendWhenWritable(text, caller, validate);
+    if (isNodeBulkData(parsed.bulk)) await this.writer.sendWhenWritable(text, caller, validate);
     else await this.writer.sendApplicationWhenWritable(text, caller, validate);
   }
 
   close(): void { this.#close(new NodeWorkerTransportError('NODE_WORKER_CLOSED')); }
 
-  #bind(binding: NodeBulkSessionBinding): void {
+  #bind(binding: NodeBulkControlBinding, bulkAttemptId: string): void {
     const session = parseNodeSessionIdentity(binding.session);
-    if (this.#binding || !session || !Number.isSafeInteger(binding.connectionId) || binding.connectionId < 1
+    if (this.#binding || !session || !isExecutionIdentity(bulkAttemptId) || !Number.isSafeInteger(binding.connectionId) || binding.connectionId < 1
       || !isExecutionIdentity(binding.principal.nodeId) || !isExecutionIdentity(binding.principal.controllerId)
       || !binding.instanceIds.size || binding.instanceIds.size > 64 || [...binding.instanceIds].some((id) => !isExecutionIdentity(id))) throw protocol();
     binding.signal.throwIfAborted();
-    this.#binding = Object.freeze({ ...binding, principal: Object.freeze({ ...binding.principal }),
-      session: Object.freeze(session), instanceIds: new Set(binding.instanceIds) });
+    this.#binding = Object.freeze({ ...binding, bulkAttemptId, principal: Object.freeze({ ...binding.principal }),
+      session: Object.freeze(session), instanceIds: new Set(binding.instanceIds),
+      signal: AbortSignal.any([binding.signal, this.#closing.signal]) });
     const close = () => this.close();
     this.#detachBinding = () => binding.signal.removeEventListener('abort', close);
     binding.signal.addEventListener('abort', close, { once: true });
@@ -145,7 +151,7 @@ export class NodeBulkSessionChannel {
     if (!frame || !sameNodeSession(frame.session, binding.session) || frame.connectionId !== binding.connectionId
       || !binding.instanceIds.has(frame.instanceId)) throw protocol();
     const bulk = parseNodeBulkFrameText(frame.payload)!;
-    const reply = bulk.type === 'node-bulk-result' || bulk.type === 'node-bulk-failed';
+    const reply = isNodeBulkReply(bulk);
     if ((direction === 'reply') !== reply) throw protocol();
     return { frame, bulk };
   }
@@ -164,10 +170,6 @@ export class NodeBulkSessionChannel {
     this.writer.close();
     try { this.options.disconnected(error); } catch { /* Bulk failure cannot retire its control connection. */ }
   }
-}
-
-function isData(payload: NodeBulkFrame): boolean {
-  return payload.type === 'node-bulk-chunk' || payload.type === 'node-bulk-complete';
 }
 
 function protocol(): NodeWorkerTransportError { return new NodeWorkerTransportError('NODE_WORKER_PROTOCOL'); }

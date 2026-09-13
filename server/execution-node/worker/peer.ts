@@ -7,7 +7,7 @@ import { NodeWorkerExecutionPort } from './execution-port.js';
 import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from './application-protocol.js';
 import { NodeWorkerServiceClient } from './service-channel.js';
 import type { NodeWorkerBulkFrame } from './bulk-protocol.js';
-import { parseNodeBulkFrameText } from '../../execution-nodes/transport/bulk-channel-wire.js';
+import { isNodeBulkData, parseNodeBulkFrameText } from '../../execution-nodes/transport/bulk-channel-wire.js';
 import type { NodeWorkerOutputRetirement } from './output-retirement.js';
 import type { NodeWorkerOutputAcknowledgement } from './service-protocol.js';
 import { parseNodeWorkerConfiguration, type NodeWorkerConfiguration } from './configuration.js';
@@ -159,7 +159,7 @@ export class NodeWorkerPeer {
     validate();
     const bulk = frame.type === 'node-worker-bulk' ? parseNodeBulkFrameText(frame.payload)! : null;
     // Relay completion stays behind chunks even when the upstream hop has already drained them.
-    const priority = bulk?.type === 'node-bulk-chunk' || bulk?.type === 'node-bulk-complete' ? 'data' : 'urgent';
+    const priority = bulk && isNodeBulkData(bulk) ? 'data' : 'urgent';
     const submission = this.#writer.submit(text, priority, { signal, validate }, priority === 'data' ? 'data' : 'application');
     void submission.drained.catch(() => { if (!signal.aborted) this.#fail(); });
     return submission;
