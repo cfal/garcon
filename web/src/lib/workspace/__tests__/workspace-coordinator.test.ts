@@ -459,6 +459,40 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowTabs(layout.snapshot, 'window-main')).toEqual(retainedTabs);
 	});
 
+	it('attaches a visible restored file renderer without activating tabs or moving focus', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: 'file:restored', type: 'file', fileSessionId: 'restored' },
+					windowId: 'window-main',
+				},
+				{ type: 'activate-window-tab', windowId: 'window-main', surfaceId: 'file:restored' },
+			]),
+		);
+		const retainedTabs = structuredClone(windowTabs(layout.snapshot, 'window-main'));
+		const focusOwner = coordinator.focusOwner;
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		const restoration = coordinator.restoreFileSession('restored', undefined, publication);
+		await vi.waitFor(() => expect(coordinator.frameVersion('file:restored')).toBe(1));
+		const attachRetainedRenderer = vi.fn();
+		const focusPrimary = vi.fn();
+		frames.register('file:restored', 'window-main', {
+			element: document.createElement('div'),
+			attachRetainedRenderer,
+			focusPrimary,
+		});
+		await restoration;
+		expect(publication.publish).toHaveBeenCalledOnce();
+		expect(attachRetainedRenderer).toHaveBeenCalledOnce();
+		expect(focusPrimary).not.toHaveBeenCalled();
+		expect(coordinator.focusOwner).toEqual(focusOwner);
+		expect(windowTabs(layout.snapshot, 'window-main')).toEqual(retainedTabs);
+	});
+
 	it('rolls back the publication when file placement fails to publish', async () => {
 		const { coordinator, layout } = createHarness({
 			failLayoutPublishAt: 1,

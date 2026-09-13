@@ -772,6 +772,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (this.layout.surface(surfaceId)) {
 			publication?.publish();
 			if (intent === 'interactive') await this.focusFileSession(sessionId);
+			else await this.#presentation.restoreSurfaceRenderer(surfaceId);
 			return 'placed';
 		}
 		if (this.isMobile) return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
@@ -975,20 +976,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		snapshot: WorkspaceLayoutSnapshot,
 		preferredWindowId: WorkspaceWindowId | null | undefined,
 	): WorkspaceWindowId {
-		if (
-			preferredWindowId &&
-			windowNodeById(snapshot.desktopRoot, preferredWindowId) &&
-			!this.#reservedWindowIds.has(preferredWindowId)
-		) {
-			return preferredWindowId;
-		}
-		const lastFocusedWindowId = this.#presentation.lastFocusedWindowId;
-		if (
-			lastFocusedWindowId &&
-			windowNodeById(snapshot.desktopRoot, lastFocusedWindowId) &&
-			!this.#reservedWindowIds.has(lastFocusedWindowId)
-		) {
-			return lastFocusedWindowId;
+		for (const candidate of [preferredWindowId, this.#presentation.lastFocusedWindowId]) {
+			if (
+				candidate &&
+				windowNodeById(snapshot.desktopRoot, candidate) &&
+				!this.#reservedWindowIds.has(candidate)
+			)
+				return candidate;
 		}
 		const first = collectWindowNodes(snapshot.desktopRoot).find(
 			(workspaceWindow) => !this.#reservedWindowIds.has(workspaceWindow.id),
