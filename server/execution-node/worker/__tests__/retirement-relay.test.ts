@@ -27,7 +27,7 @@ function fixture() {
   const submitted: Promise<unknown>[] = [];
   for (let i = 0; i < 112 + 8; i += 1) submitted.push(writer.submit('held', i < 112 ? 'data' : 'urgent',
     { signal: lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
-  const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance',
+  const frame = { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance',
     stream: { ...session, streamId: 'synthetic-stream' } } as const;
   return { relay, frame, writer, native, written, failed, timers,
     async close() { relay.close(); writer.close(); native.resolve(); await Promise.all(submitted); } };

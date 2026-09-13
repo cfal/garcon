@@ -1,6 +1,7 @@
-import { MAX_NODE_OUTPUT_SEQUENCE, parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
+import { MAX_NODE_OUTPUT_SEQUENCE, parseProducerStreamIdentity, producerStreamKey, type NodeReplayReply, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../../common/node-operation.js';
+import { DomainError } from '../../lib/domain-error.js';
 import { MAX_NODE_STREAM_IDENTITIES, NodeStreamIdentityExhaustedError } from '../replay-cache.js';
 import { NodeWorkerOutputAssembler } from './output-assembler.js';
 import type { NodeOutputAssemblyBudget } from './output-budget.js';
@@ -18,6 +19,7 @@ interface ReceiverStream {
   readonly detach: () => void;
   readonly received: (serialized: string, sequence: number) => void;
   readonly failed: (error: unknown) => void;
+  acceptedSequence: number;
 }
 
 interface ReceiverRoute { readonly instanceId: string; readonly owner: ReceiverStream | null }
@@ -27,10 +29,19 @@ export interface NodeOutputReceiverAttempt {
   readonly generation: number;
 }
 
+export type NodeOutputDeliveryReception =
+  | { readonly kind: 'record' | 'chunk' | 'retired' }
+  | { readonly kind: 'duplicate'; readonly stream: ProducerStreamIdentity };
+
 interface ReceiverAttempt {
   readonly token: NodeOutputReceiverAttempt;
   readonly assembler: NodeWorkerOutputAssembler;
   readonly detach: () => void;
+  acceptance: {
+    readonly pending: Map<ReceiverStream, number>;
+    resolve(): void;
+    reject(error: unknown): void;
+  } | null;
 }
 
 export interface NodeWorkerOutputDeliveryReceiverOptions {
@@ -78,7 +89,7 @@ export class NodeWorkerOutputDeliveryReceiver {
     if (this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) throw new NodeStreamIdentityExhaustedError();
     signal.throwIfAborted();
     const retire = () => this.retire(stream);
-    const owner: ReceiverStream = { instanceId, stream: Object.freeze(stream), signal, received, failed,
+    const owner: ReceiverStream = { instanceId, stream: Object.freeze(stream), signal, received, failed, acceptedSequence: 0,
       detach: () => signal.removeEventListener('abort', retire) };
     this.#streams.set(key, { instanceId, owner });
     signal.addEventListener('abort', retire, { once: true });
@@ -104,7 +115,8 @@ export class NodeWorkerOutputDeliveryReceiver {
     const assembler = new NodeWorkerOutputAssembler({ ...this.options, instanceIds: this.#instances,
       failed: (error) => this.#fail(error) });
     const suspend = () => this.suspend(token);
-    const attempt: ReceiverAttempt = { token, assembler, detach: () => signal.removeEventListener('abort', suspend) };
+    const attempt: ReceiverAttempt = { token, assembler, acceptance: null,
+      detach: () => signal.removeEventListener('abort', suspend) };
     this.#attempt = attempt;
     signal.addEventListener('abort', suspend, { once: true });
     try {
@@ -115,16 +127,51 @@ export class NodeWorkerOutputDeliveryReceiver {
     } catch (error) { this.suspend(token); throw error; }
   }
 
-  receive(text: string): 'record' | 'chunk' | 'retired' {
+  receive(text: string): NodeOutputDeliveryReception {
     this.#validate();
     const frame = parseNodeWorkerOutputDeliveryText(text);
     if (!frame || !sameNodeSession(frame.session, this.#session)) throw protocol();
     const attempt = this.#attempt;
-    if (!attempt || frame.connectionId !== attempt.token.connectionId || frame.generation !== attempt.token.generation) return 'retired';
+    if (!attempt || frame.connectionId !== attempt.token.connectionId || frame.generation !== attempt.token.generation) return { kind: 'retired' };
     const payload = parseNodeWorkerOutputText(frame.payload)!;
     const route = this.#streams.get(producerStreamKey(payload.stream));
     if (!this.#instances.has(payload.instanceId) || route && route.instanceId !== payload.instanceId) throw protocol();
-    return attempt.assembler.receive(payload.instanceId, frame.payload);
+    const owner = route?.owner;
+    if (owner && payload.sequence <= owner.acceptedSequence) return { kind: 'duplicate', stream: owner.stream };
+    return { kind: attempt.assembler.receive(payload.instanceId, frame.payload) };
+  }
+
+  /** Requires synchronous publisher acceptance for every still-owned range in this exact attempt. */
+  async waitForAccepted(token: NodeOutputReceiverAttempt, ranges: readonly Extract<NodeReplayReply, { type: 'node-replay-ready' }>[],
+    signal: AbortSignal): Promise<void> {
+    this.#validate(); signal.throwIfAborted();
+    const attempt = this.#attempt;
+    if (!attempt || attempt.token !== token) throw closed();
+    if (attempt.acceptance) throw protocol();
+    const pending = new Map<ReceiverStream, number>();
+    const seen = new Set<string>();
+    for (const range of ranges) {
+      const stream = parseProducerStreamIdentity(range.stream);
+      if (!stream || !sameNodeSession(stream, this.#session) || !Number.isSafeInteger(range.afterSequence)
+        || range.afterSequence < 0 || !Number.isSafeInteger(range.throughSequence)
+        || range.throughSequence < range.afterSequence || range.throughSequence > MAX_NODE_OUTPUT_SEQUENCE) throw protocol();
+      const key = producerStreamKey(stream);
+      const route = this.#streams.get(key);
+      if (!route || seen.has(key)) throw protocol();
+      seen.add(key);
+      if (!route.owner) continue;
+      if (route.owner.acceptedSequence < range.throughSequence) pending.set(route.owner, range.throughSequence);
+    }
+    if (pending.size) {
+      const completed = Promise.withResolvers<void>();
+      const cancel = () => this.#finishAcceptance(attempt, signal.reason);
+      attempt.acceptance = { pending, resolve: completed.resolve, reject: completed.reject };
+      signal.addEventListener('abort', cancel, { once: true });
+      try { await completed.promise; }
+      finally { signal.removeEventListener('abort', cancel); }
+    }
+    this.#validate(); signal.throwIfAborted();
+    if (this.#attempt !== attempt) throw closed();
   }
 
   receiveRetirement(text: string): void {
@@ -139,7 +186,10 @@ export class NodeWorkerOutputDeliveryReceiver {
       return;
     }
     if (!route.owner) return;
-    this.#failStream(route.owner, new NodeWorkerTransportError('NODE_WORKER_CLOSED'));
+    const error = frame.reason === 'replay-gap'
+      ? new DomainError('NODE_REPLAY_GAP', 'Required node output is no longer available', 409)
+      : closed();
+    this.#failStream(route.owner, error);
   }
 
   /** Returns true once for the current attempt so its owner can gate admissions and start recovery. */
@@ -156,6 +206,7 @@ export class NodeWorkerOutputDeliveryReceiver {
     const attempt = this.#attempt;
     if (!attempt || attempt.token !== token) return false;
     this.#attempt = null; attempt.detach(); attempt.assembler.close();
+    this.#finishAcceptance(attempt, closed());
     return true;
   }
 
@@ -164,7 +215,11 @@ export class NodeWorkerOutputDeliveryReceiver {
     const owner = this.#streams.get(key)?.owner;
     if (!owner) return;
     this.#streams.set(key, { instanceId: owner.instanceId, owner: null }); owner.detach();
-    this.#attempt?.assembler.retire(owner.stream);
+    const attempt = this.#attempt;
+    if (attempt) {
+      attempt.assembler.retire(owner.stream);
+      if (attempt.acceptance?.pending.delete(owner) && !attempt.acceptance.pending.size) this.#finishAcceptance(attempt);
+    }
   }
 
   close(): void {
@@ -176,13 +231,33 @@ export class NodeWorkerOutputDeliveryReceiver {
   }
 
   #install(attempt: ReceiverAttempt, owner: ReceiverStream, afterSequence: number): void {
+    owner.acceptedSequence = Math.max(owner.acceptedSequence, afterSequence);
     attempt.assembler.install(owner.instanceId, owner.stream, owner.signal,
       (serialized, sequence) => {
-        if (this.#attempt === attempt && this.#streams.get(producerStreamKey(owner.stream))?.owner === owner) owner.received(serialized, sequence);
+        const current = () => this.#attempt === attempt && this.#streams.get(producerStreamKey(owner.stream))?.owner === owner;
+        if (!current()) return;
+        owner.received(serialized, sequence);
+        if (!current()) return;
+        owner.acceptedSequence = sequence;
+        const pending = attempt.acceptance?.pending;
+        if (!pending) return;
+        const throughSequence = pending.get(owner);
+        if (throughSequence !== undefined && sequence >= throughSequence) {
+          pending.delete(owner);
+          if (!pending.size) this.#finishAcceptance(attempt);
+        }
       },
       (failure) => {
         if (this.#attempt === attempt) this.#failStream(owner, failure.cause);
-      }, afterSequence);
+      }, owner.acceptedSequence);
+  }
+
+  #finishAcceptance(attempt: ReceiverAttempt, error?: unknown): void {
+    const acceptance = attempt.acceptance;
+    if (!acceptance) return;
+    attempt.acceptance = null;
+    if (error !== undefined) acceptance.reject(error);
+    else acceptance.resolve();
   }
 
   #failStream(owner: ReceiverStream, error: unknown): void {
@@ -207,3 +282,4 @@ export class NodeWorkerOutputDeliveryReceiver {
 }
 
 function protocol(): NodeWorkerTransportError { return new NodeWorkerTransportError('NODE_WORKER_PROTOCOL'); }
+function closed(): NodeWorkerTransportError { return new NodeWorkerTransportError('NODE_WORKER_CLOSED'); }

@@ -66,7 +66,7 @@ test('service replies use the captured physical client while retirement remains 
       requestId: 1, result: { kind: 'output-recovery', generation: 1 } }));
     expect(await request).toEqual({ kind: 'output-recovery', generation: 1 });
     await f.peer.disconnect(1);
-    const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId: 'synthetic-stream' } } as const;
+    const frame = { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId: 'synthetic-stream' } } as const;
     await f.peer.forward(frame, signal).drained;
     f.application(JSON.stringify(frame)); await tick();
     expect(f.received).toHaveBeenCalledWith(frame, JSON.stringify(frame));
@@ -98,7 +98,7 @@ test('synchronous output admission leaves following service replies readable', a
     await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
     f.received.mockImplementation((_frame, text) => { pendingOutput.push(text); });
     const request = f.peer.service(1).call({ method: 'begin-output-recovery' }, new AbortController().signal);
-    const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId: 'synthetic-first' } } as const;
+    const frame = { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId: 'synthetic-first' } } as const;
     const output = JSON.stringify(frame);
     f.batch([output, serializeNodeWorkerService({ type: 'node-worker-service-result', version: 1, session, connectionId: 1,
       requestId: 1, result: { kind: 'output-recovery', generation: 1 } })]);

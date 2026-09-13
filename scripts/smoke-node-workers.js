@@ -106,7 +106,7 @@ async function smokeServices(peer, instanceId, session, role) {
   const stream = { ...session, streamId: 'synthetic-service-stream' };
   const installed = await service.call({ method: 'install-output', instanceId, stream }, signal);
   if (installed.kind !== 'output-installed') throw new Error('Worker output installation failed');
-  await peer.forward({ type: 'node-worker-output-retired', version: 1, instanceId, stream }, signal).drained;
+  await peer.forward({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId, stream }, signal).drained;
   const permission = await service.call({ method: 'permission', command: { method: 'permission-status', permission: {
     stream, runId: 'synthetic-run', handle: 'synthetic-absent-handle', permissionOccurrenceId: '00000000-0000-4000-8000-000000000001',
   } } }, signal);

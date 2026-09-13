@@ -157,7 +157,7 @@ export class NodeSessionBridge {
         || command.method === 'provider-session-configuration' && !isNodeSessionConfigurationReconciliation(command)
         || command.method === 'permission' && command.command.method === 'permission-respond') coordinator.supervisor.assertAdmission(connection.lease);
       if (command.method === 'retire-output') {
-        coordinator.retireOutput(connection, { type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+        coordinator.retireOutput(connection, { type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
           instanceId: command.instanceId, stream: command.stream });
       }
       if (command.method === 'install-output') {

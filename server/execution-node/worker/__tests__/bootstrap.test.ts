@@ -154,7 +154,7 @@ test('logical stream retirement still reaches a disconnected runtime', async () 
   try {
     f.receive(configureMessage()); f.started.resolve(f.runtime); await tick();
     f.receive({ type: 'node-worker-disconnect', version: 1, session, connectionId: 1 });
-    const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance',
+    const frame = { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance',
       stream: { ...session, streamId: 'synthetic-stream' } } as const;
     const text = serializeNodeWorkerOutputRetirement(frame);
     f.bootstrap.receive(text);

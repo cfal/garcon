@@ -113,6 +113,11 @@ export class NodePublicationRoutes {
     return this.#receiver.suspend(...args);
   }
 
+  waitForAccepted(...args: Parameters<NodeWorkerOutputDeliveryReceiver['waitForAccepted']>): Promise<void> {
+    this.#validate();
+    return this.#receiver.waitForAccepted(...args);
+  }
+
   receiveSuspension(text: string): boolean {
     return !this.#closed && this.#receiver.receiveSuspension(text);
   }
@@ -124,8 +129,14 @@ export class NodePublicationRoutes {
     this.#receiving = true;
     this.#ack = null;
     try {
-      const kind = this.#receiver.receive(text);
-      return this.#closed ? { kind: 'retired', ack: null } : { kind, ack: this.#ack };
+      const result = this.#receiver.receive(text);
+      if (this.#closed) return { kind: 'retired', ack: null };
+      if (result.kind === 'duplicate') {
+        const owner = this.#owners.get(producerStreamKey(result.stream));
+        if (!owner) return { kind: 'retired', ack: null };
+        return { kind: 'record', ack: { type: 'node-output-ack', stream: owner.route.stream, throughSequence: owner.ingress.acceptedSequence } };
+      }
+      return { kind: result.kind, ack: this.#ack };
     } finally { this.#receiving = false; this.#ack = null; }
   }
 
@@ -161,7 +172,8 @@ export class NodePublicationRoutes {
     this.#owners.delete(producerStreamKey(route.stream));
     owner.detach(); ingress.retire(); this.#receiver.retire(route.stream);
     try {
-      this.#retirements.record({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream: route.stream });
+      const reason = error instanceof DomainError && error.code === 'NODE_REPLAY_GAP' ? 'replay-gap' : 'output-retired';
+      this.#retirements.record({ type: 'node-worker-output-retired', reason, version: NODE_WIRE_VERSION, instanceId, stream: route.stream });
     } finally {
       cancellation.abort(error ?? closed());
       if (error !== undefined) {

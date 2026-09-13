@@ -1,10 +1,12 @@
 import { expect, mock, test } from 'bun:test';
-import { producerStreamKey, type NodeReplayReply, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
+import { producerStreamKey, serializeNodeOutputFrame, type NodeReplayReply, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { NodeOutputRecovery } from '../output-recovery.js';
 import { NodeWorkerOutputDeliveryReceiver } from '../../execution-node/worker/output-delivery-receiver.js';
 import { NodeOutputAssemblyBudget } from '../../execution-node/worker/output-budget.js';
 import { serializeNodeWorkerOutputSuspension, type NodeWorkerServiceCommand, type NodeWorkerServiceResult } from '../../execution-node/worker/service-protocol.js';
 import { NODE_RECOVERY_TIMEOUT_MS } from '../../execution-node/supervisor.js';
+import { chunkNodeWorkerOutput } from '../../execution-node/worker/output-protocol.js';
+import { serializeNodeWorkerOutputDelivery } from '../../execution-node/worker/output-delivery-protocol.js';
 
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
 const instanceId = 'synthetic-instance';
@@ -68,6 +70,36 @@ test('recovery coalesces triggers and reconciles before releasing its admission 
     expect(f.deadlines).toHaveLength(1); expect(f.deadlines[0]?.delay).toBe(NODE_RECOVERY_TIMEOUT_MS);
     expect(f.deadlines[0]?.cancel).toHaveBeenCalledTimes(1);
   } finally { barrier.resolve(); f.close(); }
+});
+
+test('replay transmission cannot reconcile or release admission before controller acceptance through its watermark', async () => {
+  const f = fixture(); const stream = f.install('synthetic-watermark');
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (command, signal) => command.method === 'replay-output'
+    ? { kind: 'output-replayed', ranges: [{ type: 'node-replay-ready', stream, afterSequence: 0, throughSequence: 2 }] }
+    : original(command, signal));
+  const receive = (sequence: number) => {
+    const serialized = serializeNodeOutputFrame({ type: 'node-output', stream, sequence,
+      event: { type: 'notice', runId: 'synthetic-run', content: 'synthetic output' } });
+    for (const payload of chunkNodeWorkerOutput(instanceId, serialized)) {
+      f.receiver.receive(serializeNodeWorkerOutputDelivery({ type: 'node-worker-output-delivery', version: 1,
+        session, connectionId: 1, generation: 1, payload }));
+    }
+  };
+  try {
+    const recovering = f.recovery.recover();
+    await tick();
+    expect(f.reconcile).not.toHaveBeenCalled();
+    expect(f.recovered).not.toHaveBeenCalled();
+    receive(1); await tick();
+    expect(f.reconcile).not.toHaveBeenCalled();
+    expect(f.recovered).not.toHaveBeenCalled();
+    receive(2); await recovering;
+    expect(f.reconcile).toHaveBeenCalledTimes(1);
+    expect(f.recovered).toHaveBeenCalledTimes(1);
+    expect(f.options.cursors()).toEqual([{ stream, afterSequence: 2 }]);
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
 });
 
 test('recovery batches every owned stream and repeats from current cursors when live output advances', async () => {
@@ -172,6 +204,24 @@ test('the absolute deadline aborts reconciliation and never releases its gate', 
     f.deadlines[0]!.fire();
     await expect(pending).rejects.toMatchObject({ code: 'NODE_WORKER_TIMEOUT' });
     expect(f.failed).toHaveBeenCalledTimes(1); expect(f.recovered).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
+test('the original recovery deadline expires an unaccepted watermark without starting reconciliation', async () => {
+  const f = fixture(); const stream = f.install('synthetic-watermark-timeout');
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (command, signal) => command.method === 'replay-output'
+    ? { kind: 'output-replayed', ranges: [{ type: 'node-replay-ready', stream, afterSequence: 0, throughSequence: 1 }] }
+    : original(command, signal));
+  try {
+    const pending = f.recovery.recover(); await tick();
+    expect(f.reconcile).not.toHaveBeenCalled();
+    f.deadlines[0]!.fire();
+    await expect(pending).rejects.toMatchObject({ code: 'NODE_WORKER_TIMEOUT' });
+    expect(f.failed).toHaveBeenCalledTimes(1);
+    expect(f.reconcile).not.toHaveBeenCalled();
+    expect(f.recovered).not.toHaveBeenCalled();
+    expect(f.deadlines).toHaveLength(1);
   } finally { f.close(); }
 });
 

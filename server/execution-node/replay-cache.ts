@@ -34,6 +34,14 @@ export class NodeReplayUnavailableError extends Error {
   }
 }
 
+export class NodeReplayGapError extends NodeReplayUnavailableError {
+  constructor() {
+    super();
+    this.name = 'NodeReplayGapError';
+    this.message = 'Required node output is no longer available';
+  }
+}
+
 interface StreamRecords {
   readonly identity: ProducerStreamIdentity;
   readonly records: Map<number, CachedOutput>;

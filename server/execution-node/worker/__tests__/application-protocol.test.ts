@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText } from '../application-protocol.js';
 import { chunkNodeWorkerOutput } from '../output-protocol.js';
 import { session } from './lifecycle-fixture.js';
+import { parseNodeWorkerOutputRetirementText, serializeNodeWorkerOutputRetirement } from '../output-retirement.js';
 
 test('the worker application dispatcher preserves each strict nested frame and its logical namespace', () => {
   const stream = { ...session, streamId: 'synthetic-stream' };
@@ -15,7 +16,7 @@ test('the worker application dispatcher preserves each strict nested frame and i
     JSON.parse(output),
     { ...envelope, type: 'node-worker-output-delivery', generation: 1, payload: output },
     { ...envelope, type: 'node-worker-output-suspended', generation: 1 },
-    { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream },
+    { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance', stream },
     { type: 'node-worker-output-ack', version: 1, connectionId: 1, generation: 1,
       ack: { type: 'node-output-ack', stream, throughSequence: 1 } },
     { ...envelope, type: 'node-worker-service-request', requestId: 1, command: { method: 'begin-output-recovery' } },
@@ -29,5 +30,19 @@ test('the worker application dispatcher preserves each strict nested frame and i
   }
   for (const text of ['null', '{}', '{"type":"unknown"}', '{"type":"node-worker-bulk","payload":"{}"}']) {
     expect(parseNodeWorkerApplicationText(text)).toBeNull();
+  }
+});
+
+test('retirement reasons round trip explicitly and cannot carry untyped diagnostics', () => {
+  const frame = { type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance',
+    stream: { ...session, streamId: 'synthetic-stream' } } as const;
+  for (const reason of ['output-retired', 'replay-gap'] as const) {
+    const retirement = { ...frame, reason };
+    const text = serializeNodeWorkerOutputRetirement(retirement);
+    expect(parseNodeWorkerOutputRetirementText(text)).toEqual(retirement);
+    expect(parseNodeWorkerApplicationText(text)).toEqual(retirement);
+  }
+  for (const reason of [undefined, null, 'native-settled', { message: 'synthetic private diagnostic' }]) {
+    expect(parseNodeWorkerOutputRetirementText(JSON.stringify({ ...frame, reason }))).toBeNull();
   }
 });

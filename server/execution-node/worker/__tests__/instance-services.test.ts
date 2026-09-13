@@ -259,7 +259,7 @@ test('parent stream retirement aborts only its captured operations and does not 
     await f.install(); await f.install(sibling);
     const first = await f.start(); const second = await f.start(sibling, 'synthetic-successor', '1789000000000002');
     await tick(); const prior = f.controls.length;
-    const retirement = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+    const retirement = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
       instanceId: f.location.instanceId, stream: f.stream });
     f.services.receiveRetirement(retirement); f.services.receiveRetirement(retirement);
     first.output.emit({ type: 'rows', rows: [{ message: new AssistantMessage('2026-09-09T00:00:00.000Z', 'retired') }] });
@@ -358,7 +358,7 @@ test('stream installation rejects foreign instances, recovery gates and reused i
     expect(await f.services.service(f.connection, { method: 'install-output', instanceId: f.location.instanceId, stream: f.stream }, f.connection.signal))
       .toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
     const retired = { ...f.stream, streamId: 'retired-before-installation' };
-    f.services.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+    f.services.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
       instanceId: f.location.instanceId, stream: retired }));
     expect(await f.services.service(f.connection, { method: 'install-output', instanceId: f.location.instanceId, stream: retired }, f.connection.signal))
       .toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
@@ -374,13 +374,13 @@ test('unknown retirement at the identity ceiling remains inert after install ref
     await f.install();
     const { output } = await f.start();
     for (let i = 1; i < MAX_NODE_STREAM_IDENTITIES; i++) f.services.receiveRetirement(serializeNodeWorkerOutputRetirement({
-      type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId: f.location.instanceId,
+      type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, instanceId: f.location.instanceId,
       stream: { ...f.stream, streamId: `retired-${i}` },
     }));
     const unknown = { ...f.stream, streamId: 'never-installed' };
     expect(await f.services.service(f.connection, { method: 'install-output', instanceId: f.location.instanceId, stream: unknown }, f.connection.signal))
       .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
-    expect(() => f.services.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+    expect(() => f.services.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
       instanceId: f.location.instanceId, stream: unknown }))).not.toThrow();
     expect(await f.services.service(f.connection, { method: 'retire-output', instanceId: f.location.instanceId, stream: unknown }, f.connection.signal))
       .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });

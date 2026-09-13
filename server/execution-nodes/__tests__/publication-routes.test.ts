@@ -73,6 +73,23 @@ test('ACK loss and replay preserve the captured V5 cursor without republishing c
   expect(first.failure).not.toHaveBeenCalled(); expect(f.failed).not.toHaveBeenCalled();
 });
 
+test('an already accepted record is acknowledged before duplicate body decoding without disrupting the live suffix', async () => {
+  const f = await fixture(); const first = f.install(); const attempt = f.begin();
+  const text = frames(first.route, 1, row(), attempt)[0]!;
+  expect(f.routes.receive(text).ack?.throughSequence).toBe(1);
+  const committed = f.ledger.currentRows(first.chatId);
+  const envelope = JSON.parse(text);
+  const payload = JSON.parse(envelope.payload);
+  payload.chunk.data = Buffer.alloc(Buffer.from(payload.chunk.data, 'base64').length, 120).toString('base64');
+  envelope.payload = JSON.stringify(payload);
+  expect(f.routes.receive(JSON.stringify(envelope))).toMatchObject({ kind: 'record', ack: { throughSequence: 1 } });
+  expect(f.ledger.currentRows(first.chatId)).toEqual(committed);
+  expect(f.routes.receive(frames(first.route, 2, row('synthetic suffix'), attempt)[0]!).ack?.throughSequence).toBe(2);
+  expect(f.ledger.currentRows(first.chatId)).toHaveLength(2);
+  expect(first.failure).not.toHaveBeenCalled();
+  expect(f.failed).not.toHaveBeenCalled();
+});
+
 test('run completion retains rows and session publication until the producer source closes', async () => {
   const f = await fixture(); const first = f.install(); const attempt = f.begin();
   f.ledger.beginRun(first.chatId, 'synthetic-run');
@@ -93,7 +110,7 @@ test('run completion retains rows and session publication until the producer sou
   const sent: NodeWorkerOutputRetirement[] = [];
   await f.routes.flushRetirements(async (frame) => { sent.push(frame); }, f.lifetime.signal);
   await f.routes.flushRetirements(async (frame) => { sent.push(frame); }, f.lifetime.signal);
-  expect(sent).toEqual([0, 1].map(() => ({ type: 'node-worker-output-retired', version: 1, instanceId, stream: first.route.stream })));
+  expect(sent).toEqual([0, 1].map(() => ({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId, stream: first.route.stream })));
   expect(first.failure).not.toHaveBeenCalled();
 });
 
@@ -131,7 +148,7 @@ test('a replay gap retires only the exact stream and old retirement cannot touch
   f.routes.retireGap({ type: 'node-replay-gap', stream: first.route.stream, requestedAfter: 0, firstRetainedSequence: 2, lastProducedSequence: 2 });
   expect(first.failure).toHaveBeenCalledWith(expect.objectContaining({ code: 'NODE_REPLAY_GAP' }));
   const next = f.routes.install({ ...first.options, stream: { ...session, streamId: 'synthetic-successor' } });
-  f.routes.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId, stream: first.route.stream }));
+  f.routes.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId, stream: first.route.stream }));
   expect(next.signal.aborted).toBe(false); expect(sibling.route.signal.aborted).toBe(false);
   expect(first.failure).toHaveBeenCalledTimes(1);
   expect(f.routes.cursors().map(({ stream }) => stream)).toEqual([sibling.route.stream, next.stream]);

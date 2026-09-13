@@ -163,7 +163,7 @@ test('cancellation releases raw records and later chunks while native bytes stay
     await f.submissions[0]!.drained.catch(() => {}); await Promise.resolve();
     expect(f.port.bufferedBytes).toBe(0);
     expect(f.writer.bufferedBytes).toBe(nativeBytes + Buffer.byteLength(serializeNodeWorkerOutputRetirement({
-      type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream })) + 4);
+      type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance', stream })) + 4);
     expect(f.written).toHaveLength(1);
     f.written[0]!.finished.resolve(); await Promise.resolve();
     expect(parseNodeWorkerOutputRetirementText(f.written[1]!.text)?.stream).toEqual(stream);
@@ -272,7 +272,7 @@ test('refusing a critical retirement notice fails the entire instance port befor
 test('a parent retirement cancels only its exact stream and does not echo a control back', async () => {
   const f = fixture(); const owner = f.install(); const sibling = f.install('synthetic-second');
   try {
-    const notice = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1,
+    const notice = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1,
       instanceId: 'synthetic-instance', stream });
     expect(() => f.port.receiveRetirement(notice.replace('synthetic-instance', 'synthetic-other'))).toThrow();
     expect(owner.output.retired).toBe(false);

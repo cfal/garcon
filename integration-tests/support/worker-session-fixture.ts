@@ -110,7 +110,7 @@ export async function startWorkerSessionFixture(instances: readonly FixtureInsta
     return owner;
   };
   const sendRetirement = (instanceId: string, stream: ProducerStreamIdentity) => peer.forward({
-    type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, stream, instanceId }, lifetime.signal).drained;
+    type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, stream, instanceId }, lifetime.signal).drained;
   const makeRecovery = () => new NodeOutputRecovery({ session, connectionId, signal: physical.signal,
     service: peer.service(connectionId), receiver,
     cursors: () => [...streams.values()].filter(({ retired }) => !retired).map(({ stream, accepted }) => ({ stream, afterSequence: accepted })),

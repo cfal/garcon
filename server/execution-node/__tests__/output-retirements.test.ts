@@ -5,7 +5,7 @@ import { session, tick } from '../worker/__tests__/lifecycle-fixture.js';
 import type { NodeWorkerOutputRetirement } from '../worker/output-retirement.js';
 
 const retirement = (streamId = 'synthetic-stream'): NodeWorkerOutputRetirement => ({
-  type: 'node-worker-output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId },
+  type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance', stream: { ...session, streamId },
 });
 function fixture() {
   const authority = new AbortController();
@@ -32,6 +32,20 @@ test('lost physical delivery retains immutable retirements for every replacement
     expect(received).toEqual(['synthetic-stream', 'synthetic-second']);
   }
   f.authority.abort();
+});
+
+test('an offline replay-gap retirement retains its original cause across duplicate fences and physical loss', async () => {
+  const f = fixture();
+  const frame: NodeWorkerOutputRetirement = { ...retirement(), reason: 'replay-gap' };
+  try {
+    const captured = f.retained.record(frame);
+    expect(f.retained.record(retirement())).toBe(captured);
+    await expect(f.retained.replay(async () => { throw new Error('Synthetic socket loss'); }, new AbortController().signal))
+      .rejects.toThrow('Synthetic socket loss');
+    const received: NodeWorkerOutputRetirement[] = [];
+    await f.retained.replay(async (frame) => { received.push(frame); }, new AbortController().signal);
+    expect(received).toEqual([frame]);
+  } finally { f.authority.abort(); }
 });
 
 test('a retirement observed during replay reaches the same barrier before it completes', async () => {

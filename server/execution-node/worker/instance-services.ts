@@ -64,7 +64,7 @@ export class NodeWorkerInstanceServices {
         if (!this.#streams.has(producerStreamKey(command.stream)) && this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) {
           throw new NodeStreamIdentityExhaustedError();
         }
-        this.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+        this.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
           instanceId: command.instanceId, stream: command.stream }));
         return { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream };
       }

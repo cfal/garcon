@@ -19,7 +19,7 @@ const stream = { ...session, streamId: 'synthetic-stream' };
 const command = { method: 'begin-output-recovery' } as const;
 const recovered = { kind: 'output-recovery', generation: 1 } as const;
 const status = { method: 'status', identity: { ...session, operationId: 'synthetic-operation' } } as const;
-const retirement = { type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream } as const;
+const retirement = { type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, instanceId, stream } as const;
 const fenced = { kind: 'output-fenced', instanceId, stream } as const;
 const ack = (sequence: number): NodeWorkerOutputAcknowledgement => ({ type: 'node-worker-output-ack', version: NODE_WIRE_VERSION,
   connectionId: 1, generation: 1, ack: { type: 'node-output-ack', stream, throughSequence: sequence } });

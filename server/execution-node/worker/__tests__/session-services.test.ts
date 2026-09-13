@@ -224,7 +224,7 @@ test('an urgent retirement overtaking a queued installation permanently fences o
   try {
     const firstRequest = f.recovery();
     const installation = f.call({ method: 'install-output', instanceId: first, stream });
-    const retirement = f.retire({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    const retirement = f.retire({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream });
     release(); await firstRequest; await retirement;
     expect(await installation).toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
     expect(f.childExecute).not.toHaveBeenCalled();
@@ -241,11 +241,11 @@ test('retirement after identity exhaustion preserves the session and an already 
   try {
     await f.call({ method: 'install-output', instanceId: first, stream });
     for (let i = 1; i < MAX_NODE_STREAM_IDENTITIES; i++) f.services.retirement({
-      type: 'node-worker-output-retired', version: 1, instanceId: first, stream: { ...stream, streamId: `retired-${i}` },
+      type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream: { ...stream, streamId: `retired-${i}` },
     }, 'coordinator');
     expect(await f.call({ method: 'install-output', instanceId: first, stream: sibling }))
       .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
-    expect(() => f.services.retirement({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream: sibling }, 'coordinator')).not.toThrow();
+    expect(() => f.services.retirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream: sibling }, 'coordinator')).not.toThrow();
     expect(await f.call({ method: 'retire-output', instanceId: first, stream: sibling }))
       .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
     f.emit();
@@ -271,7 +271,7 @@ test('successor installation waits for the instance output fence after retiremen
       }
       return { kind: 'unknown' };
     });
-    await f.retire({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    await f.retire({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream });
     const installation = f.call({ method: 'install-output', instanceId: first, stream: sibling });
     await tick();
     expect(f.forwards).toHaveBeenCalledTimes(1);
@@ -290,7 +290,7 @@ test.each([
   const f = fixture();
   try {
     await f.call({ method: 'install-output', instanceId: first, stream });
-    await f.retire({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    await f.retire({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream });
     f.childExecute.mockResolvedValueOnce(refusal);
     expect(await f.call({ method: 'install-output', instanceId: first, stream: sibling })).toEqual(expected);
     expect(f.childExecute.mock.calls.map(([, command]) => command.method)).toEqual(['install-output', 'retire-output']);
@@ -362,7 +362,7 @@ test('a child capacity refusal returns a terminal installation outcome and retir
     f.childExecute.mockResolvedValueOnce({ kind: 'rejected', code: 'NODE_CAPACITY' });
     expect(await f.call({ method: 'install-output', instanceId: first, stream }))
       .toEqual({ kind: 'rejected', code: 'NODE_OUTPUT_RETIRED' });
-    expect(f.output).toContainEqual({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    expect(f.output).toContainEqual({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream });
     expect(await f.call({ method: 'install-output', instanceId: first, stream })).toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
     expect(await f.call({ method: 'install-output', instanceId: first, stream: sibling })).toMatchObject({ kind: 'output-installed' });
     expect(f.authority.signal.aborted).toBe(false);
@@ -377,7 +377,7 @@ test('retirement during a submitted installation rolls back late success without
   try {
     const installation = f.call({ method: 'install-output', instanceId: first, stream });
     await started.promise;
-    await f.retire({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    await f.retire({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream });
     settled.resolve({ kind: 'output-installed', instanceId: first, stream });
     expect(await installation).not.toHaveProperty('kind', 'output-installed');
     expect(await f.call({ method: 'install-output', instanceId: first, stream })).toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
@@ -395,11 +395,11 @@ test('permission requests and retirement remain bound to the stream instance, in
     const permission = { stream, handle: 'synthetic-handle', runId: 'synthetic-run', permissionOccurrenceId: '00000000-0000-4000-8000-000000000001' };
     await f.call({ method: 'permission', command: { method: 'permission-status', permission } });
     expect(f.childExecute.mock.calls.at(-1)?.[0]).toBe(first);
-    f.services.retirement({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream }, 'coordinator');
+    f.services.retirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream }, 'coordinator');
     expect(await f.call({ method: 'permission', command: { method: 'permission-status', permission } }))
       .toMatchObject({ kind: 'permission-result', result: { receipt: { phase: 'expired' } } });
     expect(f.forwards).toHaveBeenCalledTimes(1);
-    expect(f.forwards.mock.calls[0]?.[0]).toMatchObject({ type: 'node-worker-output-retired', instanceId: first, stream });
+    expect(f.forwards.mock.calls[0]?.[0]).toMatchObject({ type: 'node-worker-output-retired', reason: 'output-retired', instanceId: first, stream });
     expect(f.childExecute.mock.calls.at(-1)?.[0]).toBe(first);
     expect(f.output).toHaveLength(0);
     f.emit(second, sibling);
@@ -420,7 +420,7 @@ test('an instance retirement clears partial assembly before its sibling record a
     const text = chunkNodeWorkerOutput(first, serializeNodeOutputFrame({ type: 'node-output', stream, sequence: 1,
       event: { type: 'notice', runId: 'synthetic-run', content: 'x'.repeat(90_000) } }))[0]!;
     f.services.receiveChild(first, parseNodeWorkerOutputText(text)!, text);
-    const frame = { type: 'node-worker-output-retired', version: 1, instanceId: first, stream } as const;
+    const frame = { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream } as const;
     f.services.receiveChild(first, frame, JSON.stringify(frame)); f.services.receiveChild(first, frame, JSON.stringify(frame));
     f.emit(first, sibling); await tick();
     expect(f.output.map((frame) => frame.type)).toEqual(['node-worker-output-retired', 'node-worker-output-delivery']);
@@ -435,7 +435,7 @@ test('resume cannot report live while a logical retirement is still waiting for 
     await f.call({ method: 'install-output', instanceId: first, stream });
     const generation = await f.recovery();
     release = f.hold('outbound');
-    f.services.retirement({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream }, 'instance');
+    f.services.retirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream }, 'instance');
     let completed = false;
     const resumed = f.services.service(1, f.authority.connection(1), { method: 'resume-output', generation }, f.lifetime.signal)
       .then((result) => { completed = true; return result; });
@@ -444,7 +444,7 @@ test('resume cannot report live while a logical retirement is still waiting for 
     release();
     expect(await resumed).toEqual({ kind: 'output-live', live: true });
     expect(premature).toBe(false);
-    expect(f.output).toContainEqual({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    expect(f.output).toContainEqual({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first, stream });
   } finally { release(); f.close(); }
 });
 
@@ -476,7 +476,7 @@ test('bulk reply and cancellation saturation preserves the session and permits l
   const release = f.hold('outbound');
   const drains: Promise<unknown>[] = [];
   try {
-    const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId: first,
+    const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first,
       stream: { ...stream, streamId: 'synthetic-filler' } });
     for (let i = 0; i < 120; i += 1) drains.push(f.outbound.submit(filler, i < 112 ? 'data' : 'urgent',
       { signal: f.lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
@@ -538,7 +538,7 @@ test('delivery saturation signals recovery through lifecycle capacity while pres
     receiver.begin(1, generation, cursors, f.lifetime.signal);
     await f.call({ method: 'resume-output', generation });
     release = f.hold('outbound');
-    const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId: first,
+    const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first,
       stream: { ...stream, streamId: 'synthetic-filler' } });
     for (let i = 0; i < 120; i += 1) drains.push(f.outbound.submit(filler, i < 112 ? 'data' : 'urgent',
       { signal: f.lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));
@@ -595,7 +595,7 @@ test('the coordinator gates saturated output and automatically replays both stre
     await recovery.recover();
     recovered.mockImplementation(() => done.resolve());
     release = f.hold('outbound');
-    const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId: first,
+    const filler = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: first,
       stream: { ...stream, streamId: 'synthetic-filler' } });
     for (let i = 0; i < 120; i++) drains.push(f.outbound.submit(filler, i < 112 ? 'data' : 'urgent',
       { signal: f.lifetime.signal, validate() {} }, i < 112 ? 'data' : 'application').drained.catch((error: unknown) => error));

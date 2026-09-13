@@ -14,6 +14,9 @@ const stream = { ...session, streamId: 'synthetic-stream' };
 const sibling = { ...session, streamId: 'synthetic-sibling' };
 const instanceId = 'synthetic-instance';
 const otherInstance = 'synthetic-other-instance';
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+const watermark = (stream: ProducerStreamIdentity, throughSequence: number, afterSequence = 0) =>
+  ({ type: 'node-replay-ready', stream, afterSequence, throughSequence } as const);
 
 function record(identity: ProducerStreamIdentity, sequence: number, large = false): string {
   return serializeNodeOutputFrame({ type: 'node-output', stream: identity, sequence,
@@ -53,11 +56,99 @@ test('a fresh physical assembler starts immediately after the controller recover
     f.receiver.begin(3, 7, [{ stream, afterSequence: 12 }], f.physical.signal);
     const serialized = record(stream, 13, true);
     const frames = chunks(stream, 13, 3, 7, true);
-    expect(f.receiver.receive(frames[0]!)).toBe('chunk');
+    expect(f.receiver.receive(frames[0]!)).toEqual({ kind: 'chunk' });
     expect(f.budget.reservedBytes).toBe(Buffer.byteLength(serialized));
-    expect(f.receiver.receive(frames[1]!)).toBe('record');
+    expect(f.receiver.receive(frames[1]!)).toEqual({ kind: 'record' });
     expect(owner.received).toHaveBeenCalledWith(serialized, 13);
     expect(owner.received).toHaveBeenCalledTimes(1); expect(f.budget.reservedBytes).toBe(0);
+  } finally { f.receiver.close(); }
+});
+
+test('watermark acceptance waits for complete records and synchronous publication, including records received before the reply', async () => {
+  const f = fixture(); const owner = f.install();
+  let accepted = false;
+  try {
+    const attempt = f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }], f.physical.signal);
+    const pending = f.receiver.waitForAccepted(attempt, [watermark(stream, 2)], f.physical.signal).then(() => { accepted = true; });
+    f.receiver.receive(chunks(stream, 1)[0]!);
+    const frames = chunks(stream, 2, 1, 1, true);
+    f.receiver.receive(frames[0]!); await tick();
+    expect(accepted).toBe(false);
+    expect(owner.received).toHaveBeenCalledTimes(1);
+    owner.received.mockImplementation(() => { expect(accepted).toBe(false); });
+    f.receiver.receive(frames[1]!); await pending;
+    expect(accepted).toBe(true);
+    expect(owner.received).toHaveBeenCalledTimes(2);
+    await f.receiver.waitForAccepted(attempt, [watermark(stream, 2)], f.physical.signal);
+    expect(owner.failed).not.toHaveBeenCalled();
+  } finally { f.receiver.close(); }
+});
+
+test('retiring one watermark keeps the barrier until its sibling is accepted', async () => {
+  const f = fixture(); const owner = f.install(); const neighbor = f.install(sibling);
+  let accepted = false;
+  try {
+    const attempt = f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }, { stream: sibling, afterSequence: 0 }], f.physical.signal);
+    const pending = f.receiver.waitForAccepted(attempt, [watermark(stream, 5), watermark(sibling, 1)], f.physical.signal)
+      .then(() => { accepted = true; });
+    owner.cancellation.abort(); await tick();
+    expect(accepted).toBe(false);
+    f.receiver.receive(chunks(sibling, 1)[0]!); await pending;
+    expect(accepted).toBe(true);
+    expect(owner.received).not.toHaveBeenCalled();
+    expect(neighbor.received).toHaveBeenCalledTimes(1);
+    expect(neighbor.failed).not.toHaveBeenCalled();
+  } finally { f.receiver.close(); }
+});
+
+test('a failed synchronous publisher retires its watermark without claiming acceptance or failing a sibling', async () => {
+  const f = fixture(); const owner = f.install(); const neighbor = f.install(sibling);
+  const error = new Error('Synthetic uncertain publication');
+  owner.received.mockImplementation(() => { throw error; });
+  try {
+    const attempt = f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }, { stream: sibling, afterSequence: 0 }], f.physical.signal);
+    const pending = f.receiver.waitForAccepted(attempt, [watermark(stream, 1), watermark(sibling, 1)], f.physical.signal);
+    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toEqual({ kind: 'retired' });
+    expect(owner.failed).toHaveBeenCalledWith(error);
+    f.receiver.receive(chunks(sibling, 1)[0]!); await pending;
+    expect(neighbor.failed).not.toHaveBeenCalled();
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.receiver.close(); }
+});
+
+test('replacement rejects the old acceptance wait and stale output cannot complete the new attempt', async () => {
+  const f = fixture(); const owner = f.install();
+  try {
+    const previous = f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }], f.physical.signal);
+    const waiting = f.receiver.waitForAccepted(previous, [watermark(stream, 1)], f.physical.signal);
+    void waiting.catch(() => {});
+    const physical = new AbortController();
+    const current = f.receiver.begin(2, 2, [{ stream, afterSequence: 0 }], physical.signal);
+    await expect(waiting).rejects.toMatchObject({ code: 'NODE_WORKER_CLOSED' });
+    let accepted = false;
+    const pending = f.receiver.waitForAccepted(current, [watermark(stream, 1)], physical.signal).then(() => { accepted = true; });
+    f.physical.abort();
+    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toEqual({ kind: 'retired' });
+    await tick(); expect(accepted).toBe(false);
+    expect(f.receiver.receive(chunks(stream, 1, 2, 2)[0]!)).toEqual({ kind: 'record' });
+    await pending;
+    expect(owner.received).toHaveBeenCalledTimes(1);
+    expect(owner.failed).not.toHaveBeenCalled();
+  } finally { f.receiver.close(); }
+});
+
+test('cancelled acceptance waits detach without consuming publication or blocking a later wait', async () => {
+  const f = fixture(); const owner = f.install();
+  const caller = new AbortController(); const error = new Error('Synthetic cancellation');
+  try {
+    const attempt = f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }], f.physical.signal);
+    const waiting = f.receiver.waitForAccepted(attempt, [watermark(stream, 1)], caller.signal);
+    void waiting.catch(() => {});
+    caller.abort(error); await expect(waiting).rejects.toBe(error);
+    const pending = f.receiver.waitForAccepted(attempt, [watermark(stream, 1)], f.physical.signal);
+    f.receiver.receive(chunks(stream, 1)[0]!); await pending;
+    expect(owner.received).toHaveBeenCalledTimes(1);
+    expect(owner.failed).not.toHaveBeenCalled();
   } finally { f.receiver.close(); }
 });
 
@@ -66,16 +157,16 @@ test('reconnect discards partial assembly while old chunks, closes and attempt t
   try {
     const old = f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }], f.physical.signal);
     const before = chunks(stream, 1, 1, 1, true);
-    expect(f.receiver.receive(before[0]!)).toBe('chunk');
+    expect(f.receiver.receive(before[0]!)).toEqual({ kind: 'chunk' });
     const replacement = new AbortController();
     const current = f.receiver.begin(2, 2, [{ stream, afterSequence: 0 }], replacement.signal);
     expect(f.budget.reservedBytes).toBe(0); expect(f.receiver.suspend(old)).toBe(false);
-    expect(f.receiver.receive(before[1]!)).toBe('retired');
+    expect(f.receiver.receive(before[1]!)).toEqual({ kind: 'retired' });
     const after = chunks(stream, 1, 2, 2, true);
-    expect(f.receiver.receive(after[0]!)).toBe('chunk');
+    expect(f.receiver.receive(after[0]!)).toEqual({ kind: 'chunk' });
     f.physical.abort();
     expect(f.budget.reservedBytes).toBeGreaterThan(0);
-    expect(f.receiver.receive(after[1]!)).toBe('record');
+    expect(f.receiver.receive(after[1]!)).toEqual({ kind: 'record' });
     expect(owner.received).toHaveBeenCalledTimes(1); expect(owner.failed).not.toHaveBeenCalled();
     expect(f.receiver.suspend(current)).toBe(true);
     expect(() => f.receiver.begin(2, 2, [{ stream, afterSequence: 1 }], replacement.signal)).toThrow();
@@ -89,8 +180,8 @@ test('attempt generations fence replay replacement on the same physical connecti
     f.receiver.receive(chunks(stream, 1, 1, 1, true)[0]!);
     f.receiver.begin(1, 2, [{ stream, afterSequence: 0 }], f.physical.signal);
     expect(f.budget.reservedBytes).toBe(0);
-    expect(f.receiver.receive(chunks(stream, 1, 1, 1)[0]!)).toBe('retired');
-    expect(f.receiver.receive(chunks(stream, 1, 1, 2)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(stream, 1, 1, 1)[0]!)).toEqual({ kind: 'retired' });
+    expect(f.receiver.receive(chunks(stream, 1, 1, 2)[0]!)).toEqual({ kind: 'record' });
     expect(owner.received).toHaveBeenCalledTimes(1);
   } finally { f.receiver.close(); }
 });
@@ -106,10 +197,10 @@ test('suspension clears partial transit once and preserves routes across stale n
     expect(f.receiver.receiveSuspension(notice)).toBe(true);
     expect(f.receiver.receiveSuspension(notice)).toBe(false);
     expect(f.budget.reservedBytes).toBe(0);
-    expect(f.receiver.receive(partial[1]!)).toBe('retired');
+    expect(f.receiver.receive(partial[1]!)).toEqual({ kind: 'retired' });
     f.receiver.begin(1, 2, [{ stream, afterSequence: 0 }], f.physical.signal);
     expect(f.receiver.receiveSuspension(notice)).toBe(false);
-    expect(f.receiver.receive(chunks(stream, 1, 1, 2)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(stream, 1, 1, 2)[0]!)).toEqual({ kind: 'record' });
     expect(owner.received).toHaveBeenCalledTimes(1); expect(owner.failed).not.toHaveBeenCalled();
     expect(f.failed).not.toHaveBeenCalled();
   } finally { f.receiver.close(); }
@@ -118,11 +209,11 @@ test('suspension clears partial transit once and preserves routes across stale n
 test('retirement arriving before publication installation cannot resurrect that route', () => {
   const f = fixture();
   try {
-    f.receiver.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: 1, instanceId, stream }));
+    f.receiver.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId, stream }));
     expect(() => f.install()).toThrow('rebound');
     const neighbor = f.install(sibling);
     f.receiver.begin(1, 1, [{ stream: sibling, afterSequence: 0 }], f.physical.signal);
-    expect(f.receiver.receive(chunks(sibling, 1)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(sibling, 1)[0]!)).toEqual({ kind: 'record' });
     expect(neighbor.failed).not.toHaveBeenCalled();
   } finally { f.receiver.close(); }
 });
@@ -134,7 +225,7 @@ test('logical routes cannot rebind and retain their immutable instance after ret
     f.receiver.retire(stream);
     expect(() => f.install()).toThrow('rebound');
     f.receiver.begin(1, 1, [], f.physical.signal);
-    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toBe('retired');
+    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toEqual({ kind: 'retired' });
     expect(() => f.receiver.receive(chunks(stream, 1, 1, 1, false, otherInstance)[0]!)).toThrow('NODE_WORKER_PROTOCOL');
   } finally { f.receiver.close(); }
 });
@@ -148,32 +239,32 @@ test('all live routes require one valid recovery cursor before replacing the phy
       [{ stream, afterSequence: -1 }, positions[1]!], [{ stream, afterSequence: 1.5 }, positions[1]!]]) {
       expect(() => f.receiver.begin(2, 2, cursors, f.physical.signal)).toThrow();
     }
-    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toEqual({ kind: 'record' });
     expect(owner.received).toHaveBeenCalledTimes(1);
   } finally { f.receiver.close(); }
 });
 
 test('logical retirement releases an abandoned record before a same-instance sibling arrives', () => {
   const f = fixture(); const owner = f.install(); const neighbor = f.install(sibling);
-  const retired = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream });
+  const retired = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, instanceId, stream });
   owner.failed.mockImplementation(() => { f.receiver.receiveRetirement(retired); });
   try {
     f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }, { stream: sibling, afterSequence: 0 }], f.physical.signal);
     f.receiver.receive(chunks(stream, 1, 1, 1, true)[0]!);
     f.receiver.receiveRetirement(retired);
     expect(f.budget.reservedBytes).toBe(0); expect(owner.failed).toHaveBeenCalledTimes(1);
-    expect(f.receiver.receive(chunks(sibling, 1)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(sibling, 1)[0]!)).toEqual({ kind: 'record' });
     expect(neighbor.failed).not.toHaveBeenCalled(); expect(neighbor.received).toHaveBeenCalledTimes(1);
-    expect(f.receiver.receive(chunks(stream, 1, 1, 1, true)[1]!)).toBe('retired');
+    expect(f.receiver.receive(chunks(stream, 1, 1, 1, true)[1]!)).toEqual({ kind: 'retired' });
   } finally { f.receiver.close(); }
 });
 
 test('logical retirement applies while disconnected without retiring a sibling publication route', () => {
   const f = fixture(); const owner = f.install(); const neighbor = f.install(sibling);
   try {
-    f.receiver.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream }));
+    f.receiver.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, instanceId, stream }));
     f.receiver.begin(2, 3, [{ stream: sibling, afterSequence: 0 }], f.physical.signal);
-    expect(f.receiver.receive(chunks(sibling, 1, 2, 3)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(sibling, 1, 2, 3)[0]!)).toEqual({ kind: 'record' });
     expect(owner.failed).toHaveBeenCalledTimes(1); expect(neighbor.failed).not.toHaveBeenCalled();
   } finally { f.receiver.close(); }
 });
@@ -182,14 +273,14 @@ test('unknown retirement at exhausted identity capacity cannot fail an existing 
   const f = fixture(); const owner = f.install();
   try {
     for (let i = 1; i < MAX_NODE_STREAM_IDENTITIES; i++) f.receiver.receiveRetirement(serializeNodeWorkerOutputRetirement({
-      type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream: { ...stream, streamId: `retired-${i}` },
+      type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, instanceId, stream: { ...stream, streamId: `retired-${i}` },
     }));
     expect(() => f.install(sibling)).toThrow('identity');
     expect(() => f.receiver.receiveRetirement(serializeNodeWorkerOutputRetirement({
-      type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream: sibling,
+      type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION, instanceId, stream: sibling,
     }))).not.toThrow();
     f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }], f.physical.signal);
-    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toEqual({ kind: 'record' });
     expect(owner.failed).not.toHaveBeenCalled(); expect(f.failed).not.toHaveBeenCalled();
   } finally { f.receiver.close(); }
 });
@@ -204,11 +295,11 @@ test('a shared assembly budget bounds two logical sessions and isolates capacity
     f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }], f.physical.signal);
     g.receiver.begin(1, 1, [{ stream: secondStream, afterSequence: 0 }], g.physical.signal);
     const first = chunks(stream, 1, 1, 1, true);
-    expect(f.receiver.receive(first[0]!)).toBe('chunk');
-    expect(g.receiver.receive(chunks(secondStream, 1, 1, 1, true)[0]!)).toBe('retired');
+    expect(f.receiver.receive(first[0]!)).toEqual({ kind: 'chunk' });
+    expect(g.receiver.receive(chunks(secondStream, 1, 1, 1, true)[0]!)).toEqual({ kind: 'retired' });
     expect(other.failed).toHaveBeenCalledWith(expect.objectContaining({ code: 'NODE_CAPACITY' }));
     expect(owner.failed).not.toHaveBeenCalled(); expect(g.failed).not.toHaveBeenCalled();
-    expect(f.receiver.receive(first[1]!)).toBe('record'); expect(budget.reservedBytes).toBe(0);
+    expect(f.receiver.receive(first[1]!)).toEqual({ kind: 'record' }); expect(budget.reservedBytes).toBe(0);
   } finally { f.receiver.close(); g.receiver.close(); }
 });
 
@@ -217,10 +308,10 @@ test('an uncertain publication retires only its route and cannot be retried afte
   const error = new Error('Synthetic uncertain publication'); owner.received.mockImplementation(() => { throw error; });
   try {
     f.receiver.begin(1, 1, [{ stream, afterSequence: 0 }, { stream: sibling, afterSequence: 0 }], f.physical.signal);
-    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toBe('retired'); expect(owner.failed).toHaveBeenCalledWith(error);
+    expect(f.receiver.receive(chunks(stream, 1)[0]!)).toEqual({ kind: 'retired' }); expect(owner.failed).toHaveBeenCalledWith(error);
     f.receiver.begin(2, 2, [{ stream: sibling, afterSequence: 0 }], f.physical.signal);
-    expect(f.receiver.receive(chunks(stream, 1, 2, 2)[0]!)).toBe('retired');
-    expect(f.receiver.receive(chunks(sibling, 1, 2, 2)[0]!)).toBe('record');
+    expect(f.receiver.receive(chunks(stream, 1, 2, 2)[0]!)).toEqual({ kind: 'retired' });
+    expect(f.receiver.receive(chunks(sibling, 1, 2, 2)[0]!)).toEqual({ kind: 'record' });
     expect(owner.received).toHaveBeenCalledTimes(1); expect(neighbor.failed).not.toHaveBeenCalled();
   } finally { f.receiver.close(); }
 });

@@ -12,7 +12,7 @@ export interface NodeOutputRecoveryOptions {
   readonly connectionId: number;
   readonly signal: AbortSignal;
   readonly service: Pick<NodeWorkerServiceClient, 'call'>;
-  readonly receiver: Pick<NodeWorkerOutputDeliveryReceiver, 'begin' | 'suspend' | 'receiveSuspension'>;
+  readonly receiver: Pick<NodeWorkerOutputDeliveryReceiver, 'begin' | 'suspend' | 'receiveSuspension' | 'waitForAccepted'>;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   cursors(): readonly NodeOutputReplayCursor[];
   retireGap(range: Extract<NodeReplayReply, { type: 'node-replay-gap' }>): void;
@@ -161,6 +161,9 @@ export class NodeOutputRecovery {
               this.#validate(); attemptSignal.throwIfAborted();
               if (result.kind !== 'output-replayed') throw protocol();
               for (const range of result.ranges) if (range.type === 'node-replay-gap') this.options.retireGap(range);
+              await this.options.receiver.waitForAccepted(generation.attempt,
+                result.ranges.filter((range) => range.type === 'node-replay-ready'), attemptSignal);
+              this.#validate(); attemptSignal.throwIfAborted();
             }
             await this.options.reconcile(attemptSignal);
             this.#validate(); attemptSignal.throwIfAborted();

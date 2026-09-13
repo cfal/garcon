@@ -7,6 +7,7 @@ import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from 
 import type { ProviderConfigurationRequest } from '../../../server/execution-nodes/provider-configuration.js';
 import { parseNodeExecutionReplyText } from '../../../server/execution-nodes/transport/execution-receipt-wire.js';
 import { NodeSocketWriter } from '../../../server/execution-nodes/transport/socket-writer.js';
+import { NodeExecutionReconciliation } from '../../../server/execution-nodes/execution-reconciliation.js';
 import { TranscriptLedgerService } from '../../../server/ledger/service.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { withTimeout } from '../../support/deferred.js';
@@ -280,6 +281,57 @@ describe.skipIf(!nodeSessionSystemdAvailable)('contained worker output over auth
     }
   }, 90_000);
 
+  test('recovery waits for controller publication while its replay reply passes held output on WSS', async () => {
+    const provider = model(async () => 'synthetic watermark output '.repeat(6000));
+    const f = await createNodeSessionOutputFixture(certificate);
+    const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(path.join(f.host.storage, 'controller-ledger')));
+    const chatId = '1789000000000088';
+    ledger.initializeChat(chatId);
+    const source = ledger.openProducer(chatId, 'direct-anthropic-compatible');
+    let pressure: ReturnType<typeof f.host.holdOutputAdmission> | undefined;
+    let service: ReturnType<typeof spyOn<typeof f.controller.client.service, 'call'>> | undefined;
+    let reconciliation: ReturnType<typeof spyOn<NodeExecutionReconciliation, 'reconcile'>> | undefined;
+    try {
+      await f.recover();
+      const output = await f.install('synthetic-watermark', { signal: source.signal, emit: (event) => source.sink.publish(event) });
+      pressure = f.host.holdOutputAdmission(64 * 1024);
+      const started = await f.start(output, chatId, 'synthetic-watermark-run', provider.configuration, 'synthetic input');
+      expect(started.result).toEqual({ kind: 'dispatched' });
+      await withTimeout(pressure.blocked, 5000, () => 'Synthetic output did not reach the held relay');
+      const replayed = Promise.withResolvers<void>();
+      const call = f.controller.client.service.call.bind(f.controller.client.service);
+      service = spyOn(f.controller.client.service, 'call').mockImplementation(async (command, signal) => {
+        const result = await call(command, signal);
+        if (command.method === 'replay-output' && result.kind === 'output-replayed') {
+          expect(result.ranges.some((range) => range.type === 'node-replay-ready' && range.throughSequence > range.afterSequence)).toBe(true);
+          replayed.resolve();
+        }
+        return result;
+      });
+      reconciliation = spyOn(NodeExecutionReconciliation.prototype, 'reconcile');
+      const recovering = f.recover();
+      void recovering.catch(() => {});
+      await withTimeout(replayed.promise, 1000, () => 'Replay reply was blocked behind output admission');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(reconciliation).not.toHaveBeenCalled();
+      expect(f.ready).toBe(false);
+      expect(ledger.currentRows(chatId).filter((row) => row.kind === 'provider-row')).toEqual([]);
+      pressure.release(); pressure = undefined;
+      await recovering;
+      await f.waitFor(output, (event) => event.type === 'run-ended');
+      expect(f.ready).toBe(true);
+      expect(f.recoveryCount).toBe(2);
+      expect(reconciliation).toHaveBeenCalled();
+      expect(ledger.currentRows(chatId).filter((row) => row.kind === 'provider-row')).toHaveLength(1);
+      expect(provider.requests).toHaveLength(1);
+      expect(output.failures).toEqual([]);
+      expect(f.failures).toEqual([]);
+    } finally {
+      pressure?.release(); service?.mockRestore(); reconciliation?.mockRestore();
+      ledger.close(); await f.dispose(); await provider.close();
+    }
+  }, 20_000);
+
   test('lost ACKs and a mid-record disconnect preserve the same V5 sink and exact operation receipts', async () => {
     const large = '界'.repeat(40_000);
     const firstOutput = 'synthetic large output '.repeat(300_000) + 'synthetic end';
@@ -456,6 +508,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('contained worker output over auth
       await closed;
       await f.reconnect(); await f.recover();
       expect(output.retired).toBe(true);
+      expect(output.failures).toMatchObject([{ code: 'NODE_REPLAY_GAP' }]);
       expect(sibling.retired).toBe(false);
       expect(f.ready).toBe(true);
       expect(f.failures).toEqual([]);

@@ -107,7 +107,7 @@ test('reconciles before opening and confirms containment before configuring or a
 test('accepted retirements keep their captured worker after physical disconnect and block the replacement barrier', async () => {
   const f = fixture(); const first = await f.start();
   const capacity = Promise.withResolvers<void>();
-  const frame = { type: 'node-worker-output-retired', version: 1, stream: { ...first.lease.session, streamId: 'synthetic-stream' },
+  const frame = { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, stream: { ...first.lease.session, streamId: 'synthetic-stream' },
     instanceId: configuration().instances[0]!.id } as const;
   f.peer.forward.mockImplementationOnce(() => { throw new NodeWorkerTransportError('NODE_WORKER_CAPACITY'); });
   f.peer.waitForRelease.mockImplementationOnce(() => capacity.promise);

@@ -2,7 +2,7 @@ import { NODE_WIRE_VERSION, parseProducerStreamIdentity, producerStreamKey, type
 import { sameNodeSession } from '../../../common/node-operation.js';
 import { parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../execution-nodes/transport/bulk-channel-wire.js';
 import { DEFAULT_NODE_BULK_LIMITS } from '../../execution-nodes/transport/bulk-transfers.js';
-import { MAX_NODE_STREAM_IDENTITIES, NodeStreamIdentityExhaustedError, type NodeReplayOptions } from '../replay-cache.js';
+import { MAX_NODE_STREAM_IDENTITIES, NodeReplayGapError, NodeStreamIdentityExhaustedError, type NodeReplayOptions } from '../replay-cache.js';
 import { NodeAuthorityError, type NodeConnectionLease } from '../supervisor.js';
 import type { NodeWorkerApplicationFrame } from './application-protocol.js';
 import type { NodeWorkerAuthority } from './authority.js';
@@ -97,7 +97,7 @@ export class NodeWorkerSessionServices {
           } catch (error) { this.#retire(owner, 'session'); throw error; }
         }
         case 'retire-output': {
-          this.retirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+          this.retirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
             instanceId: command.instanceId, stream: command.stream }, 'coordinator');
           const owner = this.#streams.get(producerStreamKey(command.stream));
           if (!owner) throw new NodeStreamIdentityExhaustedError();
@@ -206,7 +206,7 @@ export class NodeWorkerSessionServices {
     const owner = this.#streams.get(producerStreamKey(frame.stream));
     if (owner && owner.instanceId !== frame.instanceId) throw protocol();
     if (!owner && this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) return;
-    this.#retire(owner ?? this.#install(frame.instanceId, frame.stream), source);
+    this.#retire(owner ?? this.#install(frame.instanceId, frame.stream), source, frame.reason);
   }
 
   acknowledge(frame: NodeWorkerOutputAcknowledgement): void {
@@ -235,7 +235,8 @@ export class NodeWorkerSessionServices {
     const owner: SessionStream = { instanceId, stream: Object.freeze(stream), cancellation: new AbortController(), retired: false, outputFenced: false };
     this.#streams.set(key, owner);
     try {
-      this.#delivery.install(instanceId, stream, owner.cancellation.signal, () => this.#retire(owner, 'session'));
+      this.#delivery.install(instanceId, stream, owner.cancellation.signal, (error) =>
+        this.#retire(owner, 'session', error instanceof NodeReplayGapError ? 'replay-gap' : 'output-retired'));
       this.#assembler.install(instanceId, stream, owner.cancellation.signal, (serialized, sequence) => {
         try { this.#delivery.accept(stream, serialized, sequence); }
         catch { this.#retire(owner, 'session'); }
@@ -244,10 +245,10 @@ export class NodeWorkerSessionServices {
     } catch (error) { this.#retire(owner, 'session'); throw error; }
   }
 
-  #retire(owner: SessionStream, source: 'instance' | 'session' | 'coordinator'): void {
+  #retire(owner: SessionStream, source: 'instance' | 'session' | 'coordinator', reason: NodeWorkerOutputRetirement['reason'] = 'output-retired'): void {
     if (owner.retired) return;
     owner.retired = true;
-    const frame = { type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, stream: owner.stream, instanceId: owner.instanceId } as const;
+    const frame = { type: 'node-worker-output-retired', reason, version: NODE_WIRE_VERSION, stream: owner.stream, instanceId: owner.instanceId } as const;
     owner.cancellation.abort();
     if (source !== 'coordinator') this.#upstream.enqueue(frame);
     if (source !== 'instance') this.#downstream.get(owner.instanceId)!.enqueue(frame);

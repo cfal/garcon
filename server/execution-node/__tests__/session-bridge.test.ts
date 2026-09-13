@@ -100,7 +100,7 @@ function fixture() {
       dropReplies() { dropReplies = true; } };
     closeLinks.push(close); return link;
   }
-  const frame = (streamId = 'synthetic-stream') => ({ type: 'node-worker-output-retired', version: 1,
+  const frame = (streamId = 'synthetic-stream') => ({ type: 'node-worker-output-retired', reason: 'output-retired', version: 1,
     stream: { ...session, streamId }, instanceId: 'synthetic-instance' } as const);
   const dispatch = { method: 'dispatch', identity: { ...session, operationId: 'synthetic-operation' },
     stream: frame().stream, body: { ...session, transferId: 'synthetic-body' } } as const;

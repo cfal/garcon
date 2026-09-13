@@ -194,7 +194,7 @@ export class NodeWorkerOutputPort {
       while (!this.#closed && this.#retirements.size) {
         const stream = this.#retirements.values().next().value!;
         this.#retirements.delete(stream);
-        const text = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+        const text = serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', reason: 'output-retired', version: NODE_WIRE_VERSION,
           instanceId: this.options.instanceId, stream });
         await this.writer.submit(text, 'urgent', { signal: this.options.signal, validate: () => { this.#validate(); } }, 'application').drained;
       }

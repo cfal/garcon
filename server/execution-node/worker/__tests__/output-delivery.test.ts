@@ -171,6 +171,52 @@ test('recovery sends only the captured watermark, then reads the suffix from the
   } finally { f.delivery.close(); }
 });
 
+test('a repeated recovery read accepts a lower cursor and an advancing accepted suffix without rebinding the stream', async () => {
+  const f = fixture(); const owner = f.install();
+  const sent: number[] = [];
+  try {
+    owner.emit(1); owner.emit(2);
+    const attempt = f.delivery.beginRecovery(async (record) => { sent.push(record.sequence); });
+    await f.delivery.replay(attempt, [{ stream, afterSequence: 0 }]);
+    expect(await f.delivery.replay(attempt, [{ stream, afterSequence: 1 }]))
+      .toEqual([{ type: 'node-replay-ready', stream, afterSequence: 1, throughSequence: 2 }]);
+    owner.emit(3);
+    expect(await f.delivery.replay(attempt, [{ stream, afterSequence: 3 }]))
+      .toEqual([{ type: 'node-replay-ready', stream, afterSequence: 3, throughSequence: 3 }]);
+    expect(sent).toEqual([1, 2, 2]);
+    expect(f.delivery.resumeLive(attempt)).toBe(true);
+    expect(owner.failure).not.toHaveBeenCalled();
+  } finally { f.delivery.close(); }
+});
+
+test('a cumulative ACK overtaking lower-cursor replay cannot turn its accepted prefix into a cache gap', async () => {
+  const f = fixture(); const owner = f.install(); const published: unknown[] = [];
+  const ingress = new OrderedPublicationIngress({ stream, sink: { publish: (event) => published.push(event) },
+    permission() { throw new Error('Unexpected synthetic permission'); } });
+  try {
+    for (let sequence = 1; sequence <= 2; sequence++) {
+      owner.emit(sequence);
+      ingress.receive(parseNodeOutputText(record(stream, sequence))!);
+    }
+    const sent: number[] = [];
+    const attempt = f.delivery.beginRecovery(async (record, attempt) => {
+      sent.push(record.sequence);
+      const result = ingress.receive(parseNodeOutputText(record.serialized)!);
+      if (result.kind !== 'ack') throw new Error('Synthetic replay was not acknowledged');
+      f.delivery.acknowledge(attempt, result.ack);
+    });
+    expect(await f.delivery.replay(attempt, [{ stream, afterSequence: 0 }]))
+      .toEqual([{ type: 'node-replay-ready', stream, afterSequence: 0, throughSequence: 2 }]);
+    expect(sent).toEqual([1]);
+    expect(published).toHaveLength(2);
+    expect(f.delivery.retainedBytes).toBe(0);
+    expect(await f.delivery.replay(attempt, [{ stream, afterSequence: 0 }]))
+      .toEqual([{ type: 'node-replay-ready', stream, afterSequence: 0, throughSequence: 2 }]);
+    expect(f.delivery.resumeLive(attempt)).toBe(true);
+    expect(owner.failure).not.toHaveBeenCalled();
+  } finally { f.delivery.close(); }
+});
+
 test('cache eviction during replay retires only the missing stream and does not bypass the gap with transit bytes', async () => {
   const f = fixture(); const owner = f.install(); const sibling = f.install(siblingStream);
   try {

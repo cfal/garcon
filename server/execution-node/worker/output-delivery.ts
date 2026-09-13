@@ -1,7 +1,7 @@
 import { MAX_NODE_OUTPUT_SEQUENCE, parseNodeOutputAck, parseProducerStreamIdentity, producerStreamKey, type NodeOutputAck, type NodeReplayReply, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../../common/node-operation.js';
-import { NodeReplayCache, NodeReplayUnavailableError, type NodeReplayOptions } from '../replay-cache.js';
+import { NodeReplayCache, NodeReplayGapError, NodeReplayUnavailableError, type NodeReplayOptions } from '../replay-cache.js';
 import { NodeWorkerTransportError } from './framing.js';
 import { NODE_WORKER_OUTPUT_QUEUE, type NodeWorkerOutputQueueLimits } from './output-limits.js';
 
@@ -33,6 +33,7 @@ interface StreamDelivery {
   readonly cancellation: AbortController;
   readonly detach: () => void;
   produced: number;
+  acknowledged: number;
   retired: boolean;
   admitting: boolean;
 }
@@ -108,7 +109,7 @@ export class NodeWorkerOutputDelivery {
     const key = producerStreamKey(stream);
     this.#cache.register(stream);
     const retire = () => this.retire(stream);
-    this.#streams.set(key, { instanceId, stream: Object.freeze(stream), failed, produced: 0, retired: false, admitting: false, cancellation: new AbortController(),
+    this.#streams.set(key, { instanceId, stream: Object.freeze(stream), failed, produced: 0, acknowledged: 0, retired: false, admitting: false, cancellation: new AbortController(),
       detach: () => signal.removeEventListener('abort', retire) });
     signal.addEventListener('abort', retire, { once: true });
   }
@@ -183,25 +184,25 @@ export class NodeWorkerOutputDelivery {
           ? { type: 'node-replay-ready', stream: retired!.stream, afterSequence: cursor.afterSequence, throughSequence: retired!.produced } as const
           : { type: 'node-replay-gap', stream: retired!.stream, requestedAfter: cursor.afterSequence,
             firstRetainedSequence: retired!.produced + 1, lastProducedSequence: retired!.produced } as const };
-        const prior = attempt.replayed.get(owner);
-        if (prior !== undefined && prior !== cursor.afterSequence) throw protocol();
-        return { owner, range: this.#cache.capture(owner.stream, cursor.afterSequence) };
+        const range = this.#cache.capture(owner.stream, Math.max(cursor.afterSequence, owner.acknowledged));
+        return { owner, range: range.type === 'node-replay-ready' ? { ...range, afterSequence: cursor.afterSequence } : range };
       });
       for (const { owner, range } of ranges) {
         if (!this.#current(token)) return null;
         if (!owner) { results.push(range); continue; }
         if (owner.retired) continue;
         if (range.type === 'node-replay-gap') {
-          results.push(range); this.#failStream(owner, new NodeReplayUnavailableError()); continue;
+          results.push(range); this.#failStream(owner, new NodeReplayGapError()); continue;
         }
         let complete = true;
         for (let sequence = range.afterSequence + 1; sequence <= range.throughSequence; sequence += 1) {
           this.#validate();
           if (!this.#current(token)) return null;
           if (owner.retired) { complete = false; break; }
+          if (sequence <= owner.acknowledged) { sequence = owner.acknowledged; continue; }
           const read = this.#cache.read(owner.stream, sequence, range.throughSequence);
           if ('type' in read) {
-            results.push(read); this.#failStream(owner, new NodeReplayUnavailableError()); complete = false; break;
+            results.push(read); this.#failStream(owner, new NodeReplayGapError()); complete = false; break;
           }
           try { await attempt.sender({ instanceId: owner.instanceId, stream: owner.stream, sequence, serialized: read.serialized, signal: owner.cancellation.signal }, token, () => {}); }
           catch (error) {
@@ -250,6 +251,7 @@ export class NodeWorkerOutputDelivery {
     if (produced === undefined || ack.throughSequence > produced) throw protocol();
     if (!owner) return false;
     this.#cache.acknowledge(ack.stream, ack.throughSequence);
+    owner.acknowledged = Math.max(owner.acknowledged, ack.throughSequence);
     return true;
   }
 

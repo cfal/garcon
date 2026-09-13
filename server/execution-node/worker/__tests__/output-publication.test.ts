@@ -69,7 +69,10 @@ test('instance output crosses session replay and physical assembly into real V5 
   let heldChunk: string | null = null;
   const sessionWriter = new NodeWorkerWriter({ write(bytes) {
     const text = Buffer.from(bytes.subarray(4)).toString();
-    receiver.receive(text);
+    const result = receiver.receive(text);
+    if (acknowledge && result.kind === 'duplicate') {
+      delivery.acknowledge(current, { type: 'node-output-ack', stream: result.stream, throughSequence: ingress.acceptedSequence });
+    }
     if (holdNext) { holdNext = false; heldChunk = text; return held.promise; }
     return Promise.resolve();
   }, close() { held.resolve(); } }, { ...NODE_WORKER_WRITER_LIMITS, signal: lifetime.signal, failed });
@@ -101,7 +104,7 @@ test('instance output crosses session replay and physical assembly into real V5 
     await delivery.replay(redelivery.sending, [{ stream, afterSequence: 0 }]);
     expect(delivery.resumeLive(redelivery.sending)).toBe(true);
     expect(ledger.currentRows('synthetic-chat')).toEqual(committed); expect(requests).toBe(1);
-    expect(published).toEqual([accepted[0]!, accepted[0]!]); expect(delivery.retainedBytes).toBe(0);
+    expect(published).toEqual([accepted[0]!]); expect(delivery.retainedBytes).toBe(0);
 
     holdNext = true;
     output.emit({ type: 'rows', rows: [{ message: new AssistantMessage(at, '界'.repeat(30_000)) }] });
@@ -113,12 +116,12 @@ test('instance output crosses session replay and physical assembly into real V5 
     await tick(); expect(accepted).toHaveLength(3);
     const recovery = begin(3, ingress.acceptedSequence);
     const replay = delivery.replay(recovery.sending, [{ stream, afterSequence: 1 }]);
-    expect(receiver.receive(heldChunk!)).toBe('retired');
+    expect(receiver.receive(heldChunk!)).toEqual({ kind: 'retired' });
     held.resolve();
     expect(await replay).toEqual([{ type: 'node-replay-ready', stream, afterSequence: 1, throughSequence: 3 }]);
     expect(delivery.resumeLive(recovery.sending)).toBe(true);
     expect(ledger.currentRows('synthetic-chat')).toHaveLength(5);
-    expect(published).toEqual([accepted[0]!, ...accepted]);
+    expect(published).toEqual(accepted);
     expect(requests).toBe(1); expect(ingress.acceptedSequence).toBe(3);
     expect(delivery.retainedBytes).toBe(0); expect(assembler.bufferedBytes).toBe(0);
     expect(port.bufferedBytes).toBe(0); expect(failed).not.toHaveBeenCalled();
