@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../server/execution-node/worker/configuration.js';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -77,7 +78,7 @@ export async function startWorkerSessionFixture(
   let manifests: readonly NodeProviderManifest[];
   try {
     await peer.hello;
-    manifests = await peer.configure(session, connectionId, { role: 'session', nodeId: session.nodeBootId, storageDirectory: storage,
+    manifests = await peer.configure(session, connectionId, { role: 'session', nodeId: session.nodeBootId, storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
       instances: instances.map((instance) => ({ ...instance, label: instance.id, homeDirectory: path.join(storage, instance.id),
         workspaceIds: ['synthetic-workspace'], maxOperations: 2 })),
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay });

@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../../server/execution-node/worker/configuration.js';
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -24,7 +25,7 @@ test.skipIf(process.platform !== 'linux')('a foreign auth completion retires the
     const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
     const instances = ['synthetic-first', 'synthetic-second'].map((id) => ({ id, agentId: 'direct-anthropic-compatible', label: id,
       homeDirectory: path.join(storage, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 }));
-    await peer.configure(session, 1, { role: 'session', nodeId: 'synthetic-node', storageDirectory: storage,
+    await peer.configure(session, 1, { role: 'session', nodeId: 'synthetic-node', storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
       instances, workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY });
     await peer.admit(1);
     const children = (await readFile(`/proc/${child.pid}/task/${child.pid}/children`, 'utf8')).trim().split(/\s+/).map(Number);

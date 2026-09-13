@@ -3,7 +3,7 @@ import { NodeSessionHostOwner, type NodeSessionHostOptions } from '../systemd/se
 import type { NodeSessionHostMarker, NodeSessionMarkerStore } from '../systemd/session-marker.js';
 import type { SystemdLaunchIdentity, SystemdUnitIdentity } from '../systemd/contracts.js';
 import { NodeSupervisor, type NodeSupervisorOptions } from '../supervisor.js';
-import { systemdExecutionLaunch } from '../systemd/launch.js';
+import { createSystemdLaunchIdentity } from '../systemd/launch.js';
 
 const session = { controllerBootId: 'synthetic-controller-boot', nodeBootId: 'synthetic-node-boot', logicalSessionId: 'synthetic-session' };
 const unitIdentity = (launch: SystemdLaunchIdentity): SystemdUnitIdentity => ({ ...launch, invocationId: 'c'.repeat(32), mainPid: 1234,
@@ -16,7 +16,7 @@ function fixture(initial: NodeSessionHostMarker | null = null) {
   const store = {
     read: mock(async () => { calls.push('read'); return marker; }),
     recordLaunch: mock(async (launch) => { calls.push('record-launch');
-      marker = { version: 1, nodeId: 'synthetic-node', controllerId: 'synthetic-controller', launch, identity: null }; }),
+      marker = { version: 1, nodeId: 'synthetic-node', controllerId: 'synthetic-controller', launch, identity: null }; return '/synthetic/worker-cwd'; }),
     recordIdentity: mock(async (identity) => { calls.push('record-identity');
       if (!marker) throw new Error('Synthetic marker absent'); marker = { ...marker, identity }; }),
     clear: mock(async () => { calls.push('clear'); marker = null; }),
@@ -54,7 +54,7 @@ test('launch evidence precedes spawn and full identity precedes session binding'
 });
 
 test.each([false, true])('startup cleans recorded %s full identity before new launch', async (full) => {
-  const launch = systemdExecutionLaunch('synthetic-node', '/synthetic/bun', []).identity;
+  const launch = createSystemdLaunchIdentity('synthetic-node');
   const initial: NodeSessionHostMarker = { version: 1, nodeId: 'synthetic-node', controllerId: 'synthetic-controller',
     launch, identity: full ? unitIdentity(launch) : null };
   const f = fixture(initial);
@@ -167,7 +167,7 @@ test('an unconfirmed host retires only its inert launch and reaps a stuck waiter
 });
 
 test('a foreign unit or ambiguous inert retirement preserves evidence until a successful explicit reconciliation', async () => {
-  const launch = systemdExecutionLaunch('synthetic-node', '/synthetic/bun', []).identity;
+  const launch = createSystemdLaunchIdentity('synthetic-node');
   const initial: NodeSessionHostMarker = { version: 1, nodeId: 'synthetic-node', controllerId: 'synthetic-controller', launch, identity: null };
   const f = fixture(initial);
   f.helper.mockImplementationOnce(async () => { throw new Error('Synthetic foreign occupant'); });

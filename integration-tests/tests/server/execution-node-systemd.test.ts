@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { systemdExecutionLaunch } from '../../../server/execution-node/systemd/launch.js';
+import { createSystemdLaunchIdentity, systemdExecutionLaunch } from '../../../server/execution-node/systemd/launch.js';
 import { runSystemdHelper as runHelper } from '../../../server/execution-node/systemd/helper-process.js';
 import type { SystemdHelperRequest, SystemdUnitIdentity } from '../../../server/execution-node/systemd/contracts.js';
 
@@ -18,7 +18,7 @@ let helperWorkingDirectory: string;
 function runSystemdHelper(request: SystemdHelperRequest) { return runHelper(request, { workingDirectory: helperWorkingDirectory }); }
 
 async function start(nodeId: string) {
-  const launch = systemdExecutionLaunch(nodeId, process.execPath, [processFixture]);
+  const launch = systemdExecutionLaunch(createSystemdLaunchIdentity(nodeId), process.execPath, [processFixture]);
   const argv = [...launch.argv];
   argv.splice(argv.indexOf('--'), 0, '--property=RuntimeMaxSec=15s');
   const waiter = Bun.spawn(argv, { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
@@ -65,12 +65,12 @@ describe.skipIf(!available)('execution-node systemd containment (requires Linux 
   beforeEach(async () => { helperWorkingDirectory = await mkdtemp(path.join(homedir(), 'garcon-systemd-cwd-')); });
   afterEach(async () => { await rm(helperWorkingDirectory, { recursive: true, force: true }); });
   test('a never-created inert launch retires without confusing absence with a failed bus', async () => {
-    const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath, [processFixture, 'inert']);
+    const launch = systemdExecutionLaunch(createSystemdLaunchIdentity(`synthetic-${randomUUID()}`), process.execPath, [processFixture, 'inert']);
     expect(await runSystemdHelper({ kind: 'retire-inert', launch: launch.identity })).toEqual({ kind: 'retired-inert' });
   }, 10_000);
 
   test('an inert launch is retired on its exact nonce without requiring persisted running identity', async () => {
-    const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath, [processFixture, 'inert']);
+    const launch = systemdExecutionLaunch(createSystemdLaunchIdentity(`synthetic-${randomUUID()}`), process.execPath, [processFixture, 'inert']);
     const waiter = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
     const reader = waiter.stdout.getReader();
     try {
@@ -93,7 +93,7 @@ describe.skipIf(!available)('execution-node systemd containment (requires Linux 
 
   test('a delayed inert launch cannot replace an already confirmed successor after absence reconciliation', async () => {
     const nodeId = `synthetic-${randomUUID()}`;
-    const old = systemdExecutionLaunch(nodeId, process.execPath, [processFixture, 'inert']);
+    const old = systemdExecutionLaunch(createSystemdLaunchIdentity(nodeId), process.execPath, [processFixture, 'inert']);
     expect(await runSystemdHelper({ kind: 'retire-inert', launch: old.identity })).toEqual({ kind: 'retired-inert' });
     const next = await start(nodeId);
     try {
@@ -108,7 +108,7 @@ describe.skipIf(!available)('execution-node systemd containment (requires Linux 
 
   test('passes launch arguments without systemd environment expansion', async () => {
     const args = ['literal;$(command)', '${GARCON_SYNTHETIC_UNSET}', '$GARCON_SYNTHETIC_UNSET', 'argument with spaces', ''];
-    const launch = systemdExecutionLaunch(`synthetic-${randomUUID()}`, process.execPath,
+    const launch = systemdExecutionLaunch(createSystemdLaunchIdentity(`synthetic-${randomUUID()}`), process.execPath,
       [processFixture, 'argv', ...args]);
     const argv = [...launch.argv];
     argv.splice(argv.indexOf('--'), 0, '--property=RuntimeMaxSec=5s');
@@ -124,7 +124,7 @@ describe.skipIf(!available)('execution-node systemd containment (requires Linux 
     const nodeId = `synthetic-${randomUUID()}`;
     const first = await start(nodeId);
     try {
-      const competing = systemdExecutionLaunch(nodeId, '/usr/bin/true', []);
+      const competing = systemdExecutionLaunch(createSystemdLaunchIdentity(nodeId), '/usr/bin/true', []);
       const failed = Bun.spawn([...competing.argv], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
       expect(await failed.exited).not.toBe(0);
       await expect(runSystemdHelper({ kind: 'inspect', launch: competing.identity }))

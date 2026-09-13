@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../configuration.js';
 import { expect, test } from 'bun:test';
 import { mkdtemp, mkdir, readdir, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { prepareNodeInstanceEnvironments as prepareEnvironments } from '../envir
 import type { NodeInstanceConfiguration } from '../configuration.js';
 
 function prepareNodeInstanceEnvironments(instances: readonly NodeInstanceConfiguration[], signal: AbortSignal) {
-  return prepareEnvironments(instances, signal, async (integrationId) => ({ integrationId, directories: [] }));
+  return prepareEnvironments(instances, signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, async (integrationId) => ({ integrationId, directories: [] }));
 }
 
 function instance(directory: string, id: string): NodeInstanceConfiguration {
@@ -78,11 +79,11 @@ test.each([
   const root = await mkdtemp(path.join(os.homedir(), 'garcon-native-environment-'));
   try {
     const instances = ['first', 'second'].map((id) => ({ ...instance(root, id), agentId: agentId! }));
-    const environments = await prepareEnvironments(instances, new AbortController().signal);
+    const environments = await prepareEnvironments(instances, new AbortController().signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH);
     for (const [id, environment] of environments) {
       expect(environment.values[key!]).toBe(path.resolve(root, id, directory!));
     }
-    await expect(prepareEnvironments([{ ...instances[0]!, environment: { [key!]: path.join(root, 'shared') } }], new AbortController().signal))
+    await expect(prepareEnvironments([{ ...instances[0]!, environment: { [key!]: path.join(root, 'shared') } }], new AbortController().signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH))
       .rejects.toThrow('overrides are owned');
     expect(await readdir(root)).not.toContain('shared');
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -94,7 +95,7 @@ test('provider native paths cannot escape through a preexisting symlink', async 
     await mkdir(path.join(root, 'first'), { mode: 0o700 });
     await mkdir(path.join(root, 'outside'), { mode: 0o700 });
     await symlink(path.join(root, 'outside'), path.join(root, 'first', '.factory'));
-    await expect(prepareEnvironments([{ ...instance(root, 'first'), agentId: 'factory' }], new AbortController().signal))
+    await expect(prepareEnvironments([{ ...instance(root, 'first'), agentId: 'factory' }], new AbortController().signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH))
       .rejects.toThrow('Invalid instance private directory');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -103,7 +104,7 @@ test('provider native environment metadata is validated before filesystem effect
   const root = await mkdtemp(path.join(os.homedir(), 'garcon-native-environment-invalid-'));
   try {
     for (const directory of ['', '../outside', '/outside', 'nested/../outside', 'nested\\outside']) {
-      await expect(prepareEnvironments([instance(root, 'first')], new AbortController().signal,
+      await expect(prepareEnvironments([instance(root, 'first')], new AbortController().signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
         async (integrationId) => ({ integrationId, directories: [{ path: directory, environmentKey: 'SYNTHETIC_HOME' }] })))
         .rejects.toThrow('Invalid provider native environment');
     }
@@ -114,7 +115,7 @@ test('provider native environment metadata is validated before filesystem effect
 test.each(['PATH', 'LANG'])('provider native metadata cannot replace the worker-owned %s', async (environmentKey) => {
   const root = await mkdtemp(path.join(os.homedir(), 'garcon-native-environment-owned-'));
   try {
-    await expect(prepareEnvironments([instance(root, 'first')], new AbortController().signal,
+    await expect(prepareEnvironments([instance(root, 'first')], new AbortController().signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
       async (integrationId) => ({ integrationId, directories: [{ path: '.', environmentKey }] })))
       .rejects.toThrow('Invalid provider native environment');
     expect(await readdir(root)).toEqual([]);
@@ -127,5 +128,17 @@ test('direct environment preparation preserves worker-owned search path and loca
     const input = { ...instance(root, 'first'), environment: { PATH: '/synthetic/foreign-bin', LANG: 'synthetic-foreign-locale' } };
     const environments = await prepareNodeInstanceEnvironments([input], new AbortController().signal);
     expect(environments.get('first')?.values).toMatchObject({ PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('configured executable paths survive environment construction without accepting an instance PATH override', async () => {
+  const root = await mkdtemp(path.join(os.homedir(), 'garcon-native-search-path-'));
+  try {
+    const input = { ...instance(root, 'first'), environment: { PATH: '/synthetic/caller' } };
+    const searchPath = ['/synthetic/operator/bin', ...DEFAULT_NODE_EXECUTABLE_SEARCH_PATH];
+    const prepared = await prepareEnvironments([input], new AbortController().signal, searchPath,
+      async (integrationId) => ({ integrationId, directories: [] }));
+    searchPath[0] = '/synthetic/replaced';
+    expect(prepared.get(input.id)!.values.PATH).toBe('/synthetic/operator/bin:/usr/local/bin:/usr/bin:/bin');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

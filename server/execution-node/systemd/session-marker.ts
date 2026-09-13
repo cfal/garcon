@@ -2,11 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import lockfile from 'proper-lockfile';
+import { NodeCoordinatorLock } from './coordinator-lock.js';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseSystemdHelperRequest, parseSystemdIdentity, SystemdContainmentError, type SystemdLaunchIdentity, type SystemdUnitIdentity } from './contracts.js';
 import { systemdExecutionUnitName } from './launch.js';
 import { validateSystemdHelperWorkingDirectory } from './helper-cwd.js';
+import { createNodeSessionWorkingDirectory, removeNodeSessionWorkingDirectory } from './session-working-directory.js';
 
 const MAX_MARKER_BYTES = 16_384;
 
@@ -20,7 +21,7 @@ export interface NodeSessionHostMarker {
 
 export interface NodeSessionMarkerStore {
   read(): Promise<NodeSessionHostMarker | null>;
-  recordLaunch(launch: SystemdLaunchIdentity): Promise<void>;
+  recordLaunch(launch: SystemdLaunchIdentity): Promise<string>;
   recordIdentity(identity: SystemdUnitIdentity): Promise<void>;
   clear(expected: SystemdLaunchIdentity): Promise<void>;
 }
@@ -54,7 +55,7 @@ export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
   #releasing: Promise<void> | null = null;
   #pending: Promise<unknown> = Promise.resolve();
 
-  private constructor(private readonly options: NodeSessionMarkerOptions, directory: string, private readonly releaseLock: () => Promise<void>) {
+  private constructor(private readonly options: NodeSessionMarkerOptions, directory: string, private readonly lock: NodeCoordinatorLock) {
     this.#directory = directory;
     this.filePath = path.join(directory, 'session-host.json');
     this.helperWorkingDirectory = path.join(directory, 'helper-cwd');
@@ -71,39 +72,38 @@ export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
     const directory = path.join(parent, createHash('sha256').update(options.nodeId).digest('hex'));
     await mkdir(directory, { mode: 0o700 }).catch(alreadyExists);
     await privateDirectory(directory);
-    let owner: NodeSessionMarkerFile | null = null;
-    let compromised = false;
-    const release = await lockfile.lock(directory, { realpath: false, lockfilePath: path.join(directory, '.coordinator.lock'),
-      stale: 30_000, update: 5_000, retries: 0,
-      onCompromised() {
-        compromised = true;
-        if (owner) owner.#compromised = true;
-        options.onCompromised();
-      },
-    });
+    const lock = await NodeCoordinatorLock.acquire(path.join(directory, '.coordinator.lock'));
     try {
       const helperDirectory = path.join(directory, 'helper-cwd');
       await mkdir(helperDirectory, { mode: 0o700 }).catch(alreadyExists);
       validateSystemdHelperWorkingDirectory(helperDirectory);
-      if (compromised) throw invalid();
-      owner = new NodeSessionMarkerFile(options, directory, release);
-      return owner;
+      lock.assertHeld();
+      return new NodeSessionMarkerFile(options, directory, lock);
     } catch (error) {
-      await release();
+      lock.release();
       throw error;
     }
   }
 
   read(): Promise<NodeSessionHostMarker | null> { return this.#serialize(() => this.#read()); }
 
-  recordLaunch(value: SystemdLaunchIdentity): Promise<void> {
+  recordLaunch(value: SystemdLaunchIdentity): Promise<string> {
     const request = parseSystemdHelperRequest({ kind: 'inspect', launch: value });
     if (!request || request.kind !== 'inspect' || request.launch.unitName !== systemdExecutionUnitName(this.options.nodeId)) return Promise.reject(invalid());
     const marker: NodeSessionHostMarker = { version: 1, controllerId: this.options.controllerId, nodeId: this.options.nodeId,
       launch: request.launch, identity: null };
     return this.#serialize(async () => {
       if (await this.#read()) throw invalid();
+      const workingDirectory = this.#workingDirectory(marker.launch);
+      const existing = await lstat(workingDirectory).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return null;
+      });
+      if (existing) throw invalid();
       await this.#write(marker);
+      await createNodeSessionWorkingDirectory(workingDirectory);
+      this.#assertOwned();
+      return workingDirectory;
     });
   }
 
@@ -127,13 +127,15 @@ export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
       if (!current) return;
       if (!sameLaunch(current.launch, request.launch)) throw invalid();
       this.#assertOwned();
+      await removeNodeSessionWorkingDirectory(this.#workingDirectory(current.launch));
+      this.#assertOwned();
       await unlink(this.filePath);
       await this.#syncDirectory();
     });
   }
 
   release(): Promise<void> {
-    this.#releasing ??= this.#pending.then(async () => { this.#released = true; await this.releaseLock(); });
+    this.#releasing ??= this.#pending.then(() => { this.#released = true; this.lock.release(); });
     return this.#releasing;
   }
 
@@ -194,7 +196,16 @@ export class NodeSessionMarkerFile implements NodeSessionMarkerStore {
     try { await directory.sync(); } finally { await directory.close(); }
   }
 
-  #assertOwned(): void { if (this.#released || this.#compromised) throw invalid(); }
+  #workingDirectory(launch: SystemdLaunchIdentity): string { return path.join(this.#directory, `worker-${launch.launchId}`); }
+
+  #assertOwned(): void {
+    if (this.#released || this.#compromised) throw invalid();
+    try { this.lock.assertHeld(); }
+    catch {
+      this.#compromised = true;
+      try { this.options.onCompromised(); } finally { throw invalid(); }
+    }
+  }
 }
 
 async function privateDirectory(directory: string): Promise<void> {

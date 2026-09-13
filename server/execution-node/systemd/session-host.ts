@@ -1,6 +1,6 @@
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { runSystemdHelper } from './helper-process.js';
-import { systemdExecutionLaunch, type SystemdExecutionLaunch, type SystemdExecutionLaunchOptions } from './launch.js';
+import { createSystemdLaunchIdentity, systemdExecutionLaunch, type SystemdExecutionLaunch, type SystemdExecutionLaunchOptions } from './launch.js';
 import { SystemdContainmentError, type SystemdUnitIdentity } from './contracts.js';
 import type { NodeSessionMarkerStore } from './session-marker.js';
 
@@ -22,7 +22,7 @@ export interface NodeSessionHostOptions {
   readonly marker: NodeSessionMarkerStore;
   readonly helperWorkingDirectory?: string;
   readonly command: readonly [string, ...string[]];
-  readonly launchOptions?: SystemdExecutionLaunchOptions;
+  readonly launchOptions?: Omit<SystemdExecutionLaunchOptions, 'workingDirectory'>;
   readonly helper?: typeof runSystemdHelper;
   /** Starts an inert worker that cannot create executable resources before confirmation. */
   spawn(launch: SystemdExecutionLaunch): NodeSessionHostProcess;
@@ -66,8 +66,9 @@ export class NodeSessionHostOwner {
     if (!this.#reconciled || this.#transition || this.#current || this.#cleanup) throw unavailable();
     this.#transition = true;
     try {
-      const launch = systemdExecutionLaunch(this.options.nodeId, this.options.command[0], this.options.command.slice(1), this.options.launchOptions);
-      await this.options.marker.recordLaunch(launch.identity);
+      const identity = createSystemdLaunchIdentity(this.options.nodeId);
+      const workingDirectory = await this.options.marker.recordLaunch(identity);
+      const launch = systemdExecutionLaunch(identity, this.options.command[0], this.options.command.slice(1), { ...this.options.launchOptions, workingDirectory });
       const process = this.options.spawn(launch);
       const host = Object.freeze({ launch, process });
       const current: HostedSession = { host, identity: null, confirmed: false, session: null, exited: false, stopping: false };

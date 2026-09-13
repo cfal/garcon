@@ -1,15 +1,16 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../../server/execution-node/worker/configuration.js';
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readlink, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { Subprocess } from 'bun';
 import { NodeSessionHostOwner } from '../../../server/execution-node/systemd/session-host.js';
 import { NodeSessionMarkerFile } from '../../../server/execution-node/systemd/session-marker.js';
 import { NodeWorkerPeer } from '../../../server/execution-node/worker/peer.js';
-import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../../server/execution-node/worker/launch.js';
+import { NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../../server/execution-node/worker/launch.js';
 import { DEFAULT_NODE_REPLAY } from '../../../server/execution-node/replay-cache.js';
 
 const available = process.platform === 'linux' && spawnSync('systemctl', ['--user', 'is-system-running'], { stdio: 'ignore', timeout: 2000 }).status === 0;
@@ -17,13 +18,12 @@ const available = process.platform === 'linux' && spawnSync('systemctl', ['--use
 describe.skipIf(!available)('execution-node private worker composition', () => {
   test('one confirmed session unit contains all instance children and cleanup removes the complete group', async () => {
     const storage = await mkdtemp(path.join(homedir(), 'garcon-worker-containment-'));
-    const directory = await createNodeWorkerWorkingDirectory(storage);
     const nodeId = `synthetic-${randomUUID()}`;
     const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-boot', logicalSessionId: 'synthetic-session' };
     const marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory: storage, controllerId: 'synthetic-controller', nodeId, onCompromised() {} });
     const processPort: { child: Subprocess<'pipe', 'pipe', 'ignore'> | null } = { child: null };
     const owner = new NodeSessionHostOwner({ nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: nodeWorkerCommand('session'),
-      launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
+      launchOptions: { environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
       spawn(launch) {
         const child = processPort.child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
         return { exited: child.exited, closeInput() { void child.stdin.end(); }, kill() { child.kill('SIGKILL'); } };
@@ -36,6 +36,8 @@ describe.skipIf(!available)('execution-node private worker composition', () => {
       if (!processPort.child) throw new Error('Worker process was not captured');
       peer = new NodeWorkerPeer(processPort.child, { role: 'session', signal: AbortSignal.timeout(15_000), validate() {}, failed() {} });
       const workerPid = await peer.hello;
+      const directory = await readlink(`/proc/${workerPid}/cwd`);
+      expect(directory).toBe(path.join(path.dirname(marker.filePath), `worker-${host.launch.identity.launchId}`));
       expect(await readFile(`/proc/${workerPid}/task/${workerPid}/children`, 'utf8')).toBe('');
       expect((await marker.read())?.identity).toBeNull();
       const identity = await owner.confirm(host);
@@ -44,7 +46,7 @@ describe.skipIf(!available)('execution-node private worker composition', () => {
       owner.bind(host, session);
       const instances = ['synthetic-first', 'synthetic-second'].map((id) => ({ id, agentId: 'direct-anthropic-compatible', label: id,
         homeDirectory: path.join(storage, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 }));
-      const ready = await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: storage, instances,
+      const ready = await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, instances,
         workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY });
       expect(ready.map((manifest) => manifest.instanceId)).toEqual(instances.map((instance) => instance.id));
       const children = (await readFile(`/proc/${workerPid}/task/${workerPid}/children`, 'utf8')).trim().split(/\s+/).map(Number);
@@ -55,6 +57,7 @@ describe.skipIf(!available)('execution-node private worker composition', () => {
       await owner.cleanup(session);
       host = null;
       expect(await marker.read()).toBeNull();
+      expect(existsSync(directory)).toBe(false);
       for (const pid of [workerPid, ...children]) expect(existsSync(`/proc/${pid}`)).toBe(false);
       expect(existsSync(`/sys/fs/cgroup${identity.controlGroup}`)).toBe(false);
     } finally {

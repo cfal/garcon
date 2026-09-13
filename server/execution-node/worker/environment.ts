@@ -2,7 +2,7 @@ import { lstat, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentNativeEnvironment } from '@garcon/server-agent-interface';
 import { loadAgentNativeEnvironment } from '../../agents/default-agent-integrations.js';
-import { OWNED_ENVIRONMENT_KEYS, pathsOverlap, type NodeInstanceConfiguration } from './configuration.js';
+import { OWNED_ENVIRONMENT_KEYS, parseNodeExecutableSearchPath, pathsOverlap, type NodeInstanceConfiguration } from './configuration.js';
 
 export interface NodeInstanceEnvironment {
   readonly homeDirectory: string;
@@ -11,9 +11,11 @@ export interface NodeInstanceEnvironment {
 
 /** Constructs a complete child environment; the coordinator's credentials and native-home overrides are never inherited. */
 export async function prepareNodeInstanceEnvironments(
-  instances: readonly NodeInstanceConfiguration[], signal: AbortSignal,
+  instances: readonly NodeInstanceConfiguration[], signal: AbortSignal, executableSearchPath: readonly string[],
   loadEnvironment: (agentId: string) => Promise<AgentNativeEnvironment> = loadAgentNativeEnvironment,
 ): Promise<ReadonlyMap<string, NodeInstanceEnvironment>> {
+  const searchPath = parseNodeExecutableSearchPath(executableSearchPath);
+  if (!searchPath) throw new TypeError('Invalid node executable search path');
   const environments = new Map<string, NodeInstanceEnvironment>();
   for (const instance of instances) {
     signal.throwIfAborted();
@@ -51,7 +53,7 @@ export async function prepareNodeInstanceEnvironments(
     }
     signal.throwIfAborted();
     environments.set(instance.id, Object.freeze({ homeDirectory, values: Object.freeze({
-      ...instance.environment, PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8',
+      ...instance.environment, PATH: searchPath.join(path.delimiter), LANG: 'C.UTF-8',
       HOME: homeDirectory, ...directories, ...nativeValues, TMP: directories.TMPDIR, TEMP: directories.TMPDIR,
     }) }));
   }

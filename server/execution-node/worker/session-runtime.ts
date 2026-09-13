@@ -2,7 +2,7 @@ import { NodeWorkerContainmentRelay } from './containment-relay.js';
 import type { Subprocess } from 'bun';
 import type { NodeWorkerRuntime, NodeWorkerRuntimeContext } from './bootstrap.js';
 import { prepareNodeInstanceEnvironments } from './environment.js';
-import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from './launch.js';
+import { createNodeInstanceWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from './launch.js';
 import { NodeWorkerPeer } from './peer.js';
 import { NodeWorkerReady } from './ready.js';
 import { NodeWorkerExecutionRouter } from './execution-router.js';
@@ -16,7 +16,6 @@ interface HostedInstance {
   readonly instanceId: string;
   readonly process: Subprocess<'pipe', 'pipe', 'ignore'>;
   readonly peer: NodeWorkerPeer;
-  readonly directory: { dispose(): Promise<void> };
 }
 
 export async function startNodeSessionRuntime(context: NodeWorkerRuntimeContext, writer: Pick<NodeWorkerWriter, 'submit' | 'waitForRelease'>): Promise<NodeWorkerRuntime> {
@@ -58,29 +57,26 @@ export async function createNodeSessionRuntime(
         if (!child) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
         return child.peer.execution(instanceId, connectionId).call(command, signal, deadline);
       } });
-    const environments = await prepareNodeInstanceEnvironments(configuration.instances, authority.signal);
+    const environments = await prepareNodeInstanceEnvironments(configuration.instances, authority.signal, configuration.executableSearchPath);
     for (const instance of configuration.instances) {
       validate();
-      const directory = await createNodeWorkerWorkingDirectory(configuration.storageDirectory);
-      let child: HostedInstance['process'];
-      let startupTimeoutMs: number;
-      try {
-        validate();
-        startupTimeoutMs = context.startup.remainingMs;
-        if (startupTimeoutMs === 0) throw new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
-        child = Bun.spawn([...instanceCommand()], { cwd: directory.path,
-          env: { ...environments.get(instance.id)!.values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS },
-          stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
-      } catch (error) { await directory.dispose(); throw error; }
+      const directory = await createNodeInstanceWorkingDirectory(instance.id);
+      validate();
+      const startupTimeoutMs = context.startup.remainingMs;
+      if (startupTimeoutMs === 0) throw new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
+      const child = Bun.spawn([...instanceCommand()], { cwd: directory,
+        env: { ...environments.get(instance.id)!.values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS },
+        stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
       const peer = new NodeWorkerPeer(child, { role: 'instance', signal: authority.signal, validate,
         startupTimeoutMs,
         containmentRequested: (request) => containment.request(request),
         received: (frame, text) => services!.receiveChild(instance.id, frame, text),
         failed() { if (!containment.requested) authority.retire(); } });
-      children.push({ instanceId: instance.id, process: child, peer, directory });
+      children.push({ instanceId: instance.id, process: child, peer });
       await peer.hello;
       const manifests = await peer.configure(authority.session, context.connectionId, { role: 'instance',
         nodeId: configuration.nodeId, storageDirectory: configuration.storageDirectory, instance,
+        executableSearchPath: configuration.executableSearchPath,
         workspaces: configuration.workspaces.filter((workspace) => instance.workspaceIds.includes(workspace.id)) });
       for (const manifest of manifests) ready.add(manifest);
     }
@@ -120,7 +116,6 @@ async function closeInstances(children: readonly HostedInstance[]): Promise<void
     const timer = setTimeout(() => child.process.kill('SIGKILL'), 1_000);
     try { await child.process.exited; }
     finally { clearTimeout(timer); }
-    await child.directory.dispose();
   }));
   if (results.some((result) => result.status === 'rejected')) throw new Error('Worker process cleanup is unavailable');
 }

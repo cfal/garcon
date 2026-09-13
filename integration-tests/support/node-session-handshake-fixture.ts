@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../server/execution-node/worker/configuration.js';
 import { expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +19,7 @@ import { NodeSessionCoordinator, type NodeHostedConnection } from '../../server/
 import { DEFAULT_NODE_REPLAY, type NodeReplayOptions } from '../../server/execution-node/replay-cache.js';
 import { NodeSessionMarkerFile } from '../../server/execution-node/systemd/session-marker.js';
 import { runSystemdHelper } from '../../server/execution-node/systemd/helper-process.js';
-import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../server/execution-node/worker/launch.js';
+import { NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../server/execution-node/worker/launch.js';
 import { NodeWorkerPeer } from '../../server/execution-node/worker/peer.js';
 import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from '../../server/execution-node/worker/application-protocol.js';
 import { parseNodeWorkerOutputText } from '../../server/execution-node/worker/output-protocol.js';
@@ -69,14 +70,15 @@ export interface NodeSessionFixtureOptions {
   readonly sessionCommand?: [string, ...string[]];
   readonly replay?: NodeReplayOptions;
   readonly maxOperations?: number;
+  readonly executableSearchPath?: readonly string[];
   readonly instance?: Pick<NodeInstanceConfiguration, 'agentId' | 'environment'>;
+  readonly instances?: readonly NodeInstanceConfiguration[];
   readonly beforeCleanup?: () => Promise<void>;
 }
 
 export async function createNodeSessionFixture(certificate: TestCertificate, trust: ControllerTlsTrust = certificate.trust,
   options: NodeSessionFixtureOptions = {}) {
   const storage = await mkdtemp(path.join(homedir(), 'garcon-session-wss-'));
-  const directory = await createNodeWorkerWorkingDirectory(storage);
   const nodeId = `synthetic-${randomUUID()}`;
   const pairings = new NodePairingStore(storage); await pairings.init();
   const enrollment = await pairings.issueEnrollment(nodeId);
@@ -86,7 +88,10 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   const processes = new Map<object, Subprocess<'pipe', 'pipe', 'ignore'>>();
   const containmentRequests: NodeWorkerContainmentRequest[] = [];
   const approvedNodeIds = new Set([nodeId]);
-  const instanceIds = new Set(['synthetic-instance']);
+  const instances = options.instances ?? [{ id: 'synthetic-instance', agentId: options.instance?.agentId ?? 'direct-anthropic-compatible',
+    label: 'Synthetic', homeDirectory: path.join(storage, 'native'), environment: options.instance?.environment ?? {},
+    workspaceIds: ['synthetic-workspace'], maxOperations: options.maxOperations ?? 1 }];
+  const instanceIds = new Set(instances.map((instance) => instance.id));
   const workerFrames = new Set<(frame: NodeWorkerApplicationFrame) => void>();
   const nodeFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean | void>();
   const controllerFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean>();
@@ -107,16 +112,15 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   let output: { session: NodeSessionIdentity; retirements: NodeOutputRetirements; bridge: NodeSessionBridge | null } | null = null;
   const coordinator = new NodeSessionCoordinator({
     supervisor: { clock: options.clock },
-    configuration: { role: 'session', nodeId, storageDirectory: storage, replay: options.replay ?? DEFAULT_NODE_REPLAY,
-      instances: [{ id: 'synthetic-instance', agentId: options.instance?.agentId ?? 'direct-anthropic-compatible', label: 'Synthetic', homeDirectory: path.join(storage, 'native'),
-        environment: options.instance?.environment ?? {}, workspaceIds: ['synthetic-workspace'], maxOperations: options.maxOperations ?? 1 }],
+    configuration: { role: 'session', nodeId, storageDirectory: storage, executableSearchPath: options.executableSearchPath ?? DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
+      replay: options.replay ?? DEFAULT_NODE_REPLAY, instances,
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] },
     host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: options.sessionCommand ?? nodeWorkerCommand('session'),
       async helper(request, helperOptions) {
         if (request.kind === 'stop') await options.beforeCleanup?.();
         return runSystemdHelper(request, helperOptions);
       },
-      launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
+      launchOptions: { environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
       spawn(launch) {
         const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
         const process = { exited: child.exited, closeInput() { void child.stdin.end(); }, kill() { child.kill(); } };

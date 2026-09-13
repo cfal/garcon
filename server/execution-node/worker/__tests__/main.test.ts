@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../configuration.js';
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -51,7 +52,7 @@ test('source instance startup ignores dotenv and bunfig in its cwd, home, and st
   const instance = { ...configuration().instances[0]!, agentId: 'direct-anthropic-compatible',
     homeDirectory: path.join(storage, 'synthetic-home'), environment: {} };
   const signal = AbortSignal.timeout(10_000);
-  const environment = (await prepareNodeInstanceEnvironments([instance], signal)).get(instance.id)!;
+  const environment = (await prepareNodeInstanceEnvironments([instance], signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH)).get(instance.id)!;
   const marker = path.join(storage, 'unexpected-preload');
   const preload = path.join(storage, 'preload.ts');
   await writeFile(preload, `await Bun.write(${JSON.stringify(marker)}, 'unexpected'); console.log('unexpected preload');`);
@@ -65,7 +66,7 @@ test('source instance startup ignores dotenv and bunfig in its cwd, home, and st
   const peer = new NodeWorkerPeer(child, { role: 'instance', signal, validate() {}, failed() {} });
   try {
     expect(await peer.hello).toBe(child.pid);
-    const ready = await peer.configure(session, 1, { role: 'instance', nodeId: 'synthetic-node', storageDirectory: storage, instance,
+    const ready = await peer.configure(session, 1, { role: 'instance', nodeId: 'synthetic-node', storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, instance,
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] });
     expect(ready[0]?.instanceId).toBe(instance.id);
     expect(existsSync(marker)).toBe(false);

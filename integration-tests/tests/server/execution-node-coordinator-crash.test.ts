@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, utimes } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseSystemdIdentity, type SystemdUnitIdentity } from '../../../server/execution-node/systemd/contracts.js';
@@ -10,7 +10,7 @@ import { runSystemdHelper } from '../../../server/execution-node/systemd/helper-
 import { NodeSessionHostOwner } from '../../../server/execution-node/systemd/session-host.js';
 import { NodeSessionMarkerFile, parseNodeSessionHostMarker } from '../../../server/execution-node/systemd/session-marker.js';
 import { readNodeWorkerFrames } from '../../../server/execution-node/worker/framing.js';
-import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../../server/execution-node/worker/launch.js';
+import { NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../../server/execution-node/worker/launch.js';
 import { parseNodeWorkerChildText } from '../../../server/execution-node/worker/protocol.js';
 
 const available = process.platform === 'linux' && spawnSync('systemctl', ['--user', 'is-system-running'], {
@@ -40,6 +40,13 @@ describe.skipIf(!available)('execution-node coordinator crash containment', () =
       identity = parseSystemdIdentity(announced.identity);
       if (!identity) throw new Error('Invalid synthetic containment identity');
       const before = parseNodeSessionHostMarker(JSON.parse(await readFile(announced.markerPath, 'utf8')));
+      const workingDirectory = path.join(path.dirname(announced.markerPath), `worker-${identity.launchId}`);
+      expect(await readlink(`/proc/${identity.mainPid}/cwd`)).toBe(workingDirectory);
+      expect((await readdir(workingDirectory)).sort()).toEqual(phase === 'configured'
+        ? ['instance-synthetic-first', 'instance-synthetic-second'] : []);
+      for (const pid of announced.childPids) expect(path.dirname(await readlink(`/proc/${pid}/cwd`))).toBe(workingDirectory);
+      const unrelated = path.join(runtimeDirectory, '.worker-unowned');
+      await mkdir(unrelated, { mode: 0o700 });
       expect(before?.launch.launchId).toBe(identity.launchId);
       expect(before?.identity).toEqual(phase === 'launch-only' ? null : identity);
       expect(announced.childPids).toHaveLength(phase === 'configured' ? 2 : 0);
@@ -51,23 +58,23 @@ describe.skipIf(!available)('execution-node coordinator crash containment', () =
 
       coordinator.kill('SIGKILL');
       expect(await coordinator.exited).not.toBe(0);
+      marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory, controllerId: 'synthetic-controller', nodeId, onCompromised() {} });
       await Promise.all(workerPids.map(waitForExit));
       for (const pid of workerPids) expect(existsSync(`/proc/${pid}`)).toBe(false);
-      // Simulates the stale-lock interval only after the exact owner has been killed and reaped.
-      await utimes(path.join(path.dirname(announced.markerPath), '.coordinator.lock'), new Date(0), new Date(0));
-      marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory, controllerId: 'synthetic-controller', nodeId, onCompromised() {} });
-      const directory = await createNodeWorkerWorkingDirectory(runtimeDirectory);
       const outputs: { stream: ReadableStream<Uint8Array> | null } = { stream: null };
       const owner = new NodeSessionHostOwner({ nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory,
         command: nodeWorkerCommand('session'),
-        launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
+        launchOptions: { environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
         spawn(launch) {
           const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
           outputs.stream = child.stdout;
           return { exited: child.exited, closeInput() { void child.stdin.end(); }, kill() { child.kill(); } };
         }, exited() {} });
       await expect(owner.launch()).rejects.toThrow();
+      expect(existsSync(workingDirectory)).toBe(true);
       await owner.reconcile();
+      expect(existsSync(workingDirectory)).toBe(false);
+      expect(existsSync(unrelated)).toBe(true);
       expect(await marker.read()).toBeNull();
       expect(existsSync(`/sys/fs/cgroup${identity.controlGroup}`)).toBe(false);
       const unloaded = spawnSync('systemctl', ['--user', 'show', identity.unitName, '--property=LoadState', '--value'], {

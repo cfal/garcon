@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../../server/execution-node/worker/configuration.js';
 import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -133,7 +134,7 @@ test('real instance output and bulk input survive a mid-record reconnect and pub
     () => `Missing ${runId} terminal; failures=${failed.mock.calls.length}, frames=${frames.length}`);
   try {
     await peer.hello;
-    await peer.configure(session, 1, { role: 'session', nodeId: 'synthetic-node', storageDirectory: storage,
+    await peer.configure(session, 1, { role: 'session', nodeId: 'synthetic-node', storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
       instances: [{ id: instanceId, agentId: 'direct-anthropic-compatible', label: 'Synthetic', homeDirectory: path.join(storage, 'instance'),
         environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 }],
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY });

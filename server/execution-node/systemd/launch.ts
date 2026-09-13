@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
-import { systemdUnitDescription, type SystemdLaunchIdentity } from './contracts.js';
+import { parseSystemdHelperRequest, systemdUnitDescription, type SystemdLaunchIdentity } from './contracts.js';
 
 export interface SystemdExecutionLaunch {
   readonly identity: SystemdLaunchIdentity;
@@ -17,8 +17,9 @@ export interface SystemdExecutionLaunchOptions {
  * Requires exclusive same-UID management of this unit; RefUnit prevents unload, not operator restart or mutation.
  * Applies only to execution-node processes, never ordinary standalone provider launches.
  */
-export function systemdExecutionLaunch(nodeId: string, executable: string, args: readonly string[], options: SystemdExecutionLaunchOptions = {}): SystemdExecutionLaunch {
-  if (!isExecutionIdentity(nodeId) || !isAbsolute(executable)
+export function systemdExecutionLaunch(launch: SystemdLaunchIdentity, executable: string, args: readonly string[], options: SystemdExecutionLaunchOptions = {}): SystemdExecutionLaunch {
+  const request = parseSystemdHelperRequest({ kind: 'inspect', launch });
+  if (request?.kind !== 'inspect' || !isAbsolute(executable)
     || [executable, ...args].some((arg) => arg.includes('\0'))) throw new TypeError('Invalid execution-node launch');
   if (options.workingDirectory !== undefined && (!isAbsolute(options.workingDirectory) || options.workingDirectory.includes('\0'))) {
     throw new TypeError('Invalid execution-node working directory');
@@ -27,10 +28,7 @@ export function systemdExecutionLaunch(nodeId: string, executable: string, args:
   if (environment.some(([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || value.includes('\0'))) {
     throw new TypeError('Invalid execution-node environment');
   }
-  const identity = Object.freeze({
-    unitName: systemdExecutionUnitName(nodeId),
-    launchId: randomBytes(16).toString('hex'),
-  });
+  const identity = Object.freeze(request.launch);
   return Object.freeze({
     identity,
     argv: Object.freeze([
@@ -43,6 +41,10 @@ export function systemdExecutionLaunch(nodeId: string, executable: string, args:
       ...environment.map(([key, value]) => `--setenv=${key}=${value}`), '--', executable, ...args,
     ]),
   });
+}
+
+export function createSystemdLaunchIdentity(nodeId: string): SystemdLaunchIdentity {
+  return Object.freeze({ unitName: systemdExecutionUnitName(nodeId), launchId: randomBytes(16).toString('hex') });
 }
 
 export function systemdExecutionUnitName(nodeId: string): string {

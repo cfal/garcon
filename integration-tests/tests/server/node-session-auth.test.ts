@@ -73,7 +73,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('instance authentication over WSS'
     } finally { await f.dispose(); }
   }, 20_000);
 
-  test('real pinned Pi readiness comes from the instance native profile without a model call', async () => {
+  test('production Pi SDK readiness comes from the instance native profile without a model call', async () => {
     const provider = startScriptedPiTestEnvironment();
     const f = await createNodeSessionFixture(certificate, certificate.trust, {
       instance: { agentId: 'pi', environment: { GARCON_PI_BINARY: provider.serverEnvironment.GARCON_PI_BINARY! } },

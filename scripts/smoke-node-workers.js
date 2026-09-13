@@ -6,6 +6,7 @@ import { DEFAULT_NODE_REPLAY } from '../server/execution-node/replay-cache.js';
 import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS } from '../server/execution-node/worker/launch.js';
 import { NodeWorkerPeer } from '../server/execution-node/worker/peer.js';
 import { prepareNodeInstanceEnvironments } from '../server/execution-node/worker/environment.js';
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../server/execution-node/worker/configuration.js';
 
 export async function smokeNodeWorkers(commandForRole) {
   const storage = await mkdtemp(path.join(homedir(), 'garcon-worker-smoke-'));
@@ -43,6 +44,7 @@ export async function smokeNodeWorkers(commandForRole) {
       const instance = { id: 'synthetic-instance', agentId: 'direct-anthropic-compatible', label: 'Synthetic',
         homeDirectory: path.join(storage, 'synthetic-home'), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 };
       const manifests = await peer.configure(session, 1, { role: 'session', nodeId: 'synthetic-node', storageDirectory: storage,
+        executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
         instances: [instance], workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY });
       if (manifests.length !== 1 || manifests[0].instanceId !== instance.id || existsSync(marker)) throw new Error('Worker instance configuration failed');
       const children = process.platform === 'linux'
@@ -66,7 +68,7 @@ async function smokeConfiguredInstance(command, storage, preload, marker) {
   const instance = { id: 'synthetic-preload-instance', agentId: 'direct-anthropic-compatible', label: 'Synthetic',
     homeDirectory: path.join(storage, 'synthetic-preload-home'), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 };
   const signal = AbortSignal.timeout(10_000);
-  const environments = await prepareNodeInstanceEnvironments([instance], signal);
+  const environments = await prepareNodeInstanceEnvironments([instance], signal, DEFAULT_NODE_EXECUTABLE_SEARCH_PATH);
   const child = Bun.spawn(command, { cwd: directory.path,
     env: { ...environments.get(instance.id).values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS },
     stdin: 'pipe', stdout: 'pipe', stderr: 'ignore', timeout: 15_000 });
@@ -75,6 +77,7 @@ async function smokeConfiguredInstance(command, storage, preload, marker) {
     await peer.hello;
     const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node-boot', logicalSessionId: 'synthetic-session' };
     const manifests = await peer.configure(session, 1, { role: 'instance', nodeId: 'synthetic-node', storageDirectory: storage,
+      executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
       instance, workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] });
     if (manifests.length !== 1 || manifests[0].instanceId !== instance.id || existsSync(marker)) throw new Error('Worker loaded cwd bunfig');
     await peer.admit(1);

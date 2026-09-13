@@ -59,7 +59,7 @@ export async function createNodeInstanceRuntime(
   const validate = () => { authority.poll(); authority.signal.throwIfAborted(); };
   validate();
   const instance = configuration.instance;
-  const prepared = (await prepareNodeInstanceEnvironments([instance], authority.signal)).get(instance.id)!;
+  const prepared = (await prepareNodeInstanceEnvironments([instance], authority.signal, configuration.executableSearchPath)).get(instance.id)!;
   const environment: Readonly<Record<string, string>> = { ...prepared.values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS };
   if (Object.keys(process.env).length !== Object.keys(environment).length
     || Object.entries(environment).some(([key, value]) => process.env[key] !== value)) throw new Error('Worker environment differs from its configured instance');

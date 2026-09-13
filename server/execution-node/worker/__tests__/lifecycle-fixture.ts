@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../configuration.js';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { parseNodeProviderManifest } from '../../../execution-nodes/provider-manifest.js';
 import { PROVIDER_FACETS } from '../../../execution-nodes/provider-metadata.js';
@@ -6,7 +7,7 @@ import { DEFAULT_NODE_REPLAY } from '../../replay-cache.js';
 export const session = Object.freeze({ controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node-boot', logicalSessionId: 'synthetic-session' });
 
 export function configuration() {
-  return { role: 'session' as const, nodeId: 'synthetic-node', storageDirectory: '/synthetic/storage',
+  return { role: 'session' as const, nodeId: 'synthetic-node', storageDirectory: '/synthetic/storage', executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
     workspaces: [{ id: 'synthetic-workspace', projectPath: '/synthetic/project' }], replay: { ...DEFAULT_NODE_REPLAY },
     instances: [{ id: 'synthetic-instance', agentId: 'synthetic', label: 'Synthetic', homeDirectory: '/synthetic/home',
       environment: { SYNTHETIC_KEY: 'synthetic-private-value' }, workspaceIds: ['synthetic-workspace'], maxOperations: 2 }] };

@@ -1,13 +1,15 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { NodeSessionMarkerFile, parseNodeSessionHostMarker } from '../systemd/session-marker.js';
-import { systemdExecutionLaunch } from '../systemd/launch.js';
+import { createSystemdLaunchIdentity } from '../systemd/launch.js';
+
+describe.skipIf(process.platform !== 'linux')('Linux coordinator storage', () => {
 
 const nodeId = 'synthetic-node';
 const controllerId = 'synthetic-controller';
-const launch = systemdExecutionLaunch(nodeId, '/synthetic/bun', []).identity;
+const launch = createSystemdLaunchIdentity(nodeId);
 const identity = { ...launch, invocationId: 'c'.repeat(32), mainPid: 1234,
   controlGroup: `/user.slice/user-1000.slice/user@1000.service/app.slice/${launch.unitName}` };
 const marker = { version: 1 as const, nodeId, controllerId, launch, identity: null };
@@ -54,7 +56,7 @@ test('one node namespace cannot be held by two coordinator incarnations or contr
 
 test('a pending marker cannot be overwritten by concurrent or newer launch attempts', async () => {
   const f = await fixture();
-  const other = systemdExecutionLaunch(nodeId, '/synthetic/bun', []).identity;
+  const other = createSystemdLaunchIdentity(nodeId);
   const first = f.file.recordLaunch(launch);
   const second = f.file.recordLaunch(other);
   await first;
@@ -74,7 +76,7 @@ test('identity promotion and cleanup must name the recorded exact launch', async
 
 test('another node unit name cannot be recorded in this node namespace', async () => {
   const f = await fixture();
-  const foreign = systemdExecutionLaunch('synthetic-other-node', '/synthetic/bun', []).identity;
+  const foreign = createSystemdLaunchIdentity('synthetic-other-node');
   await expect(f.file.recordLaunch(foreign)).rejects.toThrow();
   expect(await f.file.read()).toBeNull();
   expect(parseNodeSessionHostMarker({ ...marker, launch: foreign })).toBeNull();
@@ -154,6 +156,56 @@ test('one empty private helper cwd survives evidence cleanup and namespace reope
   expect((await readdir(path.dirname(directory))).sort()).toEqual(['.coordinator.lock', 'helper-cwd']);
 });
 
+test('launch-owned worker directories survive reopening and exact cleanup leaves unrelated roots intact', async () => {
+  const f = await fixture();
+  const directory = await f.file.recordLaunch(launch);
+  expect(directory).toBe(path.join(path.dirname(f.file.filePath), `worker-${launch.launchId}`));
+  expect(JSON.parse(await readFile(f.file.filePath, 'utf8')).launch).toEqual(launch);
+  expect((await lstat(directory)).mode & 0o777).toBe(0o700);
+  await mkdir(path.join(directory, 'instance-synthetic-first'), { mode: 0o700 });
+  await mkdir(path.join(directory, 'instance-synthetic-second'), { mode: 0o700 });
+  const unrelated = path.join(path.dirname(directory), 'worker-unowned');
+  await mkdir(unrelated, { mode: 0o700 });
+  await f.file.release();
+  const reopened = await NodeSessionMarkerFile.acquire(f.options);
+  disposals.push(() => reopened.release());
+  await reopened.clear(launch);
+  await expect(lstat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect((await lstat(unrelated)).isDirectory()).toBe(true);
+  expect(await reopened.read()).toBeNull();
+});
+
+test.each(['contents', 'symlink', 'unknown-directory', 'permissions'])('unsafe worker cwd %s keeps its exact cleanup evidence', async (kind) => {
+  const f = await fixture();
+  const directory = await f.file.recordLaunch(launch);
+  const child = path.join(directory, kind === 'unknown-directory' ? 'unexpected' : 'instance-synthetic');
+  const foreign = path.join(f.directory, 'foreign-worker');
+  await mkdir(foreign, { mode: 0o700 });
+  await writeFile(path.join(foreign, 'retained'), 'synthetic-foreign-content');
+  if (kind === 'symlink') await symlink(foreign, child);
+  else {
+    await mkdir(child, { mode: kind === 'permissions' ? 0o755 : 0o700 });
+    if (kind === 'contents') await writeFile(path.join(child, '.env'), 'SYNTHETIC=retained');
+  }
+  await expect(f.file.clear(launch)).rejects.toThrow();
+  expect(await f.file.read()).toEqual(marker);
+  expect((await lstat(child)).isSymbolicLink()).toBe(kind === 'symlink');
+  expect(await readFile(path.join(foreign, 'retained'), 'utf8')).toBe('synthetic-foreign-content');
+  if (kind === 'contents') expect(await readFile(path.join(child, '.env'), 'utf8')).toBe('SYNTHETIC=retained');
+});
+
+test.each(['empty', 'populated'])('a preexisting %s worker root cannot become a cleanup target', async (kind) => {
+  const f = await fixture();
+  const directory = path.join(path.dirname(f.file.filePath), `worker-${launch.launchId}`);
+  await mkdir(directory, { mode: 0o700 });
+  if (kind === 'populated') await writeFile(path.join(directory, 'foreign'), 'synthetic-foreign-content');
+  await expect(f.file.recordLaunch(launch)).rejects.toMatchObject({ code: 'NODE_CONTAINMENT_MISMATCH' });
+  expect(await f.file.read()).toBeNull();
+  await f.file.clear(launch);
+  expect((await lstat(directory)).isDirectory()).toBe(true);
+  if (kind === 'populated') expect(await readFile(path.join(directory, 'foreign'), 'utf8')).toBe('synthetic-foreign-content');
+});
+
 test.each(['contents', 'symlink', 'permissions'])('unsafe helper cwd %s is preserved and its newly acquired lock is released', async (kind) => {
   const f = await fixture();
   const directory = f.file.helperWorkingDirectory;
@@ -163,7 +215,7 @@ test.each(['contents', 'symlink', 'permissions'])('unsafe helper cwd %s is prese
   else if (kind === 'permissions') await chmod(directory, 0o755);
   else { await mkdir(foreign, { mode: 0o700 }); await rm(directory, { recursive: true }); await symlink(foreign, directory); }
   await expect(NodeSessionMarkerFile.acquire(f.options)).rejects.toThrow();
-  expect(await readdir(path.dirname(directory))).toEqual(['helper-cwd']);
+  expect((await readdir(path.dirname(directory))).sort()).toEqual(['.coordinator.lock', 'helper-cwd']);
   if (kind === 'contents') {
     expect(await readFile(path.join(directory, '.env'), 'utf8')).toBe('SYNTHETIC=retained');
     await unlink(path.join(directory, '.env'));
@@ -177,4 +229,6 @@ test.each(['contents', 'symlink', 'permissions'])('unsafe helper cwd %s is prese
   const repaired = await NodeSessionMarkerFile.acquire(f.options);
   disposals.push(() => repaired.release());
   expect(await repaired.read()).toBeNull();
+});
+
 });

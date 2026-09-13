@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../../server/execution-node/worker/configuration.js';
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +10,7 @@ import type { Subprocess } from 'bun';
 import { NodeSessionCoordinator, type NodeHostedConnection } from '../../../server/execution-node/session-coordinator.js';
 import { NodeSessionMarkerFile } from '../../../server/execution-node/systemd/session-marker.js';
 import { NodeWorkerPeer } from '../../../server/execution-node/worker/peer.js';
-import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../../server/execution-node/worker/launch.js';
+import { NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../../server/execution-node/worker/launch.js';
 import { DEFAULT_NODE_REPLAY } from '../../../server/execution-node/replay-cache.js';
 import { NODE_CONTROLLER_LEASE_MS } from '../../../server/execution-node/supervisor.js';
 
@@ -19,19 +20,18 @@ const available = process.platform === 'linux'
 describe.skipIf(!available)('execution-node supervised coordinator', () => {
   test('reconnect preserves the real worker tree, recovery gates admission, and lease expiry proves complete cleanup', async () => {
     const storage = await mkdtemp(path.join(homedir(), 'garcon-session-coordinator-'));
-    const directory = await createNodeWorkerWorkingDirectory(storage);
     const nodeId = `synthetic-${randomUUID()}`;
     const marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory: storage, controllerId: 'synthetic-controller', nodeId,
       onCompromised() { throw new Error('Synthetic marker lock lost'); } });
     const processes = new Map<object, Subprocess<'pipe', 'pipe', 'ignore'>>();
     let elapsedMs = 0;
     const coordinator = new NodeSessionCoordinator({
-      configuration: { role: 'session', nodeId, storageDirectory: storage,
+      configuration: { role: 'session', nodeId, storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
         instances: ['synthetic-first', 'synthetic-second'].map((id) => ({ id, agentId: 'direct-anthropic-compatible', label: id,
           homeDirectory: path.join(storage, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 })),
         workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY },
       host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: nodeWorkerCommand('session'),
-        launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
+        launchOptions: { environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
         spawn(launch) {
           const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
           const hostProcess = { exited: child.exited, closeInput() { void child.stdin.end(); }, kill() { child.kill(); } };

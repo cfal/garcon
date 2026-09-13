@@ -39,6 +39,17 @@ export async function createNodeWorkerWorkingDirectory(storageDirectory: string)
   return { path: directory, dispose: () => rm(directory, { recursive: true, force: true }) };
 }
 
+export async function createNodeInstanceWorkingDirectory(instanceId: string): Promise<string> {
+  if (!isExecutionIdentity(instanceId)) throw new TypeError('Invalid worker instance identity');
+  const root = process.cwd();
+  if (await realpath(root) !== root) throw new Error('Invalid session working directory');
+  await assertPrivateDirectory(root);
+  const directory = path.join(root, `instance-${instanceId}`);
+  await mkdir(directory, { mode: 0o700 });
+  await assertPrivateDirectory(directory);
+  return directory;
+}
+
 async function assertPrivateDirectory(directory: string): Promise<void> {
   const metadata = await lstat(directory);
   if (metadata.isSymbolicLink() || !metadata.isDirectory() || metadata.uid !== process.getuid?.() || (metadata.mode & 0o077) !== 0) {

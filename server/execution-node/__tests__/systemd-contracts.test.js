@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseSystemdHelperReply, parseSystemdHelperRequest, parseSystemdIdentity } from '../systemd/contracts.js';
-import { systemdExecutionLaunch } from '../systemd/launch.js';
+import { createSystemdLaunchIdentity, systemdExecutionLaunch } from '../systemd/launch.js';
 import { identity, launch } from './systemd-fixture.js';
 
 describe('systemd helper contracts', () => {
@@ -28,9 +28,9 @@ describe('systemd helper contracts', () => {
   });
 
   test('same node has a stable exclusion name and independent launch nonce', () => {
-    const first = systemdExecutionLaunch('synthetic-node', '/opt/garcon', ['--execution-node']);
-    const second = systemdExecutionLaunch('synthetic-node', '/opt/garcon', ['--execution-node']);
-    const third = systemdExecutionLaunch('other-node', '/opt/garcon', []);
+    const first = systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), '/opt/garcon', ['--execution-node']);
+    const second = systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), '/opt/garcon', ['--execution-node']);
+    const third = systemdExecutionLaunch(createSystemdLaunchIdentity('other-node'), '/opt/garcon', []);
     expect(first.identity.unitName).toBe(second.identity.unitName);
     expect(first.identity.launchId).not.toBe(second.identity.launchId);
     expect(first.identity.unitName).not.toBe(third.identity.unitName);
@@ -44,22 +44,22 @@ describe('systemd helper contracts', () => {
 
   test('launch arguments remain literal argv without a shell and require an absolute executable', () => {
     const args = ['--execution-node', '--node-config', '/path with spaces/node.json', 'literal;$(command)'];
-    const result = systemdExecutionLaunch('synthetic-node', '/opt/garcon', args);
+    const result = systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), '/opt/garcon', args);
     expect(result.argv.slice(-4)).toEqual(args);
-    expect(() => systemdExecutionLaunch('synthetic-node', 'garcon', args)).toThrow();
-    expect(() => systemdExecutionLaunch('synthetic-node', '/opt/garcon', ['\0'])).toThrow();
+    expect(() => systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), 'garcon', args)).toThrow();
+    expect(() => systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), '/opt/garcon', ['\0'])).toThrow();
   });
 
   test('worker bootstrap selects an explicit working directory and literal process environment', () => {
     const options = { workingDirectory: '/synthetic/private cwd', environment: { BUN_OPTIONS: '--config=/dev/null' } };
-    const launch = systemdExecutionLaunch('synthetic-node', '/synthetic/garcon', ['--internal-node-session-worker'], options);
+    const launch = systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), '/synthetic/garcon', ['--internal-node-session-worker'], options);
     expect(launch.argv).toContain('--working-directory=/synthetic/private cwd');
     expect(launch.argv).toContain('--setenv=BUN_OPTIONS=--config=/dev/null');
     options.environment.BUN_OPTIONS = 'replacement';
     expect(launch.argv).not.toContain('--setenv=BUN_OPTIONS=replacement');
     for (const invalid of [{ workingDirectory: 'relative' }, { workingDirectory: '/synthetic\0' },
       { environment: { 'INVALID=KEY': 'value' } }, { environment: { KEY: 'value\0' } }]) {
-      expect(() => systemdExecutionLaunch('synthetic-node', '/synthetic/garcon', [], invalid)).toThrow();
+      expect(() => systemdExecutionLaunch(createSystemdLaunchIdentity('synthetic-node'), '/synthetic/garcon', [], invalid)).toThrow();
     }
   });
 });

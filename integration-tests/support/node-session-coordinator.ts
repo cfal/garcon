@@ -1,8 +1,9 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../server/execution-node/worker/configuration.js';
 import { NodeSessionMarkerFile } from '../../server/execution-node/systemd/session-marker.js';
 import { NodeSessionHostOwner } from '../../server/execution-node/systemd/session-host.js';
 import { runSystemdHelper } from '../../server/execution-node/systemd/helper-process.js';
 import { encodeNodeWorkerFrame } from '../../server/execution-node/worker/framing.js';
-import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../server/execution-node/worker/launch.js';
+import { NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../server/execution-node/worker/launch.js';
 import { NodeWorkerPeer, type NodeWorkerProcessPort } from '../../server/execution-node/worker/peer.js';
 import { DEFAULT_NODE_REPLAY } from '../../server/execution-node/replay-cache.js';
 import { readFile } from 'node:fs/promises';
@@ -12,11 +13,10 @@ const [runtimeDirectory, nodeId, phase] = process.argv.slice(2);
 if (!runtimeDirectory || !nodeId || !['launch-only', 'identified', 'configured'].includes(phase!)) process.exit(2);
 const marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory, controllerId: 'synthetic-controller', nodeId,
   onCompromised() { process.exit(2); } });
-const directory = await createNodeWorkerWorkingDirectory(runtimeDirectory);
 const pipes: { child: NodeWorkerProcessPort | null } = { child: null };
 const owner = new NodeSessionHostOwner({ nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory,
   command: nodeWorkerCommand('session'),
-  launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
+  launchOptions: { environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
   spawn(launch) {
     const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
     pipes.child = child;
@@ -34,7 +34,7 @@ if (workerPid !== inspected.identity.mainPid) throw new Error('Worker hello does
 if (phase === 'configured') {
   const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node-boot', logicalSessionId: 'synthetic-session' };
   owner.bind(host, session);
-  await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: runtimeDirectory,
+  await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: runtimeDirectory, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
     instances: ['synthetic-first', 'synthetic-second'].map((id) => ({ id, agentId: 'direct-anthropic-compatible', label: id,
       homeDirectory: path.join(runtimeDirectory, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 })),
     workspaces: [{ id: 'synthetic-workspace', projectPath: runtimeDirectory }], replay: DEFAULT_NODE_REPLAY });

@@ -8,6 +8,7 @@ import { DEFAULT_NODE_REPLAY, type NodeReplayOptions } from '../replay-cache.js'
 export const MAX_NODE_WORKER_CONFIGURATION_BYTES = 512 * 1024;
 export const MAX_NODE_WORKER_INSTANCES = 64;
 export const MAX_NODE_WORKER_WORKSPACES = 256;
+export const DEFAULT_NODE_EXECUTABLE_SEARCH_PATH: readonly string[] = Object.freeze(['/usr/local/bin', '/usr/bin', '/bin']);
 
 export interface NodeInstanceConfiguration {
   readonly id: string;
@@ -28,6 +29,7 @@ export interface NodeSessionWorkerConfiguration {
   readonly role: 'session';
   readonly nodeId: string;
   readonly storageDirectory: string;
+  readonly executableSearchPath: readonly string[];
   readonly instances: readonly NodeInstanceConfiguration[];
   readonly workspaces: readonly NodeWorkspaceConfiguration[];
   readonly replay: NodeReplayOptions;
@@ -38,6 +40,7 @@ export interface NodeInstanceWorkerConfiguration {
   readonly role: 'instance';
   readonly nodeId: string;
   readonly storageDirectory: string;
+  readonly executableSearchPath: readonly string[];
   readonly instance: NodeInstanceConfiguration;
   readonly workspaces: readonly NodeWorkspaceConfiguration[];
 }
@@ -46,22 +49,24 @@ export type NodeWorkerConfiguration = NodeSessionWorkerConfiguration | NodeInsta
 
 export function parseNodeWorkerConfiguration(value: unknown): NodeWorkerConfiguration | null {
   if (!isNormalizedJsonObject(value) || Buffer.byteLength(JSON.stringify(value)) > MAX_NODE_WORKER_CONFIGURATION_BYTES
-    || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'workspaces'], ['instances', 'instance', 'replay', 'outputMemoryBytes'])
+    || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces'], ['instances', 'instance', 'replay', 'outputMemoryBytes'])
     || !isExecutionIdentity(value.nodeId) || !absoluteDirectory(value.storageDirectory)
     || !Array.isArray(value.workspaces) || value.workspaces.length > MAX_NODE_WORKER_WORKSPACES) return null;
+  const executableSearchPath = parseNodeExecutableSearchPath(value.executableSearchPath);
+  if (!executableSearchPath) return null;
   const workspaces: NodeWorkspaceConfiguration[] = [];
   for (const entry of value.workspaces) {
     if (!exactNodeFields(entry, ['id', 'projectPath']) || !isExecutionIdentity(entry.id) || !absoluteDirectory(entry.projectPath)
       || workspaces.some((prior) => prior.id === entry.id)) return null;
     workspaces.push(Object.freeze({ id: entry.id, projectPath: entry.projectPath }));
   }
-  const base = { nodeId: value.nodeId, storageDirectory: value.storageDirectory, workspaces: Object.freeze(workspaces) };
+  const base = { nodeId: value.nodeId, storageDirectory: value.storageDirectory, executableSearchPath, workspaces: Object.freeze(workspaces) };
   if (value.role === 'instance') {
-    if (!exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'workspaces', 'instance'])) return null;
+    if (!exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces', 'instance'])) return null;
     const instance = parseInstance(value.instance, workspaces);
     return instance ? Object.freeze({ role: 'instance', ...base, instance }) : null;
   }
-  if (value.role !== 'session' || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'workspaces', 'instances', 'replay'], ['outputMemoryBytes'])
+  if (value.role !== 'session' || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces', 'instances', 'replay'], ['outputMemoryBytes'])
     || !Array.isArray(value.instances) || value.instances.length > MAX_NODE_WORKER_INSTANCES) return null;
   if (value.outputMemoryBytes !== undefined && (!Number.isSafeInteger(value.outputMemoryBytes) || Number(value.outputMemoryBytes) < 1)) return null;
   const outputMemory = value.outputMemoryBytes === undefined ? {} : { outputMemoryBytes: Number(value.outputMemoryBytes) };
@@ -112,6 +117,13 @@ export function pathsOverlap(left: string, right: string): boolean {
 
 function absoluteDirectory(value: unknown): value is string {
   return nodeString(value, 32_768) && path.isAbsolute(value) && path.normalize(value) === value && value !== path.parse(value).root;
+}
+
+export function parseNodeExecutableSearchPath(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 32
+    || !value.every((entry) => absoluteDirectory(entry) && !entry.includes(path.delimiter))
+    || new Set(value).size !== value.length || Buffer.byteLength(value.join(path.delimiter)) > 32_768) return null;
+  return Object.freeze([...value]);
 }
 
 export const OWNED_ENVIRONMENT_KEYS: ReadonlySet<string> = new Set([

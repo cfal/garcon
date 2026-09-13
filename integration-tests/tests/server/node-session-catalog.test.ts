@@ -37,7 +37,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('instance catalog discovery over W
     } finally { await f.dispose(); }
   }, 20_000);
 
-  test('the real pinned Pi CLI discovers only its configured native profile without a model request', async () => {
+  test('the production Pi SDK discovers only its configured native profile without a model request', async () => {
     const provider = startScriptedPiTestEnvironment();
     const f = await createNodeSessionFixture(certificate, certificate.trust, {
       instance: { agentId: 'pi', environment: { GARCON_PI_BINARY: provider.serverEnvironment.GARCON_PI_BINARY! } },

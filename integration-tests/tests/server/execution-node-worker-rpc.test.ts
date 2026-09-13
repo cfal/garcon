@@ -1,3 +1,4 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../../../server/execution-node/worker/configuration.js';
 import { expect, mock, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -22,7 +23,7 @@ test('execution RPC reaches only its configured instance and preserves operation
     await peer.hello;
     const instances = ['synthetic-first', 'synthetic-second'].map((id) => ({ id, agentId: 'direct-anthropic-compatible', label: id,
       homeDirectory: path.join(storage, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 }));
-    const manifests = await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: storage, instances,
+    const manifests = await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, instances,
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY });
     expect(manifests.every((manifest) => Object.entries(manifest.facets).every(([facet, present]) => present === (facet === 'catalog' || facet === 'auth' ? true : null)))).toBe(true);
     const first = peer.execution('synthetic-first', 1);

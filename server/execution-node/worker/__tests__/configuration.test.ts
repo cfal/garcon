@@ -1,9 +1,10 @@
+import { DEFAULT_NODE_EXECUTABLE_SEARCH_PATH } from '../configuration.js';
 import { expect, test } from 'bun:test';
 import { DEFAULT_NODE_REPLAY } from '../../replay-cache.js';
 import { MAX_NODE_WORKER_CONFIGURATION_BYTES, MAX_NODE_WORKER_INSTANCES, parseNodeWorkerConfiguration } from '../configuration.js';
 
 export function sessionConfiguration() {
-  return { role: 'session' as const, nodeId: 'synthetic-node', storageDirectory: '/synthetic/storage',
+  return { role: 'session' as const, nodeId: 'synthetic-node', storageDirectory: '/synthetic/storage', executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
     workspaces: [{ id: 'synthetic-workspace', projectPath: '/synthetic/project' }], replay: { ...DEFAULT_NODE_REPLAY },
     instances: [{ id: 'synthetic-instance', agentId: 'synthetic', label: 'Synthetic', homeDirectory: '/synthetic/home',
       environment: { SYNTHETIC_API_KEY: 'synthetic-private-value' }, workspaceIds: ['synthetic-workspace'], maxOperations: 2 }],
@@ -27,11 +28,24 @@ test('configuration snapshots instance environments and grants without starting 
 
 test('instance configuration receives only its explicit workspace grants', () => {
   const input = sessionConfiguration();
-  const instance = { role: 'instance' as const, nodeId: input.nodeId, storageDirectory: input.storageDirectory,
+  const instance = { role: 'instance' as const, nodeId: input.nodeId, storageDirectory: input.storageDirectory, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
     instance: input.instances[0], workspaces: input.workspaces };
   expect(parseNodeWorkerConfiguration(instance)).toEqual(instance);
   expect(parseNodeWorkerConfiguration({ ...instance, replay: DEFAULT_NODE_REPLAY })).toBeNull();
   expect(parseNodeWorkerConfiguration({ ...instance, workspaces: [] })).toBeNull();
+});
+
+test('operator executable search paths are captured and reject ambient or ambiguous lookup roots', () => {
+  const input = { ...sessionConfiguration(), executableSearchPath: ['/synthetic/operator/bin', ...DEFAULT_NODE_EXECUTABLE_SEARCH_PATH] };
+  const parsed = parseNodeWorkerConfiguration(input);
+  expect(parsed?.executableSearchPath).toEqual(input.executableSearchPath);
+  input.executableSearchPath[0] = '/synthetic/replacement';
+  expect(parsed?.executableSearchPath[0]).toBe('/synthetic/operator/bin');
+  expect(Object.isFrozen(parsed?.executableSearchPath)).toBe(true);
+  for (const executableSearchPath of [undefined, [], [''], ['.'], ['relative'], ['/'], ['/bin:relative'],
+    ['/synthetic/../bin'], ['/bin', '/bin'], ['/synthetic\0bin'], Array.from({ length: 33 }, (_, i) => `/synthetic/${i}`)]) {
+    expect(parseNodeWorkerConfiguration({ ...input, executableSearchPath })).toBeNull();
+  }
 });
 
 test('same-provider profiles require distinct identities and nonoverlapping homes', () => {
@@ -75,6 +89,6 @@ test('only session configuration can declare a finite positive output memory bud
   for (const outputMemoryBytes of [0, -1, 1.5, '1024', null, Number.MAX_SAFE_INTEGER + 1]) {
     expect(parseNodeWorkerConfiguration({ ...input, outputMemoryBytes })).toBeNull();
   }
-  expect(parseNodeWorkerConfiguration({ role: 'instance', nodeId: input.nodeId, storageDirectory: input.storageDirectory,
+  expect(parseNodeWorkerConfiguration({ role: 'instance', nodeId: input.nodeId, storageDirectory: input.storageDirectory, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
     instance: input.instances[0], workspaces: input.workspaces, outputMemoryBytes: 1024 })).toBeNull();
 });

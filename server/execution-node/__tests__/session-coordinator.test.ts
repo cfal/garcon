@@ -30,6 +30,7 @@ function fixture() {
     recordLaunch: mock<NodeSessionMarkerStore['recordLaunch']>(async (launch) => {
       calls.push('record-launch');
       marker = { version: 1, controllerId: 'synthetic-controller', nodeId: 'synthetic-node', launch, identity: null };
+      return '/synthetic/worker-cwd';
     }),
     recordIdentity: mock<NodeSessionMarkerStore['recordIdentity']>(async (value) => {
       calls.push('record-identity');
@@ -180,6 +181,7 @@ test('accepted retirements keep their captured worker after physical disconnect 
   expect(first.lease.authoritySignal.aborted).toBe(false);
   expect(f.peer.configure).toHaveBeenCalledTimes(1);
 });
+
 
 test('renews authenticated liveness before worker startup settles', async () => {
   const f = fixture();
@@ -351,7 +353,7 @@ test('lease retirement during an unsettled launch retains the replacement fence 
   const f = fixture();
   const recorded = Promise.withResolvers<void>();
   const record = f.store.recordLaunch.getMockImplementation()!;
-  f.store.recordLaunch.mockImplementationOnce(async (launch) => { await record(launch); await recorded.promise; });
+  f.store.recordLaunch.mockImplementationOnce(async (launch) => { const directory = await record(launch); await recorded.promise; return directory; });
   await f.coordinator.initialize();
   const connection = f.coordinator.open('synthetic-controller-boot');
   await tick();
