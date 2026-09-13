@@ -1,6 +1,6 @@
 import { expect, mock } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { NODE_WIRE_VERSION, type AgentStartRequestV5, type AgentProducerEvent, type AgentGoalControlRequest, type AgentSteerRequest } from '@garcon/server-agent-interface';
+import { NODE_WIRE_VERSION, type AgentExecutionHandle, type AgentStartRequestV5, type AgentProducerEvent, type AgentGoalControlRequest, type AgentSteerRequest } from '@garcon/server-agent-interface';
 import { LocalProviderExecutionService } from '../local-provider-execution.js';
 import { NodeExecutionResources } from '../execution-resources.js';
 import { DEFAULT_NODE_OPERATIONS, NodeOperationTable } from '../operation-table.js';
@@ -25,7 +25,7 @@ export function executionWireFixture(maxOperations = 1, preparationMs = DEFAULT_
       request.output.emit({ type: 'session', session: { agentSessionId: 'synthetic-native', nativeSession: null, nativeSeedReceipt: null } });
       return handle;
     }),
-    resume: mock(async () => handle), abort: mock(async () => true), runningSessions: () => [],
+    resume: mock(async () => handle), abort: mock(async (_handle: AgentExecutionHandle) => true), runningSessions: () => [],
   };
   const steering = { captureTarget: mock(() => ({})),
     steer: mock(async (request: AgentSteerRequest) => { await request.prepareDelivery(); return { kind: 'accepted' as const }; }) };

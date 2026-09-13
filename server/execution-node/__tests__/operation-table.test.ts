@@ -526,7 +526,7 @@ test('goal validation refusal cancels the parked handoff before entering commit'
   } } });
 });
 
-test('an exception inside goal commit is unknown and never retries or advances the observed run', async () => {
+test('an exception inside goal commit is unknown and retains the successor without retrying', async () => {
   const f = await controlFixture();
   const control = ready(await f.prepareGoal());
   f.handoff.commit.mockImplementation(() => { throw new Error('synthetic commit uncertainty'); });
@@ -535,7 +535,7 @@ test('an exception inside goal commit is unknown and never retries or advances t
   await expect(f.table.commitGoalControl(f.connection, f.ticket.identity, control.controlId)).rejects.toThrow();
   expect(f.handoff.commit).toHaveBeenCalledTimes(1);
   expect(f.table.status(f.connection, f.ticket.identity)).toMatchObject({ value: {
-    runId: f.request.runId, control: { phase: 'settled', deliveryPrepared: true },
+    runId: f.goalInput.runId, control: { phase: 'settled', deliveryPrepared: true },
   } });
   expect(await f.table.abort(f.connection, f.ticket.identity)).toBe(true);
   expect(f.execution.abort).toHaveBeenCalledTimes(1);

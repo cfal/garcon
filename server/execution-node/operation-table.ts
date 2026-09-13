@@ -428,7 +428,6 @@ export class NodeOperationTable {
     control.phase = { kind: 'goal-committing' };
     control.deliveryPrepared = true;
     this.#disarmControl(control);
-    const previousRunId = operation.runId;
     const publication = operation.publication!;
     // Commit may synchronously emit successor output before returning control to the table.
     operation.runId = control.ticket.runId;
@@ -438,10 +437,6 @@ export class NodeOperationTable {
       handoff.commit();
       decision.resolve();
     } catch (error) {
-      if (operation.phase === 'dispatched') {
-        operation.runId = previousRunId;
-        publication.advanceRun(previousRunId);
-      }
       decision.reject(error);
       control.cancellation.abort(error);
       this.#settleControl(control, { kind: 'failed', outcome: 'unknown' });
