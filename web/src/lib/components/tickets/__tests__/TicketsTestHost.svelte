@@ -10,14 +10,19 @@
 		SurfaceFrameBridge,
 	} from '$lib/workspace/surface-frame-context.js';
 	import TicketsPanel from '../TicketsPanel.svelte';
+	import type { TicketChatSummary } from '../ticket-presentation.js';
 	let {
 		controller,
 		frame = new SurfaceFrameBridge(),
 		pinnedProjectPaths = [],
+		chats = [],
+		onOpenChat = () => {},
 	}: {
 		controller: TicketsController;
 		frame?: SurfaceFrameBridge;
 		pinnedProjectPaths?: string[];
+		chats?: readonly TicketChatSummary[];
+		onOpenChat?: (id: string) => void;
 	} = $props();
 	setSurfaceFrameBridge(() => frame);
 	setNotifications(createNotificationsStore());
@@ -32,9 +37,9 @@
 	{controller}
 	{pinnedProjectPaths}
 	visible
-	chats={[]}
+	{chats}
 	username="local"
 	directory={null}
-	onOpenChat={() => {}}
+	{onOpenChat}
 	onOpenSource={() => {}}
 />

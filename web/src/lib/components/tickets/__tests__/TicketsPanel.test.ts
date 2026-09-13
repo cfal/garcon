@@ -24,6 +24,47 @@ afterEach(() => {
 });
 
 describe('Tickets surface', () => {
+	it.each(['Synthetic assigned chat', '', null])(
+		'opens a chat assignee from the detail field with title %j',
+		async (title) => {
+			const { controller, setItems, view } = await mount();
+			const chatId = '1000000000000001';
+			const onOpenChat = vi.fn();
+			setItems([{ ...syntheticTicket(), assignee: { kind: 'chat', chatId } }]);
+			controller.select('G-1');
+			await controller.refresh();
+			await view.rerender({ controller, chats: [{ id: chatId, title }], onOpenChat });
+			const assignee = within(view.container.querySelector<HTMLElement>('.ticket-assignee-value')!);
+			const button = assignee.getByRole('button');
+			expect(button.textContent).toContain(title || `Chat ${chatId}`);
+			expect(button.getAttribute('title')).toBe(chatId);
+			expect(onOpenChat).not.toHaveBeenCalled();
+			await fireEvent.click(button);
+			expect(onOpenChat).toHaveBeenCalledExactlyOnceWith(chatId);
+			await view.rerender({ controller, chats: [], onOpenChat });
+			expect(assignee.queryByRole('button')).toBeNull();
+			expect(assignee.getByText(`Deleted chat · ${chatId}`)).toBeTruthy();
+		},
+	);
+
+	it.each(['local', 'another-user', null])(
+		'keeps non-chat assignee %j as plain text',
+		async (username) => {
+			const { controller, setItems, view } = await mount();
+			setItems([{
+				...syntheticTicket(),
+				assignee: username === null ? null : { kind: 'user', username },
+			}]);
+			controller.select('G-1');
+			await controller.refresh();
+			await tick();
+			const assignee = within(view.container.querySelector<HTMLElement>('.ticket-assignee-value')!);
+			const label = username ?? 'Unassigned';
+			expect(assignee.getByText(label).tagName).toBe('SPAN');
+			expect(assignee.queryByRole('button', { name: label })).toBeNull();
+		},
+	);
+
 	it('restores the moved row index when a non-close status change leaves the filter', async () => {
 		vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => {
 			const rects = [new DOMRect(0, 0, 100, 20)];
@@ -610,8 +651,88 @@ describe('Tickets surface', () => {
 			expect(dialog.queryByText(/Default from (repository|folder)/)).toBeNull();
 			await fireEvent.input(project, { target: { value: '' } });
 			expect(
-				dialog.getByText('Enter a project name. A chat or folder is not required.'),
-			).toBeTruthy();
+				dialog.queryByText('Enter a project name. A chat or folder is not required.'),
+			).toBeNull();
+		},
+	);
+
+	it('does not show the project hint while the default lookup is pending', async () => {
+		const { controller, api } = await mount();
+		let release!: () => void;
+		api.projectDefault.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve({ project: '/synthetic/project', kind: 'repository' });
+				}),
+		);
+		const opening = controller.beginCreate('/synthetic/context');
+		const draft = controller.createDraft!;
+		try {
+			const dialog = within(await screen.findByRole('dialog'));
+			expect((dialog.getByLabelText('Project') as HTMLInputElement).value).toBe('');
+			expect(
+				dialog.queryByText('Enter a project name. A chat or folder is not required.'),
+			).toBeNull();
+			expect(
+				(dialog.getByRole('button', { name: 'Create ticket' }) as HTMLButtonElement).disabled,
+			).toBe(true);
+			await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+			expect(controller.createDraft).toBeNull();
+			expect(api.projectDefault.mock.lastCall?.[1]?.aborted).toBe(true);
+		} finally {
+			release();
+			await opening;
+		}
+		expect(draft.field('project')).toBe('');
+	});
+
+	it.each(['pristine', 'cleared', 'whitespace'] as const)(
+		'closes a %s new ticket without confirmation or retained recovery',
+		async (contents) => {
+			const { controller, recovery } = await mount();
+			await controller.beginCreate('/synthetic/context');
+			const draft = controller.createDraft!;
+			const dialog = within(await screen.findByRole('dialog'));
+			if (contents !== 'pristine') {
+				for (const label of ['Title', 'Description']) {
+					const input = dialog.getByLabelText(label);
+					await fireEvent.input(input, { target: { value: 'Synthetic draft text' } });
+					await fireEvent.input(input, { target: { value: contents === 'cleared' ? '' : '  ' } });
+				}
+				draft.flush();
+				expect(recovery.list(draft.current)).toHaveLength(1);
+			}
+			await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+			expect(controller.createDraft).toBeNull();
+			expect(screen.queryByText('Discard this draft?')).toBeNull();
+			expect(controller.drafts.needsExitGuard).toBe(false);
+			expect(recovery.list(draft.current)).toHaveLength(0);
+			await controller.beginCreate('/synthetic/context');
+			expect(controller.createDraft?.field('title')).toBe('');
+			expect(controller.createDraft?.field('description')).toBe('');
+		},
+	);
+
+	it.each(['Title', 'Description'])(
+		'keeps discard confirmation when the new ticket has a %s',
+		async (label) => {
+			const { controller } = await mount();
+			await controller.beginCreate('/synthetic/context');
+			const draft = controller.createDraft;
+			const dialog = within(await screen.findByRole('dialog'));
+			await fireEvent.input(dialog.getByLabelText(label), {
+				target: { value: 'Synthetic draft text' },
+			});
+			await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+			expect(dialog.getByText('Discard this draft?')).toBeTruthy();
+			expect(controller.createDraft).toBe(draft);
+			expect(controller.drafts.needsExitGuard).toBe(true);
+			await fireEvent.input(dialog.getByLabelText(label), { target: { value: '' } });
+			await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+			expect(controller.createDraft).toBeNull();
+			await controller.beginCreate('/synthetic/context');
+			const reopened = within(await screen.findByRole('dialog'));
+			expect(reopened.queryByText('Discard this draft?')).toBeNull();
 		},
 	);
 
@@ -625,6 +746,21 @@ describe('Tickets surface', () => {
 		expect(dialog.getByText('Synthetic project lookup unavailable')).toBeTruthy();
 		await fireEvent.input(dialog.getByLabelText('Project'), { target: { value: 'Release' } });
 		expect(dialog.queryByText('Synthetic project lookup unavailable')).toBeNull();
+	});
+
+	it('opens a fresh dialog without the previous discard question after creating a ticket', async () => {
+		const { controller } = await mount();
+		await controller.beginCreate('/synthetic/context');
+		const dialog = within(await screen.findByRole('dialog'));
+		await fireEvent.input(dialog.getByLabelText('Title'), { target: { value: 'Synthetic ticket' } });
+		await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+		expect(dialog.getByText('Discard this draft?')).toBeTruthy();
+		await fireEvent.click(dialog.getByRole('button', { name: 'Create ticket' }));
+		await waitFor(() => expect(controller.createDraft).toBeNull());
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		await fireEvent.click(screen.getByRole('button', { name: 'New ticket' }));
+		const reopened = within(await screen.findByRole('dialog'));
+		await waitFor(() => expect(reopened.queryByText('Discard this draft?')).toBeNull());
 	});
 
 	it('creates without a chat or filesystem default and opens authoritative detail', async () => {

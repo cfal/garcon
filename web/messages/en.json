@@ -110,7 +110,6 @@
 	"tickets_any_assignee": "Any assignee",
 	"tickets_label_filter": "Label",
 	"tickets_filter_apply": "Search",
-	"tickets_project_required": "Enter a project name. A chat or folder is not required.",
 	"tickets_copy_link": "Copy ticket link",
 	"tickets_created_outside": "Created outside current filters",
 	"tickets_reveal": "Clear filters and reveal",
