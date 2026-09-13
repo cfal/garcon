@@ -46,8 +46,6 @@ function view(
 		scrollLeft: 0,
 		scrollTop: 0,
 		folds: [],
-		pinned: true,
-		preview: false,
 		updatedAt: 1,
 		placement: 'window-main',
 	};

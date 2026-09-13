@@ -529,13 +529,6 @@
 			terminalId={surface.terminalId}
 			onRename={() => (renamingTerminalId = surface.terminalId)}
 		/>
-	{:else if surface?.type === 'file'}
-		{@const fileSession = fileSessions.get(surface.fileSessionId)}
-		{#if fileSession}
-			<menu.Item onSelect={() => fileSessions.togglePinned(fileSession.id)}>
-				{fileSession.pinned ? 'Unpin File Tab' : 'Pin File Tab'}
-			</menu.Item>
-		{/if}
 	{/if}
 {/snippet}
 

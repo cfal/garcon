@@ -400,7 +400,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				restoreFileSession: (sessionId, target, publication) =>
 					placement!.restoreFileSession(sessionId, target, publication),
 				focusFileSession: (sessionId) => placement!.focusFileSession(sessionId),
-				closeFileSession: (sessionId) => placement!.closeSurface(fileSurfaceId(sessionId)),
 				filePlacement: (sessionId) => {
 					const surfaceId = fileSurfaceId(sessionId);
 					if (placement!.layout.snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';

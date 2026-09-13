@@ -47,8 +47,6 @@ export class FileViewSession {
 	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
 	pendingSourcePresentation: FileSourcePresentation | null = null;
-	pinned = $state(true);
-	preview = $state(false);
 	lastFocusedAt = $state(Date.now());
 	onPresentationChanged: (() => void) | null = null;
 	#presentationTimer: ReturnType<typeof setTimeout> | null = null;

@@ -1,7 +1,6 @@
 export interface WindowTabLayoutInput {
 	order: readonly string[];
 	activeId: string | null;
-	pinnedIds: readonly string[];
 	availableWidth: number;
 	widths: ReadonlyMap<string, number>;
 	gap: number;
@@ -53,7 +52,6 @@ export function resolveWindowTabPresentation(input: WindowTabLayoutInput): Windo
 	const {
 		order,
 		activeId,
-		pinnedIds,
 		availableWidth,
 		widths,
 		gap,
@@ -89,10 +87,9 @@ export function resolveWindowTabPresentation(input: WindowTabLayoutInput): Windo
 
 	if (activeId && order.includes(activeId)) selected.add(activeId);
 
-	for (const surfaceId of [...pinnedIds, ...order]) {
+	for (const surfaceId of order) {
 		if (selected.size >= capacity) break;
 		if (selected.has(surfaceId)) continue;
-		if (!order.includes(surfaceId)) continue;
 		selected.add(surfaceId);
 	}
 	return {

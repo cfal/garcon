@@ -123,8 +123,6 @@ export class FileViewRecovery {
 			imageScrollLeft: session.image.scrollLeft,
 			imageScrollTop: session.image.scrollTop,
 			folds: session.editor?.folds() ?? session.pendingSourcePresentation?.folds ?? [],
-			pinned: session.pinned,
-			preview: session.preview,
 			updatedAt: Date.now(),
 			placement,
 		};
@@ -215,8 +213,6 @@ export class FileViewRecovery {
 				this.#restoringViewIds.add(restored.id);
 				const actualPlacement = this.options.getPlacement(restored.id);
 				if (actualPlacement) this.#restoredPlacements.set(originalPlacement, actualPlacement);
-				restored.pinned = record.pinned;
-				restored.preview = record.preview;
 				restored.textScrollLeft = record.scrollLeft;
 				restored.textScrollTop = record.scrollTop;
 				restored.markdownScrollLeft = record.markdownScrollLeft ?? 0;

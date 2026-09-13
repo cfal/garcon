@@ -58,8 +58,6 @@ export interface SpaFileViewV1 {
 	imageScrollLeft?: number;
 	imageScrollTop?: number;
 	folds: readonly { from: number; to: number }[];
-	pinned: boolean;
-	preview: boolean;
 	updatedAt: number;
 	placement: 'dialog' | 'mobile' | `window-${string}`;
 }

@@ -40,10 +40,6 @@ import {
 	type FileOpenMode,
 } from '$lib/files/sessions/file-open-mode.js';
 import {
-	promoteDirtyPreviewViews,
-	promoteExplicitFileOpen,
-} from '$lib/files/sessions/file-view-policy.js';
-import {
 	FileCloseCoordinator,
 	type FileCloseRelease,
 	type FileDestructiveReason,
@@ -66,9 +62,8 @@ export interface FileOpenRequest {
 	mode: FileOpenMode;
 	origin: PresentationHostId;
 	target?: DesktopPlacement;
-	reason: 'user-open' | 'preview-open' | 'responsive-restore' | 'restored-view';
+	reason: 'user-open' | 'responsive-restore' | 'restored-view';
 	openToSide?: boolean;
-	preview?: boolean;
 	line?: number;
 	col?: number;
 }
@@ -88,7 +83,6 @@ export interface FilePlacementPort {
 	filePlacement?(sessionId: string): PresentationHostId | null;
 	resolveRestoredPlacement?(host: PresentationHostId): DesktopPlacement | undefined;
 	removeUnclaimedRestoredFileSurfaces?(viewIds: readonly string[]): Promise<void>;
-	closeFileSession?(sessionId: string): Promise<boolean>;
 }
 
 export interface FileGuardRequest {
@@ -345,7 +339,6 @@ export class FileSessionRegistry {
 		if (existingId) {
 			const existing = this.get(existingId);
 			if (!existing) return null;
-			promoteExplicitFileOpen(existing, Boolean(request.preview));
 			existing.requestLocation(request.line, request.col);
 			await this.deps.getPlacement().focusFileSession(existing.id);
 			this.#recordNavigation(existing);
@@ -359,7 +352,6 @@ export class FileSessionRegistry {
 		if (pending) {
 			const session = await pending;
 			if (session) {
-				promoteExplicitFileOpen(session, Boolean(request.preview));
 				session.requestLocation(request.line, request.col);
 				await this.deps.getPlacement().focusFileSession(session.id);
 				this.#recordNavigation(session);
@@ -367,10 +359,9 @@ export class FileSessionRegistry {
 			}
 			return session;
 		}
-		const operation = this.#creationQueue.enqueue(async () => {
-			if (request.preview) await this.#closeReplaceablePreview(request.origin);
-			return this.#createAndOpen(identity, key, request);
-		});
+		const operation = this.#creationQueue.enqueue(() =>
+			this.#createAndOpen(identity, key, request),
+		);
 		if (!request.openToSide && request.reason !== 'restored-view') {
 			this.#pendingByIdentity.set(key, operation);
 		}
@@ -611,23 +602,6 @@ export class FileSessionRegistry {
 		});
 	}
 
-	async #closeReplaceablePreview(origin: PresentationHostId): Promise<void> {
-		if (origin === 'mobile' || origin === 'dialog') return;
-		const preview = this.all.find(
-			(session) =>
-				session.preview &&
-				!session.dirty &&
-				!session.document.mutationGuarded &&
-				this.deps.getPlacement().filePlacement?.(session.id) === origin,
-		);
-		if (!preview) return;
-		if (this.deps.getPlacement().closeFileSession) {
-			await this.deps.getPlacement().closeFileSession!(preview.id);
-		} else {
-			await this.destroy(preview.id);
-		}
-	}
-
 	resolveThreshold(choice: FileThresholdChoice): void {
 		const request = this.thresholdRequest;
 		if (!request) return;
@@ -657,8 +631,6 @@ export class FileSessionRegistry {
 		const session = new FileViewSession(document, viewId);
 		if (request.reason !== 'restored-view') this.#enableViewPersistence(session);
 		session.rendererMode = resolveFileRendererMode(identity.normalizedRelativePath, request.mode);
-		session.preview = Boolean(request.preview);
-		session.pinned = !session.preview;
 		if (!existingDocument) {
 			document.contentKind = fileContentKind(identity.normalizedRelativePath, session.rendererMode);
 			document.loading = true;
@@ -907,14 +879,6 @@ export class FileSessionRegistry {
 		return Boolean(session.editor);
 	}
 
-	togglePinned(sessionId: string): void {
-		const session = this.get(sessionId);
-		if (!session) return;
-		session.pinned = !session.pinned;
-		session.preview = !session.pinned;
-		void this.#persistView(session).catch(() => undefined);
-	}
-
 	async #persistView(session: FileViewSession, origin?: PresentationHostId): Promise<void> {
 		await this.#viewRecovery?.persistView(session, origin);
 	}
@@ -956,13 +920,6 @@ export class FileSessionRegistry {
 		this.#documentIdByIdentity.set(document.identityKey, document.id);
 		document.onChange(() => {
 			this.#drafts?.schedule(document);
-			promoteDirtyPreviewViews(
-				document,
-				(viewId) => this.get(viewId),
-				(view) => {
-					void this.#persistView(view).catch(() => undefined);
-				},
-			);
 		});
 	}
 

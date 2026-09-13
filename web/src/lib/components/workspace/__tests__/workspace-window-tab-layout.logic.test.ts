@@ -14,7 +14,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
-				pinnedIds: ['chat-view:window-main'],
 				availableWidth: 400,
 				widths,
 				gap: 2,
@@ -27,7 +26,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
-				pinnedIds: ['chat-view:window-main'],
 				availableWidth: 280,
 				widths,
 				gap: 2,
@@ -40,7 +38,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'terminal:1',
-				pinnedIds: ['chat-view:window-main'],
 				availableWidth: 120,
 				widths,
 				gap: 2,
@@ -57,7 +54,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
-				pinnedIds: [],
 				availableWidth: 350,
 				widths: new Map(order.map((surfaceId) => [surfaceId, 100])),
 				gap: 2,
@@ -69,7 +65,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
-				pinnedIds: [],
 				availableWidth: 360,
 				widths: new Map(order.map((surfaceId) => [surfaceId, 100])),
 				gap: 2,
@@ -78,12 +73,11 @@ describe('resolveWindowTabPresentation', () => {
 		).toEqual({ visibleIds: order, labelMode: 'truncated' });
 	});
 
-	it('keeps pinned and active tabs first when even icons overflow', () => {
+	it('keeps the active tab and earliest tabs when even icons overflow', () => {
 		expect(
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'terminal:1',
-				pinnedIds: ['chat-view:window-main'],
 				availableWidth: 90,
 				widths,
 				gap: 2,
@@ -99,7 +93,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'terminal:1',
-				pinnedIds: ['chat-view:window-main'],
 				availableWidth: 100,
 				widths: new Map([['chat-view:window-main', 80]]),
 				gap: 2,
@@ -112,7 +105,6 @@ describe('resolveWindowTabPresentation', () => {
 			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
-				pinnedIds: ['chat-view:window-main'],
 				availableWidth: 20,
 				widths,
 				gap: 2,

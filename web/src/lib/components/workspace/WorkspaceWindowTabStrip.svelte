@@ -178,10 +178,6 @@
 		tabPresentation = resolveWindowTabPresentation({
 			order: tabs.order,
 			activeId: tabs.activeId,
-			pinnedIds: tabs.order.filter((surfaceId) => {
-				const surface = workspace.layout.surface(surfaceId);
-				return surface?.type === 'file' && Boolean(files.get(surface.fileSessionId)?.pinned);
-			}),
 			availableWidth: capacity.contentWidth,
 			widths,
 			gap: tabGap,

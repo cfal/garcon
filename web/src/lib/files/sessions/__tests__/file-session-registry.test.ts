@@ -1816,8 +1816,6 @@ describe('FileSessionRegistry', () => {
 			imageScrollLeft: 32,
 			imageScrollTop: 48,
 			folds: [],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -1898,8 +1896,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 6,
 			scrollTop: 30,
 			folds: [{ from: 15, to: 29 }],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -1974,8 +1970,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 6,
 			scrollTop: 30,
 			folds: [{ from: 15, to: 26 }],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -2027,8 +2021,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 0,
 			scrollTop: 0,
 			folds: [],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -2087,8 +2079,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 0,
 			scrollTop: 0,
 			folds: [{ from: 0, to: 3 }],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -2148,8 +2138,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 0,
 			scrollTop: 0,
 			folds: [{ from: 15, to: 26 }],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -2228,8 +2216,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 0,
 			scrollTop: 0,
 			folds: [],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		};
@@ -2278,8 +2264,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 0,
 			scrollTop: 0,
 			folds: [],
-			pinned: true,
-			preview: false,
 			updatedAt: 1,
 			placement: 'window-main',
 		});
@@ -2321,8 +2305,6 @@ describe('FileSessionRegistry', () => {
 			scrollLeft: 0,
 			scrollTop: 0,
 			folds: [],
-			pinned: true,
-			preview: false,
 			updatedAt,
 			placement: 'window-file-only',
 		});
@@ -2607,23 +2589,21 @@ describe('FileSessionRegistry', () => {
 		expect(first.document.viewIds.size).toBe(1);
 	});
 
-	it('pins an existing preview when it is explicitly reopened', async () => {
+	it('keeps clean file views open when another file opens and reuses an existing view', async () => {
 		const harness = createHarness();
-		const preview = await harness.registry.open({
-			...request('src/preview.ts'),
-			preview: true,
-		});
-		if (!preview) throw new Error('Expected preview session');
-		expect(preview.preview).toBe(true);
+		const first = await harness.registry.open(request('src/first.ts'));
+		const second = await harness.registry.open(request('src/second.ts'));
+		if (!first || !second) throw new Error('Expected file sessions');
+		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
 
-		const reopened = await harness.registry.open(request('src/preview.ts'));
+		const reopened = await harness.registry.open(request('src/first.ts'));
 
-		expect(reopened).toBe(preview);
-		expect(preview.preview).toBe(false);
-		expect(preview.pinned).toBe(true);
+		expect(reopened).toBe(first);
+		expect(first.dirty).toBe(false);
+		expect(harness.registry.all).toEqual([first, second]);
 	});
 
-	it('pins a pending preview when an explicit open joins its placement', async () => {
+	it('reuses a pending file view when another open joins its placement', async () => {
 		const placement = deferred<void>();
 		let publish: (() => void) | null = null;
 		const harness = createHarness({
@@ -2637,18 +2617,15 @@ describe('FileSessionRegistry', () => {
 				async focusFileSession() {},
 			},
 		});
-		const previewOpen = harness.registry.open({
-			...request('src/pending-preview.ts'),
-			preview: true,
-		});
+		const firstOpen = harness.registry.open(request('src/pending.ts'));
 		await vi.waitFor(() => expect(publish).not.toBeNull());
-		const explicitOpen = harness.registry.open(request('src/pending-preview.ts'));
+		const secondOpen = harness.registry.open(request('src/pending.ts'));
 		placement.resolve();
 
-		const [preview, reopened] = await Promise.all([previewOpen, explicitOpen]);
-		expect(reopened).toBe(preview);
-		expect(preview?.preview).toBe(false);
-		expect(preview?.pinned).toBe(true);
+		const [first, reopened] = await Promise.all([firstOpen, secondOpen]);
+		expect(first).not.toBeNull();
+		expect(reopened).toBe(first);
+		expect(harness.registry.all).toEqual([first]);
 	});
 
 	it('keeps a late Save acknowledgement settled after the soft timeout', async () => {

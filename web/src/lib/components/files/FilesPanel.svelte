@@ -30,8 +30,7 @@
 			relativePath: node.relativePath,
 			mode: 'auto',
 			origin: presentation,
-			reason: 'preview-open',
-			preview: presentation !== 'mobile',
+			reason: 'user-open',
 		});
 	}
 </script>
