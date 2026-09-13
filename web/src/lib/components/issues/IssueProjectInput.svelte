@@ -10,8 +10,6 @@
 		disabled = false,
 		label = m.issues_project(),
 		placeholder = m.issues_project(),
-		compact = false,
-		name,
 	}: {
 		controller: IssuesController;
 		value: string;
@@ -19,8 +17,6 @@
 		disabled?: boolean;
 		label?: string;
 		placeholder?: string;
-		compact?: boolean;
-		name?: string;
 		onKeydown?: (event: KeyboardEvent) => void;
 	} = $props();
 	const id = $props.id();
@@ -49,13 +45,12 @@
 	});
 </script>
 
-<label class="issue-field issue-project-field" class:issue-project-compact={compact} for={id}>
+<label class="issue-field issue-project-field" for={id}>
 	<span class="sr-only">{label}</span>
 	<span class="issue-project-control">
 		<Folder class="issue-project-icon" size={15} aria-hidden="true" />
 		<input
 			{id}
-			{name}
 			list={`${id}-projects`}
 			class="issue-input"
 			{value}

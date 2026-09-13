@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { ApiError } from '$lib/api/client';
@@ -10,6 +10,7 @@ const controllers: IssuesController[] = [];
 afterEach(() => {
 	cleanup();
 	controllers.splice(0).forEach((controller) => controller.dispose());
+	vi.useRealTimers();
 });
 async function mount(empty = false, pinnedProjectPaths: string[] = []) {
 	const fixture = issueTestHarness(empty ? [] : [syntheticIssue()]);
@@ -29,6 +30,19 @@ function hold() {
 }
 
 describe('Issues stable, immediate interactions', () => {
+	it('renders without secure-context-only randomUUID', async () => {
+		const unavailable = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+			throw new TypeError('crypto.randomUUID is unavailable');
+		});
+		try {
+			await mount();
+			expect(screen.getByRole('button', { name: 'Open G-1' })).toBeTruthy();
+			expect(unavailable).not.toHaveBeenCalled();
+		} finally {
+			unavailable.mockRestore();
+		}
+	});
+
 	it.each([false, true])(
 		'keeps refresh errors and retry inside selected details (loaded: %s)',
 		async (loaded) => {
@@ -218,12 +232,9 @@ describe('Issues stable, immediate interactions', () => {
 
 	it('normalizes search fields without dropping urgent priority or explicit filter flags', async () => {
 		const { controller } = await mount();
-		controller.setQuery({ ready: false, includeClosed: true });
+		controller.setQuery({ project: 'Release', ready: false, includeClosed: true });
 		await controller.refresh();
 		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-		await fireEvent.input(screen.getByLabelText('Project'), {
-			target: { value: '  Release  ' },
-		});
 		await fireEvent.input(screen.getByPlaceholderText('Search issues…'), {
 			target: { value: '  Synthetic issue  ' },
 		});
@@ -245,25 +256,151 @@ describe('Issues stable, immediate interactions', () => {
 		await fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '' } });
 		expect(controller.query).not.toHaveProperty('priority');
 		expect(controller.query).toMatchObject({ ready: false, includeClosed: true });
-		await fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 		expect(controller.query).toEqual({});
 	});
 
-	it('updates assignee filter chips without substituting display names', async () => {
-		const { controller, view } = await mount();
-		const assignees = [
-			['unassigned', 'Unassigned'],
-			[{ kind: 'chat', chatId: '1000000000000001' }, '1000000000000001'],
-			[{ kind: 'user', username: 'synthetic-user' }, 'synthetic-user'],
-		] as const;
-		for (const [assignee, label] of assignees) {
-			controller.setQuery({ assignee });
-			await tick();
-			expect(view.container.querySelector('.issue-filter-chips span')?.textContent).toBe(label);
-		}
-		controller.setQuery({});
+	it('disables the project picker until bootstrap is available', async () => {
+		const { controller, api } = issueTestHarness();
+		controllers.push(controller);
+		render(IssuesTestHost, { controller });
+		const trigger = screen.getByRole('button', { name: 'Project' }) as HTMLButtonElement;
+		expect(trigger.disabled).toBe(true);
+		expect(api.facets).not.toHaveBeenCalled();
+		controller.setPresentationVisible(true);
+		await controller.refresh();
 		await tick();
-		expect(view.container.querySelector('.issue-filter-chips')).toBeNull();
+		expect(trigger.disabled).toBe(false);
+	});
+
+	it('explains a project load failure and retries when the picker reopens', async () => {
+		const { api } = await mount();
+		api.facets.mockRejectedValueOnce(new ApiError(503, 'Synthetic unavailable projects'));
+		const trigger = screen.getByRole('button', { name: 'Project' });
+		await fireEvent.click(trigger);
+		const picker = within(await screen.findByRole('dialog', { name: 'Project' }));
+		expect((await picker.findByRole('alert')).textContent).toBe(
+			"Couldn't load projects. Close and reopen to retry.",
+		);
+		await fireEvent.click(picker.getByRole('button', { name: 'All projects' }));
+		await fireEvent.click(trigger);
+		const reopened = within(await screen.findByRole('dialog', { name: 'Project' }));
+		expect(await reopened.findByRole('button', { name: 'Release' })).toBeTruthy();
+		expect(reopened.queryByRole('alert')).toBeNull();
+		expect(api.facets).toHaveBeenCalledTimes(2);
+	});
+
+	it('offers All projects first and keeps other filters when selecting a project', async () => {
+		const { controller, api } = await mount();
+		controller.setQuery({ label: 'bug', query: 'Synthetic', includeClosed: true });
+		await controller.refresh();
+		expect(api.facets).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Project' }));
+		const picker = within(await screen.findByRole('dialog', { name: 'Project' }));
+		expect(picker.getAllByRole('button')[0].textContent).toContain('All projects');
+		await fireEvent.input(picker.getByRole('textbox', { name: 'Search projects…' }), {
+			target: { value: 'Rel' },
+		});
+		await fireEvent.click(await picker.findByRole('button', { name: 'Release' }));
+		expect(api.facets).toHaveBeenLastCalledWith('project', 'Rel', expect.any(AbortSignal));
+		expect(controller.query).toMatchObject({
+			project: 'Release',
+			label: 'bug',
+			query: 'Synthetic',
+			includeClosed: true,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Project' }));
+		await fireEvent.click(
+			within(await screen.findByRole('dialog', { name: 'Project' })).getByRole('button', {
+				name: 'All projects',
+			}),
+		);
+		expect(controller.query).toEqual({ label: 'bug', query: 'Synthetic', includeClosed: true });
+	});
+
+	it.each([false, true])(
+		'groups detail actions and places assignment beside its value (assigned: %s)',
+		async (assigned) => {
+			const { controller, setItems, api } = await mount();
+			setItems([
+				{ ...syntheticIssue(), assignee: assigned ? { kind: 'user', username: 'local' } : null },
+			]);
+			await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
+			await controller.refresh();
+			const detail = screen.getByRole('region', { name: 'Issue details' });
+			const status = within(detail).getByRole('button', { name: 'Change status of G-1' });
+			expect(status.classList.contains('issue-button')).toBe(true);
+			expect(
+				within(status.parentElement!)
+					.getAllByRole('button')
+					.map((button) => button.textContent?.trim()),
+			).toEqual(['Open', 'Edit', 'Close issue']);
+			const identity = detail.querySelector('.issue-detail-identity')!;
+			expect(identity.textContent).toContain('G-1');
+			expect(identity.nextElementSibling?.classList.contains('issue-detail-title')).toBe(true);
+			expect(detail.querySelector('.issue-detail-header')?.textContent).not.toContain('G-1');
+			const assign = within(detail).getByRole('button', {
+				name: assigned ? 'Release' : 'Assign to me',
+			});
+			expect(assign.closest('dd')?.textContent).toContain(assigned ? 'local' : 'Unassigned');
+			await fireEvent.click(assign);
+			expect(api.mutate.mock.lastCall?.[0].payload).toEqual({
+				action: assigned ? 'release' : 'claim',
+				issueId: 'G-1',
+				expectedRevision: 1,
+			});
+		},
+	);
+
+	it('does not reload the collection when Clear has nothing to reset', async () => {
+		const { controller, api } = await mount();
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+		const countsCalls = api.counts.mock.calls.length;
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+		expect(controller.loading).toBe(false);
+		expect(api.counts).toHaveBeenCalledTimes(countsCalls);
+	});
+
+	it.each([false, true])(
+		'clears pending input without delayed reapply (composing: %s)',
+		async (composing) => {
+			const { controller, view } = await mount();
+			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+			const input = screen.getByPlaceholderText('Search issues…') as HTMLInputElement;
+			const label = screen.getByLabelText('Label') as HTMLInputElement;
+			const clear = screen.getByRole('button', { name: 'Clear' });
+			expect(input.closest('.issue-search-row')?.contains(clear)).toBe(true);
+			expect(view.container.querySelector('.issue-filter-footer')).toBeNull();
+			vi.useFakeTimers();
+			await fireEvent.input(input, {
+				target: { value: 'Unapplied search' },
+				isComposing: composing,
+			});
+			await fireEvent.input(label, {
+				target: { value: 'Unapplied label' },
+				isComposing: composing,
+			});
+			await fireEvent.click(clear);
+			expect(input.value).toBe('');
+			expect(label.value).toBe('');
+			expect(controller.query).toEqual({});
+			await vi.advanceTimersByTimeAsync(300);
+			expect(controller.query).toEqual({});
+			await controller.refresh();
+		},
+	);
+
+	it('clears rejected label input as well as the filter error', async () => {
+		const { controller } = await mount();
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+		const label = screen.getByLabelText('Label') as HTMLInputElement;
+		await fireEvent.input(label, { target: { value: 'x'.repeat(65) } });
+		await fireEvent.submit(label.closest('form')!);
+		expect(screen.getByRole('alert').textContent).toContain('Invalid filter');
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+		expect(label.value).toBe('');
+		expect(controller.query).toEqual({});
+		expect(screen.queryByRole('alert')).toBeNull();
 	});
 
 	it('removes create-another and explains free-form project labels', async () => {

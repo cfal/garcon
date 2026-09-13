@@ -8,10 +8,9 @@
 	import X from '@lucide/svelte/icons/x';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import type { IssueChatSummary } from './issue-presentation.js';
-	import { issuePriorityLabel, issueStatusLabel } from './issue-presentation.js';
 	import type { IssueListQuery, IssuePriority } from '$shared/issues';
 	import { parseIssueAssigneeQuery } from '$shared/issue-validation';
-	import IssueProjectInput from './IssueProjectInput.svelte';
+	import IssueProjectFilter from './IssueProjectFilter.svelte';
 	import IssueViewSettings from './IssueViewSettings.svelte';
 	import IssueSearchOptions from './IssueSearchOptions.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -30,11 +29,11 @@
 		onClose?: () => void;
 		closeDisabled?: boolean;
 	} = $props();
-	let project = $state<string | null>(null);
 	let filterError = $state(false);
 	let searchOpen = $state(false);
 	let form = $state<HTMLFormElement | null>(null);
 	let searchInput = $state<HTMLInputElement | null>(null);
+	let searchText = $derived(controller.query.query ?? '');
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 	const searchId = $props.id();
 	const saveFeedback = $derived(controller.saveFeedback);
@@ -42,14 +41,7 @@
 	const hasFilters = $derived(
 		Object.values(controller.query).some((value) => value !== false && value !== undefined),
 	);
-	const assigneeLabel = $derived.by(() => {
-		const assignee = controller.query.assignee;
-		if (!assignee) return null;
-		if (assignee === 'unassigned') return m.issues_unassigned();
-		if (assignee.kind === 'chat') return assignee.chatId;
-		return assignee.username;
-	});
-	function apply(extra: Pick<IssueListQuery, 'ready' | 'includeClosed'> = {}) {
+	function apply(extra: Pick<IssueListQuery, 'project' | 'ready' | 'includeClosed'> = {}) {
 		clearTimeout(searchTimer);
 		searchTimer = undefined;
 		if (!form) return;
@@ -59,7 +51,7 @@
 			const priority = optionalText('priority');
 			const assignee = optionalText('assignee');
 			controller.setQuery({
-				project: optionalText('project'),
+				project: controller.query.project,
 				query: optionalText('query'),
 				status: optionalText('status') as IssueListQuery['status'],
 				priority: priority === undefined ? undefined : (Number(priority) as IssuePriority),
@@ -69,7 +61,6 @@
 				includeClosed: controller.query.includeClosed,
 				...extra,
 			});
-			project = null;
 			filterError = false;
 		} catch {
 			filterError = true;
@@ -92,8 +83,9 @@
 	function clearFilters() {
 		clearTimeout(searchTimer);
 		searchTimer = undefined;
-		controller.setQuery({});
-		project = null;
+		const hasInput = form && Array.from(new FormData(form).values()).some((value) => value !== '');
+		if (hasFilters || hasInput) controller.setQuery({});
+		searchText = '';
 		filterError = false;
 	}
 	onDestroy(() => clearTimeout(searchTimer));
@@ -111,14 +103,7 @@
 		}}
 	>
 		<div class="issue-toolbar-heading">
-			<IssueProjectInput
-				{controller}
-				compact
-				name="project"
-				value={project ?? controller.query.project ?? ''}
-				onChange={(value) => (project = value)}
-				placeholder={m.issues_all_projects()}
-			/>
+			<IssueProjectFilter {controller} onSelect={(project) => apply({ project })} />
 			<button
 				class="issue-button issue-icon-button"
 				type="button"
@@ -156,41 +141,22 @@
 				>{/if}
 		</div>
 		<div id={searchId} class="issue-search-options" hidden={!searchOpen}>
-			<label class="issue-field issue-search">
-				<span class="sr-only">{m.issues_search()}</span>
-				<input
-					bind:this={searchInput}
-					name="query"
-					class="issue-input"
-					placeholder={m.issues_search()}
-					value={controller.query.query ?? ''}
-				/>
-			</label>
-			<IssueSearchOptions {controller} {chats} {username} onFilter={apply} />
-			<div class="issue-filter-footer">
-				{#if hasFilters}
-					<div class="issue-filter-chip-scroll">
-						<div class="issue-filter-chips">
-							{#if controller.query.project}<span title={controller.query.project}
-									>{controller.query.project}</span
-								>{/if}
-							{#if controller.query.query}<span>{controller.query.query}</span>{/if}
-							{#if controller.query.status}<span>{issueStatusLabel(controller.query.status)}</span
-								>{/if}
-							{#if controller.query.priority !== undefined}<span
-									>{issuePriorityLabel(controller.query.priority)}</span
-								>{/if}
-							{#if controller.query.label}<span>{controller.query.label}</span>{/if}
-							{#if controller.query.assignee}<span>{assigneeLabel}</span>{/if}
-							{#if controller.query.ready}<span>{m.issues_ready()}</span>{/if}
-							{#if controller.query.includeClosed}<span>{m.issues_include_closed()}</span>{/if}
-							<button type="button" class="issue-text-button" onclick={clearFilters}
-								>{m.issues_clear_filters()}</button
-							>
-						</div>
-					</div>
-				{/if}
+			<div class="issue-search-row">
+				<label class="issue-field issue-search">
+					<span class="sr-only">{m.issues_search()}</span>
+					<input
+						bind:this={searchInput}
+						name="query"
+						class="issue-input"
+						placeholder={m.issues_search()}
+						bind:value={searchText}
+					/>
+				</label>
+				<button type="button" class="issue-button" onclick={clearFilters}
+					>{m.issues_clear_filters()}</button
+				>
 			</div>
+			<IssueSearchOptions {controller} {chats} {username} onFilter={apply} />
 		</div>
 		<span class="sr-only" role="status">
 			{#if saveFeedback === 'saving'}{m.issues_saving()}

@@ -64,7 +64,12 @@
 	const ownAssignment = $derived(
 		issue.assignee?.kind === 'user' && issue.assignee.username === username,
 	);
-	const assignedChatId = $derived(issue.assignee?.kind === 'chat' ? issue.assignee.chatId : null);
+	const assigneeLabel = $derived.by(() => {
+		const assignee = issue.assignee;
+		if (!assignee) return m.issues_unassigned();
+		if (assignee.kind === 'user') return assignee.username;
+		return chats.find((chat) => chat.id === assignee.chatId)?.title ?? assignee.chatId;
+	});
 	function edit() {
 		controller.detail.fieldsDraft = controller.drafts.open(
 			'fields',
@@ -124,15 +129,7 @@
 	bind:this={scroll}
 	data-issue-scroll={`detail:${issue.id}`}
 >
-	<IssueDetailHeader issueId={issue.id} {onBack} {onClose} {closeDisabled}>
-		<button
-			type="button"
-			class="issue-text-button"
-			onclick={() => void copyLink()}
-			aria-label={m.issues_copy_link()}><Copy size={14} /></button
-		>
-		<IssueStatusMenu {issue} {onStatus} disabled={saving} />
-	</IssueDetailHeader>
+	<IssueDetailHeader {onBack} {onClose} {closeDisabled} />
 	{#if error}<div class="issue-notice" role="alert">
 			<p>{error}</p>
 			<button class="issue-button" onclick={() => void controller.refresh()}
@@ -140,7 +137,17 @@
 			>
 		</div>{/if}
 	<IssueMutationErrors drafts={controller.drafts.active} />
-	{#if copied}<p class="issue-muted" role="status">{copied}</p>{/if}
+	<div class="issue-detail-identity">
+		<span class="issue-id">{issue.id}</span>
+		<button
+			type="button"
+			class="issue-text-button"
+			onclick={() => void copyLink()}
+			aria-label={m.issues_copy_link()}
+			title={m.issues_copy_link()}><Copy size={14} /></button
+		>
+		{#if copied}<span class="issue-muted" role="status">{copied}</span>{/if}
+	</div>
 	{#if editing}
 		<form
 			class="issue-editor"
@@ -193,31 +200,10 @@
 			{issue.title}
 		</h1>
 		<div class="issue-actions">
+			<IssueStatusMenu {issue} {onStatus} disabled={saving} variant="button" />
 			<button type="button" class="issue-button" disabled={saving} onclick={edit}
 				>{m.issues_edit()}</button
 			>
-			{#if issue.status !== 'closed' && !issue.assignee}<button
-					type="button"
-					class="issue-button"
-					disabled={saving}
-					onclick={() =>
-						void controller.mutate(issue, {
-							action: 'claim',
-							issueId: issue.id,
-							expectedRevision: issue.revision,
-						})}>{m.issues_claim()}</button
-				>{/if}
-			{#if ownAssignment}<button
-					type="button"
-					class="issue-button"
-					disabled={saving}
-					onclick={() =>
-						void controller.mutate(issue, {
-							action: 'release',
-							issueId: issue.id,
-							expectedRevision: issue.revision,
-						})}>{m.issues_release()}</button
-				>{/if}
 			<button
 				type="button"
 				class="issue-button"
@@ -236,12 +222,21 @@
 				{issuePriorityLabel(issue.priority)}
 			</dd>
 			<dt>{m.issues_assignee()}</dt>
-			<dd>
-				{assignedChatId
-					? (chats.find((chat) => chat.id === assignedChatId)?.title ?? assignedChatId)
-					: issue.assignee?.kind === 'user'
-						? issue.assignee.username
-						: m.issues_unassigned()}
+			<dd class="issue-assignee-value">
+				<span>{assigneeLabel}</span>
+				{#if ownAssignment || (issue.status !== 'closed' && !issue.assignee)}
+					<button
+						type="button"
+						class="issue-assignee-action"
+						disabled={saving}
+						onclick={() =>
+							void controller.mutate(issue, {
+								action: ownAssignment ? 'release' : 'claim',
+								issueId: issue.id,
+								expectedRevision: issue.revision,
+							})}>{ownAssignment ? m.issues_release() : m.issues_claim()}</button
+					>
+				{/if}
 			</dd>
 			{#if issue.labels.length}<dt>{m.issues_labels()}</dt>
 				<dd>{issue.labels.join(' · ')}</dd>{/if}

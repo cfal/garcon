@@ -262,12 +262,7 @@
 						}}
 					/>{/key}
 			{:else}<div class="issue-detail issue-detail-placeholder">
-					<IssueDetailHeader
-						issueId={controller.detail.selectedId}
-						onBack={() => void back()}
-						{onClose}
-						{closeDisabled}
-					/>
+					<IssueDetailHeader onBack={() => void back()} {onClose} {closeDisabled} />
 					<IssueMutationErrors drafts={controller.drafts.active} />
 					<div class="issue-detail-status" role="status">
 						{#if detailError}

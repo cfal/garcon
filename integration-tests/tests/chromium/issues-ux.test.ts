@@ -8,10 +8,18 @@ import {
 import { Deferred, withTimeout } from "../../support/deferred.js";
 import type { Route } from "playwright";
 
-test("mobile Issues opens from the chat menu, fills the panel and closes back to chat", async () => {
+test("mobile Issues opens, saves and closes without crypto.randomUUID", async () => {
   await withChromiumFixture(
     "issues-mobile-navigation",
     async ({ page, context, integration, browserErrors }) => {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 1,
+      });
+      await context.addInitScript(() => {
+        Object.defineProperty(crypto, "randomUUID", { value: undefined });
+      });
       const chatId = integration.newChatId();
       const started = await integration.client.startDirectChat({
         chatId,
@@ -37,6 +45,12 @@ test("mobile Issues opens from the chat menu, fills the panel and closes back to
       });
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe(
+        "undefined",
+      );
+      expect(
+        await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+      ).toBe(true);
       await page.locator("[data-mobile-current-chat-menu] button").click();
       await page
         .getByRole("menuitem", { name: "Open Issues", exact: true })
@@ -70,6 +84,26 @@ test("mobile Issues opens from the chat menu, fills the panel and closes back to
           });
         });
       expect(compactGeometry).toBe(true);
+      await panel.getByRole("button", { name: "Project", exact: true }).click();
+      const projects = page.getByRole("dialog", {
+        name: "Project",
+        exact: true,
+      });
+      expect(
+        await projects.getByRole("button").first().textContent(),
+      ).toContain("All projects");
+      await projects
+        .getByRole("button", { name: "Release", exact: true })
+        .click();
+      expect(
+        await panel
+          .getByRole("button", { name: "Project", exact: true })
+          .textContent(),
+      ).toContain("Release");
+      await panel.getByRole("button", { name: "Project", exact: true }).click();
+      await projects
+        .getByRole("button", { name: "All projects", exact: true })
+        .click();
       const rowGutters = await panel.locator(".issue-row").evaluate((row) => {
         const bounds = row.getBoundingClientRect();
         const list = row.parentElement!.getBoundingClientRect();
@@ -135,11 +169,126 @@ test("mobile Issues opens from the chat menu, fills the panel and closes back to
         .click();
       await panel.locator(".issue-detail-title").waitFor();
       expect(await panel.locator(".issues-toolbar").isVisible()).toBe(false);
+      const detailGeometry = await panel
+        .locator(".issue-detail")
+        .evaluate((detail) => {
+          const rect = (selector: string) =>
+            detail.querySelector(selector)!.getBoundingClientRect();
+          const identity = rect(".issue-detail-identity");
+          const title = rect(".issue-detail-title");
+          const status = rect(".issue-status-button");
+          const buttons = [
+            ...detail.querySelectorAll(
+              ".issue-detail-title + .issue-actions button",
+            ),
+          ];
+          return {
+            identityAboveTitle: identity.bottom <= title.top,
+            statusBelowTitle: status.top >= title.bottom,
+            actions: buttons.map((button) => button.textContent?.trim()),
+            assignmentBesideValue: detail.querySelector(
+              ".issue-assignee-value",
+            )!.textContent,
+          };
+        });
+      expect(detailGeometry).toMatchObject({
+        identityAboveTitle: true,
+        statusBelowTitle: true,
+        actions: ["Open", "Edit", "Close issue"],
+      });
+      expect(detailGeometry.assignmentBesideValue).toContain("Unassigned");
+      expect(detailGeometry.assignmentBesideValue).toContain("Assign to me");
+      const composer = panel.locator(".issue-composer");
+      const comment = composer.getByRole("textbox", {
+        name: "Comment",
+        exact: true,
+      });
+      await comment.fill("Synthetic progress for refinement");
+      expect(
+        await comment.evaluate((input) => getComputedStyle(input).fontSize),
+      ).toBe("16px");
+      await composer
+        .getByRole("button", { name: "Expand comment editor" })
+        .click();
+      const editor = page.getByRole("dialog", { name: "Comment", exact: true });
+      const content = editor.locator('.cm-content[aria-label="Comment"]');
+      await content.fill("Updated synthetic progress");
+      await editor
+        .getByRole("button", { name: "Close expanded editor" })
+        .click();
+      await editor.waitFor({ state: "detached" });
+      expect(await comment.inputValue()).toBe("Updated synthetic progress");
+      const target = integration.directAgents.openAi;
+      await integration.client.updateSettings({
+        ui: {
+          promptRefinement: {
+            agentId: target.agentId,
+            model: target.provider.model,
+            apiProviderId: target.provider.providerId,
+            modelEndpointId: target.provider.endpointId,
+            modelProtocol: target.provider.protocol,
+            thinkingMode: "none",
+          },
+        },
+      });
+      const refinement = integration.fakeProviders.openAi.holdNext({
+        model: target.provider.model,
+      });
+      await composer.getByRole("button", { name: "Refine prompt" }).click();
+      const modelRequest = await refinement.received;
+      try {
+        expect(modelRequest.lastUserText).toContain(
+          "The draft is an issue comment, not a chat prompt.",
+        );
+        expect(modelRequest.lastUserText).toContain(
+          "Updated synthetic progress",
+        );
+        expect(
+          await composer
+            .getByRole("button", { name: "Comment", exact: true })
+            .isDisabled(),
+        ).toBe(true);
+      } finally {
+        refinement.releaseText("Refined synthetic progress");
+      }
+      await page.waitForFunction(
+        () =>
+          document.querySelector<HTMLTextAreaElement>(
+            ".issue-composer textarea",
+          )?.value === "Refined synthetic progress",
+      );
+      await composer
+        .getByRole("button", { name: "Comment", exact: true })
+        .click();
+      await panel
+        .locator(".issue-comment")
+        .getByText("Refined synthetic progress", { exact: true })
+        .waitFor();
       await panel.getByRole("button", { name: "Back to issues" }).click();
       await panel.getByRole("button", { name: "Search", exact: true }).click();
       expect(
         await panel.getByLabel("Label", { exact: true }).inputValue(),
       ).toBe("bug");
+      await panel
+        .getByRole("button", { name: "New issue", exact: true })
+        .click();
+      const create = page.getByRole("dialog");
+      await create
+        .getByLabel("Title", { exact: true })
+        .fill("Synthetic mobile creation");
+      await create.getByLabel("Project", { exact: true }).fill("Release");
+      await create
+        .getByRole("button", { name: "Create issue", exact: true })
+        .click();
+      await panel
+        .getByRole("heading", {
+          name: "Synthetic mobile creation",
+          exact: true,
+        })
+        .waitFor();
+      expect(
+        await panel.locator(".issue-detail-identity .issue-id").textContent(),
+      ).toBe("G-2");
       await panel.getByRole("button", { name: "Close Issues" }).click();
       await panel.waitFor({ state: "hidden" });
       await page.locator("[data-mobile-current-chat-menu]").waitFor();
@@ -272,7 +421,7 @@ test("Issues toolbar stays aligned and search retains the board until results ar
           const lanes = [...panel.querySelectorAll(".issue-lane")].map((lane) =>
             lane.getBoundingClientRect(),
           );
-          const search = rect(".issue-project-control input");
+          const search = rect(".issue-project-picker");
           const button = rect("[data-issue-search-button]");
           const scroll = rect(".issue-lane-scroll");
           const item = rect(".issue-card");
@@ -364,20 +513,50 @@ test("Issues toolbar stays aligned and search retains the board until results ar
       );
       if ((await mobileSearch.getAttribute("aria-expanded")) === "false")
         await mobileSearch.click();
-      const chipGeometry = await mobileIssuesPanel
-        .locator(".issue-filter-footer")
-        .evaluate((footer) => {
-          const strip = footer.querySelector(".issue-filter-chip-scroll")!;
-          const footerRect = footer.getBoundingClientRect();
-          const stripRect = strip.getBoundingClientRect();
+      const searchGeometry = await mobileIssuesPanel
+        .locator(".issues-toolbar")
+        .evaluate((toolbar) => {
+          const input = toolbar
+            .querySelector(".issue-search input")!
+            .getBoundingClientRect();
+          const clear = toolbar
+            .querySelector(".issue-search-row button")!
+            .getBoundingClientRect();
+          const filters = toolbar
+            .querySelector(".issue-filter-options")!
+            .getBoundingClientRect();
+          const bounds = toolbar.getBoundingClientRect();
           return {
-            overflows: strip.scrollWidth > strip.clientWidth,
-            inside:
-              stripRect.top >= footerRect.top &&
-              stripRect.bottom <= footerRect.bottom,
+            clearOnRight:
+              clear.left >= input.right && clear.right <= bounds.right,
+            aligned:
+              Math.abs(clear.top - input.top) < 1 &&
+              Math.abs(clear.height - input.height) < 1,
+            bottomGap: bounds.bottom - filters.bottom,
+            hasFooter: toolbar.querySelector(".issue-filter-footer") !== null,
           };
         });
-      expect(chipGeometry).toEqual({ overflows: true, inside: true });
+      expect(searchGeometry.clearOnRight).toBe(true);
+      expect(searchGeometry.aligned).toBe(true);
+      expect(searchGeometry.bottomGap).toBeLessThanOrEqual(13);
+      expect(searchGeometry.hasFooter).toBe(false);
+      await mobileIssuesPanel
+        .getByRole("button", { name: "Clear", exact: true })
+        .click();
+      expect(
+        await mobileIssuesPanel.getByPlaceholder("Search issues…").inputValue(),
+      ).toBe("");
+      expect(
+        await mobileIssuesPanel
+          .getByRole("button", { name: "In review · 0", exact: true })
+          .getAttribute("aria-pressed"),
+      ).toBe("true");
+      await mobileIssuesPanel
+        .getByRole("button", { name: "Open · 1", exact: true })
+        .click();
+      await mobileIssuesPanel
+        .getByRole("button", { name: "Open G-1", exact: true })
+        .waitFor();
       expect(
         await page.getByText("No issues yet", { exact: true }).count(),
       ).toBe(0);
