@@ -45,6 +45,29 @@ Requirements:
 
 For a containerized install, set `GARCON_PROJECT_DIR`, `GARCON_UID`, and `GARCON_GID` in `.env`, then run `docker compose up --build -d`. The [Docker guide](docs/docker.md) covers volumes, agent login, Git, SSH, and toolchains.
 
+## Laptop hosts
+
+Agents and terminals execute on the Garcon host. Opening the workspace from a
+phone does not move that work onto the phone; the host must stay awake and
+reachable. A background service or persistent terminal session cannot make
+local work progress while its host is asleep.
+
+Before leaving a long job, confirm a small command works from your phone with
+the laptop open. If only closing the lid stops new output, check host sleep.
+If it fails with the lid open too, check connectivity, pending permissions,
+and agent errors first. Keep an active laptop powered, ventilated, and online.
+
+On a MacBook, locking the screen, preventing idle sleep, and overriding
+lid-close sleep are separate things. You can leave the lid open with idle sleep
+managed, use a supported external-display setup, or choose a compatible
+closed-lid tool.
+
+This [Apple Silicon MacBook setup guide](https://clamshell.dev/guides/keep-claude-code-running-lid-closed#phone-check)
+includes a two-minute timestamp check and optional Clamshell setup. Clamshell
+supports macOS 14 or later and is a separate paid app: a seven-day trial, then
+$9.99 once for one Mac. Garcon does not require it, and keeping a host awake
+does not repair network outages or move execution to the cloud.
+
 ## Why Garcon
 
 One agent chat is easy. The hard part begins when several agents are running, one needs approval, another has finished, and their changes still need to be understood and shipped.
