@@ -56,6 +56,7 @@ function fixture() {
     if (command.method === 'provider-catalog') return { kind: 'provider-catalog', instanceId: command.instanceId,
       snapshot: { models: [{ value: 'synthetic-model', label: _instanceId }], defaultModel: 'synthetic-model', requiresStrictModelDiscovery: true, generation: null } };
     if (command.method === 'install-output') return { kind: 'output-installed', instanceId: command.instanceId, stream: command.stream };
+    if (command.method === 'retire-output') return { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream };
     if (command.method === 'permission') return { kind: 'permission-result', result: { kind: 'permission', receipt: { permission: command.command.permission, phase: 'expired' } } };
     return { kind: 'unknown' };
   });
@@ -245,10 +246,114 @@ test('retirement after identity exhaustion preserves the session and an already 
     expect(await f.call({ method: 'install-output', instanceId: first, stream: sibling }))
       .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
     expect(() => f.services.retirement({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream: sibling }, 'coordinator')).not.toThrow();
+    expect(await f.call({ method: 'retire-output', instanceId: first, stream: sibling }))
+      .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
     f.emit();
     expect(f.authority.signal.aborted).toBe(false);
     expect(f.failed).not.toHaveBeenCalled();
   } finally { f.close(); }
+});
+
+test('successor installation waits for the instance output fence after retirement pipe drainage', async () => {
+  const f = fixture();
+  const fence = Promise.withResolvers<void>();
+  let installed = false;
+  try {
+    await f.call({ method: 'install-output', instanceId: first, stream });
+    f.childExecute.mockImplementation(async (_instanceId, command) => {
+      if (command.method === 'retire-output') {
+        await fence.promise;
+        return { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream };
+      }
+      if (command.method === 'install-output') {
+        installed = true;
+        return { kind: 'output-installed', instanceId: command.instanceId, stream: command.stream };
+      }
+      return { kind: 'unknown' };
+    });
+    await f.retire({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    const installation = f.call({ method: 'install-output', instanceId: first, stream: sibling });
+    await tick();
+    expect(f.forwards).toHaveBeenCalledTimes(1);
+    expect(installed).toBe(false);
+    fence.resolve();
+    expect(await installation).toEqual({ kind: 'output-installed', instanceId: first, stream: sibling });
+    expect(f.childExecute.mock.calls.slice(1).map(([, command]) => command.method)).toEqual(['retire-output', 'install-output']);
+    expect(f.authority.signal.aborted).toBe(false);
+  } finally { fence.resolve(); f.close(); }
+});
+
+test.each([
+  [{ kind: 'unknown' }, { kind: 'unknown' }],
+  [{ kind: 'rejected', code: 'NODE_CAPACITY' }, { kind: 'rejected', code: 'NODE_OUTPUT_RETIRED' }],
+] as const)('an unconfirmed predecessor fence prevents successor installation without blocking another instance (%j)', async (refusal, expected) => {
+  const f = fixture();
+  try {
+    await f.call({ method: 'install-output', instanceId: first, stream });
+    await f.retire({ type: 'node-worker-output-retired', version: 1, instanceId: first, stream });
+    f.childExecute.mockResolvedValueOnce(refusal);
+    expect(await f.call({ method: 'install-output', instanceId: first, stream: sibling })).toEqual(expected);
+    expect(f.childExecute.mock.calls.map(([, command]) => command.method)).toEqual(['install-output', 'retire-output']);
+    expect(await f.call({ method: 'install-output', instanceId: first, stream: sibling }))
+      .toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
+    expect(await f.call({ method: 'install-output', instanceId: second, stream: { ...stream, streamId: 'synthetic-unrelated' } }))
+      .toMatchObject({ kind: 'output-installed', instanceId: second });
+    expect(f.authority.signal.aborted).toBe(false);
+  } finally { f.close(); }
+});
+
+test('recovery remains blocked by instance fencing while exact retirement is admissible', async () => {
+  const f = fixture();
+  const fence = Promise.withResolvers<void>();
+  let resumed = false;
+  try {
+    await f.call({ method: 'install-output', instanceId: first, stream });
+    const connection = f.authority.attach(2);
+    const retire = { method: 'retire-output', instanceId: first, stream } as const;
+    f.childExecute.mockImplementation(async (_instanceId, command) => {
+      if (command.method !== 'retire-output') throw new Error('Unexpected synthetic command during recovery');
+      await fence.promise;
+      return { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream };
+    });
+    const call = (command: NodeWorkerServiceCommand) => f.services.service(2, connection, command, connection.signal);
+    const retiring = call(retire);
+    const begun = await call({ method: 'begin-output-recovery' });
+    if (begun.kind !== 'output-recovery') throw new Error('Synthetic recovery did not begin');
+    const recovery = call({ method: 'resume-output', generation: begun.generation }).then((result) => { resumed = true; return result; });
+    expect(await call({ method: 'install-output', instanceId: first, stream: sibling })).toEqual({ kind: 'rejected', code: 'NODE_UNAVAILABLE' });
+    await tick();
+    expect(resumed).toBe(false);
+    fence.resolve();
+    expect(await retiring).toEqual({ kind: 'output-fenced', instanceId: first, stream });
+    expect(await recovery).toEqual({ kind: 'output-live', live: true });
+    expect(f.authority.signal.aborted).toBe(false);
+  } finally { fence.resolve(); f.close(); }
+});
+
+test('a cancelled physical confirmation cannot mark logical retirement confirmed for its replacement', async () => {
+  const f = fixture();
+  const oldFence = Promise.withResolvers<NodeWorkerServiceResult>();
+  const nextFence = Promise.withResolvers<NodeWorkerServiceResult>();
+  const started = Promise.withResolvers<void>();
+  try {
+    await f.call({ method: 'install-output', instanceId: first, stream });
+    f.childExecute.mockImplementationOnce(() => { started.resolve(); return oldFence.promise; });
+    const command = { method: 'retire-output', instanceId: first, stream } as const;
+    const retiring = f.call(command);
+    await started.promise;
+    const connection = f.authority.attach(2);
+    expect(await retiring).toEqual({ kind: 'unknown' });
+    f.childExecute.mockImplementationOnce(() => nextFence.promise);
+    let confirmed = false;
+    const replacement = f.services.service(2, connection, command, connection.signal).then((result) => { confirmed = true; return result; });
+    oldFence.resolve({ kind: 'output-fenced', instanceId: first, stream });
+    await tick();
+    expect(confirmed).toBe(false);
+    nextFence.resolve({ kind: 'output-fenced', instanceId: first, stream });
+    expect(await replacement).toEqual({ kind: 'output-fenced', instanceId: first, stream });
+    expect(f.childExecute.mock.calls.map(([, command]) => command.method)).toEqual(['install-output', 'retire-output', 'retire-output']);
+    expect(f.authority.signal.aborted).toBe(false);
+  } finally { oldFence.resolve({ kind: 'unknown' }); nextFence.resolve({ kind: 'unknown' }); f.close(); }
 });
 
 test('a child capacity refusal returns a terminal installation outcome and retirement before its reply', async () => {

@@ -70,12 +70,14 @@ export class NodeWorkerServiceClient {
     let text: string;
     let accepts: PendingService['accepts'];
     let providerRequest: NodeProviderRequestClass | null;
+    let usesApplicationReserve: boolean;
     try {
       text = serializeNodeWorkerService({ ...this.#envelope(requestId), type: 'node-worker-service-request', command });
       const snapshot = parseNodeWorkerServiceText(text);
       if (snapshot?.type !== 'node-worker-service-request') throw protocol();
       accepts = expectedResult(snapshot.command);
       providerRequest = providerRequestClass(snapshot.command);
+      usesApplicationReserve = providerRequest === 'status' || snapshot.command.method === 'retire-output';
     }
     catch { return { kind: 'rejected', code: 'VALIDATION_FAILED' }; }
     const releaseProvider = providerRequest ? this.#providerCapacity.reserve(providerRequest) : null;
@@ -102,7 +104,7 @@ export class NodeWorkerServiceClient {
       signal.throwIfAborted();
       pending.submitting = true;
       const submission = this.writer.submit(text, 'data', { signal: authority, validate: () => { if (!this.#validate()) throw protocol(); } },
-        providerRequest === 'status' ? 'application' : 'data');
+        usesApplicationReserve ? 'application' : 'data');
       pending.submission = submission; pending.submitting = false;
       if (pending.cancelled && submission.submitted) this.#cancel(requestId);
       const release = () => {
@@ -293,7 +295,7 @@ function matches(frame: NodeWorkerServiceFrame, options: ReturnType<typeof confi
 
 function expectedResult(command: NodeWorkerServiceCommand): (result: NodeWorkerServiceResult) => boolean {
   const { method } = command;
-  const stream = command.method === 'install-output' ? producerStreamKey(command.stream) : null;
+  const stream = command.method === 'install-output' || command.method === 'retire-output' ? producerStreamKey(command.stream) : null;
   const instanceId = 'instanceId' in command ? command.instanceId : null;
   const permission = command.method === 'permission' ? { ...command.command.permission, stream: { ...command.command.permission.stream } } : null;
   const cursors = command.method === 'replay-output' ? new Map(command.cursors.map((cursor) => [producerStreamKey(cursor.stream), cursor.afterSequence])) : null;
@@ -323,6 +325,7 @@ function expectedResult(command: NodeWorkerServiceCommand): (result: NodeWorkerS
       }
       case 'provider-catalog': return (result.kind === 'provider-catalog' || result.kind === 'provider-catalog-unavailable') && result.instanceId === instanceId;
       case 'install-output': return result.kind === 'output-installed' && result.instanceId === instanceId && producerStreamKey(result.stream) === stream;
+      case 'retire-output': return result.kind === 'output-fenced' && result.instanceId === instanceId && producerStreamKey(result.stream) === stream;
       case 'reserve-body': return result.kind === 'body-reserved';
       case 'permission': {
         if (result.kind !== 'permission-result') return false;

@@ -2,9 +2,13 @@ import { NodeOutputRetirements, type NodeOutputRetirementsOptions } from './outp
 import type { NodeWorkerOutputRetirement } from './worker/output-retirement.js';
 import type { NodeWorkerPeer } from './worker/peer.js';
 import { NodeWorkerRetirementRelay } from './worker/retirement-relay.js';
+import { confirmNodeOutputRetirement } from './worker/output-retirement-client.js';
+import type { NodeWorkerServiceClient } from './worker/service-channel.js';
 
 export interface NodeOutputRetirementRelayOptions extends NodeOutputRetirementsOptions {
-  readonly peer: Pick<NodeWorkerPeer, 'forward' | 'waitForRelease'>;
+  readonly peer: Pick<NodeWorkerPeer, 'forward' | 'waitForRelease'> & {
+    service(connectionId: number): Pick<NodeWorkerServiceClient, 'call'>;
+  };
   failed(error: unknown): void;
 }
 
@@ -13,9 +17,11 @@ export class NodeOutputRetirementRelay {
   readonly #retirements: NodeOutputRetirements;
   readonly #relay: NodeWorkerRetirementRelay;
   readonly #detach: () => void;
+  readonly #peer: NodeOutputRetirementRelayOptions['peer'];
 
   constructor(options: NodeOutputRetirementRelayOptions) {
     const { peer } = options;
+    this.#peer = peer;
     this.#retirements = new NodeOutputRetirements(options);
     this.#relay = new NodeWorkerRetirementRelay({
       send: (frame, signal) => peer.forward(frame, signal).drained,
@@ -32,7 +38,11 @@ export class NodeOutputRetirementRelay {
     this.#relay.enqueue(this.#retirements.record(frame));
   }
 
-  flush(): Promise<void> { return this.#relay.flush(); }
+  async confirm(connectionId: number, signal: AbortSignal): Promise<void> {
+    await this.#relay.flush();
+    await this.#retirements.replay((frame, active) =>
+      confirmNodeOutputRetirement(this.#peer.service(connectionId), frame, active), signal);
+  }
 
   close(): void { this.#detach(); this.#relay.close(); this.#retirements.close(); }
 }

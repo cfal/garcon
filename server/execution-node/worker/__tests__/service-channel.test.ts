@@ -63,6 +63,48 @@ test('provider status uses reserved frames without overtaking a queued service r
   } finally { f.close(); }
 });
 
+test('output retirement uses application reserve without overtaking ordinary request FIFO', async () => {
+  const f = fixture(16, undefined, { maxQueuedFrames: 4, reservedControlFrames: 1, reservedApplicationFrames: 1 });
+  const instanceId = 'synthetic-instance';
+  const stream = { ...session, streamId: 'synthetic-retirement' };
+  f.execute.mockImplementation(async (command) => command.method === 'retire-output'
+    ? { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream } : { kind: 'unknown' });
+  try {
+    const hold = f.clientWriter.send('synthetic-block', 'data', 'data');
+    const first = f.client.call({ method: 'provider-catalog', instanceId, strict: true }, f.lifetime.signal);
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    const retirement = f.client.call({ method: 'retire-output', instanceId, stream }, f.lifetime.signal);
+    const pulse = f.clientWriter.send('synthetic-block', 'control', 'lifecycle');
+    expect(f.requests).toEqual([]);
+    f.native.resolve(); await hold; await pulse;
+    expect(await first).toEqual({ kind: 'unknown' });
+    expect(await retirement).toEqual({ kind: 'output-fenced', instanceId, stream });
+    expect(f.requests.map((frame) => frame.requestId)).toEqual([1, 3]);
+    expect(f.execute.mock.calls.map(([request]) => request.method)).toEqual(['provider-catalog', 'retire-output']);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
+test('retirement timeout leaves the output fence unconfirmed despite a late matching reply', async () => {
+  const timers: (() => void)[] = [];
+  const f = fixture(16, (callback) => { timers.push(callback); return { cancel() {} }; });
+  const result = Promise.withResolvers<NodeWorkerServiceResult>();
+  const instanceId = 'synthetic-instance';
+  const stream = { ...session, streamId: 'synthetic-retirement' };
+  f.execute.mockImplementation(() => result.promise);
+  try {
+    const retirement = f.client.call({ method: 'retire-output', instanceId, stream }, f.lifetime.signal);
+    await tick();
+    timers[0]!();
+    expect(await retirement).toEqual({ kind: 'unknown' });
+    result.resolve({ kind: 'output-fenced', instanceId, stream });
+    await tick();
+    expect(await retirement).toEqual({ kind: 'unknown' });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { result.resolve({ kind: 'unknown' }); f.close(); }
+});
+
 test('provider discovery has a separate request budget and cannot consume control capacity', async () => {
   const f = fixture();
   const completion = Promise.withResolvers<NodeWorkerServiceResult>();

@@ -7,9 +7,12 @@ import { NodeSessionHostOwner, type NodeSessionHost, type NodeSessionHostOptions
 import { parseNodeWorkerConfiguration, type NodeSessionWorkerConfiguration } from './worker/configuration.js';
 import type { NodeWorkerPeer, NodeWorkerPeerOptions } from './worker/peer.js';
 import type { NodeWorkerOutputRetirement } from './worker/output-retirement.js';
+import type { NodeWorkerServiceClient } from './worker/service-channel.js';
 
 type CoordinatorPeer = Pick<NodeWorkerPeer, 'hello' | 'configure' | 'attach' | 'admit' | 'disconnect' | 'closeInput'
-  | 'execution' | 'service' | 'forward' | 'waitForRelease'>;
+  | 'execution' | 'forward' | 'waitForRelease'> & {
+    service(connectionId: number): Pick<NodeWorkerServiceClient, 'call'>;
+  };
 
 export interface NodeHostedConnection {
   readonly connectionId: number;
@@ -150,10 +153,10 @@ export class NodeSessionCoordinator {
     current.retirements.enqueue(frame);
   }
 
-  async flushOutputRetirements(connection: NodeHostedConnection): Promise<void> {
+  async flushOutputRetirements(connection: NodeHostedConnection, signal: AbortSignal = connection.lease.signal): Promise<void> {
     const current = this.#requireConnection(connection);
     if (!current.retirements) throw unavailable();
-    await current.retirements.flush();
+    await current.retirements.confirm(connection.connectionId, signal);
     this.#requireConnection(connection);
   }
 

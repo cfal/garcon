@@ -6,7 +6,7 @@ import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from 
 import { NodeWorkerExecutionPort } from '../../execution-node/worker/execution-port.js';
 import { NodeWorkerServiceServer } from '../../execution-node/worker/service-channel.js';
 import { NODE_WORKER_SERVICE_LIMITS } from '../../execution-node/worker/limits.js';
-import type { NodeWorkerOutputAcknowledgement, NodeWorkerServiceResult } from '../../execution-node/worker/service-protocol.js';
+import type { NodeWorkerOutputAcknowledgement, NodeWorkerServiceCommand, NodeWorkerServiceResult } from '../../execution-node/worker/service-protocol.js';
 import { session, tick } from '../../execution-node/worker/__tests__/lifecycle-fixture.js';
 import { NodeSessionClient } from '../session-client.js';
 import { NodeExecutionServer } from '../transport/execution-channel.js';
@@ -20,6 +20,7 @@ const command = { method: 'begin-output-recovery' } as const;
 const recovered = { kind: 'output-recovery', generation: 1 } as const;
 const status = { method: 'status', identity: { ...session, operationId: 'synthetic-operation' } } as const;
 const retirement = { type: 'node-worker-output-retired', version: NODE_WIRE_VERSION, instanceId, stream } as const;
+const fenced = { kind: 'output-fenced', instanceId, stream } as const;
 const ack = (sequence: number): NodeWorkerOutputAcknowledgement => ({ type: 'node-worker-output-ack', version: NODE_WIRE_VERSION,
   connectionId: 1, generation: 1, ack: { type: 'node-output-ack', stream, throughSequence: sequence } });
 
@@ -55,7 +56,7 @@ function socket(signal: AbortSignal, receive: (text: string) => void, disconnect
   };
 }
 
-function fixture() {
+function fixture(connectionId = 1) {
   const physical = new AbortController();
   const failed = mock((_error: unknown) => { physical.abort(); });
   const incoming = (text: string) => {
@@ -65,11 +66,11 @@ function fixture() {
   };
   const outgoing = socket(physical.signal, incoming, () => physical.abort());
   const returning = socket(physical.signal, (text) => client.receive(text), () => physical.abort());
-  const client = new NodeSessionClient(outgoing.writer, { session, connectionId: 1, instanceIds: new Set([instanceId]),
+  const client = new NodeSessionClient(outgoing.writer, { session, connectionId, instanceIds: new Set([instanceId]),
     signal: physical.signal, validate() {}, received() {}, disconnected: failed });
-  const options = { session, connectionId: 1, signal: physical.signal, validate() {}, failed };
+  const options = { session, connectionId, signal: physical.signal, validate() {}, failed };
   const submissions = new NodeSessionSocketWriter(returning.writer, physical.signal);
-  const executeService = mock(async (): Promise<NodeWorkerServiceResult> => recovered);
+  const executeService = mock(async (_command: NodeWorkerServiceCommand): Promise<NodeWorkerServiceResult> => recovered);
   const service = new NodeWorkerServiceServer(nodeWorkerReplies(submissions), executeService, options);
   const port = new NodeWorkerExecutionPort(submissions, { ...options, instanceId, closed: () => physical.abort() });
   const execution = new NodeExecutionServer(immediateNodeReplies(port), { async execute() { return { kind: 'status', receipt: null }; } }, options);
@@ -107,6 +108,9 @@ test('socket reconciliation, status and ACKs use application reserve without adm
     expect(await f.client.service.call({ method: 'provider-auth', instanceId, operation: 'status' }, f.physical.signal))
       .toEqual({ kind: 'unknown' });
     expect(f.executeService).toHaveBeenCalledTimes(1);
+    f.executeService.mockResolvedValueOnce(fenced);
+    await f.client.retireOutput(retirement, f.physical.signal);
+    expect(f.executeService).toHaveBeenCalledTimes(2);
     expect(f.client.admitOutputAck(ack(1), f.physical.signal)).toBe(true);
     expect(f.outgoing.drained).not.toHaveBeenCalled();
     expect(f.returning.drained).not.toHaveBeenCalled();
@@ -156,10 +160,12 @@ test.each(['service', 'execution'] as const)('reentrant %s cancellation after so
   } finally { f.close(); }
 });
 
-test('retirement still waits for socket drainage while unrelated ACK and RPC traffic progresses', async () => {
+test('retirement waits for the instance fence after socket drainage while unrelated traffic progresses', async () => {
   const f = fixture();
+  const confirmation = Promise.withResolvers<NodeWorkerServiceResult>();
+  f.executeService.mockImplementation((command) => command.method === 'retire-output' ? confirmation.promise : Promise.resolve(recovered));
   let completed = false;
-  const retiring = f.client.sendRetirementAndWaitForSocketDrain(retirement, f.physical.signal);
+  const retiring = f.client.retireOutput(retirement, f.physical.signal);
   void retiring.then(() => { completed = true; }, () => {});
   try {
     for (let sequence = 1; sequence <= 5; sequence++) {
@@ -168,26 +174,68 @@ test('retirement still waits for socket drainage while unrelated ACK and RPC tra
       f.progress();
     }
     expect(completed).toBe(false);
-    expect(f.outgoing.drained).toHaveBeenCalledTimes(1);
+    expect(f.outgoing.drained).not.toHaveBeenCalled();
     f.outgoing.progress(0);
+    await tick();
+    expect(completed).toBe(false);
+    confirmation.resolve(fenced);
     await retiring;
     expect(completed).toBe(true);
-  } finally { f.close(); await Promise.allSettled([retiring]); }
+  } finally { confirmation.resolve(fenced); f.close(); await Promise.allSettled([retiring]); }
 });
 
-test('replacement cancels only the captured retirement drain and cannot complete it through a successor socket', async () => {
+test('an old physical retirement reply cannot confirm the replacement connection barrier', async () => {
   const old = fixture();
-  const next = fixture();
-  const retiring = old.client.sendRetirementAndWaitForSocketDrain(retirement, old.physical.signal).catch((error: unknown) => error);
+  const next = fixture(2);
+  const oldConfirmation = Promise.withResolvers<NodeWorkerServiceResult>();
+  const nextConfirmation = Promise.withResolvers<NodeWorkerServiceResult>();
+  old.executeService.mockImplementation(() => oldConfirmation.promise);
+  next.executeService.mockImplementation(() => nextConfirmation.promise);
+  const retiring = old.client.retireOutput(retirement, old.physical.signal).catch((error: unknown) => error);
   try {
+    await tick();
     old.close();
-    next.outgoing.progress(0);
     expect(await retiring).toBeInstanceOf(Error);
-    expect(next.client.admitOutputAck(ack(1), next.physical.signal)).toBe(true);
-    expect(next.outgoing.frames).toHaveLength(1);
+    let confirmed = false;
+    const replacement = next.client.retireOutput(retirement, next.physical.signal).then(() => { confirmed = true; });
+    const stale = { type: 'node-worker-service-result', version: NODE_WIRE_VERSION, session, connectionId: 1, requestId: 1, result: fenced };
+    next.client.receive(JSON.stringify(stale));
+    oldConfirmation.resolve(fenced);
+    await tick();
+    expect(confirmed).toBe(false);
     expect(next.physical.signal.aborted).toBe(false);
+    nextConfirmation.resolve(fenced);
+    await replacement;
+    expect(confirmed).toBe(true);
     expect(() => old.client.admitOutputAck(ack(2), new AbortController().signal)).toThrow();
-  } finally { old.close(); next.close(); }
+  } finally { oldConfirmation.resolve(fenced); nextConfirmation.resolve(fenced); old.close(); next.close(); }
+});
+
+test.each(['stream', 'instance'] as const)('retirement rejects an acknowledgement for the wrong %s', async (field) => {
+  const f = fixture();
+  f.executeService.mockResolvedValueOnce(field === 'stream'
+    ? { ...fenced, stream: { ...stream, streamId: 'synthetic-other' } } : { ...fenced, instanceId: 'synthetic-other' });
+  try {
+    await expect(f.client.retireOutput(retirement, f.physical.signal)).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
+    expect(f.physical.signal.aborted).toBe(true);
+  } finally { f.close(); }
+});
+
+test('cancelled retirement remains unconfirmed after a late fence acknowledgement', async () => {
+  const f = fixture();
+  const confirmation = Promise.withResolvers<NodeWorkerServiceResult>();
+  const caller = new AbortController();
+  f.executeService.mockImplementation(() => confirmation.promise);
+  const retiring = f.client.retireOutput(retirement, caller.signal);
+  try {
+    await tick();
+    caller.abort(new Error('Synthetic cancellation'));
+    await expect(retiring).rejects.toThrow('Synthetic cancellation');
+    confirmation.resolve(fenced);
+    await tick();
+    expect(f.executeService).toHaveBeenCalledTimes(1);
+    expect(f.physical.signal.aborted).toBe(false);
+  } finally { confirmation.resolve(fenced); f.close(); }
 });
 
 test('cancelled or foreign ACKs never reach native socket admission and capacity refusal remains synchronous', () => {

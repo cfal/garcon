@@ -46,6 +46,81 @@ function model(respond: (index: number) => Promise<string>) {
 }
 
 describe.skipIf(!nodeSessionSystemdAvailable)('contained worker output over authenticated WSS', () => {
+  test('successor installation waits for the acknowledged instance fence after both worker hops complete', async () => {
+    const f = await createNodeSessionOutputFixture(certificate);
+    const source = new AbortController();
+    const firstFence = Promise.withResolvers<void>();
+    const installationFence = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let restore = () => {};
+    try {
+      await f.recover();
+      const output = await f.install('synthetic-retirement-source', { signal: source.signal, emit() {} });
+      const service = f.host.coordinator.peer(f.connection).service(f.connection.connectionId);
+      const call = service.call.bind(service);
+      let confirmations = 0;
+      let installations = 0;
+      const held = spyOn(service, 'call').mockImplementation(async (command, signal) => {
+        if (command.method === 'install-output') installations++;
+        const result = await call(command, signal);
+        if (command.method === 'retire-output') {
+          expect(result).toEqual({ kind: 'output-fenced', instanceId: 'synthetic-instance', stream: output.stream });
+          confirmations++;
+          if (confirmations === 1) firstFence.resolve();
+          else installationFence.resolve();
+          await release.promise;
+          signal.throwIfAborted();
+        }
+        return result;
+      });
+      restore = () => held.mockRestore();
+      source.abort();
+      await withTimeout(firstFence.promise, 5000, () => 'Synthetic retirement did not reach the instance');
+      let installed = false;
+      const successor = f.install('synthetic-retirement-successor', { signal: f.signal, emit() {} }).then((owner) => { installed = true; return owner; });
+      void successor.catch(() => {});
+      await withTimeout(installationFence.promise, 5000, () => 'Synthetic installation did not await retirement');
+      expect(installed).toBe(false);
+      expect(installations).toBe(0);
+      expect(await f.controller.client.service.call({ method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' }, f.signal))
+        .toMatchObject({ kind: 'provider-auth-status' });
+      release.resolve();
+      expect((await successor).retired).toBe(false);
+      expect(installations).toBe(1);
+      expect(output.retired).toBe(true);
+      expect(f.connection.lease.authoritySignal.aborted).toBe(false);
+      expect(f.failures).toEqual([]);
+    } finally { release.resolve(); restore(); await f.dispose(); }
+  }, 20_000);
+
+  test('a lost retirement acknowledgement stays unconfirmed and its logical record survives reconnect', async () => {
+    const f = await createNodeSessionOutputFixture(certificate);
+    const lost = Promise.withResolvers<void>();
+    const stream = { ...f.session, streamId: 'synthetic-preinstall-retirement' };
+    const drop = (frame: NodeWorkerApplicationFrame) => {
+      if (frame.type !== 'node-worker-service-result' || frame.result.kind !== 'output-fenced') return true;
+      lost.resolve();
+      return false;
+    };
+    try {
+      await f.recover();
+      f.host.controllerFrames.add(drop);
+      const retiring = f.controller.client.retireOutput({ instanceId: 'synthetic-instance', stream }, f.controller.signal);
+      void retiring.catch(() => {});
+      await withTimeout(lost.promise, 5000, () => 'Synthetic fence reply was not observed');
+      await f.disconnect();
+      await expect(retiring).rejects.toBeInstanceOf(Error);
+      f.host.controllerFrames.delete(drop);
+      await f.reconnect(); await f.recover();
+      const result = await f.controller.client.service.call({ method: 'install-output', instanceId: 'synthetic-instance', stream }, f.controller.signal);
+      expect(result).toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
+      expect((await f.install('synthetic-retirement-sibling', { signal: f.signal, emit() {} })).retired).toBe(false);
+      expect(f.host.coordinator.supervisor.status).toBe('online');
+      expect(f.host.processes.size).toBe(1);
+      expect(f.failures).toEqual([]);
+    } finally { f.host.controllerFrames.delete(drop); await f.dispose(); }
+  }, 20_000);
+
   test.each(['execution', 'service'] as const)('%s replies survive held application admission and partial socket drainage', async (family) => {
     const provider = model(async () => 'synthetic queued reply output');
     const f = await createNodeSessionOutputFixture(certificate);

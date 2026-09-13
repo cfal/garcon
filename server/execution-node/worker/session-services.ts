@@ -12,6 +12,7 @@ import { NodeWorkerOutputAssembler } from './output-assembler.js';
 import { NodeWorkerOutputDelivery, type NodeOutputDeliveryAttempt } from './output-delivery.js';
 import { NodeWorkerOutputDeliverySender } from './output-delivery-sender.js';
 import { serializeNodeWorkerOutputRetirement, type NodeWorkerOutputRetirement } from './output-retirement.js';
+import { confirmNodeOutputRetirement, NodeOutputRetirementUnconfirmedError } from './output-retirement-client.js';
 import type { NodeWorkerPeer } from './peer.js';
 import { NodeWorkerRetirementRelay } from './retirement-relay.js';
 import { NodeWorkerServiceReplyError } from './service-channel.js';
@@ -24,6 +25,7 @@ interface SessionStream {
   readonly stream: ProducerStreamIdentity;
   readonly cancellation: AbortController;
   retired: boolean;
+  outputFenced: boolean;
 }
 
 interface SessionDeliveryAttempt {
@@ -84,6 +86,8 @@ export class NodeWorkerSessionServices {
           authority.assertAdmission(connection);
           const owner = this.#install(command.instanceId, command.stream);
           try {
+            await this.#confirmRetirements(connectionId, connection, signal, owner.instanceId);
+            authority.assertAdmission(connection); signal.throwIfAborted(); owner.cancellation.signal.throwIfAborted();
             const result = await this.options.child(owner.instanceId).service(connectionId).call(command,
               AbortSignal.any([signal, owner.cancellation.signal]));
             authority.assertConnection(connection); signal.throwIfAborted(); owner.cancellation.signal.throwIfAborted();
@@ -91,6 +95,15 @@ export class NodeWorkerSessionServices {
             if (result.kind === 'rejected' && result.code === 'NODE_CAPACITY') return { kind: 'rejected', code: 'NODE_OUTPUT_RETIRED' };
             return result;
           } catch (error) { this.#retire(owner, 'session'); throw error; }
+        }
+        case 'retire-output': {
+          this.retirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+            instanceId: command.instanceId, stream: command.stream }, 'coordinator');
+          const owner = this.#streams.get(producerStreamKey(command.stream));
+          if (!owner) throw new NodeStreamIdentityExhaustedError();
+          await this.#confirmRetirement(owner, connectionId, connection, signal);
+          authority.assertConnection(connection); signal.throwIfAborted();
+          return { kind: 'output-fenced', instanceId: owner.instanceId, stream: owner.stream };
         }
         case 'provider-session-configuration':
           if (!isNodeSessionConfigurationReconciliation(command)) authority.assertAdmission(connection);
@@ -107,7 +120,7 @@ export class NodeWorkerSessionServices {
         case 'permission': {
           const owner = this.#streams.get(producerStreamKey(command.command.permission.stream));
           if (!owner) throw protocol();
-          if (owner.retired) await this.#downstream.get(owner.instanceId)!.flush();
+          if (owner.retired) await this.#confirmRetirement(owner, connectionId, connection, signal);
           return await this.options.child(owner.instanceId).service(connectionId).call(command, signal);
         }
         case 'begin-output-recovery': {
@@ -131,12 +144,21 @@ export class NodeWorkerSessionServices {
         }
         case 'resume-output': {
           const token = this.#token(connectionId, command.generation);
-          if (token) await this.#upstream.flush();
+          if (token) {
+            await this.#confirmRetirements(connectionId, connection, signal);
+            await this.#upstream.flush();
+          }
           this.#validate(); authority.assertConnection(connection); signal.throwIfAborted();
           return { kind: 'output-live', live: !!token && this.#delivery.resumeLive(token) };
         }
       }
     } catch (error) {
+      if (error instanceof NodeOutputRetirementUnconfirmedError) {
+        if (command.method === 'install-output' && error.result.kind === 'rejected' && error.result.code === 'NODE_CAPACITY') {
+          return { kind: 'rejected', code: 'NODE_OUTPUT_RETIRED' };
+        }
+        return error.result;
+      }
       if (error instanceof NodeWorkerServiceReplyError
         && (command.method === 'provider-auth' || command.method === 'provider-session-configuration')) return { kind: 'unknown' };
       if (error instanceof NodeStreamIdentityExhaustedError) return { kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' };
@@ -210,7 +232,7 @@ export class NodeWorkerSessionServices {
     const key = producerStreamKey(stream);
     if (this.#streams.has(key)) throw protocol();
     if (this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) throw new NodeStreamIdentityExhaustedError();
-    const owner: SessionStream = { instanceId, stream: Object.freeze(stream), cancellation: new AbortController(), retired: false };
+    const owner: SessionStream = { instanceId, stream: Object.freeze(stream), cancellation: new AbortController(), retired: false, outputFenced: false };
     this.#streams.set(key, owner);
     try {
       this.#delivery.install(instanceId, stream, owner.cancellation.signal, () => this.#retire(owner, 'session'));
@@ -229,6 +251,21 @@ export class NodeWorkerSessionServices {
     owner.cancellation.abort();
     if (source !== 'coordinator') this.#upstream.enqueue(frame);
     if (source !== 'instance') this.#downstream.get(owner.instanceId)!.enqueue(frame);
+  }
+
+  async #confirmRetirements(connectionId: number, connection: NodeConnectionLease, signal: AbortSignal, instanceId?: string): Promise<void> {
+    for (const owner of this.#streams.values()) {
+      if (owner.retired && !owner.outputFenced && (instanceId === undefined || owner.instanceId === instanceId)) {
+        await this.#confirmRetirement(owner, connectionId, connection, signal);
+      }
+    }
+  }
+
+  async #confirmRetirement(owner: SessionStream, connectionId: number, connection: NodeConnectionLease, signal: AbortSignal): Promise<void> {
+    if (owner.outputFenced) return;
+    await confirmNodeOutputRetirement(this.options.child(owner.instanceId).service(connectionId), owner, signal);
+    this.#validate(); this.options.authority.assertConnection(connection); signal.throwIfAborted();
+    owner.outputFenced = true;
   }
 
   #sendBulk(frame: NodeWorkerBulkFrame): void {

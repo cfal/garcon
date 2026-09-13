@@ -35,6 +35,7 @@ const commands: readonly NodeWorkerServiceCommand[] = [
   { method: 'provider-commands', instanceId, workspaceId: 'synthetic-workspace' },
   { method: 'provider-configuration', instanceId, operation: 'prepare-update', request: {
     previous: { model: 'synthetic-model', settings: null, endpoint: null }, next: { model: 'synthetic-next', endpoint: null }, patch: {} } },
+  { method: 'retire-output', instanceId, stream },
 ];
 const results: readonly NodeWorkerServiceResult[] = [
   { kind: 'provider-configuration-too-large', instanceId },
@@ -43,6 +44,7 @@ const results: readonly NodeWorkerServiceResult[] = [
   { kind: 'provider-configuration-rejected', instanceId, code: 'INVALID_ENDPOINT' },
   { kind: 'provider-configuration-rejected', instanceId, code: 'INVALID_SETTINGS' },
   { kind: 'output-installed', instanceId, stream }, { kind: 'body-reserved', transfer },
+  { kind: 'output-fenced', instanceId, stream },
   { kind: 'permission-result', result: { kind: 'permission', receipt: { permission, phase: 'available' } } },
   { kind: 'permission-result', result: { kind: 'permission', receipt: null } },
   { kind: 'permission-result', result: { kind: 'unknown' } },
@@ -77,10 +79,11 @@ test('private service frames round-trip typed installation, body grants, permiss
 
 test('service payload authorities cannot name a different session from their enclosing connection', () => {
   const foreign = { ...envelope, session: { ...session, logicalSessionId: 'foreign' } };
-  for (const command of commands.filter((command) => command.method === 'install-output' || command.method === 'reserve-body' || command.method === 'permission')) {
+  for (const command of commands.filter((command) => command.method === 'install-output' || command.method === 'retire-output'
+    || command.method === 'reserve-body' || command.method === 'permission')) {
     expect(parseNodeWorkerServiceText(JSON.stringify({ ...foreign, type: 'node-worker-service-request', command }))).toBeNull();
   }
-  for (const result of results.filter((result) => result.kind === 'output-installed' || result.kind === 'body-reserved'
+  for (const result of results.filter((result) => result.kind === 'output-installed' || result.kind === 'output-fenced' || result.kind === 'body-reserved'
     || result.kind === 'permission-result' && result.result.kind === 'permission' && result.result.receipt !== null)) {
     expect(parseNodeWorkerServiceText(JSON.stringify({ ...foreign, type: 'node-worker-service-result', result }))).toBeNull();
   }

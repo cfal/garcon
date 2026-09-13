@@ -7,6 +7,8 @@ import type { SystemdLaunchIdentity, SystemdUnitIdentity } from '../systemd/cont
 import { configuration, manifest, tick } from '../worker/__tests__/lifecycle-fixture.js';
 import type { NodeWorkerPeerOptions } from '../worker/peer.js';
 import { NodeWorkerTransportError } from '../worker/framing.js';
+import type { NodeWorkerServiceClient } from '../worker/service-channel.js';
+import type { NodeWorkerServiceResult } from '../worker/service-protocol.js';
 
 const coordinators: NodeSessionCoordinator[] = [];
 afterEach(async () => { for (const coordinator of coordinators.splice(0)) await coordinator.shutdown(); });
@@ -47,6 +49,8 @@ function fixture() {
       kill() { calls.push('kill-waiter'); finished.resolve(0); } };
   });
   type Peer = ReturnType<NodeSessionCoordinatorOptions['createPeer']>;
+  const service = { call: mock<NodeWorkerServiceClient['call']>(async (command) => command.method === 'retire-output'
+    ? { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream } : { kind: 'unknown' }) };
   const peer = {
     hello: hello.promise,
     configure: mock<Peer['configure']>(async () => { calls.push('configure'); return [manifest()]; }),
@@ -55,7 +59,7 @@ function fixture() {
     disconnect: mock<Peer['disconnect']>(async (connectionId) => { calls.push(`disconnect:${connectionId}`); }),
     closeInput: mock(() => { calls.push('peer-close'); hello.reject(new Error('Synthetic closed peer')); }),
     execution() { throw new Error('Unused synthetic execution client'); },
-    service() { throw new Error('Unused synthetic service client'); },
+    service: mock(() => service),
     forward: mock<Peer['forward']>(() => ({ submitted: true, drained: Promise.resolve() })),
     waitForRelease: mock<Peer['waitForRelease']>(async () => {}),
   } satisfies Peer;
@@ -79,7 +83,7 @@ function fixture() {
     await connection.ready;
     return connection;
   };
-  return { coordinator, store, helper, spawn, peer, createPeer, calls, hello, finished, polls, timeouts, clock, start,
+  return { coordinator, store, helper, spawn, peer, service, createPeer, calls, hello, finished, polls, timeouts, clock, start,
     marker: () => marker, identity, setTime(value: number) { elapsedMs = value; },
     poll() { for (const callback of [...polls]) { polls.delete(callback); callback(); } },
     peerOptions: (): NodeWorkerPeerOptions => createPeer.mock.calls[0]![1],
@@ -114,10 +118,17 @@ test('accepted retirements keep their captured worker after physical disconnect 
   expect(f.peer.forward.mock.calls[0]![1].aborted).toBe(false);
   expect(() => f.coordinator.retireOutput(first, frame)).toThrow();
   const next = f.coordinator.attach(first.lease.session); await next.ready;
+  const acknowledgement = Promise.withResolvers<NodeWorkerServiceResult>();
+  const requested = Promise.withResolvers<void>();
+  f.service.call.mockImplementationOnce(() => { requested.resolve(); return acknowledgement.promise; });
   const completed = mock(() => {});
   const flushed = f.coordinator.flushOutputRetirements(next).then(completed);
   await tick(); expect(completed).not.toHaveBeenCalled();
-  capacity.resolve(); await flushed;
+  capacity.resolve(); await requested.promise;
+  expect(completed).not.toHaveBeenCalled();
+  expect(f.peer.service).toHaveBeenCalledWith(next.connectionId);
+  acknowledgement.resolve({ kind: 'output-fenced', instanceId: frame.instanceId, stream: frame.stream });
+  await flushed;
   expect(f.peer.forward.mock.calls.map(([retired]) => retired)).toEqual([frame, frame]);
   expect(first.lease.authoritySignal.aborted).toBe(false);
   expect(f.peer.configure).toHaveBeenCalledTimes(1);

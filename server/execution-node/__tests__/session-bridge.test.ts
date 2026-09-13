@@ -35,6 +35,7 @@ function fixture() {
       case 'begin-output-recovery': return { kind: 'output-recovery', generation: ++generation };
       case 'resume-output': return { kind: 'output-live', live: command.generation === generation };
       case 'install-output': return { kind: 'output-installed', instanceId: command.instanceId, stream: command.stream };
+      case 'retire-output': return { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream };
       case 'permission': return { kind: 'permission-result', result: { kind: 'permission', receipt: null } };
       case 'replay-output': return { kind: 'output-replayed', ranges: [] };
       default: return { kind: 'unknown' };
@@ -50,7 +51,11 @@ function fixture() {
   const coordinator = {
     supervisor, peer: () => peer,
     retireOutput(connection, frame) { supervisor.assertConnection(connection.lease); downstream.enqueue(frame); },
-    async flushOutputRetirements(connection) { supervisor.assertConnection(connection.lease); await downstream.flush(); },
+    async flushOutputRetirements(connection, signal = connection.lease.signal) {
+      supervisor.assertConnection(connection.lease);
+      await downstream.confirm(connection.connectionId, signal);
+      supervisor.assertConnection(connection.lease);
+    },
     beginRecovery: (connection) => supervisor.beginRecovery(connection.lease),
     completeRecovery: mock<NodeSessionBridgeOptions['coordinator']['completeRecovery']>(async (connection, attempt) => supervisor.completeRecovery(connection.lease, attempt)),
   } satisfies NodeSessionBridgeOptions['coordinator'];

@@ -25,6 +25,7 @@ export type NodeWorkerServiceCommand =
   | NodeSessionConfigurationCommand
   // An installation consumes its stream identity once the session receives it, including rollback.
   | { readonly method: 'install-output'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
+  | { readonly method: 'retire-output'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
   | { readonly method: 'reserve-body'; readonly instanceId: string; readonly identity: NodeOperationIdentity;
       readonly kind: NodeExecutionBody['kind']; readonly controlId: string | null; readonly descriptor: NodeBulkDescriptor }
   | { readonly method: 'permission'; readonly command: NodePermissionCommand }
@@ -40,6 +41,8 @@ export type NodeWorkerServiceResult =
   | NodeProviderConfigurationReply
   | NodeSessionConfigurationReply
   | { readonly kind: 'output-installed'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
+  // Confirms output fencing only; native work may still occupy its execution capacity.
+  | { readonly kind: 'output-fenced'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
   | { readonly kind: 'body-reserved'; readonly transfer: NodeBulkIdentity }
   | { readonly kind: 'permission-result'; readonly result: NodePermissionResult }
   | { readonly kind: 'output-recovery'; readonly generation: number }
@@ -145,7 +148,8 @@ function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerS
     && isExecutionIdentity(value.instanceId) && typeof value.strict === 'boolean') {
     return { method: value.method, instanceId: value.instanceId, strict: value.strict };
   }
-  if (value.method === 'install-output' && exactNodeFields(value, ['method', 'instanceId', 'stream']) && isExecutionIdentity(value.instanceId)) {
+  if ((value.method === 'install-output' || value.method === 'retire-output')
+    && exactNodeFields(value, ['method', 'instanceId', 'stream']) && isExecutionIdentity(value.instanceId)) {
     const stream = parseProducerStreamIdentity(value.stream);
     return stream && sameNodeSession(stream, session) ? { method: value.method, instanceId: value.instanceId, stream } : null;
   }
@@ -200,7 +204,8 @@ function parseResult(value: unknown, session: NodeSessionIdentity): NodeWorkerSe
   if (value.kind === 'rejected' && exactNodeFields(value, ['kind', 'code'])
     && (value.code === 'VALIDATION_FAILED' || value.code === 'NODE_UNAVAILABLE' || value.code === 'NODE_CAPACITY'
       || value.code === 'NODE_OUTPUT_RETIRED' || value.code === 'NODE_STREAM_IDENTITIES_EXHAUSTED')) return { kind: value.kind, code: value.code };
-  if (value.kind === 'output-installed' && exactNodeFields(value, ['kind', 'instanceId', 'stream']) && isExecutionIdentity(value.instanceId)) {
+  if ((value.kind === 'output-installed' || value.kind === 'output-fenced')
+    && exactNodeFields(value, ['kind', 'instanceId', 'stream']) && isExecutionIdentity(value.instanceId)) {
     const stream = parseProducerStreamIdentity(value.stream);
     return stream && sameNodeSession(stream, session) ? { kind: value.kind, instanceId: value.instanceId, stream } : null;
   }

@@ -1,4 +1,4 @@
-import { parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
+import { NODE_WIRE_VERSION, parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { sameNodeSession } from '../../../common/node-operation.js';
 import { NodeBulkChannel } from '../../execution-nodes/transport/bulk-channel.js';
 import { NodeBulkError } from '../../execution-nodes/transport/bulk-transfers.js';
@@ -17,7 +17,7 @@ import { NodeWorkerBulkPort } from './bulk-port.js';
 import type { NodeWorkerBulkFrame } from './bulk-protocol.js';
 import { NodeWorkerTransportError } from './framing.js';
 import { NodeWorkerOutputPort } from './output-port.js';
-import { parseNodeWorkerOutputRetirementText } from './output-retirement.js';
+import { parseNodeWorkerOutputRetirementText, serializeNodeWorkerOutputRetirement } from './output-retirement.js';
 import type { NodeWorkerServiceCommand, NodeWorkerServiceResult } from './service-protocol.js';
 import type { NodeWorkerWriter } from './writer.js';
 
@@ -59,6 +59,15 @@ export class NodeWorkerInstanceServices {
   async service(connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal): Promise<NodeWorkerServiceResult> {
     try {
       this.#validate(); this.options.authority.assertConnection(connection); signal.throwIfAborted();
+      if (command.method === 'retire-output') {
+        if (command.instanceId !== this.options.instanceId) return { kind: 'rejected', code: 'VALIDATION_FAILED' };
+        if (!this.#streams.has(producerStreamKey(command.stream)) && this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) {
+          throw new NodeStreamIdentityExhaustedError();
+        }
+        this.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+          instanceId: command.instanceId, stream: command.stream }));
+        return { kind: 'output-fenced', instanceId: command.instanceId, stream: command.stream };
+      }
       if (command.method === 'permission') {
         if (!this.#streams.has(producerStreamKey(command.command.permission.stream))) return { kind: 'permission-result', result: { kind: 'permission', receipt: null } };
         return { kind: 'permission-result', result: await this.options.host.permissions.execute(connection, command.command, signal) };

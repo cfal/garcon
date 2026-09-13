@@ -3,6 +3,7 @@ import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type Node
 import { NodeWorkerExecutionPort } from '../execution-node/worker/execution-port.js';
 import { NodeWorkerTransportError } from '../execution-node/worker/framing.js';
 import type { NodeWorkerOutputRetirement } from '../execution-node/worker/output-retirement.js';
+import { confirmNodeOutputRetirement } from '../execution-node/worker/output-retirement-client.js';
 import { NodeWorkerServiceClient } from '../execution-node/worker/service-channel.js';
 import type { NodeWorkerOutputAcknowledgement } from '../execution-node/worker/service-protocol.js';
 import { NodeExecutionClient, NodeExecutionRequestBudget } from './transport/execution-channel.js';
@@ -53,27 +54,20 @@ export class NodeSessionClient {
   }
 
   admitOutputAck(frame: NodeWorkerOutputAcknowledgement, signal: AbortSignal): boolean {
-    return this.#admitOutputControl(frame, signal);
-  }
-
-  /** Waits for local socket drainage, not remote acknowledgement of stream retirement. */
-  async sendRetirementAndWaitForSocketDrain(frame: NodeWorkerOutputRetirement, signal: AbortSignal): Promise<void> {
-    if (!this.#admitOutputControl(frame, signal)) throw new NodeWorkerTransportError('NODE_WORKER_CAPACITY');
-    try { await this.writer.drained(AbortSignal.any([this.#closing.signal, signal])); }
-    catch (error) {
-      if (!signal.aborted && !this.#closing.signal.aborted) this.#close(error);
-      throw error;
-    }
-  }
-
-  #admitOutputControl(frame: NodeWorkerOutputRetirement | NodeWorkerOutputAcknowledgement, signal: AbortSignal): boolean {
     this.#validate(); signal.throwIfAborted();
     const text = JSON.stringify(frame);
     if (!parseNodeWorkerApplicationText(text) || !sameNodeSession(nodeWorkerApplicationSession(frame), this.options.session)
-      || 'instanceId' in frame && !this.options.instanceIds.has(frame.instanceId)
-      || 'connectionId' in frame && frame.connectionId !== this.options.connectionId) throw protocol();
+      || frame.connectionId !== this.options.connectionId) throw protocol();
     this.#validate(); signal.throwIfAborted();
     return this.writer.sendApplication(text);
+  }
+
+  /** Confirms the exact instance output fence without claiming native settlement. */
+  async retireOutput(target: Pick<NodeWorkerOutputRetirement, 'instanceId' | 'stream'>, signal: AbortSignal): Promise<void> {
+    this.#validate(); signal.throwIfAborted();
+    if (!this.options.instanceIds.has(target.instanceId)) throw protocol();
+    await confirmNodeOutputRetirement(this.service, target, signal);
+    this.#validate(); signal.throwIfAborted();
   }
 
   receive(text: string): void {

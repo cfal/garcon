@@ -15,6 +15,7 @@ import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type Node
 import { serializeNodeWorkerExecution } from './worker/execution-protocol.js';
 import { NodeWorkerTransportError } from './worker/framing.js';
 import { NodeWorkerServiceReplyError, NodeWorkerServiceServer, type NodeWorkerServiceClient } from './worker/service-channel.js';
+import { NodeOutputRetirementUnconfirmedError } from './worker/output-retirement-client.js';
 import type { NodeWorkerPeer } from './worker/peer.js';
 import type { NodeWorkerServiceCommand, NodeWorkerServiceResult } from './worker/service-protocol.js';
 
@@ -157,7 +158,7 @@ export class NodeSessionBridge {
       if (command.method === 'resume-output') {
         const recovery = this.#recovery;
         if (!recovery || recovery.generation !== command.generation || command.generation <= this.#suspendedGeneration) return { kind: 'output-live', live: false };
-        await coordinator.flushOutputRetirements(connection);
+        await coordinator.flushOutputRetirements(connection, signal);
         this.#validate(); signal.throwIfAborted();
         const result = await service.call(command, signal);
         this.#validate(); signal.throwIfAborted();
@@ -172,8 +173,17 @@ export class NodeSessionBridge {
       if (command.method === 'install-output' || command.method === 'reserve-body' || command.method === 'provider-catalog' || command.method === 'provider-auth' || command.method === 'provider-commands' || command.method === 'provider-configuration'
         || command.method === 'provider-session-configuration' && !isNodeSessionConfigurationReconciliation(command)
         || command.method === 'permission' && command.command.method === 'permission-respond') coordinator.supervisor.assertAdmission(connection.lease);
+      if (command.method === 'retire-output') {
+        coordinator.retireOutput(connection, { type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
+          instanceId: command.instanceId, stream: command.stream });
+      }
+      if (command.method === 'install-output') {
+        await coordinator.flushOutputRetirements(connection, signal);
+        this.#validate(); signal.throwIfAborted(); coordinator.supervisor.assertAdmission(connection.lease);
+      }
       return await service.call(command, signal);
     } catch (error) {
+      if (error instanceof NodeOutputRetirementUnconfirmedError) return error.result;
       if (error instanceof NodeWorkerServiceReplyError && command.method === 'provider-session-configuration') return { kind: 'unknown' };
       if (error instanceof NodeAuthorityError || signal.aborted || this.#closing.signal.aborted) return unavailable();
       this.#close(error);

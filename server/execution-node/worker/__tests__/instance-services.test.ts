@@ -271,6 +271,53 @@ test('parent stream retirement aborts only its captured operations and does not 
   } finally { f.close(); }
 });
 
+test('acknowledged retirement fences output once without releasing active native execution capacity', async () => {
+  const f = fixture();
+  try {
+    const starts = [];
+    for (let i = 0; i < 4; i++) {
+      const stream = { ...f.stream, streamId: `synthetic-capacity-${i}` };
+      await f.install(stream);
+      starts.push({ stream, ...await f.start(stream, `synthetic-run-${i}`, `178900000000000${i + 1}`) });
+    }
+    const first = starts[0]!;
+    const command = { method: 'retire-output', instanceId: f.location.instanceId, stream: first.stream } as const;
+    const expected = { kind: 'output-fenced', instanceId: f.location.instanceId, stream: first.stream };
+    expect(await f.services.service(f.connection, command, f.connection.signal)).toEqual(expected);
+    expect(await f.services.service(f.connection, command, f.connection.signal)).toEqual(expected);
+    await tick();
+    expect(f.execution.abort).toHaveBeenCalledTimes(1);
+    expect(await f.services.execution(f.connection, { method: 'prepare', location: f.location, request: { kind: 'start',
+      chatId: '1789000000000005', runId: 'synthetic-next', configuration: { model: 'synthetic-model', settings: null, endpoint: null } } }, f.connection.signal))
+      .toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    first.output.emit({ type: 'rows', rows: [{ message: new AssistantMessage('2026-09-09T00:00:00.000Z', 'synthetic retired output') }] });
+    starts[1]!.output.emit({ type: 'rows', rows: [{ message: new AssistantMessage('2026-09-09T00:00:00.000Z', 'synthetic sibling output') }] });
+    await tick();
+    expect(f.frames).toHaveLength(1);
+    expect(f.frames[0]?.stream).toEqual(starts[1]!.stream);
+    expect(f.authority.signal.aborted).toBe(false);
+  } finally { f.close(); }
+});
+
+test('recovery admits exact retirement and preinstall tombstones without admitting new output', async () => {
+  const f = fixture();
+  try {
+    const recovery = f.authority.attach(2);
+    const command = { method: 'retire-output', instanceId: f.location.instanceId, stream: f.stream } as const;
+    expect(await f.services.service(recovery, { ...command, instanceId: 'synthetic-foreign' }, recovery.signal))
+      .toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
+    expect(await f.services.service(recovery, command, recovery.signal))
+      .toEqual({ kind: 'output-fenced', instanceId: f.location.instanceId, stream: f.stream });
+    expect(await f.services.service(recovery, { ...command, method: 'install-output' }, recovery.signal))
+      .toEqual({ kind: 'rejected', code: 'NODE_UNAVAILABLE' });
+    f.authority.openAdmissions(2);
+    expect(await f.services.service(recovery, { ...command, method: 'install-output' }, recovery.signal))
+      .toEqual({ kind: 'rejected', code: 'VALIDATION_FAILED' });
+    expect(f.execution.abort).not.toHaveBeenCalled();
+    expect(f.authority.signal.aborted).toBe(false);
+  } finally { f.close(); }
+});
+
 test('disconnect releases incomplete physical bodies while retaining prepared logical operations', async () => {
   const f = fixture();
   try {
@@ -335,6 +382,10 @@ test('unknown retirement at the identity ceiling remains inert after install ref
       .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
     expect(() => f.services.receiveRetirement(serializeNodeWorkerOutputRetirement({ type: 'node-worker-output-retired', version: NODE_WIRE_VERSION,
       instanceId: f.location.instanceId, stream: unknown }))).not.toThrow();
+    expect(await f.services.service(f.connection, { method: 'retire-output', instanceId: f.location.instanceId, stream: unknown }, f.connection.signal))
+      .toEqual({ kind: 'rejected', code: 'NODE_STREAM_IDENTITIES_EXHAUSTED' });
+    expect(await f.services.service(f.connection, { method: 'retire-output', instanceId: f.location.instanceId,
+      stream: { ...f.stream, streamId: 'retired-1' } }, f.connection.signal)).toMatchObject({ kind: 'output-fenced' });
     output.emit({ type: 'rows', rows: [{ message: new AssistantMessage('2026-09-09T00:00:00.000Z', 'synthetic sibling output') }] });
     await tick();
     expect(f.frames).toHaveLength(1);

@@ -58,7 +58,7 @@ export async function createNodeSessionOutputFixture(certificate: TestCertificat
     assertAdmission() { if (!ready) throw new Error('Synthetic permission awaits output recovery'); } });
 
   const flushRetirements = (captured: ControllerFixtureConnection, caller: AbortSignal) =>
-    routes.flushRetirements((frame, active) => captured.client.sendRetirementAndWaitForSocketDrain(frame, active), caller);
+    routes.flushRetirements((frame, active) => captured.client.retireOutput(frame, active), caller);
 
   async function attach(connected: NodeHostedConnection) {
     if (!sameNodeSession(connected.lease.session, session)) throw new Error('Synthetic reconnect changed logical authority');
