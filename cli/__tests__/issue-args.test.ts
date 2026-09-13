@@ -16,17 +16,17 @@ function parse(...args: string[]): IssueCliCommand {
 describe('issue CLI arguments', () => {
   test('parses every action into the shared contract', () => {
     const cases = [
-      ['create', '--title', 'Synthetic task', '--project', 'Release', '--priority', '1', '--label', 'bug', '--label', 'ui', '--assignee', `chat:${CHAT}`, '--parent-id', 'ISS-2'],
+      ['create', '--title', 'Synthetic task', '--project', 'Release', '--priority', '1', '--label', 'bug', '--label', 'ui', '--assignee', `chat:${CHAT}`, '--parent-id', 'G-2'],
       ['list', '--ready', '--include-closed', '--priority', '0', '--status', 'open', '--project', 'Release', '--assignee', 'user:author:team', '--label', 'bug', '--query', '%_'],
-      ['read', 'ISS-1', '--include-description', 'false', '--comment-limit', '1', '--before-comment-sequence', '3', '--expected-collection-revision', '4'],
-      ['history', 'ISS-1', '--before-sequence', '20', '--limit', '10'],
-      ['update', 'ISS-1', '--expected-revision', '2', '--patch', '{"project":"Other","assignee":null,"labels":[],"description":""}'],
-      ...['claim', 'release', 'reopen'].map((action) => [action, 'ISS-1', '--expected-revision', '2']),
-      ['close', 'ISS-1', '--expected-revision', '2', '--resolution', 'canceled', '--comment', 'Synthetic reason'],
-      ['comment', 'ISS-1', '--body', 'Synthetic comment'],
-      ['comment-edit', 'ISS-1', '--comment-id', COMMENT, '--expected-revision', '2', '--body', 'Synthetic edit'],
-      ['comment-delete', 'ISS-1', '--comment-id', COMMENT, '--expected-revision', '2'],
-      ...['link', 'unlink'].map((action) => [action, 'ISS-1', '--expected-revision', '2', '--target-id', 'ISS-2', '--target-revision', '1', '--link-kind', 'blocks']),
+      ['read', 'G-1', '--include-description', 'false', '--comment-limit', '1', '--before-comment-sequence', '3', '--expected-collection-revision', '4'],
+      ['history', 'G-1', '--before-sequence', '20', '--limit', '10'],
+      ['update', 'G-1', '--expected-revision', '2', '--patch', '{"project":"Other","assignee":null,"labels":[],"description":""}'],
+      ...['claim', 'release', 'reopen'].map((action) => [action, 'G-1', '--expected-revision', '2']),
+      ['close', 'G-1', '--expected-revision', '2', '--resolution', 'canceled', '--comment', 'Synthetic reason'],
+      ['comment', 'G-1', '--body', 'Synthetic comment'],
+      ['comment-edit', 'G-1', '--comment-id', COMMENT, '--expected-revision', '2', '--body', 'Synthetic edit'],
+      ['comment-delete', 'G-1', '--comment-id', COMMENT, '--expected-revision', '2'],
+      ...['link', 'unlink'].map((action) => [action, 'G-1', '--expected-revision', '2', '--target-id', 'G-2', '--target-revision', '1', '--link-kind', 'blocks']),
     ];
     for (const args of cases) expect(parse(...args).operation.action).toBe(args[0]);
     const list = parse(...cases[1]!).operation;
@@ -43,29 +43,29 @@ describe('issue CLI arguments', () => {
 
   test('requires paired retry identity and frozen create project', () => {
     const retry = ['--request-id', REQUEST, '--expected-store-id', STORE];
-    expect(parse('comment', 'ISS-1', '--body', 'Synthetic', '--from-chat', CHAT, ...retry))
+    expect(parse('comment', 'G-1', '--body', 'Synthetic', '--from-chat', CHAT, ...retry))
       .toMatchObject({ retry: { requestId: REQUEST, expectedStoreId: STORE }, fromChatId: CHAT });
     expect(() => parse('create', '--title', 'Task', ...retry)).toThrow('requires --project');
     for (const flags of [['--request-id', REQUEST], ['--expected-store-id', STORE]]) {
-      expect(() => parse('comment', 'ISS-1', '--body', 'Synthetic', ...flags)).toThrow('supplied together');
+      expect(() => parse('comment', 'G-1', '--body', 'Synthetic', ...flags)).toThrow('supplied together');
     }
   });
 
   test('rejects aliases, irrelevant/duplicate flags, missing targets/revisions and invalid query combinations', () => {
     const invalid = [
-      ['show', 'ISS-1'], ['view', 'ISS-1'], ['list', 'ISS-1'], ['read'],
+      ['show', 'G-1'], ['view', 'G-1'], ['list', 'G-1'], ['read'],
       ['list', '--cwd', '/working'], ['list', '--from-chat', CHAT],
       ['list', '--label', 'a', '--label', 'b'], ['list', '--before-number', '3'],
       ['list', '--limit', '101'], ['list', '--priority', '2.0'], ['list', '--limit', '1e2'],
-      ['read', 'ISS-1', '--include-description', 'yes'],
-      ['read', 'ISS-1', '--comment-limit', '0', '--before-comment-sequence', '2', '--expected-collection-revision', '0'],
-      ['history', 'ISS-1', '--expected-collection-revision', '2'],
+      ['read', 'G-1', '--include-description', 'yes'],
+      ['read', 'G-1', '--comment-limit', '0', '--before-comment-sequence', '2', '--expected-collection-revision', '0'],
+      ['history', 'G-1', '--expected-collection-revision', '2'],
       ['create', '--title', 'Task', '--project', ''], ['create', '--title', 'Task', '--project', 'a', '--project', 'b'],
-      ['claim', 'ISS-1'], ['claim', 'ISS-1', '--expected-revision', '0'],
-      ['comment-edit', 'ISS-1', '--expected-revision', '1', '--body', 'Synthetic'],
-      ['update', 'ISS-1', '--expected-revision', '1', '--patch', '{"status":"closed"}'],
-      ['update', 'ISS-1', '--expected-revision', '1', '--patch', '{}'],
-      ['comment', 'ISS-1', '--body', 'Synthetic', '--stdin'],
+      ['claim', 'G-1'], ['claim', 'G-1', '--expected-revision', '0'],
+      ['comment-edit', 'G-1', '--expected-revision', '1', '--body', 'Synthetic'],
+      ['update', 'G-1', '--expected-revision', '1', '--patch', '{"status":"closed"}'],
+      ['update', 'G-1', '--expected-revision', '1', '--patch', '{}'],
+      ['comment', 'G-1', '--body', 'Synthetic', '--stdin'],
       ['create', '--title', 'Task', '--description', 'Synthetic', '--stdin'],
     ];
     for (const args of invalid) {
@@ -76,15 +76,15 @@ describe('issue CLI arguments', () => {
 
   test('resolves strict stdin into description, comment and closing comment before submission', () => {
     const body = 'Synthetic\n\ttext\0';
-    for (const args of [['create', '--title', 'Task'], ['comment', 'ISS-1'],
-      ['comment-edit', 'ISS-1', '--comment-id', COMMENT, '--expected-revision', '1'],
-      ['close', 'ISS-1', '--expected-revision', '1']]) {
+    for (const args of [['create', '--title', 'Task'], ['comment', 'G-1'],
+      ['comment-edit', 'G-1', '--comment-id', COMMENT, '--expected-revision', '1'],
+      ['close', 'G-1', '--expected-revision', '1']]) {
       const result = applyIssueStdin(parse(...args, '--stdin'), body);
       expect(result.readsBodyFromStdin).toBe(false);
       expect(JSON.stringify(result.operation)).toContain('Synthetic\\n\\ttext\\u0000');
     }
-    expect(() => applyIssueStdin(parse('comment', 'ISS-1', '--stdin'), ' \n')).toThrow();
-    expect(() => applyIssueStdin(parse('comment', 'ISS-1', '--stdin'), '\ud800')).toThrow();
-    expect(() => applyIssueStdin(parse('comment', 'ISS-1', '--stdin'), 'x'.repeat(49153))).toThrow();
+    expect(() => applyIssueStdin(parse('comment', 'G-1', '--stdin'), ' \n')).toThrow();
+    expect(() => applyIssueStdin(parse('comment', 'G-1', '--stdin'), '\ud800')).toThrow();
+    expect(() => applyIssueStdin(parse('comment', 'G-1', '--stdin'), 'x'.repeat(49153))).toThrow();
   });
 });

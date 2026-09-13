@@ -18,9 +18,9 @@ const initial: IssueDraftSnapshot = {
 	schemaVersion: 1,
 	storeId: STORE,
 	viewerKey: 'principal:synthetic',
-	id: 'comment:ISS-1:',
+	id: 'comment:G-1:',
 	kind: 'comment',
-	issueId: 'ISS-1',
+	issueId: 'G-1',
 	commentId: null,
 	baseRevision: null,
 	version: 0,
@@ -29,7 +29,7 @@ const initial: IssueDraftSnapshot = {
 	frozen: null,
 };
 const issue: Issue = {
-	id: 'ISS-1',
+	id: 'G-1',
 	number: 1,
 	revision: 1,
 	title: 'Synthetic issue',
@@ -101,7 +101,7 @@ describe('issue draft state', () => {
 		});
 		const { draft } = harness({
 			...initial,
-			id: 'fields:ISS-1:',
+			id: 'fields:G-1:',
 			kind: 'fields',
 			baseRevision: 1,
 			fields,
@@ -110,7 +110,7 @@ describe('issue draft state', () => {
 		draft.setField('title', 'New title');
 		expect(issueFormPayload(draft)).toEqual({
 			action: 'update',
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			expectedRevision: 1,
 			patch: { title: 'New title' },
 		});
@@ -120,7 +120,7 @@ describe('issue draft state', () => {
 		const request = {
 			requestId: OTHER_STORE,
 			expectedStoreId: STORE,
-			payload: { action: 'comment' as const, issueId: 'ISS-1', body: 'Earlier text' },
+			payload: { action: 'comment' as const, issueId: 'G-1', body: 'Earlier text' },
 		};
 		const { draft, onConfirmed } = harness(
 			{ ...initial, version: 2, fields: { body: 'Newer text' }, frozen: { version: 1, request } },
@@ -140,18 +140,18 @@ describe('issue draft state', () => {
 		const request = {
 			requestId: OTHER_STORE,
 			expectedStoreId: STORE,
-			payload: { action: 'comment' as const, issueId: 'ISS-1', body: 'Synthetic' },
+			payload: { action: 'comment' as const, issueId: 'G-1', body: 'Synthetic' },
 		};
 		const valid = { ...initial, frozen: { version: 0, request } };
 		expect(parseIssueDraft(valid)).toEqual(valid);
 		for (const value of [
-			{ ...valid, kind: 'fields', id: 'fields:ISS-1:' },
+			{ ...valid, kind: 'fields', id: 'fields:G-1:' },
 			{ ...valid, id: 'not-the-editor-key' },
 			{ ...valid, frozen: { version: 0, request: { ...request, fromChatId: '1000000000000001' } } },
 			{
 				...valid,
 				kind: 'comment-edit',
-				id: `comment-edit:ISS-1:${STORE}`,
+				id: `comment-edit:G-1:${STORE}`,
 				commentId: STORE,
 				frozen: {
 					version: 0,
@@ -159,7 +159,7 @@ describe('issue draft state', () => {
 						...request,
 						payload: {
 							action: 'comment-edit',
-							issueId: 'ISS-1',
+							issueId: 'G-1',
 							commentId: OTHER_STORE,
 							expectedRevision: 1,
 							body: 'Synthetic',
@@ -178,13 +178,13 @@ describe('issue draft state', () => {
 		api.mutate.mockImplementation(() => saved.promise);
 		const submitted = draft.submit({
 			action: 'comment',
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			body: draft.field('body'),
 		});
 		expect(draft.pending).toBe(true);
 		expect(draft.field('body')).toBe('Synthetic text');
 		expect(draft.current.frozen?.request.expectedStoreId).toBe(STORE);
-		await draft.submit({ action: 'comment', issueId: 'ISS-1', body: 'Must not run' });
+		await draft.submit({ action: 'comment', issueId: 'G-1', body: 'Must not run' });
 		expect(api.mutate).toHaveBeenCalledTimes(1);
 		saved.resolve(confirmed);
 		await submitted;
@@ -203,7 +203,7 @@ describe('issue draft state', () => {
 		first.api.mutate.mockRejectedValueOnce(new Error('Synthetic lost response'));
 		await first.draft.submit({
 			action: 'comment',
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			body: first.draft.field('body'),
 		});
 		const frozen = first.draft.current.frozen;
@@ -227,7 +227,7 @@ describe('issue draft state', () => {
 			...initial,
 			kind: 'fields',
 			baseRevision: 1,
-			id: 'fields:ISS-1',
+			id: 'fields:G-1',
 		});
 		draft.setField('title', 'Local title');
 		const changed = { ...issue, title: 'Remote title', revision: 2 };
@@ -316,7 +316,7 @@ describe('issue recovery partitions', () => {
 			const tab = storage();
 			const recovery = createIssueRecovery(() => tab);
 			for (let number = 1; number <= 20; number++)
-				recovery.write({ ...initial, issueId: `ISS-${number}`, id: `comment:ISS-${number}:` });
+				recovery.write({ ...initial, issueId: `G-${number}`, id: `comment:G-${number}:` });
 			if (malformed) tab.setItem(tab.key(0)!, '{synthetic malformed entry');
 			const store = new IssueDraftStore({
 				recovery,

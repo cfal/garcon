@@ -145,7 +145,7 @@ describe('authenticated Issues routes', () => {
   });
 
   test('rejects duplicate/unknown query fields, invalid body bytes and over-budget encoded bodies', async () => {
-    for (const path of ['?limit=1&limit=2', '?beforeNumber=2', '/counts?limit=1', '/bootstrap?extra=1', '/history?issueId=ISS-1&expectedCollectionRevision=0']) {
+    for (const path of ['?limit=1&limit=2', '?beforeNumber=2', '/counts?limit=1', '/bootstrap?extra=1', '/history?issueId=G-1&expectedCollectionRevision=0']) {
       expect((await call(path)).response.status).toBe(400);
     }
     const oversized = await mutate({ action: 'create', input: { title: 'Synthetic', project: 'Frozen', description: '\n'.repeat(48 * 1024) } });

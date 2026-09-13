@@ -1,5 +1,5 @@
 import type { Issue, IssueActivity, IssueComment, IssueField, IssueFieldChange, IssueWriteResult } from './issues.js';
-import { issueActor, issueBody, issueCommentBody, issueId, issueInteger, issueInvalid, issueLabels,
+import { formatIssueId, issueActor, issueBody, issueCommentBody, storedIssueId, issueInteger, issueInvalid, issueLabels,
   issueLinkKind, issueOwner, issuePriority, issueProject, issueRecord, issueResolution, issueSource,
   issueStatus, issueTimestamp, issueTitle, issueUuid } from './issue-validation.js';
 
@@ -11,9 +11,9 @@ export const ISSUE_FIELDS: readonly IssueField[] = ['title', 'description', 'pro
 
 export function parseIssue(value: unknown): Issue {
   const raw = issueRecord(value, issueKeys);
-  const id = issueId(raw.id);
+  const id = storedIssueId(raw.id);
   const number = issueInteger(raw.number, 'number');
-  if (id !== `ISS-${number}`) return issueInvalid('Issue ID and number disagree.');
+  if (id !== formatIssueId(number)) return issueInvalid('Issue ID and number disagree.');
   const status = issueStatus(raw.status);
   const resolution = raw.resolution === null ? null : issueResolution(raw.resolution);
   if ((status === 'closed') !== (resolution !== null)) return issueInvalid('Issue status and resolution disagree.');
@@ -21,7 +21,7 @@ export function parseIssue(value: unknown): Issue {
     title: issueTitle(raw.title), description: issueBody(raw.description), project: issueProject(raw.project),
     status, resolution, priority: issuePriority(raw.priority), labels: issueLabels(raw.labels),
     assignee: raw.assignee === null ? null : issueOwner(raw.assignee),
-    parentId: raw.parentId === null ? null : issueId(raw.parentId),
+    parentId: raw.parentId === null ? null : storedIssueId(raw.parentId),
     createdAt: issueTimestamp(raw.createdAt), updatedAt: issueTimestamp(raw.updatedAt), createdBy: issueActor(raw.createdBy) };
 }
 
@@ -30,7 +30,7 @@ export function parseIssueComment(value: unknown): IssueComment {
   const deletedAt = raw.deletedAt === null ? null : issueTimestamp(raw.deletedAt);
   const body = raw.body === null ? null : issueCommentBody(raw.body);
   if ((deletedAt === null) !== (body !== null)) return issueInvalid('Comment body and tombstone disagree.');
-  return { id: issueUuid(raw.id, 'commentId'), issueId: issueId(raw.issueId),
+  return { id: issueUuid(raw.id, 'commentId'), issueId: storedIssueId(raw.issueId),
     sequence: issueInteger(raw.sequence, 'sequence'), revision: issueInteger(raw.revision, 'revision'),
     body, deletedAt, author: issueActor(raw.author),
     createdAt: issueTimestamp(raw.createdAt), updatedAt: issueTimestamp(raw.updatedAt) };
@@ -47,7 +47,7 @@ function fieldValue<K extends IssueField>(field: K, value: unknown): Issue[K] {
     case 'priority': parsed = issuePriority(value); break;
     case 'labels': parsed = issueLabels(value); break;
     case 'assignee': parsed = value === null ? null : issueOwner(value); break;
-    case 'parentId': parsed = value === null ? null : issueId(value); break;
+    case 'parentId': parsed = value === null ? null : storedIssueId(value); break;
     default: return issueInvalid('Invalid activity field.');
   }
   return parsed as Issue[K];
@@ -63,7 +63,7 @@ function parseChange(value: unknown): IssueFieldChange {
 export function parseIssueActivity(value: unknown): IssueActivity {
   const baseKeys = ['sequence', 'issueId', 'at', 'actor', 'source', 'action'];
   const raw = issueRecord(value, [...baseKeys, 'issue', 'changes', 'commentId', 'before', 'after', 'kind', 'sourceId', 'targetId']);
-  const base = { sequence: issueInteger(raw.sequence, 'sequence'), issueId: issueId(raw.issueId),
+  const base = { sequence: issueInteger(raw.sequence, 'sequence'), issueId: storedIssueId(raw.issueId),
     at: issueTimestamp(raw.at), actor: issueActor(raw.actor), source: raw.source === null ? null : issueSource(raw.source) };
   switch (raw.action) {
     case 'created': {
@@ -84,7 +84,7 @@ export function parseIssueActivity(value: unknown): IssueActivity {
     case 'linked': case 'unlinked':
       issueRecord(raw, [...baseKeys, 'kind', 'sourceId', 'targetId']);
       return { ...base, action: raw.action, kind: issueLinkKind(raw.kind),
-        sourceId: issueId(raw.sourceId), targetId: issueId(raw.targetId) };
+        sourceId: storedIssueId(raw.sourceId), targetId: storedIssueId(raw.targetId) };
     default: return issueInvalid('Invalid activity action.');
   }
 }

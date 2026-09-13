@@ -30,7 +30,7 @@ describe("Lightpanda Issues", () => {
       });
       await mutate({
         action: "comment",
-        issueId: "ISS-1",
+        issueId: "G-1",
         body: "Original comment",
       });
       await fixture.page.evaluateOnNewDocument(() => {
@@ -56,8 +56,8 @@ describe("Lightpanda Issues", () => {
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.selectWorkspaceWindowSurface("Open Issues");
-      await fixture.page.waitForSelector('[data-issue-id="ISS-1"]');
-      await app.clickButton("Open ISS-1");
+      await fixture.page.waitForSelector('[data-issue-id="G-1"]');
+      await app.clickButton("Open G-1");
       await fixture.page.waitForSelector(".issue-detail-title");
       for (const kind of ["fields", "comment"] as const) {
         await fixture.page.evaluate((kind) => {
@@ -102,7 +102,7 @@ describe("Lightpanda Issues", () => {
       }
       const detail = parseIssueDetail(
         await fixture.integration.client.get(
-          "/api/v1/issues/detail?issueId=ISS-1",
+          "/api/v1/issues/detail?issueId=G-1",
         ),
       );
       expect(detail.issue.title).toBe("Retried title");
@@ -266,7 +266,7 @@ describe("Lightpanda Issues", () => {
       await app.waitForText("removed a comment");
       const history = parseIssueHistoryPage(
         await fixture.integration.client.get(
-          "/api/v1/issues/history?issueId=ISS-1",
+          "/api/v1/issues/history?issueId=G-1",
         ),
       );
       expect(
@@ -368,13 +368,13 @@ describe("Lightpanda Issues", () => {
           );
         await mutate({
           action: "update",
-          issueId: "ISS-1",
+          issueId: "G-1",
           expectedRevision: 1,
           patch: { title: "Newer authoritative title" },
         });
         await mutate({
           action: "comment",
-          issueId: "ISS-1",
+          issueId: "G-1",
           body: "Newer authoritative comment",
         });
         let errorsAfterReconnect = 0;
@@ -405,7 +405,7 @@ describe("Lightpanda Issues", () => {
         await app.waitForText("Newer authoritative comment");
         const current = parseIssueDetail(
           await fixture.integration.client.get(
-            "/api/v1/issues/detail?issueId=ISS-1",
+            "/api/v1/issues/detail?issueId=G-1",
           ),
         );
         expect(current.issue.revision).toBe(2);

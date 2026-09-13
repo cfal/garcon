@@ -15,7 +15,7 @@ const CHAT = '1000000000000001';
 const AT = '2026-01-01T00:00:00.000Z';
 const LATER = '2026-01-01T00:01:00.000Z';
 const CREATE = '<garcon-issue-create ref="create">{"title":"Synthetic issue"}</garcon-issue-create>';
-const READ = '<garcon-issue-read issue-id="ISS-1" />';
+const READ = '<garcon-issue-read issue-id="G-1" />';
 const cleanups = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
@@ -71,9 +71,9 @@ describe('issue command ledger evidence', () => {
     const calls = [];
     const { ledger, store } = fixture((...args) => calls.push(args));
     const view = ledger.initializeChat(CHAT);
-    const result = { command: 'create', ref: 'create', issueId: 'ISS-1', requestViewId: view.viewId,
+    const result = { command: 'create', ref: 'create', issueId: 'G-1', requestViewId: view.viewId,
       requestOrdinal: 7, status: 'ok', data: { storeId: '33333333-3333-4333-8333-333333333333',
-        issueId: 'ISS-1', revision: 1, status: 'open', collectionRevision: 1 } };
+        issueId: 'G-1', revision: 1, status: 'open', collectionRevision: 1 } };
     const outcome = issueCommandOutcome(result);
     const drafts = importedDrafts([
       { message: new AssistantMessage(AT, CREATE), providerMeta: null },
@@ -102,8 +102,8 @@ describe('issue command ledger evidence', () => {
     const { ledger } = fixture();
     const view = ledger.initializeChat(CHAT);
     const version = { storeId: '33333333-3333-4333-8333-333333333333', collectionRevision: 1 };
-    const result = { command: 'read', issueId: 'ISS-1', requestViewId: view.viewId, requestOrdinal: 1,
-      status: 'ok', data: { ...version, issue: { id: 'ISS-1', number: 1, revision: 1,
+    const result = { command: 'read', issueId: 'G-1', requestViewId: view.viewId, requestOrdinal: 1,
+      status: 'ok', data: { ...version, issue: { id: 'G-1', number: 1, revision: 1,
         title: 'Synthetic hidden title', description: 'Synthetic hidden description', project: 'Synthetic hidden project',
         status: 'open', resolution: null, priority: 2, labels: [], assignee: null, parentId: null,
         createdAt: AT, updatedAt: AT, createdBy: { kind: 'chat', chatId: CHAT, provenance: 'observed' } },
@@ -111,7 +111,7 @@ describe('issue command ledger evidence', () => {
     const drafts = importedDrafts([{ message: new UserMessage(AT, garconIssueResultContent(result)), providerMeta: null }], () => AT);
     expect(drafts).toHaveLength(1);
     expect(drafts[0].kind).toBe('notice');
-    expect(drafts[0].detail).toMatchObject({ command: 'read', status: 'ok', issueId: 'ISS-1', revision: 1 });
+    expect(drafts[0].detail).toMatchObject({ command: 'read', status: 'ok', issueId: 'G-1', revision: 1 });
     expect(JSON.stringify(drafts)).not.toContain('Synthetic hidden');
   });
 });

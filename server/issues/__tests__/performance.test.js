@@ -11,7 +11,7 @@ test('bounds indexed reads on a synthetic 10k-issue, 50k-comment workspace', () 
         (number,revision,project,status,resolution,priority,payload_json) VALUES (?,1,?,?,NULL,2,?)`);
       const insertComment = database.query('INSERT INTO issue_comments VALUES (?,?,?,1,?,NULL,?)');
       for (let number = 1; number <= 10000; number++) {
-        const issue = { ...seed, id: `ISS-${number}`, number, project: `Project-${number % 10}`,
+        const issue = { ...seed, id: `G-${number}`, number, project: `Project-${number % 10}`,
           status: number % 3 === 0 ? 'in-progress' : 'open' };
         if (number !== 1) insertIssue.run(number, issue.project, issue.status, JSON.stringify(issue));
         for (let sequence = 1; sequence <= 5; sequence++) {
@@ -38,7 +38,7 @@ test('bounds indexed reads on a synthetic 10k-issue, 50k-comment workspace', () 
       expect(page.nextBeforeNumber).not.toBeNull();
       expect(page.items.every((item) => item.commentCount === 5)).toBe(true);
       started = performance.now();
-      const detail = fixture.service.read({ issueId: 'ISS-10000' }, caller.authority);
+      const detail = fixture.service.read({ issueId: 'G-10000' }, caller.authority);
       const detailElapsed = performance.now() - started;
       expect(detail.comments.items).toHaveLength(5);
       if (iteration > 0) { listTimes.push(listElapsed); detailTimes.push(detailElapsed); }

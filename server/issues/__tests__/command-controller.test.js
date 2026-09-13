@@ -60,11 +60,11 @@ describe('issue command controller', () => {
   test('commits attributed writes, compact notices and result delivery outside the source lock', async () => {
     const f = fixture();
     const result = await f.send(create);
-    expect(result).toMatchObject({ command: 'create', ref: 'create', issueId: 'ISS-1', status: 'ok', requestOrdinal: 1 });
-    const issue = f.service.read({ issueId: 'ISS-1' }, { kind: 'chat', chatId: CHAT_ID }).issue;
+    expect(result).toMatchObject({ command: 'create', ref: 'create', issueId: 'G-1', status: 'ok', requestOrdinal: 1 });
+    const issue = f.service.read({ issueId: 'G-1' }, { kind: 'chat', chatId: CHAT_ID }).issue;
     expect(issue.project).toBe('Resolved project');
     expect(issue.createdBy).toEqual({ kind: 'chat', chatId: CHAT_ID, provenance: 'observed' });
-    expect(f.service.history({ issueId: 'ISS-1' }).items[0].source)
+    expect(f.service.history({ issueId: 'G-1' }).items[0].source)
       .toEqual({ chatId: CHAT_ID, transcriptViewId: VIEW_ID, ordinal: 1 });
     expect(f.notices).toHaveLength(1);
     expect(JSON.stringify(f.notices)).not.toContain('Synthetic issue');
@@ -75,7 +75,7 @@ describe('issue command controller', () => {
     let probes = 0;
     const f = fixture(async () => { probes++; if (probes > 1) throw new Error('Unavailable'); return { project: 'Original', kind: 'repository' }; });
     const first = await f.send(create);
-    f.write({ action: 'update', issueId: 'ISS-1', expectedRevision: 1, patch: { title: 'Later title' } });
+    f.write({ action: 'update', issueId: 'G-1', expectedRevision: 1, patch: { title: 'Later title' } });
     f.current.directory = '/unavailable';
     f.reopen();
     const retry = await f.send(create, 7);
@@ -177,7 +177,7 @@ describe('issue command controller', () => {
     expect(f.service.list({}).items).toHaveLength(1);
     f.current.failDelivery = false;
     expect((await f.send(create, 3)).status).toBe('ok');
-    expect(f.service.history({ issueId: 'ISS-1' }).items).toHaveLength(1);
+    expect(f.service.history({ issueId: 'G-1' }).items).toHaveLength(1);
   });
 
   test('byte-packs lists and mutable comment continuations without skipping overflow records', async () => {
@@ -193,25 +193,25 @@ describe('issue command controller', () => {
       query = { limit: 100, beforeNumber: response.data.nextBeforeNumber, expectedCollectionRevision: response.data.collectionRevision };
     } while (query.beforeNumber !== null);
     expect(numbers).toEqual(Array.from({ length: 15 }, (_, index) => 15 - index));
-    for (let index = 0; index < 5; index++) f.write({ action: 'comment', issueId: 'ISS-1', body: `Comment ${index}` });
-    const first = await f.send('<garcon-issue-read issue-id="ISS-1">{"commentLimit":2}</garcon-issue-read>');
-    const next = await f.send(`<garcon-issue-read issue-id="ISS-1">{"commentLimit":2,"beforeCommentSequence":${first.data.comments.nextBeforeSequence},"expectedCollectionRevision":${first.data.collectionRevision}}</garcon-issue-read>`);
+    for (let index = 0; index < 5; index++) f.write({ action: 'comment', issueId: 'G-1', body: `Comment ${index}` });
+    const first = await f.send('<garcon-issue-read issue-id="G-1">{"commentLimit":2}</garcon-issue-read>');
+    const next = await f.send(`<garcon-issue-read issue-id="G-1">{"commentLimit":2,"beforeCommentSequence":${first.data.comments.nextBeforeSequence},"expectedCollectionRevision":${first.data.collectionRevision}}</garcon-issue-read>`);
     expect(first.data.comments.items.map((comment) => comment.sequence)).toEqual([4, 5]);
     expect(next.data.comments.items.map((comment) => comment.sequence)).toEqual([2, 3]);
-    f.write({ action: 'comment', issueId: 'ISS-1', body: 'Later' });
-    const stale = await f.send(`<garcon-issue-read issue-id="ISS-1">{"commentLimit":2,"beforeCommentSequence":2,"expectedCollectionRevision":${first.data.collectionRevision}}</garcon-issue-read>`);
+    f.write({ action: 'comment', issueId: 'G-1', body: 'Later' });
+    const stale = await f.send(`<garcon-issue-read issue-id="G-1">{"commentLimit":2,"beforeCommentSequence":2,"expectedCollectionRevision":${first.data.collectionRevision}}</garcon-issue-read>`);
     expect(stale.errorCode).toBe('ISSUE_COLLECTION_CHANGED');
   });
 
   test('returns typed single-record overflow with a metadata-only escape hatch', async () => {
     const f = fixture();
     f.create();
-    f.write({ action: 'comment', issueId: 'ISS-1', body: '<'.repeat(ISSUE_LIMITS.bodyBytes) });
-    expect((await f.send('<garcon-issue-read issue-id="ISS-1" />')).errorCode).toBe('ISSUE_RESULT_TOO_LARGE');
-    const metadata = await f.send('<garcon-issue-read issue-id="ISS-1">{"includeDescription":false,"commentLimit":0}</garcon-issue-read>');
+    f.write({ action: 'comment', issueId: 'G-1', body: '<'.repeat(ISSUE_LIMITS.bodyBytes) });
+    expect((await f.send('<garcon-issue-read issue-id="G-1" />')).errorCode).toBe('ISSUE_RESULT_TOO_LARGE');
+    const metadata = await f.send('<garcon-issue-read issue-id="G-1">{"includeDescription":false,"commentLimit":0}</garcon-issue-read>');
     expect(metadata.status).toBe('ok');
     expect(metadata.data.issue.description).toBeNull();
     expect(metadata.data.comments.items).toEqual([]);
-    expect((await f.send('<garcon-issue-history issue-id="ISS-1" />')).errorCode).toBe('ISSUE_RESULT_TOO_LARGE');
+    expect((await f.send('<garcon-issue-history issue-id="G-1" />')).errorCode).toBe('ISSUE_RESULT_TOO_LARGE');
   });
 });

@@ -20,7 +20,7 @@ const adoption = { ensure() { throw new Error('Source lookup must not adopt'); }
 const notice = (requestOrdinal = 1, requestViewId = VIEW) => ({ kind: 'notice', at: AT,
   providerMeta: null, message: 'Synthetic issue outcome', detail: {
     type: 'issue-command-outcome', command: 'create', ref: 'synthetic', status: 'ok',
-    issueId: 'ISS-1', revision: 1, requestViewId, requestOrdinal,
+    issueId: 'G-1', revision: 1, requestViewId, requestOrdinal,
   } });
 
 beforeEach(() => {

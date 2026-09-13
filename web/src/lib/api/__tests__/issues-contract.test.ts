@@ -6,7 +6,7 @@ import type { Issue } from '$shared/issues';
 const storeId = '11111111-1111-4111-8111-111111111111';
 const requestId = '22222222-2222-4222-8222-222222222222';
 const issue: Issue = {
-	id: 'ISS-1',
+	id: 'G-1',
 	number: 1,
 	revision: 1,
 	title: 'Synthetic',
@@ -56,7 +56,7 @@ describe('Issues transport contracts', () => {
 			}),
 		);
 		vi.stubGlobal('fetch', fetcher);
-		await expect(issuesApi.read({ issueId: 'ISS-2' })).rejects.toThrow('selected issue');
+		await expect(issuesApi.read({ issueId: 'G-2' })).rejects.toThrow('selected issue');
 		fetcher.mockResolvedValueOnce(
 			Response.json({ success: true, storeId: requestId, collectionRevision: 1, issue }),
 		);

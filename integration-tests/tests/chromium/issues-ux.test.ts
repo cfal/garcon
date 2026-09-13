@@ -28,14 +28,14 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
       await clickWorkspaceWindowAddAction(page, "Open Issues");
       await page.getByRole("button", { name: "Board", exact: true }).click();
       await page
-        .getByRole("button", { name: "Open ISS-1", exact: true })
+        .getByRole("button", { name: "Open G-1", exact: true })
         .waitFor();
       const started = new Deferred<Route>();
       await context.route("**/api/v1/issues/mutate", async (route) => {
         if (!started.resolve(route)) await route.continue();
       });
       await page
-        .getByRole("button", { name: "Change status of ISS-1" })
+        .getByRole("button", { name: "Change status of G-1" })
         .click();
       await page
         .getByRole("menuitem", { name: "In review", exact: true })
@@ -47,7 +47,7 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
       );
       try {
         await page
-          .locator('[data-status="in-review"] [data-issue-id="ISS-1"]')
+          .locator('[data-status="in-review"] [data-issue-id="G-1"]')
           .waitFor();
         expect(
           await page.getByText("Saving…", { exact: true }).isVisible(),
@@ -71,7 +71,7 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
         });
       }
       await page
-        .locator('[data-status="open"] [data-issue-id="ISS-1"]')
+        .locator('[data-status="open"] [data-issue-id="G-1"]')
         .waitFor();
       expect(
         await page
@@ -109,7 +109,7 @@ test("Issues toolbar stays aligned and search retains the board until results ar
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
       await page.getByRole("button", { name: "Board", exact: true }).click();
-      const card = page.locator('.issue-card[data-issue-id="ISS-1"]');
+      const card = page.locator('.issue-card[data-issue-id="G-1"]');
       await card.waitFor();
       const geometry = await page
         .locator(".issues-surface")
@@ -233,7 +233,7 @@ test("card whitespace opens details and full-width detail preference survives re
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
       await page.getByRole("button", { name: "Board", exact: true }).click();
-      const card = page.locator('.issue-card[data-issue-id="ISS-1"]');
+      const card = page.locator('.issue-card[data-issue-id="G-1"]');
       await card.click({ position: { x: 5, y: 5 } });
       await page.locator(".issue-detail-title").waitFor();
       await page

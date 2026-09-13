@@ -143,7 +143,7 @@
 			<label class="issue-field"
 				>{m.issues_parent()}<input
 					class="issue-input"
-					placeholder="ISS-42"
+					placeholder="G-42"
 					value={draft.field('parentId')}
 					onkeydown={keydown}
 					oninput={(event) => draft.setField('parentId', event.currentTarget.value)}

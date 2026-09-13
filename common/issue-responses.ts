@@ -1,5 +1,5 @@
 import { parseIssue, parseIssueActivity, parseIssueComment } from './issue-records.js';
-import { issueBoolean, issueId, issueInteger, issueInvalid, issueLinkKind, issueProject,
+import { issueBoolean, storedIssueId, issueInteger, issueInvalid, issueLinkKind, issueProject,
   issueRecord, issueString, issueUuid } from './issue-validation.js';
 import { ISSUE_LIMITS, ISSUE_STATUSES, type IssueActivity, type IssueBootstrap, type IssueCollectionVersion,
   type IssueCommentView, type IssueCounts, type IssueDetail, type IssueFacets, type IssueLink,
@@ -78,8 +78,8 @@ export function parseIssueHistoryPage(value: unknown): IssueSequencePage<IssueAc
 
 function parseLink(value: unknown): IssueLink {
   const raw = issueRecord(value, ['sourceId', 'targetId', 'kind']);
-  const sourceId = issueId(raw.sourceId);
-  const targetId = issueId(raw.targetId);
+  const sourceId = storedIssueId(raw.sourceId);
+  const targetId = storedIssueId(raw.targetId);
   if (sourceId === targetId) return issueInvalid('Invalid self link.');
   return { sourceId, targetId, kind: issueLinkKind(raw.kind) };
 }

@@ -127,20 +127,20 @@ Reload and provider-native fork segments may drop Garcon-only presentation.
 
 Issue management:
   create --title <text> [--description <text> | --stdin] [--project <text>]
-    [--cwd <directory>] [--priority <0|1|2|3>] [--label <text>...] [--assignee <owner>] [--parent-id <ISS-n>]
+    [--cwd <directory>] [--priority <0|1|2|3>] [--label <text>...] [--assignee <owner>] [--parent-id <G-n>]
   list [--project <text>] [--query <text>] [--status <open|in-progress|in-review|closed>]
     [--ready] [--include-closed] [--priority <0|1|2|3>] [--label <text>] [--assignee <owner>]
     [--limit <1..100>] [--before-number <n> --expected-collection-revision <n>]
-  read <ISS-n> [--include-description <true|false>] [--comment-limit <0..100>]
+  read <G-n> [--include-description <true|false>] [--comment-limit <0..100>]
     [--before-comment-sequence <n> --expected-collection-revision <n>]
-  history <ISS-n> [--limit <1..100>] [--before-sequence <n>]
-  update <ISS-n> --expected-revision <n> --patch <JSON object>
-  claim|release|reopen <ISS-n> --expected-revision <n>
-  close <ISS-n> --expected-revision <n> [--resolution <done|canceled>] [--comment <text> | --stdin]
-  comment <ISS-n> (--body <text> | --stdin)
-  comment-edit <ISS-n> --comment-id <uuid> --expected-revision <n> (--body <text> | --stdin)
-  comment-delete <ISS-n> --comment-id <uuid> --expected-revision <n>
-  link|unlink <ISS-n> --expected-revision <n> --target-id <ISS-n> --target-revision <n> --link-kind <blocks|related>
+  history <G-n> [--limit <1..100>] [--before-sequence <n>]
+  update <G-n> --expected-revision <n> --patch <JSON object>
+  claim|release|reopen <G-n> --expected-revision <n>
+  close <G-n> --expected-revision <n> [--resolution <done|canceled>] [--comment <text> | --stdin]
+  comment <G-n> (--body <text> | --stdin)
+  comment-edit <G-n> --comment-id <uuid> --expected-revision <n> (--body <text> | --stdin)
+  comment-delete <G-n> --comment-id <uuid> --expected-revision <n>
+  link|unlink <G-n> --expected-revision <n> --target-id <G-n> --target-revision <n> --link-kind <blocks|related>
   Every verb accepts --json. Mutations accept --from-chat <chat-id> as declared attribution.
   Owners: chat:<id>, user:<username>, or unassigned. Read before editing to obtain revisions.
   New create defaults to the shared repository or folder path; --project is an arbitrary string.

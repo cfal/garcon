@@ -7,7 +7,7 @@ import { createIssueRecovery } from '$lib/issues/drafts/issue-draft-recovery';
 
 export const ISSUE_STORE = '11111111-1111-4111-8111-111111111111';
 export const syntheticIssue = (number = 1): Issue => ({
-	id: `ISS-${number}`,
+	id: `G-${number}`,
 	number,
 	revision: 1,
 	title: `Synthetic issue ${number}`,

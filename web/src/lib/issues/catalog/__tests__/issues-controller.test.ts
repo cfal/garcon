@@ -21,7 +21,7 @@ const STORE = '11111111-1111-4111-8111-111111111111';
 const OTHER_STORE = '22222222-2222-4222-8222-222222222222';
 function issue(number = 1, patch: Partial<Issue> = {}): Issue {
 	return {
-		id: `ISS-${number}`,
+		id: `G-${number}`,
 		number,
 		revision: 1,
 		title: `Synthetic ${number}`,
@@ -205,7 +205,7 @@ describe('Issues controller', () => {
 			api.mutate.mockReturnValueOnce(saved.promise);
 			const payload = {
 				action: 'update',
-				issueId: 'ISS-1',
+				issueId: 'G-1',
 				expectedRevision: 1,
 				patch: { status: 'in-review', title: 'New title' },
 			} as const;
@@ -238,12 +238,12 @@ describe('Issues controller', () => {
 				'New title',
 			);
 			expect(controller.collection).toBe(original);
-			expect(controller.mutations.busy('ISS-1')).toBe(true);
+			expect(controller.mutations.busy('G-1')).toBe(true);
 			expect(await controller.mutate(issue(), payload)).toBe(false);
 			expect(api.mutate).toHaveBeenCalledTimes(1);
 			refresh.resolve();
 			await controller.refresh();
-			expect(controller.mutations.busy('ISS-1')).toBe(false);
+			expect(controller.mutations.busy('G-1')).toBe(false);
 			expect(controller.displayedCollection).toBe(controller.collection);
 		},
 	);
@@ -255,7 +255,7 @@ describe('Issues controller', () => {
 		api.mutate.mockRejectedValueOnce(new TypeError('Synthetic response lost'));
 		await controller.mutate(issue(), {
 			action: 'update',
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			expectedRevision: 1,
 			patch: { title: 'Preview' },
 		});
@@ -277,7 +277,7 @@ describe('Issues controller', () => {
 		await sending;
 		expect(controller.collection).toBeNull();
 		expect(controller.saveFeedback).toBeNull();
-		expect(controller.mutations.busy('ISS-1')).toBe(false);
+		expect(controller.mutations.busy('G-1')).toBe(false);
 	});
 	it('uses both current endpoint revisions and invalidates both cached link projections', async () => {
 		const source = issue(1, { revision: 3 });
@@ -332,11 +332,11 @@ describe('Issues controller', () => {
 		await controller.refresh();
 		const collection = controller.collection;
 		api.list.mockClear();
-		controller.select('ISS-2');
+		controller.select('G-2');
 		await controller.refresh();
 		expect(api.list).not.toHaveBeenCalled();
 		expect(controller.collection).toBe(collection);
-		expect(controller.detail.current?.issue.id).toBe('ISS-2');
+		expect(controller.detail.current?.issue.id).toBe('G-2');
 	});
 
 	it('restores the visible lane for a persisted single-status board', () => {
@@ -351,10 +351,10 @@ describe('Issues controller', () => {
 	it('consumes reconnect during a held detail read before declaring the collection current', async () => {
 		const { controller, api, invalidations } = harness();
 		const held = deferred<IssueDetail>();
-		const original = await api.read({ issueId: 'ISS-1' });
+		const original = await api.read({ issueId: 'G-1' });
 		api.read.mockClear();
 		api.read.mockReturnValueOnce(held.promise);
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(api.read).toHaveBeenCalledOnce());
 		invalidations.publishReconnect();
@@ -367,7 +367,7 @@ describe('Issues controller', () => {
 
 	it('consumes an invalidation arriving during the awaited activity read', async () => {
 		const { controller, api, invalidations, setRevision } = harness();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		controller.detail.tab = 'activity';
@@ -401,7 +401,7 @@ describe('Issues controller', () => {
 
 	it('replaces a held user-started activity request before declaring refreshed data current', async () => {
 		const { controller, api, invalidations, setRevision } = harness();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		controller.detail.tab = 'activity';
@@ -432,7 +432,7 @@ describe('Issues controller', () => {
 
 	it('allows more than twenty successful distinct comment edits without retaining clean editors', async () => {
 		const { controller, api, recovery } = harness();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		for (let sequence = 1; sequence <= 25; sequence++) {
@@ -475,7 +475,7 @@ describe('Issues controller', () => {
 
 	it('refreshes a rejected generic mutation and allows a fresh action against current values', async () => {
 		const { controller, api, setItems, setRevision } = harness();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		const changed = issue(1, { revision: 2, title: 'Newer server title' });
@@ -487,7 +487,7 @@ describe('Issues controller', () => {
 			}),
 		);
 		expect(
-			await controller.mutate(issue(), { action: 'claim', issueId: 'ISS-1', expectedRevision: 1 }),
+			await controller.mutate(issue(), { action: 'claim', issueId: 'G-1', expectedRevision: 1 }),
 		).toBe(false);
 		expect(controller.detail.current?.issue).toEqual(changed);
 		const failed = controller.drafts.active.find((draft) => draft.current.kind === 'mutation')!;
@@ -496,14 +496,14 @@ describe('Issues controller', () => {
 		failed.reviewRevision(2);
 		expect(failed.dirty).toBe(false);
 		expect(
-			await controller.mutate(changed, { action: 'claim', issueId: 'ISS-1', expectedRevision: 2 }),
+			await controller.mutate(changed, { action: 'claim', issueId: 'G-1', expectedRevision: 2 }),
 		).toBe(true);
 		expect(api.mutate.mock.calls[1]![0].requestId).not.toBe(api.mutate.mock.calls[0]![0].requestId);
 	});
 
 	it('invalidates a cached detail on a read failure without destroying its dirty editor', async () => {
 		const { controller, api } = harness();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		const draft = controller.drafts.open('fields', controller.detail.current, {
@@ -531,10 +531,10 @@ describe('Issues controller', () => {
 		invalidations.publish({ kind: 'collection', revision: 2 });
 		await controller.refresh();
 		expect(controller.collection?.windows.list?.items).toHaveLength(500);
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		const draft = controller.drafts.open('comment', { issue: issue() })!;
-		controller.select('ISS-1');
+		controller.select('G-1');
 		expect(draft.canEdit).toBe(true);
 	});
 
@@ -543,7 +543,7 @@ describe('Issues controller', () => {
 		let revision = 1;
 		const comments: IssueCommentView[] = Array.from({ length: 180 }, (_, index) => ({
 			id: crypto.randomUUID(),
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			sequence: index + 1,
 			revision: 1,
 			body: `Synthetic ${index + 1}`,
@@ -571,7 +571,7 @@ describe('Issues controller', () => {
 			comments: page(query.beforeCommentSequence, query.commentLimit),
 		}));
 		api.comments.mockImplementation(async (query) => page(query.beforeSequence, query.limit));
-		controller.select('ISS-1');
+		controller.select('G-1');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		await controller.loadOlderComments();
@@ -644,7 +644,7 @@ describe('Issues controller', () => {
 	it('a missing deep-linked issue does not prevent the collection from loading', async () => {
 		const { controller, api } = harness();
 		api.read.mockRejectedValue(new ApiError(404, 'Synthetic missing issue', 'ISSUE_NOT_FOUND'));
-		controller.select('ISS-99');
+		controller.select('G-99');
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		expect(controller.collection?.windows.list?.items).toHaveLength(1);
@@ -674,7 +674,7 @@ describe('Issues controller', () => {
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		expect(controller.collection?.windows.list?.items).toHaveLength(1);
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		controller.setPresentationVisible(false);
 		setRevision(2);
@@ -685,7 +685,7 @@ describe('Issues controller', () => {
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		expect(api.bootstrap).toHaveBeenCalledTimes(2);
-		expect(controller.detail.selectedId).toBe('ISS-1');
+		expect(controller.detail.selectedId).toBe('G-1');
 		expect(controller.detail.current?.collectionRevision).toBe(2);
 	});
 
@@ -816,7 +816,7 @@ describe('Issues controller', () => {
 		api.mutate.mockImplementationOnce(() => held.promise);
 		const submitting = draft.submit({
 			action: 'comment',
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			body: 'Old store text',
 		});
 		setStore(OTHER_STORE);
@@ -835,18 +835,18 @@ describe('Issues controller', () => {
 	it('never downgrades a newer cached detail with an older first response', async () => {
 		const { api } = harness();
 		const detail = new IssueDetailState();
-		const original = await api.read({ issueId: 'ISS-1' });
+		const original = await api.read({ issueId: 'G-1' });
 		const newer = {
 			...original,
 			collectionRevision: 2,
 			issue: issue(1, { revision: 2, title: 'Current title' }),
 		};
-		detail.select('ISS-1');
+		detail.select('G-1');
 		detail.accept(newer);
 		detail.accept(original);
 		expect(detail.current).toEqual(newer);
 		detail.select(null);
-		detail.select('ISS-1');
+		detail.select('G-1');
 		expect(detail.current).toEqual(newer);
 	});
 
@@ -866,9 +866,9 @@ describe('Issues controller', () => {
 				},
 			});
 		expect(detail.cacheSize).toBe(20);
-		detail.select('ISS-1');
+		detail.select('G-1');
 		expect(detail.current).toBeNull();
-		detail.select('ISS-25');
-		expect(detail.current?.issue.id).toBe('ISS-25');
+		detail.select('G-25');
+		expect(detail.current?.issue.id).toBe('G-25');
 	});
 });

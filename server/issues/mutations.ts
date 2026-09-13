@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type { IssueMutationPayload } from '../../common/issue-commands.js';
 import { ISSUE_FIELDS } from '../../common/issue-records.js';
+import { formatIssueId } from '../../common/issue-validation.js';
 import { issueOwnerKey, type Issue, type IssueComment, type IssueFieldChange } from '../../common/issues.js';
 import { issueAuthorityKey, type IssueMutationContext } from './contracts.js';
 import { IssueDomainError, nextIssueCounter } from './errors.js';
@@ -43,7 +44,7 @@ function create(database: Database, payload: Extract<IssueMutationPayload, { act
   const input = payload.input;
   if (input.parentId) requireIssue(database, input.parentId);
   const number = nextAutoincrement(database, 'issues');
-  const issue: Issue = { id: `ISS-${number}`, number, revision: 1, title: input.title,
+  const issue: Issue = { id: formatIssueId(number), number, revision: 1, title: input.title,
     description: input.description ?? '', project: input.project, status: 'open', resolution: null,
     priority: input.priority ?? 2, labels: input.labels ?? [], assignee: input.assignee ?? null,
     parentId: input.parentId ?? null, createdAt: now, updatedAt: now, createdBy: context.actor };
@@ -122,7 +123,7 @@ function changeLink(database: Database, issue: Issue,
   for (const endpoint of [next, relatedIssue]) {
     saveIssue(database, endpoint);
     appendActivity(database, endpoint.id, { action: payload.action === 'link' ? 'linked' : 'unlinked',
-      kind: payload.kind, sourceId: `ISS-${sourceNumber}`, targetId: `ISS-${targetNumber}` }, context, now);
+      kind: payload.kind, sourceId: formatIssueId(sourceNumber), targetId: formatIssueId(targetNumber) }, context, now);
   }
   return { issue: next, relatedIssue, changed: true };
 }

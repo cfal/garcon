@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { parseIssueActivity } from '../../common/issue-records.js';
-import { issueBytes, issueNumber } from '../../common/issue-validation.js';
+import { formatIssueId, ISSUE_ID_PREFIX, issueBytes, issueNumber } from '../../common/issue-validation.js';
 import { ISSUE_LIMITS, issueOwnerKey, type IssueActivity, type IssueCollectionVersion,
   type IssueCommentsQuery, type IssueCommentView, type IssueCounts, type IssueDetail, type IssueFacets,
   type IssueHistoryQuery, type IssueLink, type IssueListQuery, type IssuePage, type IssueReadQuery,
@@ -64,7 +64,7 @@ function listFilter(query: IssueListQuery): { sql: string; values: (string | num
   }
   if (query.query !== undefined) {
     conditions.push(`(instr(lower(json_extract(i.payload_json,'$.title')), lower(?))>0
-      OR instr(lower(json_extract(i.payload_json,'$.description')), lower(?))>0 OR 'ISS-'||i.number=?)`);
+      OR instr(lower(json_extract(i.payload_json,'$.description')), lower(?))>0 OR '${ISSUE_ID_PREFIX}'||i.number=?)`);
     values.push(query.query, query.query, query.query);
   }
   if (query.beforeNumber !== undefined) add('i.number<?', query.beforeNumber);
@@ -128,8 +128,8 @@ export function readIssueDetail(database: Database, storeId: string, query: Issu
   const issue = { ...current, description: query.includeDescription === false ? null : current.description };
   const links = database.query<{ source_number: number; target_number: number; kind: IssueLink['kind'] }, [number, number]>(
     'SELECT * FROM issue_links WHERE source_number=? OR target_number=? ORDER BY source_number,target_number,kind',
-  ).all(current.number, current.number).map((link) => ({ sourceId: `ISS-${link.source_number}`,
-    targetId: `ISS-${link.target_number}`, kind: link.kind }));
+  ).all(current.number, current.number).map((link) => ({ sourceId: formatIssueId(link.source_number),
+    targetId: formatIssueId(link.target_number), kind: link.kind }));
   const limit = query.commentLimit ?? ISSUE_LIMITS.defaultPage;
   const candidates = limit === 0 ? [] : commentCandidates(database, {
     issueId: query.issueId, limit, beforeSequence: query.beforeCommentSequence,

@@ -51,7 +51,7 @@ test('packs a requested 100 maximum-sized summaries into complete byte-bounded p
     page = fixture.service.list({ limit: 100, beforeNumber: page.nextBeforeNumber,
       expectedCollectionRevision: page.collectionRevision });
   }
-  expect(ids).toEqual(Array.from({ length: 100 }, (_, index) => `ISS-${100 - index}`));
+  expect(ids).toEqual(Array.from({ length: 100 }, (_, index) => `G-${100 - index}`));
   expect(() => fixture.service.list({ limit: 100 }, { ...HTTP_ISSUE_BUDGET, maxBytes: 10 }))
     .toThrow(expect.objectContaining({ code: 'ISSUE_RESULT_TOO_LARGE' }));
 });

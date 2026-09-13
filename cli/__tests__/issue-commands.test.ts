@@ -8,7 +8,7 @@ import { issueQueryParams, issueSearchParams } from '@garcon/common/issue-query'
 const STORE = '22222222-2222-4222-8222-222222222222';
 const REQUEST = '11111111-1111-4111-8111-111111111111';
 const TS = '2026-01-01T00:00:00.000Z';
-const issue: Issue = { id: 'ISS-1', number: 1, revision: 1, title: 'Synthetic task', description: 'Synthetic body',
+const issue: Issue = { id: 'G-1', number: 1, revision: 1, title: 'Synthetic task', description: 'Synthetic body',
   project: 'Release', status: 'open', resolution: null, priority: 2, labels: [], assignee: null, parentId: null,
   createdAt: TS, updatedAt: TS, createdBy: { kind: 'user', username: 'local', principalMode: 'local', declaredChatId: null } };
 const result: IssueWriteResult = { success: true, storeId: STORE, collectionRevision: 1, issue };
@@ -37,7 +37,7 @@ function harness(handle: (url: URL, body: unknown) => Response | Promise<Respons
 
 describe('issue CLI execution', () => {
   test('interrupt diagnostics distinguish read, pre-submission and uncertain mutation phases', async () => {
-    for (const args of [['list'], ['read', 'ISS-1'], ['history', 'ISS-1'], ['create', '--title', 'Synthetic task', '--project', 'Release']]) {
+    for (const args of [['list'], ['read', 'G-1'], ['history', 'G-1'], ['create', '--title', 'Synthetic task', '--project', 'Release']]) {
       const interrupt = new AbortController();
       const testCase = harness(() => { interrupt.abort(); throw new Error('Synthetic interruption'); });
       expect(await testCase.run(args, { signal: interrupt.signal })).toBe(130);
@@ -46,13 +46,13 @@ describe('issue CLI execution', () => {
     }
     const stdinInterrupt = new AbortController();
     const stdin = harness(() => { throw new Error('No HTTP call expected'); });
-    expect(await stdin.run(['comment', 'ISS-1', '--stdin'], { signal: stdinInterrupt.signal,
+    expect(await stdin.run(['comment', 'G-1', '--stdin'], { signal: stdinInterrupt.signal,
       readStdin: async () => { stdinInterrupt.abort(); throw new Error('Synthetic interruption'); } })).toBe(130);
     expect(stdin.calls).toHaveLength(0);
     expect(stdin.stderr.join('')).toContain('no issue mutation was submitted');
     const interrupt = new AbortController();
     const mutation = harness(() => { interrupt.abort(); throw new Error('Synthetic interruption'); });
-    expect(await mutation.run(['comment', 'ISS-1', '--body', 'Synthetic', '--request-id', REQUEST, '--expected-store-id', STORE],
+    expect(await mutation.run(['comment', 'G-1', '--body', 'Synthetic', '--request-id', REQUEST, '--expected-store-id', STORE],
       { signal: interrupt.signal })).toBe(130);
     expect(mutation.stderr.join('')).toContain('the issue save is not confirmed');
     expect(mutation.stderr.join('')).toContain(REQUEST);
@@ -98,9 +98,9 @@ describe('issue CLI execution', () => {
     expect(await testCase.run(['list', '--assignee', 'user:name:team', '--query', '%_&', '--before-number', '9', '--expected-collection-revision', '1', '--json'])).toBe(0);
     expect(testCase.calls[0]?.url.searchParams.get('assignee')).toBe('user:name:team');
     expect(testCase.calls[0]?.url.searchParams.get('query')).toBe('%_&');
-    expect(await testCase.run(['read', 'ISS-1', '--include-description', 'false', '--comment-limit', '1', '--before-comment-sequence', '2', '--expected-collection-revision', '1'])).toBe(0);
+    expect(await testCase.run(['read', 'G-1', '--include-description', 'false', '--comment-limit', '1', '--before-comment-sequence', '2', '--expected-collection-revision', '1'])).toBe(0);
     expect(testCase.calls[1]?.url.searchParams.get('beforeCommentSequence')).toBe('2');
-    expect(await testCase.run(['history', 'ISS-1', '--before-sequence', '2'])).toBe(0);
+    expect(await testCase.run(['history', 'G-1', '--before-sequence', '2'])).toBe(0);
     expect(testCase.calls[2]?.url.searchParams.has('expectedCollectionRevision')).toBe(false);
     expect(testCase.stderr).toEqual([]);
   });
@@ -113,7 +113,7 @@ describe('issue CLI execution', () => {
 
   test('never automatically retries an ambiguous write and exposes no false success', async () => {
     const testCase = harness(() => { throw new Error('Synthetic lost response'); });
-    expect(await testCase.run(['comment', 'ISS-1', '--body', 'Synthetic', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
+    expect(await testCase.run(['comment', 'G-1', '--body', 'Synthetic', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
     expect(testCase.calls).toHaveLength(1);
     expect(testCase.stdout).toEqual([]);
     expect(testCase.stderr.join('')).toContain('Save not confirmed');
@@ -123,8 +123,8 @@ describe('issue CLI execution', () => {
   test('rejects oversized encoded requests and invalid stdin without submitting', async () => {
     const testCase = harness(() => { throw new Error('No request expected'); });
     const flags = ['--request-id', REQUEST, '--expected-store-id', STORE];
-    expect(await testCase.run(['comment', 'ISS-1', '--stdin', ...flags], { readStdin: async () => '\0'.repeat(12000) })).toBe(2);
-    expect(await testCase.run(['comment', 'ISS-1', '--stdin', ...flags], { readStdin: async () => '\ud800' })).toBe(2);
+    expect(await testCase.run(['comment', 'G-1', '--stdin', ...flags], { readStdin: async () => '\0'.repeat(12000) })).toBe(2);
+    expect(await testCase.run(['comment', 'G-1', '--stdin', ...flags], { readStdin: async () => '\ud800' })).toBe(2);
     expect(testCase.calls).toHaveLength(0);
     expect(testCase.stdout).toEqual([]);
   });
@@ -132,7 +132,7 @@ describe('issue CLI execution', () => {
   test('keeps terminal errors safe and typed domain failures nonzero', async () => {
     const testCase = harness(() => Response.json({ success: false, error: 'Synthetic \x1b]0;inject\x07\u202e',
       errorCode: 'ISSUE_REVISION_CONFLICT', retryable: false }, { status: 409 }));
-    expect(await testCase.run(['claim', 'ISS-1', '--expected-revision', '1', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
+    expect(await testCase.run(['claim', 'G-1', '--expected-revision', '1', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
     expect(testCase.stderr.join('')).toContain('ISSUE_REVISION_CONFLICT');
     expect(testCase.stderr.join('')).not.toMatch(/[\x1b\x07\u202e]/u);
     expect(testCase.stdout).toEqual([]);
@@ -142,7 +142,7 @@ describe('issue CLI execution', () => {
 
   test('rejects mismatched store or target response rather than confirming a write', async () => {
     const testCase = harness(() => Response.json({ ...result, storeId: REQUEST }));
-    expect(await testCase.run(['claim', 'ISS-1', '--expected-revision', '1', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
+    expect(await testCase.run(['claim', 'G-1', '--expected-revision', '1', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
     expect(testCase.stdout).toEqual([]);
     expect(testCase.stderr.join('')).toContain('Save not confirmed');
   });

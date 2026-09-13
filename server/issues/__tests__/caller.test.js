@@ -16,7 +16,7 @@ test.each(['alice\nadmin', 'alice\0admin', 'alice\u0085admin', 'alice\ud800', 'a
   expect(() => fixture.service.executeHttp(request, caller)).toThrow(expect.objectContaining({ code: 'ISSUE_VALIDATION_FAILED' }));
   expect(fixture.service.list({}).items).toEqual([]);
   fixture.reopen();
-  expect(fixture.create().issue.id).toBe('ISS-1');
+  expect(fixture.create().issue.id).toBe('G-1');
 });
 
 test('preserves valid Unicode principal identity through retry and reopen', () => {

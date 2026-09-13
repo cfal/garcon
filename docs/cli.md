@@ -37,29 +37,29 @@ Issues belong to the selected Garcon workspace, independently of chats and Git. 
 bun cli/main.ts issue create --title 'Preserve failed-save drafts' --cwd /path/to/worktree
 bun cli/main.ts issue create --title 'Release checklist' --project 'September release' --priority 1
 bun cli/main.ts issue list --ready --json
-bun cli/main.ts issue read ISS-42
-bun cli/main.ts issue update ISS-42 --expected-revision 1 --patch '{"status":"in-review","labels":["ui"]}'
-bun cli/main.ts issue claim ISS-42 --expected-revision 2 --from-chat 1000000000000001
-bun cli/main.ts issue comment ISS-42 --stdin
-bun cli/main.ts issue history ISS-42 --limit 20
-bun cli/main.ts issue close ISS-42 --expected-revision 3 --resolution done --comment 'Verified through the API.'
+bun cli/main.ts issue read G-42
+bun cli/main.ts issue update G-42 --expected-revision 1 --patch '{"status":"in-review","labels":["ui"]}'
+bun cli/main.ts issue claim G-42 --expected-revision 2 --from-chat 1000000000000001
+bun cli/main.ts issue comment G-42 --stdin
+bun cli/main.ts issue history G-42 --limit 20
+bun cli/main.ts issue close G-42 --expected-revision 3 --resolution done --comment 'Verified through the API.'
 ```
 
 `project` is an arbitrary, editable string, not a directory capability. New creates resolve an omitted project from `--cwd` or the process directory. Normal Git worktrees share the primary repository path; non-Git contexts use their canonical folder. If Git fails or cannot identify the primary checkout, the default is the canonical `--cwd` or process directory. An explicit `--project` bypasses filesystem lookup. Lists default to all projects and nonclosed issues, not the process directory. Use `--include-closed` or an explicit `--status closed` to include closed work.
 
-Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create accepts repeatable `--label`, `--assignee chat:<id>|user:<username>|unassigned`, and `--parent-id ISS-n`. User assignment is limited to the current authenticated user. Update accepts a JSON patch containing title, description, project, nonclosed status, priority, labels, assignee, or parentId; use JSON null to clear assignee/parent. Only `close` and `reopen` transition into/out of Closed.
+Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create accepts repeatable `--label`, `--assignee chat:<id>|user:<username>|unassigned`, and `--parent-id G-n`. User assignment is limited to the current authenticated user. Update accepts a JSON patch containing title, description, project, nonclosed status, priority, labels, assignee, or parentId; use JSON null to clear assignee/parent. Only `close` and `reopen` transition into/out of Closed.
 
 Read the current revision before a field or workflow mutation. Comment append does not need an issue revision and does not advance it. Claim atomically assigns the caller (or declared chat) and moves Open to In progress; release removes only that caller's assignment. Neither is an access-control lock. `--from-chat` records declared provenance alongside the actual HTTP principal; it cannot grant permission to edit a chat-authored comment.
 
 Additional mutations:
 
 ```bash
-bun cli/main.ts issue release ISS-42 --expected-revision 4
-bun cli/main.ts issue reopen ISS-42 --expected-revision 5
-bun cli/main.ts issue comment-edit ISS-42 --comment-id 33333333-3333-4333-8333-333333333333 --expected-revision 1 --body 'Updated progress.'
-bun cli/main.ts issue comment-delete ISS-42 --comment-id 33333333-3333-4333-8333-333333333333 --expected-revision 2
-bun cli/main.ts issue link ISS-42 --expected-revision 6 --target-id ISS-43 --target-revision 1 --link-kind blocks
-bun cli/main.ts issue unlink ISS-42 --expected-revision 7 --target-id ISS-43 --target-revision 2 --link-kind blocks
+bun cli/main.ts issue release G-42 --expected-revision 4
+bun cli/main.ts issue reopen G-42 --expected-revision 5
+bun cli/main.ts issue comment-edit G-42 --comment-id 33333333-3333-4333-8333-333333333333 --expected-revision 1 --body 'Updated progress.'
+bun cli/main.ts issue comment-delete G-42 --comment-id 33333333-3333-4333-8333-333333333333 --expected-revision 2
+bun cli/main.ts issue link G-42 --expected-revision 6 --target-id G-43 --target-revision 1 --link-kind blocks
+bun cli/main.ts issue unlink G-42 --expected-revision 7 --target-id G-43 --target-revision 2 --link-kind blocks
 ```
 
 `related` is an undirected alternative to `blocks`. Parent grouping does not imply blocking. Canceled blockers remain unresolved until unlinked or later closed as Done. Comment edit/remove is author-only. Removal hides the current comment body but preserves all previous versions in activity history; it is not redaction.
@@ -68,8 +68,8 @@ Reads are bounded. Lists accept project, status, priority, one label, assignee, 
 
 ```bash
 bun cli/main.ts issue list --before-number 100 --expected-collection-revision 12
-bun cli/main.ts issue read ISS-42 --include-description false --comment-limit 10 --before-comment-sequence 21 --expected-collection-revision 12
-bun cli/main.ts issue history ISS-42 --before-sequence 300 --limit 20
+bun cli/main.ts issue read G-42 --include-description false --comment-limit 10 --before-comment-sequence 21 --expected-collection-revision 12
+bun cli/main.ts issue history G-42 --before-sequence 300 --limit 20
 ```
 
 List/comment continuations require the returned collection revision; refresh from the first page if it changed. Immutable activity history needs no revision fence. `--include-description false --comment-limit 0` reads only metadata and links. Responses never silently truncate authored bodies.

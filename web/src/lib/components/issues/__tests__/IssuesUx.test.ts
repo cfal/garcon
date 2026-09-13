@@ -56,7 +56,7 @@ describe('Issues stable, immediate interactions', () => {
 				target: { value: 'different' },
 			});
 			await fireEvent.submit(screen.getByPlaceholderText('Search issues…').closest('form')!);
-			expect(view.container.querySelector('[data-issue-id="ISS-1"]')).not.toBeNull();
+			expect(view.container.querySelector('[data-issue-id="G-1"]')).not.toBeNull();
 			expect(screen.queryByText('Loading issues…')).toBeNull();
 			expect(
 				view.container.querySelector('[data-issue-search-button]')?.getAttribute('aria-busy'),
@@ -69,7 +69,7 @@ describe('Issues stable, immediate interactions', () => {
 
 	it('does not flash outside-filter feedback while changing layouts', async () => {
 		const { controller, api } = await mount();
-		controller.createdIssueId = 'ISS-1';
+		controller.createdIssueId = 'G-1';
 		const barrier = hold();
 		const counts = api.counts.getMockImplementation()!;
 		api.counts.mockImplementationOnce(async (...args) => {
@@ -86,7 +86,7 @@ describe('Issues stable, immediate interactions', () => {
 
 	it('keeps pending quick actions out of recovery while still guarding unsaved requests', async () => {
 		const { controller, api } = await mount();
-		await fireEvent.click(screen.getByRole('button', { name: 'Open ISS-1' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
 		await controller.refresh();
 		const barrier = hold();
 		const mutate = api.mutate.getMockImplementation()!;
@@ -113,20 +113,20 @@ describe('Issues stable, immediate interactions', () => {
 				await barrier.promise;
 				throw new ApiError(409, 'Synthetic rejected move', 'ISSUE_REVISION_CONFLICT');
 			});
-			await fireEvent.click(screen.getByRole('button', { name: 'Change status of ISS-1' }));
+			await fireEvent.click(screen.getByRole('button', { name: 'Change status of G-1' }));
 			await fireEvent.click(await screen.findByRole('menuitem', { name: 'In review' }));
 			expect(
-				view.container.querySelector('[data-status="in-review"] [data-issue-id="ISS-1"]'),
+				view.container.querySelector('[data-status="in-review"] [data-issue-id="G-1"]'),
 			).not.toBeNull();
 			expect(
-				view.container.querySelector('[data-status="open"] [data-issue-id="ISS-1"]'),
+				view.container.querySelector('[data-status="open"] [data-issue-id="G-1"]'),
 			).toBeNull();
 			expect(controller.activeLane).toBe('in-review');
 			if (changedLane) controller.activeLane = 'in-progress';
 			barrier.release();
 			await waitFor(() => expect(controller.drafts.pending).toBe(false));
 			expect(
-				view.container.querySelector('[data-status="open"] [data-issue-id="ISS-1"]'),
+				view.container.querySelector('[data-status="open"] [data-issue-id="G-1"]'),
 			).not.toBeNull();
 			expect(await screen.findByText('Synthetic rejected move')).toBeTruthy();
 			expect(controller.activeLane).toBe(changedLane ? 'in-progress' : 'open');

@@ -263,14 +263,14 @@ describe('AppShell responsive workspace binding', () => {
 			'select'
 		>;
 		testContext.current!.singletons = { issues: () => issues };
-		page.url = new URL('http://localhost/?issue=ISS-42');
+		page.url = new URL('http://localhost/?issue=G-42');
 		render(AppShell);
 		await waitFor(() =>
 			expect(openSingletonAsTab).toHaveBeenCalledWith('issues', workspace.currentWindowId),
 		);
 		expect(issues.select).not.toHaveBeenCalled();
 		opened.resolve(undefined);
-		await waitFor(() => expect(issues.select).toHaveBeenCalledWith('ISS-42'));
+		await waitFor(() => expect(issues.select).toHaveBeenCalledWith('G-42'));
 		expect(chatNavigation.gotoChat).not.toHaveBeenCalled();
 	});
 

@@ -5,7 +5,7 @@ import { IssuesInvalidatedMessage, parseServerWsMessage } from '../ws-events.js'
 
 const version = { storeId: '11111111-1111-4111-8111-111111111111', collectionRevision: 3 };
 const actor = { kind: 'user', username: 'local', principalMode: 'local', declaredChatId: null };
-const issue = { id: 'ISS-1', number: 1, revision: 1, title: 'Synthetic', description: '', project: 'Synthetic project',
+const issue = { id: 'G-1', number: 1, revision: 1, title: 'Synthetic', description: '', project: 'Synthetic project',
   status: 'open', resolution: null, priority: 2, labels: [], assignee: null, parentId: null,
   createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', createdBy: actor };
 const comment = { id: '22222222-2222-4222-8222-222222222222', issueId: issue.id, sequence: 1, revision: 1,
@@ -36,13 +36,13 @@ describe('issue response contracts', () => {
   test('rejects inconsistent detail identities, versions, ordering and continuations', () => {
     const detail = { ...version, issue, links: [], comments };
     for (const patch of [{ storeId: '33333333-3333-4333-8333-333333333333' }, { collectionRevision: 4 },
-      { items: [{ ...comment, issueId: 'ISS-2' }] }]) {
+      { items: [{ ...comment, issueId: 'G-2' }] }]) {
       expect(() => parseIssueDetail({ ...detail, comments: { ...comments, ...patch } })).toThrow();
     }
     expect(() => parseIssueCommentsPage({ ...comments, nextBeforeSequence: 2 })).toThrow();
     expect(() => parseIssueCommentsPage({ ...comments, items: [comment, comment] })).toThrow();
     expect(() => parseIssueCommentsPage({ ...comments, items: [{ ...comment, body: null, deletedAt: issue.createdAt }] })).toThrow();
-    expect(() => parseIssueDetail({ ...detail, links: [{ sourceId: 'ISS-2', targetId: 'ISS-3', kind: 'blocks' }] })).toThrow();
+    expect(() => parseIssueDetail({ ...detail, links: [{ sourceId: 'G-2', targetId: 'G-3', kind: 'blocks' }] })).toThrow();
     expect(() => parseIssuePage({ ...version, items: [], nextBeforeNumber: 1 })).toThrow();
   });
 

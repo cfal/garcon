@@ -3,7 +3,7 @@ import type { AgentCommandCorrelation } from './garcon-command-results.js';
 import { isIssueReadAction } from './garcon-issue-command.js';
 import { escapeGarconXmlText, parseGarconCommandEnvelope } from './garcon-command-envelope.js';
 import { parseIssueDetail, parseIssueHistoryPage, parseIssuePage } from './issue-responses.js';
-import { issueBytes, issueId, issueInteger, issueInvalid, issueRecord, issueRef, issueStatus, issueUuid } from './issue-validation.js';
+import { issueBytes, storedIssueId, issueInteger, issueInvalid, issueRecord, issueRef, issueStatus, issueUuid } from './issue-validation.js';
 import { isErrorCode } from './error-codes.js';
 import { ISSUE_LIMITS, type IssueActivity, type IssueDetail, type IssueErrorCode, type IssuePage,
   type IssueSequencePage, type IssueStatus, type IssueWriteResult } from './issues.js';
@@ -49,9 +49,9 @@ function parseReceipt(value: unknown): IssueMutationReceipt {
   const raw = issueRecord(value, ['storeId', 'issueId', 'revision', 'status', 'collectionRevision', 'comment', 'relatedIssue']);
   const reference = (value: unknown, kind: 'comment' | 'issue') => {
     const raw = issueRecord(value, ['id', 'revision']);
-    return { id: kind === 'comment' ? issueUuid(raw.id, 'commentId') : issueId(raw.id), revision: issueInteger(raw.revision, 'revision') };
+    return { id: kind === 'comment' ? issueUuid(raw.id, 'commentId') : storedIssueId(raw.id), revision: issueInteger(raw.revision, 'revision') };
   };
-  return { storeId: issueUuid(raw.storeId, 'storeId'), issueId: issueId(raw.issueId),
+  return { storeId: issueUuid(raw.storeId, 'storeId'), issueId: storedIssueId(raw.issueId),
     revision: issueInteger(raw.revision, 'revision'), status: issueStatus(raw.status),
     collectionRevision: issueInteger(raw.collectionRevision, 'collectionRevision', 0),
     ...(raw.comment === undefined ? {} : { comment: reference(raw.comment, 'comment') }),
@@ -63,7 +63,7 @@ function requestIdentity(raw: Record<string, unknown>) {
   const command = raw.command as IssueAction;
   const ref = raw.ref === undefined && isIssueReadAction(command) ? undefined : issueRef(raw.ref);
   if (command === 'list' && raw.issueId !== undefined) return issueInvalid('List result cannot target an issue.');
-  const target = raw.issueId === undefined && (command === 'create' || command === 'list') ? undefined : issueId(raw.issueId);
+  const target = raw.issueId === undefined && (command === 'create' || command === 'list') ? undefined : storedIssueId(raw.issueId);
   return { command, ...(ref === undefined ? {} : { ref }), ...(target === undefined ? {} : { issueId: target }),
     requestViewId: issueUuid(raw.requestViewId, 'requestViewId'), requestOrdinal: issueInteger(raw.requestOrdinal, 'requestOrdinal') };
 }

@@ -8,7 +8,7 @@ import { issueBytes } from '../issue-validation.js';
 const version = { storeId: '11111111-1111-4111-8111-111111111111', collectionRevision: 7 };
 const correlation = { requestViewId: '22222222-2222-4222-8222-222222222222', requestOrdinal: 12 };
 const actor = { kind: 'chat', chatId: '1000000000000001', provenance: 'observed' };
-const issue = { id: 'ISS-1', number: 1, revision: 1, title: 'Synthetic <title>', description: 'Synthetic <garcon-issue-list />',
+const issue = { id: 'G-1', number: 1, revision: 1, title: 'Synthetic <title>', description: 'Synthetic <garcon-issue-list />',
   project: 'Project & one', status: 'open', resolution: null, priority: 2, labels: [], assignee: null, parentId: null,
   createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', createdBy: actor };
 const comment = { id: '33333333-3333-4333-8333-333333333333', issueId: issue.id, sequence: 1, revision: 1,
@@ -31,6 +31,18 @@ function result(command, status = 'ok') {
 }
 
 describe('command-specific issue results', () => {
+  test('normalizes legacy stored results and notices without changing their correlation', () => {
+    for (const command of ISSUE_ACTIONS) for (const status of ['ok', 'error']) {
+      const expected = result(command, status);
+      const legacy = JSON.parse(JSON.stringify(expected).replace(/"G-([0-9]+)"/gu, '"ISS-$1"'));
+      expect(parseIssueCommandResult(legacy)).toEqual(expected);
+      expect(parseGarconIssueResult(garconIssueResultContent(legacy))).toEqual(expected);
+      const outcome = issueCommandOutcome(expected);
+      const legacyOutcome = JSON.parse(JSON.stringify(outcome).replace(/"G-([0-9]+)"/gu, '"ISS-$1"'));
+      expect(parseIssueCommandOutcome(legacyOutcome)).toEqual(outcome);
+    }
+  });
+
   test('round-trips every success and failure with exact correlation and one XML decoding', () => {
     for (const command of ISSUE_ACTIONS) for (const status of ['ok', 'error']) {
       const expected = result(command, status);
@@ -67,10 +79,10 @@ describe('command-specific issue results', () => {
 
   test('rejects mismatched identity, unsupported tags and malformed public projections', () => {
     const valid = result('create');
-    for (const invalid of [{ ...valid, ref: undefined }, { ...valid, issueId: 'ISS-2' },
+    for (const invalid of [{ ...valid, ref: undefined }, { ...valid, issueId: 'G-2' },
       { ...valid, data: { ...valid.data, storeId: 'invalid' } }, { ...valid, requestOrdinal: 0 },
-      { ...result('list'), issueId: 'ISS-1' }, { ...result('read'), issueId: 'ISS-2' },
-      { ...result('history'), issueId: 'ISS-2' }, { ...valid, authority: 'forged' },
+      { ...result('list'), issueId: 'G-1' }, { ...result('read'), issueId: 'G-2' },
+      { ...result('history'), issueId: 'G-2' }, { ...valid, authority: 'forged' },
       { ...result('read', 'error'), data: reads.read },
       { ...result('read', 'error'), errorCode: 'UNKNOWN_ERROR' }]) {
       expect(() => parseIssueCommandResult(invalid)).toThrow();

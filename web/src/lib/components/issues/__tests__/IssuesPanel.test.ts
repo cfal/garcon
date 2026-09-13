@@ -33,13 +33,13 @@ describe('Issues surface', () => {
 		setItems([syntheticIssue(1), syntheticIssue(2), syntheticIssue(3)]);
 		controller.setQuery({ status: 'open' });
 		await controller.refresh();
-		const status = screen.getByRole('button', { name: 'Change status of ISS-2' });
+		const status = screen.getByRole('button', { name: 'Change status of G-2' });
 		status.focus();
 		await fireEvent.click(status);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'In progress' }));
 		await controller.refresh();
-		await waitFor(() => expect(screen.queryByRole('button', { name: 'Open ISS-2' })).toBeNull());
-		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open ISS-3' }));
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Open G-2' })).toBeNull());
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open G-3' }));
 	});
 
 	it('uses the refreshed status when a remote reopen overtakes close confirmation', async () => {
@@ -50,7 +50,7 @@ describe('Issues surface', () => {
 		const { controller, api, setItems } = await mount();
 		controller.setLayout('board');
 		await controller.refresh();
-		const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+		const status = screen.getByRole('button', { name: 'Change status of G-1' });
 		status.focus();
 		await fireEvent.click(status);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
@@ -71,14 +71,14 @@ describe('Issues surface', () => {
 		await controller.refresh();
 		await tick();
 		expect(controller.activeLane).toBe('open');
-		expect(await screen.findByText('ISS-1 moved to Open.')).toBeTruthy();
+		expect(await screen.findByText('G-1 moved to Open.')).toBeTruthy();
 	});
 
 	it.each([false, true])(
 		'clears a confirmed close owner while the renderer is absent (retry=%s)',
 		async (retry) => {
 			const { controller, api, view } = await mount();
-			const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+			const status = screen.getByRole('button', { name: 'Change status of G-1' });
 			await fireEvent.click(status);
 			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
 			if (retry) {
@@ -122,7 +122,7 @@ describe('Issues surface', () => {
 		const { controller, setItems } = await mount();
 		setItems([syntheticIssue(1), syntheticIssue(2)]);
 		await controller.refresh();
-		const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+		const status = screen.getByRole('button', { name: 'Change status of G-1' });
 		status.focus();
 		await fireEvent.click(status);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
@@ -134,7 +134,7 @@ describe('Issues surface', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		await controller.refresh();
 		await waitFor(() =>
-			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open ISS-2' })),
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open G-2' })),
 		);
 	});
 
@@ -148,7 +148,7 @@ describe('Issues surface', () => {
 			const { controller, api, view } = await mount();
 			controller.setLayout('board');
 			await controller.refresh();
-			const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+			const status = screen.getByRole('button', { name: 'Change status of G-1' });
 			status.focus();
 			await fireEvent.click(status);
 			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
@@ -171,7 +171,7 @@ describe('Issues surface', () => {
 			api.counts.mockImplementation(counts);
 			await controller.refresh();
 			await waitFor(() =>
-				expect(view.container.querySelector('[data-issue-id="ISS-1"]')).toBeNull(),
+				expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull(),
 			);
 			expect(await screen.findByText('This issue is outside the current filters.')).toBeTruthy();
 			expect(document.activeElement).toBe(
@@ -182,11 +182,11 @@ describe('Issues surface', () => {
 
 	it('drops pinned snapshots immediately on an authority change', async () => {
 		const { controller, invalidations, view } = await mount();
-		screen.getByRole('button', { name: 'Open ISS-1' }).focus();
+		screen.getByRole('button', { name: 'Open G-1' }).focus();
 		invalidations.publishAuthority(false);
 		await tick();
 		expect(controller.collection).toBeNull();
-		expect(view.container.querySelector('[data-issue-id="ISS-1"]')).toBeNull();
+		expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull();
 	});
 
 	it('keeps a newer comment editor open when an unmounted editor submission settles', async () => {
@@ -244,12 +244,12 @@ describe('Issues surface', () => {
 			});
 			const { controller, api, setItems, view } = await mount();
 			setItems([syntheticIssue(1), syntheticIssue(2), syntheticIssue(3)]);
-			controller.select('ISS-2');
+			controller.select('G-2');
 			controller.setLayout('board');
 			await controller.refresh();
 			await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 			const input = screen.getByLabelText('Title');
-			const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+			const status = screen.getByRole('button', { name: 'Change status of G-1' });
 			status.focus();
 			await fireEvent.click(status);
 			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
@@ -266,12 +266,12 @@ describe('Issues surface', () => {
 			);
 			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 			const focused =
-				target === 'editor' ? input : screen.getByRole('button', { name: 'Open ISS-3' });
+				target === 'editor' ? input : screen.getByRole('button', { name: 'Open G-3' });
 			focused.focus();
 			release();
 			await controller.refresh();
 			await waitFor(() =>
-				expect(view.container.querySelector('[data-issue-id="ISS-1"]')).toBeNull(),
+				expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull(),
 			);
 			expect(document.activeElement).toBe(focused);
 		},
@@ -340,7 +340,7 @@ describe('Issues surface', () => {
 		const { controller, api, view } = await mount();
 		controller.setLayout('board');
 		await controller.refresh();
-		const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+		const status = screen.getByRole('button', { name: 'Change status of G-1' });
 		status.focus();
 		await fireEvent.click(status);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
@@ -362,7 +362,7 @@ describe('Issues surface', () => {
 		expect(document.activeElement).toBe(status);
 		release();
 		await controller.refresh();
-		await waitFor(() => expect(view.container.querySelector('[data-issue-id="ISS-1"]')).toBeNull());
+		await waitFor(() => expect(view.container.querySelector('[data-issue-id="G-1"]')).toBeNull());
 		expect(document.activeElement).toBe(
 			view.container.querySelector('.issue-lane[data-status="open"] h3'),
 		);
@@ -444,7 +444,7 @@ describe('Issues surface', () => {
 			const { controller, api, setItems } = await mount();
 			setItems([syntheticIssue(1), syntheticIssue(2)]);
 			await controller.refresh();
-			const status = screen.getByRole('button', { name: 'Change status of ISS-1' });
+			const status = screen.getByRole('button', { name: 'Change status of G-1' });
 			status.focus();
 			await fireEvent.click(status);
 			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Close issue' }));
@@ -461,7 +461,7 @@ describe('Issues surface', () => {
 			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 			expect(await screen.findByText('This issue is outside the current filters.')).toBeTruthy();
 			await waitFor(() =>
-				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open ISS-2' })),
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open G-2' })),
 			);
 		},
 	);
@@ -478,7 +478,7 @@ describe('Issues surface', () => {
 
 	it('shows activity errors instead of an empty audit and clears them on retry', async () => {
 		const { controller, api } = await mount();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		api.history.mockRejectedValueOnce(new Error('Synthetic activity unavailable'));
 		await fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
@@ -492,7 +492,7 @@ describe('Issues surface', () => {
 
 	it('shows failed refreshes beside cached detail and hides generic conflict rebase controls', async () => {
 		const { controller, api } = await mount();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		api.read.mockRejectedValueOnce(
 			new ApiError(413, 'Synthetic detail unavailable', 'ISSUE_RESULT_TOO_LARGE'),
@@ -511,7 +511,7 @@ describe('Issues surface', () => {
 		);
 		await controller.mutate(syntheticIssue(), {
 			action: 'claim',
-			issueId: 'ISS-1',
+			issueId: 'G-1',
 			expectedRevision: 1,
 		});
 		expect(await screen.findByText('Synthetic mutation conflict')).toBeTruthy();
@@ -529,7 +529,7 @@ describe('Issues surface', () => {
 			});
 		});
 		const { controller, view } = await mount();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		await tick();
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
@@ -553,7 +553,7 @@ describe('Issues surface', () => {
 
 	it('displays the stored priority and submits changed metadata through the shared form', async () => {
 		const { controller, api } = await mount();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		await tick();
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
@@ -571,7 +571,7 @@ describe('Issues surface', () => {
 
 	it('retains close resolution and comment across dialog cancellation and renderer remount', async () => {
 		const { controller, view, api } = await mount();
-		controller.select('ISS-1');
+		controller.select('G-1');
 		await controller.refresh();
 		await tick();
 		await fireEvent.click(screen.getByRole('button', { name: 'Close issue' }));
@@ -616,7 +616,7 @@ describe('Issues surface', () => {
 
 	it('preserves selection and a dirty editor across layout changes and remote refresh', async () => {
 		const { controller, setItems, invalidations } = await mount();
-		await fireEvent.click(screen.getByRole('button', { name: 'Open ISS-1' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
 		await waitFor(() => expect(controller.detail.current).not.toBeNull());
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 		const title = screen.getByLabelText('Title') as HTMLInputElement;
@@ -629,13 +629,13 @@ describe('Issues surface', () => {
 		expect(title.value).toBe('Unsaved human title');
 		await fireEvent.click(screen.getByRole('button', { name: 'Board' }));
 		await controller.refresh();
-		expect(controller.detail.selectedId).toBe('ISS-1');
+		expect(controller.detail.selectedId).toBe('G-1');
 		expect(title.value).toBe('Unsaved human title');
 	});
 
 	it('requires a close confirmation and honors cancellation and resolution', async () => {
 		const { controller, api } = await mount();
-		await fireEvent.click(screen.getByRole('button', { name: 'Open ISS-1' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
 		await waitFor(() => expect(controller.detail.current).not.toBeNull());
 		await fireEvent.click(screen.getByRole('button', { name: 'Close issue' }));
 		await fireEvent.click(
@@ -651,7 +651,7 @@ describe('Issues surface', () => {
 
 	it('keeps the composer node and unsaved text when new remote comments arrive', async () => {
 		const { controller, invalidations, setComments } = await mount();
-		await fireEvent.click(screen.getByRole('button', { name: 'Open ISS-1' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
 		const input = (await screen.findByPlaceholderText(
 			'Add to the discussion…',
 		)) as HTMLTextAreaElement;

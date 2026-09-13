@@ -61,7 +61,7 @@ test('parent cycles roll back fields and parent links never imply blocking', () 
   expect(() => fixture.write({ action: 'update', issueId: parent.id, expectedRevision: 1,
     patch: { parentId: child.id, title: 'Rolled back' } })).toThrow(expect.objectContaining({ code: 'ISSUE_RELATIONSHIP_CYCLE' }));
   expect(current(parent.id)).toEqual(parent);
-  expect(() => fixture.create({ parentId: 'ISS-999' })).toThrow(expect.objectContaining({ code: 'ISSUE_NOT_FOUND' }));
+  expect(() => fixture.create({ parentId: 'G-999' })).toThrow(expect.objectContaining({ code: 'ISSUE_NOT_FOUND' }));
   fixture.write({ action: 'close', issueId: parent.id, expectedRevision: 1 });
   expect(current(child.id).status).toBe('open');
 });

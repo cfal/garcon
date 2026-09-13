@@ -7,7 +7,7 @@
 	let kind = $state<IssueLinkKind>('blocks');
 	let pending = $state(false);
 	async function link() {
-		if (pending || !/^ISS-[1-9]\d*$/.test(target.trim())) return;
+		if (pending || !/^G-[1-9]\d*$/.test(target.trim())) return;
 		pending = true;
 		try {
 			await controller.link(detail.issue, target.trim(), kind, 'link');
@@ -59,11 +59,11 @@
 		<label class="issue-field"
 			><span class="sr-only">{m.issues_target()}</span><input
 				class="issue-input"
-				placeholder="ISS-42"
+				placeholder="G-42"
 				bind:value={target}
 			/></label
 		>
-		<button class="issue-button" disabled={pending || !/^ISS-[1-9]\d*$/.test(target.trim())}
+		<button class="issue-button" disabled={pending || !/^G-[1-9]\d*$/.test(target.trim())}
 			>{m.issues_link()}</button
 		>
 	</form>

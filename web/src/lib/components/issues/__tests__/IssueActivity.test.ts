@@ -18,7 +18,7 @@ it('opens the recorded source only on activation and disables deleted-chat navig
 		items: [
 			{
 				sequence: 1,
-				issueId: 'ISS-1',
+				issueId: 'G-1',
 				at: '2026-01-01T00:00:00.000Z',
 				actor: syntheticIssue().createdBy,
 				source,

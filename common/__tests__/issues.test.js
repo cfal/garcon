@@ -53,25 +53,25 @@ describe('issue contracts', () => {
   });
 
   test('validates canonical identities and nonclosed updates', () => {
-    expect(issueId('ISS-42')).toBe('ISS-42');
-    for (const id of ['ISS-01', 'iss-42', 'ISS-0', 'ISS-9007199254740992']) expect(() => issueId(id)).toThrow();
+    expect(issueId('G-42')).toBe('G-42');
+    for (const id of ['G-01', 'g-42', 'ISS-42', 'G-0', 'G-9007199254740992']) expect(() => issueId(id)).toThrow();
     expect(issueUuid(REQUEST, 'requestId')).toBe(REQUEST);
     expect(() => issueUuid('11111111-1111-1111-1111-111111111111', 'requestId')).toThrow();
     for (const patch of [{}, { status: 'closed' }, { resolution: 'done' }, { title: undefined }]) {
-      expect(() => parseIssueMutationPayload({ action: 'update', issueId: 'ISS-1', expectedRevision: 1, patch })).toThrow();
+      expect(() => parseIssueMutationPayload({ action: 'update', issueId: 'G-1', expectedRevision: 1, patch })).toThrow();
     }
   });
 
   test('parses every mutation shape and rejects surplus fields', () => {
-    const target = { issueId: 'ISS-1', expectedRevision: 1 };
+    const target = { issueId: 'G-1', expectedRevision: 1 };
     const commands = [
       { action: 'create', input: { title: 'Issue', project: 'Project' } },
       { action: 'update', ...target, patch: { status: 'in-review' } },
       ...['claim', 'release', 'reopen', 'close'].map((action) => ({ action, ...target })),
-      { action: 'comment', issueId: 'ISS-1', body: 'Comment' },
+      { action: 'comment', issueId: 'G-1', body: 'Comment' },
       { action: 'comment-edit', ...target, commentId: REQUEST, body: 'Edited' },
       { action: 'comment-delete', ...target, commentId: REQUEST },
-      ...['link', 'unlink'].map((action) => ({ action, ...target, targetId: 'ISS-2', targetRevision: 1, kind: 'blocks' })),
+      ...['link', 'unlink'].map((action) => ({ action, ...target, targetId: 'G-2', targetRevision: 1, kind: 'blocks' })),
     ];
     for (const command of commands) {
       expect(parseIssueMutationPayload(command).action).toBe(command.action);
@@ -81,12 +81,12 @@ describe('issue contracts', () => {
 
   test('fences mutable continuation, leaves immutable history unfenced', () => {
     expect(() => parseIssueListQuery({ beforeNumber: 10 })).toThrow();
-    expect(() => parseIssueCommentsQuery({ issueId: 'ISS-1', beforeSequence: 10 })).toThrow();
-    expect(() => parseIssueReadQuery({ issueId: 'ISS-1', beforeCommentSequence: 10 })).toThrow();
-    expect(() => parseIssueReadQuery({ issueId: 'ISS-1', beforeCommentSequence: 10, expectedCollectionRevision: 2, commentLimit: 0 })).toThrow();
-    expect(parseIssueReadQuery({ issueId: 'ISS-1', commentLimit: 0 }).commentLimit).toBe(0);
-    expect(parseIssueHistoryQuery({ issueId: 'ISS-1', beforeSequence: 10 })).toEqual({ issueId: 'ISS-1', beforeSequence: 10, limit: 50 });
-    expect(() => parseIssueHistoryQuery({ issueId: 'ISS-1', expectedCollectionRevision: 2 })).toThrow();
+    expect(() => parseIssueCommentsQuery({ issueId: 'G-1', beforeSequence: 10 })).toThrow();
+    expect(() => parseIssueReadQuery({ issueId: 'G-1', beforeCommentSequence: 10 })).toThrow();
+    expect(() => parseIssueReadQuery({ issueId: 'G-1', beforeCommentSequence: 10, expectedCollectionRevision: 2, commentLimit: 0 })).toThrow();
+    expect(parseIssueReadQuery({ issueId: 'G-1', commentLimit: 0 }).commentLimit).toBe(0);
+    expect(parseIssueHistoryQuery({ issueId: 'G-1', beforeSequence: 10 })).toEqual({ issueId: 'G-1', beforeSequence: 10, limit: 50 });
+    expect(() => parseIssueHistoryQuery({ issueId: 'G-1', expectedCollectionRevision: 2 })).toThrow();
   });
 
   test('encodes assignees without conflating colon or Unicode usernames', () => {
@@ -102,15 +102,15 @@ describe('issue contracts', () => {
 
   test('round-trips typed domain records and rejects private or contradictory fields', () => {
     const actor = { kind: 'user', username: 'local', principalMode: 'local', declaredChatId: null };
-    const issue = { id: 'ISS-1', number: 1, revision: 1, title: 'Synthetic issue', description: 'Exact\nbody',
+    const issue = { id: 'G-1', number: 1, revision: 1, title: 'Synthetic issue', description: 'Exact\nbody',
       project: 'Project', status: 'open', resolution: null, priority: 2, labels: [], assignee: null, parentId: null,
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', createdBy: actor };
-    const comment = { id: REQUEST, issueId: 'ISS-1', sequence: 1, revision: 1, body: 'Comment', author: actor,
+    const comment = { id: REQUEST, issueId: 'G-1', sequence: 1, revision: 1, body: 'Comment', author: actor,
       createdAt: issue.createdAt, updatedAt: issue.updatedAt, deletedAt: null };
     expect(parseIssue(issue)).toEqual(issue);
     expect(parseIssueComment(comment)).toEqual(comment);
     expect(parseIssueWriteResult({ success: true, storeId: STORE, collectionRevision: 2, issue, comment }).comment).toEqual(comment);
-    const activity = { sequence: 1, issueId: 'ISS-1', at: issue.createdAt, actor, source: null,
+    const activity = { sequence: 1, issueId: 'G-1', at: issue.createdAt, actor, source: null,
       action: 'updated', changes: [{ field: 'priority', before: 2, after: 1 }] };
     expect(parseIssueActivity(activity)).toEqual(activity);
     expect(() => parseIssueActivity({ ...activity, changes: [{ field: 'priority', before: 2, after: 'High' }] })).toThrow();
@@ -119,6 +119,6 @@ describe('issue contracts', () => {
     expect(() => parseIssueComment({ ...comment, body: null })).toThrow();
     expect(() => parseIssueComment({ ...comment, authorityKey: 'private' })).toThrow();
     expect(() => parseIssueWriteResult({ success: true, storeId: STORE, collectionRevision: 2, issue,
-      comment: { ...comment, issueId: 'ISS-2' } })).toThrow();
+      comment: { ...comment, issueId: 'G-2' } })).toThrow();
   });
 });

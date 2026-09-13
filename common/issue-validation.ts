@@ -91,16 +91,30 @@ export function issueUuid(value: unknown, field: string): string {
   return value;
 }
 
+export const ISSUE_ID_PREFIX = 'G-';
+
+export function formatIssueId(number: number): string {
+  return `${ISSUE_ID_PREFIX}${issueInteger(number, 'issue number')}`;
+}
+
 export function issueId(value: unknown): string {
-  if (typeof value !== 'string' || !/^ISS-[1-9][0-9]*$/u.test(value)) {
-    return issueInvalid('issueId must have the form ISS-42.');
+  if (typeof value !== 'string' || !/^G-[1-9][0-9]*$/u.test(value)) {
+    return issueInvalid('issueId must have the form G-42.');
   }
-  issueInteger(Number(value.slice(4)), 'issue number');
+  issueInteger(Number(value.slice(ISSUE_ID_PREFIX.length)), 'issue number');
   return value;
 }
 
 export function issueNumber(value: string): number {
-  return Number(issueId(value).slice(4));
+  return Number(issueId(value).slice(ISSUE_ID_PREFIX.length));
+}
+
+// Persisted snapshots retain their original spelling; new commands accept only G-n.
+export function storedIssueId(value: unknown): string {
+  if (typeof value === 'string' && value.startsWith('ISS-')) {
+    return issueId(`${ISSUE_ID_PREFIX}${value.slice(4)}`);
+  }
+  return issueId(value);
 }
 
 export function issueChatId(value: unknown): string {

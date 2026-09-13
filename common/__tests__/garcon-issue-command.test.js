@@ -9,18 +9,18 @@ const commentId = '11111111-1111-4111-8111-111111111111';
 const commands = {
   create: '<garcon-issue-create ref="create">{"title":"Synthetic issue"}</garcon-issue-create>',
   list: '<garcon-issue-list />',
-  read: '<garcon-issue-read issue-id="ISS-1" />',
-  history: '<garcon-issue-history issue-id="ISS-1">{"limit":3,"beforeSequence":7}</garcon-issue-history>',
-  update: '<garcon-issue-update ref="edit" issue-id="ISS-1" expected-revision="1">{"status":"in-review","assignee":null}</garcon-issue-update>',
-  claim: '<garcon-issue-claim ref="claim" issue-id="ISS-1" expected-revision="1" />',
-  release: '<garcon-issue-release ref="release" issue-id="ISS-1" expected-revision="1" />',
-  reopen: '<garcon-issue-reopen ref="reopen" issue-id="ISS-1" expected-revision="1" />',
-  close: '<garcon-issue-close ref="close" issue-id="ISS-1" expected-revision="1" />',
-  comment: '<garcon-issue-comment ref="comment" issue-id="ISS-1">Synthetic &lt;text&gt; &amp; &amp;lt;</garcon-issue-comment>',
-  'comment-edit': `<garcon-issue-comment-edit ref="edit-comment" issue-id="ISS-1" comment-id="${commentId}" expected-revision="1">Edited.</garcon-issue-comment-edit>`,
-  'comment-delete': `<garcon-issue-comment-delete ref="remove" issue-id="ISS-1" comment-id="${commentId}" expected-revision="1" />`,
-  link: '<garcon-issue-link ref="link" issue-id="ISS-1" expected-revision="1">{"targetId":"ISS-2","targetRevision":2,"kind":"blocks"}</garcon-issue-link>',
-  unlink: '<garcon-issue-unlink ref="unlink" issue-id="ISS-1" expected-revision="1">{"targetId":"ISS-2","targetRevision":2,"kind":"related"}</garcon-issue-unlink>',
+  read: '<garcon-issue-read issue-id="G-1" />',
+  history: '<garcon-issue-history issue-id="G-1">{"limit":3,"beforeSequence":7}</garcon-issue-history>',
+  update: '<garcon-issue-update ref="edit" issue-id="G-1" expected-revision="1">{"status":"in-review","assignee":null}</garcon-issue-update>',
+  claim: '<garcon-issue-claim ref="claim" issue-id="G-1" expected-revision="1" />',
+  release: '<garcon-issue-release ref="release" issue-id="G-1" expected-revision="1" />',
+  reopen: '<garcon-issue-reopen ref="reopen" issue-id="G-1" expected-revision="1" />',
+  close: '<garcon-issue-close ref="close" issue-id="G-1" expected-revision="1" />',
+  comment: '<garcon-issue-comment ref="comment" issue-id="G-1">Synthetic &lt;text&gt; &amp; &amp;lt;</garcon-issue-comment>',
+  'comment-edit': `<garcon-issue-comment-edit ref="edit-comment" issue-id="G-1" comment-id="${commentId}" expected-revision="1">Edited.</garcon-issue-comment-edit>`,
+  'comment-delete': `<garcon-issue-comment-delete ref="remove" issue-id="G-1" comment-id="${commentId}" expected-revision="1" />`,
+  link: '<garcon-issue-link ref="link" issue-id="G-1" expected-revision="1">{"targetId":"G-2","targetRevision":2,"kind":"blocks"}</garcon-issue-link>',
+  unlink: '<garcon-issue-unlink ref="unlink" issue-id="G-1" expected-revision="1">{"targetId":"G-2","targetRevision":2,"kind":"related"}</garcon-issue-unlink>',
 };
 
 describe('issue command grammar', () => {
@@ -42,8 +42,8 @@ describe('issue command grammar', () => {
   });
 
   test('supports exact structured query, clear, and close semantics', () => {
-    expect(parseGarconIssueCommand('<garcon-issue-read issue-id="ISS-1">{"includeDescription":false,"commentLimit":1,"beforeCommentSequence":3,"expectedCollectionRevision":5}</garcon-issue-read>')?.payload.query)
-      .toEqual({ issueId: 'ISS-1', includeDescription: false, commentLimit: 1, beforeCommentSequence: 3, expectedCollectionRevision: 5 });
+    expect(parseGarconIssueCommand('<garcon-issue-read issue-id="G-1">{"includeDescription":false,"commentLimit":1,"beforeCommentSequence":3,"expectedCollectionRevision":5}</garcon-issue-read>')?.payload.query)
+      .toEqual({ issueId: 'G-1', includeDescription: false, commentLimit: 1, beforeCommentSequence: 3, expectedCollectionRevision: 5 });
     expect(parseGarconIssueCommand('<garcon-issue-list>{"includeClosed":true,"ready":false,"assignee":{"kind":"chat","chatId":"1000000000000001"}}</garcon-issue-list>')?.payload.query.ready).toBe(false);
     expect(parseGarconIssueCommand(commands.close.replace(' />', '>{"resolution":"canceled","comment":"Stopped."}</garcon-issue-close>'))?.payload.resolution).toBe('canceled');
     expect(parseGarconIssueCommand(commands.update)?.payload.patch.assignee).toBeNull();
@@ -58,14 +58,14 @@ describe('issue command grammar', () => {
       commands.create.replace('Synthetic issue', ''),
       commands.create.replace('"title":', '"unknown":'),
       commands.read.replace('read', 'show'), commands.read.replace('read', 'view'),
-      commands.read.replace('ISS-1', 'ISS-01'),
+      commands.read.replace('G-1', 'G-01'),
       commands.claim.replace('"1"', '"1.0"'),
       commands.claim.replace(' />', '> </garcon-issue-claim>'),
       commands.update.replace('in-review', 'closed'),
       commands.comment.replace('Synthetic &lt;text&gt; &amp; &amp;lt;', ' '),
       commands['comment-delete'].replace(` comment-id="${commentId}"`, ''),
-      '<garcon-issue-read issue-id="ISS-1">{"beforeCommentSequence":2}</garcon-issue-read>',
-      '<garcon-issue-read issue-id="ISS-1">{"includeDescription":"false"}</garcon-issue-read>',
+      '<garcon-issue-read issue-id="G-1">{"beforeCommentSequence":2}</garcon-issue-read>',
+      '<garcon-issue-read issue-id="G-1">{"includeDescription":"false"}</garcon-issue-read>',
       '<garcon-issue-create ref="empty" />',
     ];
     for (const xml of invalid) expect(parseGarconIssueCommand(xml)).toBeNull();
@@ -76,7 +76,7 @@ describe('issue command grammar', () => {
     expect(transformed.commands.map((command) => command.payload.action)).toEqual(['create', 'read']);
     expect(transformed.message.content).toBe('Summary.');
     for (const content of [`\`\`\`xml\n${commands.create}\n\`\`\``, `Example ${commands.read} in text.`,
-      `<garcon-issue-comment ref="nested" issue-id="ISS-1">${commands.create}</garcon-issue-comment>`]) {
+      `<garcon-issue-comment ref="nested" issue-id="G-1">${commands.create}</garcon-issue-comment>`]) {
       expect(extractGarconCommands(new AssistantMessage(at, content))?.commands ?? []).toEqual([]);
     }
     expect(extractGarconCommands(new UserMessage(at, commands.create))).toBeNull();

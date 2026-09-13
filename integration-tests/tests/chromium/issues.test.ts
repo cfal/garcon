@@ -35,13 +35,13 @@ describe("Chromium Issues interaction", () => {
       await clickWorkspaceWindowAddAction(page, "Open Issues");
       await page.getByRole("button", { name: "Board", exact: true }).click();
       await page
-        .getByRole("button", { name: "Open ISS-2", exact: true })
+        .getByRole("button", { name: "Open G-2", exact: true })
         .click();
       await page.getByRole("button", { name: "Edit", exact: true }).click();
       const title = page.getByLabel("Title", { exact: true });
       await title.fill("Newer unsaved title");
       const status = page.getByRole("button", {
-        name: "Change status of ISS-1",
+        name: "Change status of G-1",
       });
       await status.focus();
       await status.click();
@@ -74,7 +74,7 @@ describe("Chromium Issues interaction", () => {
         );
         release();
         await page
-          .locator('[data-issue-id="ISS-1"]')
+          .locator('[data-issue-id="G-1"]')
           .waitFor({ state: "hidden" });
         await page
           .getByText("This issue is outside the current filters.", {
@@ -127,7 +127,7 @@ describe("Chromium Issues interaction", () => {
         });
         await collapseCanonicalFilesWindow(page);
         await clickWorkspaceWindowAddAction(page, "Open Issues");
-        const row = page.locator('[data-issue-id="ISS-35"]');
+        const row = page.locator('[data-issue-id="G-35"]');
         await row.waitFor();
         await row.scrollIntoViewIfNeeded();
         await row.locator("button").first().focus();
@@ -154,7 +154,7 @@ describe("Chromium Issues interaction", () => {
         );
         const after = await snapshot();
         expect(after.id).toBe(before.id);
-        expect(after.focus).toBe("ISS-35");
+        expect(after.focus).toBe("G-35");
         expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(1);
         assertNoBrowserErrors();
       },
@@ -195,7 +195,7 @@ describe("Chromium Issues interaction", () => {
           chats.push(chatId);
         }
         await page.goto(
-          `${integration.garcon.baseUrl}/chat/${chats[0]}?issue=ISS-1`,
+          `${integration.garcon.baseUrl}/chat/${chats[0]}?issue=G-1`,
           { waitUntil: "domcontentloaded" },
         );
         await collapseCanonicalFilesWindow(page);
@@ -283,7 +283,7 @@ describe("Chromium Issues interaction", () => {
         });
         await mutate({
           action: "update",
-          issueId: "ISS-1",
+          issueId: "G-1",
           expectedRevision: 1,
           patch: { status: "in-review" },
         });
@@ -298,7 +298,7 @@ describe("Chromium Issues interaction", () => {
           ),
         );
         await page.setViewportSize({ width: 390, height: 900 });
-        await page.goto(`${integration.garcon.baseUrl}/?issue=ISS-1`, {
+        await page.goto(`${integration.garcon.baseUrl}/?issue=G-1`, {
           waitUntil: "domcontentloaded",
         });
         await page.locator(".issue-detail-title").waitFor();
@@ -309,7 +309,7 @@ describe("Chromium Issues interaction", () => {
         const lane = page.locator('.issue-lane[data-status="in-review"]');
         await lane.waitFor({ state: "visible" });
         expect(await lane.getAttribute("data-active")).toBe("true");
-        expect(await lane.locator('[data-issue-id="ISS-1"]').isVisible()).toBe(
+        expect(await lane.locator('[data-issue-id="G-1"]').isVisible()).toBe(
           true,
         );
         assertNoBrowserErrors();
@@ -341,7 +341,7 @@ describe("Chromium Issues interaction", () => {
           },
         });
         markPhase("opening a deep-linked issue without a chat");
-        await page.goto(`${integration.garcon.baseUrl}/?issue=ISS-1`, {
+        await page.goto(`${integration.garcon.baseUrl}/?issue=G-1`, {
           waitUntil: "domcontentloaded",
         });
         await page.locator(".issue-detail-title").waitFor();
@@ -358,7 +358,7 @@ describe("Chromium Issues interaction", () => {
         markPhase("refreshing without replacing the editor");
         await mutate({
           action: "update",
-          issueId: "ISS-1",
+          issueId: "G-1",
           expectedRevision: 1,
           patch: { title: "Remote synthetic title" },
         });
@@ -409,7 +409,7 @@ describe("Chromium Issues interaction", () => {
         await outside.focus();
         await mutate({
           action: "comment",
-          issueId: "ISS-1",
+          issueId: "G-1",
           body: "Synthetic remote comment",
         });
         await page.locator("[data-comment-id]").waitFor();
@@ -458,12 +458,12 @@ describe("Chromium Issues interaction", () => {
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
       await page.getByRole("button", { name: "Board", exact: true }).click();
-      const handle = page.locator('[data-issue-id="ISS-1"] [data-issue-drag]');
+      const handle = page.locator('[data-issue-id="G-1"] [data-issue-drag]');
       await handle.waitFor();
       await page.waitForFunction(
         () =>
           document
-            .querySelector('[data-issue-id="ISS-1"]')
+            .querySelector('[data-issue-id="G-1"]')
             ?.getAttribute("draggable") === "true",
       );
       await handle.dragTo(
@@ -471,16 +471,16 @@ describe("Chromium Issues interaction", () => {
       );
       await page
         .locator(
-          '.issue-lane[data-status="in-review"] [data-issue-id="ISS-1"][aria-busy="false"]',
+          '.issue-lane[data-status="in-review"] [data-issue-id="G-1"][aria-busy="false"]',
         )
         .waitFor();
       const current = parseIssueDetail(
-        await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
+        await integration.client.get("/api/v1/issues/detail?issueId=G-1"),
       );
       expect(current.issue.status).toBe("in-review");
       expect(current.issue.assignee).toBeNull();
       const status = page.getByRole("button", {
-        name: "Change status of ISS-1",
+        name: "Change status of G-1",
       });
       await status.focus();
       await page.keyboard.press("Enter");
@@ -491,7 +491,7 @@ describe("Chromium Issues interaction", () => {
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
       expect(
         parseIssueDetail(
-          await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
+          await integration.client.get("/api/v1/issues/detail?issueId=G-1"),
         ).issue.status,
       ).toBe("in-review");
       await status.focus();
@@ -528,12 +528,12 @@ describe("Chromium Issues interaction", () => {
           hasText: "Synthetic authoritative refresh unavailable",
         });
       await refreshError.waitFor();
-      expect(await page.locator('[data-issue-id="ISS-1"]').count()).toBe(1);
+      expect(await page.locator('[data-issue-id="G-1"]').count()).toBe(1);
       expect(
         await page
           .locator('.issues-surface > .sr-only[role="status"]')
           .textContent(),
-      ).toBe("ISS-1 moved to In review.");
+      ).toBe("G-1 moved to In review.");
       await page.unroute("**/api/v1/issues/counts?*");
       await refreshError
         .getByRole("button", { name: "Refresh", exact: true })
@@ -548,10 +548,10 @@ describe("Chromium Issues interaction", () => {
           document.activeElement ===
           document.querySelector('.issue-lane[data-status="open"] h3'),
       );
-      expect(await page.locator('[data-issue-id="ISS-1"]').count()).toBe(0);
+      expect(await page.locator('[data-issue-id="G-1"]').count()).toBe(0);
       expect(
         parseIssueDetail(
-          await integration.client.get("/api/v1/issues/detail?issueId=ISS-1"),
+          await integration.client.get("/api/v1/issues/detail?issueId=G-1"),
         ).issue.status,
       ).toBe("closed");
       const expectedFailure =
