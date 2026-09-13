@@ -193,7 +193,7 @@ describe('FileDocumentRuntime', () => {
 			folds: [],
 		};
 
-		runtime.replaceFromDisk(`zero\n${initial}`);
+		runtime.replaceFromDisk('one\nzero\ntwo');
 
 		expect(preview.pendingSourcePresentation?.selection).toEqual({
 			line: 3,
@@ -214,7 +214,7 @@ describe('FileDocumentRuntime', () => {
 			folds: [],
 		};
 
-		value.content = `zero\n${initial}`;
+		value.content = 'one\nzero\ntwo';
 
 		expect(preview.pendingSourcePresentation?.selection).toEqual({
 			line: 3,
