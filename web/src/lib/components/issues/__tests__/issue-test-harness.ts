@@ -136,16 +136,19 @@ export function issueTestHarness(initial = [syntheticIssue()]) {
 		clear: () => values.clear(),
 	} satisfies Storage;
 	const invalidations = new IssuesInvalidationHub();
+	const recovery = createIssueRecovery(() => storage);
 	const controller = new IssuesController({
 		api,
 		invalidations,
-		recovery: createIssueRecovery(() => storage),
+		recovery,
 		preferences: { read: () => ({ layout: 'list', query: {} }), write: () => {} },
 	});
 	return {
 		controller,
 		api,
 		invalidations,
+		recovery,
+		storage,
 		setItems(next: Issue[]) {
 			items = next;
 			revision++;

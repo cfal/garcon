@@ -5,7 +5,6 @@
 	import * as m from '$lib/paraglide/messages.js';
 	let { controller }: { controller: IssuesController } = $props();
 	let message = $state('');
-	let discardKey = $state<string | null>(null);
 	const retained = $derived(
 		controller.drafts.active.filter((draft) => draft.needsExitGuard && !draft.pending),
 	);
@@ -50,35 +49,17 @@
 					type="button"
 					class="issue-text-button"
 					disabled={draft.pending}
-					onclick={() => (discardKey = draft.current.id)}>{m.issues_discard()}</button
+					onclick={() => draft.discard()}>{m.issues_discard()}</button
 				>
-				{#if discardKey === draft.current.id}<p>{m.issues_discard_confirm()}</p>
-					<button
-						class="issue-button"
-						onclick={() => {
-							draft.discard();
-							discardKey = null;
-						}}>{m.issues_discard()}</button
-					><button class="issue-button" onclick={() => (discardKey = null)}
-						>{m.issues_keep()}</button
-					>{/if}
 				<IssueDraftFeedback {draft} />
 			</div>{/each}
 		{#each unreadable as entry (entry.key)}<div class="issue-recovery-entry">
 				<strong>{m.issues_unreadable()}</strong><button
 					class="issue-text-button"
 					onclick={() => void copy(entry.raw)}>{m.issues_copy_raw()}</button
-				><button class="issue-text-button" onclick={() => (discardKey = entry.key)}
+				><button class="issue-text-button" onclick={() => controller.drafts.discardEntry(entry)}
 					>{m.issues_discard()}</button
 				>
-				{#if discardKey === entry.key}<p>{m.issues_discard_confirm()}</p>
-					<button
-						class="issue-button"
-						onclick={() => {
-							controller.drafts.discardEntry(entry);
-							discardKey = null;
-						}}>{m.issues_discard()}</button
-					>{/if}
 			</div>{/each}
 		{#each controller.drafts.oldEntries as { partition, entry } (entry.key)}<div
 				class="issue-recovery-entry"
@@ -87,19 +68,11 @@
 				<button class="issue-button" onclick={() => void copy(entry.raw)}
 					>{m.issues_copy_raw()}</button
 				>
-				<button class="issue-button" onclick={() => (discardKey = entry.key)}
+				<button
+					class="issue-button"
+					onclick={() => controller.drafts.discardOldEntry(partition, entry)}
 					>{m.issues_discard()}</button
 				>
-				{#if discardKey === entry.key}<p>{m.issues_discard_confirm()}</p>
-					<button
-						class="issue-button"
-						onclick={() => {
-							controller.drafts.discardOldEntry(partition, entry);
-							discardKey = null;
-						}}>{m.issues_discard()}</button
-					><button class="issue-button" onclick={() => (discardKey = null)}
-						>{m.issues_keep()}</button
-					>{/if}
 			</div>{/each}
 		{#each memoryOnly as draft (`${draft.current.storeId}:${draft.current.id}`)}<div
 				class="issue-recovery-entry"
@@ -110,24 +83,9 @@
 					onclick={() => void copy(JSON.stringify(draft.current, null, 2))}
 					>{m.issues_copy()}</button
 				>
-				<button
-					class="issue-button"
-					disabled={draft.pending}
-					onclick={() => (discardKey = `${draft.current.storeId}:${draft.current.id}`)}
+				<button class="issue-button" disabled={draft.pending} onclick={() => draft.discard()}
 					>{m.issues_discard()}</button
 				>
-				{#if discardKey === `${draft.current.storeId}:${draft.current.id}`}<p>
-						{m.issues_discard_confirm()}
-					</p>
-					<button
-						class="issue-button"
-						onclick={() => {
-							draft.discard();
-							discardKey = null;
-						}}>{m.issues_discard()}</button
-					><button class="issue-button" onclick={() => (discardKey = null)}
-						>{m.issues_keep()}</button
-					>{/if}
 				<IssueDraftFeedback {draft} />
 			</div>{/each}
 		{#if message}<p role="status">{message}</p>{/if}

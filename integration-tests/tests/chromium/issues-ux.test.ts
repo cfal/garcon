@@ -404,6 +404,18 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
         .getByText("Synthetic rejected move", { exact: true })
         .first()
         .waitFor();
+      await page
+        .locator(".issue-browser > .issue-notice")
+        .getByRole("button", { name: "Discard draft" })
+        .click();
+      expect(
+        await page
+          .getByText("Synthetic rejected move", { exact: true })
+          .count(),
+      ).toBe(0);
+      expect(
+        await page.getByRole("button", { name: "Keep editing" }).count(),
+      ).toBe(0);
       expect(browserErrors.filter((error) => !error.includes("409"))).toEqual(
         [],
       );

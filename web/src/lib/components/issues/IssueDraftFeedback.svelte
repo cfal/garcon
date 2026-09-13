@@ -4,7 +4,6 @@
 	import { copyToClipboard } from '$lib/utils/clipboard.js';
 	import * as m from '$lib/paraglide/messages.js';
 	let { draft }: { draft: IssueDraftState } = $props();
-	let discard = $state(false);
 	let copyMessage = $state('');
 	const current = $derived(draft.conflict?.comment ?? draft.conflict?.issue);
 	async function copy() {
@@ -62,20 +61,9 @@
 				type="button"
 				class="issue-button"
 				disabled={draft.pending}
-				onclick={() => (discard = true)}>{m.issues_discard()}</button
+				onclick={() => draft.discard()}>{m.issues_discard()}</button
 			>
 		</div>
-		{#if discard}<p>{m.issues_discard_confirm()}</p>
-			<button
-				type="button"
-				class="issue-button"
-				onclick={() => {
-					draft.discard();
-					discard = false;
-				}}>{m.issues_discard()}</button
-			><button type="button" class="issue-button" onclick={() => (discard = false)}
-				>{m.issues_keep()}</button
-			>{/if}
 		{#if copyMessage}<p>{copyMessage}</p>{/if}
 	</div>
 {/if}
