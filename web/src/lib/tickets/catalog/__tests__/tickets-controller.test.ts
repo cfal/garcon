@@ -155,6 +155,67 @@ afterEach(() => {
 });
 
 describe('Tickets controller', () => {
+	it.each([
+		undefined,
+		'unassigned',
+		{ kind: 'user', username: 'synthetic-user' },
+		{ kind: 'chat', chatId: '1000000000000001' },
+	] satisfies TicketListQuery['assignee'][])(
+		'preserves an equal in-flight query with assignee %j',
+		async (assignee) => {
+			const { controller, api, preferences } = harness();
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			const barrier = deferred<void>();
+			const counts = api.counts.getMockImplementation()!;
+			api.counts.mockImplementationOnce(async (...args) => {
+				await barrier.promise;
+				return counts(...args);
+			});
+			controller.setQuery({ query: 'Synthetic', priority: 0, ready: false, assignee });
+			const query = controller.query;
+			const countsCalls = api.counts.mock.calls.length;
+			const writes = preferences.write.mock.calls.length;
+			try {
+				controller.setQuery({
+					assignee: assignee && typeof assignee === 'object' ? { ...assignee } : assignee,
+					ready: false,
+					priority: 0,
+					query: '  Synthetic  ',
+					limit: 10,
+					beforeNumber: 2,
+					expectedCollectionRevision: 1,
+				});
+				expect(controller.query).toBe(query);
+				expect(controller.loading).toBe(true);
+				expect(api.counts).toHaveBeenCalledTimes(countsCalls);
+				expect(preferences.write).toHaveBeenCalledTimes(writes);
+			} finally {
+				barrier.resolve();
+			}
+			await controller.refresh();
+			expect(api.counts).toHaveBeenCalledTimes(countsCalls);
+			expect(controller.loading).toBe(false);
+			expect(controller.stale).toBe(false);
+		},
+	);
+
+	it.each([false, true])('allows an idle equal-query refresh after failure: %s', async (failed) => {
+		const { controller, api } = harness();
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		if (failed) api.counts.mockRejectedValueOnce(new ApiError(503, 'Synthetic refresh failure'));
+		controller.setQuery({ query: 'Synthetic' });
+		await controller.refresh();
+		expect(controller.stale).toBe(failed);
+		const countsCalls = api.counts.mock.calls.length;
+		controller.setQuery({ query: 'Synthetic' });
+		await controller.refresh();
+		expect(api.counts).toHaveBeenCalledTimes(countsCalls + 1);
+		expect(controller.error).toBeNull();
+		expect(controller.stale).toBe(false);
+	});
+
 	it('retains displayed results but never reuses their cursors for a new query at the same revision', async () => {
 		const { controller, api } = harness(
 			Array.from({ length: 550 }, (_, index) => ticket(index + 1)),

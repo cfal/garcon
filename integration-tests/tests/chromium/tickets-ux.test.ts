@@ -569,20 +569,27 @@ test("Tickets toolbar stays aligned and search retains the board until results a
           .count(),
       ).toBe(0);
       const started = new Deferred<Route>();
+      const searchQuery = "No matching synthetic ticket ".repeat(6).trim();
+      let searchRequests = 0;
       await context.route("**/api/v1/tickets/counts?*", async (route) => {
+        if (new URL(route.request().url()).searchParams.get("query") !== searchQuery) {
+          await route.continue();
+          return;
+        }
+        searchRequests++;
         if (!started.resolve(route)) await route.continue();
       });
+      const beforeBoard = await page.locator(".ticket-board").boundingBox();
       await page
         .getByPlaceholder("Search tickets…")
-        .fill("No matching synthetic ticket ".repeat(6));
-      const beforeBoard = await page.locator(".ticket-board").boundingBox();
-      await page.getByPlaceholder("Search tickets…").press("Enter");
+        .fill(searchQuery);
       const held = await withTimeout(
         started.promise,
         20_000,
-        () => "Search was not captured",
+        () => "Debounced search was not captured",
       );
       try {
+        await page.getByPlaceholder("Search tickets…").press("Enter");
         expect(await card.isVisible()).toBe(true);
         expect(await page.locator(".ticket-board").boundingBox()).toEqual(
           beforeBoard,
@@ -602,6 +609,7 @@ test("Tickets toolbar stays aligned and search retains the board until results a
         await held.continue();
       }
       await card.waitFor({ state: "hidden" });
+      expect(searchRequests).toBe(1);
       await page
         .getByRole("combobox", { name: "Status", exact: true })
         .selectOption("in-review");
