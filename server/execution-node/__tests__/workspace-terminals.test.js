@@ -533,6 +533,45 @@ test.each(['terminal-taken-over', 'terminal-replay-truncated', 'terminal-attache
   },
 );
 
+test.each(['terminal-taken-over', 'terminal-replay-truncated', 'terminal-attached', 'terminal-output'])(
+  'expiry during %s fails attachment and releases only the expiring peer',
+  async (event) => {
+    let now = 0;
+    const child = pty();
+    const owner = service({ spawnPty: () => child, replayBytes: 1, now: () => now });
+    const { terminal } = await owner.create(principal, {
+      requestId: 'expiry-create', requestedInitialWorkingDirectory: null,
+    });
+    const emit = (data) => child.dataListeners.forEach((listener) => listener(data));
+    const original = peer('original', (message) => {
+      if (message.type === event) now = 1;
+    });
+    const request = { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'old',
+      afterSequence: 0, intent: 'restore' };
+    owner.attach(principal, original, request);
+    emit('a'); emit('b'); now = 0;
+    const messages = [];
+    const replacement = peer('replacement', (message) => {
+      messages.push(message);
+      if (message.type === event) now = 1;
+      if (message.type === 'terminal-attached' && event === 'terminal-output') emit('c');
+    });
+    expectTerminalError(() => owner.attach({ ...principal, expiresAtMs: 1 }, replacement,
+      { ...request, clientId: 'new', intent: 'takeover' }), 'terminal-auth-expired');
+    expect(owner.list(principal)[0].attachmentStatus).toBe('detached');
+    expectTerminalError(() => owner.input(principal, replacement, terminal.terminalId, 'expired'), 'terminal-not-attached');
+    const received = messages.length;
+    owner.rename(principal, terminal.terminalId, 'Synthetic title');
+    emit('d');
+    expect(messages).toHaveLength(received);
+    const successor = peer('successor');
+    owner.attach(principal, successor, { ...request, clientId: 'successor', afterSequence: 0 });
+    owner.input(principal, successor, terminal.terminalId, 'current');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(child.writes).toEqual(['current']);
+  },
+);
+
 test('takeover delivers replay before output emitted reentrantly during either peer callback', async () => {
   const child = pty();
   const owner = service({ spawnPty: () => child });

@@ -178,6 +178,40 @@ describe('workspace terminals through authenticated HTTP and WebSocket', () => {
     },
   );
 
+  test.each(['terminal-taken-over', 'terminal-replay-truncated', 'terminal-attached', 'terminal-output'] as const)(
+    'reports attachment expiry during %s and permits a fresh attachment', async (event) => {
+      await withIntegrationFixture(`workspace-attach-expiry-${event}`, async (fixture) => {
+        const { terminal } = await fixture.client.post<TerminalCreateResponse>('/api/v1/terminals', {
+          requestId: 'expiry-create', requestedInitialWorkingDirectory: fixture.dirs.project,
+        });
+        const original = await TerminalClient.connect(fixture);
+        const replacement = await TerminalClient.connect(fixture);
+        const attach = { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'original',
+          afterSequence: 0, intent: 'restore' } as const;
+        try {
+          original.send(attach);
+          await original.waitFor((messages) => messages.find((message) => message.type === 'terminal-attached'));
+          original.send({ type: 'terminal-input', terminalId: terminal.terminalId, data: 'first' });
+          original.send({ type: 'terminal-input', terminalId: terminal.terminalId, data: 'second' });
+          await original.waitForOutput('synthetic-echo:second');
+          replacement.send({ ...attach, clientId: 'expiring', intent: 'takeover' });
+          const failure = await replacement.waitFor((messages) => messages.find((message) => message.type === 'terminal-error'));
+          expect(failure).toMatchObject({ code: 'terminal-auth-expired', terminalId: terminal.terminalId });
+          const listed = await fixture.client.get<TerminalListResponse>('/api/v1/terminals');
+          expect(listed.terminals[0].attachmentStatus).toBe('detached');
+          replacement.send({ ...attach, clientId: 'fresh' });
+          replacement.send({ type: 'terminal-input', terminalId: terminal.terminalId, data: 'fresh' });
+          await replacement.waitForOutput('synthetic-echo:fresh');
+        } finally {
+          await Promise.all([original.close(), replacement.close()]);
+        }
+      }, { authentication: 'account', bindAddress: '0.0.0.0',
+        preloadModules: [fileURLToPath(new URL('../../support/workspace-terminals-stream-preload.ts', import.meta.url))],
+        resolveServerEnvironment: () => ({ GARCON_TEST_TERMINAL_ATTACH_EXPIRY: event }),
+      });
+    },
+  );
+
   test('takeover replays earlier bytes before output produced during peer notifications', async () => {
     await withIntegrationFixture(
       'workspace-terminal-takeover-order',

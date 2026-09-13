@@ -113,20 +113,10 @@ function terminateRequestKey(terminalId: string, requestId: string): string {
   return JSON.stringify([terminalId, requestId]);
 }
 
-async function defaultSpawnPty(
-  file: string,
-  args: string[],
-  options: {
-    name: string;
-    cols: number;
-    rows: number;
-    cwd: string;
-    env: Record<string, string>;
-  },
-): Promise<TerminalPty> {
+const defaultSpawnPty: PtySpawner = async (file, args, options) => {
   const { spawn } = await import("bun-pty");
   return spawn(file, args, options);
-}
+};
 
 export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
   readonly #sessionsByPrincipal = new Map<
@@ -505,6 +495,14 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
     session.attachmentGeneration += 1;
     session.metadata.attachmentStatus = "attached";
     const generation = session.attachmentGeneration;
+    const attachmentPrincipal = { key: session.principalKey, expiresAtMs: attachment.expiresAtMs };
+    const ownsInitialization = () => {
+      if (session.attachment !== attachment || session.attachmentGeneration !== generation) return false;
+      this.#assertAvailable(attachmentPrincipal);
+      this.#assertPeerActive(peer);
+      if (session.terminating) throw new WorkspaceTerminalError("terminal-internal", "Terminal is terminating.");
+      return true;
+    };
     if (
       previous &&
       previous.clientId !== request.clientId &&
@@ -524,7 +522,7 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
       }
     }
     try {
-      if (!this.#stillOwns(session, peer, generation)) return;
+      if (!ownsInitialization()) return;
       let throughSequence = session.metadata.latestOutputSequence;
       const replay = session.replay.after(request.afterSequence);
       const firstSequence = session.replay.firstRetainedSequence;
@@ -534,12 +532,12 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
           terminalId: session.metadata.terminalId,
           firstSequence,
         });
-        if (!this.#stillOwns(session, peer, generation)) return;
+        if (!ownsInitialization()) return;
       }
       const terminal = cloneTerminalMetadata(session.metadata);
       peer.sendTerminalMessage({ type: "terminal-attached", terminal, replay });
       while (
-        this.#stillOwns(session, peer, generation) &&
+        ownsInitialization() &&
         throughSequence < session.metadata.latestOutputSequence
       ) {
         const latestSequence = session.metadata.latestOutputSequence;
@@ -553,7 +551,7 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
           });
         }
         for (const chunk of chunks) {
-          if (!this.#stillOwns(session, peer, generation)) return;
+          if (!ownsInitialization()) return;
           peer.sendTerminalMessage({
             type: "terminal-output",
             terminalId: terminal.terminalId,
@@ -562,11 +560,11 @@ export class LocalWorkspaceTerminalService implements WorkspaceTerminalService {
         }
         throughSequence = latestSequence;
       }
-      if (!this.#stillOwns(session, peer, generation)) return;
+      if (!ownsInitialization()) return;
       attachment.initializing = false;
     } catch (error) {
       if (session.attachment === attachment)
-        this.detachTerminal(principal, peer, session.metadata.terminalId);
+        this.detachTerminal(attachmentPrincipal, peer, session.metadata.terminalId);
       throw error;
     }
     logger.info(

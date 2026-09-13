@@ -20,6 +20,9 @@ let handler: TerminalStreamHandler | undefined;
 let socket: Parameters<TerminalStreamHandler['message']>[0] | undefined;
 const reentrantOutput = process.env.GARCON_TEST_TERMINAL_REENTRANT_OUTPUT === '1';
 const reentrantMetadata = process.env.GARCON_TEST_TERMINAL_REENTRANT_METADATA;
+const attachExpiry = process.env.GARCON_TEST_TERMINAL_ATTACH_EXPIRY;
+let ownerNow = 0;
+let expiringAttachment = false;
 let metadataDelivered = false;
 let terminalOwner: LocalWorkspaceTerminalService | undefined;
 let attachedMessages = 0;
@@ -28,7 +31,8 @@ class ControlledTerminalService extends LocalWorkspaceTerminalService {
   constructor(options: ConstructorParameters<typeof LocalWorkspaceTerminalService>[0]) {
     super({
       ...options,
-      ...(reentrantMetadata ? { replayBytes: 1 } : {}),
+      ...(reentrantMetadata || attachExpiry ? { replayBytes: 1 } : {}),
+      ...(attachExpiry ? { now: () => ownerNow } : {}),
       spawnPty: () => {
         let output = (_data: string) => {};
         outputs.push((data) => output(data));
@@ -57,7 +61,12 @@ class ControlledTerminalService extends LocalWorkspaceTerminalService {
       outputs[0]('a');
       outputs[0]('b');
     }
-    super.attach(...args);
+    expiringAttachment = !!attachExpiry && args[2].clientId === 'expiring';
+    try {
+      super.attach(expiringAttachment ? { ...args[0], expiresAtMs: 1 } : args[0], args[1], args[2]);
+    } finally {
+      expiringAttachment = false;
+    }
   }
 }
 
@@ -91,6 +100,13 @@ mock.module('../../server/ws/transport.js', () => ({
       }
     }
     const status = sendPayload(...args);
+    if (expiringAttachment) {
+      const message: unknown = JSON.parse(args[1]);
+      if (isRecord(message)) {
+        if (message.type === attachExpiry) ownerNow = 1;
+        if (message.type === 'terminal-attached' && attachExpiry === 'terminal-output') outputs[0]('c');
+      }
+    }
     if (reentrantMetadata && !metadataDelivered) {
       const message: unknown = JSON.parse(args[1]);
       if (isRecord(message) && message.type === 'terminal-replay-truncated') {
