@@ -20,6 +20,7 @@ const integration = {
     configuration: [],
   },
   attachments: null,
+  executionLifetime: null, singleQueryLifetime: null, textGenerationLifetime: null,
   execution: {
     start: async () => ({ id: 'execution' }),
     resume: async () => ({ id: 'execution' }),
@@ -108,6 +109,9 @@ describe('validateAgentIntegration', () => {
   test('requires every nullable capability to declare its state', () => {
     const nullableFacets = [
       'attachments',
+      'executionLifetime',
+      'singleQueryLifetime',
+      'textGenerationLifetime',
       'auth',
       'commands',
       'compaction',
@@ -137,6 +141,9 @@ describe('validateAgentIntegration', () => {
   test('rejects malformed required and advertised facet shapes', () => {
     const invalidFacets = [
       ['execution', { ...integration.execution, runningSessions: undefined }],
+      ['executionLifetime', {}],
+      ['singleQueryLifetime', {}],
+      ['textGenerationLifetime', {}],
       ['catalog', {}],
       ['settings', { ...integration.settings, applyPatch: undefined }],
       ['lifecycle', { ...integration.lifecycle, migrateOwnedStorage: undefined }],

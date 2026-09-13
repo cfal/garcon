@@ -2,7 +2,7 @@ import {
   isExecutionIdentity, parseExecutionLocation, type ExecutionLocation,
 } from '../../common/execution-location.js';
 import { isStoredProjectPath } from '../../common/execution-nodes.js';
-import type { ProviderExecutionService } from '../execution-nodes/provider-execution.js';
+import type { ProviderRetainedExecutionService } from '../execution-nodes/provider-execution.js';
 import type { WorkspaceFileService } from '../execution-nodes/workspace-files.js';
 import { DomainError, ProjectUnavailableError } from '../lib/domain-error.js';
 
@@ -17,14 +17,14 @@ export interface NodeExecutionSourceTarget {
 export interface NodeExecutionResource {
   readonly location: ExecutionLocation;
   readonly projectPath: string;
-  readonly execution: ProviderExecutionService;
+  readonly execution: ProviderRetainedExecutionService | null;
   readonly files: Pick<WorkspaceFileService, 'inspectProject'>;
 }
 
 export interface PreparedNodeExecutionResource {
   readonly location: ExecutionLocation;
   readonly projectPath: string;
-  readonly execution: ProviderExecutionService;
+  readonly execution: ProviderRetainedExecutionService | null;
   /** Ends when this grant retires, independently of the preparation caller. */
   readonly signal: AbortSignal;
   validate(): void;

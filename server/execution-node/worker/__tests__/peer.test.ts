@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 import { NodeWorkerPeer, type NodeWorkerProcessPort } from '../peer.js';
 import { encodeNodeWorkerFrame } from '../framing.js';
-import { MAX_NODE_WORKER_LIFECYCLE_BYTES, parseNodeWorkerParentText, serializeNodeWorkerChild, type NodeWorkerChildMessage } from '../protocol.js';
+import { MAX_NODE_WORKER_LIFECYCLE_BYTES, parseNodeWorkerParentText, serializeNodeWorkerChild, type NodeWorkerChildMessage, type NodeWorkerContainmentRequest } from '../protocol.js';
 import { configuration, manifest, session, tick } from './lifecycle-fixture.js';
 import { parseNodeWorkerExecutionText, serializeNodeWorkerExecution, type NodeWorkerExecutionFrame } from '../execution-protocol.js';
 import { serializeNodeExecutionReply } from '../../../execution-nodes/transport/execution-receipt-wire.js';
@@ -17,6 +17,7 @@ function fixture() {
   let blocked: Promise<void> | null = null;
   let valid = true;
   const failed = mock(() => {});
+  const containmentRequested = mock((_request: NodeWorkerContainmentRequest): void => {});
   const received = mock((_frame: NodeWorkerApplicationFrame, _text: string): void => {});
   const end = mock(() => 0);
   const processPort = {
@@ -27,10 +28,10 @@ function fixture() {
       return bytes.byteLength;
     }, flush: () => blocked ? blocked.then(() => 0) : 0, end },
   } satisfies NodeWorkerProcessPort;
-  const peer = new NodeWorkerPeer(processPort, { role: 'session', signal: new AbortController().signal, failed, received,
+  const peer = new NodeWorkerPeer(processPort, { role: 'session', signal: new AbortController().signal, failed, received, containmentRequested,
     validate() { if (!valid) throw new Error('Synthetic replaced authority'); } });
   const receive = (message: NodeWorkerChildMessage) => readable!.enqueue(encodeNodeWorkerFrame(serializeNodeWorkerChild(message), MAX_NODE_WORKER_LIFECYCLE_BYTES));
-  return { peer, sent, failed, received, end, receive,
+  return { peer, sent, failed, received, containmentRequested, end, receive,
     batch(texts: readonly string[]) { readable!.enqueue(Buffer.concat(texts.map((text) => encodeNodeWorkerFrame(text, MAX_NODE_WORKER_LIFECYCLE_BYTES)))); },
     application(text: string) { readable!.enqueue(encodeNodeWorkerFrame(text, MAX_NODE_WORKER_LIFECYCLE_BYTES)); },
     receiveExecution(frame: NodeWorkerExecutionFrame) { readable!.enqueue(encodeNodeWorkerFrame(serializeNodeWorkerExecution(frame), MAX_NODE_WORKER_LIFECYCLE_BYTES)); },
@@ -254,3 +255,32 @@ test.each(['wrong role', 'duplicate hello', 'ready before configure', 'foreign r
     } finally { f.close(); }
   },
 );
+
+
+test('whole-session containment from an exact configured instance survives physical disconnect', async () => {
+  const f = fixture();
+  try {
+    await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
+    await f.peer.disconnect(1);
+    const request: NodeWorkerContainmentRequest = { type: 'node-worker-containment-request', version: 1, session,
+      instanceId: configuration().instances[0]!.id, operationId: 'synthetic-operation', reason: 'native-settlement-unconfirmed' };
+    f.receive(request); await tick();
+    expect(f.containmentRequested).toHaveBeenCalledWith(request);
+    expect(f.received).not.toHaveBeenCalled();
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
+test.each(['instance', 'session'] as const)('foreign %s containment cannot retire the current worker tree', async (foreign) => {
+  const f = fixture();
+  try {
+    await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
+    f.receive({ type: 'node-worker-containment-request', version: 1,
+      session: foreign === 'session' ? { ...session, logicalSessionId: 'synthetic-foreign' } : session,
+      instanceId: foreign === 'instance' ? 'synthetic-foreign' : configuration().instances[0]!.id,
+      operationId: 'synthetic-operation', reason: 'native-settlement-unconfirmed' });
+    await tick();
+    expect(f.containmentRequested).not.toHaveBeenCalled();
+    expect(f.failed).toHaveBeenCalledTimes(1);
+  } finally { f.close(); }
+});

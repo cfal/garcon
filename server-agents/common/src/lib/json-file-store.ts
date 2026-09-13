@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
 
 export async function writeJsonFileAtomic(
   filePath: string,
@@ -29,7 +30,7 @@ export async function writeJsonFileAtomic(
   }
 }
 
-export async function syncDirectory(dir: string): Promise<void> {
+export async function syncDirectory(dir: string, cleanup: NativeCleanupObserver | null = null): Promise<void> {
   let directory: Awaited<ReturnType<typeof fs.open>> | null = null;
   try {
     directory = await fs.open(dir, 'r');
@@ -38,7 +39,7 @@ export async function syncDirectory(dir: string): Promise<void> {
     if (isUnsupportedDirectorySyncError(error)) return;
     throw error;
   } finally {
-    if (directory) await directory.close().catch(() => {});
+    if (directory) await directory.close().catch((error: unknown) => cleanup?.failed(error));
   }
 }
 

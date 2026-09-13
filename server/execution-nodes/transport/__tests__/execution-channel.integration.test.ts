@@ -82,13 +82,16 @@ test('a lost WebSocket dispatch reply reconciles the same native occurrence thro
     expect(f.execution.start).toHaveBeenCalledTimes(1);
     nextConnection = f.supervisor.attach(f.session);
     const second = await connect();
-    expect(await second.call({ method: 'status', identity }, caller.signal)).toMatchObject({ kind: 'status', receipt: { phase: 'dispatched', dispatch: 'completed' } });
+    expect(await second.call({ method: 'status', identity }, caller.signal)).toMatchObject({ kind: 'status', receipt: { phase: 'dispatched', dispatch: 'accepted' } });
     expect(await second.call({ method: 'prepare', location: f.location, request: f.request }, caller.signal)).toEqual({ kind: 'rejected', code: 'NODE_UNAVAILABLE' });
     expect(await second.call({ method: 'abort', identity }, caller.signal)).toEqual({ kind: 'abort-result', requested: true });
     expect(f.execution.abort).toHaveBeenCalledTimes(1);
     f.execution.start.mock.calls[0]![0].output.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
     expect(await second.call({ method: 'status', identity }, caller.signal)).toMatchObject({ kind: 'status', receipt: { phase: 'ended', abort: 'requested' } });
     f.supervisor.completeRecovery(nextConnection, f.supervisor.beginRecovery(nextConnection));
+    expect(await second.call({ method: 'prepare', location: f.location, request: { ...f.request, runId: 'synthetic-next-run' } }, caller.signal))
+      .toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    await f.settleNative();
     expect(await second.call({ method: 'prepare', location: f.location, request: { ...f.request, runId: 'synthetic-next-run' } }, caller.signal))
       .toMatchObject({ kind: 'prepared', ticket: { runId: 'synthetic-next-run' } });
     expect(f.execution.start).toHaveBeenCalledTimes(1);

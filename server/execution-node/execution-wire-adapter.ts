@@ -35,8 +35,10 @@ export class NodeExecutionWireAdapter {
           const output = this.capabilities.output(command.stream, command.identity);
           const body = this.#body(command.body, command.identity, 'execution', null);
           if (body.kind !== 'execution') throw new InvalidExecutionBody();
-          await this.table.dispatch(connection, command.identity, body.input, output);
-          return { kind: 'dispatched' };
+          const outcome = await this.table.dispatch(connection, command.identity, body.input, output);
+          if (outcome.kind === 'accepted') return { kind: 'dispatched' };
+          if (outcome.kind === 'unknown') return { kind: 'unknown' };
+          throw outcome.error;
         }
         case 'release': this.table.release(connection, command.identity); return { kind: 'released' };
         case 'abort': return { kind: 'abort-result', requested: await this.table.abort(connection, command.identity) };

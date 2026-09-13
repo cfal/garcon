@@ -10,6 +10,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { CodexExecution } from '../../execution.ts';
 import { LocalProviderExecutionService } from '../../../../../../../server/execution-node/local-provider-execution.ts';
 import { NodeOperationTable } from '../../../../../../../server/execution-node/operation-table.ts';
+import { NodeNativeOccupancy } from '../../../../../../../server/execution-node/native-occupancy.ts';
+import { executionLifetimeFixture } from '../../../../../../../server/execution-node/__tests__/execution-lifetime-fixture.ts';
 import { NodeExecutionResources } from '../../../../../../../server/execution-node/execution-resources.ts';
 import { NodeSupervisor } from '../../../../../../../server/execution-node/supervisor.ts';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
@@ -9400,6 +9402,7 @@ it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached'
     const resume = execution.resume.bind(execution);
     execution.resume = async (...args) => { await resume(...args); started.resolve(); };
     const adapter = createAgentProducerAdapter(execution, { warn() {}, info() {}, error() {}, debug() {} });
+    const native = executionLifetimeFixture(adapter.execution, null);
     const configuration = {
       model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'none',
       settings: { ownerId: 'codex', schemaVersion: 1, values: {} }, endpoint: null,
@@ -9414,7 +9417,7 @@ it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached'
       }) },
     });
     const integration = {
-      descriptor: { id: 'codex' }, execution: adapter.execution, compaction: null, steering: null,
+      descriptor: { id: 'codex' }, execution: adapter.execution, executionLifetime: native.lifetime, compaction: null, steering: null,
       goals: { submitControl: (request) => (goalSubmission = adapter.submitGoalControl(request, async (goal, publish) => {
         try {
           return await execution.submitGoalControl({
@@ -9441,10 +9444,15 @@ it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached'
     supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
     const location = { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' };
     const resources = new NodeExecutionResources(location.nodeId);
-    resources.register({ location, execution: service, projectPath: '/repo',
+    resources.register({ location, execution: service.retained, projectPath: '/repo',
       files: { inspectProject: async () => ({ kind: 'available', effectiveProjectKey: '/repo' }) },
     });
-    const table = new NodeOperationTable({ connection, supervisor, resources, limits: { maxOperations: 1 } });
+    const table = new NodeOperationTable({ connection, supervisor, resources, occupancy: new NodeNativeOccupancy(1),
+      requestContainment() { throw new Error('Synthetic native settlement was not released'); }, limits: { maxOperations: 1 } });
+    const settleNative = async () => {
+      native.settlements[0].resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+    };
     const request = {
       kind: 'resume', chatId: 'synthetic-chat', runId: 'synthetic-original', agentSessionId: 'thread-1', nativeSession: null,
       configuration: { model: configuration.model, settings: null, endpoint: null },
@@ -9477,6 +9485,8 @@ it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached'
         await expect(table.prepare(connection, location, request, signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
         settleGoal.resolve();
         await expect(goalSubmission).rejects.toThrow('Codex session ended before goal control delivery');
+        await expect(table.prepare(connection, location, request, signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+        await settleNative();
         await expect(table.prepare(connection, location, request, signal)).resolves.toHaveProperty('identity');
         return;
       }
@@ -9511,12 +9521,15 @@ it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached'
       }
       settleGoal.resolve();
       expect(await committed).toEqual(scenario.startsWith('accepted') ? { kind: 'accepted' } : { kind: 'failed', outcome: 'unknown' });
+      await expect(table.prepare(connection, location, request, signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+      await settleNative();
       await expect(table.prepare(connection, location, request, signal)).resolves.toHaveProperty('identity');
       expect(fake.resumeThread).toHaveBeenCalledTimes(1);
       expect(fake.startThread).not.toHaveBeenCalled();
       expect(nativeCommits).toBe(1);
     } finally {
       settleGoal.resolve();
+      for (const settlement of native.settlements) settlement.resolve();
       table.close();
       resources.close();
       await supervisor.shutdown();

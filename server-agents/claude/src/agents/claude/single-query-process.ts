@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { NativeQueryLifetime } from '@garcon/server-agent-common/execution/native-query-lifetime';
 
 const MAX_SINGLE_QUERY_STDOUT_BYTES = 4 * 1024 * 1024;
 const MAX_SINGLE_QUERY_STDERR_BYTES = 16 * 1024;
@@ -13,6 +14,7 @@ interface ClaudeSingleQueryProcessOptions {
   readonly envOverrides?: Record<string, string>;
   readonly signal: AbortSignal;
   readonly logger: AgentLogger;
+  readonly nativeLifetime?: Pick<NativeQueryLifetime, 'accepted' | 'track' | 'failed'>;
 }
 
 export async function runClaudeSingleQueryProcess({
@@ -22,27 +24,50 @@ export async function runClaudeSingleQueryProcess({
   envOverrides,
   signal,
   logger,
+  nativeLifetime,
 }: ClaudeSingleQueryProcessOptions): Promise<string> {
   const { CLAUDECODE, ...env } = process.env;
-  const proc = Bun.spawn([binary, ...args], {
-    cwd,
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    signal,
-    env: { ...env, ...envOverrides },
-  });
+  let proc: import('bun').Subprocess<'ignore', 'pipe', 'pipe'>;
+  try {
+    proc = Bun.spawn([binary, ...args], {
+      cwd,
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      signal,
+      env: { ...env, ...envOverrides },
+    });
+  } catch (error) {
+    nativeLifetime?.failed(error);
+    throw error;
+  }
+  nativeLifetime?.accepted();
+  const output = readBoundedOutput(proc.stdout, MAX_SINGLE_QUERY_STDOUT_BYTES, 'stdout');
+  const diagnostics = readBoundedOutput(proc.stderr, MAX_SINGLE_QUERY_STDERR_BYTES, 'stderr');
+  let terminationRequested = signal.aborted;
+  const onAbort = () => { terminationRequested = true; };
+  signal.addEventListener('abort', onAbort, { once: true });
+  nativeLifetime?.track(Promise.allSettled([output, diagnostics, proc.exited]).then((completions) => {
+    for (const completion of completions) {
+      if (completion.status === 'rejected') throw completion.reason;
+    }
+    const exit = completions[2];
+    if (terminationRequested || proc.signalCode !== null || exit.status !== 'fulfilled' || exit.value !== 0) {
+      throw new Error('Claude one-shot native settlement requires supervised containment');
+    }
+  }));
 
   let stdout: string;
   let stderr: string;
   let exitCode: number;
   try {
     [stdout, stderr, exitCode] = await Promise.all([
-      readBoundedOutput(proc.stdout, MAX_SINGLE_QUERY_STDOUT_BYTES, 'stdout'),
-      readBoundedOutput(proc.stderr, MAX_SINGLE_QUERY_STDERR_BYTES, 'stderr'),
+      output,
+      diagnostics,
       proc.exited,
     ]);
   } catch (error) {
+    terminationRequested = true;
     try {
       await terminateFailedProcess(proc);
     } catch (teardownError) {
@@ -52,6 +77,8 @@ export async function runClaudeSingleQueryProcess({
       );
     }
     throw error;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
   }
   signal.throwIfAborted();
   if (exitCode !== 0) {
@@ -112,17 +139,21 @@ async function readBoundedOutput(
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   const reader = stream.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    if (bytes > maxBytes) {
-      throw new Error(`Claude one-shot ${name} exceeded ${maxBytes} bytes`);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        throw new Error(`Claude one-shot ${name} exceeded ${maxBytes} bytes`);
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+    const decoder = new TextDecoder();
+    return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
+  } finally {
+    reader.releaseLock();
   }
-  const decoder = new TextDecoder();
-  return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
 }
 
 export { MAX_SINGLE_QUERY_STDERR_BYTES, MAX_SINGLE_QUERY_STDOUT_BYTES };

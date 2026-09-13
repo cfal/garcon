@@ -1,3 +1,8 @@
+import { NodeNativeTasks } from '../native-tasks.js';
+import { NodeProviderAuxiliaryHost } from '../provider-auxiliary-host.js';
+import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
+import { NodeNativeOccupancy } from '../native-occupancy.js';
+import { NodeWorkerContainmentRelay } from './containment-relay.js';
 import { loadAgentIntegration } from '../../agents/default-agent-integrations.js';
 import { NodeProviderCapacity } from '../provider-capacity.js';
 import { IntegrationHostFactory } from '../../agents/integration-host.js';
@@ -21,14 +26,34 @@ import { NodeProviderAuthHost } from '../provider-auth-host.js';
 import { LocalProviderCommandsService } from '../local-provider-commands.js';
 import { NodeProviderCommandsHost } from '../provider-commands-host.js';
 import { LocalProviderExecutionService } from '../local-provider-execution.js';
-import { NodeOperationTable } from '../operation-table.js';
+import { NodeOperationTable, type NodeOperationLimits, type NodeOperationTableOptions } from '../operation-table.js';
+import type { ProviderRetainedExecutionService } from '../../execution-nodes/provider-execution.js';
+import type { NodeInstanceConfiguration } from './configuration.js';
 import { NodeWorkerExecutionRouter } from './execution-router.js';
 import { NodeWorkerInstanceServices } from './instance-services.js';
 import { NodeWorkerServiceRouter } from './service-router.js';
 import { NodeWorkerTransportError } from './framing.js';
 import type { NodeWorkerWriter } from './writer.js';
 
-export async function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext, writer: Pick<NodeWorkerWriter, 'submit'>): Promise<NodeWorkerRuntime> {
+interface NodeInstanceExecutionBinding {
+  readonly occupancy: NodeOperationTableOptions['occupancy'];
+  readonly limits: Partial<NodeOperationLimits>;
+  bind(service: LocalProviderExecutionService): ProviderRetainedExecutionService | null;
+}
+
+export function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext, writer: Pick<NodeWorkerWriter, 'submit'>): Promise<NodeWorkerRuntime> {
+  return createNodeInstanceRuntime(context, writer, (instance, occupancy) => ({
+    occupancy,
+    limits: { maxOperations: instance.maxOperations },
+    bind: (service) => service.retained,
+  }));
+}
+
+export async function createNodeInstanceRuntime(
+  context: NodeWorkerRuntimeContext,
+  writer: Pick<NodeWorkerWriter, 'submit'>,
+  executionBinding: (instance: NodeInstanceConfiguration, occupancy: NodeNativeOccupancy) => NodeInstanceExecutionBinding,
+): Promise<NodeWorkerRuntime> {
   const { configuration, authority } = context;
   if (configuration.role !== 'instance') throw new TypeError('Invalid instance worker role');
   const validate = () => { authority.poll(); authority.signal.throwIfAborted(); };
@@ -47,6 +72,10 @@ export async function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext
   const registry = new IntegrationRegistry({ integrations: [integration], hostFactory: hosts,
     migrationStoreFor: () => new FileAgentMigrationStore(storageDirectory) });
   const resources = new NodeExecutionResources(configuration.nodeId);
+  const occupancy = new NodeNativeOccupancy(instance.maxOperations);
+  const binding = executionBinding(instance, occupancy);
+  const nativeTasks = new NodeNativeTasks({ occupancy, signal: authority.signal });
+  const containment = new NodeWorkerContainmentRelay(authority, writer);
   let table: NodeOperationTable;
   let host: NodeExecutionHost;
   let services: NodeWorkerInstanceServices;
@@ -54,12 +83,15 @@ export async function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext
   let execution: NodeWorkerExecutionRouter;
   let closing: Promise<void> | null = null;
   const close = () => {
+    occupancy.close(); nativeTasks.close();
     execution?.close(); requests?.close(); services?.close(); host?.close(); table?.close(); resources.close();
     return closing ??= registry.stop();
   };
   try {
-    table = new NodeOperationTable({ connection: context.connection, supervisor: authority, resources,
-      limits: { maxOperations: instance.maxOperations } });
+    table = new NodeOperationTable({ connection: context.connection, supervisor: authority, resources, occupancy: binding.occupancy,
+      requestContainment: (identity, location) => containment.request({ type: 'node-worker-containment-request', version: NODE_WIRE_VERSION,
+        session: authority.session, instanceId: location.instanceId, operationId: identity.operationId, reason: 'native-settlement-unconfirmed' }),
+      limits: binding.limits });
     host = new NodeExecutionHost(context.connection, authority, table);
     await registry.start();
     validate();
@@ -67,6 +99,10 @@ export async function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext
     const providerCapacity = new NodeProviderCapacity();
     const configurationService = new LocalProviderConfigurationService(provider);
     services = new NodeWorkerInstanceServices({ authority, instanceId: instance.id, host, writer,
+      auxiliary: new NodeProviderAuxiliaryHost({ instance: { nodeId: configuration.nodeId, instanceId: instance.id },
+        provider, resources, capacity: providerCapacity, configuration: configurationService, native: nativeTasks,
+        requestContainment: (identity) => containment.request({ type: 'node-worker-containment-request', version: NODE_WIRE_VERSION,
+          session: authority.session, instanceId: instance.id, operationId: identity.operationId, reason: 'native-settlement-unconfirmed' }) }),
       sessionConfiguration: new NodeSessionConfigurationHost({ instanceId: instance.id, connection: context.connection, supervisor: authority,
         capacity: providerCapacity, configuration: configurationService, resources, execution: host }),
       configuration: new NodeProviderConfigurationHost(providerCapacity, instance.id, configurationService),
@@ -79,8 +115,9 @@ export async function startNodeInstanceRuntime(context: NodeWorkerRuntimeContext
     execution = new NodeWorkerExecutionRouter(context.connectionId, { authority, writer,
       instanceIds: new Set([instance.id]), execute: (_instance, _connectionId, connection, command, signal) => services.execution(connection, command, signal) });
     const service = new LocalProviderExecutionService(provider, configurationService);
+    const retained = binding.bind(service);
     for (const workspace of configuration.workspaces.filter((workspace) => instance.workspaceIds.includes(workspace.id))) resources.register({
-      location: { nodeId: configuration.nodeId, instanceId: instance.id, workspaceId: workspace.id }, projectPath: workspace.projectPath, execution: service,
+      location: { nodeId: configuration.nodeId, instanceId: instance.id, workspaceId: workspace.id }, projectPath: workspace.projectPath, execution: retained,
       files: { async inspectProject(projectPath, signal) {
         signal.throwIfAborted();
         const result = await inspectProjectDirectory(projectPath, { resolvePath: fs.realpath });

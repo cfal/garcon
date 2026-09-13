@@ -42,6 +42,9 @@ test('one publisher spans sequential operations and physical reconnect without r
       f.execution.start.mock.calls.at(-1)![0].output.emit({ type: 'run-ended', runId, outcome: 'finished' });
       expect(await host.execute(connection, { method: 'status', identity }, connection.signal)).toMatchObject({ kind: 'status', receipt: { phase: 'ended' } });
       expect(host.transfers.reservedBytes).toBe(0);
+      expect(f.occupancy.active).toBe(1);
+      await f.settleNative(index);
+      expect(f.occupancy.active).toBe(0);
     }
     expect(f.execution.start).toHaveBeenCalledTimes(12);
   } finally { host.close(); await f.dispose(); }

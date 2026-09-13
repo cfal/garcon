@@ -7,6 +7,7 @@ import {
   type AgentHistoryImport,
   type AgentNativeSessionAccess,
 } from '@garcon/server-agent-interface';
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
 import {
   DirectSessionStore,
@@ -77,6 +78,7 @@ export async function loadDirectSessionRequired(
   agentSessionId: string,
   nativeSession: Parameters<DirectSessionStore['sessionIdFromReference']>[0],
   signal: AbortSignal,
+  cleanup: NativeCleanupObserver | null = null,
 ) {
   signal.throwIfAborted();
   let sessionId: string;
@@ -85,7 +87,7 @@ export async function loadDirectSessionRequired(
   } catch (error) {
     throw directSessionUnavailable(error);
   }
-  return loadRequired(sessions, sessionId, signal);
+  return loadRequired(sessions, sessionId, signal, cleanup);
 }
 
 function requiredSessionId(
@@ -105,8 +107,9 @@ async function loadRequired(
   sessions: DirectSessionStore,
   sessionId: string,
   signal: AbortSignal,
+  cleanup: NativeCleanupObserver | null = null,
 ) {
-  return runRequiredSessionOperation(() => sessions.load(sessionId), signal);
+  return runRequiredSessionOperation(() => sessions.load(sessionId, cleanup), signal);
 }
 
 async function inspectRequired(

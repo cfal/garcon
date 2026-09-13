@@ -21,6 +21,8 @@ import type {
   AgentSessionConfigurationUpdates,
 } from './execution.js';
 import type { AgentExecutionV5 } from './execution-v5.js';
+import type { AgentExecutionLifetime } from './execution-lifetime.js';
+import type { AgentSingleQueryLifetime, AgentTextGenerationLifetime } from './native-task-lifetime.js';
 import type {
   AgentHistoryImport,
   AgentNativeActivityProbe,
@@ -31,6 +33,7 @@ export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
   readonly attachments: AgentAttachments | null;
   readonly execution: AgentExecutionV5;
+  readonly executionLifetime: AgentExecutionLifetime | null;
   readonly catalog: AgentCatalog;
   readonly settings: AgentSettings;
   readonly lifecycle: AgentLifecycle;
@@ -43,7 +46,9 @@ export interface AgentIntegration {
   readonly goals: AgentGoals | null;
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
+  readonly singleQueryLifetime: AgentSingleQueryLifetime | null;
   readonly textGeneration: AgentTextGeneration | null;
+  readonly textGenerationLifetime: AgentTextGenerationLifetime | null;
   readonly legacyHistoryImport: AgentHistoryImport | null;
   readonly nativeHistoryImport: AgentHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;

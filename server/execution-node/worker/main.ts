@@ -1,5 +1,5 @@
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
-import { NodeWorkerBootstrap } from './bootstrap.js';
+import { NodeWorkerBootstrap, type NodeWorkerRuntime, type NodeWorkerRuntimeContext } from './bootstrap.js';
 import { readNodeWorkerFrames, NodeWorkerTransportError } from './framing.js';
 import { NodeWorkerLifeline } from './lifeline.js';
 import { reserveNodeWorkerStdout } from './pipes.js';
@@ -10,6 +10,20 @@ import { NODE_WORKER_WRITER_LIMITS } from './limits.js';
 
 export async function runNodeWorkerMain(role: NodeWorkerRole): Promise<never> {
   if (process.argv.length !== 3 || process.argv[2] !== nodeWorkerRoleFlag(role)) process.exit(2);
+  return runNodeWorkerRuntime(role, async (context, writer) => {
+    if (role === 'session') {
+      const { startNodeSessionRuntime } = await import('./session-runtime.js');
+      return startNodeSessionRuntime(context, writer);
+    }
+    const { startNodeInstanceRuntime } = await import('./instance-runtime.js');
+    return startNodeInstanceRuntime(context, writer);
+  });
+}
+
+export async function runNodeWorkerRuntime(
+  role: NodeWorkerRole,
+  start: (context: NodeWorkerRuntimeContext, writer: NodeWorkerWriter) => Promise<NodeWorkerRuntime>,
+): Promise<never> {
   const port = reserveNodeWorkerStdout();
   process.umask(0o077);
   let bootstrap: NodeWorkerBootstrap | null = null;
@@ -29,12 +43,7 @@ export async function runNodeWorkerMain(role: NodeWorkerRole): Promise<never> {
   bootstrap = new NodeWorkerBootstrap({ role, lifeline, send: (text) => writer.send(text, 'control', 'lifecycle'), failed: stop,
     async start(context) {
       lifeline.poll();
-      if (role === 'session') {
-        const { startNodeSessionRuntime } = await import('./session-runtime.js');
-        return startNodeSessionRuntime(context, writer);
-      }
-      const { startNodeInstanceRuntime } = await import('./instance-runtime.js');
-      return startNodeInstanceRuntime(context, writer);
+      return start(context, writer);
     } });
   try {
     await writer.send(serializeNodeWorkerChild({ type: 'node-worker-hello', version: NODE_WIRE_VERSION, role, pid: process.pid }), 'control', 'lifecycle');

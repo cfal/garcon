@@ -178,7 +178,7 @@ export class NodeExecutionReconciliation {
     const receipt = owner.receipt;
     if (owner.stop !== stop || owner.runId !== stop.runId || !receipt || receipt.runId !== stop.runId) return false;
     if (receipt.abort !== null) { stop.submitted = true; return receipt.abort === 'requested'; }
-    if (stop.submitted || receipt.phase !== 'prepared' && receipt.phase !== 'dispatched') return false;
+    if (stop.submitted || receipt.phase !== 'prepared' && receipt.native !== 'possible') return false;
     // Admission ambiguity cannot turn a Stop into an automatic second mutation.
     stop.submitted = true;
     const result = await physical.connection.execution(owner.instanceId).call({ method: 'abort-run', identity: owner.identity, runId: stop.runId },

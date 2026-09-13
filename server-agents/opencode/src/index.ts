@@ -63,6 +63,9 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly executionLifetime = null;
+  readonly singleQueryLifetime = null;
+  readonly textGenerationLifetime = null;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;

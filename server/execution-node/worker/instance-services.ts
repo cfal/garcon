@@ -1,3 +1,4 @@
+import type { NodeProviderAuxiliaryHost } from '../provider-auxiliary-host.js';
 import { NODE_WIRE_VERSION, parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { sameNodeSession } from '../../../common/node-operation.js';
 import { NodeBulkChannel } from '../../execution-nodes/transport/bulk-channel.js';
@@ -35,6 +36,7 @@ export interface NodeWorkerInstanceServicesOptions {
   readonly auth: NodeProviderAuthHost;
   readonly commands: NodeProviderCommandsHost;
   readonly configuration: NodeProviderConfigurationHost;
+  readonly auxiliary: Pick<NodeProviderAuxiliaryHost, 'execute'> | null;
   readonly sessionConfiguration: Pick<NodeSessionConfigurationHost, 'execute' | 'close'>;
 }
 
@@ -76,6 +78,13 @@ export class NodeWorkerInstanceServices {
         return await this.options.sessionConfiguration.execute(connection, command, signal);
       }
       this.options.authority.assertAdmission(connection);
+      if (command.method === 'provider-single-query' || command.method === 'provider-text-generation') {
+        if (command.instanceId !== this.options.instanceId || !sameNodeSession(command.identity, this.options.authority.session)) {
+          return { kind: 'rejected', code: 'VALIDATION_FAILED' };
+        }
+        if (!this.options.auxiliary) return { kind: 'rejected', code: 'NODE_UNAVAILABLE' };
+        return await this.options.auxiliary.execute(command, AbortSignal.any([signal, connection.signal, this.#closing.signal]));
+      }
       if (command.method === 'provider-configuration') {
         if (command.instanceId !== this.options.instanceId) return { kind: 'rejected', code: 'VALIDATION_FAILED' };
         return await this.options.configuration.prepareUpdate(command, AbortSignal.any([signal, connection.signal, this.#closing.signal]));

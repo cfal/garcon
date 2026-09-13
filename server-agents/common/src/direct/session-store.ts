@@ -9,6 +9,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { syncDirectory } from '../lib/json-file-store.js';
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
 
 const DIRECT_SESSION_NAMESPACE = 'direct-sessions-v1';
 const DIRECT_SESSION_SCHEMA_VERSION = 1;
@@ -61,7 +62,7 @@ export interface DirectSessionStoreOptions {
   readonly host: Pick<AgentHost, 'agentId' | 'storage'>;
   readonly now?: () => string;
   readonly readFile?: (file: FileHandle) => Promise<Buffer>;
-  readonly syncDirectory?: (directory: string) => Promise<void>;
+  readonly syncDirectory?: (directory: string, cleanup?: NativeCleanupObserver | null) => Promise<void>;
 }
 
 interface ParsedSessionFile {
@@ -93,7 +94,7 @@ export class DirectSessionStore {
   readonly #host: DirectSessionStoreOptions['host'];
   readonly #now: () => string;
   readonly #readFile: (file: FileHandle) => Promise<Buffer>;
-  readonly #syncDirectory: (directory: string) => Promise<void>;
+  readonly #syncDirectory: (directory: string, cleanup?: NativeCleanupObserver | null) => Promise<void>;
   readonly #operations = new Map<string, Promise<void>>();
   readonly #appendStates = new Map<string, DirectSessionAppendState>();
   #directoryPromise: Promise<string> | null = null;
@@ -148,7 +149,7 @@ export class DirectSessionStore {
     readonly runId: string;
     readonly content: string;
     readonly attachments: readonly AgentAttachment[];
-  }): Promise<DirectSessionSnapshot> {
+  }, cleanup: NativeCleanupObserver | null = null): Promise<DirectSessionSnapshot> {
     const sessionId = requireSessionId(input.sessionId);
     return this.#serialized(sessionId, async () => {
       const directory = await this.#directory();
@@ -184,9 +185,9 @@ export class DirectSessionStore {
         await file.sync();
         identity = fileIdentity(await file.stat({ bigint: true }));
       } finally {
-        await file.close().catch(() => undefined);
+        await file.close().catch((error: unknown) => cleanup?.failed(error));
       }
-      await this.#syncDirectory(directory);
+      await this.#syncDirectory(directory, cleanup);
       if (!identity) throw new Error('Direct session creation did not capture file identity');
       this.#appendStates.set(
         sessionId,
@@ -200,11 +201,11 @@ export class DirectSessionStore {
     });
   }
 
-  async load(sessionId: string): Promise<DirectSessionSnapshot> {
+  async load(sessionId: string, cleanup: NativeCleanupObserver | null = null): Promise<DirectSessionSnapshot> {
     const validatedSessionId = requireSessionId(sessionId);
     return this.#serialized(validatedSessionId, async () => {
       const filePath = await this.#sessionFilePath(validatedSessionId);
-      const file = await openRegularFile(filePath, constants.O_RDONLY);
+      const file = await openRegularFile(filePath, constants.O_RDONLY, cleanup);
       try {
         const parsed = parseSessionFile(
           await this.#readFile(file),
@@ -215,21 +216,21 @@ export class DirectSessionStore {
         this.#appendStates.set(validatedSessionId, appendStateFor({ ...parsed, identity }));
         return { header: parsed.header, records: parsed.records, path: filePath };
       } finally {
-        await file.close().catch(() => undefined);
+        await file.close().catch((error: unknown) => cleanup?.failed(error));
       }
     });
   }
 
-  async inspect(sessionId: string): Promise<{ readonly path: string }> {
+  async inspect(sessionId: string, cleanup: NativeCleanupObserver | null = null): Promise<{ readonly path: string }> {
     const validatedSessionId = requireSessionId(sessionId);
     return this.#serialized(validatedSessionId, async () => {
       const filePath = await this.#sessionFilePath(validatedSessionId);
-      const file = await openRegularFile(filePath, constants.O_RDONLY);
+      const file = await openRegularFile(filePath, constants.O_RDONLY, cleanup);
       try {
         await validateSessionHeader(file, this.#host.agentId, validatedSessionId);
         return { path: filePath };
       } finally {
-        await file.close().catch(() => undefined);
+        await file.close().catch((error: unknown) => cleanup?.failed(error));
       }
     });
   }
@@ -239,7 +240,7 @@ export class DirectSessionStore {
     readonly runId: string;
     readonly content: string;
     readonly attachments: readonly AgentAttachment[];
-  }): Promise<DirectUserRecordV1> {
+  }, cleanup: NativeCleanupObserver | null = null): Promise<DirectUserRecordV1> {
     const record = parseUserRecord({
       type: 'user',
       at: requireTimestamp(this.#now(), 'at'),
@@ -247,7 +248,7 @@ export class DirectSessionStore {
       content: input.content,
       attachments: input.attachments,
     });
-    await this.#append(input.sessionId, record);
+    await this.#append(input.sessionId, record, cleanup);
     return record;
   }
 
@@ -256,7 +257,7 @@ export class DirectSessionStore {
     readonly runId: string;
     readonly content: string;
     readonly checkpoint?: DirectResponsesCheckpointV1 | null;
-  }): Promise<DirectAssistantRecordV1> {
+  }, cleanup: NativeCleanupObserver | null = null): Promise<DirectAssistantRecordV1> {
     const record = parseAssistantRecord({
       type: 'assistant',
       at: requireTimestamp(this.#now(), 'at'),
@@ -264,11 +265,11 @@ export class DirectSessionStore {
       content: input.content,
       checkpoint: input.checkpoint ?? null,
     });
-    await this.#append(input.sessionId, record);
+    await this.#append(input.sessionId, record, cleanup);
     return record;
   }
 
-  async delete(sessionId: string): Promise<void> {
+  async delete(sessionId: string, cleanup: NativeCleanupObserver | null = null): Promise<void> {
     const validatedSessionId = requireSessionId(sessionId);
     await this.#serialized(validatedSessionId, async () => {
       const directory = await this.#directory();
@@ -283,15 +284,15 @@ export class DirectSessionStore {
         throw error;
       }
       this.#appendStates.delete(validatedSessionId);
-      await this.#syncDirectory(directory);
+      await this.#syncDirectory(directory, cleanup);
     });
   }
 
-  async #append(sessionId: string, record: DirectSessionRecordV1): Promise<void> {
+  async #append(sessionId: string, record: DirectSessionRecordV1, cleanup: NativeCleanupObserver | null): Promise<void> {
     const validatedSessionId = requireSessionId(sessionId);
     await this.#serialized(validatedSessionId, async () => {
       const filePath = await this.#sessionFilePath(validatedSessionId);
-      const file = await openRegularFile(filePath, constants.O_RDWR);
+      const file = await openRegularFile(filePath, constants.O_RDWR, cleanup);
       try {
         const observedIdentity = fileIdentity(await file.stat({ bigint: true }));
         let appendState = this.#appendStates.get(validatedSessionId);
@@ -331,7 +332,7 @@ export class DirectSessionStore {
           userRunIds,
         });
       } finally {
-        await file.close().catch(() => undefined);
+        await file.close().catch((error: unknown) => cleanup?.failed(error));
       }
     });
   }
@@ -370,14 +371,14 @@ export class DirectSessionStore {
   }
 }
 
-async function openRegularFile(filePath: string, flags: number): Promise<FileHandle> {
+async function openRegularFile(filePath: string, flags: number, cleanup: NativeCleanupObserver | null): Promise<FileHandle> {
   const file = await fs.open(filePath, flags | constants.O_NOFOLLOW);
   try {
     const stats = await file.stat();
     if (!stats.isFile()) throw new TypeError('Direct session source is not a regular file');
     return file;
   } catch (error) {
-    await file.close().catch(() => undefined);
+    await file.close().catch((error: unknown) => cleanup?.failed(error));
     throw error;
   }
 }

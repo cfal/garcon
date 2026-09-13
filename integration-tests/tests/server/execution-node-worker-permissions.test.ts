@@ -3,7 +3,7 @@ import type { NodeOutputFrame } from '../../../server-agents/interface/src/index
 import type { NodePermissionReference } from '../../../server/execution-nodes/transport/permission-wire.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
-import { startWorkerSessionFixture } from '../../support/worker-session-fixture.js';
+import { startUnattestedClaudeWorkerFixture } from '../../support/unattested-claude-fixture.js';
 
 const question = () => claudeToolUse('synthetic-shared-native-tool', 'AskUserQuestion', {
   questions: [{ question: 'Which storage?', header: 'Storage', multiSelect: false,
@@ -16,15 +16,15 @@ const reference = (frame: NodeOutputFrame): NodePermissionReference => {
     permissionOccurrenceId: frame.event.lifecycle.permissionOccurrenceId };
 };
 
-test('real Claude instance permissions survive reconnect and retirement aborts only the owning stream', async () => {
+test('internal unattested characterization: real Claude instance permissions survive reconnect and retirement aborts only the owning stream', async () => {
   const firstModel = await startScriptedClaudeTestEnvironment();
   const secondModel = await startScriptedClaudeTestEnvironment();
-  let fixture: Awaited<ReturnType<typeof startWorkerSessionFixture>> | undefined;
+  let fixture: Awaited<ReturnType<typeof startUnattestedClaudeWorkerFixture>> | undefined;
   try {
     firstModel.model.scriptTurn([question()]);
     secondModel.model.scriptTurn([question()]);
     secondModel.model.scriptTurn([claudeText('synthetic sibling completed')]);
-    fixture = await startWorkerSessionFixture([
+    fixture = await startUnattestedClaudeWorkerFixture([
       { id: 'synthetic-first', agentId: 'claude', environment: firstModel.serverEnvironment },
       { id: 'synthetic-second', agentId: 'claude', environment: secondModel.serverEnvironment },
     ]);
@@ -35,7 +35,7 @@ test('real Claude instance permissions survive reconnect and retirement aborts o
       settings: { ownerId: 'claude', schemaVersion: 1, values: {} }, endpoint: null };
     await fixture.start(first, '1789000000000001', 'synthetic-first-run', configuration);
     const firstPermission = reference(await fixture.waitFor(first, isPermission));
-    await fixture.start(second, '1789000000000002', 'synthetic-second-run', configuration);
+    const secondOperation = await fixture.start(second, '1789000000000002', 'synthetic-second-run', configuration);
     const secondPermission = reference(await fixture.waitFor(second, isPermission));
     expect(firstPermission.permissionOccurrenceId).not.toBe(secondPermission.permissionOccurrenceId);
     expect(firstPermission.stream).not.toEqual(secondPermission.stream);
@@ -54,6 +54,9 @@ test('real Claude instance permissions survive reconnect and retirement aborts o
     expect(await fixture.call(command)).toMatchObject({ kind: 'permission-result', result: { receipt: { phase: 'resolved' } } });
     const terminal = await fixture.waitFor(second, (frame) => frame.event.type === 'run-ended');
     expect(terminal.event).toMatchObject({ outcome: 'finished' });
+    expect(await fixture.receipt('synthetic-second', secondOperation.identity)).toMatchObject({
+      kind: 'status', receipt: { phase: 'ended', native: 'possible' },
+    });
     expect(second.frames.some((frame) => frame.event.type === 'rows'
       && frame.event.rows.some(({ message }) => message.type === 'assistant-message' && message.content === 'synthetic sibling completed'))).toBe(true);
     expect(firstModel.model.requests()).toHaveLength(1);

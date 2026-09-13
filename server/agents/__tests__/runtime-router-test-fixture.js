@@ -171,6 +171,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
 }
 
 export function createRuntimeInstanceFixture(integration) {
+  integration.executionLifetime ??= null;
   const configuration = new LocalProviderConfigurationService(integration);
   const execution = new LocalProviderExecutionService(integration, configuration);
   return {

@@ -16,11 +16,12 @@ import { NodeSessionConnectionOwner } from '../../server/execution-node/session-
 import { NodeSessionCoordinator, type NodeHostedConnection } from '../../server/execution-node/session-coordinator.js';
 import { DEFAULT_NODE_REPLAY, type NodeReplayOptions } from '../../server/execution-node/replay-cache.js';
 import { NodeSessionMarkerFile } from '../../server/execution-node/systemd/session-marker.js';
+import { runSystemdHelper } from '../../server/execution-node/systemd/helper-process.js';
 import { createNodeWorkerWorkingDirectory, NODE_WORKER_BUN_OPTIONS, nodeWorkerCommand } from '../../server/execution-node/worker/launch.js';
 import { NodeWorkerPeer } from '../../server/execution-node/worker/peer.js';
 import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from '../../server/execution-node/worker/application-protocol.js';
 import { parseNodeWorkerOutputText } from '../../server/execution-node/worker/output-protocol.js';
-import { MAX_NODE_WORKER_LIFECYCLE_BYTES } from '../../server/execution-node/worker/protocol.js';
+import { MAX_NODE_WORKER_LIFECYCLE_BYTES, type NodeWorkerContainmentRequest } from '../../server/execution-node/worker/protocol.js';
 import type { NodeWorkerBulkFrame } from '../../server/execution-node/worker/bulk-protocol.js';
 import type { NodeInstanceConfiguration } from '../../server/execution-node/worker/configuration.js';
 import { NodeChannelAuthentication, type AuthenticatedNodeChannel } from '../../server/execution-nodes/channel-authentication.js';
@@ -58,9 +59,11 @@ export interface ControllerFixtureConnection {
 }
 
 export interface NodeSessionFixtureOptions {
+  readonly sessionCommand?: [string, ...string[]];
   readonly replay?: NodeReplayOptions;
   readonly maxOperations?: number;
   readonly instance?: Pick<NodeInstanceConfiguration, 'agentId' | 'environment'>;
+  readonly beforeCleanup?: () => Promise<void>;
 }
 
 export async function createNodeSessionFixture(certificate: TestCertificate, trust: ControllerTlsTrust = certificate.trust,
@@ -74,6 +77,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   const marker = await NodeSessionMarkerFile.acquire({ runtimeDirectory: storage, nodeId, controllerId: pairings.controllerId,
     onCompromised() { throw new Error('Synthetic marker ownership lost'); } });
   const processes = new Map<object, Subprocess<'pipe', 'pipe', 'ignore'>>();
+  const containmentRequests: NodeWorkerContainmentRequest[] = [];
   const approvedNodeIds = new Set([nodeId]);
   const instanceIds = new Set(['synthetic-instance']);
   const workerFrames = new Set<(frame: NodeWorkerApplicationFrame) => void>();
@@ -99,17 +103,24 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       instances: [{ id: 'synthetic-instance', agentId: options.instance?.agentId ?? 'direct-anthropic-compatible', label: 'Synthetic', homeDirectory: path.join(storage, 'native'),
         environment: options.instance?.environment ?? {}, workspaceIds: ['synthetic-workspace'], maxOperations: options.maxOperations ?? 1 }],
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] },
-    host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: nodeWorkerCommand('session'),
+    host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: options.sessionCommand ?? nodeWorkerCommand('session'),
+      async helper(request, helperOptions) {
+        if (request.kind === 'stop') await options.beforeCleanup?.();
+        return runSystemdHelper(request, helperOptions);
+      },
       launchOptions: { workingDirectory: directory.path, environment: { BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS } },
       spawn(launch) {
         const child = Bun.spawn([...launch.argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
         const process = { exited: child.exited, closeInput() { void child.stdin.end(); }, kill() { child.kill(); } };
         processes.set(process, child); return process;
       } },
-    createPeer(host, options) {
+    createPeer(host, peerOptions) {
       const child = processes.get(host.process);
       if (!child) throw new Error('Synthetic worker missing');
-      return new NodeWorkerPeer(child, options);
+      return new NodeWorkerPeer(child, { ...peerOptions, containmentRequested(request) {
+        containmentRequests.push(request);
+        peerOptions.containmentRequested?.(request);
+      } });
     }, received(frame, text) {
       if (!output) throw new Error('Synthetic worker has no logical output owner');
       if (outputPressure && frame.type === 'node-worker-output-delivery'
@@ -278,7 +289,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     void ready.promise.then(() => clearTimeout(deadline), () => clearTimeout(deadline));
     return { ready: ready.promise, closed: closed.promise, socket, stop() { physical.abort(); socket.terminate(); } };
   };
-  return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, workerFrames, controllerFrames, nodeFrames,
+  return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, workerFrames, controllerFrames, nodeFrames, containmentRequests,
     async pairAnotherNode() {
       const id = `synthetic-${randomUUID()}`;
       const enrollment = await pairings.issueEnrollment(id);

@@ -71,6 +71,7 @@ export class NodeWorkerServiceClient {
     let accepts: PendingService['accepts'];
     let providerRequest: NodeProviderRequestClass | null;
     let usesApplicationReserve: boolean;
+    let timeoutMs: number;
     try {
       text = serializeNodeWorkerService({ ...this.#envelope(requestId), type: 'node-worker-service-request', command });
       const snapshot = parseNodeWorkerServiceText(text);
@@ -78,6 +79,13 @@ export class NodeWorkerServiceClient {
       accepts = expectedResult(snapshot.command);
       providerRequest = providerRequestClass(snapshot.command);
       usesApplicationReserve = providerRequest === 'status' || snapshot.command.method === 'retire-output';
+      if (snapshot.command.method === 'provider-single-query' || snapshot.command.method === 'provider-text-generation') {
+        timeoutMs = snapshot.command.request.timeoutMs;
+      } else if (providerRequest) {
+        timeoutMs = this.#options.providerRequestTimeoutMs;
+      } else {
+        timeoutMs = this.#options.requestTimeoutMs;
+      }
     }
     catch { return { kind: 'rejected', code: 'VALIDATION_FAILED' }; }
     const releaseProvider = providerRequest ? this.#providerCapacity.reserve(providerRequest) : null;
@@ -99,8 +107,7 @@ export class NodeWorkerServiceClient {
     signal.addEventListener('abort', cancel, { once: true });
     const authority = AbortSignal.any([this.#closing.signal, pending.cancellation.signal]);
     try {
-      pending.timer = (this.options.scheduleTimeout ?? scheduleTimeout)(cancel,
-        providerRequest ? this.#options.providerRequestTimeoutMs : this.#options.requestTimeoutMs);
+      pending.timer = (this.options.scheduleTimeout ?? scheduleTimeout)(cancel, timeoutMs);
       signal.throwIfAborted();
       pending.submitting = true;
       const submission = this.writer.submit(text, 'data', { signal: authority, validate: () => { if (!this.#validate()) throw protocol(); } },
@@ -284,7 +291,8 @@ function providerRequestClass(command: NodeWorkerServiceCommand): NodeProviderRe
   switch (command.method) {
     case 'provider-session-configuration': return command.operation === 'prepare' || command.operation === 'commit' ? 'work' : 'status';
     case 'provider-auth': return command.operation === 'status' || command.operation === 'login-status' ? 'status' : 'work';
-    case 'provider-catalog': case 'provider-commands': case 'provider-configuration': return 'work';
+    case 'provider-catalog': case 'provider-commands': case 'provider-configuration':
+    case 'provider-single-query': case 'provider-text-generation': return 'work';
     default: return null;
   }
 }
@@ -307,6 +315,10 @@ function expectedResult(command: NodeWorkerServiceCommand): (result: NodeWorkerS
         return result.kind === 'provider-session-configuration-receipt' && result.instanceId === instanceId
           && sameNodeSession(result.identity, command.identity) && result.identity.operationId === command.identity.operationId;
       }
+      case 'provider-single-query': case 'provider-text-generation':
+        return (result.kind === 'provider-auxiliary-result' || result.kind === 'provider-auxiliary-too-large')
+          && result.instanceId === instanceId && sameNodeSession(result.identity, command.identity)
+          && result.identity.operationId === command.identity.operationId;
       case 'provider-configuration': return (result.kind === 'provider-configuration-prepared' || result.kind === 'provider-configuration-rejected'
         || result.kind === 'provider-configuration-too-large')
         && result.instanceId === instanceId;

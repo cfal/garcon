@@ -18,7 +18,7 @@ test('wire preparation never dispatches, and verified input reaches only the own
     .toEqual({ kind: 'dispatched' });
   expect(f.execution.start.mock.calls[0]![0]).toMatchObject({ prompt: input.prompt, projectPath: '/synthetic/project' });
   expect(f.transfers.reservedBytes).toBe(0);
-  expect(await f.call({ method: 'status', identity: ticket.identity })).toMatchObject({ kind: 'status', receipt: { phase: 'dispatched', dispatch: 'completed' } });
+  expect(await f.call({ method: 'status', identity: ticket.identity })).toMatchObject({ kind: 'status', receipt: { phase: 'dispatched', dispatch: 'accepted' } });
   expect(await f.call({ method: 'dispatch', identity: ticket.identity, stream: f.stream, body: f.body(ticket.identity, { kind: 'execution', input }) }))
     .toMatchObject({ kind: 'rejected', code: 'NODE_OPERATION_UNKNOWN' });
   expect(f.execution.start).toHaveBeenCalledTimes(1);
@@ -29,7 +29,7 @@ test('lost physical replies reconcile the original ticket after reconnect withou
   const ticket = await f.start();
   f.supervisor.disconnect(f.connection);
   const replacement = f.supervisor.attach(f.session);
-  expect(await f.call({ method: 'status', identity: ticket.identity }, replacement)).toMatchObject({ kind: 'status', receipt: { dispatch: 'completed' } });
+  expect(await f.call({ method: 'status', identity: ticket.identity }, replacement)).toMatchObject({ kind: 'status', receipt: { dispatch: 'accepted' } });
   expect(await f.call({ method: 'prepare', location: f.location, request: f.request }, replacement)).toEqual({ kind: 'rejected', code: 'NODE_UNAVAILABLE' });
   expect(await f.call({ method: 'abort', identity: ticket.identity }, replacement)).toEqual({ kind: 'abort-result', requested: true });
   expect(f.execution.start).toHaveBeenCalledTimes(1);
@@ -65,6 +65,9 @@ test('goal preparation parks one handoff and commit transfers the existing occur
   expect(await f.call({ method: 'status', identity: ticket.identity })).toMatchObject({ kind: 'status', receipt: { phase: 'ended', runId: 'synthetic-successor' } });
   expect(f.execution.start).toHaveBeenCalledTimes(1);
   expect(f.goals.submitControl).toHaveBeenCalledTimes(1);
+  expect(await f.call({ method: 'prepare', location: f.location, request: f.request })).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+  f.native.settlements[0]!.resolve();
+  await new Promise(setImmediate);
   expect((await f.prepare()).identity.operationId).not.toBe(ticket.identity.operationId);
 });
 
@@ -106,7 +109,10 @@ test('provider failure text cannot expose private input in a reply or receipt', 
   const ticket = await f.prepare();
   const result = await f.call({ method: 'dispatch', identity: ticket.identity, stream: f.stream,
     body: f.body(ticket.identity, { kind: 'execution', input: { prompt: 'synthetic-private-prompt', attachments: [], carriedContext: null } }) });
-  expect(result).toEqual({ kind: 'rejected', code: 'NODE_EXECUTION_FAILED' });
+  expect(result).toEqual({ kind: 'unknown' });
   expect(JSON.stringify(await f.call({ method: 'status', identity: ticket.identity }))).not.toMatch(/private-(credential|prompt)/);
+  expect(await f.call({ method: 'prepare', location: f.location, request: f.request })).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+  f.native.settlements[0]!.resolve();
+  await new Promise(setImmediate);
   expect((await f.prepare()).identity.operationId).not.toBe(ticket.identity.operationId);
 });

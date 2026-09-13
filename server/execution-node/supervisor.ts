@@ -12,11 +12,11 @@ export const NODE_CLEANUP_TIMEOUT_MS = 30_000;
 
 export type NodeRetirementReason =
   | 'lease-expired' | 'recovery-expired' | 'clock-discontinuity' | 'worker-exited' | 'worker-protocol-failed'
-  | 'revoked' | 'controller-shutdown' | 'node-shutdown';
+  | 'native-settlement-unconfirmed' | 'revoked' | 'controller-shutdown' | 'node-shutdown';
 
 const RETIREMENT_PRIORITY: Record<NodeRetirementReason, number> = {
   'lease-expired': 0, 'recovery-expired': 1, 'clock-discontinuity': 2,
-  'worker-exited': 3, 'worker-protocol-failed': 4, revoked: 5, 'controller-shutdown': 6, 'node-shutdown': 7,
+  'worker-exited': 3, 'worker-protocol-failed': 4, 'native-settlement-unconfirmed': 5, revoked: 6, 'controller-shutdown': 7, 'node-shutdown': 8,
 };
 
 export interface NodeConnectionLease {
@@ -91,6 +91,8 @@ export class NodeSupervisor {
     this.poll();
     return this.#retired ? 'cleaning-up' : this.#active?.phase ?? 'offline';
   }
+
+  get retirementReason(): NodeRetirementReason | null { return this.#retired?.reason ?? null; }
 
   get cleanupFailure(): NodeCleanupFailure | null {
     return this.#cleanupFailure;
@@ -227,6 +229,14 @@ export class NodeSupervisor {
   }
 
   executionHostExited(identity: NodeSessionIdentity, cause: 'worker-exited' | 'worker-protocol-failed'): Promise<boolean> {
+    return this.#retireSession(identity, cause);
+  }
+
+  requestNativeContainment(identity: NodeSessionIdentity): Promise<boolean> {
+    return this.#retireSession(identity, 'native-settlement-unconfirmed');
+  }
+
+  #retireSession(identity: NodeSessionIdentity, cause: NodeRetirementReason): Promise<boolean> {
     const reentry = this.#rejectCleanupReentry();
     if (reentry) return reentry;
     this.poll();

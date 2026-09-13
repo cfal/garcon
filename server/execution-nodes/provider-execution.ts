@@ -6,6 +6,7 @@ import type {
   AgentNativeSessionRef,
   AgentGoalControlHandoff,
   AgentSteerResult,
+  AgentDispatchOutcome,
 } from '@garcon/server-agent-interface';
 import type { ProviderConfigurationRequest } from './provider-configuration.js';
 
@@ -74,7 +75,7 @@ export interface ProviderExecutionDelivery {
 
 /** Server-local port; operations, output, and admission are capabilities, not wire payloads. */
 export interface ProviderExecutionService {
-  /** The signal covers preparation only; dispatch owns its execution admission. */
+  /** Prepares without native effects. The signal covers preparation only; dispatch owns its admission. */
   prepare(request: ProviderExecutionRequest, signal: AbortSignal): Promise<ProviderExecutionOperation>;
   dispatch(operation: ProviderExecutionOperation, input: ProviderExecutionInput, delivery: ProviderExecutionDelivery): Promise<void>;
   /** Releases an unused preparation. Has no effect after dispatch. */
@@ -84,4 +85,15 @@ export interface ProviderExecutionService {
   prepareSteer(operation: ProviderExecutionOperation, signal: AbortSignal): Promise<ProviderSteerPreparation>;
   steer(operation: ProviderExecutionOperation, target: ProviderSteerTarget, input: ProviderSteerInput): Promise<AgentSteerResult>;
   submitGoalControl(operation: ProviderExecutionOperation, input: ProviderGoalControlInput, signal: AbortSignal): Promise<boolean>;
+}
+
+export interface ProviderExecutionAttempt {
+  readonly dispatch: Promise<AgentDispatchOutcome>;
+  readonly settled: Promise<void>;
+}
+
+/** Retains node cleanup and native occupancy independently of dispatch and visible completion. */
+export interface ProviderRetainedExecutionService extends Omit<ProviderExecutionService, 'dispatch'> {
+  /** Transfers lifetime ownership synchronously before any native effect can begin. */
+  beginDispatch(operation: ProviderExecutionOperation, input: ProviderExecutionInput, delivery: ProviderExecutionDelivery): ProviderExecutionAttempt;
 }

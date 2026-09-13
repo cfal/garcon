@@ -1,3 +1,5 @@
+import { NodeNativeOccupancy } from '../../native-occupancy.js';
+import { executionLifetimeFixture } from '../../__tests__/execution-lifetime-fixture.js';
 import { expect, mock, test } from 'bun:test';
 import { NodeProviderCapacity } from '../../provider-capacity.js';
 import { MAX_NODE_STREAM_IDENTITIES } from '../../replay-cache.js';
@@ -37,18 +39,20 @@ function fixture() {
   const connection = authority.attach(1); authority.openAdmissions(1);
   const location = { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' };
   const stream = { ...session, streamId: 'synthetic-stream' };
-  const execution = { start: mock(async (_request: AgentStartRequestV5) => ({})), resume: mock(async () => ({})),
+  const handle = Object.freeze({});
+  const execution = { start: mock(async (_request: AgentStartRequestV5) => handle), resume: mock(async () => handle),
     abort: mock(async () => true), runningSessions: () => [] };
+  const native = executionLifetimeFixture(execution, handle);
   const service = new LocalProviderExecutionService({ descriptor: { id: 'synthetic', label: 'Synthetic', icon: null,
     supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], supportsImages: false,
     supportsProjectPathUpdate: false, requiresNativePathForProjectPathUpdate: false, supportedEndpointProtocols: [], configuration: [] },
-    execution, steering: null, goals: null, compaction: null }, { resolve: async (request) => ({ ...request,
+    execution, executionLifetime: native.lifetime, steering: null, goals: null, compaction: null }, { resolve: async (request) => ({ ...request,
     permissionMode: request.permissionMode ?? 'default', thinkingMode: request.thinkingMode ?? 'none',
     settings: request.settings ?? { ownerId: 'synthetic', schemaVersion: 1, values: {} } }) });
   const resources = new NodeExecutionResources(location.nodeId);
-  resources.register({ location, projectPath: '/synthetic/project', execution: service,
+  resources.register({ location, projectPath: '/synthetic/project', execution: service.retained,
     files: { inspectProject: async () => ({ kind: 'available', effectiveProjectKey: '/synthetic/project' }) } });
-  const table = new NodeOperationTable({ supervisor: authority, connection, resources, limits: { maxOperations: 4 } });
+  const table = new NodeOperationTable({ occupancy: new NodeNativeOccupancy(4), requestContainment() { authority.retire(); }, supervisor: authority, connection, resources, limits: { maxOperations: 4 } });
   const host = new NodeExecutionHost(connection, authority, table);
   const failed = mock((_error: unknown) => {});
   const frames: NodeOutputFrame[] = []; const controls: string[] = [];
@@ -67,7 +71,7 @@ function fixture() {
   const prepareUpdate = mock(async (_request: ProviderConfigurationUpdateRequest) => ({ previous: settingsSnapshot, next: settingsSnapshot }));
   const launchLogin = mock(async () => ({ launched: true, alreadyRunning: false, sessionId: 'synthetic-login' }));
   const providerCapacity = new NodeProviderCapacity();
-  const services = new NodeWorkerInstanceServices({ authority, instanceId: location.instanceId, host, writer,
+  const services = new NodeWorkerInstanceServices({ authority, instanceId: location.instanceId, host, writer, auxiliary: null,
     sessionConfiguration: new NodeSessionConfigurationHost({ instanceId: location.instanceId, connection, supervisor: authority,
       capacity: providerCapacity, resources, execution: host, configuration: {
         prepareApply: async () => ({ kind: 'unsupported' }), commit: async () => ({ kind: 'not-required' }), cancel: async () => {},
@@ -282,7 +286,7 @@ test('acknowledged retirement fences output once without releasing active native
     }
     const first = starts[0]!;
     const command = { method: 'retire-output', instanceId: f.location.instanceId, stream: first.stream } as const;
-    const expected = { kind: 'output-fenced', instanceId: f.location.instanceId, stream: first.stream };
+    const expected = { kind: 'output-fenced', instanceId: f.location.instanceId, stream: first.stream } as const;
     expect(await f.services.service(f.connection, command, f.connection.signal)).toEqual(expected);
     expect(await f.services.service(f.connection, command, f.connection.signal)).toEqual(expected);
     await tick();

@@ -16,7 +16,7 @@ import { NODE_WORKER_PULSE_INTERVAL_MS, NODE_WORKER_INERT_TIMEOUT_MS } from './l
 import { nodeWorkerPipePort } from './pipes.js';
 import {
   MAX_NODE_WORKER_LIFECYCLE_BYTES, parseNodeWorkerChildText, serializeNodeWorkerParent,
-  type NodeWorkerParentMessage,
+  type NodeWorkerParentMessage, type NodeWorkerContainmentRequest,
 } from './protocol.js';
 import type { NodeWorkerRole } from './roles.js';
 import { NodeWorkerWriter, type NodeWorkerSubmission } from './writer.js';
@@ -34,6 +34,7 @@ export interface NodeWorkerPeerOptions {
   /** Checks the parent authority before every local pulse; a pulse cannot extend a controller lease. */
   validate(): void;
   failed(error: NodeWorkerTransportError): void;
+  containmentRequested?(request: NodeWorkerContainmentRequest): void;
   /** Admits output synchronously into its owner's bounded storage. */
   received?(frame: NodeWorkerApplicationFrame, text: string): void;
 }
@@ -205,6 +206,10 @@ export class NodeWorkerPeer {
           if (this.#pid !== null || message.role !== this.options.role) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
           this.#pid = message.pid;
           this.#hello.resolve(message.pid);
+        } else if (message.type === 'node-worker-containment-request') {
+          if (!this.#session || !sameNodeSession(message.session, this.#session) || !this.#hasInstance(message.instanceId)
+            || !this.options.containmentRequested) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
+          this.options.containmentRequested(message);
         } else {
           if (this.#isReady || !this.#session || !this.#configuration || !sameNodeSession(message.session, this.#session)
             || !expectedManifests(this.#configuration, message.manifests)) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');

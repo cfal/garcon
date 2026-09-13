@@ -1,5 +1,7 @@
 export * from './contracts/execution.js';
 export * from './contracts/execution-v5.js';
+export * from './contracts/execution-lifetime.js';
+export * from './contracts/native-task-lifetime.js';
 export * from './contracts/host.js';
 export * from './contracts/integration.js';
 export * from './contracts/native-fork.js';

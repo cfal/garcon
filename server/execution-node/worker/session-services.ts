@@ -113,6 +113,8 @@ export class NodeWorkerSessionServices {
         case 'provider-auth':
         case 'provider-commands':
         case 'provider-configuration':
+        case 'provider-single-query':
+        case 'provider-text-generation':
         case 'reserve-body':
           authority.assertAdmission(connection);
           if (!this.options.instanceIds.has(command.instanceId)) throw protocol();

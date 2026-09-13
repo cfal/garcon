@@ -2,7 +2,7 @@ import { NODE_WORKER_SERVICE_LIMITS } from './worker/limits.js';
 
 export type NodeProviderRequestClass = 'status' | 'work';
 
-/** Reserves status headroom and retains native slots until their owner observes actual settlement. */
+/** Bounds request handlers while reserving headroom for status calls. */
 export class NodeProviderCapacity {
   #pending = 0;
   #work = 0;

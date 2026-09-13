@@ -1,3 +1,4 @@
+import { parseNodeProviderAuxiliaryCommand, parseNodeProviderAuxiliaryReply, type NodeProviderAuxiliaryCommand, type NodeProviderAuxiliaryReply } from '../../execution-nodes/transport/provider-auxiliary-wire.js';
 import {
   MAX_NODE_OUTPUT_SEQUENCE, NODE_WIRE_VERSION, parseNodeOutputAck, parseNodeReplayReply, parseProducerStreamIdentity,
   producerStreamKey, type NodeOutputAck, type NodeReplayReply, type ProducerStreamIdentity,
@@ -19,6 +20,7 @@ export const MAX_NODE_WORKER_SERVICE_BYTES = 256 * 1024;
 export const MAX_NODE_WORKER_REPLAY_CURSORS = 256;
 
 export type NodeWorkerServiceCommand =
+  | NodeProviderAuxiliaryCommand
   | NodeProviderAuthCommand
   | NodeProviderCommandsCommand
   | NodeProviderConfigurationCommand
@@ -35,6 +37,7 @@ export type NodeWorkerServiceCommand =
   | { readonly method: 'resume-output'; readonly generation: number };
 
 export type NodeWorkerServiceResult =
+  | NodeProviderAuxiliaryReply
   | NodeProviderCatalogReply
   | NodeProviderAuthReply
   | NodeProviderCommandsReply
@@ -136,6 +139,10 @@ export function serializeNodeWorkerOutputAcknowledgement(frame: NodeWorkerOutput
 
 function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerServiceCommand | null {
   if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request'])) return null;
+  if (value.method === 'provider-single-query' || value.method === 'provider-text-generation') {
+    const command = parseNodeProviderAuxiliaryCommand(value);
+    return command && sameNodeSession(command.identity, session) ? command : null;
+  }
   if (value.method === 'provider-configuration') return parseNodeProviderConfigurationCommand(value);
   if (value.method === 'provider-session-configuration') {
     const command = parseNodeSessionConfigurationCommand(value);
@@ -187,7 +194,11 @@ function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerS
 }
 
 function parseResult(value: unknown, session: NodeSessionIdentity): NodeWorkerServiceResult | null {
-  if (!exactNodeFields(value, ['kind'], ['instanceId', 'stream', 'transfer', 'result', 'generation', 'ranges', 'live', 'code', 'snapshot', 'staleModels', 'status', 'workspaceId', 'commands', 'reason', 'configuration', 'identity', 'preparation', 'receipt'])) return null;
+  if (!exactNodeFields(value, ['kind'], ['instanceId', 'stream', 'transfer', 'result', 'generation', 'ranges', 'live', 'code', 'snapshot', 'staleModels', 'status', 'workspaceId', 'commands', 'reason', 'configuration', 'identity', 'preparation', 'receipt', 'value'])) return null;
+  if (value.kind === 'provider-auxiliary-result' || value.kind === 'provider-auxiliary-too-large') {
+    const result = parseNodeProviderAuxiliaryReply(value);
+    return result && sameNodeSession(result.identity, session) ? result : null;
+  }
   if (value.kind === 'provider-session-configuration-prepared' || value.kind === 'provider-session-configuration-receipt') {
     const reply = parseNodeSessionConfigurationReply(value);
     const identity = reply?.kind === 'provider-session-configuration-receipt' ? reply.identity

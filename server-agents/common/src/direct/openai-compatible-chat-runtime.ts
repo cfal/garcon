@@ -1,3 +1,6 @@
+import { fetchDirectQuery, type DirectNativeQuery } from './native-query.js';
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
+import { readResponseJson, readResponseText } from '../shared/response-body.js';
 // OpenAI-compatible chat-completions protocol adapter for direct runtimes.
 
 import type { AgentAttachment } from '@garcon/common/agent-execution';
@@ -78,6 +81,7 @@ export function buildOpenAiCompatibleUserContent(
 async function readOpenAiCompatibleTextStream(
   response: Response,
   runtimeLabel: string,
+  cleanup: NativeCleanupObserver | null = null,
 ): Promise<string> {
   if (!response.body) {
     throw new Error(`${runtimeLabel} response did not include a stream body.`);
@@ -106,7 +110,7 @@ async function readOpenAiCompatibleTextStream(
     } catch {
       // Skips malformed chunks from partially-compatible providers.
     }
-  });
+  }, cleanup);
 
   if (lastStreamError) {
     throw new Error(`${runtimeLabel} stream error: ${lastStreamError}`);
@@ -121,12 +125,13 @@ async function readOpenAiCompatibleTextStream(
 async function readOpenAiCompatibleResponse(
   response: Response,
   runtimeLabel: string,
+  cleanup: NativeCleanupObserver | null = null,
 ): Promise<string> {
   let text: string;
   if (!isJsonResponse(response)) {
-    text = await readOpenAiCompatibleTextStream(response, runtimeLabel);
+    text = await readOpenAiCompatibleTextStream(response, runtimeLabel, cleanup);
   } else {
-    const parsed = await response.json() as {
+    const parsed = await readResponseJson(response, cleanup) as {
       choices?: Array<{ message?: { content?: unknown } }>;
       error?: { message?: string };
     };
@@ -143,6 +148,7 @@ export async function runOpenAiCompatibleSingleQuery(
   config: OpenAiCompatibleChatRuntimeConfig,
   prompt: string,
   options: Record<string, unknown> = {},
+  native: DirectNativeQuery | null = null,
 ): Promise<string> {
   const apiKey = config.getApiKey();
   const model = typeof options.model === 'string' && options.model
@@ -154,7 +160,7 @@ export async function runOpenAiCompatibleSingleQuery(
   const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
-    const response = await fetch(`${config.getBaseUrl()}/chat/completions`, {
+    const response = await fetchDirectQuery(native, `${config.getBaseUrl()}/chat/completions`, {
       method: 'POST',
       headers: buildHeaders(config, apiKey),
       body: JSON.stringify({
@@ -167,11 +173,11 @@ export async function runOpenAiCompatibleSingleQuery(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = await readResponseText(response, native);
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return await readOpenAiCompatibleResponse(response, config.runtimeLabel);
+    return await readOpenAiCompatibleResponse(response, config.runtimeLabel, native);
   } finally {
     clearTimeout(timer);
   }
@@ -221,11 +227,11 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
+        const errorText = await readResponseText(response, session.nativeWork);
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
       return {
-        content: await readOpenAiCompatibleResponse(response, this.config.runtimeLabel),
+        content: await readOpenAiCompatibleResponse(response, this.config.runtimeLabel, session.nativeWork),
         checkpoint: null,
       };
     } finally {

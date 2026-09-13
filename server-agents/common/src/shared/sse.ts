@@ -1,13 +1,16 @@
 // Iterates server-sent event data payloads from a fetch response body.
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
 
 export async function readSseDataEvents(
   body: ReadableStream<Uint8Array>,
   onData: (data: string) => void,
+  cleanup: NativeCleanupObserver | null = null,
 ): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let dataLines: string[] = [];
+  let readFailure: { error: unknown } | null = null;
 
   const emitEvent = () => {
     if (dataLines.length === 0) return;
@@ -32,7 +35,10 @@ export async function readSseDataEvents(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try { chunk = await reader.read(); }
+      catch (error) { readFailure = { error }; throw error; }
+      const { done, value } = chunk;
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -48,6 +54,10 @@ export async function readSseDataEvents(
     if (buffer) processLine(buffer);
     emitEvent();
   } finally {
-    await reader.cancel().catch(() => {});
+    await reader.cancel().catch((error: unknown) => {
+      // Cancelling an errored stream repeats its stored read error without invoking underlying cleanup.
+      if (!readFailure || !Object.is(error, readFailure.error)) cleanup?.failed(error);
+    });
+    if (cleanup) reader.releaseLock();
   }
 }

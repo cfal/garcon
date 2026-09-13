@@ -45,6 +45,9 @@ describe('ClaudeAgentIntegration', () => {
     expect(integration.commands).toBeDefined();
     expect(integration.endpoints).toBeDefined();
     expect(integration.singleQuery).toBeDefined();
+    expect(integration.singleQueryLifetime).toEqual({ begin: expect.any(Function) });
+    expect(integration.executionLifetime).toBeNull();
+    expect(integration.textGenerationLifetime).toBeNull();
     expect(integration.settings.describe()).toEqual([
       expect.objectContaining({
         key: 'claudeThinkingMode',

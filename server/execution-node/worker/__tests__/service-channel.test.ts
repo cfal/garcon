@@ -10,6 +10,20 @@ import { session, tick } from './lifecycle-fixture.js';
 const command = { method: 'begin-output-recovery' } as const;
 const recovered = { kind: 'output-recovery', generation: 1 } as const;
 
+test('auxiliary replies must match the captured operation and use the admitted request budget', async () => {
+  const deadlines: number[] = [];
+  const f = fixture(16, (_callback, delay) => { deadlines.push(delay); return { cancel() {} }; });
+  const request = { method: 'provider-text-generation', instanceId: 'synthetic-instance', identity: { ...session, operationId: 'synthetic-query' },
+    request: { prompt: 'synthetic input', timeoutMs: 120_000, configuration: { model: 'synthetic-model', settings: null, endpoint: null } } } as const;
+  f.execute.mockImplementationOnce(async () => ({ kind: 'provider-auxiliary-result', instanceId: request.instanceId,
+    identity: { ...request.identity, operationId: 'synthetic-foreign' }, value: 'synthetic result' }));
+  try {
+    await expect(f.client.call(request, f.lifetime.signal)).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
+    expect(deadlines).toEqual([120_000]);
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  } finally { f.close(); }
+});
+
 function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOptions['scheduleTimeout'],
   writerLimits: Partial<Pick<NodeWorkerWriterOptions, 'maxQueuedFrames' | 'reservedControlFrames' | 'reservedApplicationFrames'>> = {}) {
   const lifetime = new AbortController();

@@ -7,7 +7,7 @@ import type { NodeExecutionCommand } from '../transport/execution-wire.js';
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
 const identity = (id = 'synthetic-operation') => ({ ...session, operationId: id });
 const receipt = (patch: Partial<NodeExecutionReceipt> = {}): NodeExecutionReceipt => ({
-  identity: identity(), runId: 'synthetic-run', phase: 'dispatched', dispatch: 'completed', abort: null, control: null, ...patch,
+  identity: identity(), runId: 'synthetic-run', phase: 'dispatched', dispatch: 'accepted', native: 'possible', containment: null, abort: null, control: null, ...patch,
 });
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0)) close(); });
@@ -96,7 +96,7 @@ test.each(['ended', 'failed', 'released', 'expired'] as const)('a %s receipt mak
   const f = fixture(); const operation = f.track();
   expect(await operation.interrupt()).toBe(false);
   const current = f.connect();
-  f.handler.mockImplementation(async () => ({ kind: 'status', receipt: receipt({ phase }) }));
+  f.handler.mockImplementation(async () => ({ kind: 'status', receipt: receipt({ phase, native: 'settled' }) }));
   await f.manager.reconcile(current.connectionId, current.signal);
   expect(f.aborts()).toEqual([]);
 });
@@ -200,4 +200,18 @@ test('logical closure cannot retain or reuse controller receipts', async () => {
   expect(operation.receipt).toBeNull(); expect(await operation.interrupt()).toBe(false);
   expect(() => f.track()).toThrow();
   expect(() => f.manager.attach(f.connection())).toThrow();
+});
+
+
+test.each(['ended', 'failed'] as const)('a %s receipt with unsettled native work still accepts the exact pending Stop', async (phase) => {
+  const f = fixture(); const operation = f.track();
+  expect(await operation.interrupt()).toBe(false);
+  const current = f.connect();
+  f.handler.mockImplementation(async (command) => command.method === 'status'
+    ? { kind: 'status', receipt: receipt({ phase, native: 'possible' }) }
+    : { kind: 'abort-result', requested: true });
+  await f.manager.reconcile(current.connectionId, current.signal);
+  expect(f.aborts()).toHaveLength(1);
+  expect(f.aborts()[0]!.command).toEqual({ method: 'abort-run', identity: operation.identity, runId: 'synthetic-run' });
+  expect(f.calls.some(({ command }) => command.method === 'dispatch')).toBe(false);
 });

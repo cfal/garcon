@@ -91,15 +91,18 @@ function parseExecutionTicket(value: unknown): NodeExecutionTicket | null {
 }
 
 function parseExecutionReceipt(value: unknown): NodeExecutionReceipt | null {
-  if (!exactNodeFields(value, ['identity', 'runId', 'phase', 'dispatch', 'abort', 'control']) || !isExecutionIdentity(value.runId)
+  if (!exactNodeFields(value, ['identity', 'runId', 'phase', 'dispatch', 'native', 'containment', 'abort', 'control']) || !isExecutionIdentity(value.runId)
     || !['preparing', 'prepared', 'dispatched', 'ended', 'failed', 'released', 'expired'].includes(value.phase as string)
-    || ![null, 'pending', 'completed', 'failed'].includes(value.dispatch as string | null)
+    || ![null, 'pending', 'accepted', 'rejected', 'unknown'].includes(value.dispatch as string | null)
+    || !['none', 'possible', 'settled'].includes(value.native as string)
+    || ![null, 'requested'].includes(value.containment as string | null)
     || ![null, 'pending', 'requested', 'unconfirmed'].includes(value.abort as string | null)) return null;
   const identity = parseNodeOperationIdentity(value.identity);
   const control = value.control === null ? null : parseControlReceipt(value.control);
   if (!identity || (value.control !== null && !control)) return null;
   return { identity, runId: value.runId, phase: value.phase as NodeExecutionReceipt['phase'],
-    dispatch: value.dispatch as NodeExecutionReceipt['dispatch'], abort: value.abort as NodeExecutionReceipt['abort'], control };
+    dispatch: value.dispatch as NodeExecutionReceipt['dispatch'],
+    native: value.native as NodeExecutionReceipt['native'], containment: value.containment as NodeExecutionReceipt['containment'], abort: value.abort as NodeExecutionReceipt['abort'], control };
 }
 
 function parseControlPreparation(value: unknown): NodeControlPreparation | null {

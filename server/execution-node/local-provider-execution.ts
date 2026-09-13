@@ -1,6 +1,9 @@
 import type {
   AgentCompaction,
   AgentExecutionHandle,
+  AgentExecutionAttempt,
+  AgentExecutionLifetime,
+  AgentDispatchOutcome,
   AgentExecutionV5,
   AgentIntegration,
   AgentPreparedProviderConfiguration,
@@ -16,6 +19,8 @@ import type {
   ProviderExecutionOperation,
   ProviderExecutionRequest,
   ProviderExecutionService,
+  ProviderRetainedExecutionService,
+  ProviderExecutionAttempt,
   ProviderGoalControlInput,
   ProviderSteerInput,
   ProviderSteerPreparation,
@@ -40,6 +45,7 @@ interface LocalExecutionOperation {
   readonly handle: PromiseWithResolvers<AgentExecutionHandle | null>;
   phase: 'prepared' | 'dispatched' | 'released';
   abort: Promise<boolean> | null;
+  native: AgentExecutionAttempt | null;
   runId: string;
   ended: boolean;
   session: { agentSessionId: string; nativeSession: AgentNativeSessionRef | null } | null;
@@ -48,6 +54,7 @@ interface LocalExecutionOperation {
 }
 
 export class LocalProviderExecutionService implements ProviderExecutionService {
+  readonly retained: ProviderRetainedExecutionService | null;
   readonly #operations = new WeakMap<ProviderExecutionOperation, LocalExecutionOperation>();
   readonly #steerTargets = new WeakMap<ProviderSteerTarget, {
     execution: LocalExecutionOperation;
@@ -56,9 +63,20 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
   }>();
 
   constructor(
-    private readonly integration: Pick<AgentIntegration, 'descriptor' | 'execution' | 'compaction' | 'steering' | 'goals'>,
+    private readonly integration: Pick<AgentIntegration, 'descriptor' | 'execution' | 'executionLifetime' | 'compaction' | 'steering' | 'goals'>,
     private readonly configuration: ProviderConfigurationResolver,
-  ) {}
+  ) {
+    const lifetime = integration.executionLifetime;
+    this.retained = lifetime === null ? null : Object.freeze({
+      prepare: (request, signal) => this.prepare(request, signal),
+      beginDispatch: (operation, input, delivery) => this.#beginRetainedDispatch(lifetime, operation, input, delivery),
+      release: (operation) => this.release(operation),
+      abort: (operation) => this.abort(operation),
+      prepareSteer: (operation, signal) => this.prepareSteer(operation, signal),
+      steer: (operation, target, input) => this.steer(operation, target, input),
+      submitGoalControl: (operation, input, signal) => this.submitGoalControl(operation, input, signal),
+    } satisfies ProviderRetainedExecutionService);
+  }
 
   async prepare(input: ProviderExecutionRequest, signal: AbortSignal): Promise<ProviderExecutionOperation> {
     signal.throwIfAborted();
@@ -79,7 +97,7 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
       steering, goals,
       handle: Promise.withResolvers<AgentExecutionHandle | null>(),
       phase: 'prepared',
-      abort: null,
+      abort: null, native: null,
       runId: request.runId, ended: false, delivery: null, detachCancellation: null,
       session: request.kind === 'start' ? null : { agentSessionId: request.agentSessionId, nativeSession: request.nativeSession },
     });
@@ -97,66 +115,10 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
     execution.phase = 'dispatched';
     let handle: AgentExecutionHandle | null = null;
     try {
-      delivery.output.signal.throwIfAborted();
       const { request } = execution;
-      const content = {
-        prompt: input.prompt,
-        attachments: input.attachments.map((attachment) => ({ ...attachment })),
-        carriedContext: input.carriedContext === null ? null : { ...input.carriedContext },
-      };
-      if (request.kind !== 'start' && content.carriedContext !== null) {
-        throw new TypeError('Only a new native session accepts carried context');
-      }
-      const signal = AbortSignal.any([execution.cancellation.signal, delivery.admission.signal]);
-      // Admission cancellation can win before a native handle exists or after dispatch returns.
-      const cancel = () => {
-        void this.#abortExecution(execution).catch(() => {
-          logger.warn('Provider cancellation could not be confirmed', { chatId: request.chatId });
-        });
-      };
-      if (signal.aborted) cancel();
-      else {
-        signal.addEventListener('abort', cancel, { once: true });
-        execution.detachCancellation = () => signal.removeEventListener('abort', cancel);
-      }
-      signal.throwIfAborted();
-      execution.delivery = {
-        output: {
-          signal: delivery.output.signal,
-          emit: (event) => {
-            const session = event.type === 'session' ? {
-              agentSessionId: event.session.agentSessionId,
-              nativeSession: structuredClone(event.session.nativeSession),
-            } : null;
-            if (event.type === 'run-ended' && event.runId === execution.runId) {
-              execution.ended = true;
-              execution.detachCancellation?.();
-              execution.detachCancellation = null;
-            }
-            delivery.output.emit(event);
-            if (session) execution.session = session;
-          },
-        },
-        admission: {
-          signal,
-          async markStarted() {
-            signal.throwIfAborted();
-            await delivery.admission.markStarted();
-            signal.throwIfAborted();
-          },
-        },
-      };
-      const context = {
-        ...structuredClone(execution.configuration),
-        chatId: request.chatId,
-        projectPath: request.projectPath,
-        runId: request.runId,
-        ...execution.delivery,
-        prompt: content.prompt,
-        attachments: content.attachments,
-      };
+      const { context, carriedContext } = this.#prepareDelivery(execution, input, delivery);
       if (request.kind === 'start') {
-        handle = await execution.execution.start({ ...context, carriedContext: content.carriedContext });
+        handle = await execution.execution.start({ ...context, carriedContext });
       } else {
         const resume = { ...context, agentSessionId: request.agentSessionId, nativeSession: structuredClone(request.nativeSession) };
         if (request.kind === 'compact') {
@@ -266,13 +228,124 @@ export class LocalProviderExecutionService implements ProviderExecutionService {
     });
   }
 
+  #prepareDelivery(execution: LocalExecutionOperation, input: ProviderExecutionInput, delivery: ProviderExecutionDelivery) {
+    delivery.output.signal.throwIfAborted();
+    const { request } = execution;
+    const content = {
+      prompt: input.prompt,
+      attachments: input.attachments.map((attachment) => ({ ...attachment })),
+      carriedContext: input.carriedContext === null ? null : { ...input.carriedContext },
+    };
+    if (request.kind !== 'start' && content.carriedContext !== null) {
+      throw new TypeError('Only a new native session accepts carried context');
+    }
+    const signal = AbortSignal.any([execution.cancellation.signal, delivery.admission.signal]);
+    // Admission cancellation can win before a native handle exists or after dispatch returns.
+    const cancel = () => {
+      void this.#abortExecution(execution).catch(() => {
+        logger.warn('Provider cancellation could not be confirmed', { chatId: request.chatId });
+      });
+    };
+    if (signal.aborted) cancel();
+    else {
+      signal.addEventListener('abort', cancel, { once: true });
+      execution.detachCancellation = () => signal.removeEventListener('abort', cancel);
+    }
+    signal.throwIfAborted();
+    execution.delivery = {
+      output: {
+        signal: delivery.output.signal,
+        emit: (event) => {
+          const session = event.type === 'session' ? {
+            agentSessionId: event.session.agentSessionId,
+            nativeSession: structuredClone(event.session.nativeSession),
+          } : null;
+          if (event.type === 'run-ended' && event.runId === execution.runId) {
+            execution.ended = true;
+            if (execution.native === null) {
+              execution.detachCancellation?.();
+              execution.detachCancellation = null;
+            }
+          }
+          delivery.output.emit(event);
+          if (session) execution.session = session;
+        },
+      },
+      admission: {
+        signal,
+        async markStarted() {
+          signal.throwIfAborted();
+          await delivery.admission.markStarted();
+          signal.throwIfAborted();
+        },
+      },
+    };
+    const context = {
+      ...structuredClone(execution.configuration),
+      chatId: request.chatId,
+      projectPath: request.projectPath,
+      runId: request.runId,
+      ...execution.delivery,
+      prompt: content.prompt,
+      attachments: content.attachments,
+    };
+    return { context, carriedContext: content.carriedContext };
+  }
+
+  #beginRetainedDispatch(
+    lifetime: AgentExecutionLifetime,
+    operation: ProviderExecutionOperation,
+    input: ProviderExecutionInput,
+    delivery: ProviderExecutionDelivery,
+  ): ProviderExecutionAttempt {
+    const execution = this.#require(operation);
+    execution.cancellation.signal.throwIfAborted();
+    if (execution.phase !== 'prepared') throw new Error(`Provider execution was already ${execution.phase}`);
+    execution.phase = 'dispatched';
+    try {
+      const { request } = execution;
+      const { context, carriedContext } = this.#prepareDelivery(execution, input, delivery);
+      const native = lifetime.begin(request.kind === 'start'
+        ? { kind: 'start', request: { ...context, carriedContext } }
+        : { kind: request.kind, request: { ...context, agentSessionId: request.agentSessionId, nativeSession: structuredClone(request.nativeSession) } });
+      const { dispatch: nativeDispatch, settled: nativeSettled, abort } = native;
+      execution.native = Object.freeze({ dispatch: nativeDispatch, settled: nativeSettled, abort: () => Reflect.apply(abort, native, []) });
+      execution.handle.resolve(null);
+      const dispatch = nativeDispatch.then((outcome) => {
+        if (outcome.kind !== 'accepted') execution.ended = true;
+        return outcome;
+      }, (error: unknown): AgentDispatchOutcome => {
+        execution.ended = true;
+        return { kind: 'unknown', error };
+      });
+      const settled = nativeSettled.then(() => {
+        execution.ended = true;
+        execution.detachCancellation?.();
+        execution.detachCancellation = null;
+      }, (error: unknown) => {
+        execution.ended = true;
+        throw error;
+      });
+      return Object.freeze({ dispatch, settled });
+    } catch (error) {
+      execution.handle.resolve(null);
+      execution.ended = true;
+      execution.detachCancellation?.();
+      execution.detachCancellation = null;
+      throw error;
+    }
+  }
+
   #live(execution: LocalExecutionOperation): boolean {
     return execution.phase === 'dispatched' && !execution.ended && !execution.cancellation.signal.aborted;
   }
 
   #abortExecution(execution: LocalExecutionOperation): Promise<boolean> {
     if (execution.abort) return execution.abort;
-    execution.abort = execution.handle.promise.then((handle) => handle ? execution.execution.abort(handle) : false);
+    execution.abort = execution.handle.promise.then((handle) => {
+      if (execution.native !== null) return execution.native.abort();
+      return handle ? execution.execution.abort(handle) : false;
+    });
     execution.cancellation.abort(new DOMException('Provider execution cancelled', 'AbortError'));
     return execution.abort;
   }

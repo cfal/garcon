@@ -47,6 +47,9 @@ export default class AmpAgentIntegration implements AgentIntegration {
     fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
   } as const;
   readonly execution;
+  readonly executionLifetime = null;
+  readonly singleQueryLifetime = null;
+  readonly textGenerationLifetime = null;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;

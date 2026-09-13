@@ -61,6 +61,9 @@ export default class PiAgentIntegration implements AgentIntegration {
   readonly descriptor = PI_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly executionLifetime = null;
+  readonly singleQueryLifetime = null;
+  readonly textGenerationLifetime = null;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;

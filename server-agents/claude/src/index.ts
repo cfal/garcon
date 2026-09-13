@@ -35,6 +35,8 @@ import {
   buildClaudeHostEnvironment,
 } from './agents/claude/endpoint-runtime.js';
 import { ClaudeExecution } from './agents/claude/execution.js';
+import { createClaudeSingleQueryLifetime } from './agents/claude/single-query-lifetime.js';
+import { classifyClaudeError } from './agents/claude/errors.js';
 import {
   claudeForkSemanticDigest,
   projectClaudeForkEntry,
@@ -75,6 +77,9 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly executionLifetime = null;
+  readonly singleQueryLifetime: NonNullable<AgentIntegration['singleQueryLifetime']>;
+  readonly textGenerationLifetime = null;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
@@ -250,6 +255,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         }
       },
     };
+    this.singleQueryLifetime = createClaudeSingleQueryLifetime(config, { binary: config.binary, logger, versionProbe });
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
@@ -362,18 +368,4 @@ function claudeLoginEnvironment(config: ReturnType<typeof createClaudeConfig>): 
     COLORTERM: 'truecolor',
     FORCE_COLOR: '3',
   };
-}
-
-function classifyClaudeError(error: unknown): AgentIntegrationError {
-  if (error instanceof AgentIntegrationError) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
-  const code = normalized.includes('auth') || normalized.includes('login')
-    ? 'AUTH_REQUIRED'
-    : normalized.includes('rate limit') || normalized.includes('429')
-      ? 'RATE_LIMITED'
-      : normalized.includes('timeout') || normalized.includes('timed out')
-        ? 'TIMEOUT'
-        : 'PROVIDER_FAILURE';
-  return new AgentIntegrationError(code, message, code !== 'AUTH_REQUIRED');
 }

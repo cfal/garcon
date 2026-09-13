@@ -52,6 +52,9 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly descriptor = FACTORY_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly executionLifetime = null;
+  readonly singleQueryLifetime = null;
+  readonly textGenerationLifetime = null;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;

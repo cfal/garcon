@@ -42,6 +42,7 @@ function fixture() {
     },
     endpoints: { validate: mock(async (_endpoint: AgentEndpointSelection) => {}) },
     sessionConfiguration: null,
+    executionLifetime: null,
     execution: {
       start: mock(async (_request: AgentStartRequestV5) => nativeHandle),
       resume: mock(async (_request: AgentResumeRequestV5) => nativeHandle),
@@ -63,7 +64,7 @@ function fixture() {
       }),
     },
   } satisfies Pick<AgentIntegration,
-    'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration' | 'execution' | 'compaction' | 'steering' | 'goals'>;
+    'descriptor' | 'settings' | 'endpoints' | 'sessionConfiguration' | 'execution' | 'executionLifetime' | 'compaction' | 'steering' | 'goals'>;
   const request: ProviderExecutionRequest = {
     kind: 'start', chatId: 'synthetic-chat', projectPath: '/synthetic-project', runId: 'synthetic-run',
     configuration: { model: 'synthetic-model', settings: null, endpoint: null },
@@ -531,7 +532,7 @@ test('captures goal attachment values before asynchronous configuration resoluti
   const validation = Promise.withResolvers<void>();
   const resolve = f.configuration.resolve.bind(f.configuration);
   f.configuration.resolve = async (request, signal) => { await validation.promise; return resolve(request, signal); };
-  const attachment = { data: 'c3ludGhldGlj', mimeType: 'image/png', name: 'original' };
+  const attachment = { kind: 'image' as const, data: 'c3ludGhldGlj', mimeType: 'image/png', name: 'original' };
   const beforeDelivery = mock(async (handoff: { commit(): void }) => handoff.commit());
   const result = f.service.submitGoalControl(f.prepared, {
     ...f.input, attachments: [attachment], runId: 'synthetic-goal', configuration: f.request.configuration, beforeDelivery,
@@ -541,6 +542,6 @@ test('captures goal attachment values before asynchronous configuration resoluti
   validation.resolve();
   expect(await result).toBe(true);
   expect(f.integration.goals.submitControl.mock.calls[0]![0].attachments)
-    .toEqual([{ data: 'c3ludGhldGlj', mimeType: 'image/png', name: 'original' }]);
-  expect(beforeDelivery).toHaveBeenCalledOnce();
+    .toEqual([{ kind: 'image' as const, data: 'c3ludGhldGlj', mimeType: 'image/png', name: 'original' }]);
+  expect(beforeDelivery).toHaveBeenCalledTimes(1);
 });

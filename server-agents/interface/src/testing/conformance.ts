@@ -14,6 +14,7 @@ const REQUIRED_FACET_METHODS = {
 } as const;
 
 const NULLABLE_FACET_METHODS = {
+  executionLifetime: ['begin'],
   auth: ['status'],
   commands: ['discover'],
   compaction: ['compact'],
@@ -22,7 +23,9 @@ const NULLABLE_FACET_METHODS = {
   goals: ['submitControl'],
   endpoints: ['validate'],
   singleQuery: ['run'],
+  singleQueryLifetime: ['begin'],
   textGeneration: ['run'],
+  textGenerationLifetime: ['begin'],
   legacyHistoryImport: ['load'],
   nativeHistoryImport: ['load'],
   nativeActivity: ['lastActivity'],

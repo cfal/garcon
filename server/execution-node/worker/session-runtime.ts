@@ -1,3 +1,4 @@
+import { NodeWorkerContainmentRelay } from './containment-relay.js';
 import type { Subprocess } from 'bun';
 import type { NodeWorkerRuntime, NodeWorkerRuntimeContext } from './bootstrap.js';
 import { prepareNodeInstanceEnvironments } from './environment.js';
@@ -19,10 +20,19 @@ interface HostedInstance {
 }
 
 export async function startNodeSessionRuntime(context: NodeWorkerRuntimeContext, writer: Pick<NodeWorkerWriter, 'submit' | 'waitForRelease'>): Promise<NodeWorkerRuntime> {
+  return createNodeSessionRuntime(context, writer, () => nodeWorkerCommand('instance'));
+}
+
+export async function createNodeSessionRuntime(
+  context: NodeWorkerRuntimeContext,
+  writer: Pick<NodeWorkerWriter, 'submit' | 'waitForRelease'>,
+  instanceCommand: () => readonly [string, ...string[]],
+): Promise<NodeWorkerRuntime> {
   const { configuration, authority } = context;
   if (configuration.role !== 'session') throw new TypeError('Invalid session worker role');
   assertNodeOutputMemoryBudget(configuration.instances.length, configuration.replay, configuration.outputMemoryBytes);
   const children: HostedInstance[] = [];
+  const containment = new NodeWorkerContainmentRelay(authority, writer);
   const ready = new NodeWorkerReady(authority.session);
   const validate = () => { authority.poll(); authority.signal.throwIfAborted(); };
   const instanceIds = new Set(configuration.instances.map((instance) => instance.id));
@@ -55,13 +65,14 @@ export async function startNodeSessionRuntime(context: NodeWorkerRuntimeContext,
       let child: HostedInstance['process'];
       try {
         validate();
-        child = Bun.spawn(nodeWorkerCommand('instance'), { cwd: directory.path,
+        child = Bun.spawn([...instanceCommand()], { cwd: directory.path,
           env: { ...environments.get(instance.id)!.values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS },
           stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
       } catch (error) { await directory.dispose(); throw error; }
       const peer = new NodeWorkerPeer(child, { role: 'instance', signal: authority.signal, validate,
+        containmentRequested: (request) => containment.request(request),
         received: (frame, text) => services!.receiveChild(instance.id, frame, text),
-        failed() { authority.retire(); } });
+        failed() { if (!containment.requested) authority.retire(); } });
       children.push({ instanceId: instance.id, process: child, peer, directory });
       await peer.hello;
       const manifests = await peer.configure(authority.session, context.connectionId, { role: 'instance',

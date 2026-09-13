@@ -1,27 +1,35 @@
 import { randomUUID } from 'node:crypto';
 import { isExecutionIdentity, type ExecutionLocation } from '../../common/execution-location.js';
+import { isErrorCode } from '../../common/error-codes.js';
 import {
   parseNodeOperationIdentity, sameNodeSession, type NodeOperationIdentity, type NodeOperationResult,
 } from '../../common/node-operation.js';
-import type { AgentProducerEvent, AgentGoalControlHandoff, AgentSteerResult, AgentExecutionAdmission } from '@garcon/server-agent-interface';
+import type { AgentProducerEvent, AgentGoalControlHandoff, AgentSteerResult, AgentExecutionAdmission, AgentDispatchOutcome } from '@garcon/server-agent-interface';
 import type {
   ProviderExecutionInput, ProviderExecutionOperation, ProviderExecutionOutput, ProviderExecutionRequest,
-  ProviderGoalControlInput, ProviderSteerInput, ProviderSteerTarget,
+  ProviderGoalControlInput, ProviderSteerInput, ProviderSteerTarget, ProviderRetainedExecutionService,
 } from '../execution-nodes/provider-execution.js';
 import { DomainError } from '../lib/domain-error.js';
+import { createLogger } from '../lib/log.js';
 import type { NodeConnectionLease, NodeSupervisor } from './supervisor.js';
 import type { NodeExecutionResources, NodeExecutionSourceTarget, PreparedNodeExecutionResource } from './execution-resources.js';
 import type { NodeExecutionBody } from '../execution-nodes/transport/execution-body-wire.js';
+import type { NodeNativeOccupancy, NodeNativeExecutionReservation } from './native-occupancy.js';
+import { DEFAULT_NODE_NATIVE_LIFETIME } from './native-lifetime-limits.js';
+
+const logger = createLogger('execution-node:operations');
 
 export interface NodeOperationLimits {
   readonly maxOperations: number;
   readonly maxReceipts: number;
   readonly preparationMs: number;
   readonly receiptMs: number;
+  readonly dispatchMs: number;
+  readonly nativeSettlementMs: number;
 }
 
 export const DEFAULT_NODE_OPERATIONS: NodeOperationLimits = Object.freeze({
-  maxOperations: 128, maxReceipts: 1_024, preparationMs: 30_000, receiptMs: 300_000,
+  maxOperations: 128, maxReceipts: 1_024, preparationMs: 30_000, receiptMs: 300_000, ...DEFAULT_NODE_NATIVE_LIFETIME,
 });
 
 export type NodeExecutionRequest =
@@ -56,7 +64,9 @@ export interface NodeExecutionReceipt {
   readonly identity: NodeOperationIdentity;
   readonly runId: string;
   readonly phase: 'preparing' | 'prepared' | 'dispatched' | 'ended' | 'failed' | 'released' | 'expired';
-  readonly dispatch: 'pending' | 'completed' | 'failed' | null;
+  readonly dispatch: 'pending' | 'accepted' | 'rejected' | 'unknown' | null;
+  readonly native: 'none' | 'possible' | 'settled';
+  readonly containment: 'requested' | null;
   /** A requested abort is not proof of process termination. */
   readonly abort: 'pending' | 'requested' | 'unconfirmed' | null;
   readonly control: NodeControlReceipt | null;
@@ -125,9 +135,18 @@ interface Operation {
   readonly expiresAt: number;
   phase: NodeExecutionReceipt['phase'];
   dispatch: NodeExecutionReceipt['dispatch'];
+  native: NodeExecutionReceipt['native'];
+  containment: NodeExecutionReceipt['containment'];
+  readonly reservation: NodeNativeExecutionReservation;
+  dispatchWait: {
+    readonly result: PromiseWithResolvers<AgentDispatchOutcome>;
+    readonly expiresAt: number;
+    readonly timer: { cancel(): void };
+  } | null;
+  settlementWait: { readonly expiresAt: number; readonly timer: { cancel(): void } } | null;
   abort: NodeExecutionReceipt['abort'];
   pending: number;
-  resource: PreparedNodeExecutionResource | null;
+  resource: (PreparedNodeExecutionResource & { readonly execution: ProviderRetainedExecutionService }) | null;
   provider: ProviderExecutionOperation | null;
   abortTask: Promise<boolean> | null;
   timer: { cancel(): void } | null;
@@ -140,6 +159,8 @@ export interface NodeOperationTableOptions {
   readonly connection: NodeConnectionLease;
   readonly supervisor: Pick<NodeSupervisor, 'assertConnection' | 'assertAdmission' | 'poll'>;
   readonly resources: Pick<NodeExecutionResources, 'prepare'>;
+  readonly occupancy: Pick<NodeNativeOccupancy, 'reserveExecution' | 'close'>;
+  requestContainment(identity: NodeOperationIdentity, location: ExecutionLocation): void;
   readonly limits?: Partial<NodeOperationLimits>;
   readonly scheduleTimeout?: (callback: () => void, delay: number) => { cancel(): void };
 }
@@ -151,6 +172,7 @@ export class NodeOperationTable {
   readonly #limits: NodeOperationLimits;
   readonly #detachAuthority: () => void;
   #closed = false;
+  #containing = false;
 
   constructor(private readonly options: NodeOperationTableOptions) {
     this.#limits = { ...DEFAULT_NODE_OPERATIONS, ...options.limits };
@@ -165,7 +187,7 @@ export class NodeOperationTable {
 
   async prepare(connection: NodeConnectionLease, location: ExecutionLocation, input: NodeExecutionRequest, signal: AbortSignal): Promise<NodeExecutionTicket> {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     signal.throwIfAborted();
     const now = this.#pollLive();
     if (this.#operations.size >= this.#limits.maxOperations) {
@@ -178,7 +200,8 @@ export class NodeOperationTable {
       identity, chatId: request.chatId, runId: request.runId, runs: new Set([request.runId]), capability: null,
       cancellation: new AbortController(), grant: new AbortController(),
       expiresAt: now + this.#limits.preparationMs,
-      phase: 'preparing', dispatch: null, abort: null, pending: 1,
+      phase: 'preparing', dispatch: null, native: 'none', containment: null, abort: null, pending: 1,
+      reservation: this.options.occupancy.reserveExecution(request.chatId), dispatchWait: null, settlementWait: null,
       resource: null, provider: null, abortTask: null, timer: null, detachGrant: null, publication: null, control: null,
     };
     this.#operations.set(identity.operationId, operation);
@@ -187,7 +210,9 @@ export class NodeOperationTable {
     const preparation = (async () => {
       try {
         const resource = await this.options.resources.prepare(location, admissionSignal);
-        operation.resource = resource;
+        const execution = resource.execution;
+        if (execution === null) throw new DomainError('NODE_UNAVAILABLE', 'The provider does not support retained native execution', 409);
+        operation.resource = { ...resource, execution };
         this.#pollLive();
         admissionSignal.throwIfAborted();
         const revoked = () => { void this.#abort(operation).catch(() => {}); };
@@ -195,11 +220,11 @@ export class NodeOperationTable {
         operation.detachGrant = () => resource.signal.removeEventListener('abort', revoked);
         resource.signal.throwIfAborted();
         const prepareSignal = AbortSignal.any([admissionSignal, resource.signal]);
-        operation.provider = await resource.execution.prepare({ ...request, projectPath: resource.projectPath }, prepareSignal);
+        operation.provider = await execution.prepare({ ...request, projectPath: resource.projectPath }, prepareSignal);
         this.#pollLive();
         prepareSignal.throwIfAborted();
         this.#connection(connection);
-        this.options.supervisor.assertAdmission(connection);
+        this.#admission(connection);
         resource.validate();
         operation.phase = 'prepared';
         return Object.freeze({ identity, location: resource.location, projectPath: resource.projectPath, runId: request.runId });
@@ -216,45 +241,52 @@ export class NodeOperationTable {
     return awaitPreparation(preparation, admissionSignal);
   }
 
-  async dispatch(connection: NodeConnectionLease, identity: NodeOperationIdentity, input: ProviderExecutionInput, output: ProviderExecutionOutput): Promise<void> {
+  async dispatch(connection: NodeConnectionLease, identity: NodeOperationIdentity, input: ProviderExecutionInput, output: ProviderExecutionOutput): Promise<AgentDispatchOutcome> {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     const operation = this.#require(identity);
     const { resource, provider } = operation;
     if (operation.phase !== 'prepared' || !resource || !provider) throw consumed();
     resource.validate();
     operation.cancellation.signal.throwIfAborted();
+    operation.reservation.enter();
     operation.phase = 'dispatched';
     operation.dispatch = 'pending';
-    operation.pending += 1;
+    operation.native = 'possible';
     operation.timer?.cancel();
     operation.timer = null;
     const signal = AbortSignal.any([this.options.connection.authoritySignal, resource.signal, operation.cancellation.signal]);
     const publication = executionOutput(output, operation.runId, (outcome) => {
       if (operation.phase !== 'dispatched') return;
-      if (outcome === 'failed') void this.#abort(operation).catch(() => {});
       operation.phase = outcome;
       this.#cancelControl(operation, new Error('Execution ended before control delivery'));
-      operation.detachGrant?.();
-      operation.detachGrant = null;
+      if (outcome === 'failed') void this.#abort(operation).catch(() => {});
       this.#retireSettled(operation);
     }, this.options.supervisor, signal);
     operation.publication = publication;
+    const result = Promise.withResolvers<AgentDispatchOutcome>();
+    operation.dispatchWait = {
+      result, expiresAt: this.options.supervisor.poll() + this.#limits.dispatchMs,
+      timer: (this.options.scheduleTimeout ?? scheduleTimeout)(() => this.poll(), this.#limits.dispatchMs),
+    };
     try {
-      await resource.execution.dispatch(provider, input, {
+      const attempt = resource.execution.beginDispatch(provider, input, {
         output: publication.sink, admission: publication.admission,
       });
-      operation.dispatch = 'completed';
+      void attempt.dispatch.then(
+        (outcome) => this.#completeDispatch(operation, outcome),
+        (error: unknown) => this.#completeDispatch(operation, { kind: 'unknown', error }),
+      );
+      void attempt.settled.then(() => {
+        if (operation.native !== 'possible' || operation.containment !== null) return;
+        operation.native = 'settled';
+        this.#retireSettled(operation);
+      }, () => this.#requestContainment(operation));
     } catch (error) {
-      operation.dispatch = 'failed';
-      if (operation.phase === 'dispatched') operation.phase = 'failed';
-      publication.detachOccurrence();
-      this.#cancelControl(operation, error);
-      throw error;
-    } finally {
-      operation.pending -= 1;
-      this.#retireSettled(operation);
+      // The synchronous port cannot enter native work before returning its attempt.
+      this.#completeDispatch(operation, { kind: 'rejected', error });
     }
+    return result.promise;
   }
 
   /** Captures byte and permission authority independently of a replaceable physical connection. */
@@ -299,7 +331,7 @@ export class NodeOperationTable {
 
   async prepareSteer(connection: NodeConnectionLease, identity: NodeOperationIdentity, signal: AbortSignal): Promise<NodeControlPreparation> {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     const operation = this.#require(identity);
     const control = this.#reserveControl(connection, operation, 'steer', operation.runId, signal);
     const { resource, provider } = operation;
@@ -333,7 +365,7 @@ export class NodeOperationTable {
     input: Omit<ProviderSteerInput, 'prepareDelivery'>,
   ): Promise<NodeSteerDelivery> {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     const operation = this.#require(identity);
     const control = this.#requireControl(operation, controlId);
     this.#validateControl(operation, control);
@@ -369,7 +401,7 @@ export class NodeOperationTable {
     input: Omit<ProviderGoalControlInput, 'beforeDelivery'>, signal: AbortSignal,
   ): Promise<NodeControlPreparation> {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     const operation = this.#require(identity);
     if (!isExecutionIdentity(input.runId) || operation.runs.has(input.runId)) {
       throw new DomainError('VALIDATION_FAILED', 'A goal handoff requires a new run identity', 400);
@@ -417,7 +449,7 @@ export class NodeOperationTable {
 
   async commitGoalControl(connection: NodeConnectionLease, identity: NodeOperationIdentity, controlId: string): Promise<NodeControlOutcome> {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     const operation = this.#require(identity);
     const control = this.#requireControl(operation, controlId);
     this.#validateControl(operation, control);
@@ -487,6 +519,11 @@ export class NodeOperationTable {
     const now = this.options.supervisor.poll();
     if (this.#closed) return now;
     for (const operation of this.#operations.values()) {
+      if (operation.dispatchWait && now >= operation.dispatchWait.expiresAt) {
+        this.#completeDispatch(operation, { kind: 'unknown', error: new DOMException('Native dispatch outcome is unconfirmed', 'TimeoutError') });
+      }
+      if (operation.settlementWait && now >= operation.settlementWait.expiresAt) this.#requestContainment(operation);
+      if (this.#closed) return now;
       if (operation.control && now >= operation.control.expiresAt) {
         this.#cancelControl(operation, new DOMException('Node execution control expired', 'TimeoutError'));
       }
@@ -513,15 +550,17 @@ export class NodeOperationTable {
       operation.detachGrant?.();
       operation.detachGrant = null;
       operation.publication?.detachOccurrence();
+      if (operation.dispatchWait) this.#completeDispatch(operation, { kind: 'unknown', error: unavailable() });
+      operation.settlementWait?.timer.cancel();
+      operation.settlementWait = null;
       void this.#abort(operation).catch(() => {});
       this.#retireSettled(operation);
     }
-    this.#operations.clear();
   }
 
   #reserveControl(connection: NodeConnectionLease, operation: Operation, kind: 'steer' | 'goal', runId: string, signal: AbortSignal): Control {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     signal.throwIfAborted();
     const now = this.#pollLive();
     this.#validateLive(operation);
@@ -554,7 +593,7 @@ export class NodeOperationTable {
 
   #validateLive(operation: Operation): void {
     this.options.connection.authoritySignal.throwIfAborted();
-    if (this.#closed || operation.phase !== 'dispatched' || !operation.resource || !operation.provider) throw consumed();
+    if (this.#closed || this.#containing || operation.phase !== 'dispatched' || !operation.resource || !operation.provider) throw consumed();
     operation.cancellation.signal.throwIfAborted();
     operation.resource.validate();
   }
@@ -568,7 +607,7 @@ export class NodeOperationTable {
 
   #validatePreparation(connection: NodeConnectionLease, operation: Operation, control: Control): void {
     this.#connection(connection);
-    this.options.supervisor.assertAdmission(connection);
+    this.#admission(connection);
     this.#validateControl(operation, control);
   }
 
@@ -648,8 +687,9 @@ export class NodeOperationTable {
       catch (error) { return Promise.reject(error); }
       return Promise.resolve(false);
     }
-    if (operation.phase !== 'dispatched' || !operation.resource || !operation.provider) return Promise.resolve(false);
+    if (operation.native !== 'possible' || !operation.resource || !operation.provider) return Promise.resolve(false);
     operation.abort = 'pending';
+    this.#awaitNativeSettlement(operation);
     operation.pending += 1;
     const { resource, provider } = operation;
     const result = Promise.resolve().then(() => resource.execution.abort(provider));
@@ -667,17 +707,77 @@ export class NodeOperationTable {
     return operation.abortTask;
   }
 
+  #completeDispatch(operation: Operation, outcome: AgentDispatchOutcome): void {
+    const wait = operation.dispatchWait;
+    if (!wait) return;
+    operation.dispatchWait = null;
+    wait.timer.cancel();
+    outcome = captureDispatchOutcome(outcome);
+    operation.dispatch = outcome.kind;
+    if (outcome.kind !== 'accepted') {
+      logger.warn('Native dispatch did not confirm admission', {
+        ...operation.identity, instanceId: operation.resource?.location.instanceId,
+        outcome: outcome.kind, code: dispatchFailureCode(outcome.error),
+      });
+      if (outcome.kind === 'rejected') operation.native = 'none';
+      if (operation.phase === 'dispatched') operation.phase = 'failed';
+      this.#cancelControl(operation, outcome.error);
+      if (outcome.kind === 'unknown') void this.#abort(operation).catch(() => {});
+    }
+    wait.result.resolve(outcome);
+    this.#retireSettled(operation);
+  }
+
+  #awaitNativeSettlement(operation: Operation): void {
+    if (this.#closed || operation.native !== 'possible' || operation.containment !== null || operation.settlementWait) return;
+    operation.settlementWait = {
+      expiresAt: this.options.supervisor.poll() + this.#limits.nativeSettlementMs,
+      timer: (this.options.scheduleTimeout ?? scheduleTimeout)(() => this.poll(), this.#limits.nativeSettlementMs),
+    };
+  }
+
+  #requestContainment(operation: Operation): void {
+    if (this.#closed || operation.native !== 'possible' || operation.containment !== null || !operation.resource) return;
+    operation.containment = 'requested';
+    operation.settlementWait?.timer.cancel();
+    operation.settlementWait = null;
+    this.#containing = true;
+    this.options.occupancy.close();
+    for (const current of this.#operations.values()) this.#cancelControl(current, unavailable());
+    void this.#abort(operation).catch(() => {});
+    this.options.requestContainment(operation.identity, operation.resource.location);
+  }
+
+  #admission(connection: NodeConnectionLease): void {
+    this.options.supervisor.assertAdmission(connection);
+    if (this.#containing) throw new DomainError('NODE_UNAVAILABLE', 'Native settlement requires whole-session containment', 409);
+  }
+
   #retireSettled(operation: Operation): void {
-    if (operation.pending || !this.#closed && (operation.phase === 'prepared' || operation.phase === 'dispatched' || operation.phase === 'preparing')) return;
+    if (operation.native !== 'possible') {
+      operation.settlementWait?.timer.cancel();
+      operation.settlementWait = null;
+      if (operation.native === 'settled' && operation.dispatch !== 'pending' && operation.phase === 'dispatched') {
+        operation.phase = 'failed';
+      }
+    }
+    if (!this.#closed && (operation.phase === 'prepared' || operation.phase === 'dispatched' || operation.phase === 'preparing')) return;
     operation.grant.abort(new DOMException('Node operation retired', 'AbortError'));
     operation.timer?.cancel();
     operation.timer = null;
+    this.#cancelControl(operation, new Error('Execution ended before control delivery'));
+    operation.publication?.detachOccurrence();
+    if (operation.native === 'possible') {
+      this.#awaitNativeSettlement(operation);
+      return;
+    }
+    if (operation.pending || operation.dispatchWait) return;
     operation.detachGrant?.();
     operation.detachGrant = null;
-    operation.publication?.detachOccurrence();
     operation.publication = null;
     operation.provider = null;
     operation.resource = null;
+    operation.reservation.release();
     if (!this.#operations.delete(operation.identity.operationId) || this.#closed) return;
     const now = this.options.supervisor.poll();
     if (this.#closed) return;
@@ -686,6 +786,30 @@ export class NodeOperationTable {
     });
     while (this.#receipts.size > this.#limits.maxReceipts) this.#receipts.delete(this.#receipts.keys().next().value!);
   }
+
+}
+
+function captureDispatchOutcome(outcome: AgentDispatchOutcome): AgentDispatchOutcome {
+  try {
+    const kind = outcome.kind;
+    return kind === 'accepted' ? { kind } : { kind, error: outcome.error };
+  } catch (error) {
+    return { kind: 'unknown', error };
+  }
+}
+
+function dispatchFailureCode(error: unknown): string {
+  try {
+    if (error instanceof DomainError) {
+      const code = error.code;
+      if (isErrorCode(code)) return code;
+    }
+    if (error instanceof DOMException) {
+      const name = error.name;
+      if (name === 'AbortError' || name === 'TimeoutError') return name;
+    }
+  } catch { /* Provider error inspection cannot interrupt cleanup. */ }
+  return 'unclassified-provider-error';
 }
 
 // Late output retains its captured sink without retaining the operation owner after a terminal.
@@ -729,7 +853,7 @@ function executionOutput(
 
 function snapshot(operation: Operation): NodeExecutionReceipt {
   return Object.freeze({ identity: operation.identity, runId: operation.runId,
-    phase: operation.phase, dispatch: operation.dispatch, abort: operation.abort, control: operation.control ? controlSnapshot(operation.control) : null });
+    phase: operation.phase, dispatch: operation.dispatch, native: operation.native, containment: operation.containment, abort: operation.abort, control: operation.control ? controlSnapshot(operation.control) : null });
 }
 
 function controlSnapshot(control: Control): NodeControlReceipt {

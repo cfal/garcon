@@ -13,6 +13,7 @@ export class NodeWorkerAuthority {
   readonly #controller = new AbortController();
   readonly #detach: () => void;
   #lastConnection = 0;
+  #containing = false;
   #connection: { readonly lease: NodeConnectionLease; readonly controller: AbortController; admitting: boolean } | null = null;
 
   constructor(private readonly options: NodeWorkerAuthorityOptions) {
@@ -42,6 +43,7 @@ export class NodeWorkerAuthority {
 
   openAdmissions(connectionId: number): void {
     this.connection(connectionId);
+    if (this.#containing) throw new NodeAuthorityError('NODE_UNAVAILABLE', 'Whole-session native containment is pending');
     this.#connection!.admitting = true;
   }
 
@@ -68,7 +70,7 @@ export class NodeWorkerAuthority {
 
   assertAdmission(connection: NodeConnectionLease): void {
     this.assertConnection(connection);
-    if (!this.#connection!.admitting) throw new NodeAuthorityError('NODE_UNAVAILABLE', 'Worker admissions are suspended');
+    if (this.#containing || !this.#connection!.admitting) throw new NodeAuthorityError('NODE_UNAVAILABLE', 'Worker admissions are suspended');
   }
 
   poll(): number {
@@ -78,6 +80,12 @@ export class NodeWorkerAuthority {
       if (!Number.isFinite(now) || now < 0) this.retire();
       return now;
     } catch { this.retire(); return NaN; }
+  }
+
+  /** Irrevocably fences admission while the containment reason uses the lifecycle reply reserve. */
+  beginContainment(): void {
+    this.#containing = true;
+    if (this.#connection) this.#connection.admitting = false;
   }
 
   retire(): void {

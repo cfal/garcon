@@ -1,3 +1,5 @@
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
+import { readResponseJson, readResponseText } from '../shared/response-body.js';
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
@@ -167,11 +169,12 @@ export function consumeResponsesStreamEvent(
 export async function readOpenAiResponsesResponse(
   response: Response,
   runtimeLabel: string,
+  cleanup: NativeCleanupObserver | null = null,
 ): Promise<ResponsesCompletion> {
   let text: string;
   let completedResponseId: string | null;
   if (isJsonResponse(response)) {
-    const data = await response.json() as ResponsesJsonBody;
+    const data = await readResponseJson(response, cleanup) as ResponsesJsonBody;
     const responseError = responseErrorMessage(data);
     if (data.status === 'failed' || data.status === 'incomplete' || responseError) {
       const detail = responseError
@@ -204,7 +207,7 @@ export async function readOpenAiResponsesResponse(
       } catch {
         // Skips malformed chunks from partially-compatible providers.
       }
-    });
+    }, cleanup);
 
     if (state.errorMessage) {
       throw new ResponsesRequestError(
@@ -233,8 +236,9 @@ export async function readOpenAiResponsesResponse(
 export async function throwResponsesHttpError(
   response: Response,
   runtimeLabel: string,
+  cleanup: NativeCleanupObserver | null = null,
 ): Promise<never> {
-  const errorText = await response.text();
+  const errorText = await readResponseText(response, cleanup);
   let message = errorText;
   let code: string | null = null;
   try {

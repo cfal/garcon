@@ -1,3 +1,4 @@
+import { createDirectSingleQueryLifetime, createDirectTextGenerationLifetime } from '@garcon/server-agent-common/direct/auxiliary-lifetime';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { TEXT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import {
@@ -47,6 +48,9 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
     fileMimeTypes: TEXT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly singleQueryLifetime: AgentIntegration['singleQueryLifetime'];
+  readonly textGenerationLifetime: AgentIntegration['textGenerationLifetime'];
+  readonly executionLifetime: AgentIntegration['executionLifetime'];
   readonly legacyHistoryImport = null;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
@@ -76,6 +80,8 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
     this.nativeHistoryImport = createDirectNativeHistoryImport(sessions);
     this.nativeSessions = createDirectNativeSessionAccess(sessions);
     this.textGeneration = createDirectTextGeneration(runtime);
+    this.singleQueryLifetime = createDirectSingleQueryLifetime(runtime);
+    this.textGenerationLifetime = createDirectTextGenerationLifetime(runtime);
 
     this.settings = createVersionedSettings({
       ownerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -87,7 +93,9 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
-    this.execution = createAgentProducerAdapter(providerExecution, host.logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host.logger, providerExecution);
+    this.execution = producer.execution;
+    this.executionLifetime = producer.executionLifetime;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

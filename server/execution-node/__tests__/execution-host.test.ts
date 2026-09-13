@@ -70,6 +70,7 @@ test('a retired operation cannot give its native permission callback a successor
   try {
     const old = await f.start();
     old.sink.emit({ type: 'run-ended', runId: old.ticket.runId, outcome: 'finished' });
+    await f.settleNative();
     const next = await f.start('synthetic-successor');
     const respond = mock(async () => {});
     const sequence = f.output.producedSequence;
@@ -89,6 +90,7 @@ test('a released publisher still records late rows, session facts and inert perm
   try {
     const old = await f.start();
     old.sink.emit({ type: 'run-ended', runId: old.ticket.runId, outcome: 'finished' });
+    await f.settleNative();
     await f.start('synthetic-successor');
     const respond = mock(async () => {});
     old.sink.emit(permission(old.ticket.runId, 1, respond));
@@ -149,6 +151,7 @@ test('late run controls cannot retire a successor that reused the same run label
   try {
     const old = await f.start();
     old.sink.emit({ type: 'run-ended', runId: old.ticket.runId, outcome: 'finished' });
+    await f.settleNative();
     const next = await f.start(old.ticket.runId);
     const respond = mock(async () => {});
     next.sink.emit(permission(next.ticket.runId, 1, respond));

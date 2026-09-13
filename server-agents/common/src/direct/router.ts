@@ -1,3 +1,4 @@
+import type { DirectNativeQuery } from './native-query.js';
 import type { ApiProtocol } from '@garcon/common/api-providers';
 import crypto from 'node:crypto';
 import {
@@ -43,6 +44,7 @@ export interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRun
     prompt: string,
     endpoint: DirectEndpointRuntime,
     options: Record<string, unknown>,
+    native: DirectNativeQuery | null,
   ) => Promise<string>;
 }
 
@@ -97,9 +99,10 @@ export class DirectEndpointRouterRuntime<
     prompt: string,
     endpoint: DirectEndpointRuntime,
     options: Record<string, unknown> = {},
+    native: DirectNativeQuery | null = null,
   ): Promise<string> {
     this.#validateEndpoint(endpoint);
-    return this.config.runSingleQuery(prompt, endpoint, options);
+    return this.config.runSingleQuery(prompt, endpoint, options, native);
   }
 
   startPurgeTimer(): void {
@@ -162,10 +165,11 @@ export function createDirectOpenAiChatRuntime(
     createRuntime: (endpoint) => new OpenAiCompatibleChatRuntime(
       buildDirectOpenAiConfig({ ...options, endpoint }),
     ),
-    runSingleQuery: (prompt, endpoint, query) => runOpenAiCompatibleSingleQuery(
+    runSingleQuery: (prompt, endpoint, query, native) => runOpenAiCompatibleSingleQuery(
       buildDirectOpenAiConfig({ ...options, endpoint }),
       prompt,
       query,
+      native,
     ),
   });
 }
@@ -179,10 +183,11 @@ export function createDirectOpenAiResponsesRuntime(
     createRuntime: (endpoint) => new OpenAiCompatibleResponsesRuntime(
       buildDirectOpenAiResponsesConfig({ ...options, endpoint }),
     ),
-    runSingleQuery: (prompt, endpoint, query) => runOpenAiResponsesSingleQuery(
+    runSingleQuery: (prompt, endpoint, query, native) => runOpenAiResponsesSingleQuery(
       buildDirectOpenAiResponsesConfig({ ...options, endpoint }),
       prompt,
       query,
+      native,
     ),
   });
 }
@@ -196,10 +201,11 @@ export function createDirectAnthropicRuntime(
     createRuntime: (endpoint) => new AnthropicCompatibleChatRuntime(
       buildDirectAnthropicConfig({ ...options, endpoint }),
     ),
-    runSingleQuery: (prompt, endpoint, query) => runAnthropicCompatibleSingleQuery(
+    runSingleQuery: (prompt, endpoint, query, native) => runAnthropicCompatibleSingleQuery(
       buildDirectAnthropicConfig({ ...options, endpoint }),
       prompt,
       query,
+      native,
     ),
   });
 }

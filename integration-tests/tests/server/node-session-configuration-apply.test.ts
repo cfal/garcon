@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { RemoteProviderConfigurationService } from '../../../server/execution-nodes/remote-provider-configuration.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { nodeSessionSystemdAvailable } from '../../support/node-session-handshake-fixture.js';
-import { createNodeSessionOutputFixture } from '../../support/node-session-output-fixture.js';
+import { createUnattestedClaudeSessionFixture } from '../../support/unattested-claude-fixture.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 import { withTimeout } from '../../support/deferred.js';
 import { TlsCertificates, type TestCertificate } from '../../support/tls-certificates.js';
@@ -14,7 +14,7 @@ let certificate: TestCertificate;
 beforeAll(async () => { certificates = await TlsCertificates.create(); certificate = await certificates.selfSigned('configuration-apply'); });
 afterAll(async () => certificates?.dispose());
 
-describe.skipIf(!nodeSessionSystemdAvailable)('captured session configuration through real workers and WSS', () => {
+describe.skipIf(!nodeSessionSystemdAvailable)('internal unattested Claude characterization: captured session configuration through real workers and WSS', () => {
   test('a delayed preparation cannot configure a replacement source for the same native session', async () => {
     const provider = await startScriptedClaudeTestEnvironment();
     provider.model.scriptTurn([claudeText('synthetic first reply')]);
@@ -22,7 +22,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('captured session configuration th
       command: 'printf synthetic-successor > successor.txt',
     })]);
     provider.model.scriptTurn([claudeText('synthetic successor reply')]);
-    const f = await createNodeSessionOutputFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
+    const f = await createUnattestedClaudeSessionFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
     const original = new AbortController(); const successor = new AbortController();
     const entered = Promise.withResolvers<void>(); const deliver = Promise.withResolvers<void>();
     let delayed = true;
@@ -78,7 +78,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('captured session configuration th
       command: 'printf synthetic-configuration > configured.txt',
     })]);
     provider.model.scriptTurn([claudeText('synthetic configured reply')]);
-    const f = await createNodeSessionOutputFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
+    const f = await createUnattestedClaudeSessionFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
     const source = new AbortController();
     let commits = 0;
     f.host.nodeFrames.add(frame => {

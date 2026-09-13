@@ -412,3 +412,37 @@ test('cleanup failure retains evidence until successful retry and stale callback
   oldOptions.failed(new NodeWorkerTransportError('NODE_WORKER_CLOSED'));
   expect(next.lease.authoritySignal.aborted).toBe(false);
 });
+
+
+test.each(['confirmed', 'failed'] as const)('native containment %s waits for whole-session cleanup and retains replacement fencing', async (outcome) => {
+  const f = fixture();
+  const connection = await f.start();
+  await f.coordinator.completeRecovery(connection, f.coordinator.beginRecovery(connection));
+  const stopped = Promise.withResolvers<Awaited<ReturnType<typeof f.helper>>>();
+  f.helper.mockImplementationOnce(async (request) => {
+    expect(request.kind).toBe('stop');
+    return stopped.promise;
+  });
+  f.peerOptions().containmentRequested!({ type: 'node-worker-containment-request', version: 1,
+    session: connection.lease.session, instanceId: configuration().instances[0]!.id,
+    operationId: 'synthetic-operation', reason: 'native-settlement-unconfirmed' });
+  await tick();
+  expect(connection.lease.authoritySignal.aborted).toBe(true);
+  expect(f.coordinator.supervisor.status).toBe('cleaning-up');
+  expect(f.coordinator.supervisor.retirementReason).toBe('native-settlement-unconfirmed');
+  expect(() => f.coordinator.open('synthetic-replacement')).toThrow();
+  expect(f.store.clear).not.toHaveBeenCalled();
+  if (outcome === 'confirmed') stopped.resolve({ kind: 'stopped' });
+  else stopped.reject(new Error('Synthetic containment could not be verified'));
+  const cleaned = await f.coordinator.supervisor.retryCleanup();
+  expect(cleaned).toBe(outcome === 'confirmed');
+  if (outcome === 'confirmed') {
+    expect(f.coordinator.supervisor.status).toBe('offline');
+    expect(f.store.clear).toHaveBeenCalledTimes(1);
+  } else {
+    expect(f.coordinator.supervisor.status).toBe('cleaning-up');
+    expect(f.coordinator.supervisor.cleanupFailure?.code).toBe('NODE_CLEANUP_FAILED');
+    expect(f.store.clear).not.toHaveBeenCalled();
+    expect(() => f.coordinator.open('synthetic-replacement')).toThrow();
+  }
+});

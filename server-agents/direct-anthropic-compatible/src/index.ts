@@ -1,3 +1,4 @@
+import { createDirectSingleQueryLifetime, createDirectTextGenerationLifetime } from '@garcon/server-agent-common/direct/auxiliary-lifetime';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import {
   DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
@@ -53,6 +54,9 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     ],
   } as const;
   readonly execution;
+  readonly singleQueryLifetime: AgentIntegration['singleQueryLifetime'];
+  readonly textGenerationLifetime: AgentIntegration['textGenerationLifetime'];
+  readonly executionLifetime: AgentIntegration['executionLifetime'];
   readonly legacyHistoryImport = null;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
@@ -82,6 +86,8 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     this.nativeHistoryImport = createDirectNativeHistoryImport(sessions);
     this.nativeSessions = createDirectNativeSessionAccess(sessions);
     this.textGeneration = createDirectTextGeneration(runtime);
+    this.singleQueryLifetime = createDirectSingleQueryLifetime(runtime);
+    this.textGenerationLifetime = createDirectTextGenerationLifetime(runtime);
 
     this.settings = createVersionedSettings({
       ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -93,7 +99,9 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
-    this.execution = createAgentProducerAdapter(providerExecution, host.logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host.logger, providerExecution);
+    this.execution = producer.execution;
+    this.executionLifetime = producer.executionLifetime;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

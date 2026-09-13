@@ -3,6 +3,8 @@ import {
   type AgentExecutionHandle,
   type AgentEstablishedSession,
   type AgentExecutionV5,
+  type AgentExecutionLifetime,
+  type AgentDispatchOutcome,
   type AgentLogger,
   type AgentEmissionSink,
   type AgentGoalControlRequest,
@@ -14,6 +16,7 @@ import {
   type AgentRuntimeEvent,
   type AgentRuntimePublisher,
   type AgentRuntimeExecution,
+  type AgentRuntimeExecutionLifetime,
 } from './runtime-events.js';
 
 interface RuntimeHandle {
@@ -40,6 +43,7 @@ interface ProducerBinding {
 
 export interface AgentProducerAdapter {
   readonly execution: AgentExecutionV5;
+  readonly executionLifetime: AgentExecutionLifetime | null;
   compact(
     request: AgentResumeRequestV5,
     operation: (request: Omit<AgentResumeRequestV5, 'output'>, publish: AgentRuntimePublisher) => Promise<void>,
@@ -53,6 +57,7 @@ export interface AgentProducerAdapter {
 export function createAgentProducerAdapter(
   runtime: AgentRuntimeExecution,
   logger: AgentLogger,
+  lifetime: AgentRuntimeExecutionLifetime | null = null,
 ): AgentProducerAdapter {
   // Binding-scoped session bookkeeping is read only at publisher construction, never
   // used to route an arriving event. Publishers retain their exact output capability.
@@ -136,12 +141,7 @@ export function createAgentProducerAdapter(
       const occurrence = occurrenceFor(binding, request.chatId, request.runId, null);
       try {
         const session = await runtime.start(runtimeRequest(request, binding, occurrence), occurrence.publish);
-        admitControlOccurrence(binding, occurrence);
-        occurrence.agentSessionId = session.agentSessionId;
-        if (!sameSession(binding.publishedSession, session)) {
-          binding.output.emit({ type: 'session', session });
-          binding.publishedSession = session;
-        }
+        establishSession(binding, occurrence, session);
         return handle(session.agentSessionId, occurrence.publish);
       } catch (error) {
         failControlOccurrence(binding, occurrence, error);
@@ -177,6 +177,44 @@ export function createAgentProducerAdapter(
     },
 
     runningSessions: () => runtime.runningSessions(),
+  };
+
+  const executionLifetime: AgentExecutionLifetime | null = lifetime === null ? null : {
+    begin(input) {
+      const { kind, request } = input;
+      const binding = bindingFor(request.output);
+      const occurrence = occurrenceFor(binding, request.chatId, request.runId,
+        kind === 'start' ? null : request.agentSessionId);
+      const attempt = lifetime.begin(kind === 'start'
+        ? { kind: 'start', request: runtimeRequest(request, binding, occurrence) }
+        : { kind, request: runtimeRequest(request, binding, occurrence) }, occurrence.publish);
+      const { dispatch: nativeDispatch, settled: nativeSettled, abort } = attempt;
+      const dispatch = nativeDispatch.then((outcome): AgentDispatchOutcome => {
+        if (outcome.kind !== 'accepted') {
+          if (outcome.kind === 'rejected' && occurrence.phase === 'preparing') retireControlOccurrence(binding, occurrence);
+          else failControlOccurrence(binding, occurrence, outcome.error);
+          return outcome;
+        }
+        if (kind === 'start') {
+          if (outcome.session === null) throw new TypeError('Native start returned no established session');
+          establishSession(binding, occurrence, outcome.session);
+        } else {
+          if (outcome.session !== null) throw new TypeError('Native resume returned an unexpected session');
+          admitControlOccurrence(binding, occurrence);
+        }
+        return { kind: 'accepted' };
+      }).catch((error: unknown): AgentDispatchOutcome => {
+        failControlOccurrence(binding, occurrence, error);
+        return { kind: 'unknown', error };
+      });
+      const settled = Promise.all([nativeSettled, dispatch]).then(() => {
+        retireControlOccurrence(binding, occurrence);
+      }, (error: unknown) => {
+        failControlOccurrence(binding, occurrence, error);
+        throw error;
+      });
+      return Object.freeze({ dispatch, settled, abort: () => Reflect.apply(abort, attempt, []) });
+    },
   };
 
   const compact: AgentProducerAdapter['compact'] = async (request, operation) => {
@@ -222,7 +260,16 @@ export function createAgentProducerAdapter(
     }, occurrence.publish);
   };
 
-  return { execution, compact, submitGoalControl };
+  return { execution, executionLifetime, compact, submitGoalControl };
+}
+
+function establishSession(binding: ProducerBinding, occurrence: ControlOccurrence, session: AgentEstablishedSession): void {
+  admitControlOccurrence(binding, occurrence);
+  occurrence.agentSessionId = session.agentSessionId;
+  if (!sameSession(binding.publishedSession, session)) {
+    binding.output.emit({ type: 'session', session });
+    binding.publishedSession = session;
+  }
 }
 
 function retireControlOccurrence(binding: ProducerBinding, occurrence: ControlOccurrence): void {

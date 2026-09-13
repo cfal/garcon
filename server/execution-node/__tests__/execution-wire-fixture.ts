@@ -1,6 +1,8 @@
 import { expect, mock } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { NODE_WIRE_VERSION, type AgentExecutionHandle, type AgentStartRequestV5, type AgentProducerEvent, type AgentGoalControlRequest, type AgentSteerRequest } from '@garcon/server-agent-interface';
+import { NodeNativeOccupancy } from '../native-occupancy.js';
+import { executionLifetimeFixture } from './execution-lifetime-fixture.js';
 import { LocalProviderExecutionService } from '../local-provider-execution.js';
 import { NodeExecutionResources } from '../execution-resources.js';
 import { DEFAULT_NODE_OPERATIONS, NodeOperationTable } from '../operation-table.js';
@@ -34,10 +36,11 @@ export function executionWireFixture(maxOperations = 1, preparationMs = DEFAULT_
     await request.beforeDelivery({ validate() {}, commit() { committed = true; } });
     return committed;
   }) };
+  const native = executionLifetimeFixture(execution, handle);
   const integration = { descriptor: { id: 'synthetic', label: 'Synthetic', icon: null,
     supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], supportsImages: true,
     supportsProjectPathUpdate: false, requiresNativePathForProjectPathUpdate: false, supportedEndpointProtocols: [], configuration: [] },
-    execution, steering, goals, compaction: null,
+    execution, executionLifetime: native.lifetime, steering, goals, compaction: null,
   } satisfies ConstructorParameters<typeof LocalProviderExecutionService>[0];
   const configuration = { resolve: async (request) => ({ ...request,
     permissionMode: request.permissionMode ?? 'default', thinkingMode: request.thinkingMode ?? 'none',
@@ -46,9 +49,11 @@ export function executionWireFixture(maxOperations = 1, preparationMs = DEFAULT_
   const service = new LocalProviderExecutionService(integration, configuration);
   const location = { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' };
   const resources = new NodeExecutionResources(location.nodeId);
-  resources.register({ location, execution: service, projectPath: '/synthetic/project',
+  resources.register({ location, execution: service.retained, projectPath: '/synthetic/project',
     files: { inspectProject: async () => ({ kind: 'available', effectiveProjectKey: '/synthetic/project' }) } });
-  const table = new NodeOperationTable({ supervisor, connection, resources, limits: { maxOperations, preparationMs }, scheduleTimeout: () => ({ cancel() {} }) });
+  const occupancy = new NodeNativeOccupancy(maxOperations);
+  const containment = mock(() => {});
+  const table = new NodeOperationTable({ supervisor, connection, resources, occupancy, requestContainment: containment, limits: { maxOperations, preparationMs }, scheduleTimeout: () => ({ cancel() {} }) });
   const transfers = new NodeBulkTransfers({ session, authoritySignal: connection.authoritySignal });
   const owners = new Map<string, { readonly identity: NodeOperationIdentity; readonly kind: NodeExecutionBody['kind']; readonly controlId: string | null }>();
   const stream = { ...session, streamId: 'synthetic-stream' };
@@ -100,6 +105,7 @@ export function executionWireFixture(maxOperations = 1, preparationMs = DEFAULT_
     return ticket;
   };
   const dispose = async () => { table.close(); resources.close(); transfers.close(); await supervisor.shutdown(); };
-  return { adapter, dispose, call, body, prepare, start, table, execution, steering, goals, supervisor, connection, session, stream, location, request, events, transfers, resources, service,
+  return { native, occupancy, containment, adapter, dispose, call, body, prepare, start, table, execution, steering, goals, supervisor, connection, session, stream, location, request, events, transfers, resources, service,
+    async settleNative(index = native.settlements.length - 1) { native.settlements[index]!.resolve(); await new Promise(setImmediate); },
     advanceClock(ms: number) { elapsedMs += ms; } };
 }

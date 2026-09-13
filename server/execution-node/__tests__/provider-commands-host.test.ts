@@ -2,7 +2,6 @@ import { expect, mock, test } from 'bun:test';
 import { NodeProviderCapacity } from '../provider-capacity.js';
 import type { ProjectResolution } from '../../../common/project-resolution.js';
 import type { SlashCommand } from '../../../common/slash-commands.js';
-import type { ProviderExecutionService } from '../../execution-nodes/provider-execution.js';
 import { NodeExecutionResources } from '../execution-resources.js';
 import { LocalProviderCommandsService } from '../local-provider-commands.js';
 import { NodeProviderCommandsHost } from '../provider-commands-host.js';
@@ -13,16 +12,12 @@ const command = { method: 'provider-commands', instanceId: instance.instanceId, 
 const signal = () => new AbortController().signal;
 
 function fixture() {
-  const execution = { async prepare() { throw new Error('Unexpected execution'); }, async dispatch() {}, release() {},
-    async abort() { return false; }, async prepareSteer() { return { kind: 'unsupported' as const }; },
-    async steer() { return { kind: 'accepted' as const }; }, async submitGoalControl() { return false; },
-  } satisfies ProviderExecutionService;
   const native = mock(async (_projectPath: string, _signal: AbortSignal): Promise<readonly SlashCommand[]> => [{ name: 'review', source: 'skill' }]);
   const inspect = mock(async (_projectPath: string): Promise<ProjectResolution> => ({ kind: 'available', effectiveProjectKey: '/synthetic/canonical' }));
   const inspectNative = mock(async (projectPath: string): Promise<ProjectResolution> => ({ kind: 'available', effectiveProjectKey: projectPath }));
   const resources = new NodeExecutionResources(instance.nodeId);
   const location = { ...instance, workspaceId: command.workspaceId };
-  resources.register({ location, projectPath: '/synthetic/alias', execution, files: { inspectProject: inspect } });
+  resources.register({ location, projectPath: '/synthetic/alias', execution: null, files: { inspectProject: inspect } });
   const host = new NodeProviderCommandsHost(new NodeProviderCapacity(), instance, resources, new LocalProviderCommandsService({ commands: { discover: native } }, inspectNative));
   return { host, native, inspect, inspectNative, resources, location };
 }

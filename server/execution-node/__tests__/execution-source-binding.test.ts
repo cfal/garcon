@@ -35,6 +35,7 @@ test('source capture keeps exact workspace identity through operation retirement
     const captured = f.host.captureSource(f.target, f.stream);
     if (captured.kind !== 'captured') throw new Error('Synthetic source was not captured');
     started.sink.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
+    await f.settleNative();
     const connection = f.supervisor.attach(f.session);
     f.supervisor.completeRecovery(connection, f.supervisor.beginRecovery(connection));
     expect(f.connection.signal.aborted).toBe(true);
@@ -67,8 +68,9 @@ test.each(['workspace', 'chat'] as const)('one publisher cannot rebind its %s af
   try {
     const started = await f.start();
     started.sink.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
+    await f.settleNative();
     const alias = { ...f.location, workspaceId: 'synthetic-alias' };
-    f.resources.register({ location: alias, projectPath: f.target.projectPath, execution: f.service,
+    f.resources.register({ location: alias, projectPath: f.target.projectPath, execution: f.service.retained,
       files: { inspectProject: async () => ({ kind: 'available', effectiveProjectKey: f.target.projectPath }) } });
     const identity = field === 'workspace' ? await f.prepare(alias) : await f.prepare(f.location, '1789000000000002');
     expect(() => f.host.bindOutput(f.connection, identity, f.stream)).toThrow();
@@ -84,6 +86,7 @@ test('a new publisher cannot supersede a live source and retirement cannot reviv
     const captured = f.host.captureSource(f.target, f.stream);
     if (captured.kind !== 'captured') throw new Error('Synthetic source was not captured');
     started.sink.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
+    await f.settleNative();
     const next = { ...f.stream, streamId: 'synthetic-successor' };
     f.host.installStream(next, f.connection.authoritySignal, () => ({ forOperation: () => ({ emit() {} }) }));
     const identity = await f.prepare();

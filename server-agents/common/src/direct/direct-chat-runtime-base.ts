@@ -3,6 +3,7 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { AssistantMessage } from '@garcon/common/chat-types';
+import type { DirectNativeExecution } from './native-execution.js';
 import {
   assertDirectExecutionOpen,
   markDirectExecutionStarted,
@@ -40,6 +41,7 @@ export interface DirectRuntimeSession<TMessage> {
   startTime: number;
   lastActivityAt: number;
   operation: AgentRuntimeOperation;
+  nativeWork: DirectNativeExecution | null;
 }
 
 export interface DirectTurnCompletion {
@@ -100,11 +102,12 @@ export abstract class DirectChatRuntimeBase<
       runId: request.operation.runId,
       content: request.command,
       attachments: request.images ?? [],
-    });
+    }, request.nativeWork);
     try {
       assertDirectExecutionOpen(request);
     } catch (error) {
-      await this.#sessionsStore.delete(sessionId).catch(() => undefined);
+      await this.#sessionsStore.delete(sessionId, request.nativeWork)
+        .catch((failure: unknown) => request.nativeWork?.failed(failure));
       throw error;
     }
 
@@ -116,7 +119,9 @@ export abstract class DirectChatRuntimeBase<
       nativeSession: this.#sessionsStore.nativeReference(sessionId),
     };
     request.onSessionActivated?.(started);
-    void this.#runTurnInternal(session, request).catch(() => undefined);
+    const turn = this.#runTurnInternal(session, request);
+    request.nativeWork?.track(turn);
+    void turn.catch(() => undefined);
     return started;
   }
 
@@ -132,6 +137,7 @@ export abstract class DirectChatRuntimeBase<
     if (request.model) session.model = request.model;
     session.thinkingMode = normalizeThinkingMode(request.thinkingMode);
     session.operation = request.operation;
+    session.nativeWork = request.nativeWork ?? null;
     this.#markSessionRunning(session);
     try {
       if (session.historyNeedsRefresh) {
@@ -140,6 +146,7 @@ export abstract class DirectChatRuntimeBase<
           request.agentSessionId,
           request.nativeSession,
           request.executionAdmission?.signal ?? new AbortController().signal,
+          request.nativeWork,
         );
         session.history = [...snapshot.records];
         session.messages = this.#projectMessages(snapshot.records);
@@ -161,10 +168,14 @@ export abstract class DirectChatRuntimeBase<
 
   abort(agentSessionId: string, publish: AgentRuntimePublisher): boolean {
     const session = this.#sessions.get(agentSessionId);
-    if (!session?.isRunning || session.isFinalizing) return false;
+    if (!session) return false;
     if (!isRuntimeAbortTarget(session.operation, publish)) return false;
+    return this.#abortSession(session);
+  }
 
-    this.#sessions.delete(agentSessionId);
+  #abortSession(session: DirectRuntimeSession<TMessage>): boolean {
+    if (!session.isRunning || session.isFinalizing) return false;
+    if (this.#sessions.get(session.id) === session) this.#sessions.delete(session.id);
     session.aborted = true;
     session.abortController?.abort();
     return true;
@@ -212,6 +223,7 @@ export abstract class DirectChatRuntimeBase<
       request.agentSessionId,
       request.nativeSession,
       request.executionAdmission?.signal ?? new AbortController().signal,
+      request.nativeWork,
     );
     const session = this.#createRuntimeSession(
       request.agentSessionId,
@@ -243,6 +255,7 @@ export abstract class DirectChatRuntimeBase<
       startTime: now,
       lastActivityAt: now,
       operation: request.operation,
+      nativeWork: request.nativeWork ?? null,
     };
   }
 
@@ -254,7 +267,7 @@ export abstract class DirectChatRuntimeBase<
         runId: request.operation.runId,
         content: request.command,
         attachments: request.images ?? [],
-      });
+      }, request.nativeWork);
     } catch (error) {
       throw directSessionUnavailable(error);
     }
@@ -292,6 +305,8 @@ export abstract class DirectChatRuntimeBase<
   ): Promise<void> {
     const operation = session.operation;
     this.#markSessionRunning(session);
+    session.nativeWork?.bindAbort(() => isRuntimeAbortTarget(session.operation, operation.publish)
+      && this.#abortSession(session));
     if (session.aborted) {
       this.#finishAbortedTurn(session, operation);
       return;
@@ -299,6 +314,12 @@ export abstract class DirectChatRuntimeBase<
 
     try {
       if (request.executionAdmission) await markDirectExecutionStarted(request);
+      assertDirectExecutionOpen(request);
+      if (session.aborted) {
+        this.#finishAbortedTurn(session, operation);
+        return;
+      }
+      session.nativeWork?.started();
       const completion = await this.streamSession(session);
       const response = completion.content;
 
@@ -324,7 +345,7 @@ export abstract class DirectChatRuntimeBase<
           runId: operation.runId,
           content: response,
           checkpoint: completion.checkpoint,
-        });
+        }, session.nativeWork);
       } catch (error) {
         throw directSessionUnavailable(error);
       }

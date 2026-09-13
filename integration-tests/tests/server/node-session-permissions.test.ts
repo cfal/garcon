@@ -6,7 +6,7 @@ import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { withTimeout } from '../../support/deferred.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { nodeSessionSystemdAvailable } from '../../support/node-session-handshake-fixture.js';
-import { createNodeSessionOutputFixture } from '../../support/node-session-output-fixture.js';
+import { createUnattestedClaudeSessionFixture } from '../../support/unattested-claude-fixture.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 import { TlsCertificates, type TestCertificate } from '../../support/tls-certificates.js';
 
@@ -15,7 +15,7 @@ let certificate: TestCertificate;
 beforeAll(async () => { certificates = await TlsCertificates.create(); certificate = await certificates.selfSigned('permission-session'); });
 afterAll(async () => certificates?.dispose());
 
-describe.skipIf(!nodeSessionSystemdAvailable)('contained native permission recovery over WSS', () => {
+describe.skipIf(!nodeSessionSystemdAvailable)('internal unattested Claude characterization: contained native permission recovery over WSS', () => {
   test('one stalled receipt read does not block another native permission response', async () => {
     const provider = await startScriptedClaudeTestEnvironment();
     for (const name of ['first', 'second']) provider.model.scriptTurn([claudeToolUse(`synthetic-${name}-question`, 'AskUserQuestion', {
@@ -23,7 +23,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('contained native permission recov
         options: [{ label: 'SQLite', description: 'Embedded' }, { label: 'Postgres', description: 'Server' }] }],
     })]);
     const followups = ['first', 'second'].map(name => provider.model.scriptHeldTurn([claudeText(`synthetic ${name} completed`)]));
-    const f = await createNodeSessionOutputFixture(certificate, { maxOperations: 2,
+    const f = await createUnattestedClaudeSessionFixture(certificate, { maxOperations: 2,
       instance: { agentId: 'claude', environment: provider.serverEnvironment } });
     const sources = [new AbortController(), new AbortController()];
     const decisionRequests = new Set<number>();
@@ -82,7 +82,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('contained native permission recov
         options: [{ label: 'SQLite', description: 'Embedded' }, { label: 'Postgres', description: 'Server' }] }],
     })]);
     const next = provider.model.scriptHeldTurn([claudeText('synthetic permission completed')]);
-    const f = await createNodeSessionOutputFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
+    const f = await createUnattestedClaudeSessionFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
     const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(path.join(f.host.storage, 'controller-ledger')),
       { serverInstanceId: 'synthetic-controller-server' });
     const chatId = '1789000000000008'; const runId = 'synthetic-permission-run';
@@ -175,7 +175,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('contained native permission recov
   }, 60_000);
 });
 
-async function waitForNodeRunEnd(f: Awaited<ReturnType<typeof createNodeSessionOutputFixture>>, identity: NodeOperationIdentity) {
+async function waitForNodeRunEnd(f: Awaited<ReturnType<typeof createUnattestedClaudeSessionFixture>>, identity: NodeOperationIdentity) {
   const signal = AbortSignal.any([f.controller.signal, AbortSignal.timeout(5000)]);
   for (;;) {
     signal.throwIfAborted();

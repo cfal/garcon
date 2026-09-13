@@ -1,4 +1,5 @@
 import { NODE_WIRE_VERSION, isNormalizedJsonObject } from '@garcon/server-agent-interface';
+import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { parseNodeProviderManifest, type NodeProviderManifest } from '../../execution-nodes/provider-manifest.js';
 import { exactNodeFields, parsePrivateNodeJson } from '../../execution-nodes/transport/private-json.js';
@@ -29,7 +30,16 @@ export type NodeWorkerParentMessage = NodeWorkerConfigurationMessage | NodeWorke
   readonly connectionId: number;
 };
 
-export type NodeWorkerChildMessage = {
+export interface NodeWorkerContainmentRequest {
+  readonly type: 'node-worker-containment-request';
+  readonly version: typeof NODE_WIRE_VERSION;
+  readonly session: NodeSessionIdentity;
+  readonly instanceId: string;
+  readonly operationId: string;
+  readonly reason: 'native-settlement-unconfirmed';
+}
+
+export type NodeWorkerChildMessage = NodeWorkerContainmentRequest | {
   readonly type: 'node-worker-hello';
   readonly version: typeof NODE_WIRE_VERSION;
   readonly role: NodeWorkerRole;
@@ -65,6 +75,13 @@ export function parseNodeWorkerChildText(text: string): NodeWorkerChildMessage |
     return exactNodeFields(value, ['type', 'version', 'role', 'pid']) && (value.role === 'session' || value.role === 'instance')
       && Number.isSafeInteger(value.pid) && Number(value.pid) > 0
       ? { type: value.type, version: NODE_WIRE_VERSION, role: value.role, pid: Number(value.pid) } : null;
+  }
+  if (value.type === 'node-worker-containment-request') {
+    const session = parseNodeSessionIdentity(value.session);
+    if (!exactNodeFields(value, ['type', 'version', 'session', 'instanceId', 'operationId', 'reason'])
+      || !session || !isExecutionIdentity(value.instanceId) || !isExecutionIdentity(value.operationId)
+      || value.reason !== 'native-settlement-unconfirmed') return null;
+    return { type: value.type, version: NODE_WIRE_VERSION, session, instanceId: value.instanceId, operationId: value.operationId, reason: value.reason };
   }
   if (value.type !== 'node-worker-ready' || !exactNodeFields(value, ['type', 'version', 'session', 'manifests'])
     || !Array.isArray(value.manifests) || value.manifests.length > MAX_NODE_WORKER_INSTANCES) return null;

@@ -1,3 +1,5 @@
+import { NodeNativeOccupancy } from '../../native-occupancy.js';
+import { executionLifetimeFixture } from '../../__tests__/execution-lifetime-fixture.js';
 import { expect, mock, test } from 'bun:test';
 import type { AgentExecutionHandle, AgentResumeRequestV5, AgentStartRequestV5 } from '@garcon/server-agent-interface';
 import { LocalProviderExecutionService } from '../../local-provider-execution.js';
@@ -20,7 +22,8 @@ function fixture() {
     resume: mock(async (_request: AgentResumeRequestV5): Promise<AgentExecutionHandle> => handle),
     abort: mock(async (_handle: AgentExecutionHandle) => true), runningSessions: () => [],
   };
-  const service = new LocalProviderExecutionService({ execution, compaction: null, steering: null, goals: null,
+  const native = executionLifetimeFixture(execution, handle);
+  const service = new LocalProviderExecutionService({ execution, executionLifetime: native.lifetime, compaction: null, steering: null, goals: null,
     descriptor: { id: 'synthetic', label: 'Synthetic', icon: null, supportedPermissionModes: ['default'],
       supportedThinkingModes: ['none'], supportsImages: false, supportsProjectPathUpdate: false,
       requiresNativePathForProjectPathUpdate: false, supportedEndpointProtocols: [], configuration: [] },
@@ -28,14 +31,14 @@ function fixture() {
     settings: { ownerId: 'synthetic', schemaVersion: 1, values: {} }, endpoint: null }) });
   const location = { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' };
   const resources = new NodeExecutionResources(location.nodeId);
-  resources.register({ location, projectPath: '/synthetic/project', execution: service,
+  resources.register({ location, projectPath: '/synthetic/project', execution: service.retained,
     files: { inspectProject: async () => ({ kind: 'available', effectiveProjectKey: '/synthetic/project' }) } });
-  const table = new NodeOperationTable({ supervisor: authority, connection, resources, limits: { maxOperations: 1 },
+  const table = new NodeOperationTable({ occupancy: new NodeNativeOccupancy(1), requestContainment() { authority.retire(); }, supervisor: authority, connection, resources, limits: { maxOperations: 1 },
     scheduleTimeout: () => ({ cancel() {} }) });
   const request: NodeExecutionRequest = { kind: 'start', chatId: '1789000000000001', runId: 'synthetic-run',
     configuration: { model: 'synthetic-model', settings: null, endpoint: null } };
   const input = { prompt: 'synthetic prompt', attachments: [], carriedContext: null };
-  return { lifeline, authority, connection, execution, table, location, request, input, handle,
+  return { native, lifeline, authority, connection, execution, table, location, request, input, handle,
     expire() { now += NODE_WORKER_PULSE_TIMEOUT_MS; }, close() { lifeline.close(); resources.close(); table.close(); } };
 }
 
@@ -58,6 +61,9 @@ test('worker recovery keeps the exact operation and its capacity while local adm
     f.authority.openAdmissions(2);
     await expect(f.table.prepare(replacement, f.location, f.request, f.lifeline.signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
     native.output.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'interrupted' });
+    await expect(f.table.prepare(replacement, f.location, f.request, f.lifeline.signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+    f.native.settlements[0]!.resolve();
+    await new Promise(setImmediate);
     const next = await f.table.prepare(replacement, f.location, { ...f.request, runId: 'synthetic-next-run' }, f.lifeline.signal);
     expect(next.identity.operationId).not.toBe(ticket.identity.operationId);
   } finally { f.close(); }
@@ -71,6 +77,7 @@ test('worker expiry aborts a late native handle and no new physical gate can res
     f.execution.start.mockImplementationOnce(() => started.promise);
     const ticket = await f.table.prepare(f.connection, f.location, f.request, f.lifeline.signal);
     const dispatched = f.table.dispatch(f.connection, ticket.identity, f.input, { signal: f.connection.authoritySignal, emit() {} }).catch((error: unknown) => error);
+    await new Promise(setImmediate);
     f.expire();
     expect(() => f.table.status(f.connection, ticket.identity)).toThrow();
     expect(f.execution.start.mock.calls[0]![0].admission.signal.aborted).toBe(true);

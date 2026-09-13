@@ -1,3 +1,4 @@
+import { createLogger } from '../lib/log.js';
 import { sameNodeSession, type NodeSessionIdentity } from '../../common/node-operation.js';
 import type { NodeProviderManifest } from '../execution-nodes/provider-manifest.js';
 import { NodeOutputRetirementRelay } from './output-retirement-relay.js';
@@ -8,6 +9,8 @@ import { parseNodeWorkerConfiguration, type NodeSessionWorkerConfiguration } fro
 import type { NodeWorkerPeer, NodeWorkerPeerOptions } from './worker/peer.js';
 import type { NodeWorkerOutputRetirement } from './worker/output-retirement.js';
 import type { NodeWorkerServiceClient } from './worker/service-channel.js';
+
+const logger = createLogger('execution-node:session-coordinator');
 
 type CoordinatorPeer = Pick<NodeWorkerPeer, 'hello' | 'configure' | 'attach' | 'admit' | 'disconnect' | 'closeInput'
   | 'execution' | 'forward' | 'waitForRelease'> & {
@@ -201,6 +204,13 @@ export class NodeSessionCoordinator {
     this.#assertAuthority(current);
     const peer = this.options.createPeer(host, { role: 'session', signal: current.signal,
       validate: () => this.#assertAuthority(current), received: this.options.received,
+      containmentRequested: (request) => {
+        this.#assertAuthority(current);
+        logger.warn('Native settlement is unconfirmed; retiring the whole logical session and all sibling instance work', {
+          instanceId: request.instanceId, operationId: request.operationId, reason: request.reason,
+        });
+        void this.supervisor.requestNativeContainment(current.session);
+      },
       failed: () => { void this.supervisor.executionHostExited(current.session, 'worker-protocol-failed'); } });
     current.peer = peer;
     const pid = await peer.hello;

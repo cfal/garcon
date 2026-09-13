@@ -1,3 +1,6 @@
+import { fetchDirectQuery, type DirectNativeQuery } from './native-query.js';
+import type { NativeCleanupObserver } from '../execution/native-cleanup.js';
+import { readResponseJson, readResponseText } from '../shared/response-body.js';
 // Anthropic-compatible Messages protocol adapter for direct runtimes.
 
 import type { AgentAttachment } from '@garcon/common/agent-execution';
@@ -136,10 +139,11 @@ function consumeAnthropicEvent(state: AnthropicStreamState, data: string): void 
 async function readAnthropicCompatibleResponse(
   response: Response,
   runtimeLabel: string,
+  cleanup: NativeCleanupObserver | null = null,
 ): Promise<string> {
   let text: string;
   if (isJsonResponse(response)) {
-    const data = await response.json() as {
+    const data = await readResponseJson(response, cleanup) as {
       content?: Array<{ type?: string; text?: string }>;
     };
     text = (data.content ?? [])
@@ -158,7 +162,7 @@ async function readAnthropicCompatibleResponse(
     };
     await readSseDataEvents(response.body, (data) => {
       consumeAnthropicEvent(state, data);
-    });
+    }, cleanup);
 
     if (state.errorMessage) {
       throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
@@ -176,6 +180,7 @@ export async function runAnthropicCompatibleSingleQuery(
   config: AnthropicCompatibleChatRuntimeConfig,
   prompt: string,
   options: Record<string, unknown> = {},
+  native: DirectNativeQuery | null = null,
 ): Promise<string> {
   const model = typeof options.model === 'string' && options.model
     ? options.model
@@ -186,7 +191,7 @@ export async function runAnthropicCompatibleSingleQuery(
   const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
-    const response = await fetch(anthropicMessagesUrl(config.getBaseUrl()), {
+    const response = await fetchDirectQuery(native, anthropicMessagesUrl(config.getBaseUrl()), {
       method: 'POST',
       headers: buildAnthropicCompatibleHeaders(config.getApiKey()),
       body: JSON.stringify({
@@ -200,11 +205,11 @@ export async function runAnthropicCompatibleSingleQuery(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = await readResponseText(response, native);
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return await readAnthropicCompatibleResponse(response, config.runtimeLabel);
+    return await readAnthropicCompatibleResponse(response, config.runtimeLabel, native);
   } finally {
     clearTimeout(timer);
   }
@@ -253,11 +258,11 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
+        const errorText = await readResponseText(response, session.nativeWork);
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
       return {
-        content: await readAnthropicCompatibleResponse(response, this.config.runtimeLabel),
+        content: await readAnthropicCompatibleResponse(response, this.config.runtimeLabel, session.nativeWork),
         checkpoint: null,
       };
     } finally {

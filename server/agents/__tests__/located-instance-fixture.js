@@ -47,6 +47,7 @@ function createIntegration(profile) {
       migrate: async (input) => input,
       applyPatch: (input, patch) => ({ ...input, values: { ...input.values, ...patch } }),
     },
+    executionLifetime: null, singleQueryLifetime: null, textGenerationLifetime: null,
     execution: {
       start: mock(async (request) => {
         request.output.emit({ type: 'session', session });

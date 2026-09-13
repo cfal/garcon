@@ -27,6 +27,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       abort: async () => false,
       runningSessions: () => [],
     },
+    executionLifetime: null, singleQueryLifetime: null, textGenerationLifetime: null,
     attachments: null,
     legacyHistoryImport: null,
     nativeHistoryImport: null,

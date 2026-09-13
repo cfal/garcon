@@ -1,15 +1,15 @@
 import { expect, mock, test } from 'bun:test';
 import type { ProjectResolution } from '@garcon/common/project-resolution';
-import type { ProviderExecutionService } from '../../execution-nodes/provider-execution.js';
+import type { ProviderRetainedExecutionService } from '../../execution-nodes/provider-execution.js';
 import { MAX_NODE_EXECUTION_RESOURCES, NodeExecutionResources, type NodeExecutionResource } from '../execution-resources.js';
 
 function resource(overrides: Partial<NodeExecutionResource> = {}): NodeExecutionResource {
   const execution = {
     async prepare() { throw new Error('Execution must not begin during resource resolution'); },
-    async dispatch() {}, release() {}, async abort() { return false; },
+    beginDispatch() { throw new Error('Unexpected native entry'); }, release() {}, async abort() { return false; },
     async prepareSteer() { return { kind: 'unsupported' as const }; }, async steer() { return { kind: 'accepted' as const }; },
     async submitGoalControl() { return false; },
-  } satisfies ProviderExecutionService;
+  } satisfies ProviderRetainedExecutionService;
   return {
     location: { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' },
     projectPath: '/synthetic/project-alias', execution,

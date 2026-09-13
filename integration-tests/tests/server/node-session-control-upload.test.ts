@@ -5,7 +5,7 @@ import { serializeNodeBulkFrame } from '../../../server/execution-nodes/transpor
 import { serializeNodeExecutionBody } from '../../../server/execution-nodes/transport/execution-body-wire.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { nodeSessionSystemdAvailable } from '../../support/node-session-handshake-fixture.js';
-import { createNodeSessionOutputFixture } from '../../support/node-session-output-fixture.js';
+import { createUnattestedClaudeSessionFixture } from '../../support/unattested-claude-fixture.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 import { TlsCertificates, type TestCertificate } from '../../support/tls-certificates.js';
 
@@ -14,11 +14,11 @@ let certificate: TestCertificate;
 beforeAll(async () => { certificates = await TlsCertificates.create(); certificate = await certificates.selfSigned('control-upload'); });
 afterAll(async () => certificates?.dispose());
 
-describe.skipIf(!nodeSessionSystemdAvailable)('exact control upload cancellation through WSS and native workers', () => {
+describe.skipIf(!nodeSessionSystemdAvailable)('internal unattested Claude characterization: exact control upload cancellation through WSS and native workers', () => {
   test('cancelling a prepared Claude steer revokes partial and complete bulk bodies', async () => {
     const provider = await startScriptedClaudeTestEnvironment();
     const held = provider.model.scriptHeldTurn([claudeText('synthetic original turn completed')]);
-    const f = await createNodeSessionOutputFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
+    const f = await createUnattestedClaudeSessionFixture(certificate, { instance: { agentId: 'claude', environment: provider.serverEnvironment } });
     const source = new AbortController();
     try {
       await f.recover();

@@ -71,7 +71,7 @@ test('executable configuration values never run during request serialization', (
 test.each<NodeExecutionResult>([
   { kind: 'prepared', ticket }, { kind: 'dispatched' }, { kind: 'released' }, { kind: 'unknown' },
   { kind: 'abort-result', requested: true }, { kind: 'status', receipt: null },
-  { kind: 'status', receipt: { identity, runId: request.runId, phase: 'dispatched', dispatch: 'pending', abort: 'pending', control: null } },
+  { kind: 'status', receipt: { identity, runId: request.runId, phase: 'dispatched', dispatch: 'pending', native: 'possible', containment: null, abort: 'pending', control: null } },
   { kind: 'control-prepared', preparation: { kind: 'ready', ticket: control } },
   { kind: 'control-prepared', preparation: { kind: 'unsupported' } }, { kind: 'control-prepared', preparation: { kind: 'unavailable' } },
   { kind: 'steer-result', outcome: { kind: 'failed', outcome: 'not-sent' }, deliveryPrepared: false },
@@ -83,7 +83,7 @@ test.each<NodeExecutionResult>([
 });
 
 test('receipts reject private bodies, stale identities and inconsistent settled controls', () => {
-  const receipt = { identity, runId: request.runId, phase: 'ended', dispatch: 'completed', abort: null, control: null };
+  const receipt = { identity, runId: request.runId, phase: 'ended', dispatch: 'accepted', native: 'possible', containment: null, abort: null, control: null };
   const reply = { type: 'node-execution-result', version: NODE_WIRE_VERSION, session, requestId: 1 };
   for (const invalid of [
     { ...receipt, credential: 'synthetic-private' }, { ...receipt, prompt: 'synthetic-private' },
@@ -100,5 +100,25 @@ test('unsupported versions, fractional IDs and unknown error vocabularies cannot
   for (const override of [{ version: 99 }, { requestId: 0 }, { requestId: 1.5 }, { extra: true },
     { result: { kind: 'rejected', code: 'arbitrary-provider-error' } }, { result: { kind: 'unknown', prompt: 'synthetic-private' } }]) {
     expect(parseNodeExecutionReplyText(JSON.stringify({ ...reply, ...override }))).toBeNull();
+  }
+});
+
+
+test.each([
+  { phase: 'prepared', dispatch: null, native: 'none', containment: null },
+  { phase: 'failed', dispatch: 'rejected', native: 'none', containment: null },
+  { phase: 'failed', dispatch: 'unknown', native: 'possible', containment: null },
+  { phase: 'failed', dispatch: 'unknown', native: 'possible', containment: 'requested' },
+  { phase: 'ended', dispatch: 'accepted', native: 'settled', containment: null },
+] as const)('dispatch certainty and native occupancy round-trip independently: %j', (lifetime) => {
+  const receipt = { identity, runId: request.runId, ...lifetime, abort: null, control: null };
+  const reply: NodeExecutionReply = { type: 'node-execution-result', version: NODE_WIRE_VERSION, session, requestId: 1,
+    result: { kind: 'status', receipt } };
+  expect(parseNodeExecutionReplyText(serializeNodeExecutionReply(reply))).toEqual(reply);
+  for (const field of ['native', 'containment', 'dispatch'] as const) {
+    const missing = { ...receipt };
+    Reflect.deleteProperty(missing, field);
+    expect(parseNodeExecutionReplyText(JSON.stringify({ ...reply, result: { kind: 'status', receipt: missing } }))).toBeNull();
+    expect(parseNodeExecutionReplyText(JSON.stringify({ ...reply, result: { kind: 'status', receipt: { ...receipt, [field]: 'unsupported' } } }))).toBeNull();
   }
 });

@@ -1,3 +1,4 @@
+import { fetchDirectQuery, type DirectNativeQuery } from './native-query.js';
 // Implements Direct over OpenAI-compatible Responses APIs.
 // Keeps Responses request/stream parsing separate from chat completions.
 
@@ -94,6 +95,7 @@ export async function runOpenAiResponsesSingleQuery(
   config: OpenAiCompatibleResponsesRuntimeConfig,
   prompt: string,
   options: Record<string, unknown> = {},
+  native: DirectNativeQuery | null = null,
 ): Promise<string> {
   const apiKey = config.getApiKey();
   const model = typeof options.model === 'string' && options.model
@@ -105,7 +107,7 @@ export async function runOpenAiResponsesSingleQuery(
   const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
-    const response = await fetch(`${config.getBaseUrl()}/responses`, {
+    const response = await fetchDirectQuery(native, `${config.getBaseUrl()}/responses`, {
       method: 'POST',
       headers: buildHeaders(config, apiKey),
       body: JSON.stringify({
@@ -119,10 +121,10 @@ export async function runOpenAiResponsesSingleQuery(
     });
 
     if (!response.ok) {
-      await throwResponsesHttpError(response, config.runtimeLabel);
+      await throwResponsesHttpError(response, config.runtimeLabel, native);
     }
 
-    return (await readOpenAiResponsesResponse(response, config.runtimeLabel)).text;
+    return (await readOpenAiResponsesResponse(response, config.runtimeLabel, native)).text;
   } finally {
     clearTimeout(timer);
   }
@@ -228,9 +230,9 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     });
 
     if (!response.ok) {
-      await throwResponsesHttpError(response, this.config.runtimeLabel);
+      await throwResponsesHttpError(response, this.config.runtimeLabel, session.nativeWork);
     }
-    return await readOpenAiResponsesResponse(response, this.config.runtimeLabel);
+    return await readOpenAiResponsesResponse(response, this.config.runtimeLabel, session.nativeWork);
   }
 }
 

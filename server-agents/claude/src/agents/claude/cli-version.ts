@@ -5,6 +5,12 @@ const MAX_VERSION_OUTPUT_BYTES = 16 * 1024;
 
 type CliVersion = readonly [number, number, number];
 
+export interface ClaudeCliVersionCheck {
+  readonly result: Promise<CliVersion>;
+  /** Retains the probe's exit and readers even after its result times out. */
+  readonly drained: Promise<void>;
+}
+
 function parseClaudeCliVersion(output: string): CliVersion | null {
   const match = output.match(/(\d+)\.(\d+)\.(\d+)/);
   if (!match) return null;
@@ -45,26 +51,44 @@ async function readProbeOutput(
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let bytes = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    if (bytes > MAX_VERSION_OUTPUT_BYTES) {
-      throw new Error('Claude CLI version output exceeded its size limit');
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_VERSION_OUTPUT_BYTES) {
+        throw new Error('Claude CLI version output exceeded its size limit');
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
+  } finally {
+    reader.releaseLock();
   }
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
 }
 
-async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion> {
-  const process = Bun.spawn([claudeBinary, '--version'], {
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+async function probeClaudeCliVersion(
+  claudeBinary: string,
+  drainage: ReturnType<typeof Promise.withResolvers<void>>,
+): Promise<CliVersion> {
+  let process: import('bun').Subprocess<'ignore', 'pipe', 'pipe'>;
+  try {
+    process = Bun.spawn([claudeBinary, '--version'], {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+  } catch (error) {
+    drainage.reject(error);
+    throw error;
+  }
   const stdout = readProbeOutput(process.stdout);
   const stderr = readProbeOutput(process.stderr);
+  void Promise.allSettled([process.exited, stdout, stderr]).then((completions) => {
+    const failure = completions.find((completion) => completion.status === 'rejected');
+    if (failure) drainage.reject(failure.reason);
+    else drainage.resolve();
+  });
 
   let exitCode = await waitForExit(process, VERSION_PROBE_TIMEOUT_MS);
   if (exitCode === null) {
@@ -94,10 +118,19 @@ async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion> 
 }
 
 export class ClaudeCliVersionProbe {
-  readonly #versions = new Map<string, Promise<CliVersion>>();
+  readonly #versions = new Map<string, ClaudeCliVersionCheck>();
 
   async assertCompatible(claudeBinary: string): Promise<CliVersion> {
-    const version = await this.#version(claudeBinary);
+    return this.check(claudeBinary).result;
+  }
+
+  check(claudeBinary: string): ClaudeCliVersionCheck {
+    const probe = this.#version(claudeBinary);
+    return { result: this.#assertCompatible(probe.result), drained: probe.drained };
+  }
+
+  async #assertCompatible(result: Promise<CliVersion>): Promise<CliVersion> {
+    const version = await result;
     if (isVersionBefore(version, MINIMUM_CLAUDE_CLI_VERSION)) {
       throw new Error(
         `Claude Code ${versionText(version)} is unsupported.`
@@ -107,12 +140,14 @@ export class ClaudeCliVersionProbe {
     return version;
   }
 
-  #version(claudeBinary: string): Promise<CliVersion> {
+  #version(claudeBinary: string): ClaudeCliVersionCheck {
     let cached = this.#versions.get(claudeBinary);
     if (!cached) {
-      cached = probeClaudeCliVersion(claudeBinary);
+      const drainage = Promise.withResolvers<void>();
+      void drainage.promise.catch(() => undefined);
+      cached = { result: probeClaudeCliVersion(claudeBinary, drainage), drained: drainage.promise };
       this.#versions.set(claudeBinary, cached);
-      void cached.catch(() => {
+      void cached.result.catch(() => {
         if (this.#versions.get(claudeBinary) === cached) {
           this.#versions.delete(claudeBinary);
         }

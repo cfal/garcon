@@ -5,6 +5,7 @@ import type {
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
+import type { DirectNativeExecution } from './native-execution.js';
 
 export interface DirectEndpointRuntime {
   readonly selection: AgentEndpointSelection;
@@ -27,6 +28,7 @@ export interface DirectExecutionRequest {
   readonly images?: readonly AgentAttachment[];
   readonly endpoint: DirectEndpointRuntime;
   readonly operation: AgentRuntimeOperation;
+  readonly nativeWork?: DirectNativeExecution | null;
 }
 
 export interface DirectStartRequest extends DirectExecutionRequest {

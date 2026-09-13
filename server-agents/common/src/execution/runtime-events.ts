@@ -7,6 +7,7 @@ import type {
   AgentRunningSession,
   AgentEstablishedSession,
   AgentStartRequestV5,
+  AgentDispatchOutcome,
 } from '@garcon/server-agent-interface';
 import { providerMetadata } from '../native-session/provider-metadata.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
@@ -66,6 +67,26 @@ export interface AgentRuntimeExecution {
   resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void>;
   abort(agentSessionId: string, publish: AgentRuntimePublisher): Promise<boolean>;
   runningSessions(): readonly AgentRunningSession[];
+}
+
+export type AgentRuntimeExecutionLifetimeRequest =
+  | { readonly kind: 'start'; readonly request: AgentRuntimeStartRequest }
+  | { readonly kind: 'resume' | 'compact'; readonly request: AgentRuntimeResumeRequest };
+
+export type AgentRuntimeDispatchOutcome =
+  | { readonly kind: 'accepted'; readonly session: AgentEstablishedSession | null }
+  | Exclude<AgentDispatchOutcome, { readonly kind: 'accepted' }>;
+
+export interface AgentRuntimeExecutionAttempt {
+  /** Supplies the established session for start and null for resume or compact. */
+  readonly dispatch: Promise<AgentRuntimeDispatchOutcome>;
+  readonly settled: Promise<void>;
+  abort(): Promise<boolean>;
+}
+
+export interface AgentRuntimeExecutionLifetime {
+  /** Captures the exact publisher and returns before native effects, including filesystem preparation. */
+  begin(request: AgentRuntimeExecutionLifetimeRequest, publish: AgentRuntimePublisher): AgentRuntimeExecutionAttempt;
 }
 
 export function runtimeRows(messages: readonly ChatMessage[]): readonly AgentProducedRow[] {

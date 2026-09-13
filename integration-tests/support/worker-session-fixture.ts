@@ -6,6 +6,7 @@ import { NODE_WIRE_VERSION, parseNodeOutputText, type NodeOutputFrame, type Node
 import { NodeOutputRecovery } from '../../server/execution-nodes/output-recovery.js';
 import { DomainError } from '../../server/lib/domain-error.js';
 import type { ProviderConfigurationRequest } from '../../server/execution-nodes/provider-configuration.js';
+import type { NodeProviderManifest } from '../../server/execution-nodes/provider-manifest.js';
 import type { NodeOperationIdentity } from '../../common/node-operation.js';
 import { DEFAULT_NODE_REPLAY, type NodeReplayOptions } from '../../server/execution-node/replay-cache.js';
 import { NodeWorkerPeer } from '../../server/execution-node/worker/peer.js';
@@ -34,7 +35,11 @@ interface FixtureStream {
   accepted: number;
 }
 
-export async function startWorkerSessionFixture(instances: readonly FixtureInstance[], replay: NodeReplayOptions = DEFAULT_NODE_REPLAY) {
+export async function startWorkerSessionFixture(
+  instances: readonly FixtureInstance[],
+  replay: NodeReplayOptions = DEFAULT_NODE_REPLAY,
+  sessionCommand: readonly [string, ...string[]] = nodeWorkerCommand('session'),
+) {
   const storage = await mkdtemp(path.join(homedir(), 'garcon-worker-session-'));
   const directory = await createNodeWorkerWorkingDirectory(storage);
   const lifetime = new AbortController();
@@ -51,7 +56,7 @@ export async function startWorkerSessionFixture(instances: readonly FixtureInsta
   const retirements = new Set<Promise<void>>();
   let acknowledge = true;
   const failed = (error: unknown) => { failures.push(error); for (const observer of observers) observer(); };
-  const child = Bun.spawn(nodeWorkerCommand('session'), { cwd: directory.path,
+  const child = Bun.spawn([...sessionCommand], { cwd: directory.path,
     env: { PATH: '/usr/bin:/bin', BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS }, stdin: 'pipe', stdout: 'pipe', stderr: 'ignore', timeout: 90_000 });
   const receiver = new NodeWorkerOutputDeliveryReceiver({ session, instanceIds: new Set(instances.map(({ id }) => id)),
     signal: lifetime.signal, budget: new NodeOutputAssemblyBudget(32 * 1024 * 1024), now: () => performance.now(), validate() {}, failed });
@@ -69,9 +74,10 @@ export async function startWorkerSessionFixture(instances: readonly FixtureInsta
     for (const channel of channels.values()) channel.close();
     await child.exited; await rm(storage, { recursive: true, force: true });
   };
+  let manifests: readonly NodeProviderManifest[];
   try {
     await peer.hello;
-    await peer.configure(session, connectionId, { role: 'session', nodeId: session.nodeBootId, storageDirectory: storage,
+    manifests = await peer.configure(session, connectionId, { role: 'session', nodeId: session.nodeBootId, storageDirectory: storage,
       instances: instances.map((instance) => ({ ...instance, label: instance.id, homeDirectory: path.join(storage, instance.id),
         workspaceIds: ['synthetic-workspace'], maxOperations: 2 })),
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay });
@@ -136,7 +142,12 @@ export async function startWorkerSessionFixture(instances: readonly FixtureInsta
     await peer.admit(connectionId);
     return [...gaps];
   };
-  return { storage, session, failures, install, recover, call, close, sendRetirement,
+  const prepare = (instanceId: string, chatId: string, runId: string, configuration: ProviderConfigurationRequest) => {
+    if (!outputReady) throw new Error('Synthetic execution admission is waiting for output recovery');
+    return peer.execution(instanceId, connectionId).call({ method: 'prepare', location: { nodeId: session.nodeBootId,
+      instanceId, workspaceId: 'synthetic-workspace' }, request: { kind: 'start', chatId, runId, configuration } }, physical.signal);
+  };
+  return { storage, session, manifests, failures, install, recover, call, close, sendRetirement, prepare,
     get outputReady() { return outputReady; }, get recoveryCount() { return recoveryCount; },
     setAcknowledgements(enabled: boolean) { acknowledge = enabled; },
     async reconnect() {
@@ -153,10 +164,8 @@ export async function startWorkerSessionFixture(instances: readonly FixtureInsta
       return peer.execution(instanceId, connectionId).call({ method: 'status', identity }, physical.signal);
     },
     async start(owner: FixtureStream, chatId: string, runId: string, configuration: ProviderConfigurationRequest, prompt = 'synthetic input') {
-      if (!outputReady) throw new Error('Synthetic execution admission is waiting for output recovery');
       const client = peer.execution(owner.instanceId, connectionId);
-      const prepared = await client.call({ method: 'prepare', location: { nodeId: session.nodeBootId,
-        instanceId: owner.instanceId, workspaceId: 'synthetic-workspace' }, request: { kind: 'start', chatId, runId, configuration } }, physical.signal);
+      const prepared = await prepare(owner.instanceId, chatId, runId, configuration);
       if (prepared.kind !== 'prepared') throw new Error(`Fixture preparation failed: ${JSON.stringify(prepared)}`);
       const bytes = serializeNodeExecutionBody({ kind: 'execution', input: { prompt, attachments: [], carriedContext: null } });
       const reserved = await call({ method: 'reserve-body', instanceId: owner.instanceId, identity: prepared.ticket.identity,
