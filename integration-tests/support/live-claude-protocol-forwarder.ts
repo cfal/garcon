@@ -34,8 +34,8 @@ function observe(line: string): string {
   let message: Record<string, unknown>;
   try {
     const parsed = JSON.parse(line) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return line;
-    message = parsed as Record<string, unknown>;
+    if (!isRecord(parsed)) return line;
+    message = parsed;
   } catch {
     return line;
   }
@@ -66,15 +66,16 @@ function observe(line: string): string {
       })}\n`,
     );
   }
-  const control = isRecord(message.response) ? message.response : null;
-  const receipt = control?.subtype === 'success' && isRecord(control.response)
-    ? control.response
-    : null;
+  const control = message.response;
   if (
-    message.type === 'control_response'
-    && receipt
-    && (Array.isArray(receipt.cancelled) || Array.isArray(receipt.still_queued))
-  ) {
+    message.type !== 'control_response'
+    || !isRecord(control)
+    || control.subtype !== 'success'
+    || !isRecord(control.response)
+  ) return line;
+
+  const receipt = control.response;
+  if (Array.isArray(receipt.cancelled) || Array.isArray(receipt.still_queued)) {
     appendFileSync(
       interruptReceiptPath,
       `${JSON.stringify({
@@ -84,31 +85,29 @@ function observe(line: string): string {
       })}\n`,
     );
   }
-  if (message.type === 'control_response' && receipt) {
-    const processId = child.pid;
-    if (Array.isArray(receipt.sources)) {
-      const flags = receipt.sources.find(source => isRecord(source) && source.source === 'flagSettings');
-      const settings = isRecord(flags?.settings) ? flags.settings : {};
-      recordContext({
-        type: 'flag-environment', processId,
-        keys: isRecord(settings.env) ? Object.keys(settings.env) : [],
+  const processId = child.pid;
+  if (Array.isArray(receipt.sources)) {
+    const flags = receipt.sources.find(source => isRecord(source) && source.source === 'flagSettings');
+    const settings = isRecord(flags?.settings) ? flags.settings : {};
+    recordContext({
+      type: 'flag-environment', processId,
+      keys: isRecord(settings.env) ? Object.keys(settings.env) : [],
+    });
+  }
+  if (
+    typeof receipt.model === 'string'
+    && typeof receipt.rawMaxTokens === 'number'
+    && typeof receipt.autocompactSource === 'string'
+  ) {
+    recordContext({
+      type: 'context-window', processId, model: receipt.model,
+      source: receipt.autocompactSource, window: receipt.rawMaxTokens,
+    });
+    if (invalidateContextUsage) {
+      return JSON.stringify({
+        ...message,
+        response: { ...control, response: { ...receipt, rawMaxTokens: 0 } },
       });
-    }
-    if (
-      typeof receipt.model === 'string'
-      && typeof receipt.rawMaxTokens === 'number'
-      && typeof receipt.autocompactSource === 'string'
-    ) {
-      recordContext({
-        type: 'context-window', processId, model: receipt.model,
-        source: receipt.autocompactSource, window: receipt.rawMaxTokens,
-      });
-      if (invalidateContextUsage) {
-        return JSON.stringify({
-          ...message,
-          response: { ...control, response: { ...receipt, rawMaxTokens: 0 } },
-        });
-      }
     }
   }
   return line;

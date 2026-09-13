@@ -2065,8 +2065,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         } else if (request.subtype === 'set_model') {
           model = request.model;
         } else if (request.subtype === 'get_context_usage') {
-          expect(fake.proc.stdin.write.mock.calls.filter(([line]) => JSON.parse(line).type === 'user'))
-            .toHaveLength(cap === '850000' ? 1 : 2);
+          expect(writtenUserMessages(fake)).toHaveLength(cap === '850000' ? 1 : 2);
           response = { model, rawMaxTokens: Number(cap), autocompactSource: 'env' };
         }
         return { subtype: 'success', response };
@@ -2125,7 +2124,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       await enqueueResult(second);
       await resumed;
       expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
-      expect(first.proc.stdin.write.mock.calls.filter(([line]) => JSON.parse(line).type === 'user')).toHaveLength(1);
+      expect(writtenUserMessages(first)).toHaveLength(1);
       const requests = second.proc.stdin.write.mock.calls.map(([line]) => JSON.parse(line));
       expect(requests.filter(request => request.type === 'user')).toHaveLength(1);
       expect(requests.some(request => request.request?.subtype === 'apply_flag_settings')).toBe(false);
@@ -2238,7 +2237,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         expect(await settled).toBeInstanceOf(Error);
         expect(Bun.spawn).toHaveBeenCalledTimes(1);
       }
-      expect(first.proc.stdin.write.mock.calls.filter(([line]) => JSON.parse(line).type === 'user')).toHaveLength(1);
+      expect(writtenUserMessages(first)).toHaveLength(1);
     } finally {
       await runtime.shutdown();
       Bun.spawn = originalSpawn;

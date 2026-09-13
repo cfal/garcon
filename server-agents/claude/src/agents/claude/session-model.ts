@@ -26,8 +26,11 @@ export async function configureClaudeSessionModel(
     // policy. Transitions into or out of automatic policy still use a fresh process.
     if (current.autoCompactWindow === null || desired.autoCompactWindow === null) {
       await options.retireProcess();
-    } else if (await tryUpdateContextWindow(session, current.model, desired.model, desired.autoCompactWindow, options)) {
-      session.currentModel = desiredModel;
+    } else {
+      const contextUpdated = await tryUpdateContextWindow(
+        session, current.model, desired.model, desired.autoCompactWindow, options,
+      );
+      if (contextUpdated) session.currentModel = desiredModel;
     }
   }
 
@@ -84,7 +87,9 @@ async function tryUpdateContextWindow(
       processId: process?.pid ?? null,
       controlSubtype,
     });
-    if (options.isCurrentSession() && session.process === process) await options.retireProcess();
+    if (options.isCurrentSession() && session.process === process) {
+      await options.retireProcess();
+    }
     assertCurrentSession(options);
     return false;
   }

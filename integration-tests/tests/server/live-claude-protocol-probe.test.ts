@@ -5,12 +5,25 @@ import { join } from 'node:path';
 import { createLiveClaudeProtocolProbe } from '../../support/live-claude-protocol-probe.js';
 
 describe('live Claude protocol probe', () => {
-  test('observes lifecycle and context controls without retaining message content or settings values', async () => {
+  test.each([false, true])('observes controls without retaining private values (invalidate context: %j)', async invalidateContextUsage => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-claude-probe-'));
     try {
       const commandUuid = crypto.randomUUID();
       const fakeBinary = join(root, 'fake-claude');
+      const ignoredReceipt = {
+        sources: [], model: 'ignored-model', rawMaxTokens: 100, autocompactSource: 'env',
+      };
+      const ignoredFrames = [
+        null,
+        [],
+        { type: 'assistant', response: { subtype: 'success', response: ignoredReceipt } },
+        { type: 'control_response', response: { subtype: 'error', response: ignoredReceipt } },
+        { type: 'control_response', response: null },
+        { type: 'control_response', response: { subtype: 'success', response: null } },
+      ];
+      const ignoredOutput = ['not JSON', ...ignoredFrames.map(frame => JSON.stringify(frame))].join('\n') + '\n';
       await writeFile(fakeBinary, `#!/usr/bin/env bun
+process.stdout.write(${JSON.stringify(ignoredOutput)});
 console.log(JSON.stringify({
   type: 'command_lifecycle',
   state: 'started',
@@ -50,7 +63,7 @@ console.log(JSON.stringify({
 console.log(JSON.stringify({ type: 'system', subtype: 'compact_boundary' }));
 `, { mode: 0o700 });
       const environment = { CLAUDE_BINARY: fakeBinary };
-      const probe = createLiveClaudeProtocolProbe(environment);
+      const probe = createLiveClaudeProtocolProbe(environment, { invalidateContextUsage });
       await probe.prepareWorkspace({
         root,
         config: join(root, 'config'),
@@ -66,9 +79,11 @@ console.log(JSON.stringify({ type: 'system', subtype: 'compact_boundary' }));
       });
       const output = await new Response(child.stdout).text();
       expect(await child.exited).toBe(0);
+      expect(output.startsWith(ignoredOutput)).toBe(true);
       expect(output).toContain('private output');
       expect(output).toContain('private-value');
-      expect(output).toContain('"rawMaxTokens":850000');
+      const forwardedWindow = invalidateContextUsage ? 0 : 850000;
+      expect(output).toContain(`"rawMaxTokens":${forwardedWindow}`);
 
       expect(await probe.waitForInputStarted()).toBe(commandUuid);
       expect(await probe.waitForTerminal()).toEqual({
