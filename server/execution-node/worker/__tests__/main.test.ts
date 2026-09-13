@@ -67,7 +67,7 @@ test('source instance startup ignores dotenv and bunfig in its cwd, home, and st
   try {
     expect(await peer.hello).toBe(child.pid);
     const ready = await peer.configure(session, 1, { role: 'instance', nodeId: 'synthetic-node', storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, instance,
-      workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] });
+      workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], historyTransportMemoryBytes: 16 * 1024 * 1024 });
     expect(ready[0]?.instanceId).toBe(instance.id);
     expect(existsSync(marker)).toBe(false);
     peer.closeInput();

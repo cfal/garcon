@@ -15,6 +15,8 @@ import type { NodeSessionConfigurationHost } from '../provider-session-configura
 import { MAX_NODE_STREAM_IDENTITIES, NodeStreamIdentityExhaustedError } from '../replay-cache.js';
 import { NodeAuthorityError, type NodeConnectionLease } from '../supervisor.js';
 import type { NodeWorkerAuthority } from './authority.js';
+import { NodeWorkerBulkAttempts, type NodeWorkerBulkAttempt } from './bulk-attempts.js';
+import type { NodeWorkerBulkGateMessage } from './protocol.js';
 import { NodeWorkerBulkPort } from './bulk-port.js';
 import type { NodeWorkerBulkFrame } from './bulk-protocol.js';
 import { NodeWorkerTransportError } from './framing.js';
@@ -22,6 +24,10 @@ import { NodeWorkerOutputPort } from './output-port.js';
 import { parseNodeWorkerOutputRetirementText, serializeNodeWorkerOutputRetirement } from './output-retirement.js';
 import type { NodeWorkerServiceCommand, NodeWorkerServiceResult } from './service-protocol.js';
 import type { NodeWorkerWriter } from './writer.js';
+import type { NodeDeadline } from '../../execution-nodes/deadline.js';
+import type { NodeProviderHistoryImportHost } from '../provider-history-host.js';
+import type { NodeHistoryBulkSender } from '../../execution-nodes/transport/provider-history-sender.js';
+import type { NodeHistoryBulkFrame } from '../../execution-nodes/transport/provider-history-bulk-wire.js';
 
 interface InstanceStream {
   readonly stream: ProducerStreamIdentity;
@@ -40,10 +46,13 @@ export interface NodeWorkerInstanceServicesOptions {
   readonly nativeSessions: Pick<NodeProviderNativeHost, 'execute'> | null;
   readonly auxiliary: Pick<NodeProviderAuxiliaryHost, 'execute'> | null;
   readonly sessionConfiguration: Pick<NodeSessionConfigurationHost, 'execute' | 'close'>;
+  readonly history: { readonly host: Pick<NodeProviderHistoryImportHost, 'execute' | 'close'>;
+    readonly sender: Pick<NodeHistoryBulkSender, 'receive' | 'close'> } | null;
 }
 
 /** Keeps output and permission authority in its provider instance while physical body channels can be replaced. */
 export class NodeWorkerInstanceServices {
+  readonly #bulkAttempts: NodeWorkerBulkAttempts;
   readonly #output: NodeWorkerOutputPort;
   readonly #streams = new Map<string, InstanceStream | null>();
   readonly #closing = new AbortController();
@@ -52,6 +61,7 @@ export class NodeWorkerInstanceServices {
 
   constructor(private readonly options: NodeWorkerInstanceServicesOptions) {
     const { authority } = options;
+    this.#bulkAttempts = new NodeWorkerBulkAttempts(authority);
     this.#output = new NodeWorkerOutputPort(options.writer, { session: authority.session, instanceId: options.instanceId,
       signal: authority.signal, now: () => authority.poll(), validate: () => this.#validate(), failed: () => authority.retire() });
     const close = () => this.close();
@@ -60,7 +70,7 @@ export class NodeWorkerInstanceServices {
     if (authority.signal.aborted) this.close();
   }
 
-  async service(connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal): Promise<NodeWorkerServiceResult> {
+  async service(connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal, deadline?: NodeDeadline): Promise<NodeWorkerServiceResult> {
     try {
       this.#validate(); this.options.authority.assertConnection(connection); signal.throwIfAborted();
       if (command.method === 'retire-output') {
@@ -78,6 +88,13 @@ export class NodeWorkerInstanceServices {
       }
       if (command.method === 'provider-session-configuration') {
         return await this.options.sessionConfiguration.execute(connection, command, signal);
+      }
+      if (command.method === 'provider-history-import') {
+        if (!this.options.history || !deadline) return { kind: 'rejected', code: 'NODE_UNAVAILABLE' };
+        if (command.instanceId !== this.options.instanceId || !sameNodeSession(command.identity, this.options.authority.session)) throw protocol();
+        this.options.authority.assertConnection(this.options.authority.connection(command.connectionId));
+        if (command.operation !== 'cancel') this.options.authority.assertAdmission(connection);
+        return await this.options.history.host.execute(command, AbortSignal.any([signal, connection.signal, this.#closing.signal]), deadline);
       }
       this.options.authority.assertAdmission(connection);
       if (command.method === 'provider-single-query' || command.method === 'provider-text-generation') {
@@ -135,6 +152,17 @@ export class NodeWorkerInstanceServices {
     } catch { return { kind: 'rejected', code: 'NODE_UNAVAILABLE' }; }
   }
 
+  bulkLifetime(message: NodeWorkerBulkGateMessage): void {
+    this.#validate();
+    if (!sameNodeSession(message.session, this.options.authority.session)) throw protocol();
+    if (message.type === 'node-worker-bulk-attached') this.#bulkAttempts.attach(message.connectionId, message.bulkAttemptId);
+    else this.#bulkAttempts.retire(message.connectionId, message.bulkAttemptId);
+  }
+
+  captureBulk(connectionId: number, bulkAttemptId: string): NodeWorkerBulkAttempt {
+    return this.#bulkAttempts.capture(connectionId, bulkAttemptId);
+  }
+
   bulk(frame: NodeWorkerBulkFrame): void {
     this.#validate();
     const { authority, host, writer } = this.options;
@@ -155,6 +183,14 @@ export class NodeWorkerInstanceServices {
     this.#bulk.channel.receive(frame.payload);
   }
 
+  history(frame: NodeHistoryBulkFrame): void {
+    this.#validate();
+    if (frame.instanceId !== this.options.instanceId || !sameNodeSession(frame.identity, this.options.authority.session)) throw protocol();
+    try { this.captureBulk(frame.connectionId, frame.bulkAttemptId).validate(); }
+    catch (error) { if (error instanceof NodeBulkError || error instanceof NodeAuthorityError) return; throw error; }
+    this.options.history?.sender.receive(frame);
+  }
+
   receiveRetirement(text: string): void {
     this.#validate();
     const frame = parseNodeWorkerOutputRetirementText(text);
@@ -166,6 +202,8 @@ export class NodeWorkerInstanceServices {
   close(): void {
     if (this.#closing.signal.aborted) return;
     this.#closing.abort(); this.#detach(); this.#output.close(); this.#bulk?.channel.close(); this.#bulk = null;
+    this.#bulkAttempts.close();
+    this.options.history?.host.close(); this.options.history?.sender.close();
     this.options.sessionConfiguration.close();
     for (const owner of this.#streams.values()) if (owner) this.#retire(owner.stream);
     this.#streams.clear();

@@ -11,6 +11,7 @@ import { NodeWorkerTransportError } from './framing.js';
 import { assertNodeOutputMemoryBudget } from './output-memory.js';
 import { NodeWorkerSessionServices } from './session-services.js';
 import { NodeWorkerServiceRouter } from './service-router.js';
+import { allocateNodeHistoryTransport } from '../../execution-nodes/transport/provider-history-allocation.js';
 
 interface HostedInstance {
   readonly instanceId: string;
@@ -30,6 +31,7 @@ export async function createNodeSessionRuntime(
   const { configuration, authority } = context;
   if (configuration.role !== 'session') throw new TypeError('Invalid session worker role');
   assertNodeOutputMemoryBudget(configuration.instances.length, configuration.replay, configuration.outputMemoryBytes);
+  const historyAllocation = allocateNodeHistoryTransport(configuration.instances.length, configuration.historyTransportMemoryBytes);
   const children: HostedInstance[] = [];
   const containment = new NodeWorkerContainmentRelay(authority, writer);
   const ready = new NodeWorkerReady(authority.session);
@@ -77,6 +79,7 @@ export async function createNodeSessionRuntime(
       const manifests = await peer.configure(authority.session, context.connectionId, { role: 'instance',
         nodeId: configuration.nodeId, storageDirectory: configuration.storageDirectory, instance,
         executableSearchPath: configuration.executableSearchPath,
+        historyTransportMemoryBytes: historyAllocation.instanceBytes,
         workspaces: configuration.workspaces.filter((workspace) => instance.workspaceIds.includes(workspace.id)) });
       for (const manifest of manifests) ready.add(manifest);
     }
@@ -89,6 +92,7 @@ export async function createNodeSessionRuntime(
         if (!services) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
         switch (frame.type) {
           case 'node-worker-bulk': services.bulk(frame); return;
+          case 'node-history-bulk': services.history(frame); return;
           case 'node-worker-output-retired': services.retirement(frame, 'coordinator'); return;
           case 'node-worker-output-ack': services.acknowledge(frame); return;
           default: throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
@@ -98,11 +102,14 @@ export async function createNodeSessionRuntime(
         validate();
         if (message.type === 'node-worker-attach') { execution.attach(message.connectionId); requests.attach(message.connectionId); services?.disconnected(); }
         if (message.type === 'node-worker-disconnect') services?.disconnected();
+        if (message.type === 'node-worker-bulk-attached' || message.type === 'node-worker-bulk-retired') services?.bulkLifetime(message);
         await Promise.all(children.map(({ peer }) => {
           switch (message.type) {
             case 'node-worker-attach': return peer.attach(message.connectionId);
             case 'node-worker-admit': return peer.admit(message.connectionId);
             case 'node-worker-disconnect': return peer.disconnect(message.connectionId);
+            case 'node-worker-bulk-attached': return peer.attachBulk(message.connectionId, message.bulkAttemptId);
+            case 'node-worker-bulk-retired': return peer.retireBulk(message.connectionId, message.bulkAttemptId);
           }
         }));
         validate();

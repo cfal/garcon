@@ -11,6 +11,7 @@ import type { NodeReplyAuthority, NodeReplyPort } from '../../execution-nodes/tr
 import { isNodeRequestTimeout, NodeDeadline } from '../../execution-nodes/deadline.js';
 import type { LeaseClock } from '../lease-clock.js';
 import { DeferredNodeFrameText } from './frame-text.js';
+import { matchesNodeHistoryReply } from '../../execution-nodes/transport/provider-history-wire.js';
 
 export interface NodeWorkerServiceChannelOptions {
   readonly session: NodeSessionIdentity;
@@ -327,6 +328,7 @@ function requestTimeout(command: NodeWorkerServiceCommand, options: ReturnType<t
 
 function providerRequestClass(command: NodeWorkerServiceCommand): NodeProviderRequestClass | null {
   switch (command.method) {
+    case 'provider-history-import': return command.operation === 'cancel' ? 'status' : 'work';
     case 'provider-session-configuration': return command.operation === 'prepare' || command.operation === 'commit' ? 'work' : 'status';
     case 'provider-auth': return command.operation === 'status' || command.operation === 'login-status' ? 'status' : 'work';
     case 'provider-catalog': case 'provider-commands': case 'provider-configuration': case 'provider-native-sessions':
@@ -348,6 +350,7 @@ function expectedResult(command: NodeWorkerServiceCommand): (result: NodeWorkerS
   return (result) => {
     if (result.kind === 'unknown' || result.kind === 'rejected') return true;
     switch (method) {
+      case 'provider-history-import': return result.kind === 'provider-history-result' && matchesNodeHistoryReply(command, result);
       case 'provider-session-configuration': {
         if (command.operation === 'prepare') return result.kind === 'provider-session-configuration-prepared' && result.instanceId === instanceId;
         return result.kind === 'provider-session-configuration-receipt' && result.instanceId === instanceId

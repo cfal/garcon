@@ -58,6 +58,8 @@ function fixture() {
     attach: mock<Peer['attach']>(async (connectionId) => { calls.push(`attach:${connectionId}`); }),
     admit: mock<Peer['admit']>(async (connectionId) => { calls.push(`admit:${connectionId}`); }),
     disconnect: mock<Peer['disconnect']>(async (connectionId) => { calls.push(`disconnect:${connectionId}`); }),
+    attachBulk: mock<Peer['attachBulk']>(async () => {}),
+    retireBulk: mock<Peer['retireBulk']>(async () => {}),
     closeInput: mock(() => { calls.push('peer-close'); hello.reject(new Error('Synthetic closed peer')); }),
     execution() { throw new Error('Unused synthetic execution client'); },
     service: mock(() => service),

@@ -14,7 +14,7 @@ import type { NodeDeadline } from '../execution-nodes/deadline.js';
 
 const logger = createLogger('execution-node:session-coordinator');
 
-type CoordinatorPeer = Pick<NodeWorkerPeer, 'hello' | 'configure' | 'attach' | 'admit' | 'disconnect' | 'closeInput'
+type CoordinatorPeer = Pick<NodeWorkerPeer, 'hello' | 'configure' | 'attach' | 'admit' | 'disconnect' | 'attachBulk' | 'retireBulk' | 'closeInput'
   | 'execution' | 'forward' | 'waitForRelease'> & {
     service(connectionId: number): Pick<NodeWorkerServiceClient, 'call'>;
   };

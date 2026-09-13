@@ -1,4 +1,5 @@
 import { parseNodeProviderNativeCommand, parseNodeProviderNativeReply, type NodeProviderNativeCommand, type NodeProviderNativeReply } from '../../execution-nodes/transport/provider-native-wire.js';
+import { parseNodeProviderHistoryCommand, parseNodeProviderHistoryReply, type NodeProviderHistoryCommand, type NodeProviderHistoryReply } from '../../execution-nodes/transport/provider-history-wire.js';
 import { parseNodeProviderAuxiliaryCommand, parseNodeProviderAuxiliaryReply, type NodeProviderAuxiliaryCommand, type NodeProviderAuxiliaryReply } from '../../execution-nodes/transport/provider-auxiliary-wire.js';
 import {
   MAX_NODE_OUTPUT_SEQUENCE, NODE_WIRE_VERSION, parseNodeOutputAck, parseNodeReplayReply, parseProducerStreamIdentity,
@@ -22,6 +23,7 @@ export const MAX_NODE_WORKER_SERVICE_BYTES = 256 * 1024;
 export const MAX_NODE_WORKER_REPLAY_CURSORS = 256;
 
 export type NodeWorkerServiceCommand =
+  | NodeProviderHistoryCommand
   | NodeProviderNativeCommand
   | NodeProviderAuxiliaryCommand
   | NodeProviderAuthCommand
@@ -40,6 +42,7 @@ export type NodeWorkerServiceCommand =
   | { readonly method: 'resume-output'; readonly generation: number };
 
 export type NodeWorkerServiceResult =
+  | NodeProviderHistoryReply
   | NodeProviderNativeReply
   | NodeProviderAuxiliaryReply
   | NodeProviderCatalogReply
@@ -112,11 +115,11 @@ export function parseNodeWorkerServiceText(text: string): NodeWorkerServiceFrame
   }
   if (value.type === 'node-worker-service-request' && exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId', 'timeoutMs', 'command'])
     && isNodeRequestTimeout(value.timeoutMs)) {
-    const command = parseCommand(value.command, session);
+    const command = parseCommand(value.command, session, envelope.connectionId);
     return command ? { ...envelope, type: value.type, timeoutMs: value.timeoutMs, command } : null;
   }
   if (value.type === 'node-worker-service-result' && exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId', 'result'])) {
-    const result = parseResult(value.result, session);
+    const result = parseResult(value.result, session, envelope.connectionId);
     return result ? { ...envelope, type: value.type, result } : null;
   }
   return null;
@@ -142,8 +145,12 @@ export function serializeNodeWorkerOutputAcknowledgement(frame: NodeWorkerOutput
   return text;
 }
 
-function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerServiceCommand | null {
-  if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request', 'chat', 'reason'])) return null;
+function parseCommand(value: unknown, session: NodeSessionIdentity, connectionId: number): NodeWorkerServiceCommand | null {
+  if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request', 'chat', 'reason', 'connectionId', 'bulkAttemptId', 'facet', 'sequence', 'grant'])) return null;
+  if (value.method === 'provider-history-import') {
+    const command = parseNodeProviderHistoryCommand(value);
+    return command && sameNodeSession(command.identity, session) && command.connectionId === connectionId ? command : null;
+  }
   if (value.method === 'provider-single-query' || value.method === 'provider-text-generation') {
     const command = parseNodeProviderAuxiliaryCommand(value);
     return command && sameNodeSession(command.identity, session) ? command : null;
@@ -199,8 +206,12 @@ function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerS
   return null;
 }
 
-function parseResult(value: unknown, session: NodeSessionIdentity): NodeWorkerServiceResult | null {
-  if (!exactNodeFields(value, ['kind'], ['instanceId', 'stream', 'transfer', 'result', 'generation', 'ranges', 'live', 'code', 'snapshot', 'staleModels', 'status', 'workspaceId', 'commands', 'reason', 'configuration', 'identity', 'preparation', 'receipt', 'value', 'operation', 'reference', 'source'])) return null;
+function parseResult(value: unknown, session: NodeSessionIdentity, connectionId: number): NodeWorkerServiceResult | null {
+  if (!exactNodeFields(value, ['kind'], ['instanceId', 'stream', 'transfer', 'result', 'generation', 'ranges', 'live', 'code', 'snapshot', 'staleModels', 'status', 'workspaceId', 'commands', 'reason', 'configuration', 'identity', 'preparation', 'receipt', 'value', 'operation', 'reference', 'source', 'connectionId', 'bulkAttemptId', 'sequence', 'encoding', 'descriptor', 'settled'])) return null;
+  if (value.kind === 'provider-history-result') {
+    const result = parseNodeProviderHistoryReply(value);
+    return result && sameNodeSession(result.identity, session) && result.connectionId === connectionId ? result : null;
+  }
   if (value.kind === 'provider-auxiliary-result' || value.kind === 'provider-auxiliary-too-large') {
     const result = parseNodeProviderAuxiliaryReply(value);
     return result && sameNodeSession(result.identity, session) ? result : null;

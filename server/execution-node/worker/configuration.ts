@@ -34,6 +34,7 @@ export interface NodeSessionWorkerConfiguration {
   readonly workspaces: readonly NodeWorkspaceConfiguration[];
   readonly replay: NodeReplayOptions;
   readonly outputMemoryBytes?: number;
+  readonly historyTransportMemoryBytes?: number;
 }
 
 export interface NodeInstanceWorkerConfiguration {
@@ -43,13 +44,14 @@ export interface NodeInstanceWorkerConfiguration {
   readonly executableSearchPath: readonly string[];
   readonly instance: NodeInstanceConfiguration;
   readonly workspaces: readonly NodeWorkspaceConfiguration[];
+  readonly historyTransportMemoryBytes: number;
 }
 
 export type NodeWorkerConfiguration = NodeSessionWorkerConfiguration | NodeInstanceWorkerConfiguration;
 
 export function parseNodeWorkerConfiguration(value: unknown): NodeWorkerConfiguration | null {
   if (!isNormalizedJsonObject(value) || Buffer.byteLength(JSON.stringify(value)) > MAX_NODE_WORKER_CONFIGURATION_BYTES
-    || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces'], ['instances', 'instance', 'replay', 'outputMemoryBytes'])
+    || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces'], ['instances', 'instance', 'replay', 'outputMemoryBytes', 'historyTransportMemoryBytes'])
     || !isExecutionIdentity(value.nodeId) || !absoluteDirectory(value.storageDirectory)
     || !Array.isArray(value.workspaces) || value.workspaces.length > MAX_NODE_WORKER_WORKSPACES) return null;
   const executableSearchPath = parseNodeExecutableSearchPath(value.executableSearchPath);
@@ -62,14 +64,17 @@ export function parseNodeWorkerConfiguration(value: unknown): NodeWorkerConfigur
   }
   const base = { nodeId: value.nodeId, storageDirectory: value.storageDirectory, executableSearchPath, workspaces: Object.freeze(workspaces) };
   if (value.role === 'instance') {
-    if (!exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces', 'instance'])) return null;
+    if (!exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces', 'instance', 'historyTransportMemoryBytes'])
+      || !Number.isSafeInteger(value.historyTransportMemoryBytes) || Number(value.historyTransportMemoryBytes) < 1) return null;
     const instance = parseInstance(value.instance, workspaces);
-    return instance ? Object.freeze({ role: 'instance', ...base, instance }) : null;
+    return instance ? Object.freeze({ role: 'instance', ...base, instance, historyTransportMemoryBytes: Number(value.historyTransportMemoryBytes) }) : null;
   }
-  if (value.role !== 'session' || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces', 'instances', 'replay'], ['outputMemoryBytes'])
+  if (value.role !== 'session' || !exactNodeFields(value, ['role', 'nodeId', 'storageDirectory', 'executableSearchPath', 'workspaces', 'instances', 'replay'], ['outputMemoryBytes', 'historyTransportMemoryBytes'])
     || !Array.isArray(value.instances) || value.instances.length > MAX_NODE_WORKER_INSTANCES) return null;
   if (value.outputMemoryBytes !== undefined && (!Number.isSafeInteger(value.outputMemoryBytes) || Number(value.outputMemoryBytes) < 1)) return null;
   const outputMemory = value.outputMemoryBytes === undefined ? {} : { outputMemoryBytes: Number(value.outputMemoryBytes) };
+  if (value.historyTransportMemoryBytes !== undefined && (!Number.isSafeInteger(value.historyTransportMemoryBytes) || Number(value.historyTransportMemoryBytes) < 1)) return null;
+  const historyMemory = value.historyTransportMemoryBytes === undefined ? {} : { historyTransportMemoryBytes: Number(value.historyTransportMemoryBytes) };
   const instances: NodeInstanceConfiguration[] = [];
   for (const entry of value.instances) {
     const instance = parseInstance(entry, workspaces);
@@ -77,7 +82,7 @@ export function parseNodeWorkerConfiguration(value: unknown): NodeWorkerConfigur
     instances.push(instance);
   }
   const replay = parseReplay(value.replay);
-  return replay ? Object.freeze({ role: 'session', ...base, instances: Object.freeze(instances), replay, ...outputMemory }) : null;
+  return replay ? Object.freeze({ role: 'session', ...base, instances: Object.freeze(instances), replay, ...outputMemory, ...historyMemory }) : null;
 }
 
 function parseInstance(value: unknown, workspaces: readonly NodeWorkspaceConfiguration[]): NodeInstanceConfiguration | null {

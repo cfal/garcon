@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { MAX_NODE_BULK_CHUNK_BYTES, parseNodeBulkChunkText, type NodeBulkDescriptor } from '../bulk-wire.js';
 import { NodeBulkTransfers } from '../bulk-transfers.js';
 import { NodeBulkUploads, type NodeBulkUploadPort, type NodeBulkUploadsOptions } from '../bulk-upload.js';
@@ -22,6 +23,68 @@ function fixture(limits: NodeBulkUploadsOptions['limits'] = {}) {
   } satisfies NodeBulkUploadPort;
   return { controller, owner, transfers, port, uploads: new NodeBulkUploads(port, { session, authoritySignal: controller.signal, limits }) };
 }
+
+function descriptor(bytes: Uint8Array): NodeBulkDescriptor {
+  return { byteLength: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
+
+test('a preinstalled destination receives an owned snapshot without a reservation RPC', async () => {
+  const f = fixture();
+  try {
+    const bytes = Buffer.from('synthetic reserved history');
+    const offered = descriptor(bytes);
+    const identity = f.transfers.reserve(f.owner, offered, f.controller.signal);
+    const uploaded = f.uploads.uploadReserved(bytes, identity, offered, f.controller.signal);
+    bytes.fill(0);
+    await uploaded;
+    expect(Buffer.from(f.transfers.take(identity, f.owner)).toString()).toBe('synthetic reserved history');
+    expect(f.port.reserve).not.toHaveBeenCalled();
+    expect(f.port.complete).toHaveBeenCalledTimes(1);
+  } finally { f.transfers.close(); }
+});
+
+test.each(['length', 'hash', 'session'] as const)('a reserved upload refuses a mismatched %s before sending', async (mismatch) => {
+  const f = fixture();
+  try {
+    const bytes = Buffer.from('synthetic');
+    const offered = descriptor(bytes);
+    const identity = f.transfers.reserve(f.owner, offered, f.controller.signal);
+    await expect(f.uploads.uploadReserved(bytes,
+      mismatch === 'session' ? { ...identity, nodeBootId: 'synthetic-other-node' } : identity,
+      mismatch === 'length' ? { ...offered, byteLength: offered.byteLength + 1 }
+        : mismatch === 'hash' ? { ...offered, sha256: '0'.repeat(64) } : offered,
+      f.controller.signal)).rejects.toMatchObject({ code: 'NODE_BULK_INVALID' });
+    expect(f.port.reserve).not.toHaveBeenCalled();
+    expect(f.port.sendChunk).not.toHaveBeenCalled();
+    expect(f.port.complete).not.toHaveBeenCalled();
+    expect(f.port.cancel).not.toHaveBeenCalled();
+  } finally { f.transfers.close(); }
+});
+
+test('cancelled reserved uploads retain shared sender capacity until the pending write settles', async () => {
+  const f = fixture({ maxTransfers: 1, maxBytes: 8, maxTransferBytes: 8 });
+  const cancellation = new AbortController();
+  const entered = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  try {
+    const bytes = Buffer.from('history');
+    const offered = descriptor(bytes);
+    const identity = f.transfers.reserve(f.owner, offered, f.controller.signal);
+    f.port.sendChunk.mockImplementationOnce(async () => { entered.resolve(); await released.promise; });
+    const pending = f.uploads.uploadReserved(bytes, identity, offered, cancellation.signal);
+    await entered.promise;
+    cancellation.abort(new Error('synthetic cancellation'));
+    await expect(f.uploads.upload(Buffer.from('other'), f.controller.signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+    await expect(f.uploads.uploadReserved(bytes, identity, offered, f.controller.signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
+    released.resolve();
+    await expect(pending).rejects.toThrow('synthetic cancellation');
+    expect(f.port.complete).not.toHaveBeenCalled();
+    expect(f.port.cancel).toHaveBeenCalledTimes(1);
+    expect(f.transfers.reservedBytes).toBe(0);
+    await f.uploads.upload(Buffer.from('other'), f.controller.signal);
+    expect(f.port.complete).toHaveBeenCalledTimes(1);
+  } finally { released.resolve(); f.transfers.close(); }
+});
 
 test('upload snapshots caller bytes before reservation and completes through the receiver codec', async () => {
   const f = fixture();

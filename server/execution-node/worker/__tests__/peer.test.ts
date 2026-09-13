@@ -98,6 +98,31 @@ test('worker peer retains the exact configuration sent despite caller mutation b
   } finally { f.close(); }
 });
 
+test('physical bulk lifecycle is forwarded before later service requests and cannot target an old control connection', async () => {
+  const f = fixture();
+  try {
+    await f.hello();
+    const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
+    const blocked = Promise.withResolvers<void>();
+    f.block(blocked.promise);
+    const attached = f.peer.attachBulk(1, 'synthetic-attempt');
+    const retired = f.peer.retireBulk(1, 'synthetic-attempt');
+    const request = f.peer.service(1).call({ method: 'begin-output-recovery' }, new AbortController().signal);
+    void request.catch(() => {});
+    f.block(Promise.resolve()); blocked.resolve();
+    await Promise.all([attached, retired]); await tick();
+    const frames = f.sent.slice(1).map((text) => JSON.parse(text));
+    expect(frames.map((frame) => frame.type)).toEqual([
+      'node-worker-bulk-attached', 'node-worker-bulk-retired', 'node-worker-service-request',
+    ]);
+    await f.peer.attach(2);
+    expect(await request).toEqual({ kind: 'unknown' });
+    await expect(f.peer.attachBulk(1, 'stale')).rejects.toThrow();
+    await expect(f.peer.retireBulk(1, 'stale')).rejects.toThrow();
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
 test('service replies use the captured physical client while retirement remains logical', async () => {
   const f = fixture(); const signal = new AbortController().signal;
   try {

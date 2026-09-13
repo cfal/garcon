@@ -6,7 +6,7 @@ import { createNodeClientSocket, type NodeClientSocket } from '../../../server/e
 import { serializeNodeLeaseFrame } from '../../../server/execution-nodes/transport/lease-wire.js';
 import { serializeNodeBulkSessionFrame } from '../../../server/execution-nodes/transport/bulk-session-wire.js';
 import { parseNodeBulkFrameText, serializeNodeBulkFrame, type NodeBulkReply } from '../../../server/execution-nodes/transport/bulk-channel-wire.js';
-import type { NodeWorkerBulkFrame } from '../../../server/execution-node/worker/bulk-protocol.js';
+import type { NodeBulkSessionDataFrame } from '../../../server/execution-nodes/transport/bulk-session-channel.js';
 import { withTimeout } from '../../support/deferred.js';
 import { createNodeSessionFixture, nodeSessionSystemdAvailable } from '../../support/node-session-handshake-fixture.js';
 import { TlsCertificates, type TestCertificate } from '../../support/tls-certificates.js';
@@ -117,7 +117,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('authenticated session handshake o
       }
       const transfer = { ...connection.lease.session, transferId: 'synthetic-surviving-bulk' };
       const survived = Promise.withResolvers<NodeBulkReply>();
-      const observe = (frame: NodeWorkerBulkFrame) => {
+      const observe = (frame: NodeBulkSessionDataFrame) => {
         const reply = parseNodeBulkFrameText(frame.payload);
         if (reply?.type === 'node-bulk-result' && reply.requestId === 1) survived.resolve(reply);
       };
@@ -164,12 +164,12 @@ describe.skipIf(!nodeSessionSystemdAvailable)('authenticated session handshake o
       expect(f.processes.size).toBe(1); expect(f.upgrades()).toBe(1); expect(f.bulkUpgrades()).toBe(2);
 
       const transfer = { ...binding.session, transferId: 'synthetic-replacement-transfer' };
-      const request: NodeWorkerBulkFrame = { type: 'node-worker-bulk', version: 1, session: binding.session,
+      const request: NodeBulkSessionDataFrame = { type: 'node-worker-bulk', version: 1, session: binding.session,
         connectionId: binding.connectionId, instanceId: 'synthetic-instance',
         payload: serializeNodeBulkFrame({ type: 'node-bulk-cancel', version: 1, transfer, requestId: 1 }) };
       expect(() => original.send(request)).toThrow();
       const result = Promise.withResolvers<NodeBulkReply>();
-      const observe = (frame: NodeWorkerBulkFrame) => {
+      const observe = (frame: NodeBulkSessionDataFrame) => {
         const reply = parseNodeBulkFrameText(frame.payload);
         if (reply?.type === 'node-bulk-result' && reply.requestId === 1) result.resolve(reply);
       };

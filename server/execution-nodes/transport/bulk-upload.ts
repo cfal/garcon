@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../../common/node-operation.js';
-import { MAX_NODE_BULK_CHUNK_BYTES, parseNodeBulkIdentity, serializeNodeBulkChunk, type NodeBulkDescriptor, type NodeBulkIdentity } from './bulk-wire.js';
+import { MAX_NODE_BULK_CHUNK_BYTES, parseNodeBulkDescriptor, parseNodeBulkIdentity, serializeNodeBulkChunk, type NodeBulkDescriptor, type NodeBulkIdentity } from './bulk-wire.js';
 import { DEFAULT_NODE_BULK_LIMITS, NodeBulkError, type NodeBulkLimits } from './bulk-transfers.js';
 
 export interface NodeBulkUploadPort {
@@ -40,6 +40,27 @@ export class NodeBulkUploads {
   }
 
   async upload(bytes: Uint8Array, callerSignal: AbortSignal): Promise<{ readonly identity: NodeBulkIdentity; readonly descriptor: NodeBulkDescriptor }> {
+    return this.#upload(bytes, callerSignal, (descriptor, signal) => this.port.reserve(descriptor, signal));
+  }
+
+  /** Uses a destination grant installed before dispatch while sharing ordinary upload capacity and settlement. */
+  async uploadReserved(bytes: Uint8Array, value: NodeBulkIdentity, expected: NodeBulkDescriptor, callerSignal: AbortSignal): Promise<void> {
+    const identity = parseNodeBulkIdentity(value);
+    const descriptor = parseNodeBulkDescriptor(expected);
+    if (!identity || !sameNodeSession(identity, this.#session) || !descriptor || descriptor.byteLength !== bytes.byteLength) {
+      throw new NodeBulkError('NODE_BULK_INVALID', 'Invalid reserved upload destination');
+    }
+    await this.#upload(bytes, callerSignal, async (captured) => {
+      if (captured.byteLength !== descriptor.byteLength || captured.sha256 !== descriptor.sha256) {
+        throw new NodeBulkError('NODE_BULK_INVALID', 'Reserved upload differs from its descriptor');
+      }
+      return identity;
+    });
+  }
+
+  async #upload(bytes: Uint8Array, callerSignal: AbortSignal, reserve: NodeBulkUploadPort['reserve']): Promise<{
+    readonly identity: NodeBulkIdentity; readonly descriptor: NodeBulkDescriptor;
+  }> {
     const signal = AbortSignal.any([this.options.authoritySignal, callerSignal]);
     signal.throwIfAborted();
     const length = bytes.byteLength;
@@ -54,7 +75,7 @@ export class NodeBulkUploads {
     try {
       captured = Uint8Array.from(bytes);
       const descriptor = Object.freeze({ byteLength: length, sha256: createHash('sha256').update(captured).digest('hex') });
-      const reserved = await this.port.reserve(descriptor, signal);
+      const reserved = await reserve(descriptor, signal);
       const parsed = parseNodeBulkIdentity(reserved);
       if (!parsed || !sameNodeSession(parsed, this.#session)) throw new TypeError('Invalid bulk reservation reply');
       identity = Object.freeze(parsed);

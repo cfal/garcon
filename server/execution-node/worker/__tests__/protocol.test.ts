@@ -33,6 +33,16 @@ test('worker parent envelopes reject undeclared fields, sessions, roles, version
   expect(parseNodeWorkerParentText('x'.repeat(MAX_NODE_WORKER_LIFECYCLE_BYTES + 1))).toBeNull();
 });
 
+test.each(['node-worker-bulk-attached', 'node-worker-bulk-retired'] as const)('physical bulk lifecycle %s requires the exact attempt binding', (type) => {
+  const message = { type, version: NODE_WIRE_VERSION, session, connectionId: 2, bulkAttemptId: 'synthetic-bulk-attempt' };
+  expect(parseNodeWorkerParentText(serializeNodeWorkerParent(message))).toEqual(message);
+  for (const input of [{ ...message, bulkAttemptId: undefined }, { ...message, bulkAttemptId: '' },
+    { ...message, bulkAttemptId: 'x'.repeat(257) }, { ...message, startupTimeoutMs: 10 },
+    { ...message, type: 'node-worker-admit' }, { ...message, connectionId: 0 },
+    { ...message, session: { ...session, operationId: 'synthetic-operation' } }])
+    expect(parseNodeWorkerParentText(JSON.stringify(input))).toBeNull();
+});
+
 test('worker replies cannot claim duplicate instances or manifests from different nodes', () => {
   const ready = { type: 'node-worker-ready', version: NODE_WIRE_VERSION, session, manifests: [manifest()] };
   for (const input of [{ ...ready, manifests: [manifest(), manifest()] },

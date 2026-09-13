@@ -47,6 +47,8 @@ export interface NodeBulkTransfersOptions {
   readonly limits?: Partial<NodeBulkLimits>;
   readonly now?: () => number;
   readonly scheduleTimeout?: (callback: () => void, delay: number) => { cancel(): void };
+  /** Releases outer ownership when a grant is discarded, including expiry; take transfers ownership instead. */
+  readonly discarded?: (identity: NodeBulkIdentity) => void;
 }
 
 /** Receives private bytes under locally installed grants; wire handlers still authenticate each physical channel. */
@@ -186,6 +188,7 @@ export class NodeBulkTransfers {
     transfer.bytes.fill(0);
     transfer.hash = null;
     this.#remove(transfer);
+    this.options.discarded?.(transfer.identity);
   }
 
   #renew(transfer: Transfer): void {

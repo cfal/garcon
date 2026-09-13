@@ -95,6 +95,11 @@ export class NodeWorkerBootstrap {
           this.#authority.disconnect(message.connectionId);
           this.#connected = false;
           break;
+        case 'node-worker-bulk-attached': case 'node-worker-bulk-retired':
+          if (!this.#runtime || message.connectionId > this.#connectionId) throw protocolError();
+          if (message.connectionId < this.#connectionId || !this.#connected) return;
+          this.#authority.connection(message.connectionId);
+          break;
       }
       void this.#runtime?.control(message).catch(() => this.#fail());
     } catch { this.#fail(); }

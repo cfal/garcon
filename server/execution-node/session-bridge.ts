@@ -20,6 +20,13 @@ import { NodeOutputRetirementUnconfirmedError } from './worker/output-retirement
 import type { NodeWorkerPeer } from './worker/peer.js';
 import type { NodeWorkerServiceCommand, NodeWorkerServiceResult } from './worker/service-protocol.js';
 import type { NodeDeadline } from '../execution-nodes/deadline.js';
+import type { NodeHistoryBulkFrame } from '../execution-nodes/transport/provider-history-bulk-wire.js';
+
+export interface NodeHistoryPhysicalSend {
+  readonly signal: AbortSignal;
+  validate(): void;
+  send(frame: NodeHistoryBulkFrame): boolean;
+}
 
 export interface NodeSessionBridgeOptions {
   readonly connection: NodeHostedConnection;
@@ -34,6 +41,7 @@ export interface NodeSessionBridgeOptions {
   };
   readonly retirements: NodeOutputRetirements;
   readonly bulk: Pick<NodeBulkSessionChannel, 'send' | 'close'>;
+  historyBulk(frame: NodeHistoryBulkFrame): NodeHistoryPhysicalSend | null;
   readonly scheduleOutputTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   readonly replyLimits?: Pick<NodeSocketReplyOutboxOptions, 'maxEntries' | 'maxBytes' | 'maxAgeMs' | 'scheduleTimeout'>;
   readonly now?: () => number;
@@ -110,6 +118,15 @@ export class NodeSessionBridge {
       this.#validate();
       if (!sameNodeSession(nodeWorkerApplicationSession(frame), this.options.connection.lease.session)) throw protocol();
       if ('connectionId' in frame && frame.connectionId !== this.options.connection.connectionId) return;
+      if (frame.type === 'node-history-bulk') {
+        if (!this.options.instanceIds.has(frame.instanceId)) throw protocol();
+        const bulk = this.options.historyBulk(frame);
+        if (bulk) {
+          // Refusal loses this credited frame. The row fails at its deadline; no extra relay queue or shared control closure is needed.
+          try { bulk.signal.throwIfAborted(); bulk.validate(); bulk.send(frame); } catch { /* Captured bulk loss is local to the import. */ }
+        }
+        return;
+      }
       if (frame.type === 'node-worker-bulk') {
         try { if (!this.options.bulk.send(frame)) this.options.bulk.close(); }
         catch { this.options.bulk.close(); }
@@ -155,6 +172,7 @@ export class NodeSessionBridge {
         return { kind: 'output-live', live: admitted };
       }
       if (command.method === 'provider-native-sessions' || command.method === 'install-output' || command.method === 'reserve-body' || command.method === 'provider-catalog' || command.method === 'provider-auth' || command.method === 'provider-commands' || command.method === 'provider-configuration'
+        || command.method === 'provider-history-import' && command.operation !== 'cancel'
         || command.method === 'provider-session-configuration' && !isNodeSessionConfigurationReconciliation(command)
         || command.method === 'permission' && command.command.method === 'permission-respond') coordinator.supervisor.assertAdmission(connection.lease);
       if (command.method === 'retire-output') {

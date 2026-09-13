@@ -1,10 +1,11 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import type { NodeSessionIdentity } from '../../../../common/node-operation.js';
-import type { NodeWorkerBulkFrame } from '../../../execution-node/worker/bulk-protocol.js';
+import type { NodeBulkSessionDataFrame } from '../../../execution-nodes/transport/bulk-session-channel.js';
 import { NodeBulkSessionChannel, type NodeBulkControlBinding } from '../bulk-session-channel.js';
 import { serializeNodeBulkFrame } from '../bulk-channel-wire.js';
 import { serializeNodeBulkSessionFrame } from '../bulk-session-wire.js';
 import { NodeSocketWriter, type NodeSocketPort } from '../socket-writer.js';
+import type { NodeHistoryBulkFrame } from '../provider-history-bulk-wire.js';
 
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
 const connectionId = 2;
@@ -16,8 +17,8 @@ function fixture(authenticated = principal) {
   const control = new AbortController();
   const nodePhysical = new AbortController();
   const controllerPhysical = new AbortController();
-  const nodeReceived: NodeWorkerBulkFrame[] = [];
-  const controllerReceived: NodeWorkerBulkFrame[] = [];
+  const nodeReceived: NodeBulkSessionDataFrame[] = [];
+  const controllerReceived: NodeBulkSessionDataFrame[] = [];
   const nodeFailed = mock((_error: unknown) => {});
   const controllerFailed = mock((_error: unknown) => {});
   const binding: NodeBulkControlBinding = { principal, session, connectionId, instanceIds: new Set(['synthetic-instance']),
@@ -39,7 +40,7 @@ function fixture(authenticated = principal) {
     validate() {}, received: (frame) => controllerReceived.push(frame), disconnected: controllerFailed });
   const node = new NodeBulkSessionChannel(nodeWriter, { side: 'node', binding, signal: nodePhysical.signal,
     validate() {}, received: (frame) => nodeReceived.push(frame), disconnected: nodeFailed });
-  const frame = (payload: string): NodeWorkerBulkFrame => ({ type: 'node-worker-bulk', version: 1, session, connectionId,
+  const frame = (payload: string): NodeBulkSessionDataFrame => ({ type: 'node-worker-bulk', version: 1, session, connectionId,
     instanceId: 'synthetic-instance', payload });
   const transfer = { ...session, transferId: 'synthetic-transfer' };
   const request = frame(serializeNodeBulkFrame({ type: 'node-bulk-complete', version: 1, transfer, requestId: 1 }));
@@ -171,4 +172,84 @@ test('application data before handshake is rejected and duplicate handshakes can
   const second = fixture(); await second.connect();
   second.controller.receive(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1, session, connectionId, bulkAttemptId: 'synthetic-attempt' }));
   expect(second.controllerFailed).toHaveBeenCalledTimes(1); expect(second.capture).toHaveBeenCalledTimes(1);
+});
+
+function historyFrames(bulkAttemptId: string) {
+  const grant = { ...session, transferId: 'synthetic-history-transfer' };
+  const wrap = (payload: string): NodeHistoryBulkFrame => ({ type: 'node-history-bulk', version: 1,
+    identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance', connectionId,
+    bulkAttemptId, sequence: 1, grant, payload });
+  return {
+    chunk: wrap(serializeNodeBulkFrame({ type: 'node-bulk-credit-chunk', version: 1, transfer: grant, offset: 0,
+      data: Buffer.from('synthetic').toString('base64') })),
+    ack: wrap(serializeNodeBulkFrame({ type: 'node-bulk-chunk-ack', version: 1, transfer: grant, nextOffset: 9 })),
+    complete: wrap(serializeNodeBulkFrame({ type: 'node-bulk-complete', version: 1, transfer: grant, requestId: 1 })),
+    result: wrap(serializeNodeBulkFrame({ type: 'node-bulk-result', version: 1, session, requestId: 1,
+      command: 'node-bulk-complete', result: 'completed' })),
+  };
+}
+
+test('history reverses bulk direction while execution bodies retain their existing direction', async () => {
+  const f = fixture(); await f.connect();
+  const h = historyFrames((await f.node.ready).bulkAttemptId);
+  for (const frame of [h.chunk, h.complete]) expect(f.node.send(frame)).toBe(true);
+  for (const frame of [h.ack, h.result]) expect(f.controller.send(frame)).toBe(true);
+  expect(f.controller.send(f.request)).toBe(true);
+  expect(f.node.send(f.response)).toBe(true);
+  await Promise.resolve();
+  expect(f.controllerReceived).toEqual([h.chunk, h.complete, f.response]);
+  expect(f.nodeReceived).toEqual([h.ack, h.result, f.request]);
+  expect(f.nodeFailed).not.toHaveBeenCalled(); expect(f.controllerFailed).not.toHaveBeenCalled();
+});
+
+test('history chunks and completion leave reply capacity available', async () => {
+  const f = fixture(); await f.connect(); f.reserveOnlyNode(); f.saturateController();
+  const h = historyFrames((await f.node.ready).bulkAttemptId);
+  expect(f.node.send(h.chunk)).toBe(false);
+  expect(f.node.send(h.complete)).toBe(false);
+  expect(f.controller.send(h.ack)).toBe(true);
+  expect(f.controller.send(h.result)).toBe(true);
+  await Promise.resolve();
+  expect(f.nodeReceived).toEqual([h.ack, h.result]);
+  expect(f.controllerReceived).toEqual([]);
+  expect(f.control.signal.aborted).toBe(false);
+});
+
+test.each(['node', 'controller'] as const)('history from a replaced bulk attempt cannot reach the %s', async (side) => {
+  const first = fixture(); await first.connect();
+  const old = historyFrames((await first.node.ready).bulkAttemptId);
+  first.node.close(); first.controller.close();
+  const replacement = fixture(); await replacement.connect();
+  replacement[side].receive(JSON.stringify(side === 'node' ? old.ack : old.chunk));
+  expect(side === 'node' ? replacement.nodeFailed : replacement.controllerFailed).toHaveBeenCalledTimes(1);
+  expect(replacement.nodeReceived).toEqual([]); expect(replacement.controllerReceived).toEqual([]);
+  expect(replacement.control.signal.aborted).toBe(false);
+});
+
+test.each(['node', 'controller'] as const)('history rejects wrong-direction frames on the %s', async (side) => {
+  const f = fixture(); await f.connect();
+  const h = historyFrames((await f.node.ready).bulkAttemptId);
+  f[side].receive(JSON.stringify(side === 'node' ? h.chunk : h.ack));
+  expect(side === 'node' ? f.nodeFailed : f.controllerFailed).toHaveBeenCalledTimes(1);
+  expect(f.control.signal.aborted).toBe(false);
+});
+
+test('history rejects uncredited chunks before controller dispatch', async () => {
+  const f = fixture(); await f.connect();
+  const h = historyFrames((await f.node.ready).bulkAttemptId);
+  f.controller.receive(JSON.stringify({ ...h.chunk, payload: h.chunk.payload.replace('node-bulk-credit-chunk', 'node-bulk-chunk') }));
+  expect(f.controllerReceived).toEqual([]); expect(f.controllerFailed).toHaveBeenCalledTimes(1);
+  expect(f.control.signal.aborted).toBe(false);
+});
+
+test('history rechecks the captured row immediately before a waiting socket submission', async () => {
+  const f = fixture(); await f.connect(); f.saturateNode();
+  const h = historyFrames((await f.node.ready).bulkAttemptId);
+  const reason = new Error('Synthetic row retired');
+  let current = true;
+  const pending = f.node.sendWhenWritable(h.chunk, f.control.signal, () => { if (!current) throw reason; });
+  await Promise.resolve(); current = false; f.releaseNode();
+  await expect(pending).rejects.toBe(reason);
+  expect(f.controllerReceived).toEqual([]);
+  expect(f.nodeFailed).not.toHaveBeenCalled(); expect(f.control.signal.aborted).toBe(false);
 });

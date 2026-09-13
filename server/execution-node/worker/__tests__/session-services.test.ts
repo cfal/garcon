@@ -14,6 +14,7 @@ import type { NodeWorkerPeer } from '../peer.js';
 import { DEFAULT_NODE_REPLAY, MAX_NODE_STREAM_IDENTITIES } from '../../replay-cache.js';
 import { DEFAULT_NODE_BULK_LIMITS } from '../../../execution-nodes/transport/bulk-transfers.js';
 import { serializeNodeBulkFrame } from '../../../execution-nodes/transport/bulk-channel-wire.js';
+import type { NodeHistoryBulkFrame } from '../../../execution-nodes/transport/provider-history-bulk-wire.js';
 import { NodeWorkerTransportError } from '../framing.js';
 import { serializeNodeWorkerOutputRetirement, type NodeWorkerOutputRetirement } from '../output-retirement.js';
 import { NodeWorkerOutputDeliveryReceiver } from '../output-delivery-receiver.js';
@@ -112,6 +113,36 @@ function fixture() {
     observeOutput(observer: (frame: NodeWorkerApplicationFrame, text: string) => void) { observers.add(observer); },
     close() { lifetime.abort(); services.close(); router.close(); parent.close(); for (const writer of allWriters) writer.close(); } };
 }
+
+test('reverse history chunks and completion remain FIFO while cleanup and status preserve their headroom', async () => {
+  const f = fixture(); const release = f.hold('outbound');
+  const grant = { ...session, transferId: 'synthetic-history' };
+  const target = { type: 'node-history-bulk', version: 1, identity: { ...session, operationId: 'synthetic-import' },
+    instanceId: first, connectionId: 1, bulkAttemptId: 'synthetic-bulk', sequence: 1, grant } as const;
+  const chunk: NodeHistoryBulkFrame = { ...target,
+    payload: serializeNodeBulkFrame({ type: 'node-bulk-credit-chunk', version: 1, transfer: grant, offset: 0, data: 'YQ==' }) };
+  const complete: NodeHistoryBulkFrame = { ...target,
+    payload: serializeNodeBulkFrame({ type: 'node-bulk-complete', version: 1, transfer: grant, requestId: 1 }) };
+  const cancel: NodeHistoryBulkFrame = { ...target,
+    payload: serializeNodeBulkFrame({ type: 'node-bulk-cancel', version: 1, transfer: grant, requestId: 1 }) };
+  try {
+    f.services.bulkLifetime({ type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: target.bulkAttemptId });
+    f.services.receiveChild(first, chunk, JSON.stringify(chunk));
+    f.services.receiveChild(first, complete, JSON.stringify(complete));
+    f.services.receiveChild(first, cancel, JSON.stringify(cancel));
+    release(); await tick();
+    expect(f.output).toEqual([chunk, cancel, complete]);
+    const ack: NodeHistoryBulkFrame = { ...target,
+      payload: serializeNodeBulkFrame({ type: 'node-bulk-chunk-ack', version: 1, transfer: grant, nextOffset: 1 }) };
+    f.services.history(ack);
+    expect(f.forwards.mock.calls.at(-1)?.[0]).toEqual(ack);
+    f.services.bulkLifetime({ type: 'node-worker-bulk-retired', version: 1, session, connectionId: 1, bulkAttemptId: target.bulkAttemptId });
+    f.services.receiveChild(first, complete, JSON.stringify(complete)); f.services.history(ack); await tick();
+    expect(f.output).toHaveLength(3); expect(f.forwards).toHaveBeenCalledTimes(1);
+    expect(f.failed).not.toHaveBeenCalled();
+    expect(await f.call({ method: 'provider-catalog', instanceId: second, strict: false })).toMatchObject({ kind: 'provider-catalog' });
+  } finally { release(); f.close(); }
+});
 
 test('command discovery selects the exact child and leaves workspace validation at the instance', async () => {
   const f = fixture();

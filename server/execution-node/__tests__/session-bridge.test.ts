@@ -87,7 +87,7 @@ function fixture() {
       validate() {}, received: (frame) => received.push(frame), disconnected: close });
     const bulk = { send: mock(() => true), close: mock(() => {}) };
     const bridge = new NodeSessionBridge(nodeWriter, { connection, instanceIds, signal: physical.signal, coordinator, retirements,
-      bulk, scheduleOutputTimeout, replyLimits, now: () => now,
+      bulk, historyBulk: () => ({ signal: physical.signal, validate() {}, send: bulk.send }), scheduleOutputTimeout, replyLimits, now: () => now,
       validate() {}, disconnected(error) { failures.push(error); close(); } });
     const call = (command: Parameters<NodeWorkerServiceClient['call']>[0], signal = physical.signal) => client.service.call(command, signal);
     const recover = async () => {

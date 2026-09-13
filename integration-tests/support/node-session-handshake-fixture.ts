@@ -24,7 +24,7 @@ import { NodeWorkerPeer } from '../../server/execution-node/worker/peer.js';
 import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from '../../server/execution-node/worker/application-protocol.js';
 import { parseNodeWorkerOutputText } from '../../server/execution-node/worker/output-protocol.js';
 import { MAX_NODE_WORKER_LIFECYCLE_BYTES, type NodeWorkerContainmentRequest } from '../../server/execution-node/worker/protocol.js';
-import type { NodeWorkerBulkFrame } from '../../server/execution-node/worker/bulk-protocol.js';
+import type { NodeBulkSessionDataFrame } from '../../server/execution-nodes/transport/bulk-session-channel.js';
 import type { NodeInstanceConfiguration } from '../../server/execution-node/worker/configuration.js';
 import { NodeChannelAuthentication, type AuthenticatedNodeChannel } from '../../server/execution-nodes/channel-authentication.js';
 import { ControllerNodeHandshake, type ControllerNodeHandshakeOptions } from '../../server/execution-nodes/controller-handshake.js';
@@ -33,7 +33,9 @@ import { NodeSessionClient } from '../../server/execution-nodes/session-client.j
 import { NodeEnrollmentTransport } from '../../server/execution-nodes/trust.js';
 import { clientNodeSocketPort, serverNodeSocketPort, type NodeClientSocket } from '../../server/execution-nodes/transport/bun-sockets.js';
 import { NodeSocketWriter } from '../../server/execution-nodes/transport/socket-writer.js';
-import { NodeBulkSessionChannel, type NodeBulkControlBinding } from '../../server/execution-nodes/transport/bulk-session-channel.js';
+import { NodeBulkSessionChannel, type NodeBulkControlBinding, type NodeBulkSessionBinding } from '../../server/execution-nodes/transport/bulk-session-channel.js';
+import { NodeHistoryReceiverPool } from '../../server/execution-nodes/transport/provider-history-receiver-pool.js';
+import type { RemoteProviderHistoryConnection } from '../../server/execution-nodes/remote-provider-history-import.js';
 import type { NodeSessionAccepted } from '../../server/execution-nodes/transport/session-wire.js';
 import { DomainError } from '../../server/lib/domain-error.js';
 import type { TestCertificate } from './tls-certificates.js';
@@ -58,7 +60,8 @@ export interface ControllerFixtureConnection {
   readonly received: Set<(frame: NodeWorkerApplicationFrame, text: string) => void>;
   readonly bulk: Promise<NodeBulkSessionChannel>;
   readonly currentBulk: NodeBulkSessionChannel | null;
-  readonly bulkReceived: Set<(frame: NodeWorkerBulkFrame) => void>;
+  readonly bulkReceived: Set<(frame: NodeBulkSessionDataFrame) => void>;
+  historyConnection(): Promise<RemoteProviderHistoryConnection>;
   validate(): void;
 }
 
@@ -75,6 +78,8 @@ export interface NodeSessionFixtureOptions {
   readonly instance?: Pick<NodeInstanceConfiguration, 'agentId' | 'environment'>;
   readonly instances?: readonly NodeInstanceConfiguration[];
   readonly beforeCleanup?: () => Promise<void>;
+  readonly historyTransportMemoryBytes?: number;
+  readonly controllerHistoryPool?: NodeHistoryReceiverPool;
 }
 
 export async function createNodeSessionFixture(certificate: TestCertificate, trust: ControllerTlsTrust = certificate.trust,
@@ -96,9 +101,14 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   const workerFrames = new Set<(frame: NodeWorkerApplicationFrame) => void>();
   const nodeFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean | void>();
   const controllerFrames = new Set<(frame: NodeWorkerApplicationFrame) => boolean>();
+  const controllerBulkFrames = new Set<(frame: NodeBulkSessionDataFrame) => boolean>();
+  const nodeBulkFrames = new Set<(frame: NodeBulkSessionDataFrame) => boolean>();
+  const historyPool = options.controllerHistoryPool ?? new NodeHistoryReceiverPool();
   let outputPressure: { minimumRecordBytes: number; blocked: PromiseWithResolvers<void>; active: boolean } | null = null;
   let socketBacklog: { bytes: number; writer: NodeSocketWriter } | null = null;
   let nodeWriter: NodeSocketWriter | null = null;
+  let nodeBulkWriter: NodeSocketWriter | null = null;
+  let bulkBacklog: { writer: NodeSocketWriter; refused: PromiseWithResolvers<void> } | null = null;
   const controllers = new Map<string, PromiseWithResolvers<ControllerFixtureConnection>>();
   const controllerBindings = new Map<string, { binding: NodeBulkControlBinding; connection: ControllerFixtureConnection;
     ready: PromiseWithResolvers<NodeBulkSessionChannel>; channel: NodeBulkSessionChannel | null }>();
@@ -115,6 +125,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     supervisor: { clock: options.clock },
     configuration: { role: 'session', nodeId, storageDirectory: storage, executableSearchPath: options.executableSearchPath ?? DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
       replay: options.replay ?? DEFAULT_NODE_REPLAY, instances,
+      ...(options.historyTransportMemoryBytes === undefined ? {} : { historyTransportMemoryBytes: options.historyTransportMemoryBytes }),
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] },
     host: { nodeId, marker, helperWorkingDirectory: marker.helperWorkingDirectory, command: options.sessionCommand ?? nodeWorkerCommand('session'),
       async helper(request, helperOptions) {
@@ -190,7 +201,10 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
               owner.binding.validate(); owner.channel?.close(); owner.channel = channel;
               return owner.binding;
             },
-            received(frame) { for (const listener of owner!.connection.bulkReceived) listener(frame); },
+            received(frame) {
+              for (const listener of controllerBulkFrames) if (!listener(frame)) return;
+              for (const listener of owner!.connection.bulkReceived) listener(frame);
+            },
             disconnected() { physical.abort(); authority.releaseHandshake(); } });
           void channel.ready.then(() => { authority.releaseHandshake(); owner!.ready.resolve(channel); }, () => authority.releaseHandshake());
           return;
@@ -209,8 +223,21 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
               disconnected() { physical.abort(); } });
             const bulk = Promise.withResolvers<NodeBulkSessionChannel>(); void bulk.promise.catch(() => {});
             const key = connectionKey(connection.session, connection.connectionId);
+            const historyReceiver = historyPool.createReceiver(connection.session, physical.signal);
             const fixtureConnection: ControllerFixtureConnection = { client, signal: physical.signal, received, validate,
-              bulk: bulk.promise, bulkReceived: new Set(), get currentBulk() { return controllerBindings.get(key)?.channel ?? null; } };
+              bulk: bulk.promise, bulkReceived: new Set([(frame) => { if (frame.type === 'node-history-bulk') historyReceiver.receive(frame); }]),
+              get currentBulk() { return controllerBindings.get(key)?.channel ?? null; },
+              async historyConnection() {
+                const captured = controllerBindings.get(key)?.channel ?? await bulk.promise;
+                const binding = await captured.ready;
+                const signal = AbortSignal.any([physical.signal, binding.signal]);
+                const validateHistory = () => { signal.throwIfAborted(); validate(); binding.validate(); };
+                validateHistory();
+                return { nodeId: binding.principal.nodeId, session: binding.session, connectionId: binding.connectionId,
+                  bulkAttemptId: binding.bulkAttemptId, signal, controlSignal: physical.signal, service: client.service, receiver: historyReceiver,
+                  bulk: { send: (frame) => captured.send(frame), sendWhenWritable: (...args) => captured.sendWhenWritable(...args) },
+                  validate: validateHistory, validateControl: validate };
+              } };
             const owner = { binding: { principal: authority.principal, session: connection.session, connectionId: connection.connectionId, instanceIds,
               signal: physical.signal, validate }, connection: fixtureConnection, ready: bulk, channel: null };
             controllerBindings.set(key, owner);
@@ -249,6 +276,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     let handshake: NodeControllerHandshake | null = null;
     let bridge: NodeSessionBridge | null = null;
     let bulk: NodeBulkSessionChannel | null = null;
+    let bulkBinding: NodeBulkSessionBinding | null = null;
     let bulkAttempt = 0;
     const openBulk = (connection: NodeHostedConnection): Promise<NodeBulkSessionChannel> => {
       const attempt = ++bulkAttempt;
@@ -258,26 +286,47 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       const bulkSocket = createNodeBulkSocket(configured); clients.push(bulkSocket);
       const bulkPhysical = new AbortController();
       let channel: NodeBulkSessionChannel | null = null;
+      let registeredAttempt: string | null = null;
+      let closingBulk = false;
       const closeBulk = () => {
+        if (closingBulk) return;
+        closingBulk = true;
         bulkPhysical.abort(); bulkSocket.terminate();
         pending.reject(new Error('Synthetic bulk connection closed'));
+        if (registeredAttempt && !controlSignal.aborted) {
+          const disconnectControl = () => { physical.abort(); socket.terminate(); };
+          try { void coordinator.peer(connection).retireBulk(connection.connectionId, registeredAttempt).catch(disconnectControl); }
+          catch { disconnectControl(); }
+        }
       };
       controlSignal.addEventListener('abort', closeBulk, { once: true });
       bulkSocket.addEventListener('open', () => {
-        const bulkWriter = new NodeSocketWriter(clientNodeSocketPort(bulkSocket), { ...socketLimits, signal: bulkPhysical.signal });
+        const port = clientNodeSocketPort(bulkSocket);
+        const bulkWriter: NodeSocketWriter = nodeBulkWriter = new NodeSocketWriter({
+          get open() { return port.open; },
+          get bufferedBytes() { return Math.max(port.bufferedBytes,
+            bulkBacklog?.writer === bulkWriter ? socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes : 0); },
+          bufferedFrameBytes: (bytes) => port.bufferedFrameBytes(bytes),
+          send: (text) => port.send(text), terminate: () => port.terminate(),
+        }, { ...socketLimits, signal: bulkPhysical.signal });
         const opened = channel = new NodeBulkSessionChannel(bulkWriter, { side: 'node', signal: bulkPhysical.signal,
           binding: { principal: { controllerId: configured.controllerId, nodeId: configured.nodeId }, session: connection.lease.session,
             connectionId: connection.connectionId, instanceIds, signal: controlSignal,
             validate() { coordinator.supervisor.assertConnection(connection.lease); } },
           validate() { bulkPhysical.signal.throwIfAborted(); }, disconnected: closeBulk,
           received(frame) {
+            for (const listener of nodeBulkFrames) if (!listener(frame)) return;
             const submission = coordinator.peer(connection).forward(frame, bulkPhysical.signal);
             void submission.drained.catch(closeBulk);
           } });
-        void opened.ready.then(() => {
+        void opened.ready.then(async (binding) => {
           if (attempt !== bulkAttempt) { closeBulk(); return; }
-          bulk = opened; pending.resolve(opened);
-        }, closeBulk);
+          binding.signal.throwIfAborted();
+          registeredAttempt = binding.bulkAttemptId;
+          await coordinator.peer(connection).attachBulk(connection.connectionId, binding.bulkAttemptId);
+          binding.signal.throwIfAborted();
+          bulk = opened; bulkBinding = binding; pending.resolve(opened);
+        }).catch(closeBulk);
         opened.start();
       });
       bulkSocket.addEventListener('message', (event) => {
@@ -310,6 +359,15 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
         ready(connection) {
           bridge = new NodeSessionBridge(writer, { connection, instanceIds, coordinator, retirements: output!.retirements,
             bulk: { send(frame) { return bulk?.send(frame) ?? false; }, close() { bulk?.close(); } },
+            historyBulk(frame) {
+              const captured = bulk; const binding = bulkBinding;
+              if (!captured || !binding || binding.bulkAttemptId !== frame.bulkAttemptId || binding.signal.aborted) return null;
+              return { signal: binding.signal, validate: () => binding.validate(), send(frame) {
+                const accepted = captured.send(frame);
+                if (!accepted) bulkBacklog?.refused.resolve();
+                return accepted;
+              } };
+            },
             signal: AbortSignal.any([physical.signal, connection.lease.signal]), validate() { physical.signal.throwIfAborted(); },
             disconnected() { physical.abort(); } });
           output!.bridge = bridge;
@@ -332,7 +390,8 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     return { ready: ready.promise, closed: closed.promise, socket,
       async replaceBulk() { return openBulk(await ready.promise); }, stop() { physical.abort(); socket.terminate(); } };
   };
-  return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, sessionAdmissions, workerFrames, controllerFrames, nodeFrames, containmentRequests,
+  return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, sessionAdmissions, workerFrames, controllerFrames, nodeFrames,
+    controllerBulkFrames, nodeBulkFrames, historyPool, containmentRequests,
     async pairAnotherNode() {
       const id = `synthetic-${randomUUID()}`;
       const enrollment = await pairings.issueEnrollment(id);
@@ -353,6 +412,14 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
       const captured = socketBacklog = { bytes: socketLimits.maxBufferedBytes - socketLimits.reservedControlBytes, writer: nodeWriter };
       return { release() {
         if (socketBacklog === captured) socketBacklog = null;
+        captured.writer.drain();
+      } };
+    },
+    holdBulkSocketAdmission() {
+      if (bulkBacklog || !nodeBulkWriter) throw new Error('Synthetic bulk pressure is unavailable');
+      const captured = bulkBacklog = { writer: nodeBulkWriter, refused: Promise.withResolvers<void>() };
+      return { refused: captured.refused.promise, release() {
+        if (bulkBacklog === captured) bulkBacklog = null;
         captured.writer.drain();
       } };
     },

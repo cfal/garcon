@@ -29,7 +29,7 @@ test('configuration snapshots instance environments and grants without starting 
 test('instance configuration receives only its explicit workspace grants', () => {
   const input = sessionConfiguration();
   const instance = { role: 'instance' as const, nodeId: input.nodeId, storageDirectory: input.storageDirectory, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
-    instance: input.instances[0], workspaces: input.workspaces };
+    instance: input.instances[0], workspaces: input.workspaces, historyTransportMemoryBytes: 1024 };
   expect(parseNodeWorkerConfiguration(instance)).toEqual(instance);
   expect(parseNodeWorkerConfiguration({ ...instance, replay: DEFAULT_NODE_REPLAY })).toBeNull();
   expect(parseNodeWorkerConfiguration({ ...instance, workspaces: [] })).toBeNull();
@@ -90,5 +90,19 @@ test('only session configuration can declare a finite positive output memory bud
     expect(parseNodeWorkerConfiguration({ ...input, outputMemoryBytes })).toBeNull();
   }
   expect(parseNodeWorkerConfiguration({ role: 'instance', nodeId: input.nodeId, storageDirectory: input.storageDirectory, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
-    instance: input.instances[0], workspaces: input.workspaces, outputMemoryBytes: 1024 })).toBeNull();
+    instance: input.instances[0], workspaces: input.workspaces, historyTransportMemoryBytes: 1024, outputMemoryBytes: 1024 })).toBeNull();
+});
+
+test('history allocation is optional at the session and mandatory as an explicit instance quota', () => {
+  const input = sessionConfiguration();
+  expect(parseNodeWorkerConfiguration({ ...input, historyTransportMemoryBytes: 512 * 1024 * 1024 }))
+    .toMatchObject({ historyTransportMemoryBytes: 512 * 1024 * 1024 });
+  const instance = { role: 'instance', nodeId: input.nodeId, storageDirectory: input.storageDirectory,
+    executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, instance: input.instances[0], workspaces: input.workspaces };
+  expect(parseNodeWorkerConfiguration(instance)).toBeNull();
+  for (const historyTransportMemoryBytes of [0, -1, 1.5, '1024', null, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(parseNodeWorkerConfiguration({ ...input, historyTransportMemoryBytes })).toBeNull();
+    expect(parseNodeWorkerConfiguration({ ...instance, historyTransportMemoryBytes })).toBeNull();
+  }
+  expect(parseNodeWorkerConfiguration({ ...instance, historyTransportMemoryBytes: 1 })).not.toBeNull();
 });

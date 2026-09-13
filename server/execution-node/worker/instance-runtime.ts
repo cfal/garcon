@@ -36,6 +36,11 @@ import { NodeWorkerInstanceServices } from './instance-services.js';
 import { NodeWorkerServiceRouter } from './service-router.js';
 import { NodeWorkerTransportError } from './framing.js';
 import type { NodeWorkerWriter } from './writer.js';
+import { NodeHistoryMemoryBudget } from '../../execution-nodes/transport/provider-history-memory.js';
+import { NodeHistoryBulkSender } from '../../execution-nodes/transport/provider-history-sender.js';
+import { NodeWorkerHistoryBulkPort } from './history-bulk-port.js';
+import { NodeProviderHistoryImportHost } from '../provider-history-host.js';
+import { LocalProviderHistoryImportService } from '../local-provider-history-import.js';
 
 interface NodeInstanceExecutionBinding {
   readonly occupancy: NodeOperationTableOptions['occupancy'];
@@ -100,7 +105,23 @@ export async function createNodeInstanceRuntime(
     const provider = registry.require(instance.agentId);
     const providerCapacity = new NodeProviderCapacity();
     const configurationService = new LocalProviderConfigurationService(provider);
+    const historyMemory = new NodeHistoryMemoryBudget(configuration.historyTransportMemoryBytes);
+    const historySender = new NodeHistoryBulkSender(new NodeWorkerHistoryBulkPort(writer, { session: authority.session,
+      instanceId: instance.id, signal: authority.signal, capture: (connectionId, bulkAttemptId) => services.captureBulk(connectionId, bulkAttemptId) }),
+      { session: authority.session, signal: authority.signal, memory: historyMemory });
+    const historyHost = new NodeProviderHistoryImportHost({ instance: { nodeId: configuration.nodeId, instanceId: instance.id },
+      agentId: instance.agentId, session: authority.session, signal: authority.signal, capacity: providerCapacity, occupancy, resources, memory: historyMemory,
+      facets: { native: provider.nativeHistoryImport ? new LocalProviderHistoryImportService(provider, provider.nativeHistoryImport) : null,
+        legacy: provider.legacyHistoryImport ? new LocalProviderHistoryImportService(provider, provider.legacyHistoryImport) : null },
+      assertAdmission: (target) => authority.assertAdmission(authority.connection(target.connectionId)),
+      capture(target) {
+        const attempt = services.captureBulk(target.connectionId, target.bulkAttemptId);
+        return { signal: attempt.signal, validate: () => attempt.validate(),
+          transfer: (bytes, sequence, grant, descriptor, signal) => historySender.transfer({ ...target, sequence, grant }, descriptor, bytes,
+            signal, () => attempt.validate()) };
+      } });
     services = new NodeWorkerInstanceServices({ authority, instanceId: instance.id, host, writer,
+      history: { host: historyHost, sender: historySender },
       nativeSessions: new NodeProviderNativeHost(providerCapacity, { nodeId: configuration.nodeId, instanceId: instance.id },
         instance.agentId, resources, new LocalProviderNativeSessionService(provider), occupancy),
       auxiliary: new NodeProviderAuxiliaryHost({ instance: { nodeId: configuration.nodeId, instanceId: instance.id },
@@ -115,7 +136,7 @@ export async function createNodeInstanceRuntime(
         new LocalProviderCommandsService(provider, (projectPath) => inspectProjectDirectory(projectPath, { resolvePath: fs.realpath }))),
       auth: new NodeProviderAuthHost(providerCapacity, instance.id, new LocalProviderAuthService(provider)) });
     requests = new NodeWorkerServiceRouter(context.connectionId, { authority, writer,
-      execute: (_connectionId, connection, command, signal) => services.service(connection, command, signal) });
+      execute: (_connectionId, connection, command, signal, deadline) => services.service(connection, command, signal, deadline) });
     execution = new NodeWorkerExecutionRouter(context.connectionId, { authority, writer,
       instanceIds: new Set([instance.id]), execute: (_instance, _connectionId, connection, command, signal) => services.execution(connection, command, signal) });
     const service = new LocalProviderExecutionService(provider, configurationService);
@@ -137,6 +158,7 @@ export async function createNodeInstanceRuntime(
           case 'node-worker-execution': execution.receive(frame); return;
           case 'node-worker-service-request': case 'node-worker-service-cancel': requests.receive(frame); return;
           case 'node-worker-bulk': services.bulk(frame); return;
+          case 'node-history-bulk': services.history(frame); return;
           case 'node-worker-output-retired': services.receiveRetirement(text); return;
           default: throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
         }
@@ -144,6 +166,7 @@ export async function createNodeInstanceRuntime(
       async control(message) {
         validate();
         if (message.type === 'node-worker-attach') { execution.attach(message.connectionId); requests.attach(message.connectionId); }
+        if (message.type === 'node-worker-bulk-attached' || message.type === 'node-worker-bulk-retired') services.bulkLifetime(message);
       } };
   } catch (error) {
     await close();

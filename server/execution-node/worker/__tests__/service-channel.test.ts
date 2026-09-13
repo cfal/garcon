@@ -8,6 +8,8 @@ import { parseNodeWorkerServiceText, type NodeWorkerServiceCommand, type NodeWor
 import { NodeWorkerWriter, type NodeWorkerWriterOptions } from '../writer.js';
 import { NODE_WORKER_SERVICE_LIMITS, NODE_WORKER_WRITER_LIMITS } from '../limits.js';
 import { session, tick } from './lifecycle-fixture.js';
+import type { NodeProviderHistoryCommand, NodeProviderHistoryReply } from '../../../execution-nodes/transport/provider-history-wire.js';
+import { NODE_HISTORY_ROW_ENCODING } from '../../../execution-nodes/transport/provider-history-row.js';
 
 const command = { method: 'begin-output-recovery' } as const;
 const recovered = { kind: 'output-recovery', generation: 1 } as const;
@@ -495,4 +497,94 @@ test('service success at expiry remains unknown and cancelled server timers stay
     expect(f.execute.mock.calls.at(-1)![1].aborted).toBe(false);
     expect(f.failures).not.toHaveBeenCalled();
   } finally { held.resolve({ kind: 'unknown' }); f.close(); }
+});
+
+const historyTarget = { identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance',
+  connectionId: 1, bulkAttemptId: 'synthetic-bulk-attempt' };
+const historyCommands: readonly NodeProviderHistoryCommand[] = [
+  { ...historyTarget, method: 'provider-history-import', operation: 'open', facet: 'native', workspaceId: 'synthetic-workspace',
+    chat: { chatId: '1000000000000000', agentId: 'synthetic-agent', agentSessionId: null, model: '', nativeSession: null,
+      carryOverRevision: '', nativeSeedReceipt: null, settings: null } },
+  { ...historyTarget, method: 'provider-history-import', operation: 'next', sequence: 1 },
+  { ...historyTarget, method: 'provider-history-import', operation: 'transfer', sequence: 1,
+    grant: { ...session, transferId: 'synthetic-transfer' }, descriptor: { byteLength: 3, sha256: 'a'.repeat(64) } },
+];
+const historyCancel: NodeProviderHistoryCommand = { ...historyTarget, method: 'provider-history-import', operation: 'cancel' };
+const historyCancelled: NodeProviderHistoryReply = { ...historyTarget, kind: 'provider-history-result', operation: 'cancelled', settled: false };
+
+test.each(historyCommands)('history %j uses provider budgets and leaves exact cancellation admissible', async (history) => {
+  const delays: number[] = [];
+  const f = fixture(16, (_callback, delay) => { delays.push(delay); return { cancel() {} }; });
+  const caller = new AbortController(); const held = Promise.withResolvers<NodeWorkerServiceResult>();
+  f.execute.mockImplementation(async (request) => request.method === 'provider-history-import'
+    ? request.operation === 'cancel' ? historyCancelled : held.promise : recovered);
+  const allowance = NODE_WORKER_SERVICE_LIMITS.maxProviderRequests - NODE_WORKER_SERVICE_LIMITS.reservedProviderStatusRequests;
+  try {
+    const pending = Array.from({ length: allowance }, (_, i) => f.client.call({ ...history, instanceId: `synthetic-instance-${i}` }, caller.signal));
+    await tick();
+    expect(delays).toEqual(Array(allowance).fill(60_000));
+    expect(f.serverTimers.map(({ delayMs }) => delayMs)).toEqual(Array(allowance).fill(59_750));
+    expect(await f.client.call(history, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    expect(await f.client.call(historyCancel, f.lifetime.signal)).toEqual(historyCancelled);
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual(recovered);
+    caller.abort(); await Promise.all(pending); await tick();
+    expect(await f.client.call(history, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    expect(await f.client.call(historyCancel, f.lifetime.signal)).toEqual(historyCancelled);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { held.resolve({ kind: 'unknown' }); f.close(); }
+});
+
+test('history cancellation uses application headroom while preserving request FIFO', async () => {
+  const f = fixture(16, undefined, { maxQueuedFrames: 4, reservedControlFrames: 1, reservedApplicationFrames: 1 });
+  f.execute.mockImplementation(async () => ({ kind: 'unknown' }));
+  try {
+    const hold = f.clientWriter.send('synthetic-block', 'data', 'data');
+    const first = f.client.call(historyCommands[0]!, f.lifetime.signal);
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    const cancel = f.client.call(historyCancel, f.lifetime.signal);
+    expect(f.requests).toEqual([]);
+    f.native.resolve(); await hold; await Promise.all([first, cancel]);
+    expect(f.requests.map((frame) => frame.requestId)).toEqual([1, 3]);
+    expect(f.execute.mock.calls.map(([request]) => 'operation' in request ? request.operation : null)).toEqual(['open', 'cancel']);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
+const historyRow: NodeProviderHistoryReply = { ...historyTarget, kind: 'provider-history-result', operation: 'row', sequence: 1,
+  encoding: NODE_HISTORY_ROW_ENCODING, descriptor: { byteLength: 3, sha256: 'a'.repeat(64) } };
+const mismatchedHistoryReplies: readonly NodeProviderHistoryReply[] = [
+  { ...historyRow, instanceId: 'foreign-instance' },
+  { ...historyRow, bulkAttemptId: 'foreign-attempt' },
+  { ...historyRow, identity: { ...historyTarget.identity, operationId: 'foreign-operation' } },
+  { ...historyRow, sequence: 2 },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'opened' },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'transferred', sequence: 1 },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'eof', sequence: 2 },
+];
+test.each(mismatchedHistoryReplies)('history next rejects a valid reply belonging to another target or transition: %j', async (reply) => {
+  const f = fixture(); f.execute.mockImplementationOnce(async () => reply);
+  try {
+    await expect(f.client.call(historyCommands[1]!, f.lifetime.signal)).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  } finally { f.close(); }
+});
+
+test('history requests forward a decreasing provider deadline across three service hops', async () => {
+  const hops = [fixture(), fixture(), fixture()];
+  const advance = (ms: number) => { for (const hop of hops) hop.advance(ms); };
+  hops[0]!.execute.mockImplementation(async (request, signal, deadline) => {
+    advance(1_000); return hops[1]!.client.call(request, signal, deadline);
+  });
+  hops[1]!.execute.mockImplementation(async (request, signal, deadline) => {
+    advance(500); return hops[2]!.client.call(request, signal, deadline);
+  });
+  hops[2]!.execute.mockImplementation(async () => historyRow);
+  try {
+    expect(await hops[0]!.client.call(historyCommands[1]!, hops[0]!.lifetime.signal)).toEqual(historyRow);
+    expect(hops.map((hop) => {
+      const frame = hop.requests[0];
+      return frame?.type === 'node-worker-service-request' ? frame.timeoutMs : null;
+    })).toEqual([60_000, 58_750, 58_000]);
+    expect(hops.map((hop) => hop.serverTimers[0]!.delayMs)).toEqual([59_750, 58_500, 57_750]);
+  } finally { for (const hop of hops) hop.close(); }
 });

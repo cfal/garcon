@@ -6,6 +6,7 @@ import { parseNodeWorkerBulkText, type NodeWorkerBulkFrame } from '../../executi
 import { NodeWorkerTransportError } from '../../execution-node/worker/framing.js';
 import { isNodeBulkData, isNodeBulkReply, parseNodeBulkFrameText, type NodeBulkFrame } from './bulk-channel-wire.js';
 import { parseNodeBulkSessionFrameText, serializeNodeBulkSessionFrame } from './bulk-session-wire.js';
+import { parseNodeHistoryBulkText, type NodeHistoryBulkFrame } from './provider-history-bulk-wire.js';
 import { NODE_HANDSHAKE_TIMEOUT_MS } from './session-wire.js';
 import type { NodeSocketWriter } from './socket-writer.js';
 import type { PairedNodePrincipal } from '../pairing-store.js';
@@ -23,11 +24,13 @@ export interface NodeBulkSessionBinding extends NodeBulkControlBinding {
   readonly bulkAttemptId: string;
 }
 
+export type NodeBulkSessionDataFrame = NodeWorkerBulkFrame | NodeHistoryBulkFrame;
+
 interface BulkSessionOptions {
   readonly signal: AbortSignal;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   validate(): void;
-  received(frame: NodeWorkerBulkFrame): void;
+  received(frame: NodeBulkSessionDataFrame): void;
   disconnected(error: unknown): void;
 }
 
@@ -111,19 +114,19 @@ export class NodeBulkSessionChannel {
     } catch (error) { this.#close(error); }
   }
 
-  send(frame: NodeWorkerBulkFrame): boolean {
+  send(frame: NodeBulkSessionDataFrame): boolean {
     this.#assertActive();
     const text = JSON.stringify(frame);
     const parsed = this.#parse(text, this.options.side === 'controller' ? 'request' : 'reply');
     return isNodeBulkData(parsed.bulk) ? this.writer.sendData(text) : this.writer.sendApplication(text);
   }
 
-  async sendWhenWritable(frame: NodeWorkerBulkFrame, signal: AbortSignal): Promise<void> {
+  async sendWhenWritable(frame: NodeBulkSessionDataFrame, signal: AbortSignal, beforeSend: () => void = () => {}): Promise<void> {
     this.#assertActive(); signal.throwIfAborted();
     const text = JSON.stringify(frame);
     const parsed = this.#parse(text, this.options.side === 'controller' ? 'request' : 'reply');
     const caller = AbortSignal.any([signal, this.#closing.signal]);
-    const validate = () => this.#assertActive();
+    const validate = () => { this.#assertActive(); beforeSend(); };
     if (isNodeBulkData(parsed.bulk)) await this.writer.sendWhenWritable(text, caller, validate);
     else await this.writer.sendApplicationWhenWritable(text, caller, validate);
   }
@@ -145,14 +148,16 @@ export class NodeBulkSessionChannel {
     this.#validate();
   }
 
-  #parse(text: string, direction: 'request' | 'reply'): { frame: NodeWorkerBulkFrame; bulk: NodeBulkFrame } {
-    const frame = parseNodeWorkerBulkText(text);
+  #parse(text: string, direction: 'request' | 'reply'): { frame: NodeBulkSessionDataFrame; bulk: NodeBulkFrame } {
+    const frame = parseNodeWorkerBulkText(text) ?? parseNodeHistoryBulkText(text);
     const binding = this.#binding!;
-    if (!frame || !sameNodeSession(frame.session, binding.session) || frame.connectionId !== binding.connectionId
+    if (!frame || !sameNodeSession(frame.type === 'node-history-bulk' ? frame.identity : frame.session, binding.session) || frame.connectionId !== binding.connectionId
       || !binding.instanceIds.has(frame.instanceId)) throw protocol();
+    if (frame.type === 'node-history-bulk' && frame.bulkAttemptId !== binding.bulkAttemptId) throw protocol();
     const bulk = parseNodeBulkFrameText(frame.payload)!;
     const reply = isNodeBulkReply(bulk);
-    if ((direction === 'reply') !== reply) throw protocol();
+    const expectedReply = frame.type === 'node-history-bulk' ? direction === 'request' : direction === 'reply';
+    if (expectedReply !== reply || frame.type === 'node-history-bulk' && bulk.type === 'node-bulk-chunk') throw protocol();
     return { frame, bulk };
   }
 

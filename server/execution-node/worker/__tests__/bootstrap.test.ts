@@ -58,6 +58,27 @@ test('EOF retires pending initialization immediately and closes its eventual run
   expect(f.failed).not.toHaveBeenCalled();
 });
 
+test('bulk lifecycle controls reach only the current initialized physical connection', async () => {
+  const f = fixture();
+  try {
+    f.receive(configureMessage()); f.started.resolve(f.runtime); await tick();
+    const first = { type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: 'first' } as const;
+    f.receive(first);
+    f.receive({ type: 'node-worker-attach', version: 1, session, connectionId: 2 });
+    f.receive({ ...first, type: 'node-worker-bulk-retired' });
+    f.receive({ ...first, connectionId: 2, bulkAttemptId: 'second' });
+    f.receive({ type: 'node-worker-disconnect', version: 1, session, connectionId: 2 });
+    f.receive({ ...first, connectionId: 2, bulkAttemptId: 'late' });
+    expect(f.runtime.control.mock.calls.map(([message]) => message)).toEqual([
+      first,
+      { type: 'node-worker-attach', version: 1, session, connectionId: 2 },
+      { ...first, connectionId: 2, bulkAttemptId: 'second' },
+      { type: 'node-worker-disconnect', version: 1, session, connectionId: 2 },
+    ]);
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { await f.dispose(); }
+});
+
 test('connection replacement during initialization reaches descendants before readiness', async () => {
   const f = fixture();
   try {

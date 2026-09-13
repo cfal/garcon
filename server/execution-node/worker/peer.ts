@@ -7,6 +7,7 @@ import { NodeWorkerExecutionPort } from './execution-port.js';
 import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from './application-protocol.js';
 import { NodeWorkerServiceClient } from './service-channel.js';
 import type { NodeWorkerBulkFrame } from './bulk-protocol.js';
+import type { NodeHistoryBulkFrame } from '../../execution-nodes/transport/provider-history-bulk-wire.js';
 import { isNodeBulkData, parseNodeBulkFrameText } from '../../execution-nodes/transport/bulk-channel-wire.js';
 import type { NodeWorkerOutputRetirement } from './output-retirement.js';
 import type { NodeWorkerOutputAcknowledgement } from './service-protocol.js';
@@ -116,6 +117,12 @@ export class NodeWorkerPeer {
   attach(connectionId: number): Promise<void> { return this.#sendControl('node-worker-attach', connectionId); }
 
   admit(connectionId: number): Promise<void> { return this.#sendControl('node-worker-admit', connectionId); }
+  attachBulk(connectionId: number, bulkAttemptId: string): Promise<void> {
+    return this.#sendBulkControl('node-worker-bulk-attached', connectionId, bulkAttemptId);
+  }
+  retireBulk(connectionId: number, bulkAttemptId: string): Promise<void> {
+    return this.#sendBulkControl('node-worker-bulk-retired', connectionId, bulkAttemptId);
+  }
   disconnect(connectionId: number): Promise<void> {
     return this.#connected && connectionId === this.#connectionId ? this.#sendControl('node-worker-disconnect', connectionId) : Promise.resolve();
   }
@@ -147,7 +154,7 @@ export class NodeWorkerPeer {
       validate: () => this.#assertPhysical(connectionId), failed: () => { if (!signal.aborted) this.#fail(); } });
   }
 
-  forward(frame: NodeWorkerBulkFrame | NodeWorkerOutputRetirement | NodeWorkerOutputAcknowledgement, caller: AbortSignal): NodeWorkerSubmission {
+  forward(frame: NodeWorkerBulkFrame | NodeHistoryBulkFrame | NodeWorkerOutputRetirement | NodeWorkerOutputAcknowledgement, caller: AbortSignal): NodeWorkerSubmission {
     this.#validate(); caller.throwIfAborted();
     const text = JSON.stringify(frame);
     if (!this.#isReady || !this.#session || !parseNodeWorkerApplicationText(text)
@@ -157,7 +164,7 @@ export class NodeWorkerPeer {
     const signal = AbortSignal.any([caller, this.#closing.signal, ...(connectionId === null ? [] : [this.#physical.signal])]);
     const validate = () => { this.#validate(); if (connectionId !== null) this.#assertPhysical(connectionId); };
     validate();
-    const bulk = frame.type === 'node-worker-bulk' ? parseNodeBulkFrameText(frame.payload)! : null;
+    const bulk = frame.type === 'node-worker-bulk' || frame.type === 'node-history-bulk' ? parseNodeBulkFrameText(frame.payload)! : null;
     // Relay completion stays behind chunks even when the upstream hop has already drained them.
     const priority = bulk && isNodeBulkData(bulk) ? 'data' : 'urgent';
     const submission = this.#writer.submit(text, priority, { signal, validate }, priority === 'data' ? 'data' : 'application');
@@ -207,7 +214,7 @@ export class NodeWorkerPeer {
           } else if (frame.type === 'node-worker-service-result') {
             if (!this.#service) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
             this.#service.receive(frame);
-          } else if (frame.type === 'node-worker-output-retired' || frame.type === 'node-worker-bulk'
+          } else if (frame.type === 'node-worker-output-retired' || frame.type === 'node-worker-bulk' || frame.type === 'node-history-bulk'
             || frame.type === 'node-worker-output-suspended' && this.options.role === 'session'
             || frame.type === (this.options.role === 'instance' ? 'node-worker-output' : 'node-worker-output-delivery')) {
             if (!this.options.received) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
@@ -237,7 +244,15 @@ export class NodeWorkerPeer {
     } catch { this.#fail(); }
   }
 
-  async #sendControl(type: Exclude<NodeWorkerParentMessage['type'], 'node-worker-configure'>, connectionId: number): Promise<void> {
+  async #sendBulkControl(type: 'node-worker-bulk-attached' | 'node-worker-bulk-retired', connectionId: number, bulkAttemptId: string): Promise<void> {
+    this.#assertPhysical(connectionId);
+    const text = serializeNodeWorkerParent({ type, version: NODE_WIRE_VERSION, session: this.#session!, connectionId, bulkAttemptId });
+    try { await this.#writer.send(text, 'control', 'lifecycle'); }
+    catch (error) { this.#fail(); throw error; }
+    this.#assertPhysical(connectionId);
+  }
+
+  async #sendControl(type: Exclude<NodeWorkerParentMessage['type'], 'node-worker-configure' | 'node-worker-bulk-attached' | 'node-worker-bulk-retired'>, connectionId: number): Promise<void> {
     this.#validate();
     if (!this.#session) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
     const text = serializeNodeWorkerParent({ type, version: NODE_WIRE_VERSION, session: this.#session, connectionId });

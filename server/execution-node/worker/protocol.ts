@@ -18,12 +18,22 @@ export interface NodeWorkerConfigurationMessage {
   readonly configuration: NodeWorkerConfiguration;
 }
 
-export interface NodeWorkerGateMessage {
+interface NodeWorkerConnectionGateMessage {
   readonly type: 'node-worker-attach' | 'node-worker-admit' | 'node-worker-disconnect';
   readonly version: typeof NODE_WIRE_VERSION;
   readonly session: NodeSessionIdentity;
   readonly connectionId: number;
 }
+
+export interface NodeWorkerBulkGateMessage {
+  readonly type: 'node-worker-bulk-attached' | 'node-worker-bulk-retired';
+  readonly version: typeof NODE_WIRE_VERSION;
+  readonly session: NodeSessionIdentity;
+  readonly connectionId: number;
+  readonly bulkAttemptId: string;
+}
+
+export type NodeWorkerGateMessage = NodeWorkerConnectionGateMessage | NodeWorkerBulkGateMessage;
 
 export type NodeWorkerParentMessage = NodeWorkerConfigurationMessage | NodeWorkerGateMessage | {
   readonly type: 'node-worker-pulse';
@@ -55,7 +65,7 @@ export type NodeWorkerChildMessage = NodeWorkerContainmentRequest | {
 
 export function parseNodeWorkerParentText(text: string): NodeWorkerParentMessage | null {
   const value = parsePrivateNodeJson(text, MAX_NODE_WORKER_LIFECYCLE_BYTES);
-  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'], ['configuration', 'startupTimeoutMs'])
+  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'], ['configuration', 'startupTimeoutMs', 'bulkAttemptId'])
     || value.version !== NODE_WIRE_VERSION || !connectionId(value.connectionId)) return null;
   const session = parseNodeSessionIdentity(value.session);
   if (!session) return null;
@@ -66,6 +76,10 @@ export function parseNodeWorkerParentText(text: string): NodeWorkerParentMessage
       || Number(value.startupTimeoutMs) > MAX_NODE_READINESS_TIMEOUT_MS) return null;
     const configuration = parseNodeWorkerConfiguration(value.configuration);
     return configuration ? { type: value.type, ...base, startupTimeoutMs: Number(value.startupTimeoutMs), configuration } : null;
+  }
+  if (value.type === 'node-worker-bulk-attached' || value.type === 'node-worker-bulk-retired') {
+    return exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'bulkAttemptId']) && isExecutionIdentity(value.bulkAttemptId)
+      ? { type: value.type, ...base, bulkAttemptId: value.bulkAttemptId } : null;
   }
   if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'])) return null;
   return value.type === 'node-worker-pulse' || value.type === 'node-worker-attach'

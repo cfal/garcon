@@ -8,6 +8,7 @@ import {
   type NodeWorkerServiceCommand, type NodeWorkerServiceFrame, type NodeWorkerServiceResult,
 } from '../service-protocol.js';
 import { session } from './lifecycle-fixture.js';
+import { NODE_HISTORY_ROW_ENCODING } from '../../../execution-nodes/transport/provider-history-row.js';
 
 const stream = { ...session, streamId: 'synthetic-stream' };
 const identity = { ...session, operationId: 'synthetic-operation' };
@@ -16,6 +17,7 @@ const instanceId = 'synthetic-instance';
 const descriptor = { byteLength: 3, sha256: 'a'.repeat(64) };
 const permission = { stream, handle: 'synthetic-handle', runId: 'synthetic-run', permissionOccurrenceId: '00000000-0000-4000-8000-000000000001' };
 const envelope = { version: NODE_WIRE_VERSION, session, connectionId: 1, requestId: 1 } as const;
+const historyTarget = { identity, instanceId, connectionId: 1, bulkAttemptId: 'synthetic-bulk-attempt' };
 const settingsConfiguration = { model: 'synthetic-model', permissionMode: 'default' as const, thinkingMode: 'none' as const,
   endpoint: null, settings: { ownerId: 'synthetic', schemaVersion: 1, values: {} } };
 const commands: readonly NodeWorkerServiceCommand[] = [
@@ -36,8 +38,20 @@ const commands: readonly NodeWorkerServiceCommand[] = [
   { method: 'provider-configuration', instanceId, operation: 'prepare-update', request: {
     previous: { model: 'synthetic-model', settings: null, endpoint: null }, next: { model: 'synthetic-next', endpoint: null }, patch: {} } },
   { method: 'retire-output', instanceId, stream },
+  { ...historyTarget, method: 'provider-history-import', operation: 'open', facet: 'native', workspaceId: 'synthetic-workspace',
+    chat: { chatId: '1000000000000000', agentId: 'synthetic-agent', agentSessionId: null, model: '', nativeSession: null,
+      carryOverRevision: '', nativeSeedReceipt: null, settings: null } },
+  { ...historyTarget, method: 'provider-history-import', operation: 'next', sequence: 1 },
+  { ...historyTarget, method: 'provider-history-import', operation: 'transfer', sequence: 1, grant: transfer, descriptor },
+  { ...historyTarget, method: 'provider-history-import', operation: 'cancel' },
 ];
 const results: readonly NodeWorkerServiceResult[] = [
+  { ...historyTarget, kind: 'provider-history-result', operation: 'opened' },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'row', sequence: 1, encoding: NODE_HISTORY_ROW_ENCODING, descriptor },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'transferred', sequence: 1 },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'eof', sequence: 2 },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'cancelled', settled: false },
+  { ...historyTarget, kind: 'provider-history-result', operation: 'failed', code: 'NODE_HISTORY_SOURCE_FAILED' },
   { kind: 'provider-configuration-too-large', instanceId },
   { kind: 'provider-configuration-prepared', instanceId, configuration: { previous: settingsConfiguration, next: settingsConfiguration } },
   { kind: 'provider-configuration-rejected', instanceId, code: 'VALIDATION_FAILED' },
@@ -148,4 +162,15 @@ test('worker service request budgets are mandatory bounded integer durations', (
     expect(parseNodeWorkerServiceText(JSON.stringify({ ...request, timeoutMs }))).toBeNull();
   }
   expect(parseNodeWorkerServiceText(JSON.stringify({ ...request, timeoutMs: 300_000 }))).not.toBeNull();
+});
+
+test('history commands and replies bind both session and physical control connection to the service envelope', () => {
+  for (const foreign of [{ ...envelope, connectionId: 2 }, { ...envelope, session: { ...session, nodeBootId: 'foreign' } }]) {
+    for (const command of commands.filter((command) => command.method === 'provider-history-import')) {
+      expect(parseNodeWorkerServiceText(JSON.stringify({ ...foreign, type: 'node-worker-service-request', timeoutMs: 60_000, command }))).toBeNull();
+    }
+    for (const result of results.filter((result) => result.kind === 'provider-history-result')) {
+      expect(parseNodeWorkerServiceText(JSON.stringify({ ...foreign, type: 'node-worker-service-result', result }))).toBeNull();
+    }
+  }
 });

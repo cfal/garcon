@@ -78,7 +78,7 @@ async function smokeConfiguredInstance(command, storage, preload, marker) {
     const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node-boot', logicalSessionId: 'synthetic-session' };
     const manifests = await peer.configure(session, 1, { role: 'instance', nodeId: 'synthetic-node', storageDirectory: storage,
       executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH,
-      instance, workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] });
+      instance, workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], historyTransportMemoryBytes: 16 * 1024 * 1024 });
     if (manifests.length !== 1 || manifests[0].instanceId !== instance.id || existsSync(marker)) throw new Error('Worker loaded cwd bunfig');
     await peer.admit(1);
     await smokeExecution(peer, instance.id);

@@ -1,11 +1,14 @@
 import { NODE_WIRE_VERSION, parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { sameNodeSession } from '../../../common/node-operation.js';
-import { isNodeBulkReply, parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../execution-nodes/transport/bulk-channel-wire.js';
-import { DEFAULT_NODE_BULK_LIMITS } from '../../execution-nodes/transport/bulk-transfers.js';
+import { isNodeBulkData, isNodeBulkReply, parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../execution-nodes/transport/bulk-channel-wire.js';
+import { DEFAULT_NODE_BULK_LIMITS, NodeBulkError } from '../../execution-nodes/transport/bulk-transfers.js';
+import { serializeNodeHistoryBulk, type NodeHistoryBulkFrame } from '../../execution-nodes/transport/provider-history-bulk-wire.js';
 import { MAX_NODE_STREAM_IDENTITIES, NodeReplayGapError, NodeStreamIdentityExhaustedError, type NodeReplayOptions } from '../replay-cache.js';
 import { NodeAuthorityError, type NodeConnectionLease } from '../supervisor.js';
 import type { NodeWorkerApplicationFrame } from './application-protocol.js';
 import type { NodeWorkerAuthority } from './authority.js';
+import { NodeWorkerBulkAttempts } from './bulk-attempts.js';
+import type { NodeWorkerBulkGateMessage } from './protocol.js';
 import type { NodeWorkerBulkFrame } from './bulk-protocol.js';
 import { NodeWorkerTransportError } from './framing.js';
 import { NodeWorkerOutputAssembler } from './output-assembler.js';
@@ -46,6 +49,7 @@ export interface NodeWorkerSessionServicesOptions {
 
 /** Owns immutable instance routes and the sole session replay cache; instances retain native authority. */
 export class NodeWorkerSessionServices {
+  readonly #bulkAttempts: NodeWorkerBulkAttempts;
   readonly #streams = new Map<string, SessionStream>();
   readonly #delivery: NodeWorkerOutputDelivery;
   readonly #assembler: NodeWorkerOutputAssembler;
@@ -59,6 +63,7 @@ export class NodeWorkerSessionServices {
   constructor(private readonly options: NodeWorkerSessionServicesOptions) {
     this.options = Object.freeze({ ...options, instanceIds: new Set(options.instanceIds) });
     const { authority, instanceIds, writer } = options;
+    this.#bulkAttempts = new NodeWorkerBulkAttempts(authority);
     const validate = () => this.#validate();
     const failed = () => authority.retire();
     this.#upstream = new NodeWorkerRetirementRelay({
@@ -109,6 +114,13 @@ export class NodeWorkerSessionServices {
         case 'provider-session-configuration':
           if (!isNodeSessionConfigurationReconciliation(command)) authority.assertAdmission(connection);
           if (!this.options.instanceIds.has(command.instanceId)) throw protocol();
+          return await this.options.child(command.instanceId).service(connectionId).call(command, signal, deadline);
+        case 'provider-history-import':
+          if (command.operation !== 'cancel') {
+            authority.assertAdmission(connection);
+            this.#bulkAttempts.capture(connectionId, command.bulkAttemptId);
+          }
+          if (command.connectionId !== connectionId || !this.options.instanceIds.has(command.instanceId)) throw protocol();
           return await this.options.child(command.instanceId).service(connectionId).call(command, signal, deadline);
         case 'provider-native-sessions':
         case 'provider-catalog':
@@ -177,11 +189,19 @@ export class NodeWorkerSessionServices {
     if (!this.options.instanceIds.has(instanceId) || !('instanceId' in frame) || frame.instanceId !== instanceId) throw protocol();
     if (frame.type === 'node-worker-output') { this.#assembler.receive(instanceId, text); return; }
     if (frame.type === 'node-worker-output-retired') { this.retirement(frame, 'instance'); return; }
+    if (frame.type === 'node-history-bulk') { this.#historyUpstream(frame); return; }
     if (frame.type !== 'node-worker-bulk') throw protocol();
     const payload = parseNodeBulkFrameText(frame.payload);
     if (!payload || !isNodeBulkReply(payload)) throw protocol();
     if (payload.type === 'node-bulk-failed' && !this.#rememberBulkFailure(frame, payload.transfer.transferId)) return;
     this.#sendBulk(frame);
+  }
+
+  bulkLifetime(message: NodeWorkerBulkGateMessage): void {
+    this.#validate();
+    if (!sameNodeSession(message.session, this.options.authority.session)) throw protocol();
+    if (message.type === 'node-worker-bulk-attached') this.#bulkAttempts.attach(message.connectionId, message.bulkAttemptId);
+    else this.#bulkAttempts.retire(message.connectionId, message.bulkAttemptId);
   }
 
   bulk(frame: NodeWorkerBulkFrame): void {
@@ -201,6 +221,21 @@ export class NodeWorkerSessionServices {
       if (!this.#rememberBulkFailure(frame, payload.transfer.transferId)) return;
       this.#sendBulk({ ...frame, payload: serializeNodeBulkFrame({ type: 'node-bulk-failed', version: NODE_WIRE_VERSION,
         transfer: payload.transfer, code: 'NODE_BULK_UNAVAILABLE' }) });
+    }
+  }
+
+  history(frame: NodeHistoryBulkFrame): void {
+    this.#validate();
+    if (!sameNodeSession(frame.identity, this.options.authority.session) || !this.options.instanceIds.has(frame.instanceId)) throw protocol();
+    const payload = parseNodeBulkFrameText(frame.payload);
+    if (!payload || !isNodeBulkReply(payload)) throw protocol();
+    try {
+      const attempt = this.#bulkAttempts.capture(frame.connectionId, frame.bulkAttemptId);
+      const submission = this.options.child(frame.instanceId).forward(frame, attempt.signal);
+      void submission.drained.catch(() => {});
+    } catch (error) {
+      if (!(error instanceof NodeBulkError) && !(error instanceof NodeAuthorityError)
+        && !(error instanceof NodeWorkerTransportError && error.code === 'NODE_WORKER_CAPACITY')) throw error;
     }
   }
 
@@ -224,6 +259,7 @@ export class NodeWorkerSessionServices {
   close(): void {
     if (this.#closing.signal.aborted) return;
     this.#closing.abort(); this.#detach(); this.#suspend();
+    this.#bulkAttempts.close();
     this.#upstream.close(); for (const relay of this.#downstream.values()) relay.close();
     this.#assembler.close(); this.#delivery.close();
     for (const owner of this.#streams.values()) owner.cancellation.abort();
@@ -283,6 +319,22 @@ export class NodeWorkerSessionServices {
     } catch (error) {
       // Lost bulk replies settle through the caller's bounded timeout; effects are never replayed.
       if (!(error instanceof NodeWorkerTransportError) || error.code !== 'NODE_WORKER_CAPACITY') throw error;
+    }
+  }
+
+  #historyUpstream(frame: NodeHistoryBulkFrame): void {
+    if (!sameNodeSession(frame.identity, this.options.authority.session)) throw protocol();
+    const payload = parseNodeBulkFrameText(frame.payload);
+    if (!payload || isNodeBulkReply(payload) || payload.type === 'node-bulk-chunk') throw protocol();
+    try {
+      const attempt = this.#bulkAttempts.capture(frame.connectionId, frame.bulkAttemptId);
+      const data = isNodeBulkData(payload);
+      const submission = this.options.writer.submit(serializeNodeHistoryBulk(frame), data ? 'data' : 'urgent',
+        { signal: attempt.signal, validate: () => attempt.validate() }, data ? 'data' : 'application');
+      void submission.drained.catch(() => {});
+    } catch (error) {
+      if (!(error instanceof NodeBulkError) && !(error instanceof NodeAuthorityError)
+        && !(error instanceof NodeWorkerTransportError && error.code === 'NODE_WORKER_CAPACITY')) throw error;
     }
   }
 
