@@ -1,3 +1,5 @@
+import { NodeProviderNativeHost } from '../provider-native-host.js';
+import { LocalProviderNativeSessionService } from '../local-provider-native-sessions.js';
 import { NodeNativeTasks } from '../native-tasks.js';
 import { NodeProviderAuxiliaryHost } from '../provider-auxiliary-host.js';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
@@ -99,6 +101,8 @@ export async function createNodeInstanceRuntime(
     const providerCapacity = new NodeProviderCapacity();
     const configurationService = new LocalProviderConfigurationService(provider);
     services = new NodeWorkerInstanceServices({ authority, instanceId: instance.id, host, writer,
+      nativeSessions: new NodeProviderNativeHost(providerCapacity, { nodeId: configuration.nodeId, instanceId: instance.id },
+        instance.agentId, resources, new LocalProviderNativeSessionService(provider), occupancy),
       auxiliary: new NodeProviderAuxiliaryHost({ instance: { nodeId: configuration.nodeId, instanceId: instance.id },
         provider, resources, capacity: providerCapacity, configuration: configurationService, native: nativeTasks,
         requestContainment: (identity) => containment.request({ type: 'node-worker-containment-request', version: NODE_WIRE_VERSION,
@@ -125,7 +129,7 @@ export async function createNodeInstanceRuntime(
         return result;
       } },
     });
-    const manifest = createNodeProviderManifest(configuration.nodeId, instance.id, provider, new Set(['catalog', 'auth', 'commands']), instance.maxOperations);
+    const manifest = createNodeProviderManifest(configuration.nodeId, instance.id, provider, new Set(['catalog', 'auth', 'commands', 'nativeSessions']), instance.maxOperations);
     return { manifests: Object.freeze([manifest]), close,
       application(frame, text) {
         validate();

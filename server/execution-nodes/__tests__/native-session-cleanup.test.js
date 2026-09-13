@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 import { createLocatedInstanceFixture } from '../../agents/__tests__/located-instance-fixture.js';
 import { DomainError } from '../../lib/domain-error.js';
-import { resolveLocalNativeSessions } from '../local-native-sessions.js';
+import { resolveNativeSessionCleanup } from '../native-session-cleanup.js';
 
 /** @satisfies {import('../../chats/agent-ownership-journal.js').LocatedNativeRelease} */
 const reference = {
@@ -13,15 +13,23 @@ const reference = {
   },
 };
 
+/** @returns {import('../store.js').ResolvedExecutionLocation} */
+function location() {
+  return {
+    node: { id: 'local-node', kind: 'local', label: 'Synthetic', removedAt: null },
+    instance: { id: 'secondary', nodeId: 'local-node', agentId: 'test', label: 'Synthetic',
+      storageNamespace: 'instances/secondary', default: false, removedAt: null },
+    workspace: { id: 'project', nodeId: 'local-node', projectPath: '/synthetic-project', removedAt: null },
+  };
+}
+
 test('native cleanup resolves the recorded instance only after placement validation', async () => {
   const f = await createLocatedInstanceFixture();
-  /** @satisfies {Pick<import('../local-placement.js').LocalExecutionPlacement, 'assertAvailable'>} */
-  const placements = { assertAvailable: mock(() => {}) };
+  /** @satisfies {Pick<import('../store.js').ExecutionNodesStore, 'requireLocation'>} */
+  const nodes = { requireLocation: mock(() => location()) };
   try {
-    const sessions = resolveLocalNativeSessions(reference, placements, f.instances);
-    expect(placements.assertAvailable).toHaveBeenCalledWith({
-      ...reference.chat, executionLocation: reference.executionLocation,
-    });
+    const sessions = resolveNativeSessionCleanup(reference, nodes, f.instances);
+    expect(nodes.requireLocation).toHaveBeenCalledWith(reference.executionLocation, reference.chat.agentId);
     const signal = new AbortController().signal;
     await sessions.release({ chat: reference.chat, reason: 'deleted' }, signal);
     expect(f.primary.integration.nativeSessions.release).not.toHaveBeenCalled();
@@ -40,11 +48,11 @@ test.each([
   ['placement', 'NODE_REMOVED'], ['instance', 'NODE_REMOVED'],
 ])('unavailable %s (%s) leaves native cleanup pending', (unavailable, code) => {
   const failure = new DomainError(code, 'Synthetic unavailable owner', 409);
-  /** @satisfies {Pick<import('../local-placement.js').LocalExecutionPlacement, 'assertAvailable'>} */
-  const placements = { assertAvailable: mock(() => { if (unavailable === 'placement') throw failure; }) };
+  /** @satisfies {Pick<import('../store.js').ExecutionNodesStore, 'requireLocation'>} */
+  const nodes = { requireLocation: mock(() => { if (unavailable === 'placement') throw failure; return location(); }) };
   /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'nativeSessionsFor'>} */
   const instances = { nativeSessionsFor: mock(() => { throw failure; }) };
-  expect(resolveLocalNativeSessions(reference, placements, instances)).toBeNull();
+  expect(resolveNativeSessionCleanup(reference, nodes, instances)).toBeNull();
   expect(instances.nativeSessionsFor).toHaveBeenCalledTimes(unavailable === 'placement' ? 0 : 1);
 });
 
@@ -54,9 +62,18 @@ test.each([
   Object.assign(new Error('Synthetic untyped failure'), { code: 'NODE_UNAVAILABLE' }),
   Object.assign(new Error('Synthetic untyped tombstone'), { code: 'NODE_REMOVED' }),
 ])('unexpected resolution failures remain visible: %s', (failure) => {
-  /** @satisfies {Pick<import('../local-placement.js').LocalExecutionPlacement, 'assertAvailable'>} */
-  const placements = { assertAvailable() {} };
+  /** @satisfies {Pick<import('../store.js').ExecutionNodesStore, 'requireLocation'>} */
+  const nodes = { requireLocation: location };
   /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'nativeSessionsFor'>} */
   const instances = { nativeSessionsFor() { throw failure; } };
-  expect(() => resolveLocalNativeSessions(reference, placements, instances)).toThrow(failure);
+  expect(() => resolveNativeSessionCleanup(reference, nodes, instances)).toThrow(failure);
+});
+
+test('a changed registered project cannot redirect retained cleanup', () => {
+  /** @satisfies {Pick<import('../store.js').ExecutionNodesStore, 'requireLocation'>} */
+  const nodes = { requireLocation: location };
+  /** @satisfies {Pick<import('../../agents/instance-directory.js').AgentInstanceDirectory, 'nativeSessionsFor'>} */
+  const instances = { nativeSessionsFor: mock(() => { throw new Error('Unexpected provider lookup'); }) };
+  expect(resolveNativeSessionCleanup({ ...reference, chat: { ...reference.chat, projectPath: '/different' } }, nodes, instances)).toBeNull();
+  expect(instances.nativeSessionsFor).not.toHaveBeenCalled();
 });

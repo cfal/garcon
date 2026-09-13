@@ -1,4 +1,5 @@
 import { nodeWorkerReplies } from '../reply-port.js';
+import type { NodeProviderNativeCommand } from '../../../execution-nodes/transport/provider-native-wire.js';
 import type { NodeDeadline } from '../../../execution-nodes/deadline.js';
 import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
@@ -184,6 +185,53 @@ test('provider discovery uses its explicit deadline while controls keep their sh
     timers[1]!.callback(); expect(await control).toEqual({ kind: 'unknown' });
     timers[0]!.callback(); expect(await catalog).toEqual({ kind: 'unknown' });
     expect(timers.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { completion.resolve({ kind: 'unknown' }); f.close(); }
+});
+
+const nativeCommands = (['resolve', 'describe', 'release'] as const).map((operation): NodeProviderNativeCommand => ({
+  method: 'provider-native-sessions', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace',
+  chat: { chatId: '1000000000000000', agentId: 'synthetic-agent', agentSessionId: null, model: 'synthetic-model',
+    nativeSession: null, carryOverRevision: '', nativeSeedReceipt: null, settings: null },
+  ...(operation === 'release' ? { operation, reason: 'deleted' } : { operation }),
+}));
+
+test.each(nativeCommands)('native scalar calls use the provider deadline: %j', async (native) => {
+  const delays: number[] = [];
+  const f = fixture(16, (_callback, delay) => { delays.push(delay); return { cancel() {} }; });
+  const completion = Promise.withResolvers<NodeWorkerServiceResult>();
+  f.execute.mockImplementation(async () => completion.promise);
+  try {
+    const pending = f.client.call(native, f.lifetime.signal);
+    const control = f.client.call(command, f.lifetime.signal);
+    await tick();
+    expect(delays).toEqual([60_000, 10_000]);
+    expect(f.serverTimers.map(({ delayMs }) => delayMs)).toEqual([59_750, 9750]);
+    completion.resolve({ kind: 'unknown' }); await Promise.all([pending, control]);
+  } finally { completion.resolve({ kind: 'unknown' }); f.close(); }
+});
+
+test.each(nativeCommands)('native scalar calls retain provider occupancy and leave status and recovery capacity: %j', async (native) => {
+  const f = fixture(); const caller = new AbortController();
+  const completion = Promise.withResolvers<NodeWorkerServiceResult>();
+  const status = { method: 'provider-auth', instanceId: 'synthetic-instance', operation: 'status' } as const;
+  f.execute.mockImplementation(async (request) => request.method === 'provider-native-sessions' ? completion.promise
+    : request.method === 'provider-auth' ? { kind: 'provider-auth-status', instanceId: request.instanceId, status: null } : recovered);
+  const allowance = NODE_WORKER_SERVICE_LIMITS.maxProviderRequests - NODE_WORKER_SERVICE_LIMITS.reservedProviderStatusRequests;
+  try {
+    const pending = Array.from({ length: allowance }, (_, i) => f.client.call({ ...native,
+      instanceId: `synthetic-instance-${i}` }, caller.signal));
+    await tick();
+    const overflow = f.client.call(native, f.lifetime.signal);
+    await tick();
+    expect(f.execute).toHaveBeenCalledTimes(allowance);
+    expect(await overflow).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    expect(await f.client.call(status, f.lifetime.signal)).toMatchObject({ kind: 'provider-auth-status' });
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual(recovered);
+    caller.abort(); await Promise.all(pending); await tick();
+    expect(await f.client.call(native, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    expect(await f.client.call(status, f.lifetime.signal)).toMatchObject({ kind: 'provider-auth-status' });
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual(recovered);
     expect(f.failures).not.toHaveBeenCalled();
   } finally { completion.resolve({ kind: 'unknown' }); f.close(); }
 });

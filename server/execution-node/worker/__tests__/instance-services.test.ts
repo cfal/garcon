@@ -71,7 +71,7 @@ function fixture() {
   const prepareUpdate = mock(async (_request: ProviderConfigurationUpdateRequest) => ({ previous: settingsSnapshot, next: settingsSnapshot }));
   const launchLogin = mock(async () => ({ launched: true, alreadyRunning: false, sessionId: 'synthetic-login' }));
   const providerCapacity = new NodeProviderCapacity();
-  const services = new NodeWorkerInstanceServices({ authority, instanceId: location.instanceId, host, writer, auxiliary: null,
+  const services = new NodeWorkerInstanceServices({ authority, instanceId: location.instanceId, host, writer, auxiliary: null, nativeSessions: null,
     sessionConfiguration: new NodeSessionConfigurationHost({ instanceId: location.instanceId, connection, supervisor: authority,
       capacity: providerCapacity, resources, execution: host, configuration: {
         prepareApply: async () => ({ kind: 'unsupported' }), commit: async () => ({ kind: 'not-required' }), cancel: async () => {},

@@ -329,7 +329,7 @@ function providerRequestClass(command: NodeWorkerServiceCommand): NodeProviderRe
   switch (command.method) {
     case 'provider-session-configuration': return command.operation === 'prepare' || command.operation === 'commit' ? 'work' : 'status';
     case 'provider-auth': return command.operation === 'status' || command.operation === 'login-status' ? 'status' : 'work';
-    case 'provider-catalog': case 'provider-commands': case 'provider-configuration':
+    case 'provider-catalog': case 'provider-commands': case 'provider-configuration': case 'provider-native-sessions':
     case 'provider-single-query': case 'provider-text-generation': return 'work';
     default: return null;
   }
@@ -373,6 +373,8 @@ function expectedResult(command: NodeWorkerServiceCommand): (result: NodeWorkerS
         }
         return unexpectedAuthCommand(command);
       }
+      case 'provider-native-sessions': return result.kind === 'provider-native-result' && result.instanceId === instanceId
+        && result.workspaceId === command.workspaceId && result.operation === command.operation;
       case 'provider-catalog': return (result.kind === 'provider-catalog' || result.kind === 'provider-catalog-unavailable') && result.instanceId === instanceId;
       case 'install-output': return result.kind === 'output-installed' && result.instanceId === instanceId && producerStreamKey(result.stream) === stream;
       case 'retire-output': return result.kind === 'output-fenced' && result.instanceId === instanceId && producerStreamKey(result.stream) === stream;

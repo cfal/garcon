@@ -23,7 +23,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('instance catalog discovery over W
       const manifest = (await f.accepted.at(-1)!.ready).manifests[0]!;
       expect(manifest.descriptor.id).toBe(agentId);
       expect(Object.entries(manifest.facets).every(([name, present]) => present ===
-        (name === 'catalog' || name === 'auth' || name === 'commands' && agentId !== 'direct-anthropic-compatible' ? true : null))).toBe(true);
+        (name === 'catalog' || name === 'auth' || name === 'nativeSessions' || name === 'commands' && agentId !== 'direct-anthropic-compatible' ? true : null))).toBe(true);
       await recover(controller);
       const snapshot = await catalog.snapshot({ strict: true }, controller.signal);
       if (agentId !== 'direct-anthropic-compatible') expect(snapshot.models.length).toBeGreaterThan(0);

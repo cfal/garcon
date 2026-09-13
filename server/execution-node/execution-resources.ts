@@ -65,8 +65,7 @@ export class NodeExecutionResources {
     });
   }
 
-  async prepare(input: ExecutionLocation, signal: AbortSignal): Promise<PreparedNodeExecutionResource> {
-    signal.throwIfAborted();
+  capture(input: ExecutionLocation): PreparedNodeExecutionResource {
     const location = this.#location(input);
     const key = resourceKey(location);
     const registered = this.#resources.get(key);
@@ -76,16 +75,23 @@ export class NodeExecutionResources {
       registered.cancellation.signal.throwIfAborted();
     };
     validate();
-    const preparationSignal = AbortSignal.any([signal, registered.cancellation.signal]);
     const resource = registered.resource;
+    return Object.freeze({ location: resource.location, projectPath: resource.projectPath, execution: resource.execution,
+      signal: registered.cancellation.signal, validate });
+  }
+
+  async prepare(input: ExecutionLocation, signal: AbortSignal): Promise<PreparedNodeExecutionResource> {
+    signal.throwIfAborted();
+    const captured = this.capture(input);
+    const resource = this.#resources.get(resourceKey(captured.location))!.resource;
+    const preparationSignal = AbortSignal.any([signal, captured.signal]);
     const project = await resource.files.inspectProject(resource.projectPath, preparationSignal);
     preparationSignal.throwIfAborted();
-    validate();
+    captured.validate();
     if (project.kind === 'unavailable') throw new ProjectUnavailableError(resource.projectPath, project.reason);
     if (!isStoredProjectPath(project.effectiveProjectKey)) throw new TypeError('Invalid resolved execution project');
     return Object.freeze({
-      location: resource.location, projectPath: project.effectiveProjectKey, execution: resource.execution,
-      signal: registered.cancellation.signal, validate,
+      ...captured, projectPath: project.effectiveProjectKey,
     });
   }
 

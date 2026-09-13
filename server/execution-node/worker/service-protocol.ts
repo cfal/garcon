@@ -1,3 +1,4 @@
+import { parseNodeProviderNativeCommand, parseNodeProviderNativeReply, type NodeProviderNativeCommand, type NodeProviderNativeReply } from '../../execution-nodes/transport/provider-native-wire.js';
 import { parseNodeProviderAuxiliaryCommand, parseNodeProviderAuxiliaryReply, type NodeProviderAuxiliaryCommand, type NodeProviderAuxiliaryReply } from '../../execution-nodes/transport/provider-auxiliary-wire.js';
 import {
   MAX_NODE_OUTPUT_SEQUENCE, NODE_WIRE_VERSION, parseNodeOutputAck, parseNodeReplayReply, parseProducerStreamIdentity,
@@ -21,6 +22,7 @@ export const MAX_NODE_WORKER_SERVICE_BYTES = 256 * 1024;
 export const MAX_NODE_WORKER_REPLAY_CURSORS = 256;
 
 export type NodeWorkerServiceCommand =
+  | NodeProviderNativeCommand
   | NodeProviderAuxiliaryCommand
   | NodeProviderAuthCommand
   | NodeProviderCommandsCommand
@@ -38,6 +40,7 @@ export type NodeWorkerServiceCommand =
   | { readonly method: 'resume-output'; readonly generation: number };
 
 export type NodeWorkerServiceResult =
+  | NodeProviderNativeReply
   | NodeProviderAuxiliaryReply
   | NodeProviderCatalogReply
   | NodeProviderAuthReply
@@ -140,7 +143,7 @@ export function serializeNodeWorkerOutputAcknowledgement(frame: NodeWorkerOutput
 }
 
 function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerServiceCommand | null {
-  if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request'])) return null;
+  if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request', 'chat', 'reason'])) return null;
   if (value.method === 'provider-single-query' || value.method === 'provider-text-generation') {
     const command = parseNodeProviderAuxiliaryCommand(value);
     return command && sameNodeSession(command.identity, session) ? command : null;
@@ -151,6 +154,7 @@ function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerS
     const identity = command?.operation === 'prepare' ? command.stream : command?.identity;
     return command && (!identity || sameNodeSession(identity, session)) ? command : null;
   }
+  if (value.method === 'provider-native-sessions') return parseNodeProviderNativeCommand(value);
   if (value.method === 'provider-auth') return parseNodeProviderAuthCommand(value);
   if (value.method === 'provider-commands') return parseNodeProviderCommandsCommand(value);
   if (value.method === 'provider-catalog' && exactNodeFields(value, ['method', 'instanceId', 'strict'])
@@ -196,7 +200,7 @@ function parseCommand(value: unknown, session: NodeSessionIdentity): NodeWorkerS
 }
 
 function parseResult(value: unknown, session: NodeSessionIdentity): NodeWorkerServiceResult | null {
-  if (!exactNodeFields(value, ['kind'], ['instanceId', 'stream', 'transfer', 'result', 'generation', 'ranges', 'live', 'code', 'snapshot', 'staleModels', 'status', 'workspaceId', 'commands', 'reason', 'configuration', 'identity', 'preparation', 'receipt', 'value'])) return null;
+  if (!exactNodeFields(value, ['kind'], ['instanceId', 'stream', 'transfer', 'result', 'generation', 'ranges', 'live', 'code', 'snapshot', 'staleModels', 'status', 'workspaceId', 'commands', 'reason', 'configuration', 'identity', 'preparation', 'receipt', 'value', 'operation', 'reference', 'source'])) return null;
   if (value.kind === 'provider-auxiliary-result' || value.kind === 'provider-auxiliary-too-large') {
     const result = parseNodeProviderAuxiliaryReply(value);
     return result && sameNodeSession(result.identity, session) ? result : null;
@@ -212,6 +216,7 @@ function parseResult(value: unknown, session: NodeSessionIdentity): NodeWorkerSe
   if (value.kind === 'provider-commands' || value.kind === 'provider-commands-unavailable') return parseNodeProviderCommandsReply(value);
   if (value.kind === 'provider-auth-status' || value.kind === 'provider-auth-rejected' || value.kind === 'provider-login-status'
     || value.kind === 'provider-login-launched' || value.kind === 'provider-login-completed') return parseNodeProviderAuthReply(value);
+  if (value.kind === 'provider-native-result') return parseNodeProviderNativeReply(value);
   if (value.kind === 'provider-catalog' || value.kind === 'provider-catalog-unavailable') return parseNodeProviderCatalogReply(value);
   if (value.kind === 'unknown' && exactNodeFields(value, ['kind'])) return { kind: value.kind };
   if (value.kind === 'rejected' && exactNodeFields(value, ['kind', 'code'])

@@ -25,6 +25,8 @@ import { createChatRowRoutes } from './chat-rows.js';
 import { createChatExportRoutes } from './chat-export.js';
 import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
 import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
+import { createNativeCleanupRoutes } from './native-cleanup.js';
+import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
 import { createProjectResolutionRoutes } from './project-resolution.js';
 import { createChatBoardRoutes } from './chat-boards.js';
 import { createChatTagRoutes } from './chat-tags.js';
@@ -102,6 +104,7 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows,
   transcriptExport,
   handoffArtifact,
+  ownershipJournal,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -136,6 +139,7 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows: ChatRowService;
   transcriptExport: TranscriptExportService;
   handoffArtifact: HandoffArtifactService;
+  ownershipJournal: AgentOwnershipJournal;
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
   const workspaceFiles = new LocalWorkspaceFileService({
@@ -159,6 +163,7 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createChatExportRoutes(transcriptExport),
     ...createChatHandoffArtifactRoutes(handoffArtifact),
     ...createNativeSessionLookupRoutes(registry, agents),
+    ...createNativeCleanupRoutes(ownershipJournal),
     ...createProjectResolutionRoutes({ registry }),
     ...createStaticRoutes(settings),
     ...authRoutes,

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { NativeCleanupRetryRequest, NativeCleanupRetryResult, NativeCleanupSnapshot } from '../../common/native-cleanup.js';
 import type { ProviderNativeChatReference, ProviderNativeReleaseRequest, ProviderNativeSessionService } from '../execution-nodes/provider-native-sessions.js';
 import type { TranscriptWatermark } from '../ledger/contracts.js';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
@@ -127,6 +128,37 @@ export class AgentOwnershipJournal {
 
   pendingKind(chatId: string): 'handoff' | 'delete' | null {
     return this.#fencedIntents().find((intent) => intent.chatId === chatId)?.kind ?? null;
+  }
+
+  nativeCleanupSnapshot(): NativeCleanupSnapshot {
+    return { entries: this.#fencedIntents().filter((intent): intent is DeleteIntent => intent.kind === 'delete').map((intent) => {
+      const current = this.#registry.getChat(intent.chatId);
+      return {
+        chatId: intent.chatId, operationId: intent.operationId, sourceEpoch: intent.sourceEpoch,
+        registryEpoch: current?.agentOwnershipEpoch ?? null,
+        status: this.#pendingJournal ? 'durability-unknown'
+          : current && current.agentOwnershipEpoch !== intent.sourceEpoch ? 'ownership-conflict'
+          : this.#removedLedgers.has(intent.operationId) ? 'native-cleanup-pending' : 'deletion-pending',
+        owners: intent.releaseReferences.map(({ chat, executionLocation }) => ({ agentId: chat.agentId, executionLocation: { ...executionLocation } })),
+        createdAt: intent.createdAt,
+      };
+    }) };
+  }
+
+  /** Retries only a retained decision; a restored conflicting owner keeps its durable fence. */
+  retryNativeCleanup(request: NativeCleanupRetryRequest): Promise<NativeCleanupRetryResult> {
+    const { chatId, operationId } = request;
+    return this.#scheduleDeleteWork(async () => {
+      await this.reconcileDurability();
+      const intent = this.#findDelete(operationId);
+      if (!intent || intent.chatId !== chatId) return { kind: 'not-found' };
+      const current = this.#registry.getChat(chatId);
+      if (current && current.agentOwnershipEpoch !== intent.sourceEpoch) {
+        throw new DomainError('STALE_CHAT_OWNERSHIP', 'Restored chat ownership conflicts with the retained deletion. Restore consistent ownership before retrying.', 409);
+      }
+      await this.#recoverDelete(intent);
+      return { kind: 'scheduled' };
+    });
   }
 
   roots(): ReadonlySet<string> {

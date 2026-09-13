@@ -1,3 +1,4 @@
+import type { NodeProviderNativeHost } from '../provider-native-host.js';
 import type { NodeProviderAuxiliaryHost } from '../provider-auxiliary-host.js';
 import { NODE_WIRE_VERSION, parseProducerStreamIdentity, producerStreamKey, type ProducerStreamIdentity } from '@garcon/server-agent-interface';
 import { sameNodeSession } from '../../../common/node-operation.js';
@@ -36,6 +37,7 @@ export interface NodeWorkerInstanceServicesOptions {
   readonly auth: NodeProviderAuthHost;
   readonly commands: NodeProviderCommandsHost;
   readonly configuration: NodeProviderConfigurationHost;
+  readonly nativeSessions: Pick<NodeProviderNativeHost, 'execute'> | null;
   readonly auxiliary: Pick<NodeProviderAuxiliaryHost, 'execute'> | null;
   readonly sessionConfiguration: Pick<NodeSessionConfigurationHost, 'execute' | 'close'>;
 }
@@ -92,6 +94,10 @@ export class NodeWorkerInstanceServices {
       if (command.method === 'provider-commands') {
         if (command.instanceId !== this.options.instanceId) return { kind: 'rejected', code: 'VALIDATION_FAILED' };
         return await this.options.commands.discover(command, AbortSignal.any([signal, connection.signal, this.#closing.signal]));
+      }
+      if (command.method === 'provider-native-sessions') {
+        if (!this.options.nativeSessions) return { kind: 'rejected', code: 'NODE_UNAVAILABLE' };
+        return await this.options.nativeSessions.execute(command, AbortSignal.any([signal, connection.signal, this.#closing.signal]));
       }
       if (command.method === 'provider-auth') {
         if (command.instanceId !== this.options.instanceId) return { kind: 'rejected', code: 'VALIDATION_FAILED' };

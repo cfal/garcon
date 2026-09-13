@@ -154,7 +154,7 @@ export class NodeSessionBridge {
         if (admitted) this.#recovery = null;
         return { kind: 'output-live', live: admitted };
       }
-      if (command.method === 'install-output' || command.method === 'reserve-body' || command.method === 'provider-catalog' || command.method === 'provider-auth' || command.method === 'provider-commands' || command.method === 'provider-configuration'
+      if (command.method === 'provider-native-sessions' || command.method === 'install-output' || command.method === 'reserve-body' || command.method === 'provider-catalog' || command.method === 'provider-auth' || command.method === 'provider-commands' || command.method === 'provider-configuration'
         || command.method === 'provider-session-configuration' && !isNodeSessionConfigurationReconciliation(command)
         || command.method === 'permission' && command.command.method === 'permission-respond') coordinator.supervisor.assertAdmission(connection.lease);
       if (command.method === 'retire-output') {

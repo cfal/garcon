@@ -132,6 +132,42 @@ describe('AgentOwnershipJournal', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
+  it('diagnoses restored ownership conflicts and retries only the exact retained deletion after repair', async () => {
+    const chatId = '1000000000000000';
+    const original = chat();
+    const registry = createRegistry({ [chatId]: original });
+    let available = false;
+    const release = mock(async () => { if (!available) throw new Error('Synthetic owner offline'); });
+    const ledger = { deleteChat: mock(() => {}) };
+    const journal = createJournal({ workspaceDir, registry, ledger, integrations: createIntegrations(release) });
+    await journal.initialize();
+    await journal.delete(chatId); await journal.waitForProviderCleanup();
+    const pending = journal.nativeCleanupSnapshot().entries[0];
+    expect(pending.status).toBe('native-cleanup-pending');
+    expect(pending.owners).toEqual([{ agentId: original.agentId, executionLocation: original.executionLocation }]);
+    expect(pending).not.toHaveProperty('nativeSession');
+    expect(pending).not.toHaveProperty('settings');
+    const replacement = chat('target-agent'); registry.setChat(chatId, replacement);
+    expect(journal.nativeCleanupSnapshot().entries[0]).toMatchObject({
+      status: 'ownership-conflict', sourceEpoch: original.agentOwnershipEpoch, registryEpoch: replacement.agentOwnershipEpoch,
+    });
+    expect(await journal.retryNativeCleanup({ chatId, operationId: 'foreign-operation' })).toEqual({ kind: 'not-found' });
+    await expect(journal.retryNativeCleanup({ chatId, operationId: pending.operationId }))
+      .rejects.toMatchObject({ code: 'STALE_CHAT_OWNERSHIP' });
+    expect(registry.getChat(chatId)).toBe(replacement);
+    expect(journal.hasPending(chatId)).toBe(true);
+    expect(release).toHaveBeenCalledTimes(1);
+    registry.removeChat(chatId); available = true;
+    expect(await journal.retryNativeCleanup({ chatId, operationId: pending.operationId })).toEqual({ kind: 'scheduled' });
+    await journal.waitForProviderCleanup();
+    expect(journal.nativeCleanupSnapshot()).toEqual({ entries: [] });
+    expect(ledger.deleteChat).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(2);
+    registry.setChat(chatId, replacement);
+    expect(await journal.retryNativeCleanup({ chatId, operationId: pending.operationId })).toEqual({ kind: 'not-found' });
+    expect(registry.getChat(chatId)).toBe(replacement);
+  });
+
   it('persists the complete handoff decision and accepts an identical retry', async () => {
     const registry = createRegistry({ chat: chat() });
     const journal = createJournal({

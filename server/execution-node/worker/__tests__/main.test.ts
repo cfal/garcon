@@ -97,7 +97,7 @@ test('session runtime hosts two same-provider instances in separate children and
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }] });
     expect(ready.map((manifest) => manifest.instanceId)).toEqual(instances.map((instance) => instance.id));
     expect(ready.every((manifest) => manifest.descriptor.id === 'direct-anthropic-compatible')).toBe(true);
-    expect(ready.every((manifest) => Object.entries(manifest.facets).every(([facet, present]) => present === (facet === 'catalog' || facet === 'auth' ? true : null)))).toBe(true);
+    expect(ready.every((manifest) => Object.entries(manifest.facets).every(([facet, present]) => present === (facet === 'catalog' || facet === 'auth' || facet === 'nativeSessions' ? true : null)))).toBe(true);
     for (const instance of instances) expect(existsSync(path.join(storage, 'agent-data', 'instances', instance.id))).toBe(true);
     expect(existsSync(path.join(storage, 'agent-data', 'direct-anthropic-compatible'))).toBe(false);
     if (process.platform === 'linux') {

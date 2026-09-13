@@ -110,6 +110,7 @@ export class NodeWorkerSessionServices {
           if (!isNodeSessionConfigurationReconciliation(command)) authority.assertAdmission(connection);
           if (!this.options.instanceIds.has(command.instanceId)) throw protocol();
           return await this.options.child(command.instanceId).service(connectionId).call(command, signal, deadline);
+        case 'provider-native-sessions':
         case 'provider-catalog':
         case 'provider-auth':
         case 'provider-commands':

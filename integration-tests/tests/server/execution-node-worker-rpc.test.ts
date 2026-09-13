@@ -25,7 +25,7 @@ test('execution RPC reaches only its configured instance and preserves operation
       homeDirectory: path.join(storage, id), environment: {}, workspaceIds: ['synthetic-workspace'], maxOperations: 1 }));
     const manifests = await peer.configure(session, 1, { role: 'session', nodeId, storageDirectory: storage, executableSearchPath: DEFAULT_NODE_EXECUTABLE_SEARCH_PATH, instances,
       workspaces: [{ id: 'synthetic-workspace', projectPath: storage }], replay: DEFAULT_NODE_REPLAY });
-    expect(manifests.every((manifest) => Object.entries(manifest.facets).every(([facet, present]) => present === (facet === 'catalog' || facet === 'auth' ? true : null)))).toBe(true);
+    expect(manifests.every((manifest) => Object.entries(manifest.facets).every(([facet, present]) => present === (facet === 'catalog' || facet === 'auth' || facet === 'nativeSessions' ? true : null)))).toBe(true);
     const first = peer.execution('synthetic-first', 1);
     const second = peer.execution('synthetic-second', 1);
     const prepare = (instanceId: string): NodeExecutionCommand => ({ method: 'prepare',

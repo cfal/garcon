@@ -92,7 +92,7 @@ import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
 import { LocalExecutionPlacement } from './execution-nodes/local-placement.js';
-import { resolveLocalNativeSessions } from './execution-nodes/local-native-sessions.js';
+import { resolveNativeSessionCleanup } from './execution-nodes/native-session-cleanup.js';
 import { migrateWorkspaceExecutionLocations } from './execution-nodes/workspace-migration.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
@@ -302,7 +302,7 @@ export async function startServer(): Promise<void> {
       workspaceDir,
       registry: chatRegistry,
       resolveNativeSessions(reference) {
-        return resolveLocalNativeSessions(reference, placements, instances);
+        return resolveNativeSessionCleanup(reference, executionNodes, instances);
       },
       ledger: transcriptLedger,
     });
@@ -688,6 +688,7 @@ export async function startServer(): Promise<void> {
 
     // Build route and WS handler tables
     const routes = createAllRoutes(workspaceDir, {
+      ownershipJournal: agentOwnership,
       registry: chatRegistry,
       settings,
       recentTitleIcons,
