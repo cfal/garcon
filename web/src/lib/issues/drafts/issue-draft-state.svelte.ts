@@ -2,6 +2,7 @@ import { parseHttpIssueMutationRequest, type IssueMutationPayload } from '$share
 import type { IssueWriteResult } from '$shared/issues';
 import { ApiError } from '$lib/api/client.js';
 import { issueConflict, type IssueConflict, type IssuesApi } from '$lib/api/issues.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 import type {
 	FrozenIssueSubmission,
 	IssueDraftField,
@@ -131,7 +132,7 @@ export class IssueDraftState {
 		if (!this.canEdit || this.#disposed) return;
 		try {
 			const request = parseHttpIssueMutationRequest({
-				requestId: crypto.randomUUID(),
+				requestId: createRandomId(),
 				expectedStoreId: this.current.storeId,
 				payload,
 			});

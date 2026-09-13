@@ -1,6 +1,7 @@
 import type { IssueStatus, IssueSummary } from '$shared/issues';
 import type { IssueDraftPartition } from '$lib/issues/drafts/issue-draft-recovery.js';
 import type { IssueWindowKey } from '$lib/issues/catalog/issue-collection.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 
 export type IssueFocusTarget =
 	| { kind: 'issue'; issueId: string; control: 'open' | 'status' }
@@ -24,7 +25,7 @@ export interface IssueStatusMove {
 	readonly partition: IssueDraftPartition;
 }
 export class IssuePanelMemory {
-	readonly id = crypto.randomUUID();
+	readonly id = createRandomId();
 	readonly scroll = new Map<string, number>();
 	focus: IssueFocusBookmark | null = null;
 	returnTo: IssueFocusBookmark | null = null;

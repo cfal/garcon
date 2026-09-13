@@ -94,6 +94,25 @@ afterEach(() => {
 });
 
 describe('issue draft state', () => {
+	it('submits a valid request without secure-context-only randomUUID', async () => {
+		const unavailable = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+			throw new TypeError('crypto.randomUUID is unavailable');
+		});
+		try {
+			const { draft, api } = harness();
+			draft.setField('body', 'Synthetic comment');
+			await draft.submit({ action: 'comment', issueId: 'G-1', body: 'Synthetic comment' });
+			expect(api.mutate).toHaveBeenCalledOnce();
+			expect(api.mutate.mock.calls[0]![0].requestId).toMatch(
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+			expect(draft.error).toBeNull();
+			expect(unavailable).not.toHaveBeenCalled();
+		} finally {
+			unavailable.mockRestore();
+		}
+	});
+
 	it('sends only changed fields, preserving another user’s assignment and remote metadata', () => {
 		const fields = issueEditorFields({
 			...issue,
