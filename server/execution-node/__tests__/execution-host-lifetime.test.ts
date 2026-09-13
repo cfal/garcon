@@ -27,6 +27,7 @@ test('one publisher spans sequential operations and physical reconnect without r
     for (let index = 0; index < 12; index += 1) {
       if (index === 6) {
         connection = f.supervisor.attach(f.session);
+        f.supervisor.completeStartup(connection.session);
         f.supervisor.completeRecovery(connection, f.supervisor.beginRecovery(connection));
       }
       const runId = `synthetic-run-${index}`;

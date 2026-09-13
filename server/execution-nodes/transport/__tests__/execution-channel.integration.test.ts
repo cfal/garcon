@@ -88,6 +88,7 @@ test('a lost WebSocket dispatch reply reconciles the same native occurrence thro
     expect(f.execution.abort).toHaveBeenCalledTimes(1);
     f.execution.start.mock.calls[0]![0].output.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
     expect(await second.call({ method: 'status', identity }, caller.signal)).toMatchObject({ kind: 'status', receipt: { phase: 'ended', abort: 'requested' } });
+    f.supervisor.completeStartup(nextConnection.session);
     f.supervisor.completeRecovery(nextConnection, f.supervisor.beginRecovery(nextConnection));
     expect(await second.call({ method: 'prepare', location: f.location, request: { ...f.request, runId: 'synthetic-next-run' } }, caller.signal))
       .toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });

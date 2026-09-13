@@ -20,6 +20,7 @@ export function executionWireFixture(maxOperations = 1, preparationMs = DEFAULT_
   const supervisor = new NodeSupervisor({ clock: { read: () => ({ elapsedMs, discontinuity: false }) }, async cleanup() {} });
   const session = supervisor.openSession('synthetic-controller');
   const connection = supervisor.attach(session);
+  supervisor.completeStartup(connection.session);
   supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
   const handle = Object.freeze({});
   const execution = {
@@ -73,7 +74,7 @@ export function executionWireFixture(maxOperations = 1, preparationMs = DEFAULT_
   const adapter = new NodeExecutionWireAdapter(table, supervisor, capabilities);
   let requestId = 0;
   const call = async (command: NodeExecutionCommand, physical: NodeConnectionLease = connection) => {
-    const text = serializeNodeExecutionCall({ type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: ++requestId, command });
+    const text = serializeNodeExecutionCall({ type: 'node-execution-request', timeoutMs: 10_000, version: NODE_WIRE_VERSION, session, requestId: ++requestId, command });
     const parsed = parseNodeExecutionCallText(text);
     if (!parsed) throw new Error('Synthetic request failed parsing');
     const result = await adapter.execute(physical, parsed.command, physical.signal);

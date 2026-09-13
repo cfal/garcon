@@ -8,6 +8,9 @@ import {
 } from './service-protocol.js';
 import type { NodeFrameSubmission, NodeFrameWriter } from './writer.js';
 import type { NodeReplyAuthority, NodeReplyPort } from '../../execution-nodes/transport/reply-port.js';
+import { isNodeRequestTimeout, NodeDeadline } from '../../execution-nodes/deadline.js';
+import type { LeaseClock } from '../lease-clock.js';
+import { DeferredNodeFrameText } from './frame-text.js';
 
 export interface NodeWorkerServiceChannelOptions {
   readonly session: NodeSessionIdentity;
@@ -17,12 +20,15 @@ export interface NodeWorkerServiceChannelOptions {
   readonly maxProviderRequests?: number;
   readonly requestTimeoutMs?: number;
   readonly providerRequestTimeoutMs?: number;
+  readonly createClock?: () => LeaseClock;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   validate(): void;
   failed(error: unknown): void;
 }
 
 interface PendingService {
+  readonly deadline: NodeDeadline;
+  readonly cancel: () => void;
   readonly releaseProvider: (() => void) | null;
   readonly completion: PromiseWithResolvers<NodeWorkerServiceResult>;
   readonly cancellation: AbortController;
@@ -61,8 +67,9 @@ export class NodeWorkerServiceClient {
     if (options.signal.aborted) this.close();
   }
 
-  async call(command: NodeWorkerServiceCommand, signal: AbortSignal): Promise<NodeWorkerServiceResult> {
+  async call(command: NodeWorkerServiceCommand, signal: AbortSignal, inheritedDeadline?: NodeDeadline): Promise<NodeWorkerServiceResult> {
     signal.throwIfAborted();
+    if (inheritedDeadline?.remainingMs === 0) return { kind: 'unknown' };
     if (!this.#validate()) return unavailable();
     if (this.#pending.size >= this.#options.maxRequests) return { kind: 'rejected', code: 'NODE_CAPACITY' };
     if (this.#sent === Number.MAX_SAFE_INTEGER) { this.#fail(protocol()); return unavailable(); }
@@ -71,21 +78,17 @@ export class NodeWorkerServiceClient {
     let accepts: PendingService['accepts'];
     let providerRequest: NodeProviderRequestClass | null;
     let usesApplicationReserve: boolean;
-    let timeoutMs: number;
+    let deadline: NodeDeadline;
     try {
-      text = serializeNodeWorkerService({ ...this.#envelope(requestId), type: 'node-worker-service-request', command });
+      deadline = inheritedDeadline ?? new NodeDeadline(requestTimeout(command, this.#options), this.options.createClock?.());
+      const timeoutMs = deadline.remainingMs;
+      if (timeoutMs === 0) return { kind: 'unknown' };
+      text = serializeNodeWorkerService({ ...this.#envelope(requestId), type: 'node-worker-service-request', timeoutMs, command });
       const snapshot = parseNodeWorkerServiceText(text);
       if (snapshot?.type !== 'node-worker-service-request') throw protocol();
       accepts = expectedResult(snapshot.command);
       providerRequest = providerRequestClass(snapshot.command);
       usesApplicationReserve = providerRequest === 'status' || snapshot.command.method === 'retire-output';
-      if (snapshot.command.method === 'provider-single-query' || snapshot.command.method === 'provider-text-generation') {
-        timeoutMs = snapshot.command.request.timeoutMs;
-      } else if (providerRequest) {
-        timeoutMs = this.#options.providerRequestTimeoutMs;
-      } else {
-        timeoutMs = this.#options.requestTimeoutMs;
-      }
     }
     catch { return { kind: 'rejected', code: 'VALIDATION_FAILED' }; }
     const releaseProvider = providerRequest ? this.#providerCapacity.reserve(providerRequest) : null;
@@ -100,17 +103,31 @@ export class NodeWorkerServiceClient {
       this.#settle(requestId, submitted || pending.submitting ? { kind: 'unknown' } : unavailable());
       if (submitted) this.#cancel(requestId);
     };
-    const pending: PendingService = { completion: Promise.withResolvers<NodeWorkerServiceResult>(), cancellation: new AbortController(),
+    const pending: PendingService = { deadline, cancel, completion: Promise.withResolvers<NodeWorkerServiceResult>(), cancellation: new AbortController(),
       accepts, releaseProvider, detach: () => signal.removeEventListener('abort', cancel), timer: null,
       submission: null, submitted: false, submitting: false, cancelled: false };
     this.#pending.set(requestId, pending);
     signal.addEventListener('abort', cancel, { once: true });
     const authority = AbortSignal.any([this.#closing.signal, pending.cancellation.signal]);
     try {
-      pending.timer = (this.options.scheduleTimeout ?? scheduleTimeout)(cancel, timeoutMs);
+      pending.timer = (this.options.scheduleTimeout ?? scheduleTimeout)(cancel, deadline.remainingMs);
       signal.throwIfAborted();
+      if (deadline.remainingMs === 0) cancel();
+      if (!this.#pending.has(requestId)) return pending.completion.promise;
       pending.submitting = true;
-      const submission = this.writer.submit(text, 'data', { signal: authority, validate: () => { if (!this.#validate()) throw protocol(); } },
+      const source = new DeferredNodeFrameText(text, (captured) => {
+        const timeoutMs = deadline.remainingMs;
+        if (timeoutMs === 0) cancel();
+        authority.throwIfAborted();
+        const frame = parseNodeWorkerServiceText(captured);
+        if (frame?.type !== 'node-worker-service-request') throw protocol();
+        return serializeNodeWorkerService({ ...frame, timeoutMs });
+      });
+      const submission = this.writer.submit(source, 'data', { signal: authority, validate: () => {
+        if (deadline.remainingMs === 0) cancel();
+        authority.throwIfAborted();
+        if (!this.#validate()) throw protocol();
+      } },
         usesApplicationReserve ? 'application' : 'data');
       pending.submission = submission; pending.submitting = false;
       if (pending.cancelled && submission.submitted) this.#cancel(requestId);
@@ -133,6 +150,7 @@ export class NodeWorkerServiceClient {
     if (!matches(frame, this.#options) || frame.type !== 'node-worker-service-result' || frame.requestId > this.#sent) { this.#fail(protocol()); return; }
     const pending = this.#pending.get(frame.requestId);
     if (!pending) return;
+    if (pending.deadline.remainingMs === 0) { pending.cancel(); return; }
     if (!pending.accepts(frame.result)) {
       const error = new NodeWorkerServiceReplyError(frame.requestId);
       this.#take(frame.requestId)?.completion.reject(error);
@@ -196,7 +214,7 @@ export class NodeWorkerServiceServer {
   #received = 0;
 
   constructor(private readonly replies: NodeReplyPort,
-    private readonly execute: (command: NodeWorkerServiceCommand, signal: AbortSignal) => Promise<NodeWorkerServiceResult>,
+    private readonly execute: (command: NodeWorkerServiceCommand, signal: AbortSignal, deadline: NodeDeadline) => Promise<NodeWorkerServiceResult>,
     private readonly options: NodeWorkerServiceChannelOptions) {
     this.#options = configuration(options);
     this.#replyAuthority = { signal: this.#closing.signal, validate: () => { if (!this.#validate()) throw protocol(); }, failed: (error) => this.#fail(error) };
@@ -238,13 +256,28 @@ export class NodeWorkerServiceServer {
   }
 
   async #execute(frame: Extract<NodeWorkerServiceFrame, { type: 'node-worker-service-request' }>, cancellation: AbortController): Promise<void> {
+    const deadline = NodeDeadline.receive(frame.timeoutMs, this.options.createClock?.());
     const signal = AbortSignal.any([cancellation.signal, this.#closing.signal]);
+    let completed = false;
+    const expire = () => {
+      if (completed || signal.aborted) return;
+      this.#reply(frame.requestId, { kind: 'unknown' });
+      cancellation.abort(new DOMException('Node service request timed out', 'TimeoutError'));
+    };
+    const timer = (this.options.scheduleTimeout ?? scheduleTimeout)(expire, deadline.remainingMs);
     try {
       let result: NodeWorkerServiceResult;
-      try { result = await this.execute(frame.command, signal); }
+      try {
+        if (deadline.remainingMs === 0) expire();
+        signal.throwIfAborted();
+        result = await this.execute(frame.command, signal, deadline);
+      }
       catch { result = { kind: 'unknown' }; }
+      if (deadline.remainingMs === 0) expire();
       if (!signal.aborted) this.#reply(frame.requestId, result, signal);
     } finally {
+      completed = true;
+      timer.cancel();
       this.#pending.get(frame.requestId)?.releaseProvider?.();
       this.#pending.delete(frame.requestId);
     }
@@ -282,9 +315,14 @@ function configuration(options: NodeWorkerServiceChannelOptions) {
   const maxProviderRequests = options.maxProviderRequests ?? Math.min(maxRequests, NODE_WORKER_SERVICE_LIMITS.maxProviderRequests);
   const requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
   const providerRequestTimeoutMs = options.providerRequestTimeoutMs ?? NODE_WORKER_SERVICE_LIMITS.providerRequestTimeoutMs;
-  if (!session || maxProviderRequests > maxRequests
+  if (!session || maxProviderRequests > maxRequests || !isNodeRequestTimeout(requestTimeoutMs) || !isNodeRequestTimeout(providerRequestTimeoutMs)
     || ![options.connectionId, maxRequests, maxProviderRequests, requestTimeoutMs, providerRequestTimeoutMs].every((n) => Number.isSafeInteger(n) && n > 0)) throw protocol();
   return Object.freeze({ session: Object.freeze(session), connectionId: options.connectionId, maxRequests, maxProviderRequests, requestTimeoutMs, providerRequestTimeoutMs });
+}
+
+function requestTimeout(command: NodeWorkerServiceCommand, options: ReturnType<typeof configuration>): number {
+  if (command.method === 'provider-single-query' || command.method === 'provider-text-generation') return command.request.timeoutMs;
+  return providerRequestClass(command) ? options.providerRequestTimeoutMs : options.requestTimeoutMs;
 }
 
 function providerRequestClass(command: NodeWorkerServiceCommand): NodeProviderRequestClass | null {

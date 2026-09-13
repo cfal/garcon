@@ -71,6 +71,7 @@ test('a prepared capture survives its preparation caller and physical connection
     const next = f.supervisor.attach(f.session);
     expect(await f.call({ ...f.command, operation: 'status', identity }, next.signal, next)).toMatchObject({ receipt: { phase: 'prepared' } });
     expect(await f.call({ ...f.command, operation: 'commit', identity }, next.signal, next)).toMatchObject({ kind: 'rejected', code: 'NODE_UNAVAILABLE' });
+    f.supervisor.completeStartup(next.session);
     f.supervisor.completeRecovery(next, f.supervisor.beginRecovery(next));
     expect(await f.call({ ...f.command, operation: 'commit', identity }, next.signal, next)).toMatchObject({ receipt: { result: { kind: 'applied' } } });
     expect(f.configuration.prepareApply.mock.calls[0]![1].aborted).toBe(false);

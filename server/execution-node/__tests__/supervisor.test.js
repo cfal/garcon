@@ -20,6 +20,7 @@ function fixture(cleanup, options = {}) {
   });
   const identity = supervisor.openSession('controller-boot');
   const connection = supervisor.attach(identity);
+  supervisor.completeStartup(connection.session);
   supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
   return {
     supervisor, identity, connection, cleanups,
@@ -134,6 +135,7 @@ describe('remote controller supervision', () => {
     expect(await f.supervisor.retryCleanup()).toBe(true);
     expect(attempts).toBe(2);
     const next = f.supervisor.attach(f.supervisor.openSession('next-controller'));
+    f.supervisor.completeStartup(next.session);
     f.supervisor.completeRecovery(next, f.supervisor.beginRecovery(next));
     deadlines.forEach((expire) => expire());
     expect(f.supervisor.status).toBe('online');
@@ -232,6 +234,7 @@ describe('remote controller supervision', () => {
     supervisor.disconnect(connection);
     expect(() => supervisor.completeRecovery(connection)).toThrow('no longer authoritative');
     expect(supervisor.status).toBe('recovering');
+    supervisor.completeStartup(replacement.session);
     supervisor.completeRecovery(replacement, supervisor.beginRecovery(replacement));
     expect(() => supervisor.assertAdmission(replacement)).not.toThrow();
     expect(cleanups).toEqual([]);
@@ -307,6 +310,7 @@ describe('remote controller supervision', () => {
   test('a stale shutdown or abort callback cannot clean up replacement authority', async () => {
     const { supervisor, identity, connection, cleanups } = fixture();
     const replacement = supervisor.attach(identity);
+    supervisor.completeStartup(replacement.session);
     supervisor.completeRecovery(replacement, supervisor.beginRecovery(replacement));
     expect(await supervisor.controllerShutdown(connection)).toBe(false);
     let reentrantCleanup;
@@ -315,6 +319,7 @@ describe('remote controller supervision', () => {
     expect(await reentrantCleanup).toBe(true);
     expect(cleanups).toHaveLength(1);
     const next = supervisor.attach(supervisor.openSession('next-controller'));
+    supervisor.completeStartup(next.session);
     supervisor.completeRecovery(next, supervisor.beginRecovery(next));
     expect(await supervisor.controllerShutdown(replacement)).toBe(false);
     expect(() => supervisor.assertAdmission(next)).not.toThrow();
@@ -324,12 +329,14 @@ describe('remote controller supervision', () => {
   test('connection-scoped revocation cannot abort a replacement socket or logical session', async () => {
     const { supervisor, identity, connection, cleanups } = fixture();
     const replacement = supervisor.attach(identity);
+    supervisor.completeStartup(replacement.session);
     supervisor.completeRecovery(replacement, supervisor.beginRecovery(replacement));
     expect(await supervisor.revokeConnection(connection)).toBe(false);
     expect(() => supervisor.assertAdmission(replacement)).not.toThrow();
     expect(await supervisor.revokeConnection(replacement)).toBe(true);
     expect(cleanups).toHaveLength(1);
     const next = supervisor.attach(supervisor.openSession('controller-next'));
+    supervisor.completeStartup(next.session);
     supervisor.completeRecovery(next, supervisor.beginRecovery(next));
     expect(await supervisor.revokeConnection(replacement)).toBe(false);
     expect(next.authoritySignal.aborted).toBe(false);
@@ -637,6 +644,7 @@ describe('suspend-aware lease clock', () => {
       clock: { read: () => ({ elapsedMs, discontinuity: false }) }, async cleanup() {},
     });
     const connection = supervisor.attach(supervisor.openSession('controller-a'));
+    supervisor.completeStartup(connection.session);
     supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
     expect(supervisor.status).toBe('online');
     elapsedMs = invalid;
@@ -653,6 +661,7 @@ describe('suspend-aware lease clock', () => {
       clock: new SuspendAwareLeaseClock(() => monotonic, () => wall), async cleanup() {},
     });
     const connection = supervisor.attach(supervisor.openSession('controller-a'));
+    supervisor.completeStartup(connection.session);
     supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
     for (let index = 0; index < 15; index += 1) {
       monotonic += 100;
@@ -674,6 +683,7 @@ describe('suspend-aware lease clock', () => {
     monotonic += 3_600_000;
     wall += 3_601_500;
     const connection = supervisor.attach(supervisor.openSession('controller-a'));
+    supervisor.completeStartup(connection.session);
     supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
     expect(() => supervisor.assertAdmission(connection)).not.toThrow();
     await supervisor.shutdown();

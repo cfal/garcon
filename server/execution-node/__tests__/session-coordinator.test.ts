@@ -104,6 +104,53 @@ test('reconciles before opening and confirms containment before configuring or a
   expect(() => f.coordinator.supervisor.assertAdmission(connection.lease)).not.toThrow();
 });
 
+test('recovery cannot replace the startup deadline before worker readiness', async () => {
+  const f = fixture();
+  await f.coordinator.initialize();
+  const connection = f.coordinator.open('synthetic-controller-boot');
+  await tick();
+  expect(f.createPeer).toHaveBeenCalledTimes(1);
+  const recovery = f.coordinator.beginRecovery(connection);
+  expect(f.coordinator.supervisor.remainingReadinessMs(connection.lease.session)).toBe(60_000);
+  f.hello.resolve(1234);
+  await connection.ready;
+  expect(f.coordinator.supervisor.remainingReadinessMs(connection.lease.session)).toBe(NODE_RECOVERY_TIMEOUT_MS);
+  expect(await f.coordinator.completeRecovery(connection, recovery)).toBe(true);
+});
+
+test('deadline-driven worker unwinding preserves the initiating startup retirement reason', async () => {
+  const f = fixture();
+  const configuration = Promise.withResolvers<readonly NodeProviderManifest[]>();
+  const cleanup = Promise.withResolvers<void>();
+  f.peer.configure.mockImplementation(() => configuration.promise);
+  f.helper.mockImplementation(async (request) => {
+    if (request.kind === 'inspect') return { kind: 'ready', identity: f.identity(request.launch) };
+    await cleanup.promise;
+    return request.kind === 'stop' ? { kind: 'stopped' } : { kind: 'retired-inert' };
+  });
+  try {
+    await f.coordinator.initialize();
+    const connection = f.coordinator.open('synthetic-controller-boot');
+    const outcome = connection.ready.catch((error: unknown) => error);
+    f.hello.resolve(1234); await tick();
+    expect(f.peer.configure).toHaveBeenCalledTimes(1);
+    for (let now = 5_000; now < 60_000; now += 5_000) {
+      f.setTime(now);
+      const challenge = f.coordinator.supervisor.issueChallenge(connection.lease)!;
+      expect(f.coordinator.supervisor.renew(connection.lease, challenge)).toBe(true);
+    }
+    f.setTime(60_000);
+    f.coordinator.supervisor.poll();
+    expect(f.coordinator.supervisor.retirementReason).toBe('startup-expired');
+    const error = new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
+    f.peerOptions().failed(error);
+    configuration.reject(error);
+    expect(await outcome).toBeInstanceOf(Error);
+    await tick();
+    expect(f.coordinator.supervisor.retirementReason).toBe('startup-expired');
+  } finally { configuration.resolve([]); cleanup.resolve(); await f.coordinator.supervisor.retryCleanup(); }
+});
+
 test('accepted retirements keep their captured worker after physical disconnect and block the replacement barrier', async () => {
   const f = fixture(); const first = await f.start();
   const capacity = Promise.withResolvers<void>();
@@ -445,4 +492,55 @@ test.each(['confirmed', 'failed'] as const)('native containment %s waits for who
     expect(f.store.clear).not.toHaveBeenCalled();
     expect(() => f.coordinator.open('synthetic-replacement')).toThrow();
   }
+});
+
+test.each(['recovering', 'online'] as const)('post-startup worker write timeout retires %s authority before child exit', async (phase) => {
+  const f = fixture();
+  const connection = await f.start();
+  if (phase === 'online') await f.coordinator.completeRecovery(connection, f.coordinator.beginRecovery(connection));
+  const stopped = Promise.withResolvers<void>();
+  f.helper.mockImplementationOnce(async () => { await stopped.promise; return { kind: 'stopped' }; });
+  try {
+    expect(f.coordinator.supervisor.status).toBe(phase);
+    f.peerOptions().failed(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT'));
+    expect(connection.lease.authoritySignal.aborted).toBe(true);
+    expect(f.coordinator.supervisor.retirementReason).toBe('worker-protocol-failed');
+    expect(f.coordinator.supervisor.status).toBe('cleaning-up');
+    expect(() => f.coordinator.supervisor.assertAdmission(connection.lease)).toThrow();
+    expect(() => f.coordinator.open('synthetic-replacement')).toThrow();
+    await tick();
+    expect(f.calls).not.toContain('kill-waiter');
+    expect(f.store.clear).not.toHaveBeenCalled();
+    stopped.resolve();
+    expect(await f.coordinator.supervisor.retryCleanup()).toBe(true);
+    expect(f.store.clear).toHaveBeenCalledTimes(1);
+  } finally { stopped.resolve(); }
+});
+
+test('a worker timeout during live startup retires as startup expiry before host exit', async () => {
+  const f = fixture();
+  await f.coordinator.initialize();
+  const connection = f.coordinator.open('synthetic-controller-boot');
+  const outcome = connection.ready.catch((error: unknown) => error);
+  const stopped = Promise.withResolvers<void>();
+  f.helper.mockImplementationOnce(async () => { await stopped.promise; return { kind: 'retired-inert' }; });
+  try {
+    await tick();
+    expect(f.createPeer).toHaveBeenCalledTimes(1);
+    expect(f.peer.configure).not.toHaveBeenCalled();
+    expect(connection.lease.authoritySignal.aborted).toBe(false);
+    f.peerOptions().failed(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT'));
+    expect(connection.lease.authoritySignal.aborted).toBe(true);
+    expect(connection.lease.authoritySignal.reason).toMatchObject({ code: 'NODE_READINESS_TIMEOUT' });
+    expect(f.coordinator.supervisor.retirementReason).toBe('startup-expired');
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(f.coordinator.supervisor.retirementReason).toBe('startup-expired');
+    expect(f.calls).not.toContain('kill-waiter');
+    expect(f.store.clear).not.toHaveBeenCalled();
+    stopped.resolve();
+    expect(await f.coordinator.supervisor.retryCleanup()).toBe(true);
+    expect(f.coordinator.supervisor.status).toBe('offline');
+    expect(f.store.clear).toHaveBeenCalledTimes(1);
+    expect(connection.lease.authoritySignal.reason).toMatchObject({ code: 'NODE_READINESS_TIMEOUT' });
+  } finally { stopped.resolve(); f.hello.resolve(1234); }
 });

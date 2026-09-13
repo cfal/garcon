@@ -11,6 +11,7 @@ function fixture() {
   const supervisor = new NodeSupervisor({ clock: { read: () => ({ elapsedMs: now, discontinuity }) }, cleanup });
   const session = supervisor.openSession('synthetic-controller');
   const connection = supervisor.attach(session);
+  supervisor.completeStartup(connection.session);
   supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
   const polls: { callback(): void; cancelled: boolean; delayMs: number }[] = [];
   const schedulePoll = (callback: () => void, delayMs: number) => {

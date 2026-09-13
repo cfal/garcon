@@ -10,10 +10,52 @@ import { serializeNodeExecutionReply } from '../../../execution-nodes/transport/
 import { NodeWorkerWriter, type NodeWorkerWritePort } from '../writer.js';
 import { NODE_WORKER_EXECUTION_LIMITS, NODE_WORKER_WRITER_LIMITS } from '../limits.js';
 import { session, tick } from './lifecycle-fixture.js';
+import { NodeSessionSocketWriter } from '../../../execution-nodes/transport/session-socket-writer.js';
+import { NodeDeadline } from '../../../execution-nodes/deadline.js';
 
 const operation = { ...session, operationId: 'synthetic-operation' };
 const dispatch: NodeExecutionCommand = { method: 'dispatch', identity: operation,
   body: { ...session, transferId: 'synthetic-body' }, stream: { ...session, streamId: 'synthetic-stream' } };
+
+test('expiry during synchronous socket materialization preserves other in-flight execution calls', async () => {
+  const lifetime = new AbortController();
+  const held = Promise.withResolvers<NodeExecutionResult>();
+  const payloads: string[] = [];
+  let elapsedMs = 0;
+  let expire: (() => void) | null = null;
+  const closed = mock(() => {});
+  const send = (text: string) => {
+    const frame = parseNodeWorkerExecutionText(text);
+    if (!frame) throw new Error('Missing synthetic execution frame');
+    payloads.push(frame.payload);
+    server.receive(frame.payload);
+    return true;
+  };
+  const socket = new NodeSessionSocketWriter({ send, sendData: send, sendApplication: send }, lifetime.signal);
+  const port = new NodeWorkerExecutionPort({ submit(source, priority, authority, admission) {
+    return socket.submit(source, priority, { ...authority, validate() {
+      authority.validate();
+      const callback = expire; expire = null; callback?.();
+    } }, admission);
+  } }, { session, connectionId: 1, instanceId: 'synthetic-instance', signal: lifetime.signal, validate() {}, closed });
+  const client = new NodeExecutionClient(port, { session, signal: lifetime.signal, validate() {} });
+  const execute = mock(async (): Promise<NodeExecutionResult> => ({ kind: 'dispatched' }));
+  execute.mockImplementationOnce(() => held.promise);
+  const server = new NodeExecutionServer(immediateNodeReplies({ send(text) { client.receive(text); return true; }, close: closed }),
+    { execute }, { session, signal: lifetime.signal, validate() {} });
+  try {
+    const first = client.call(dispatch, lifetime.signal);
+    const deadline = new NodeDeadline(10, { read: () => ({ elapsedMs, discontinuity: false }) });
+    expire = () => { elapsedMs = 10; };
+    expect(await client.call(dispatch, lifetime.signal, deadline)).toEqual({ kind: 'unknown' });
+    expect(closed).not.toHaveBeenCalled();
+    expect(payloads).toHaveLength(1);
+    held.resolve({ kind: 'dispatched' });
+    expect(await first).toEqual({ kind: 'dispatched' });
+    expect(await client.call(dispatch, lifetime.signal)).toEqual({ kind: 'dispatched' });
+    expect(execute).toHaveBeenCalledTimes(2);
+  } finally { held.resolve({ kind: 'unknown' }); client.close(); server.close(); lifetime.abort(); }
+});
 
 test.each(['request', 'reply', 'cancel'] as const)('saturated execution %s frames leave lifecycle capacity and priority intact', async (kind) => {
   const f = fixture();
@@ -48,6 +90,7 @@ function fixture(limits = { ...NODE_WORKER_WRITER_LIMITS,
   const connection = new AbortController();
   const written: { text: string; drained: PromiseWithResolvers<void> }[] = [];
   const callbacks: (() => void)[] = [];
+  let elapsedMs = 0;
   const failed = mock(() => {});
   let onWrite: (() => void) | null = null;
   const native = { async write(bytes: Uint8Array) {
@@ -61,6 +104,7 @@ function fixture(limits = { ...NODE_WORKER_WRITER_LIMITS,
   const transport = new NodeWorkerExecutionPort(writer, { session, connectionId: 1, instanceId: 'synthetic-instance', signal: connection.signal,
     validate() { connection.signal.throwIfAborted(); }, closed() { client.close(); } });
   const client = new NodeExecutionClient(transport, { session, signal: connection.signal, validate() {},
+    createClock: () => ({ read: () => ({ elapsedMs, discontinuity: false }) }),
     scheduleTimeout(callback) { callbacks.push(callback); return { cancel() {} }; } });
   const execute = mock(async (_command: NodeExecutionCommand, _signal: AbortSignal): Promise<NodeExecutionResult> => ({ kind: 'dispatched' }));
   const server = new NodeExecutionServer(immediateNodeReplies({ send(payload) { client.receive(payload); return true; }, close() {} }), { execute },
@@ -70,6 +114,7 @@ function fixture(limits = { ...NODE_WORKER_WRITER_LIMITS,
     return frame ? [JSON.parse(frame.payload)] : [];
   });
   return { writer, written, native, transport, client, server, execute, connection, callbacks, frames,
+    advance(milliseconds: number) { elapsedMs += milliseconds; },
     onWrite(callback: () => void) { onWrite = callback; },
     async deliver(index: number) {
       const frame = parseNodeWorkerExecutionText(written[index]!.text);
@@ -107,6 +152,44 @@ test.each(['abort', 'status', 'release'] as const)('reserved %s admission reache
     expect(await control).toEqual(expected);
     expect(f.execute.mock.calls.map(([command]) => command.method)).toEqual(['dispatch', method]);
     expect(f.frames().map((frame) => frame.requestId)).toEqual([1, 3]);
+    expect(f.native.close).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+test('an expired queued execution never enters native submission before its delayed timeout callback', async () => {
+  const f = fixture();
+  try {
+    const hold = f.writer.send('hold', 'data', 'data');
+    const pending = f.client.call(dispatch, new AbortController().signal);
+    f.advance(10_000);
+    await f.deliver(0); await hold;
+    expect(await pending).toEqual({ kind: 'unknown' });
+    expect(f.frames()).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.writer.bufferedBytes).toBe(0);
+    f.callbacks[0]!();
+    const successor = f.client.call(dispatch, new AbortController().signal);
+    await f.deliver(1);
+    expect(await successor).toEqual({ kind: 'dispatched' });
+    expect(f.frames().map((frame) => frame.requestId)).toEqual([2]);
+    expect(f.native.close).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+test('queued execution encodes its remaining budget at native submission and keeps its captured command', async () => {
+  const f = fixture();
+  const command = { ...dispatch, identity: { ...dispatch.identity } };
+  try {
+    const hold = f.writer.send('hold', 'data', 'data');
+    const pending = f.client.call(command, new AbortController().signal);
+    command.identity.operationId = 'synthetic-mutated';
+    f.advance(4321);
+    await f.deliver(0); await hold;
+    expect(f.frames()).toMatchObject([{ timeoutMs: 5679, command: { identity: operation } }]);
+    await f.deliver(1);
+    expect(await pending).toEqual({ kind: 'dispatched' });
+    expect(f.execute.mock.calls[0]![0]).toEqual(dispatch);
+    expect(f.writer.bufferedBytes).toBe(0);
     expect(f.native.close).not.toHaveBeenCalled();
   } finally { await f.close(); }
 });

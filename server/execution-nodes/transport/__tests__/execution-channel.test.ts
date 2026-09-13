@@ -4,6 +4,7 @@ import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeExecutionClient, NodeExecutionRequestBudget, NodeExecutionServer, type NodeExecutionRequestHandler } from '../execution-channel.js';
 import { parseNodeExecutionCallText, serializeNodeExecutionCall, serializeNodeExecutionCancellation, type NodeExecutionCommand } from '../execution-wire.js';
 import { serializeNodeExecutionReply, type NodeExecutionResult } from '../execution-receipt-wire.js';
+import { NodeDeadline } from '../../deadline.js';
 
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
 const identity = { ...session, operationId: 'synthetic-operation' };
@@ -14,17 +15,21 @@ const ticket = { identity, location, runId: 'synthetic-run', projectPath: '/synt
 const closes: (() => void)[] = [];
 afterEach(() => { for (const close of closes.splice(0)) close(); });
 
-function fixture(maxRequests = 1) {
+function fixture(maxRequests = 1, scheduled = () => {}) {
   const physical = new AbortController();
   const timers: { callback(): void; cancelled: boolean }[] = [];
+  const serverTimers: { callback(): void; delayMs: number; cancelled: boolean }[] = [];
+  let elapsedMs = 0;
   let current = true;
   let holdReplies = false;
   const sent: string[] = [];
   const replies: string[] = [];
   const options = { session, signal: physical.signal, maxRequests, reservedControlRequests: 1,
+    createClock: () => ({ read: () => ({ elapsedMs, discontinuity: false }) }),
     validate() { if (!current) throw new Error('Synthetic replaced connection'); },
     scheduleTimeout(callback: () => void) {
       const timer = { callback, cancelled: false }; timers.push(timer);
+      scheduled();
       return { cancel() { timer.cancelled = true; } };
     },
   };
@@ -33,11 +38,28 @@ function fixture(maxRequests = 1) {
   const clientWriter = { send(text: string) { sent.push(text); server.receive(text); return true; }, close: mock(() => {}) };
   const serverWriter = { send(text: string) { replies.push(text); if (!holdReplies) client.receive(text); return true; }, close: mock(() => {}) };
   const client = new NodeExecutionClient(clientWriter, options);
-  const server = new NodeExecutionServer(immediateNodeReplies(serverWriter), { execute }, options);
+  const server = new NodeExecutionServer(immediateNodeReplies(serverWriter), { execute }, { ...options,
+    scheduleTimeout(callback, delayMs) {
+      const timer = { callback, delayMs, cancelled: false }; serverTimers.push(timer);
+      return { cancel() { timer.cancelled = true; } };
+    },
+  });
   closes.push(() => { client.close(); server.close(); });
-  return { client, server, execute, sent, replies, timers, physical, clientWriter, serverWriter,
+  return { client, server, execute, sent, replies, timers, serverTimers, physical, clientWriter, serverWriter,
+    advance(ms: number) { elapsedMs += ms; },
     replace() { current = false; }, holdReplies() { holdReplies = true; } };
 }
+
+test('expiry before writer handoff emits no unmatched cancellation and leaves the channel usable', async () => {
+  let elapsedMs = 0;
+  const f = fixture(1, () => { elapsedMs = 10; });
+  const deadline = new NodeDeadline(10, { read: () => ({ elapsedMs, discontinuity: false }) });
+  expect(await f.client.call(prepare, f.physical.signal, deadline)).toEqual({ kind: 'unknown' });
+  expect(f.sent).toEqual([]);
+  expect(f.serverWriter.close).not.toHaveBeenCalled();
+  expect(await f.client.call(prepare, f.physical.signal)).toEqual({ kind: 'prepared', ticket });
+  expect(f.execute).toHaveBeenCalledTimes(1);
+});
 
 test('execution replies are bounded, correlated and cancel their physical deadline', async () => {
   const f = fixture();
@@ -46,6 +68,70 @@ test('execution replies are bounded, correlated and cancel their physical deadli
   expect(f.timers[0]!.cancelled).toBe(true);
   expect(f.sent).toHaveLength(1);
   expect(parseNodeExecutionCallText(f.sent[0]!)?.command).toEqual(prepare);
+});
+
+test('forwarded execution requests spend one remaining budget across three channel hops', async () => {
+  const hops = [fixture(), fixture(), fixture()];
+  const advance = (ms: number) => { for (const hop of hops) hop.advance(ms); };
+  hops[0]!.execute.mockImplementation(async (command, signal, deadline) => {
+    advance(1_000);
+    return hops[1]!.client.call(command, signal, deadline);
+  });
+  hops[1]!.execute.mockImplementation(async (command, signal, deadline) => {
+    advance(500);
+    return hops[2]!.client.call(command, signal, deadline);
+  });
+  expect(await hops[0]!.client.call(prepare, hops[0]!.physical.signal)).toEqual({ kind: 'prepared', ticket });
+  expect(hops.map((hop) => parseNodeExecutionCallText(hop.sent[0]!)?.timeoutMs)).toEqual([10_000, 8_750, 8_000]);
+  expect(hops.map((hop) => hop.serverTimers[0]!.delayMs)).toEqual([9_750, 8_500, 7_750]);
+  expect(hops.every((hop) => hop.execute.mock.calls.length === 1)).toBe(true);
+});
+
+test('execution expiry returns unknown while a noncooperative handler keeps its slot', async () => {
+  const f = fixture();
+  const held = Promise.withResolvers<NodeExecutionResult>();
+  f.execute.mockImplementationOnce(() => held.promise);
+  try {
+    const pending = f.client.call(prepare, f.physical.signal);
+    const providerSignal = f.execute.mock.calls[0]![1];
+    f.advance(f.serverTimers[0]!.delayMs);
+    f.serverTimers[0]!.callback();
+    expect(await pending).toEqual({ kind: 'unknown' });
+    expect(providerSignal.aborted).toBe(true);
+    expect(await f.client.call(prepare, f.physical.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    expect(await f.client.call({ method: 'status', identity }, f.physical.signal)).toEqual({ kind: 'status', receipt: null });
+    held.resolve({ kind: 'prepared', ticket });
+    await held.promise;
+    expect(await f.client.call(prepare, f.physical.signal)).toEqual({ kind: 'prepared', ticket });
+    expect(f.replies.filter((text) => JSON.parse(text).requestId === 1)).toHaveLength(1);
+  } finally { held.resolve({ kind: 'unknown' }); }
+});
+
+test('late handler success checks execution expiry before a delayed timer fires', async () => {
+  const f = fixture();
+  const held = Promise.withResolvers<NodeExecutionResult>();
+  f.execute.mockImplementationOnce(() => held.promise);
+  const pending = f.client.call(prepare, f.physical.signal);
+  f.advance(f.serverTimers[0]!.delayMs);
+  held.resolve({ kind: 'prepared', ticket });
+  expect(await pending).toEqual({ kind: 'unknown' });
+  const replies = f.replies.length;
+  f.serverTimers[0]!.callback();
+  expect(f.replies).toHaveLength(replies);
+  expect(f.serverTimers[0]!.cancelled).toBe(true);
+});
+
+test('an expired execution caller refuses a held success before its delayed timeout callback', async () => {
+  const f = fixture();
+  f.holdReplies();
+  const pending = f.client.call(prepare, f.physical.signal);
+  await Promise.resolve();
+  f.advance(10_000);
+  f.client.receive(f.replies[0]!);
+  expect(await pending).toEqual({ kind: 'unknown' });
+  f.timers[0]!.callback();
+  expect(f.execute).toHaveBeenCalledTimes(1);
+  expect(f.sent.map((text) => JSON.parse(text).type)).toEqual(['node-execution-request', 'node-execution-cancel']);
 });
 
 test('lost reply becomes unknown once, leaves no retry, and ignores the late result', async () => {
@@ -137,7 +223,7 @@ test('a replaced physical connection cannot dispatch or deliver its pending resu
 
 test.each(['controllerBootId', 'nodeBootId', 'logicalSessionId'] as const)('foreign %s is rejected before handler dispatch', (key) => {
   const f = fixture();
-  f.server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', version: NODE_WIRE_VERSION,
+  f.server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', timeoutMs: 10_000, version: NODE_WIRE_VERSION,
     session: { ...session, [key]: 'synthetic-other' }, requestId: 1, command: prepare }));
   expect(f.execute).not.toHaveBeenCalled();
   expect(f.serverWriter.close).toHaveBeenCalledTimes(1);
@@ -185,7 +271,7 @@ test('cancellation cannot name a request which was never received', () => {
 });
 
 test('invalid frames and unsupported versions close before any mutation', () => {
-  for (const frame of ['{}', 'x'.repeat(256 * 1024 + 1), JSON.stringify({ type: 'node-execution-request',
+  for (const frame of ['{}', 'x'.repeat(256 * 1024 + 1), JSON.stringify({ type: 'node-execution-request', timeoutMs: 10_000,
     version: 99, session, requestId: 1, command: prepare })]) {
     const f = fixture(); f.server.receive(frame);
     expect(f.serverWriter.close).toHaveBeenCalledTimes(1);
@@ -195,7 +281,7 @@ test('invalid frames and unsupported versions close before any mutation', () => 
 
 test('an invalid command with an authenticated envelope rejects only that request', async () => {
   const f = fixture(); f.holdReplies();
-  const frame = { type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: 1,
+  const frame = { type: 'node-execution-request', timeoutMs: 10_000, version: NODE_WIRE_VERSION, session, requestId: 1,
     command: { ...prepare, request: { ...prepare.request, privateUnexpectedField: 'synthetic-private-value' } } } as const;
   f.server.receive(JSON.stringify(frame));
   expect(f.execute).not.toHaveBeenCalled();
@@ -213,7 +299,7 @@ test('an invalid command with an authenticated envelope rejects only that reques
 test('invalid commands do not relax session or version fencing', () => {
   for (const overrides of [{ session: { ...session, logicalSessionId: 'synthetic-foreign' } }, { version: 99 }]) {
     const f = fixture();
-    f.server.receive(JSON.stringify({ type: 'node-execution-request', version: NODE_WIRE_VERSION,
+    f.server.receive(JSON.stringify({ type: 'node-execution-request', timeoutMs: 10_000, version: NODE_WIRE_VERSION,
       session, requestId: 1, command: { method: 'invalid' }, ...overrides }));
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.replies).toHaveLength(0);
@@ -307,7 +393,7 @@ test('shared server capacity survives cancellation and physical replacement unti
   const first = new NodeExecutionServer(immediateNodeReplies(writer), { execute: firstExecute }, { session, signal: firstPhysical.signal, budget, validate() {} });
   const next = new NodeExecutionServer(immediateNodeReplies(writer), { execute: nextExecute }, { session, signal: nextPhysical.signal, budget, validate() {} });
   const call = (server: NodeExecutionServer, requestId: number, command: NodeExecutionCommand) => server.receive(serializeNodeExecutionCall({
-    type: 'node-execution-request', version: 1, session, requestId, command }));
+    type: 'node-execution-request', timeoutMs: 10_000, version: 1, session, requestId, command }));
   try {
     call(first, 1, prepare);
     first.receive(serializeNodeExecutionCancellation({ type: 'node-execution-cancel', version: 1, session, requestId: 1 }));

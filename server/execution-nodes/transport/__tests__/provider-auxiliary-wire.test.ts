@@ -11,7 +11,7 @@ const envelope = { version: 1, session, connectionId: 1, requestId: 1 } as const
 
 test('auxiliary commands and replies survive strict parsing through both worker hops', () => {
   for (const request of [command, { ...command, method: 'provider-single-query', workspaceId: 'synthetic-workspace' }] as const) {
-    const frame = { ...envelope, type: 'node-worker-service-request', command: request } as const;
+    const frame = { ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, command: request } as const;
     expect(parseNodeWorkerServiceText(serializeNodeWorkerService(frame))).toEqual(frame);
   }
   for (const result of [
@@ -39,7 +39,7 @@ test('auxiliary parsing rejects authority overrides, local paths, malformed budg
 
 test('auxiliary identities cannot cross the worker envelope logical session', () => {
   const foreign = { ...identity, logicalSessionId: 'foreign-session' };
-  expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', command: { ...command, identity: foreign } }))).toBeNull();
+  expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, command: { ...command, identity: foreign } }))).toBeNull();
   expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-result',
     result: { kind: 'provider-auxiliary-result', instanceId: command.instanceId, identity: foreign, value: '' } }))).toBeNull();
 });

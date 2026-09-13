@@ -67,7 +67,7 @@ const results: readonly NodeWorkerServiceResult[] = [
 
 test('private service frames round-trip typed installation, body grants, permissions, catalogs and output recovery', () => {
   const frames: NodeWorkerServiceFrame[] = [
-    ...commands.map((command) => ({ ...envelope, type: 'node-worker-service-request' as const, command })),
+    ...commands.map((command) => ({ ...envelope, type: 'node-worker-service-request' as const, timeoutMs: 10_000, command })),
     ...results.map((result) => ({ ...envelope, type: 'node-worker-service-result' as const, result })),
     { ...envelope, type: 'node-worker-service-cancel' },
   ];
@@ -81,7 +81,7 @@ test('service payload authorities cannot name a different session from their enc
   const foreign = { ...envelope, session: { ...session, logicalSessionId: 'foreign' } };
   for (const command of commands.filter((command) => command.method === 'install-output' || command.method === 'retire-output'
     || command.method === 'reserve-body' || command.method === 'permission')) {
-    expect(parseNodeWorkerServiceText(JSON.stringify({ ...foreign, type: 'node-worker-service-request', command }))).toBeNull();
+    expect(parseNodeWorkerServiceText(JSON.stringify({ ...foreign, type: 'node-worker-service-request', timeoutMs: 10_000, command }))).toBeNull();
   }
   for (const result of results.filter((result) => result.kind === 'output-installed' || result.kind === 'output-fenced' || result.kind === 'body-reserved'
     || result.kind === 'permission-result' && result.result.kind === 'permission' && result.result.receipt !== null)) {
@@ -111,9 +111,9 @@ test('service parsing rejects malformed ownership, cursors, bodies and nested pe
     { method: 'provider-commands', instanceId, workspaceId: '' },
     { method: 'provider-auth', instanceId, operation: 'status', workspaceId: 'synthetic-workspace' },
   ];
-  for (const command of invalid) expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', command }))).toBeNull();
+  for (const command of invalid) expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, command }))).toBeNull();
   for (const field of ['connectionId', 'requestId']) for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-    expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', command: commands[0], [field]: value }))).toBeNull();
+    expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, command: commands[0], [field]: value }))).toBeNull();
   }
   expect(parseNodeWorkerServiceText(' '.repeat(MAX_NODE_WORKER_SERVICE_BYTES + 1))).toBeNull();
   expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-cancel', command: commands[0] }))).toBeNull();
@@ -139,4 +139,13 @@ test('output suspension carries a strictly parsed logical session and physical r
     { ...frame, generation: Number.MAX_SAFE_INTEGER + 1 }, { ...frame, version: 2 }, { ...frame, session: {} }]) {
     expect(parseNodeWorkerOutputSuspensionText(JSON.stringify(bad))).toBeNull();
   }
+});
+
+
+test('worker service request budgets are mandatory bounded integer durations', () => {
+  const request = { ...envelope, type: 'node-worker-service-request', command: { method: 'begin-output-recovery' } };
+  for (const timeoutMs of [undefined, null, 0, -1, 0.5, '1000', 300_001, Infinity]) {
+    expect(parseNodeWorkerServiceText(JSON.stringify({ ...request, timeoutMs }))).toBeNull();
+  }
+  expect(parseNodeWorkerServiceText(JSON.stringify({ ...request, timeoutMs: 300_000 }))).not.toBeNull();
 });

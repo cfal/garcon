@@ -8,7 +8,8 @@ import type { Subprocess } from 'bun';
 import type { ControllerTlsTrust } from '../../common/controller-tls.js';
 import type { ExecutionNodePairing } from '../../common/execution-node-config.js';
 import { sameNodeSession, type NodeSessionIdentity } from '../../common/node-operation.js';
-import { NodeControllerHandshake } from '../../server/execution-node/controller-handshake.js';
+import { NodeControllerHandshake, type NodeControllerHandshakeOptions } from '../../server/execution-node/controller-handshake.js';
+import type { LeaseClock } from '../../server/execution-node/lease-clock.js';
 import { createNodeControllerSocket, createNodeBulkSocket } from '../../server/execution-node/controller-socket.js';
 import { NodeOutputRetirements } from '../../server/execution-node/output-retirements.js';
 import { NodeSessionBridge } from '../../server/execution-node/session-bridge.js';
@@ -25,13 +26,14 @@ import { MAX_NODE_WORKER_LIFECYCLE_BYTES, type NodeWorkerContainmentRequest } fr
 import type { NodeWorkerBulkFrame } from '../../server/execution-node/worker/bulk-protocol.js';
 import type { NodeInstanceConfiguration } from '../../server/execution-node/worker/configuration.js';
 import { NodeChannelAuthentication, type AuthenticatedNodeChannel } from '../../server/execution-nodes/channel-authentication.js';
-import { ControllerNodeHandshake } from '../../server/execution-nodes/controller-handshake.js';
+import { ControllerNodeHandshake, type ControllerNodeHandshakeOptions } from '../../server/execution-nodes/controller-handshake.js';
 import { NodePairingStore } from '../../server/execution-nodes/pairing-store.js';
 import { NodeSessionClient } from '../../server/execution-nodes/session-client.js';
 import { NodeEnrollmentTransport } from '../../server/execution-nodes/trust.js';
 import { clientNodeSocketPort, serverNodeSocketPort, type NodeClientSocket } from '../../server/execution-nodes/transport/bun-sockets.js';
 import { NodeSocketWriter } from '../../server/execution-nodes/transport/socket-writer.js';
 import { NodeBulkSessionChannel, type NodeBulkSessionBinding } from '../../server/execution-nodes/transport/bulk-session-channel.js';
+import type { NodeSessionAccepted } from '../../server/execution-nodes/transport/session-wire.js';
 import { DomainError } from '../../server/lib/domain-error.js';
 import type { TestCertificate } from './tls-certificates.js';
 
@@ -59,6 +61,11 @@ export interface ControllerFixtureConnection {
 }
 
 export interface NodeSessionFixtureOptions {
+  readonly clock?: LeaseClock;
+  readonly controllerClock?: LeaseClock;
+  readonly scheduleControllerTimeout?: ControllerNodeHandshakeOptions['scheduleTimeout'];
+  readonly scheduleHeartbeat?: NodeControllerHandshakeOptions['scheduleHeartbeat'];
+  readonly beforeWorkerConfiguration?: () => Promise<void>;
   readonly sessionCommand?: [string, ...string[]];
   readonly replay?: NodeReplayOptions;
   readonly maxOperations?: number;
@@ -99,6 +106,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   };
   let output: { session: NodeSessionIdentity; retirements: NodeOutputRetirements; bridge: NodeSessionBridge | null } | null = null;
   const coordinator = new NodeSessionCoordinator({
+    supervisor: { clock: options.clock },
     configuration: { role: 'session', nodeId, storageDirectory: storage, replay: options.replay ?? DEFAULT_NODE_REPLAY,
       instances: [{ id: 'synthetic-instance', agentId: options.instance?.agentId ?? 'direct-anthropic-compatible', label: 'Synthetic', homeDirectory: path.join(storage, 'native'),
         environment: options.instance?.environment ?? {}, workspaceIds: ['synthetic-workspace'], maxOperations: options.maxOperations ?? 1 }],
@@ -117,10 +125,18 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     createPeer(host, peerOptions) {
       const child = processes.get(host.process);
       if (!child) throw new Error('Synthetic worker missing');
-      return new NodeWorkerPeer(child, { ...peerOptions, containmentRequested(request) {
+      const peer = new NodeWorkerPeer(child, { ...peerOptions, clock: options.clock, containmentRequested(request) {
         containmentRequests.push(request);
         peerOptions.containmentRequested?.(request);
       } });
+      if (options.beforeWorkerConfiguration) {
+        const configure = peer.configure.bind(peer);
+        peer.configure = async (...args) => {
+          await options.beforeWorkerConfiguration!();
+          return configure(...args);
+        };
+      }
+      return peer;
     }, received(frame, text) {
       if (!output) throw new Error('Synthetic worker has no logical output owner');
       if (outputPressure && frame.type === 'node-worker-output-delivery'
@@ -138,6 +154,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     authorize(principal) { if (!approvedNodeIds.has(principal.nodeId)) throw new DomainError('NODE_REMOVED', 'Synthetic node unavailable', 403); } });
   let requests = 0; let upgrades = 0; let bulkUpgrades = 0; let controllerBootId = 'synthetic-controller-boot';
   const accepted: ControllerNodeHandshake[] = [];
+  const sessionAdmissions: NodeSessionAccepted[] = [];
   const clients: NodeClientSocket[] = [];
   const server = Bun.serve<ControllerSocketData>({ hostname: '0.0.0.0', port: 0, tls: { cert: certificate.cert, key: certificate.key },
     fetch(request, server) {
@@ -174,9 +191,11 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
           return;
         }
         const handshake = socket.data.handshake = new ControllerNodeHandshake(writer, { controllerId: pairings.controllerId, controllerBootId,
-          nodeId: authority.principal.nodeId, signal: physical.signal,
+          nodeId: authority.principal.nodeId, signal: physical.signal, clock: options.controllerClock ?? options.clock,
+          scheduleTimeout: options.scheduleControllerTimeout,
           validate() { physical.signal.throwIfAborted(); authority.validate(); },
           accepted(connection) {
+            sessionAdmissions.push(connection);
             const received = new Set<(frame: NodeWorkerApplicationFrame, text: string) => void>();
             const validate = () => { physical.signal.throwIfAborted(); authority.validate(); };
             const client = socket.data.client = new NodeSessionClient(writer, { session: connection.session,
@@ -236,6 +255,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
         send: (text) => port.send(text), terminate: () => port.terminate(),
       }, { ...socketLimits, signal: physical.signal });
       handshake = new NodeControllerHandshake(writer, { controllerId: pairing.controllerId, nodeId, signal: physical.signal, supervisor: coordinator.supervisor,
+        clock: options.clock, scheduleHeartbeat: options.scheduleHeartbeat,
         connect: (boot, signal) => connections.connect(boot, signal), validate() { physical.signal.throwIfAborted(); },
         connected(connection) {
           if (!output || !sameNodeSession(output.session, connection.lease.session)) {
@@ -289,7 +309,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     void ready.promise.then(() => clearTimeout(deadline), () => clearTimeout(deadline));
     return { ready: ready.promise, closed: closed.promise, socket, stop() { physical.abort(); socket.terminate(); } };
   };
-  return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, workerFrames, controllerFrames, nodeFrames, containmentRequests,
+  return { storage, pairing, pairings, connect, coordinator, marker, processes, accepted, sessionAdmissions, workerFrames, controllerFrames, nodeFrames, containmentRequests,
     async pairAnotherNode() {
       const id = `synthetic-${randomUUID()}`;
       const enrollment = await pairings.issueEnrollment(id);

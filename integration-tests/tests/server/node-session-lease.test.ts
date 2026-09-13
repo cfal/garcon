@@ -35,6 +35,7 @@ test('WSS lease renewals survive six-second round trips and stale replies cannot
   });
   const session = supervisor.openSession('synthetic-lease-controller');
   const connection = supervisor.attach(session);
+  supervisor.completeStartup(connection.session);
   supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
   const monitor = new NodeSessionLeaseMonitor({ authoritySignal: connection.authoritySignal, supervisor, schedulePoll,
     failed() { throw new Error('Synthetic lease clock failed'); } });

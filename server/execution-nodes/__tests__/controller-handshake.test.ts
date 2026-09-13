@@ -16,13 +16,14 @@ function fixture() {
   const physical = new AbortController();
   const worker = Promise.withResolvers<readonly NodeProviderManifest[]>();
   const nodeFrames: string[] = []; const controllerFrames: string[] = [];
-  const deadlines: { fire(): void; cancel: ReturnType<typeof mock> }[] = [];
+  const deadlines: { fire(): void; delayMs: number; cancel: ReturnType<typeof mock> }[] = [];
   const heartbeats: (() => void)[] = [];
-  const scheduleTimeout = (fire: () => void) => {
-    const timer = { fire, cancel: mock(() => {}) }; deadlines.push(timer); return timer;
+  const scheduleTimeout = (fire: () => void, delayMs: number) => {
+    const timer = { fire, delayMs, cancel: mock(() => {}) }; deadlines.push(timer); return timer;
   };
   let elapsedMs = 0;
-  const supervisor = new NodeSupervisor({ cleanup: async () => {}, clock: { read: () => ({ elapsedMs, discontinuity: false }) } });
+  const clock = { read: () => ({ elapsedMs, discontinuity: false }) };
+  const supervisor = new NodeSupervisor({ cleanup: async () => {}, clock });
   const connect = mock<NodeControllerHandshakeOptions['connect']>(async (controllerBootId, signal) => {
     signal.throwIfAborted();
     const session = supervisor.openSession(controllerBootId);
@@ -44,10 +45,10 @@ function fixture() {
   const identity = { nodeId: 'synthetic-node', controllerId: 'synthetic-controller-id' };
   const controllerValidate = mock(() => physical.signal.throwIfAborted());
   const node = new NodeControllerHandshake(nodeWriter, { ...identity, signal: physical.signal, supervisor, connect, connected, ready: nodeReady,
-    validate() { physical.signal.throwIfAborted(); }, disconnect, disconnected: nodeDisconnected, scheduleTimeout,
+    validate() { physical.signal.throwIfAborted(); }, disconnect, disconnected: nodeDisconnected, scheduleTimeout, clock,
     scheduleHeartbeat(callback) { heartbeats.push(callback); return { cancel() {} }; } });
   const controller = new ControllerNodeHandshake(controllerWriter, { ...identity, controllerBootId: 'synthetic-controller-boot', signal: physical.signal,
-    validate: controllerValidate, accepted, disconnected: controllerDisconnected, scheduleTimeout });
+    validate: controllerValidate, accepted, disconnected: controllerDisconnected, scheduleTimeout, clock });
   const flush = () => {
     for (let round = 0; round < 16; round++) {
       if (!nodeFrames.length && !controllerFrames.length) return;
@@ -76,8 +77,13 @@ test('establishes exact boot authority and renews while startup is pending witho
   f.heartbeats.shift()!(); f.flush();
   f.setTime(16_000);
   f.supervisor.poll();
-  // Startup recovery retains its independent fifteen-second deadline despite valid lease renewal.
-  expect(connection.lease.authoritySignal.aborted).toBe(true);
+  expect(connection.lease.authoritySignal.aborted).toBe(false);
+  expect(f.deadlines.map((timer) => timer.delayMs)).toEqual([10_000, 10_000, 60_000]);
+  f.deadlines[0]!.fire(); f.deadlines[1]!.fire();
+  expect(f.nodeDisconnected).not.toHaveBeenCalled();
+  expect(f.controllerDisconnected).not.toHaveBeenCalled();
+  f.worker.resolve([manifest()]); await tick(); f.flush();
+  expect((await f.controller.ready).manifests).toEqual([manifest()]);
 });
 
 test('worker readiness advertises only captured manifests and leaves recovery admission closed', async () => {
@@ -90,6 +96,18 @@ test('worker readiness advertises only captured manifests and leaves recovery ad
   expect(f.nodeDisconnected).not.toHaveBeenCalled();
   expect(f.controllerDisconnected).not.toHaveBeenCalled();
   expect(f.deadlines.every((timer) => timer.cancel.mock.calls.length === 1)).toBe(true);
+});
+
+test.each(['timer', 'clock'] as const)('accepted worker readiness timeout has its own %s failure reason', async (expiry) => {
+  const f = fixture(); await f.begin();
+  if (expiry === 'timer') f.deadlines[2]!.fire();
+  else {
+    f.setTime(60_000);
+    f.worker.resolve([manifest()]); await tick(); f.flush();
+  }
+  await expect(f.controller.ready).rejects.toMatchObject({ code: 'NODE_READINESS_TIMEOUT' });
+  expect(f.controllerDisconnected.mock.calls[0]![0]).toMatchObject({ code: 'NODE_READINESS_TIMEOUT' });
+  expect(f.controllerDisconnected).toHaveBeenCalledTimes(1);
 });
 
 test.each(['NODE_SESSION_EXPIRED', 'NODE_REMOVED', 'NODE_UNAUTHORIZED'] as const)('preserves %s as the reason an established controller channel closes', async (code) => {
@@ -167,14 +185,20 @@ test('stale physical closure cannot disconnect a replacement lease or emit late 
   expect(f.nodeFrames).toHaveLength(0);
 });
 
-test('startup timeout closes physical delivery once and never advertises late manifests', async () => {
-  const f = fixture(); await f.begin();
+test('initial handshake timeout closes physical delivery once and never advertises a late connection', async () => {
+  const f = fixture();
+  const pending = Promise.withResolvers<NodeHostedConnection>();
+  f.connect.mockImplementationOnce(() => pending.promise);
+  await f.begin();
   f.deadlines[0]!.fire();
+  const lease = f.supervisor.attach(f.supervisor.openSession('synthetic-controller-boot'));
+  pending.resolve({ connectionId: 1, lease, ready: f.worker.promise });
   f.worker.resolve([manifest()]); await tick();
   expect(f.nodeDisconnected.mock.calls).toHaveLength(1);
   expect(f.nodeDisconnected.mock.calls[0]![0]).toMatchObject({ code: 'NODE_HANDSHAKE_TIMEOUT' });
   expect(f.nodeReady).not.toHaveBeenCalled();
   expect(f.nodeFrames).toHaveLength(0);
+  expect(lease.signal.aborted).toBe(true);
 });
 
 test('controller rejects a stale boot before accepting a session or answering its lease challenge', async () => {
@@ -182,7 +206,7 @@ test('controller rejects a stale boot before accepting a session or answering it
   f.controllerFrames.length = 0;
   const session = f.supervisor.openSession('synthetic-stale-controller-boot');
   f.controller.receive(serializeNodeSessionFrame({ type: 'node-session-accepted', version: 1, controllerId: 'synthetic-controller-id',
-    nodeId: 'synthetic-node', session, connectionId: 1 }));
+    nodeId: 'synthetic-node', session, connectionId: 1, readinessTimeoutMs: 60_000 }));
   await expect(f.controller.ready).rejects.toMatchObject({ code: 'NODE_PROTOCOL' });
   expect(f.accepted).not.toHaveBeenCalled();
   expect(f.controllerFrames).toHaveLength(0);

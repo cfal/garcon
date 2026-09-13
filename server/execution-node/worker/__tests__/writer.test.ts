@@ -1,6 +1,61 @@
 import { expect, mock, test } from 'bun:test';
 import { NODE_WORKER_WRITER_LIMITS } from '../limits.js';
 import { NodeWorkerWriter, type NodeWorkerWritePort, type NodeWorkerWriterOptions } from '../writer.js';
+import { DeferredNodeFrameText } from '../frame-text.js';
+
+test('deferred frames charge their snapshot and encoded bytes through native drainage', async () => {
+  const f = fixture({ maxQueuedBytes: 64 });
+  const prepare = mock(() => 'x');
+  try {
+    const held = f.writer.send('hold', 'data', 'data');
+    const frame = new DeferredNodeFrameText('abcdef', prepare);
+    const pending = f.writer.submit(frame, 'data', { signal: f.authority.signal, validate() {} }, 'data');
+    expect(f.writer.bufferedBytes).toBe(8 + 12 + 6 + 4);
+    expect(prepare).not.toHaveBeenCalled();
+    f.written[0]!.finished.resolve(); await held;
+    expect(prepare).toHaveBeenCalledWith('abcdef');
+    expect(f.written[1]!.text).toBe('x');
+    expect(f.writer.bufferedBytes).toBe(22);
+    f.written[1]!.finished.resolve(); await pending.drained;
+    expect(f.writer.bufferedBytes).toBe(0);
+    expect(f.written[1]!.bytes.every((byte) => byte === 0)).toBe(true);
+  } finally { f.writer.close(); }
+});
+
+test('cancelling a queued deferred frame drops its snapshot without preparing or submitting it', async () => {
+  const f = fixture({ maxQueuedBytes: 64 });
+  const cancellation = new AbortController();
+  const prepare = mock((source: string) => source);
+  try {
+    const held = f.writer.send('hold', 'data', 'data');
+    const frame = new DeferredNodeFrameText('abcdef', prepare);
+    const pending = f.writer.submit(frame, 'data', { signal: cancellation.signal, validate() {} }, 'data');
+    const outcome = pending.drained.catch((error: unknown) => error);
+    cancellation.abort();
+    expect(await outcome).toBe(cancellation.signal.reason);
+    expect(f.writer.bufferedBytes).toBe(8);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(() => frame.materialize()).toThrow('NODE_WORKER_PROTOCOL');
+    f.written[0]!.finished.resolve(); await held;
+    expect(f.written.map(({ text }) => text)).toEqual(['hold']);
+  } finally { f.writer.close(); }
+});
+
+test('deferred encoding cannot exceed its byte reservation or poison the shared writer', async () => {
+  const f = fixture();
+  try {
+    const invalid = new DeferredNodeFrameText('x', () => 'larger');
+    const pending = f.writer.submit(invalid, 'data', { signal: f.authority.signal, validate() {} }, 'data');
+    await expect(pending.drained).rejects.toMatchObject({ code: 'NODE_WORKER_PROTOCOL' });
+    expect(pending.submitted).toBe(false);
+    expect(f.written).toEqual([]);
+    expect(f.writer.bufferedBytes).toBe(0);
+    const next = f.writer.send('next', 'data', 'data');
+    f.written[0]!.finished.resolve(); await next;
+    expect(f.written[0]!.text).toBe('next');
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.writer.close(); }
+});
 
 function fixture(limits: Partial<Pick<NodeWorkerWriterOptions, 'maxQueuedBytes' | 'maxQueuedFrames' | 'reservedApplicationFrames' | 'reservedApplicationBytes'>> = {}) {
   const authority = new AbortController();

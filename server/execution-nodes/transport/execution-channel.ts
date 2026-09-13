@@ -6,8 +6,19 @@ import {
   isNodeExecutionReconciliation, type NodeExecutionCall, type NodeExecutionCommand,
 } from './execution-wire.js';
 import { parseNodeExecutionReplyText, serializeNodeExecutionReply, type NodeExecutionResult } from './execution-receipt-wire.js';
-import type { NodeSocketWriter } from './socket-writer.js';
 import type { NodeReplyAuthority, NodeReplyPort } from './reply-port.js';
+import { isNodeRequestTimeout, NodeDeadline } from '../deadline.js';
+import type { LeaseClock } from '../../execution-node/lease-clock.js';
+
+export interface NodeExecutionWriteAuthority {
+  readonly deadline: NodeDeadline;
+  expired(): void;
+}
+
+export interface NodeExecutionChannelWriter {
+  send(text: string, authority?: NodeExecutionWriteAuthority): boolean;
+  close(): void;
+}
 
 export interface NodeExecutionChannelOptions {
   readonly session: NodeSessionIdentity;
@@ -16,12 +27,15 @@ export interface NodeExecutionChannelOptions {
   readonly reservedControlRequests?: number;
   readonly budget?: NodeExecutionRequestBudget;
   readonly requestTimeoutMs?: number;
+  readonly createClock?: () => LeaseClock;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   /** Validates the exact physical connection without reopening admission during recovery. */
   validate(): void;
 }
 
 interface PendingCall {
+  readonly deadline: NodeDeadline;
+  readonly cancel: () => void;
   readonly result: PromiseWithResolvers<NodeExecutionResult>;
   readonly accepts: (result: NodeExecutionResult) => boolean;
   readonly detach: () => void;
@@ -65,7 +79,7 @@ export class NodeExecutionClient {
   #sent = 0;
   #closed = false;
 
-  constructor(private readonly writer: Pick<NodeSocketWriter, 'send' | 'close'>, private readonly options: NodeExecutionChannelOptions) {
+  constructor(private readonly writer: NodeExecutionChannelWriter, private readonly options: NodeExecutionChannelOptions) {
     this.#session = sessionIdentity(options.session);
     this.#limits = channelLimits(options);
     const close = () => this.close();
@@ -74,8 +88,9 @@ export class NodeExecutionClient {
     if (options.signal.aborted) this.close();
   }
 
-  async call(command: NodeExecutionCommand, signal: AbortSignal): Promise<NodeExecutionResult> {
+  async call(command: NodeExecutionCommand, signal: AbortSignal, deadline = new NodeDeadline(this.#limits.timeoutMs, this.options.createClock?.())): Promise<NodeExecutionResult> {
     signal.throwIfAborted();
+    if (deadline.remainingMs === 0) return { kind: 'unknown' };
     if (!this.#validate()) return { kind: 'rejected', code: 'NODE_UNAVAILABLE' };
     const priority = isNodeExecutionReconciliation(command);
     if (atCapacity(this.#pending.size, this.#ordinary, priority, this.#limits)) return { kind: 'rejected', code: 'NODE_CAPACITY' };
@@ -83,32 +98,38 @@ export class NodeExecutionClient {
     const requestId = this.#sent + 1;
     let serialized: string;
     try {
+      const timeoutMs = deadline.remainingMs;
+      if (timeoutMs === 0) return { kind: 'unknown' };
       serialized = serializeNodeExecutionCall({ type: 'node-execution-request', version: NODE_WIRE_VERSION,
-        session: this.#session, requestId, command });
+        session: this.#session, requestId, timeoutMs, command });
     } catch { return { kind: 'rejected', code: 'VALIDATION_FAILED' }; }
     const release = this.options.budget?.acquire(command) ?? null;
     if (this.options.budget && !release) return { kind: 'rejected', code: 'NODE_CAPACITY' };
+    let handedOff = false;
     const cancel = () => {
       if (!this.#pending.has(requestId)) return;
       this.#settle(requestId, { kind: 'unknown' });
-      if (!this.#validate()) return;
+      if (!handedOff || !this.#validate()) return;
       try { this.writer.send(serializeNodeExecutionCancellation({ type: 'node-execution-cancel', version: NODE_WIRE_VERSION,
         session: this.#session, requestId })); }
       catch { this.close(); }
     };
-    const pending: PendingCall = { result: Promise.withResolvers<NodeExecutionResult>(), accepts: expectedResult(command), priority, release,
+    const pending: PendingCall = { deadline, cancel, result: Promise.withResolvers<NodeExecutionResult>(), accepts: expectedResult(command), priority, release,
       timer: null, detach: () => signal.removeEventListener('abort', cancel) };
     this.#pending.set(requestId, pending);
     if (!priority) this.#ordinary += 1;
     this.#sent = requestId;
     signal.addEventListener('abort', cancel, { once: true });
-    pending.timer = (this.options.scheduleTimeout ?? scheduleTimeout)(cancel, this.#limits.timeoutMs);
+    pending.timer = (this.options.scheduleTimeout ?? scheduleTimeout)(cancel, deadline.remainingMs);
     try {
-      if (!this.writer.send(serialized)) {
+      if (deadline.remainingMs === 0 || signal.aborted) cancel();
+      if (!this.#pending.has(requestId)) return pending.result.promise;
+      handedOff = true;
+      if (!this.writer.send(serialized, { deadline, expired: cancel })) {
         this.#settle(requestId, { kind: 'rejected', code: 'NODE_CAPACITY' });
       }
     }
-    catch { this.close(); }
+    catch { if (this.#pending.has(requestId)) this.close(); }
     return pending.result.promise;
   }
 
@@ -118,6 +139,7 @@ export class NodeExecutionClient {
     if (!reply || !sameNodeSession(reply.session, this.#session) || reply.requestId > this.#sent) { this.close(); return; }
     const pending = this.#pending.get(reply.requestId);
     if (!pending) return;
+    if (pending.deadline.remainingMs === 0) { pending.cancel(); return; }
     if (!pending.accepts(reply.result)) { this.close(); return; }
     this.#settle(reply.requestId, reply.result);
   }
@@ -150,7 +172,7 @@ export class NodeExecutionClient {
 }
 
 export interface NodeExecutionRequestHandler {
-  execute(command: NodeExecutionCommand, signal: AbortSignal): Promise<NodeExecutionResult>;
+  execute(command: NodeExecutionCommand, signal: AbortSignal, deadline: NodeDeadline): Promise<NodeExecutionResult>;
 }
 
 /** Cancellation keeps a handler's slot until settlement; reconciliation has reserved capacity. */
@@ -220,12 +242,25 @@ export class NodeExecutionServer {
   }
 
   async #execute(call: NodeExecutionCall, cancellation: AbortController, priority: boolean, release: (() => void) | null): Promise<void> {
+    const deadline = NodeDeadline.receive(call.timeoutMs, this.options.createClock?.());
     const signal = AbortSignal.any([cancellation.signal, this.#closing.signal, this.options.signal]);
+    let completed = false;
+    const expire = () => {
+      if (completed || signal.aborted) return;
+      this.#reply(call.requestId, { kind: 'unknown' });
+      cancellation.abort(new DOMException('Node request timed out', 'TimeoutError'));
+    };
+    const timer = (this.options.scheduleTimeout ?? scheduleTimeout)(expire, deadline.remainingMs);
     try {
-      const result = await this.handler.execute(call.command, signal);
+      if (deadline.remainingMs === 0) expire();
+      signal.throwIfAborted();
+      const result = await this.handler.execute(call.command, signal, deadline);
+      if (deadline.remainingMs === 0) expire();
       if (!signal.aborted) this.#reply(call.requestId, result, signal);
     } catch { if (!signal.aborted) this.#reply(call.requestId, { kind: 'unknown' }, signal); }
     finally {
+      completed = true;
+      timer.cancel();
       this.#pending.delete(call.requestId);
       if (!priority) this.#ordinary -= 1;
       release?.();
@@ -259,7 +294,7 @@ function channelLimits(options: Pick<NodeExecutionChannelOptions, 'maxRequests' 
   const ordinary = options.maxRequests ?? 32;
   const reserved = options.reservedControlRequests ?? 8;
   const timeoutMs = options.requestTimeoutMs ?? 10_000;
-  if (![ordinary, reserved, timeoutMs, ordinary + reserved].every((n) => Number.isSafeInteger(n) && n > 0)) throw new TypeError('Invalid execution channel limits');
+  if (!isNodeRequestTimeout(timeoutMs) || ![ordinary, reserved, ordinary + reserved].every((n) => Number.isSafeInteger(n) && n > 0)) throw new TypeError('Invalid execution channel limits');
   return { ordinary, total: ordinary + reserved, timeoutMs };
 }
 

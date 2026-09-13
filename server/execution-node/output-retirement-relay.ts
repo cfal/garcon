@@ -4,6 +4,7 @@ import type { NodeWorkerPeer } from './worker/peer.js';
 import { NodeWorkerRetirementRelay } from './worker/retirement-relay.js';
 import { confirmNodeOutputRetirement } from './worker/output-retirement-client.js';
 import type { NodeWorkerServiceClient } from './worker/service-channel.js';
+import type { NodeDeadline } from '../execution-nodes/deadline.js';
 
 export interface NodeOutputRetirementRelayOptions extends NodeOutputRetirementsOptions {
   readonly peer: Pick<NodeWorkerPeer, 'forward' | 'waitForRelease'> & {
@@ -38,10 +39,10 @@ export class NodeOutputRetirementRelay {
     this.#relay.enqueue(this.#retirements.record(frame));
   }
 
-  async confirm(connectionId: number, signal: AbortSignal): Promise<void> {
+  async confirm(connectionId: number, signal: AbortSignal, deadline?: NodeDeadline): Promise<void> {
     await this.#relay.flush();
     await this.#retirements.replay((frame, active) =>
-      confirmNodeOutputRetirement(this.#peer.service(connectionId), frame, active), signal);
+      confirmNodeOutputRetirement(this.#peer.service(connectionId), frame, active, deadline), signal);
   }
 
   close(): void { this.#detach(); this.#relay.close(); this.#retirements.close(); }

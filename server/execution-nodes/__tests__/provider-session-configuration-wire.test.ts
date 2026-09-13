@@ -19,7 +19,7 @@ test('configuration commands and body-free receipts round-trip through the worke
   for (const value of [command, { ...command, request: { ...request, permissionModeIntent: 'preserve' } },
     { ...command, stream: null }, ...['commit', 'status', 'cancel'].map(operation => ({ method: command.method, instanceId, operation, identity }))]) {
     expect(parseNodeSessionConfigurationCommand(value)).toEqual(value);
-    expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', command: value })))
+    expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, command: value })))
       .toMatchObject({ command: value });
   }
   const preparations = [{ kind: 'prepared', identity }, { kind: 'unsupported' }, { kind: 'not-required' }, { kind: 'rejected', reason: 'target-conflict' }];
@@ -44,10 +44,10 @@ test('rejects foreign authority, malformed identities, credentials and oversized
     { ...command, request: { ...request, next: { ...snapshot, endpoint: { credential: 'synthetic-secret' } } } },
     { ...command, request: { ...request, next: { ...snapshot, settings: { ...snapshot.settings, values: { huge: 'x'.repeat(MAX_NODE_SESSION_CONFIGURATION_BYTES) } } } } },
   ]) expect(parseNodeSessionConfigurationCommand(invalid)).toBeNull();
-  expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request',
+  expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000,
     command: { ...command, stream: { ...stream, logicalSessionId: 'foreign' } } }))).toBeNull();
   for (const operation of ['commit', 'cancel', 'status']) {
-    expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', command: {
+    expect(parseNodeWorkerServiceText(JSON.stringify({ ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, command: {
       method: command.method, instanceId, operation, identity: { ...identity, nodeBootId: 'foreign' },
     } }))).toBeNull();
   }

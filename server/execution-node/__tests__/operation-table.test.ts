@@ -18,6 +18,7 @@ function fixture(facets: Partial<Pick<ConstructorParameters<typeof LocalProvider
   supervisors.push(supervisor);
   const identity = supervisor.openSession('synthetic-controller');
   const connection = supervisor.attach(identity);
+  supervisor.completeStartup(connection.session);
   supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
   const caller = new AbortController();
   const nativeHandle = Object.freeze({});
@@ -407,6 +408,7 @@ test('replacing a physical connection cancels its pending validation without lau
   await entered.promise;
   const replacement = f.supervisor.attach(f.identity);
   expect(await pending).toMatchObject({ code: 'NODE_SESSION_EXPIRED' });
+  f.supervisor.completeStartup(replacement.session);
   f.supervisor.completeRecovery(replacement, f.supervisor.beginRecovery(replacement));
   await expect(f.table.prepare(replacement, f.location, f.request, f.caller.signal)).rejects.toMatchObject({ code: 'NODE_CAPACITY' });
   release.resolve();
@@ -673,6 +675,7 @@ test.each(['steer', 'goal'] as const)('physical replacement preserves committed 
   release.resolve();
   await delivered;
   expect(f.table.status(replacement, f.ticket.identity)).toMatchObject({ value: { control: { outcome: { kind: 'accepted' } } } });
+  f.supervisor.completeStartup(replacement.session);
   f.supervisor.completeRecovery(replacement, f.supervisor.beginRecovery(replacement));
   await expect(kind === 'steer'
     ? f.table.commitSteer(replacement, f.ticket.identity, control.controlId, f.steerInput)

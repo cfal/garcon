@@ -8,11 +8,12 @@ export const MAX_NODE_SESSION_CONTROL_BYTES = 4096;
 export const MAX_NODE_SESSION_READY_BYTES = 2 * 1024 * 1024;
 export const MAX_NODE_SESSION_MANIFESTS = 64;
 export const NODE_HANDSHAKE_TIMEOUT_MS = 10_000;
-export const NODE_SESSION_REJECTION_CODES = ['NODE_INCOMPATIBLE', 'NODE_UNAVAILABLE', 'NODE_SESSION_EXPIRED'] as const;
+export const MAX_NODE_READINESS_TIMEOUT_MS = 60_000;
+export const NODE_SESSION_REJECTION_CODES = ['NODE_INCOMPATIBLE', 'NODE_UNAVAILABLE', 'NODE_SESSION_EXPIRED', 'NODE_READINESS_TIMEOUT'] as const;
 export type NodeSessionRejectionCode = typeof NODE_SESSION_REJECTION_CODES[number];
 
 export class NodeSessionHandshakeError extends Error {
-  constructor(readonly code: NodeSessionRejectionCode | 'NODE_PROTOCOL' | 'NODE_HANDSHAKE_TIMEOUT' | 'NODE_UNAUTHORIZED' | 'NODE_REMOVED') {
+  constructor(readonly code: NodeSessionRejectionCode | 'NODE_PROTOCOL' | 'NODE_HANDSHAKE_TIMEOUT' | 'NODE_READINESS_TIMEOUT' | 'NODE_UNAUTHORIZED' | 'NODE_REMOVED') {
     super('Execution node connection could not be established');
     this.name = 'NodeSessionHandshakeError';
   }
@@ -34,6 +35,7 @@ export interface NodeSessionAccepted {
   readonly nodeId: string;
   readonly session: NodeSessionIdentity;
   readonly connectionId: number;
+  readonly readinessTimeoutMs: number;
 }
 
 export interface NodeSessionReady {
@@ -78,11 +80,13 @@ export function parseNodeSessionFrameText(text: string): NodeSessionFrame | null
   }
   if (value.version !== NODE_WIRE_VERSION) return null;
   if (value.type === 'node-session-accepted') {
-    if (!exactNodeFields(value, ['type', 'version', 'controllerId', 'nodeId', 'session', 'connectionId'])
-      || !isExecutionIdentity(value.controllerId) || !isExecutionIdentity(value.nodeId) || !connectionId(value.connectionId)) return null;
+    if (!exactNodeFields(value, ['type', 'version', 'controllerId', 'nodeId', 'session', 'connectionId', 'readinessTimeoutMs'])
+      || !isExecutionIdentity(value.controllerId) || !isExecutionIdentity(value.nodeId) || !connectionId(value.connectionId)
+      || !Number.isSafeInteger(value.readinessTimeoutMs) || Number(value.readinessTimeoutMs) < 1
+      || Number(value.readinessTimeoutMs) > MAX_NODE_READINESS_TIMEOUT_MS) return null;
     const session = parseNodeSessionIdentity(value.session);
     return session ? { type: value.type, version: NODE_WIRE_VERSION, controllerId: value.controllerId,
-      nodeId: value.nodeId, session, connectionId: value.connectionId } : null;
+      nodeId: value.nodeId, session, connectionId: value.connectionId, readinessTimeoutMs: Number(value.readinessTimeoutMs) } : null;
   }
   if (value.type === 'node-session-rejected' && exactNodeFields(value, ['type', 'version', 'code'])) {
     const code = NODE_SESSION_REJECTION_CODES.find((code) => code === value.code);

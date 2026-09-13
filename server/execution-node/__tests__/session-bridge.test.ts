@@ -29,6 +29,7 @@ function fixture() {
   const supervisor = new NodeSupervisor({ clock: { read: () => ({ elapsedMs: 0, discontinuity: false }) }, async cleanup() {} });
   const session = supervisor.openSession('synthetic-controller');
   const initial = supervisor.attach(session);
+  supervisor.completeStartup(session);
   const instanceIds = new Set(['synthetic-instance', 'synthetic-second']);
   const retirements = new NodeOutputRetirements({ session, instanceIds, signal: initial.authoritySignal });
   const service = { call: mock<NodeWorkerServiceClient['call']>(async (command) => {
@@ -327,7 +328,7 @@ test('capacity rejection replies consume the same outbox budget without owning h
   const permission = { stream: f.frame().stream, handle: 'synthetic-handle', runId: 'synthetic-run',
     permissionOccurrenceId: '00000000-0000-4000-8000-000000000001' };
   const command = { method: 'permission', command: { method: 'permission-status', permission } } as const;
-  const receive = (requestId: number) => link.bridge.receive(JSON.stringify({ type: 'node-worker-service-request', version: 1,
+  const receive = (requestId: number) => link.bridge.receive(JSON.stringify({ type: 'node-worker-service-request', timeoutMs: 10_000, version: 1,
     session: f.session, connectionId: 1, requestId, command }));
   try {
     link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);
@@ -370,7 +371,7 @@ test('execution admission rejections share the reply budget across instance chan
   f.execution.call.mockImplementation(() => held.promise);
   const receive = (requestId: number, instanceId = 'synthetic-instance') => link.bridge.receive(JSON.stringify({
     type: 'node-worker-execution', version: 1, session: f.session, connectionId: 1, instanceId,
-    payload: JSON.stringify({ type: 'node-execution-request', version: 1, session: f.session, requestId, command: f.dispatch }),
+    payload: JSON.stringify({ type: 'node-execution-request', timeoutMs: 10_000, version: 1, session: f.session, requestId, command: f.dispatch }),
   }));
   try {
     link.nodeBuffer(limits.maxBufferedBytes - limits.reservedLifecycleBytes);

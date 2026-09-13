@@ -26,7 +26,7 @@ function fixture() {
       return execute(instanceId, command, signal);
     } });
   const frame = (instanceId = 'synthetic-first', connectionId = 1): NodeWorkerExecutionFrame => ({ type: 'node-worker-execution', version: 1,
-    session, instanceId, connectionId, payload: serializeNodeExecutionCall({ type: 'node-execution-request', version: 1, session,
+    session, instanceId, connectionId, payload: serializeNodeExecutionCall({ type: 'node-execution-request', timeoutMs: 10_000, version: 1, session,
       requestId: 1, command: { method: 'status', identity: { ...session, operationId: 'synthetic-operation' } } }) });
   return { authority, execute, router, written, frame, close() { router.close(); parent.abort(); } };
 }
@@ -90,7 +90,7 @@ test('instance handlers share capacity across replacement connections until canc
   const dispatch: NodeExecutionCommand = { method: 'dispatch', identity: { ...session, operationId: 'synthetic-operation' },
     stream: { ...session, streamId: 'synthetic-stream' }, body: { ...session, transferId: 'synthetic-body' } };
   const call = (instanceId: string, connectionId: number, requestId: number, command: NodeExecutionCommand) => f.router.receive({
-    ...f.frame(instanceId, connectionId), payload: serializeNodeExecutionCall({ type: 'node-execution-request', version: 1, session, requestId, command }),
+    ...f.frame(instanceId, connectionId), payload: serializeNodeExecutionCall({ type: 'node-execution-request', timeoutMs: 10_000, version: 1, session, requestId, command }),
   });
   f.execute.mockImplementation((_instance, command) => command.method === 'status'
     ? Promise.resolve({ kind: 'status', receipt: null }) : native.promise);

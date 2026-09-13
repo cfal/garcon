@@ -9441,6 +9441,7 @@ it.each(['native-failure', 'source-exit', 'accepted-active', 'accepted-detached'
     const supervisor = new NodeSupervisor({ async cleanup() {} });
     const session = supervisor.openSession('synthetic-controller');
     const connection = supervisor.attach(session);
+    supervisor.completeStartup(session);
     supervisor.completeRecovery(connection, supervisor.beginRecovery(connection));
     const location = { nodeId: 'synthetic-node', instanceId: 'synthetic-instance', workspaceId: 'synthetic-workspace' };
     const resources = new NodeExecutionResources(location.nodeId);

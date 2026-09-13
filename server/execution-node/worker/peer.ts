@@ -21,6 +21,9 @@ import {
 import type { NodeWorkerRole } from './roles.js';
 import { NodeWorkerWriter, type NodeWorkerSubmission } from './writer.js';
 import { NODE_WORKER_EXECUTION_LIMITS, NODE_WORKER_WRITER_LIMITS } from './limits.js';
+import { NodeDeadline } from '../../execution-nodes/deadline.js';
+import { MAX_NODE_READINESS_TIMEOUT_MS } from '../../execution-nodes/transport/session-wire.js';
+import type { LeaseClock } from '../lease-clock.js';
 
 export interface NodeWorkerProcessPort {
   readonly stdin: Pick<FileSink, 'write' | 'flush' | 'end'>;
@@ -31,6 +34,9 @@ export interface NodeWorkerProcessPort {
 export interface NodeWorkerPeerOptions {
   readonly role: NodeWorkerRole;
   readonly signal: AbortSignal;
+  readonly startupTimeoutMs?: number;
+  readonly clock?: LeaseClock;
+  readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
   /** Checks the parent authority before every local pulse; a pulse cannot extend a controller lease. */
   validate(): void;
   failed(error: NodeWorkerTransportError): void;
@@ -50,16 +56,19 @@ export class NodeWorkerPeer {
   #service: NodeWorkerServiceClient | null = null;
   #physical = new AbortController();
   readonly #detach: () => void;
+  readonly #startup: NodeDeadline;
   #session: NodeSessionIdentity | null = null;
   #configuration: NodeWorkerConfiguration | null = null;
   #connectionId = 0;
   #connected = false;
   #pid: number | null = null;
   #isReady = false;
-  #deadline: ReturnType<typeof setTimeout> | null = null;
+  #deadline: { cancel(): void } | null = null;
+  #deadlineToken: symbol | null = null;
   #pulse: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly process: NodeWorkerProcessPort, private readonly options: NodeWorkerPeerOptions) {
+    this.#startup = new NodeDeadline(options.startupTimeoutMs ?? MAX_NODE_READINESS_TIMEOUT_MS, options.clock);
     // Observers may attach after a pipe has already failed.
     void this.#hello.promise.catch(() => {});
     void this.#ready.promise.catch(() => {});
@@ -74,8 +83,7 @@ export class NodeWorkerPeer {
     options.signal.addEventListener('abort', close, { once: true });
     this.#detach = () => options.signal.removeEventListener('abort', close);
     if (options.signal.aborted) { this.closeInput(); return; }
-    this.#deadline = setTimeout(() => this.#fail(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT')), NODE_WORKER_INERT_TIMEOUT_MS);
-    this.#deadline.unref();
+    this.#armDeadline(Math.min(NODE_WORKER_INERT_TIMEOUT_MS, this.#startup.remainingMs));
     void this.#read();
     void process.exited.then(() => this.#fail(), () => this.#fail());
   }
@@ -87,7 +95,11 @@ export class NodeWorkerPeer {
     if (this.#pid === null || this.#session || configuration.role !== this.options.role) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
     const snapshot = parseNodeWorkerConfiguration(configuration);
     if (!snapshot) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
-    const text = serializeNodeWorkerParent({ type: 'node-worker-configure', version: NODE_WIRE_VERSION, session, connectionId, configuration: snapshot });
+    const startupTimeoutMs = this.#startup.remainingMs;
+    if (startupTimeoutMs === 0) throw new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
+    const text = serializeNodeWorkerParent({ type: 'node-worker-configure', version: NODE_WIRE_VERSION, session, connectionId,
+      startupTimeoutMs, configuration: snapshot });
+    this.#armDeadline(startupTimeoutMs);
     this.#session = Object.freeze({ ...session });
     this.#configuration = snapshot;
     this.#connectionId = connectionId;
@@ -164,9 +176,10 @@ export class NodeWorkerPeer {
     if (this.#closing.signal.aborted) return;
     this.#detach();
     if (this.#pulse) clearInterval(this.#pulse);
-    if (this.#deadline) clearTimeout(this.#deadline);
+    this.#deadline?.cancel();
     this.#pulse = null;
     this.#deadline = null;
+    this.#deadlineToken = null;
     this.#closing.abort(error);
     this.#execution.clear();
     this.#service?.close(); this.#service = null;
@@ -214,8 +227,9 @@ export class NodeWorkerPeer {
           if (this.#isReady || !this.#session || !this.#configuration || !sameNodeSession(message.session, this.#session)
             || !expectedManifests(this.#configuration, message.manifests)) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
           this.#isReady = true;
-          if (this.#deadline) clearTimeout(this.#deadline);
+          this.#deadline?.cancel();
           this.#deadline = null;
+          this.#deadlineToken = null;
           this.#ready.resolve(message.manifests);
         }
       }
@@ -252,8 +266,18 @@ export class NodeWorkerPeer {
 
   #validate(): void {
     this.#closing.signal.throwIfAborted();
+    if (!this.#isReady && this.#startup.remainingMs === 0) this.#fail(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT'));
+    this.#closing.signal.throwIfAborted();
     try { this.options.signal.throwIfAborted(); this.options.validate(); }
     catch { this.#fail(); this.#closing.signal.throwIfAborted(); }
+  }
+
+  #armDeadline(delayMs: number): void {
+    this.#deadline?.cancel();
+    const token = this.#deadlineToken = Symbol('worker-startup');
+    this.#deadline = (this.options.scheduleTimeout ?? scheduleTimeout)(() => {
+      if (this.#deadlineToken === token) this.#fail(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT'));
+    }, delayMs);
   }
 
   #assertPhysical(connectionId: number): void {
@@ -272,6 +296,12 @@ export class NodeWorkerPeer {
     this.#close(error);
     try { this.options.failed(error); } catch { /* Closure remains final. */ }
   }
+}
+
+function scheduleTimeout(callback: () => void, delayMs: number): { cancel(): void } {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref();
+  return { cancel: () => clearTimeout(timer) };
 }
 
 function expectedManifests(configuration: NodeWorkerConfiguration, manifests: readonly NodeProviderManifest[]): boolean {

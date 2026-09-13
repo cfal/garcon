@@ -3,10 +3,12 @@ import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import {
   isNodeExecutionReconciliation, parseNodeExecutionCallText, parseNodeExecutionCancellationText,
+  serializeNodeExecutionCall,
 } from '../../execution-nodes/transport/execution-wire.js';
-import type { NodeSocketWriter } from '../../execution-nodes/transport/socket-writer.js';
+import type { NodeExecutionChannelWriter, NodeExecutionWriteAuthority } from '../../execution-nodes/transport/execution-channel.js';
 import { NodeWorkerTransportError } from './framing.js';
-import { serializeNodeWorkerExecution } from './execution-protocol.js';
+import { parseNodeWorkerExecutionText, serializeNodeWorkerExecution } from './execution-protocol.js';
+import { DeferredNodeFrameText } from './frame-text.js';
 import type { NodeFrameAdmission, NodeFrameSubmission, NodeFrameWriter, NodeWorkerFramePriority } from './writer.js';
 
 export interface NodeWorkerExecutionPortOptions {
@@ -20,12 +22,13 @@ export interface NodeWorkerExecutionPortOptions {
 
 interface PendingWrite {
   readonly cancellation: AbortController;
+  readonly authority: NodeExecutionWriteAuthority | null;
   submission: NodeFrameSubmission | null;
   cancelled: string | null;
 }
 
 /** Adapts channel admission to frame submission, retaining cancellation while native writes remain queued. */
-export class NodeWorkerExecutionPort implements Pick<NodeSocketWriter, 'send' | 'close'> {
+export class NodeWorkerExecutionPort implements NodeExecutionChannelWriter {
   readonly #session: NodeSessionIdentity;
   readonly #closing = new AbortController();
   readonly #requests = new Map<number, PendingWrite>();
@@ -42,7 +45,7 @@ export class NodeWorkerExecutionPort implements Pick<NodeSocketWriter, 'send' | 
     if (options.signal.aborted) this.close();
   }
 
-  send(payload: string): boolean {
+  send(payload: string, authority?: NodeExecutionWriteAuthority): boolean {
     this.#validate();
     const cancel = parseNodeExecutionCancellationText(payload);
     if (cancel) {
@@ -57,7 +60,7 @@ export class NodeWorkerExecutionPort implements Pick<NodeSocketWriter, 'send' | 
     const request = parseNodeExecutionCallText(payload);
     if (!request) return this.#send(payload, null, 'application');
     if (this.#requests.has(request.requestId)) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
-    const pending: PendingWrite = { cancellation: new AbortController(), submission: null, cancelled: null };
+    const pending: PendingWrite = { cancellation: new AbortController(), authority: authority ?? null, submission: null, cancelled: null };
     this.#requests.set(request.requestId, pending);
     try { return this.#send(payload, { requestId: request.requestId, pending }, isNodeExecutionReconciliation(request.command) ? 'application' : 'data'); }
     catch (error) { this.#requests.delete(request.requestId); throw error; }
@@ -77,8 +80,22 @@ export class NodeWorkerExecutionPort implements Pick<NodeSocketWriter, 'send' | 
     const signal = pending ? AbortSignal.any([this.#closing.signal, pending.cancellation.signal]) : this.#closing.signal;
     const text = serializeNodeWorkerExecution({ type: 'node-worker-execution', version: NODE_WIRE_VERSION,
       session: this.#session, connectionId: this.options.connectionId, instanceId: this.options.instanceId, payload });
+    const deadlineAuthority = pending?.authority;
+    const source = deadlineAuthority ? new DeferredNodeFrameText(text, (captured) => {
+      const timeoutMs = deadlineAuthority.deadline.remainingMs;
+      if (timeoutMs === 0) deadlineAuthority.expired();
+      signal.throwIfAborted();
+      const frame = parseNodeWorkerExecutionText(captured);
+      const call = frame && parseNodeExecutionCallText(frame.payload);
+      if (!frame || !call) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
+      return serializeNodeWorkerExecution({ ...frame, payload: serializeNodeExecutionCall({ ...call, timeoutMs }) });
+    }) : text;
     let submission: NodeFrameSubmission;
-    try { submission = this.writer.submit(text, priority, { signal, validate: () => this.#validate() }, admission); }
+    try { submission = this.writer.submit(source, priority, { signal, validate: () => {
+      this.#validate();
+      if (pending?.authority?.deadline.remainingMs === 0) pending.authority.expired();
+      signal.throwIfAborted();
+    } }, admission); }
     catch (error) {
       if (request) this.#requests.delete(request.requestId);
       if (error instanceof NodeWorkerTransportError && error.code === 'NODE_WORKER_CAPACITY') return false;

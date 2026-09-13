@@ -6,11 +6,12 @@ import { NodeWorkerTransportError } from './framing.js';
 import { NodeWorkerServiceServer } from './service-channel.js';
 import type { NodeWorkerServiceCommand, NodeWorkerServiceFrame, NodeWorkerServiceResult } from './service-protocol.js';
 import type { NodeWorkerWriter } from './writer.js';
+import type { NodeDeadline } from '../../execution-nodes/deadline.js';
 
 export interface NodeWorkerServiceRouterOptions {
   readonly authority: NodeWorkerAuthority;
   readonly writer: Pick<NodeWorkerWriter, 'submit'>;
-  execute(connectionId: number, connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal): Promise<NodeWorkerServiceResult>;
+  execute(connectionId: number, connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal, deadline: NodeDeadline): Promise<NodeWorkerServiceResult>;
 }
 
 export class NodeWorkerServiceRouter {
@@ -33,7 +34,7 @@ export class NodeWorkerServiceRouter {
       const signal = AbortSignal.any([connection.signal, this.#closing.signal]);
       const connectionId = frame.connectionId;
       this.#channel = new NodeWorkerServiceServer(nodeWorkerReplies(this.options.writer),
-        (command, caller) => this.options.execute(connectionId, connection, command, caller), {
+        (command, caller, deadline) => this.options.execute(connectionId, connection, command, caller, deadline), {
           session: authority.session, connectionId, signal, validate: () => authority.assertConnection(connection),
           failed() { if (!signal.aborted) authority.retire(); },
         });

@@ -1,4 +1,5 @@
 import { nodeWorkerReplies } from '../reply-port.js';
+import type { NodeDeadline } from '../../../execution-nodes/deadline.js';
 import { expect, mock, test } from 'bun:test';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { NodeWorkerServiceClient, NodeWorkerServiceServer, type NodeWorkerServiceChannelOptions } from '../service-channel.js';
@@ -9,6 +10,21 @@ import { session, tick } from './lifecycle-fixture.js';
 
 const command = { method: 'begin-output-recovery' } as const;
 const recovered = { kind: 'output-recovery', generation: 1 } as const;
+
+test('queued services encode only the budget remaining at native submission', async () => {
+  const f = fixture();
+  try {
+    const hold = f.clientWriter.send('synthetic-block', 'data', 'data');
+    const pending = f.client.call(command, f.lifetime.signal);
+    f.advance(4321);
+    f.native.resolve(); await hold;
+    expect(await pending).toEqual(recovered);
+    expect(f.requests).toMatchObject([{ timeoutMs: 5679, command }]);
+    expect(f.serverTimers[0]!.delayMs).toBe(5429);
+    expect(f.clientWriter.bufferedBytes).toBe(0);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
 
 test('auxiliary replies must match the captured operation and use the admitted request budget', async () => {
   const deadlines: number[] = [];
@@ -29,9 +45,11 @@ function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOpt
   const lifetime = new AbortController();
   const failures = mock((_error: unknown) => {});
   const fail = (error: unknown) => { if (!lifetime.signal.aborted) { failures(error); lifetime.abort(); } };
-  const execute = mock(async (_command: NodeWorkerServiceCommand, _signal: AbortSignal): Promise<NodeWorkerServiceResult> => recovered);
+  const execute = mock(async (_command: NodeWorkerServiceCommand, _signal: AbortSignal, _deadline: NodeDeadline): Promise<NodeWorkerServiceResult> => recovered);
   const requests: NodeWorkerServiceFrame[] = [];
   const replies: NodeWorkerServiceFrame[] = [];
+  const serverTimers: { callback(): void; delayMs: number; cancelled: boolean }[] = [];
+  let elapsedMs = 0;
   const native = Promise.withResolvers<void>();
   let hold = false;
   let beforeReceive: (() => void) | null = null;
@@ -48,10 +66,17 @@ function fixture(maxRequests = 16, scheduleTimeout?: NodeWorkerServiceChannelOpt
     const frame = parseNodeWorkerServiceText(Buffer.from(bytes.subarray(4)).toString())!;
     replies.push(frame); client.receive(frame); return Promise.resolve();
   }, close() {} }, { ...NODE_WORKER_WRITER_LIMITS, signal: lifetime.signal, failed: fail });
-  const options = { session, connectionId: 1, signal: lifetime.signal, validate() {}, failed: fail, maxRequests, scheduleTimeout };
+  const options = { session, connectionId: 1, signal: lifetime.signal, validate() {}, failed: fail, maxRequests, scheduleTimeout,
+    createClock: () => ({ read: () => ({ elapsedMs, discontinuity: false }) }) };
   const client = new NodeWorkerServiceClient(clientWriter, options);
-  const server = new NodeWorkerServiceServer(nodeWorkerReplies(serverWriter), execute, options);
-  return { client, server, clientWriter, serverWriter, execute, failures, requests, replies, lifetime, native,
+  const server = new NodeWorkerServiceServer(nodeWorkerReplies(serverWriter), execute, { ...options,
+    scheduleTimeout(callback, delayMs) {
+      const timer = { callback, delayMs, cancelled: false }; serverTimers.push(timer);
+      return { cancel() { timer.cancelled = true; } };
+    },
+  });
+  return { client, server, clientWriter, serverWriter, execute, failures, requests, replies, lifetime, native, serverTimers,
+    advance(ms: number) { elapsedMs += ms; },
     hold() { hold = true; }, before(callback: () => void) { beforeReceive = callback; }, failReply() { replyFailure = true; },
     close() { lifetime.abort(); client.close(); server.close(); clientWriter.close(); serverWriter.close(); native.resolve(); },
   };
@@ -357,4 +382,69 @@ test('a shared cancellation burst cannot close a healthy channel when urgent cap
     f.native.resolve(); completion.resolve(recovered); await Promise.all(blocked); await tick();
     expect(await f.client.call(command, f.lifetime.signal)).toEqual(recovered);
   } finally { completion.resolve(recovered); f.native.resolve(); f.close(); await Promise.all(blocked); }
+});
+
+
+test('three service hops preserve one decreasing request budget and a reply allowance', async () => {
+  const hops = [fixture(), fixture(), fixture()];
+  const advance = (ms: number) => { for (const hop of hops) hop.advance(ms); };
+  hops[0]!.execute.mockImplementation(async (request, signal, deadline) => {
+    advance(1_000);
+    return hops[1]!.client.call(request, signal, deadline);
+  });
+  hops[1]!.execute.mockImplementation(async (request, signal, deadline) => {
+    advance(500);
+    return hops[2]!.client.call(request, signal, deadline);
+  });
+  try {
+    expect(await hops[0]!.client.call(command, hops[0]!.lifetime.signal)).toEqual(recovered);
+    expect(hops.map((hop) => {
+      const frame = hop.requests[0];
+      return frame?.type === 'node-worker-service-request' ? frame.timeoutMs : null;
+    })).toEqual([10_000, 8_750, 8_000]);
+    expect(hops.map((hop) => hop.serverTimers[0]!.delayMs)).toEqual([9_750, 8_500, 7_750]);
+  } finally { for (const hop of hops) hop.close(); }
+});
+
+test('service expiry retains a noncooperative handler until it actually completes', async () => {
+  const f = fixture(1);
+  const held = Promise.withResolvers<NodeWorkerServiceResult>();
+  f.execute.mockImplementationOnce(() => held.promise);
+  try {
+    const pending = f.client.call(command, f.lifetime.signal);
+    await tick();
+    const providerSignal = f.execute.mock.calls[0]![1];
+    f.advance(f.serverTimers[0]!.delayMs);
+    f.serverTimers[0]!.callback();
+    expect(await pending).toEqual({ kind: 'unknown' });
+    expect(providerSignal.aborted).toBe(true);
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual({ kind: 'rejected', code: 'NODE_CAPACITY' });
+    held.resolve(recovered);
+    await tick();
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual(recovered);
+    expect(f.replies.filter((reply) => reply.requestId === 1)).toHaveLength(1);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { held.resolve({ kind: 'unknown' }); f.close(); }
+});
+
+test('service success at expiry remains unknown and cancelled server timers stay inert', async () => {
+  const f = fixture();
+  const held = Promise.withResolvers<NodeWorkerServiceResult>();
+  f.execute.mockImplementationOnce(() => held.promise);
+  try {
+    const pending = f.client.call(command, f.lifetime.signal);
+    await tick();
+    f.advance(f.serverTimers[0]!.delayMs);
+    held.resolve(recovered);
+    expect(await pending).toEqual({ kind: 'unknown' });
+    const replies = f.replies.length;
+    f.serverTimers[0]!.callback();
+    await tick();
+    expect(f.serverTimers[0]!.cancelled).toBe(true);
+    expect(f.replies).toHaveLength(replies);
+    expect(await f.client.call(command, f.lifetime.signal)).toEqual(recovered);
+    f.serverTimers.at(-1)!.callback();
+    expect(f.execute.mock.calls.at(-1)![1].aborted).toBe(false);
+    expect(f.failures).not.toHaveBeenCalled();
+  } finally { held.resolve({ kind: 'unknown' }); f.close(); }
 });

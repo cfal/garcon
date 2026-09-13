@@ -23,7 +23,8 @@ export function manifest() {
 }
 
 export function configureMessage() {
-  return { type: 'node-worker-configure', version: NODE_WIRE_VERSION, session, connectionId: 1, configuration: configuration() } as const;
+  return { type: 'node-worker-configure', version: NODE_WIRE_VERSION, session, connectionId: 1,
+    startupTimeoutMs: 60_000, configuration: configuration() } as const;
 }
 
 export const tick = () => new Promise<void>((resolve) => setImmediate(resolve));

@@ -3,19 +3,21 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { isExecutionIdentity, type ExecutionNodeStatus } from '../../common/execution-location.js';
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../common/node-operation.js';
 import { SuspendAwareLeaseClock, type LeaseClock } from './lease-clock.js';
+import { MAX_NODE_READINESS_TIMEOUT_MS } from '../execution-nodes/transport/session-wire.js';
 
 export const NODE_CHALLENGE_INTERVAL_MS = 5_000;
 export const NODE_SESSION_LEASE_POLL_INTERVAL_MS = 100;
 export const NODE_CONTROLLER_LEASE_MS = 15_000;
+export const NODE_STARTUP_TIMEOUT_MS = 60_000;
 export const NODE_RECOVERY_TIMEOUT_MS = 15_000;
 export const NODE_CLEANUP_TIMEOUT_MS = 30_000;
 
 export type NodeRetirementReason =
-  | 'lease-expired' | 'recovery-expired' | 'clock-discontinuity' | 'worker-exited' | 'worker-protocol-failed'
+  | 'lease-expired' | 'startup-expired' | 'recovery-expired' | 'clock-discontinuity' | 'worker-exited' | 'worker-protocol-failed'
   | 'native-settlement-unconfirmed' | 'revoked' | 'controller-shutdown' | 'node-shutdown';
 
 const RETIREMENT_PRIORITY: Record<NodeRetirementReason, number> = {
-  'lease-expired': 0, 'recovery-expired': 1, 'clock-discontinuity': 2,
+  'lease-expired': 0, 'startup-expired': 1, 'recovery-expired': 1, 'clock-discontinuity': 2,
   'worker-exited': 3, 'worker-protocol-failed': 4, 'native-settlement-unconfirmed': 5, revoked: 6, 'controller-shutdown': 7, 'node-shutdown': 8,
 };
 
@@ -47,7 +49,7 @@ export interface NodeSupervisorOptions {
 }
 
 export class NodeAuthorityError extends Error {
-  constructor(readonly code: 'NODE_UNAVAILABLE' | 'NODE_SESSION_EXPIRED', message: string) {
+  constructor(readonly code: 'NODE_UNAVAILABLE' | 'NODE_SESSION_EXPIRED' | 'NODE_READINESS_TIMEOUT', message: string) {
     super(message);
     this.name = 'NodeAuthorityError';
   }
@@ -59,6 +61,7 @@ interface ActiveControllerSession {
   connection: { readonly lease: NodeConnectionLease; readonly controller: AbortController } | null;
   phase: 'online' | 'recovering' | 'reconnecting';
   recovery: NodeRecoveryAttempt | null;
+  startupDeadline: number | null;
   recoveryDeadline: number | null;
   deadline: number;
   lastChallengeAt: number;
@@ -110,7 +113,7 @@ export class NodeSupervisor {
     const identity = Object.freeze({ controllerBootId, nodeBootId: this.#nodeBootId, logicalSessionId: randomUUID() });
     this.#active = {
       identity, controller: new AbortController(), connection: null, phase: 'recovering',
-      recovery: null, recoveryDeadline: now + NODE_RECOVERY_TIMEOUT_MS,
+      recovery: null, startupDeadline: now + NODE_STARTUP_TIMEOUT_MS, recoveryDeadline: null,
       deadline: now + NODE_CONTROLLER_LEASE_MS, lastChallengeAt: -Infinity, challenges: new Map(),
     };
     return identity;
@@ -128,7 +131,7 @@ export class NodeSupervisor {
     active.connection = { lease: connection, controller };
     active.phase = 'recovering';
     active.recovery = null;
-    active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
+    if (active.startupDeadline === null) active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
     active.challenges.clear();
     active.lastChallengeAt = -Infinity;
     previous?.controller.abort(expired());
@@ -144,21 +147,31 @@ export class NodeSupervisor {
     active.challenges.clear();
     active.phase = 'reconnecting';
     active.recovery = null;
-    active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
+    if (active.startupDeadline === null) active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
     detached.controller.abort(expired());
   }
 
   beginRecovery(connection: NodeConnectionLease): NodeRecoveryAttempt {
     const { active, now } = this.#requireConnection(connection);
     active.phase = 'recovering';
-    active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
+    if (active.startupDeadline === null) active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
     active.recovery = Object.freeze({ token: Symbol('node-recovery') });
     return active.recovery;
   }
 
+  /** Starts recovery's budget only after the owning worker has completed configuration. */
+  completeStartup(identity: NodeSessionIdentity): void {
+    const now = this.poll();
+    const active = this.#active;
+    if (!active || !sameNodeSession(active.identity, identity)) throw expired();
+    if (active.startupDeadline === null) return;
+    active.startupDeadline = null;
+    active.recoveryDeadline ??= now + NODE_RECOVERY_TIMEOUT_MS;
+  }
+
   completeRecovery(connection: NodeConnectionLease, attempt: NodeRecoveryAttempt): boolean {
     const { active } = this.#requireConnection(connection);
-    if (active.phase !== 'recovering' || active.recovery === null || active.recovery !== attempt) return false;
+    if (active.startupDeadline !== null || active.phase !== 'recovering' || active.recovery === null || active.recovery !== attempt) return false;
     active.phase = 'online';
     active.recovery = null;
     active.recoveryDeadline = null;
@@ -175,6 +188,13 @@ export class NodeSupervisor {
   /** Allows exact-session reconciliation while new admissions remain suspended. */
   assertConnection(connection: NodeConnectionLease): void {
     this.#requireConnection(connection);
+  }
+
+  remainingReadinessMs(identity: NodeSessionIdentity): number {
+    const now = this.poll();
+    const active = this.#active;
+    if (!active || !sameNodeSession(active.identity, identity)) throw expired();
+    return Math.min(MAX_NODE_READINESS_TIMEOUT_MS, Math.ceil((active.startupDeadline ?? active.recoveryDeadline ?? now + NODE_RECOVERY_TIMEOUT_MS) - now));
   }
 
   issueChallenge(connection: NodeConnectionLease): string | null {
@@ -204,6 +224,9 @@ export class NodeSupervisor {
     if (this.#active) {
       if (reading.discontinuity || !Number.isFinite(reading.elapsedMs) || reading.elapsedMs < 0) this.#retire('clock-discontinuity');
       else if (reading.elapsedMs >= this.#active.deadline) this.#retire('lease-expired');
+      else if (this.#active.startupDeadline !== null && reading.elapsedMs >= this.#active.startupDeadline) {
+        this.#retire('startup-expired');
+      }
       else if (this.#active.recoveryDeadline !== null && reading.elapsedMs >= this.#active.recoveryDeadline) {
         this.#retire('recovery-expired');
       }
@@ -230,6 +253,12 @@ export class NodeSupervisor {
 
   executionHostExited(identity: NodeSessionIdentity, cause: 'worker-exited' | 'worker-protocol-failed'): Promise<boolean> {
     return this.#retireSession(identity, cause);
+  }
+
+  startupTimedOut(identity: NodeSessionIdentity): Promise<boolean> {
+    this.poll();
+    if (!this.#active || this.#active.startupDeadline === null || !sameNodeSession(this.#active.identity, identity)) return Promise.resolve(false);
+    return this.#retireSession(identity, 'startup-expired');
   }
 
   requestNativeContainment(identity: NodeSessionIdentity): Promise<boolean> {
@@ -291,8 +320,10 @@ export class NodeSupervisor {
     const retired = { identity: active.identity, connection: active.connection?.lease ?? null, reason };
     this.#retired = retired;
     this.#startCleanup(retired);
-    active.controller.abort(expired());
-    active.connection?.controller.abort(expired());
+    const error = reason === 'startup-expired' || reason === 'recovery-expired'
+      ? new NodeAuthorityError('NODE_READINESS_TIMEOUT', 'Execution node readiness deadline expired') : expired();
+    active.controller.abort(error);
+    active.connection?.controller.abort(error);
   }
 
   #startCleanup(retired: RetiredControllerSession): Promise<boolean> {

@@ -19,6 +19,7 @@ import { NodeWorkerServiceReplyError, NodeWorkerServiceServer, type NodeWorkerSe
 import { NodeOutputRetirementUnconfirmedError } from './worker/output-retirement-client.js';
 import type { NodeWorkerPeer } from './worker/peer.js';
 import type { NodeWorkerServiceCommand, NodeWorkerServiceResult } from './worker/service-protocol.js';
+import type { NodeDeadline } from '../execution-nodes/deadline.js';
 
 export interface NodeSessionBridgeOptions {
   readonly connection: NodeHostedConnection;
@@ -68,7 +69,7 @@ export class NodeSessionBridge {
     const close = () => this.close();
     this.#detach = () => options.signal.removeEventListener('abort', close);
     options.signal.addEventListener('abort', close, { once: true });
-    this.#service = new NodeWorkerServiceServer(this.#replies.channel(), (command, signal) => this.#call(command, signal), {
+    this.#service = new NodeWorkerServiceServer(this.#replies.channel(), (command, signal, deadline) => this.#call(command, signal, deadline), {
       session: options.connection.lease.session, connectionId: options.connection.connectionId, signal: this.#closing.signal,
       validate: () => this.#validate(), failed: (error) => this.#close(error),
     });
@@ -130,20 +131,20 @@ export class NodeSessionBridge {
 
   close(): void { this.#close(new NodeWorkerTransportError('NODE_WORKER_CLOSED')); }
 
-  async #call(command: NodeWorkerServiceCommand, signal: AbortSignal): Promise<NodeWorkerServiceResult> {
+  async #call(command: NodeWorkerServiceCommand, signal: AbortSignal, deadline: NodeDeadline): Promise<NodeWorkerServiceResult> {
     try {
       this.#validate(); signal.throwIfAborted();
       const { coordinator, connection } = this.options;
       const service = coordinator.peer(connection).service(connection.connectionId);
       if (command.method === 'begin-output-recovery') {
-        return await this.#beginRecovery(signal);
+        return await this.#beginRecovery(signal, deadline);
       }
       if (command.method === 'resume-output') {
         const recovery = this.#recovery;
         if (!recovery || recovery.generation !== command.generation || command.generation <= this.#suspendedGeneration) return { kind: 'output-live', live: false };
-        await coordinator.flushOutputRetirements(connection, signal);
+        await coordinator.flushOutputRetirements(connection, signal, deadline);
         this.#validate(); signal.throwIfAborted();
-        const result = await service.call(command, signal);
+        const result = await service.call(command, signal, deadline);
         this.#validate(); signal.throwIfAborted();
         if (this.#recovery !== recovery || command.generation <= this.#suspendedGeneration
           || result.kind !== 'output-live' || !result.live) return { kind: 'output-live', live: false };
@@ -161,10 +162,10 @@ export class NodeSessionBridge {
           instanceId: command.instanceId, stream: command.stream });
       }
       if (command.method === 'install-output') {
-        await coordinator.flushOutputRetirements(connection, signal);
+        await coordinator.flushOutputRetirements(connection, signal, deadline);
         this.#validate(); signal.throwIfAborted(); coordinator.supervisor.assertAdmission(connection.lease);
       }
-      return await service.call(command, signal);
+      return await service.call(command, signal, deadline);
     } catch (error) {
       if (error instanceof NodeOutputRetirementUnconfirmedError) return error.result;
       if (error instanceof NodeWorkerServiceReplyError && command.method === 'provider-session-configuration') return { kind: 'unknown' };
@@ -174,14 +175,14 @@ export class NodeSessionBridge {
     }
   }
 
-  async #beginRecovery(signal: AbortSignal): Promise<NodeWorkerServiceResult> {
+  async #beginRecovery(signal: AbortSignal, deadline: NodeDeadline): Promise<NodeWorkerServiceResult> {
     const { coordinator, connection } = this.options;
     this.#recovery?.cancellation.abort();
     const recovery: BridgeRecovery = { attempt: coordinator.beginRecovery(connection), generation: null, cancellation: new AbortController() };
     this.#recovery = recovery;
     const lifetime = AbortSignal.any([signal, recovery.cancellation.signal]);
     try {
-      const result = await coordinator.peer(connection).service(connection.connectionId).call({ method: 'begin-output-recovery' }, lifetime);
+      const result = await coordinator.peer(connection).service(connection.connectionId).call({ method: 'begin-output-recovery' }, lifetime, deadline);
       this.#validate(); lifetime.throwIfAborted();
       if (this.#recovery !== recovery || result.kind !== 'output-recovery') return unavailable();
       if (result.generation <= this.#lastGeneration || result.generation < this.#suspendedGeneration) throw protocol();
@@ -202,13 +203,13 @@ export class NodeSessionBridge {
     const { connection, coordinator } = this.options;
     const replies = this.#replies.channel((payload) => serializeNodeWorkerExecution({ type: 'node-worker-execution', version: NODE_WIRE_VERSION,
       session: connection.lease.session, connectionId: connection.connectionId, instanceId, payload }));
-    const server = new NodeExecutionServer(replies, { execute: async (command, signal) => {
+    const server = new NodeExecutionServer(replies, { execute: async (command, signal, deadline) => {
       this.#validate(); signal.throwIfAborted();
       if (!isNodeExecutionReconciliation(command)) {
         try { coordinator.supervisor.assertAdmission(connection.lease); }
         catch { return { kind: 'rejected', code: 'NODE_UNAVAILABLE' }; }
       }
-      return coordinator.peer(connection).execution(instanceId, connection.connectionId).call(command, signal);
+      return coordinator.peer(connection).execution(instanceId, connection.connectionId).call(command, signal, deadline);
     } }, { session: connection.lease.session, signal: this.#closing.signal, budget: this.#executionBudget, validate: () => this.#validate() });
     this.#execution.set(instanceId, server);
     return server;

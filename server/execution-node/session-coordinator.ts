@@ -9,6 +9,8 @@ import { parseNodeWorkerConfiguration, type NodeSessionWorkerConfiguration } fro
 import type { NodeWorkerPeer, NodeWorkerPeerOptions } from './worker/peer.js';
 import type { NodeWorkerOutputRetirement } from './worker/output-retirement.js';
 import type { NodeWorkerServiceClient } from './worker/service-channel.js';
+import { NodeWorkerTransportError } from './worker/framing.js';
+import type { NodeDeadline } from '../execution-nodes/deadline.js';
 
 const logger = createLogger('execution-node:session-coordinator');
 
@@ -67,7 +69,12 @@ export class NodeSessionCoordinator {
     this.#configuration = configuration;
     this.supervisor = new NodeSupervisor({ ...options.supervisor, cleanup: (session) => this.#cleanup(session) });
     this.#owner = new NodeSessionHostOwner({ ...options.host,
-      exited: (session) => { void this.supervisor.executionHostExited(session, 'worker-exited'); } });
+      exited: (session) => {
+        this.supervisor.poll();
+        if (this.#current && sameNodeSession(this.#current.session, session) && !this.#current.signal.aborted) {
+          void this.supervisor.executionHostExited(session, 'worker-exited');
+        }
+      } });
   }
 
   initialize(): Promise<void> {
@@ -98,10 +105,10 @@ export class NodeSessionCoordinator {
     void ready.promise.catch(() => {});
     current.monitor = new NodeSessionLeaseMonitor({ supervisor: this.supervisor, authoritySignal: current.signal,
       schedulePoll: this.options.scheduleLeasePoll,
-      failed: () => { void this.supervisor.executionHostExited(session, 'worker-protocol-failed'); } });
+      failed: () => this.#workerFailed(current) });
     void this.#start(current).then(ready.resolve, (error) => {
       ready.reject(error);
-      void this.supervisor.executionHostExited(session, 'worker-protocol-failed');
+      this.#workerFailed(current, error);
     }).finally(current.settled.resolve);
     return connection;
   }
@@ -156,10 +163,10 @@ export class NodeSessionCoordinator {
     current.retirements.enqueue(frame);
   }
 
-  async flushOutputRetirements(connection: NodeHostedConnection, signal: AbortSignal = connection.lease.signal): Promise<void> {
+  async flushOutputRetirements(connection: NodeHostedConnection, signal: AbortSignal = connection.lease.signal, deadline?: NodeDeadline): Promise<void> {
     const current = this.#requireConnection(connection);
     if (!current.retirements) throw unavailable();
-    await current.retirements.confirm(connection.connectionId, signal);
+    await current.retirements.confirm(connection.connectionId, signal, deadline);
     this.#requireConnection(connection);
   }
 
@@ -203,6 +210,7 @@ export class NodeSessionCoordinator {
     current.host = host;
     this.#assertAuthority(current);
     const peer = this.options.createPeer(host, { role: 'session', signal: current.signal,
+      startupTimeoutMs: this.supervisor.remainingReadinessMs(current.session),
       validate: () => this.#assertAuthority(current), received: this.options.received,
       containmentRequested: (request) => {
         this.#assertAuthority(current);
@@ -211,7 +219,7 @@ export class NodeSessionCoordinator {
         });
         void this.supervisor.requestNativeContainment(current.session);
       },
-      failed: () => { void this.supervisor.executionHostExited(current.session, 'worker-protocol-failed'); } });
+      failed: (error) => this.#workerFailed(current, error) });
     current.peer = peer;
     const pid = await peer.hello;
     this.#assertAuthority(current);
@@ -223,9 +231,20 @@ export class NodeSessionCoordinator {
     this.#assertAuthority(current);
     current.retirements = new NodeOutputRetirementRelay({ session: current.session,
       instanceIds: new Set(this.#configuration.instances.map((instance) => instance.id)), signal: current.signal, peer,
-      failed: () => { void this.supervisor.executionHostExited(current.session, 'worker-protocol-failed'); } });
+      failed: () => this.#workerFailed(current) });
+    this.supervisor.completeStartup(current.session);
     if (current.connection.lease.signal.aborted) await peer.disconnect(1);
     return manifests;
+  }
+
+  #workerFailed(current: HostedAuthority, error?: unknown): void {
+    this.supervisor.poll();
+    if (this.#current !== current || current.signal.aborted) return;
+    if (error instanceof NodeWorkerTransportError && error.code === 'NODE_WORKER_TIMEOUT') {
+      void this.supervisor.startupTimedOut(current.session);
+    }
+    // Startup expiry aborts synchronously; still-live authority requires the worker failure fallback.
+    if (!current.signal.aborted) void this.supervisor.executionHostExited(current.session, 'worker-protocol-failed');
   }
 
   async #cleanup(session: NodeSessionIdentity): Promise<void> {

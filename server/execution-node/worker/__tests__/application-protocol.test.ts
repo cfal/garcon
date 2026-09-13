@@ -19,7 +19,7 @@ test('the worker application dispatcher preserves each strict nested frame and i
     { type: 'node-worker-output-retired', reason: 'output-retired', version: 1, instanceId: 'synthetic-instance', stream },
     { type: 'node-worker-output-ack', version: 1, connectionId: 1, generation: 1,
       ack: { type: 'node-output-ack', stream, throughSequence: 1 } },
-    { ...envelope, type: 'node-worker-service-request', requestId: 1, command: { method: 'begin-output-recovery' } },
+    { ...envelope, type: 'node-worker-service-request', timeoutMs: 10_000, requestId: 1, command: { method: 'begin-output-recovery' } },
     { ...envelope, type: 'node-worker-service-result', requestId: 1, result: { kind: 'unknown' } },
     { ...envelope, type: 'node-worker-service-cancel', requestId: 1 },
   ];

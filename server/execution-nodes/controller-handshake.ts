@@ -6,6 +6,8 @@ import { parseNodeLeaseFrameText } from './transport/lease-wire.js';
 import { NODE_HANDSHAKE_TIMEOUT_MS, NodeSessionHandshakeError, parseNodeSessionFrameText, serializeNodeSessionFrame,
   type NodeSessionAccepted, type NodeSessionReady } from './transport/session-wire.js';
 import type { NodeSocketWriter } from './transport/socket-writer.js';
+import { NodeDeadline } from './deadline.js';
+import type { LeaseClock } from '../execution-node/lease-clock.js';
 
 export interface ControllerNodeHandshakeOptions {
   readonly controllerId: string;
@@ -13,6 +15,7 @@ export interface ControllerNodeHandshakeOptions {
   readonly nodeId: string;
   readonly signal: AbortSignal;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
+  readonly clock?: LeaseClock;
   validate(): void;
   accepted(connection: NodeSessionAccepted): void;
   disconnected(error: NodeSessionHandshakeError): void;
@@ -27,6 +30,7 @@ export class ControllerNodeHandshake {
   #connection: NodeSessionAccepted | null = null;
   #lease: ControllerLeaseResponder | null = null;
   #timer: { cancel(): void } | null = null;
+  #deadline: NodeDeadline | null = null;
   #started = false;
   #isReady = false;
 
@@ -46,7 +50,7 @@ export class ControllerNodeHandshake {
   start(): void {
     if (this.#started || this.#closing.signal.aborted) return;
     this.#started = true;
-    this.#timer = (this.options.scheduleTimeout ?? scheduleTimeout)(() => this.#close(new NodeSessionHandshakeError('NODE_HANDSHAKE_TIMEOUT')), NODE_HANDSHAKE_TIMEOUT_MS);
+    this.#armDeadline(NODE_HANDSHAKE_TIMEOUT_MS);
     try {
       this.#validate();
       if (!this.writer.send(this.#hello)) this.close();
@@ -65,6 +69,7 @@ export class ControllerNodeHandshake {
           || frame.session.controllerBootId !== this.options.controllerBootId) throw new NodeSessionHandshakeError('NODE_PROTOCOL');
         const connection = Object.freeze({ ...frame, session: Object.freeze(frame.session) });
         this.#connection = connection;
+        this.#armDeadline(connection.readinessTimeoutMs);
         this.options.accepted(connection);
         this.#validate();
         this.#lease = new ControllerLeaseResponder(this.writer, { session: connection.session, signal: this.#closing.signal,
@@ -78,6 +83,7 @@ export class ControllerNodeHandshake {
           || frame.manifests.some((manifest) => manifest.nodeId !== connection.nodeId)) throw new NodeSessionHandshakeError('NODE_PROTOCOL');
         this.#isReady = true;
         this.#timer?.cancel(); this.#timer = null;
+        this.#deadline = null;
         this.#ready.resolve(Object.freeze({ ...frame, session: connection.session, manifests: Object.freeze(frame.manifests) }));
         return;
       }
@@ -100,7 +106,24 @@ export class ControllerNodeHandshake {
     try { this.options.disconnected(error); } catch { /* A failed physical hop cannot restore admission. */ }
   }
 
-  #validate(): void { this.#closing.signal.throwIfAborted(); this.options.validate(); this.#closing.signal.throwIfAborted(); }
+  #armDeadline(durationMs: number): void {
+    this.#timer?.cancel();
+    const deadline = this.#deadline = new NodeDeadline(durationMs, this.options.clock);
+    this.#timer = (this.options.scheduleTimeout ?? scheduleTimeout)(() => {
+      if (this.#deadline === deadline) this.#close(this.#timeout());
+    }, deadline.remainingMs);
+  }
+
+  #validate(): void {
+    this.#closing.signal.throwIfAborted();
+    if (this.#deadline?.remainingMs === 0) throw this.#timeout();
+    this.options.validate();
+    this.#closing.signal.throwIfAborted();
+  }
+
+  #timeout(): NodeSessionHandshakeError {
+    return new NodeSessionHandshakeError(this.#connection ? 'NODE_READINESS_TIMEOUT' : 'NODE_HANDSHAKE_TIMEOUT');
+  }
 }
 
 function handshakeError(error: unknown): NodeSessionHandshakeError {

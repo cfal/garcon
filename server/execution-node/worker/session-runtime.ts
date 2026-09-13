@@ -53,23 +53,27 @@ export async function createNodeSessionRuntime(
       execute: async (...args) => services ? services.service(...args) : { kind: 'rejected', code: 'NODE_UNAVAILABLE' } });
     execution = new NodeWorkerExecutionRouter(context.connectionId, { authority, writer,
       instanceIds,
-      execute(instanceId, connectionId, _connection, command, signal) {
+      execute(instanceId, connectionId, _connection, command, signal, deadline) {
         const child = children.find((child) => child.instanceId === instanceId);
         if (!child) throw new NodeWorkerTransportError('NODE_WORKER_PROTOCOL');
-        return child.peer.execution(instanceId, connectionId).call(command, signal);
+        return child.peer.execution(instanceId, connectionId).call(command, signal, deadline);
       } });
     const environments = await prepareNodeInstanceEnvironments(configuration.instances, authority.signal);
     for (const instance of configuration.instances) {
       validate();
       const directory = await createNodeWorkerWorkingDirectory(configuration.storageDirectory);
       let child: HostedInstance['process'];
+      let startupTimeoutMs: number;
       try {
         validate();
+        startupTimeoutMs = context.startup.remainingMs;
+        if (startupTimeoutMs === 0) throw new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
         child = Bun.spawn([...instanceCommand()], { cwd: directory.path,
           env: { ...environments.get(instance.id)!.values, BUN_OPTIONS: NODE_WORKER_BUN_OPTIONS },
           stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
       } catch (error) { await directory.dispose(); throw error; }
       const peer = new NodeWorkerPeer(child, { role: 'instance', signal: authority.signal, validate,
+        startupTimeoutMs,
         containmentRequested: (request) => containment.request(request),
         received: (frame, text) => services!.receiveChild(instance.id, frame, text),
         failed() { if (!containment.requested) authority.retire(); } });

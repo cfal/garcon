@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test';
-import { NodeWorkerPeer, type NodeWorkerProcessPort } from '../peer.js';
+import { NodeWorkerPeer, type NodeWorkerPeerOptions, type NodeWorkerProcessPort } from '../peer.js';
 import { encodeNodeWorkerFrame } from '../framing.js';
 import { MAX_NODE_WORKER_LIFECYCLE_BYTES, parseNodeWorkerParentText, serializeNodeWorkerChild, type NodeWorkerChildMessage, type NodeWorkerContainmentRequest } from '../protocol.js';
 import { configuration, manifest, session, tick } from './lifecycle-fixture.js';
@@ -10,7 +10,7 @@ import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from 
 import { parseNodeWorkerBulkText } from '../bulk-protocol.js';
 import { parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../../execution-nodes/transport/bulk-channel-wire.js';
 
-function fixture() {
+function fixture(options: Pick<NodeWorkerPeerOptions, 'clock' | 'scheduleTimeout' | 'startupTimeoutMs'> = {}) {
   let readable: ReadableStreamDefaultController<Uint8Array>;
   const sent: string[] = [];
   const exited = Promise.withResolvers<number>();
@@ -29,7 +29,7 @@ function fixture() {
     }, flush: () => blocked ? blocked.then(() => 0) : 0, end },
   } satisfies NodeWorkerProcessPort;
   const peer = new NodeWorkerPeer(processPort, { role: 'session', signal: new AbortController().signal, failed, received, containmentRequested,
-    validate() { if (!valid) throw new Error('Synthetic replaced authority'); } });
+    ...options, validate() { if (!valid) throw new Error('Synthetic replaced authority'); } });
   const receive = (message: NodeWorkerChildMessage) => readable!.enqueue(encodeNodeWorkerFrame(serializeNodeWorkerChild(message), MAX_NODE_WORKER_LIFECYCLE_BYTES));
   return { peer, sent, failed, received, containmentRequested, end, receive,
     batch(texts: readonly string[]) { readable!.enqueue(Buffer.concat(texts.map((text) => encodeNodeWorkerFrame(text, MAX_NODE_WORKER_LIFECYCLE_BYTES)))); },
@@ -41,6 +41,46 @@ function fixture() {
     close() { peer.closeInput(); exited.resolve(0); },
   };
 }
+
+test('worker startup consumes its original budget across hello, configuration and physical replacement', async () => {
+  let elapsedMs = 0;
+  const timers: { fire(): void; delayMs: number }[] = [];
+  const f = fixture({ startupTimeoutMs: 20_000, clock: { read: () => ({ elapsedMs, discontinuity: false }) },
+    scheduleTimeout(fire, delayMs) { timers.push({ fire, delayMs }); return { cancel() {} }; } });
+  try {
+    elapsedMs = 4_000;
+    await f.hello();
+    const ready = f.peer.configure(session, 1, configuration());
+    void ready.catch(() => {});
+    expect(parseNodeWorkerParentText(f.sent[0]!)).toMatchObject({ startupTimeoutMs: 16_000 });
+    expect(timers.map(({ delayMs }) => delayMs)).toEqual([20_000, 16_000]);
+    timers[0]!.fire();
+    elapsedMs = 12_000;
+    await f.peer.disconnect(1);
+    await f.peer.attach(2);
+    expect(timers).toHaveLength(2);
+    elapsedMs = 19_999;
+    f.ready();
+    expect(await ready).toEqual([manifest()]);
+    timers[1]!.fire();
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
+test('late worker readiness cannot outrun an expired startup clock before its timer fires', async () => {
+  let elapsedMs = 0;
+  const f = fixture({ startupTimeoutMs: 20_000, clock: { read: () => ({ elapsedMs, discontinuity: false }) },
+    scheduleTimeout() { return { cancel() {} }; } });
+  try {
+    await f.hello();
+    const ready = f.peer.configure(session, 1, configuration());
+    elapsedMs = 20_000;
+    f.ready();
+    await expect(ready).rejects.toMatchObject({ code: 'NODE_WORKER_TIMEOUT' });
+    expect(f.failed).toHaveBeenCalledTimes(1);
+    expect(() => f.peer.service(1)).toThrow();
+  } finally { f.close(); }
+});
 
 test('worker peer retains the exact configuration sent despite caller mutation before ready', async () => {
   const f = fixture();

@@ -12,7 +12,7 @@ const configuration = { model: 'synthetic-model', settings: null, endpoint: null
 const request = { kind: 'start' as const, chatId: '1789000000000001', runId: 'synthetic-run', configuration };
 const ticket = { identity, location, runId: request.runId, projectPath: '/synthetic/project' };
 const control = { identity, controlId: 'synthetic-control', runId: request.runId, kind: 'goal' as const };
-const envelope = (command: NodeExecutionCommand): NodeExecutionCall => ({ type: 'node-execution-request',
+const envelope = (command: NodeExecutionCommand): NodeExecutionCall => ({ type: 'node-execution-request', timeoutMs: 10_000,
   version: NODE_WIRE_VERSION, session, requestId: 1, command });
 
 test.each<NodeExecutionCommand>([
@@ -121,4 +121,13 @@ test.each([
     expect(parseNodeExecutionReplyText(JSON.stringify({ ...reply, result: { kind: 'status', receipt: missing } }))).toBeNull();
     expect(parseNodeExecutionReplyText(JSON.stringify({ ...reply, result: { kind: 'status', receipt: { ...receipt, [field]: 'unsupported' } } }))).toBeNull();
   }
+});
+
+
+test('execution request budgets are mandatory bounded integer durations', () => {
+  const call = envelope({ method: 'status', identity });
+  for (const timeoutMs of [undefined, null, 0, -1, 0.5, '1000', 300_001, Infinity]) {
+    expect(parseNodeExecutionCallText(JSON.stringify({ ...call, timeoutMs }))).toBeNull();
+  }
+  expect(parseNodeExecutionCallText(JSON.stringify({ ...call, timeoutMs: 300_000 }))?.timeoutMs).toBe(300_000);
 });

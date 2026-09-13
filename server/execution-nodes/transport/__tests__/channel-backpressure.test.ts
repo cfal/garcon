@@ -77,13 +77,13 @@ test('a refused execution reply leaves the operation unknown and the physical ch
   const server = new NodeExecutionServer(immediateNodeReplies(f.writer), { async execute() { executed.resolve(); return { kind: 'unknown' }; } }, f.options);
   try {
     f.buffer(4096);
-    server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: 1, command: prepare }));
+    server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', timeoutMs: 10_000, version: NODE_WIRE_VERSION, session, requestId: 1, command: prepare }));
     await executed.promise;
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(f.frames).toHaveLength(0);
     expect(f.port.terminate).not.toHaveBeenCalled();
     f.buffer(0);
-    server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: 2, command: prepare }));
+    server.receive(serializeNodeExecutionCall({ type: 'node-execution-request', timeoutMs: 10_000, version: NODE_WIRE_VERSION, session, requestId: 2, command: prepare }));
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(f.frames).toHaveLength(1);
     expect(JSON.parse(f.frames[0]!).requestId).toBe(2);

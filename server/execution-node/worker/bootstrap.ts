@@ -8,6 +8,7 @@ import { NodeWorkerTransportError } from './framing.js';
 import type { NodeWorkerLifeline } from './lifeline.js';
 import { parseNodeWorkerParentText, serializeNodeWorkerChild, type NodeWorkerGateMessage } from './protocol.js';
 import type { NodeWorkerRole } from './roles.js';
+import { NodeDeadline } from '../../execution-nodes/deadline.js';
 import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from './application-protocol.js';
 
 export interface NodeWorkerRuntime {
@@ -22,6 +23,7 @@ export interface NodeWorkerRuntimeContext {
   readonly connectionId: number;
   readonly connection: NodeConnectionLease;
   readonly configuration: NodeWorkerConfiguration;
+  readonly startup: NodeDeadline;
 }
 
 export interface NodeWorkerBootstrapOptions {
@@ -71,7 +73,8 @@ export class NodeWorkerBootstrap {
         const connection = authority.attach(message.connectionId);
         this.#connectionId = message.connectionId;
         this.#connected = true;
-        this.#starting = this.#start({ configuration: message.configuration, connectionId: message.connectionId, connection, authority });
+        this.#starting = this.#start({ configuration: message.configuration, connectionId: message.connectionId, connection, authority,
+          startup: new NodeDeadline(message.startupTimeoutMs) });
         return;
       }
       if (!this.#authority || !this.#session || !sameNodeSession(message.session, this.#session)) throw protocolError();
@@ -126,6 +129,7 @@ export class NodeWorkerBootstrap {
       if (!connected) await runtime.control({ type: 'node-worker-disconnect',
         version: NODE_WIRE_VERSION, session: context.authority.session, connectionId });
       this.options.lifeline.poll();
+      if (context.startup.remainingMs === 0) throw new NodeWorkerTransportError('NODE_WORKER_TIMEOUT');
       await this.options.send(serializeNodeWorkerChild({ type: 'node-worker-ready', version: NODE_WIRE_VERSION,
         session: context.authority.session, manifests: runtime.manifests }));
     } catch { this.#fail(); }

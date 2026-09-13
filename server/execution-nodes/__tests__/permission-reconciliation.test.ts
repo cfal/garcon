@@ -272,7 +272,7 @@ function channel(f: ReturnType<typeof fixture>, maxRequests = 16) {
   let saturated = false;
   const client = new NodeWorkerServiceClient({ submit(text, _priority, authority) {
     authority.signal.throwIfAborted(); authority.validate();
-    const frame = parseNodeWorkerServiceText(text);
+    const frame = parseNodeWorkerServiceText(materializeNodeFrameText(text));
     if (!frame) throw new Error('Invalid fixture request');
     if (frame.type === 'node-worker-service-request') {
       if (saturated) throw new NodeWorkerTransportError('NODE_WORKER_CAPACITY');
@@ -453,3 +453,4 @@ test('reentrant connection validation cannot replace a newer attachment with the
   await f.manager.reconcile(replacement.connectionId, replacement.signal);
   expect(f.calls[0]?.connectionId).toBe(replacement.connectionId);
 });
+import { materializeNodeFrameText } from '../../execution-node/worker/frame-text.js';

@@ -5,9 +5,11 @@ import { MAX_NODE_SESSION_MANIFESTS, MAX_NODE_SESSION_READY_BYTES, parseNodeSess
 
 const frames: NodeSessionFrame[] = [
   { type: 'node-controller-hello', version: 1, controllerId: 'synthetic-controller-id', controllerBootId: session.controllerBootId, nodeId: 'synthetic-node' },
-  { type: 'node-session-accepted', version: 1, controllerId: 'synthetic-controller-id', nodeId: 'synthetic-node', session, connectionId: 1 },
+  { type: 'node-session-accepted', version: 1, controllerId: 'synthetic-controller-id', nodeId: 'synthetic-node', session, connectionId: 1,
+    readinessTimeoutMs: 60_000 },
   { type: 'node-session-ready', version: 1, session, connectionId: 1, manifests: [manifest()] },
   { type: 'node-session-rejected', version: 1, code: 'NODE_INCOMPATIBLE' },
+  { type: 'node-session-rejected', version: 1, code: 'NODE_READINESS_TIMEOUT' },
 ];
 
 test.each(frames)('round-trips the explicit session envelope $type', (frame) => {
@@ -24,6 +26,9 @@ test('rejects malformed, oversized and ambiguous session advertisements', () => 
   expect(parseNodeSessionFrameText(' ' .repeat(MAX_NODE_SESSION_READY_BYTES + 1))).toBeNull();
   for (const connectionId of [0, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, '1', null]) {
     expect(parseNodeSessionFrameText(JSON.stringify({ ...frames[1], connectionId }))).toBeNull();
+  }
+  for (const readinessTimeoutMs of [undefined, null, 0, -1, 0.5, 60_001, '10000']) {
+    expect(parseNodeSessionFrameText(JSON.stringify({ ...frames[1], readinessTimeoutMs }))).toBeNull();
   }
   expect(parseNodeSessionFrameText(JSON.stringify({ ...frames[1], session: { ...session, credential: 'synthetic-secret' } }))).toBeNull();
   expect(parseNodeSessionFrameText(JSON.stringify({ ...frames[2], manifests: [manifest(), manifest()] }))).toBeNull();

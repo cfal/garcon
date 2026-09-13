@@ -1,14 +1,17 @@
 import { NodeWorkerTransportError } from '../../execution-node/worker/framing.js';
 import type { NodeFrameAdmission, NodeFrameSubmission, NodeFrameWriter, NodeWorkerFramePriority, NodeWorkerWriteAuthority } from '../../execution-node/worker/writer.js';
 import type { NodeSocketWriter } from './socket-writer.js';
+import { materializeNodeFrameText, type NodeFrameText } from '../../execution-node/worker/frame-text.js';
 
 /** Admits synchronously; the socket owns its native backlog without per-frame drain promises. */
 export class NodeSessionSocketWriter implements NodeFrameWriter {
   constructor(private readonly writer: Pick<NodeSocketWriter, 'send' | 'sendApplication' | 'sendData'>,
     private readonly signal: AbortSignal) {}
 
-  submit(text: string, _priority: NodeWorkerFramePriority, authority: NodeWorkerWriteAuthority, admission: NodeFrameAdmission): NodeFrameSubmission {
+  submit(source: NodeFrameText, _priority: NodeWorkerFramePriority, authority: NodeWorkerWriteAuthority, admission: NodeFrameAdmission): NodeFrameSubmission {
     this.signal.throwIfAborted(); authority.signal.throwIfAborted();
+    authority.validate();
+    const text = materializeNodeFrameText(source);
     authority.validate();
     this.signal.throwIfAborted(); authority.signal.throwIfAborted();
     const accepted = admission === 'data' ? this.writer.sendData(text)

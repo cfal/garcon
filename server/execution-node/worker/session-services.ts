@@ -19,6 +19,7 @@ import { NodeWorkerServiceReplyError } from './service-channel.js';
 import { isNodeSessionConfigurationReconciliation } from '../../execution-nodes/transport/provider-session-configuration-wire.js';
 import { serializeNodeWorkerOutputSuspension, type NodeWorkerOutputAcknowledgement, type NodeWorkerServiceCommand, type NodeWorkerServiceResult } from './service-protocol.js';
 import type { NodeWorkerWriter } from './writer.js';
+import type { NodeDeadline } from '../../execution-nodes/deadline.js';
 
 interface SessionStream {
   readonly instanceId: string;
@@ -77,7 +78,7 @@ export class NodeWorkerSessionServices {
     if (authority.signal.aborted) this.close();
   }
 
-  async service(connectionId: number, connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal): Promise<NodeWorkerServiceResult> {
+  async service(connectionId: number, connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal, deadline?: NodeDeadline): Promise<NodeWorkerServiceResult> {
     const { authority } = this.options;
     try {
       this.#validate(); authority.assertConnection(connection); signal.throwIfAborted();
@@ -86,10 +87,10 @@ export class NodeWorkerSessionServices {
           authority.assertAdmission(connection);
           const owner = this.#install(command.instanceId, command.stream);
           try {
-            await this.#confirmRetirements(connectionId, connection, signal, owner.instanceId);
+            await this.#confirmRetirements(connectionId, connection, signal, deadline, owner.instanceId);
             authority.assertAdmission(connection); signal.throwIfAborted(); owner.cancellation.signal.throwIfAborted();
             const result = await this.options.child(owner.instanceId).service(connectionId).call(command,
-              AbortSignal.any([signal, owner.cancellation.signal]));
+              AbortSignal.any([signal, owner.cancellation.signal]), deadline);
             authority.assertConnection(connection); signal.throwIfAborted(); owner.cancellation.signal.throwIfAborted();
             if (result.kind !== 'output-installed') this.#retire(owner, 'session');
             if (result.kind === 'rejected' && result.code === 'NODE_CAPACITY') return { kind: 'rejected', code: 'NODE_OUTPUT_RETIRED' };
@@ -101,14 +102,14 @@ export class NodeWorkerSessionServices {
             instanceId: command.instanceId, stream: command.stream }, 'coordinator');
           const owner = this.#streams.get(producerStreamKey(command.stream));
           if (!owner) throw new NodeStreamIdentityExhaustedError();
-          await this.#confirmRetirement(owner, connectionId, connection, signal);
+          await this.#confirmRetirement(owner, connectionId, connection, signal, deadline);
           authority.assertConnection(connection); signal.throwIfAborted();
           return { kind: 'output-fenced', instanceId: owner.instanceId, stream: owner.stream };
         }
         case 'provider-session-configuration':
           if (!isNodeSessionConfigurationReconciliation(command)) authority.assertAdmission(connection);
           if (!this.options.instanceIds.has(command.instanceId)) throw protocol();
-          return await this.options.child(command.instanceId).service(connectionId).call(command, signal);
+          return await this.options.child(command.instanceId).service(connectionId).call(command, signal, deadline);
         case 'provider-catalog':
         case 'provider-auth':
         case 'provider-commands':
@@ -118,12 +119,12 @@ export class NodeWorkerSessionServices {
         case 'reserve-body':
           authority.assertAdmission(connection);
           if (!this.options.instanceIds.has(command.instanceId)) throw protocol();
-          return await this.options.child(command.instanceId).service(connectionId).call(command, signal);
+          return await this.options.child(command.instanceId).service(connectionId).call(command, signal, deadline);
         case 'permission': {
           const owner = this.#streams.get(producerStreamKey(command.command.permission.stream));
           if (!owner) throw protocol();
-          if (owner.retired) await this.#confirmRetirement(owner, connectionId, connection, signal);
-          return await this.options.child(owner.instanceId).service(connectionId).call(command, signal);
+          if (owner.retired) await this.#confirmRetirement(owner, connectionId, connection, signal, deadline);
+          return await this.options.child(owner.instanceId).service(connectionId).call(command, signal, deadline);
         }
         case 'begin-output-recovery': {
           this.#suspend();
@@ -147,7 +148,7 @@ export class NodeWorkerSessionServices {
         case 'resume-output': {
           const token = this.#token(connectionId, command.generation);
           if (token) {
-            await this.#confirmRetirements(connectionId, connection, signal);
+            await this.#confirmRetirements(connectionId, connection, signal, deadline);
             await this.#upstream.flush();
           }
           this.#validate(); authority.assertConnection(connection); signal.throwIfAborted();
@@ -256,17 +257,17 @@ export class NodeWorkerSessionServices {
     if (source !== 'instance') this.#downstream.get(owner.instanceId)!.enqueue(frame);
   }
 
-  async #confirmRetirements(connectionId: number, connection: NodeConnectionLease, signal: AbortSignal, instanceId?: string): Promise<void> {
+  async #confirmRetirements(connectionId: number, connection: NodeConnectionLease, signal: AbortSignal, deadline?: NodeDeadline, instanceId?: string): Promise<void> {
     for (const owner of this.#streams.values()) {
       if (owner.retired && !owner.outputFenced && (instanceId === undefined || owner.instanceId === instanceId)) {
-        await this.#confirmRetirement(owner, connectionId, connection, signal);
+        await this.#confirmRetirement(owner, connectionId, connection, signal, deadline);
       }
     }
   }
 
-  async #confirmRetirement(owner: SessionStream, connectionId: number, connection: NodeConnectionLease, signal: AbortSignal): Promise<void> {
+  async #confirmRetirement(owner: SessionStream, connectionId: number, connection: NodeConnectionLease, signal: AbortSignal, deadline?: NodeDeadline): Promise<void> {
     if (owner.outputFenced) return;
-    await confirmNodeOutputRetirement(this.options.child(owner.instanceId).service(connectionId), owner, signal);
+    await confirmNodeOutputRetirement(this.options.child(owner.instanceId).service(connectionId), owner, signal, deadline);
     this.#validate(); this.options.authority.assertConnection(connection); signal.throwIfAborted();
     owner.outputFenced = true;
   }

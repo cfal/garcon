@@ -7,13 +7,16 @@ import { NODE_HANDSHAKE_TIMEOUT_MS, NodeSessionHandshakeError, parseNodeSessionF
 import type { NodeSocketWriter } from '../execution-nodes/transport/socket-writer.js';
 import type { NodeHostedConnection } from './session-coordinator.js';
 import { NodeAuthorityError, type NodeSupervisor } from './supervisor.js';
+import { NodeDeadline } from '../execution-nodes/deadline.js';
+import type { LeaseClock } from './lease-clock.js';
 
 export interface NodeControllerHandshakeOptions {
   readonly controllerId: string;
   readonly nodeId: string;
   readonly signal: AbortSignal;
-  readonly supervisor: Pick<NodeSupervisor, 'issueChallenge' | 'renew' | 'disconnect'>;
+  readonly supervisor: Pick<NodeSupervisor, 'issueChallenge' | 'renew' | 'disconnect' | 'remainingReadinessMs'>;
   readonly scheduleTimeout?: (callback: () => void, delayMs: number) => { cancel(): void };
+  readonly clock?: LeaseClock;
   readonly scheduleHeartbeat?: (callback: () => void, delayMs: number) => { cancel(): void };
   /** Opens or attaches only after the outer WSS connection has authenticated this controller namespace. */
   connect(controllerBootId: string, signal: AbortSignal): Promise<NodeHostedConnection>;
@@ -29,6 +32,7 @@ export class NodeControllerHandshake {
   readonly #closing = new AbortController();
   readonly #detach: () => void;
   readonly #timer: { cancel(): void };
+  readonly #deadline: NodeDeadline;
   #connection: NodeHostedConnection | null = null;
   #heartbeat: NodeLeaseHeartbeat | null = null;
   #connecting = false;
@@ -37,10 +41,13 @@ export class NodeControllerHandshake {
   constructor(private readonly writer: Pick<NodeSocketWriter, 'send' | 'drained' | 'close'>, private readonly options: NodeControllerHandshakeOptions) {
     if (!isExecutionIdentity(options.controllerId) || !isExecutionIdentity(options.nodeId)) throw new TypeError('Invalid paired node identity');
     this.options = Object.freeze({ ...options });
+    this.#deadline = new NodeDeadline(NODE_HANDSHAKE_TIMEOUT_MS, options.clock);
     const close = () => this.close();
     this.#detach = () => options.signal.removeEventListener('abort', close);
     options.signal.addEventListener('abort', close, { once: true });
-    this.#timer = (options.scheduleTimeout ?? scheduleTimeout)(() => this.#close(new NodeSessionHandshakeError('NODE_HANDSHAKE_TIMEOUT')), NODE_HANDSHAKE_TIMEOUT_MS);
+    this.#timer = (options.scheduleTimeout ?? scheduleTimeout)(() => {
+      if (!this.#connection) this.#close(new NodeSessionHandshakeError('NODE_HANDSHAKE_TIMEOUT'));
+    }, NODE_HANDSHAKE_TIMEOUT_MS);
     if (options.signal.aborted) this.close();
   }
 
@@ -72,6 +79,11 @@ export class NodeControllerHandshake {
         this.#disconnect(connection);
         return;
       }
+      if (this.#deadline.remainingMs === 0) {
+        this.#disconnect(connection);
+        this.#close(new NodeSessionHandshakeError('NODE_HANDSHAKE_TIMEOUT'));
+        return;
+      }
       this.#connection = connection;
       this.#validate();
       if (connection.lease.session.controllerBootId !== controllerBootId || connection.lease.signal.aborted) throw new NodeSessionHandshakeError('NODE_SESSION_EXPIRED');
@@ -79,9 +91,12 @@ export class NodeControllerHandshake {
       this.#validate();
       this.#send(serializeNodeSessionFrame({ type: 'node-session-accepted', version: NODE_WIRE_VERSION,
         controllerId: this.options.controllerId, nodeId: this.options.nodeId,
-        session: connection.lease.session, connectionId: connection.connectionId }));
-      this.#heartbeat = new NodeLeaseHeartbeat(this.writer, { connection: connection.lease, supervisor: this.options.supervisor,
-        schedulePoll: this.options.scheduleHeartbeat, disconnected: () => this.close() });
+        session: connection.lease.session, connectionId: connection.connectionId,
+        readinessTimeoutMs: this.options.supervisor.remainingReadinessMs(connection.lease.session) }));
+      this.#timer.cancel();
+      this.#heartbeat = new NodeLeaseHeartbeat({ send: (text) => this.writer.send(text), close: () => this.#leaseClosed() },
+        { connection: connection.lease, supervisor: this.options.supervisor,
+          schedulePoll: this.options.scheduleHeartbeat, disconnected: () => this.#leaseClosed() });
       this.#validate();
       const manifests = await connection.ready;
       this.#validate();
@@ -89,18 +104,19 @@ export class NodeControllerHandshake {
       if (manifests.some((manifest) => manifest.nodeId !== this.options.nodeId)) throw new NodeSessionHandshakeError('NODE_PROTOCOL');
       this.#send(serializeNodeSessionFrame({ type: 'node-session-ready', version: NODE_WIRE_VERSION,
         session: connection.lease.session, connectionId: connection.connectionId, manifests }));
-      this.#timer.cancel();
       this.options.ready(connection);
     } catch (error) {
       if (this.#closing.signal.aborted) return;
-      const code = error instanceof NodeAuthorityError || error instanceof NodeSessionHandshakeError
-        ? error.code : 'NODE_UNAVAILABLE';
-      if (code === 'NODE_INCOMPATIBLE' || code === 'NODE_SESSION_EXPIRED' || code === 'NODE_UNAVAILABLE') await this.#reject(code);
+      const authorityError: unknown = this.#connection?.lease.authoritySignal.reason;
+      const code = authorityError instanceof NodeAuthorityError && authorityError.code === 'NODE_READINESS_TIMEOUT'
+        ? authorityError.code : error instanceof NodeAuthorityError || error instanceof NodeSessionHandshakeError ? error.code : 'NODE_UNAVAILABLE';
+      if (code === 'NODE_INCOMPATIBLE' || code === 'NODE_SESSION_EXPIRED' || code === 'NODE_UNAVAILABLE' || code === 'NODE_READINESS_TIMEOUT') await this.#reject(code);
       else this.#close(new NodeSessionHandshakeError(code));
     }
   }
 
   async #reject(code: NodeSessionRejectionCode): Promise<void> {
+    if (this.#rejecting || this.#closing.signal.aborted) return;
     this.#rejecting = true;
     try {
       this.#send(serializeNodeSessionFrame({ type: 'node-session-rejected', version: NODE_WIRE_VERSION, code }));
@@ -109,12 +125,24 @@ export class NodeControllerHandshake {
     this.#close(new NodeSessionHandshakeError(code));
   }
 
+  #leaseClosed(): void {
+    if (this.#rejecting || this.#closing.signal.aborted) return;
+    const error: unknown = this.#connection?.lease.authoritySignal.reason;
+    if (error instanceof NodeAuthorityError && error.code === 'NODE_READINESS_TIMEOUT') void this.#reject(error.code);
+    else this.close();
+  }
+
   #send(text: string): void {
     this.#validate();
     if (!this.writer.send(text)) throw new NodeSessionHandshakeError('NODE_UNAVAILABLE');
   }
 
-  #validate(): void { this.#closing.signal.throwIfAborted(); this.options.validate(); this.#closing.signal.throwIfAborted(); }
+  #validate(): void {
+    this.#closing.signal.throwIfAborted();
+    if (!this.#connection && this.#deadline.remainingMs === 0) throw new NodeSessionHandshakeError('NODE_HANDSHAKE_TIMEOUT');
+    this.options.validate();
+    this.#closing.signal.throwIfAborted();
+  }
 
   #close(error: NodeSessionHandshakeError): void {
     if (this.#closing.signal.aborted) return;

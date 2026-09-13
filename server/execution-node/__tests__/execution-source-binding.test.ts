@@ -37,6 +37,7 @@ test('source capture keeps exact workspace identity through operation retirement
     started.sink.emit({ type: 'run-ended', runId: f.request.runId, outcome: 'finished' });
     await f.settleNative();
     const connection = f.supervisor.attach(f.session);
+    f.supervisor.completeStartup(connection.session);
     f.supervisor.completeRecovery(connection, f.supervisor.beginRecovery(connection));
     expect(f.connection.signal.aborted).toBe(true);
     expect(captured.signal.aborted).toBe(false);

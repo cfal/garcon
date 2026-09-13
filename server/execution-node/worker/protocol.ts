@@ -5,6 +5,7 @@ import { parseNodeProviderManifest, type NodeProviderManifest } from '../../exec
 import { exactNodeFields, parsePrivateNodeJson } from '../../execution-nodes/transport/private-json.js';
 import { parseNodeWorkerConfiguration, MAX_NODE_WORKER_INSTANCES, type NodeWorkerConfiguration } from './configuration.js';
 import type { NodeWorkerRole } from './roles.js';
+import { MAX_NODE_READINESS_TIMEOUT_MS } from '../../execution-nodes/transport/session-wire.js';
 
 export const MAX_NODE_WORKER_LIFECYCLE_BYTES = 2 * 1024 * 1024;
 
@@ -13,6 +14,7 @@ export interface NodeWorkerConfigurationMessage {
   readonly version: typeof NODE_WIRE_VERSION;
   readonly session: NodeSessionIdentity;
   readonly connectionId: number;
+  readonly startupTimeoutMs: number;
   readonly configuration: NodeWorkerConfiguration;
 }
 
@@ -53,14 +55,17 @@ export type NodeWorkerChildMessage = NodeWorkerContainmentRequest | {
 
 export function parseNodeWorkerParentText(text: string): NodeWorkerParentMessage | null {
   const value = parsePrivateNodeJson(text, MAX_NODE_WORKER_LIFECYCLE_BYTES);
-  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'], ['configuration'])
+  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'], ['configuration', 'startupTimeoutMs'])
     || value.version !== NODE_WIRE_VERSION || !connectionId(value.connectionId)) return null;
   const session = parseNodeSessionIdentity(value.session);
   if (!session) return null;
   const base = { version: NODE_WIRE_VERSION, session, connectionId: value.connectionId } as const;
   if (value.type === 'node-worker-configure') {
+    if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'configuration', 'startupTimeoutMs'])
+      || !Number.isSafeInteger(value.startupTimeoutMs) || Number(value.startupTimeoutMs) < 1
+      || Number(value.startupTimeoutMs) > MAX_NODE_READINESS_TIMEOUT_MS) return null;
     const configuration = parseNodeWorkerConfiguration(value.configuration);
-    return configuration ? { type: value.type, ...base, configuration } : null;
+    return configuration ? { type: value.type, ...base, startupTimeoutMs: Number(value.startupTimeoutMs), configuration } : null;
   }
   if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'])) return null;
   return value.type === 'node-worker-pulse' || value.type === 'node-worker-attach'

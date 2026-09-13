@@ -10,6 +10,7 @@ import type { ProviderConfigurationRequest } from '../provider-configuration.js'
 import { parseNodeProviderConfiguration } from './provider-configuration-wire.js';
 import { parseNodeBulkIdentity, type NodeBulkIdentity } from './bulk-wire.js';
 import { exactNodeFields, nodeString, parsePrivateNodeJson } from './private-json.js';
+import { isNodeRequestTimeout } from '../deadline.js';
 
 export const MAX_NODE_EXECUTION_FRAME_BYTES = 256 * 1024;
 
@@ -28,6 +29,7 @@ export interface NodeExecutionCall {
   readonly version: typeof NODE_WIRE_VERSION;
   readonly session: NodeSessionIdentity;
   readonly requestId: number;
+  readonly timeoutMs: number;
   readonly command: NodeExecutionCommand;
 }
 
@@ -70,15 +72,16 @@ export function parseNodeExecutionCallText(text: string): NodeExecutionCall | nu
 
 export function parseNodeExecutionEnvelopeText(text: string): NodeExecutionEnvelope | null {
   const value = parsePrivateNodeJson(text, MAX_NODE_EXECUTION_FRAME_BYTES);
-  if (!exactNodeFields(value, ['type', 'version', 'session', 'requestId', 'command'])
+  if (!exactNodeFields(value, ['type', 'version', 'session', 'requestId', 'timeoutMs', 'command'])
     || value.type !== 'node-execution-request' || value.version !== NODE_WIRE_VERSION
+    || !isNodeRequestTimeout(value.timeoutMs)
     || !Number.isSafeInteger(value.requestId) || (value.requestId as number) < 1) return null;
   const session = parseNodeSessionIdentity(value.session);
   const command = parseCommand(value.command);
   if (!session || command && (('identity' in command && !sameNodeSession(command.identity, session))
     || ('body' in command && !sameNodeSession(command.body, session))
     || ('stream' in command && !sameNodeSession(command.stream, session)))) return null;
-  return { type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: value.requestId as number, command };
+  return { type: 'node-execution-request', version: NODE_WIRE_VERSION, session, requestId: value.requestId as number, timeoutMs: value.timeoutMs, command };
 }
 
 export function serializeNodeExecutionCall(call: NodeExecutionCall): string {

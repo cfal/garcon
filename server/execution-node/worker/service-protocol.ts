@@ -15,6 +15,7 @@ import { parseNodeProviderCommandsCommand, parseNodeProviderCommandsReply, type 
 import { parseNodeProviderConfigurationCommand, parseNodeProviderConfigurationReply, type NodeProviderConfigurationCommand, type NodeProviderConfigurationReply } from '../../execution-nodes/transport/provider-configuration-update-wire.js';
 import { parseNodeSessionConfigurationCommand, parseNodeSessionConfigurationReply, type NodeSessionConfigurationCommand, type NodeSessionConfigurationReply } from '../../execution-nodes/transport/provider-session-configuration-wire.js';
 import type { NodeOutputReplayCursor } from './output-delivery.js';
+import { isNodeRequestTimeout } from '../../execution-nodes/deadline.js';
 
 export const MAX_NODE_WORKER_SERVICE_BYTES = 256 * 1024;
 export const MAX_NODE_WORKER_REPLAY_CURSORS = 256;
@@ -62,7 +63,7 @@ interface NodeWorkerServiceEnvelope {
 }
 
 export type NodeWorkerServiceFrame =
-  | NodeWorkerServiceEnvelope & { readonly type: 'node-worker-service-request'; readonly command: NodeWorkerServiceCommand }
+  | NodeWorkerServiceEnvelope & { readonly type: 'node-worker-service-request'; readonly timeoutMs: number; readonly command: NodeWorkerServiceCommand }
   | NodeWorkerServiceEnvelope & { readonly type: 'node-worker-service-result'; readonly result: NodeWorkerServiceResult }
   | NodeWorkerServiceEnvelope & { readonly type: 'node-worker-service-cancel' };
 
@@ -98,7 +99,7 @@ export function serializeNodeWorkerOutputSuspension(frame: NodeWorkerOutputSuspe
 
 export function parseNodeWorkerServiceText(text: string): NodeWorkerServiceFrame | null {
   const value = parsePrivateNodeJson(text, MAX_NODE_WORKER_SERVICE_BYTES);
-  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId'], ['command', 'result'])
+  if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId'], ['command', 'result', 'timeoutMs'])
     || value.version !== NODE_WIRE_VERSION || !positiveInteger(value.connectionId) || !positiveInteger(value.requestId)) return null;
   const session = parseNodeSessionIdentity(value.session);
   if (!session) return null;
@@ -106,9 +107,10 @@ export function parseNodeWorkerServiceText(text: string): NodeWorkerServiceFrame
   if (value.type === 'node-worker-service-cancel' && exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId'])) {
     return { ...envelope, type: value.type };
   }
-  if (value.type === 'node-worker-service-request' && exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId', 'command'])) {
+  if (value.type === 'node-worker-service-request' && exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId', 'timeoutMs', 'command'])
+    && isNodeRequestTimeout(value.timeoutMs)) {
     const command = parseCommand(value.command, session);
-    return command ? { ...envelope, type: value.type, command } : null;
+    return command ? { ...envelope, type: value.type, timeoutMs: value.timeoutMs, command } : null;
   }
   if (value.type === 'node-worker-service-result' && exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'requestId', 'result'])) {
     const result = parseResult(value.result, session);
