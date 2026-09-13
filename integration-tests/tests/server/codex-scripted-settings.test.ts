@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutionSettingsPatchResponse } from '../../../common/chat-command-contracts.js';
 import { isRecord } from '../../../common/json.js';
@@ -48,7 +49,10 @@ describe('scripted Codex session settings', () => {
   let environment: ScriptedCodexTestEnvironment;
   let protocol: LiveCodexProtocolProbe;
   let fixtureOptions: IntegrationFixtureOptions;
+  let outsideDirectory: string;
   beforeEach(async () => {
+    // The workspace-write policy permits /tmp and TMPDIR, including the ordinary fixture root.
+    outsideDirectory = await mkdtemp(join(homedir(), 'garcon-codex-settings-'));
     environment = await startScriptedCodexTestEnvironment();
     const serverEnvironment = { ...environment.serverEnvironment };
     protocol = createLiveCodexProtocolProbe(serverEnvironment);
@@ -60,11 +64,14 @@ describe('scripted Codex session settings', () => {
       },
     };
   });
-  afterEach(async () => { await environment.dispose(); });
+  afterEach(async () => {
+    try { await environment?.dispose(); }
+    finally { if (outsideDirectory) await rm(outsideDirectory, { recursive: true, force: true }); }
+  });
 
   test('rejects active effort clearing and applies confirmed permissions at the next turn', async () => {
     await withIntegrationFixture('codex-settings-active', async fixture => {
-      const outsidePath = join(fixture.dirs.workspace, 'synthetic-settings-output');
+      const outsidePath = join(outsideDirectory, 'synthetic-settings-output');
       const held = environment.model.scriptHeldTurn([
         codexExecCommandCall('call_running', writeCommand(outsidePath, 'synthetic-running')),
       ]);
@@ -110,7 +117,7 @@ describe('scripted Codex session settings', () => {
 
   test('retains active manual-bypass approval while saving default permissions for the next turn', async () => {
     await withIntegrationFixture('codex-settings-active-approval', async fixture => {
-      const outsidePath = join(fixture.dirs.workspace, 'synthetic-settings-approval');
+      const outsidePath = join(outsideDirectory, 'synthetic-settings-approval');
       const held = environment.model.scriptHeldTurn([codexExecCommandCall('call_active_escalation',
         writeCommand(outsidePath, 'synthetic-active-approval'), {
           sandbox_permissions: 'require_escalated', justification: 'synthetic active-turn approval',
@@ -175,7 +182,7 @@ describe('scripted Codex session settings', () => {
         expect(await fixture.client.patch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', {
           chatId, thinkingMode: 'none',
         })).toMatchObject({ success: true, thinkingMode: 'none' });
-        const outsidePath = join(fixture.dirs.workspace, 'synthetic-idle-settings');
+        const outsidePath = join(outsideDirectory, 'synthetic-idle-settings');
         scriptSandboxedEscalation(environment.model, outsidePath, 'synthetic-resumed-reply');
         const resumedCursor = fixture.client.markEvents();
         const resumed = await fixture.client.runChat({ chatId, command: 'synthetic resumed input',
