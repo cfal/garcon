@@ -1,4 +1,4 @@
-import { isExecutionIdentity } from '../../../common/execution-location.js';
+import { nodeBulkAttemptOrdinal } from '../../execution-nodes/transport/bulk-session-wire.js';
 import { NodeBulkError } from '../../execution-nodes/transport/bulk-transfers.js';
 import type { NodeWorkerAuthority } from './authority.js';
 
@@ -14,16 +14,14 @@ interface ActiveAttempt {
   readonly cancellation: AbortController;
 }
 
-/** Keeps retired physical identities consumed even when retirement overtakes their installation. */
+/** Fences consumed session-wide ordinals even when retirement overtakes installation. */
 export class NodeWorkerBulkAttempts {
-  readonly #consumed = new Set<string>();
   readonly #closing = new AbortController();
   readonly #detach: () => void;
   #active: ActiveAttempt | null = null;
-  #exhausted = false;
+  #consumedThrough = 0;
 
-  constructor(private readonly authority: NodeWorkerAuthority, private readonly maxIdentities = 4096) {
-    if (!Number.isSafeInteger(maxIdentities) || maxIdentities < 1) throw new TypeError('Invalid bulk attempt limit');
+  constructor(private readonly authority: NodeWorkerAuthority) {
     const close = () => this.close();
     this.#detach = () => authority.signal.removeEventListener('abort', close);
     authority.signal.addEventListener('abort', close, { once: true });
@@ -31,15 +29,15 @@ export class NodeWorkerBulkAttempts {
   }
 
   attach(connectionId: number, bulkAttemptId: string): boolean {
-    this.#validateIdentity(connectionId, bulkAttemptId);
+    const ordinal = this.#validateIdentity(connectionId, bulkAttemptId);
     const connection = this.authority.connection(connectionId);
     const current = this.#active;
     if (current?.lease.connectionId === connectionId && current.lease.bulkAttemptId === bulkAttemptId) {
       current.lease.validate();
       return true;
     }
-    if (this.#consumed.has(bulkAttemptId)) return false;
-    if (!this.#consume(bulkAttemptId)) return false;
+    if (ordinal <= this.#consumedThrough) return false;
+    this.#consumedThrough = ordinal;
     const cancellation = new AbortController();
     const signal = AbortSignal.any([cancellation.signal, connection.signal, this.#closing.signal]);
     const lease: NodeWorkerBulkAttempt = Object.freeze({ connectionId, bulkAttemptId, signal,
@@ -55,7 +53,6 @@ export class NodeWorkerBulkAttempts {
 
   capture(connectionId: number, bulkAttemptId: string): NodeWorkerBulkAttempt {
     this.#validateIdentity(connectionId, bulkAttemptId);
-    if (this.#exhausted) throw new NodeBulkError('NODE_CAPACITY', 'Bulk attempt identities are exhausted');
     const lease = this.#active?.lease;
     if (!lease || lease.connectionId !== connectionId || lease.bulkAttemptId !== bulkAttemptId) throw unavailable();
     lease.validate();
@@ -63,9 +60,9 @@ export class NodeWorkerBulkAttempts {
   }
 
   retire(connectionId: number, bulkAttemptId: string): void {
-    this.#validateIdentity(connectionId, bulkAttemptId);
+    const ordinal = this.#validateIdentity(connectionId, bulkAttemptId);
     this.authority.connection(connectionId);
-    this.#consume(bulkAttemptId);
+    this.#consumedThrough = Math.max(this.#consumedThrough, ordinal);
     if (this.#active?.lease.connectionId === connectionId && this.#active.lease.bulkAttemptId === bulkAttemptId)
       this.#retireActive();
   }
@@ -77,28 +74,18 @@ export class NodeWorkerBulkAttempts {
     this.#retireActive();
   }
 
-  #consume(bulkAttemptId: string): boolean {
-    if (this.#exhausted) return false;
-    if (this.#consumed.has(bulkAttemptId)) return true;
-    if (this.#consumed.size >= this.maxIdentities) {
-      this.#exhausted = true;
-      this.#retireActive();
-      return false;
-    }
-    this.#consumed.add(bulkAttemptId);
-    return true;
-  }
-
   #retireActive(): void {
     const current = this.#active;
     this.#active = null;
     current?.cancellation.abort(unavailable());
   }
 
-  #validateIdentity(connectionId: number, bulkAttemptId: string): void {
+  #validateIdentity(connectionId: number, bulkAttemptId: string): number {
     this.#closing.signal.throwIfAborted();
-    if (!Number.isSafeInteger(connectionId) || connectionId < 1 || !isExecutionIdentity(bulkAttemptId))
+    const ordinal = nodeBulkAttemptOrdinal(bulkAttemptId);
+    if (!Number.isSafeInteger(connectionId) || connectionId < 1 || ordinal === null)
       throw new TypeError('Invalid bulk attempt identity');
+    return ordinal;
   }
 }
 

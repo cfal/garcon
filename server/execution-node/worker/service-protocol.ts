@@ -6,6 +6,7 @@ import {
   producerStreamKey, type NodeOutputAck, type NodeReplayReply, type ProducerStreamIdentity,
 } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
+import { nodeBulkAttemptOrdinal } from '../../execution-nodes/transport/bulk-session-wire.js';
 import { parseNodeOperationIdentity, parseNodeSessionIdentity, sameNodeSession, type NodeOperationIdentity, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { parseNodeBulkDescriptor, parseNodeBulkIdentity, type NodeBulkDescriptor, type NodeBulkIdentity } from '../../execution-nodes/transport/bulk-wire.js';
 import { MAX_NODE_EXECUTION_BODY_BYTES, type NodeExecutionBody } from '../../execution-nodes/transport/execution-body-wire.js';
@@ -33,6 +34,7 @@ export type NodeWorkerServiceCommand =
   // An installation consumes its stream identity once the session receives it, including rollback.
   | { readonly method: 'install-output'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
   | { readonly method: 'retire-output'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
+  | { readonly method: 'confirm-bulk'; readonly instanceId: string; readonly connectionId: number; readonly bulkAttemptId: string }
   | { readonly method: 'reserve-body'; readonly instanceId: string; readonly identity: NodeOperationIdentity;
       readonly kind: NodeExecutionBody['kind']; readonly controlId: string | null; readonly descriptor: NodeBulkDescriptor }
   | { readonly method: 'permission'; readonly command: NodePermissionCommand }
@@ -53,6 +55,7 @@ export type NodeWorkerServiceResult =
   | { readonly kind: 'output-installed'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
   // Confirms output fencing only; native work may still occupy its execution capacity.
   | { readonly kind: 'output-fenced'; readonly instanceId: string; readonly stream: ProducerStreamIdentity }
+  | { readonly kind: 'bulk-installed'; readonly instanceId: string; readonly bulkAttemptId: string }
   | { readonly kind: 'body-reserved'; readonly transfer: NodeBulkIdentity }
   | { readonly kind: 'permission-result'; readonly result: NodePermissionResult }
   | { readonly kind: 'output-recovery'; readonly generation: number }
@@ -146,7 +149,7 @@ export function serializeNodeWorkerOutputAcknowledgement(frame: NodeWorkerOutput
 }
 
 function parseCommand(value: unknown, session: NodeSessionIdentity, connectionId: number): NodeWorkerServiceCommand | null {
-  if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request', 'chat', 'reason', 'connectionId', 'bulkAttemptId', 'facet', 'sequence', 'grant'])) return null;
+  if (!exactNodeFields(value, ['method'], ['instanceId', 'stream', 'identity', 'kind', 'controlId', 'descriptor', 'command', 'generation', 'cursors', 'strict', 'operation', 'sessionId', 'code', 'workspaceId', 'request', 'chat', 'reason', 'connectionId', 'bulkAttemptId', 'facet', 'sequence', 'grant', 'after'])) return null;
   if (value.method === 'provider-history-import') {
     const command = parseNodeProviderHistoryCommand(value);
     return command && sameNodeSession(command.identity, session) && command.connectionId === connectionId ? command : null;
@@ -162,6 +165,10 @@ function parseCommand(value: unknown, session: NodeSessionIdentity, connectionId
     return command && (!identity || sameNodeSession(identity, session)) ? command : null;
   }
   if (value.method === 'provider-native-sessions') return parseNodeProviderNativeCommand(value);
+  if (value.method === 'confirm-bulk' && exactNodeFields(value, ['method', 'instanceId', 'connectionId', 'bulkAttemptId'])
+    && isExecutionIdentity(value.instanceId) && nodeBulkAttemptOrdinal(value.bulkAttemptId) !== null && value.connectionId === connectionId) {
+    return { method: value.method, instanceId: value.instanceId, connectionId, bulkAttemptId: value.bulkAttemptId as string };
+  }
   if (value.method === 'provider-auth') return parseNodeProviderAuthCommand(value);
   if (value.method === 'provider-commands') return parseNodeProviderCommandsCommand(value);
   if (value.method === 'provider-catalog' && exactNodeFields(value, ['method', 'instanceId', 'strict'])
@@ -228,6 +235,10 @@ function parseResult(value: unknown, session: NodeSessionIdentity, connectionId:
   if (value.kind === 'provider-auth-status' || value.kind === 'provider-auth-rejected' || value.kind === 'provider-login-status'
     || value.kind === 'provider-login-launched' || value.kind === 'provider-login-completed') return parseNodeProviderAuthReply(value);
   if (value.kind === 'provider-native-result') return parseNodeProviderNativeReply(value);
+  if (value.kind === 'bulk-installed' && exactNodeFields(value, ['kind', 'instanceId', 'bulkAttemptId'])
+    && isExecutionIdentity(value.instanceId) && nodeBulkAttemptOrdinal(value.bulkAttemptId) !== null) {
+    return { kind: value.kind, instanceId: value.instanceId, bulkAttemptId: value.bulkAttemptId as string };
+  }
   if (value.kind === 'provider-catalog' || value.kind === 'provider-catalog-unavailable') return parseNodeProviderCatalogReply(value);
   if (value.kind === 'unknown' && exactNodeFields(value, ['kind'])) return { kind: value.kind };
   if (value.kind === 'rejected' && exactNodeFields(value, ['kind', 'code'])

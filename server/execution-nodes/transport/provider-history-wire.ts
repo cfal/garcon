@@ -3,11 +3,13 @@ import { isRecord } from '../../../common/json.js';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeOperationIdentity, sameNodeSession, type NodeOperationIdentity } from '../../../common/node-operation.js';
 import { parseNodeBulkDescriptor, parseNodeBulkIdentity, type NodeBulkDescriptor, type NodeBulkIdentity } from './bulk-wire.js';
+import { nodeBulkAttemptOrdinal } from './bulk-session-wire.js';
 import { exactNodeFields, isNodeData } from './private-json.js';
 import { parseNodeNativeChatReference, type NodeNativeChatReference } from './provider-native-wire.js';
 import { MAX_NODE_HISTORY_ROW_BYTES, NODE_HISTORY_ROW_ENCODING } from './provider-history-row.js';
 
 export const MAX_NODE_HISTORY_CONTROL_BYTES = 240 * 1024;
+export const MAX_NODE_HISTORY_OPERATIONS = 64;
 export const NODE_HISTORY_FAILURE_CODES = ['NODE_HISTORY_INVALID', 'NODE_HISTORY_TOO_LARGE', 'NODE_HISTORY_UNAVAILABLE',
   'NODE_HISTORY_SOURCE_FAILED', 'NODE_HISTORY_MULTIPLE_FAILURES', 'NODE_CAPACITY'] as const;
 export type NodeHistoryFailureCode = typeof NODE_HISTORY_FAILURE_CODES[number];
@@ -21,7 +23,7 @@ export interface NodeHistoryImportTarget {
 }
 
 export type NodeProviderHistoryCommand = NodeHistoryImportTarget & { readonly method: 'provider-history-import' } & (
-  | { readonly operation: 'open'; readonly workspaceId: string; readonly facet: NodeHistoryFacet; readonly chat: NodeNativeChatReference }
+  | { readonly operation: 'open'; readonly after: number; readonly workspaceId: string; readonly facet: NodeHistoryFacet; readonly chat: NodeNativeChatReference }
   | { readonly operation: 'next'; readonly sequence: number }
   | { readonly operation: 'transfer'; readonly sequence: number; readonly grant: NodeBulkIdentity; readonly descriptor: NodeBulkDescriptor }
   | { readonly operation: 'cancel' }
@@ -37,11 +39,16 @@ export type NodeProviderHistoryReply = NodeHistoryImportTarget & { readonly kind
 
 const targetFields = ['identity', 'instanceId', 'connectionId', 'bulkAttemptId'] as const;
 
+export function nodeHistoryOperationOrdinal(value: unknown): number | null {
+  return typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+}
+
 export function parseNodeHistoryImportTarget(value: unknown): NodeHistoryImportTarget | null {
-  if (!isNodeData(value) || !isRecord(value) || !isExecutionIdentity(value.instanceId) || !isExecutionIdentity(value.bulkAttemptId)
+  if (!isNodeData(value) || !isRecord(value) || !isExecutionIdentity(value.instanceId) || nodeBulkAttemptOrdinal(value.bulkAttemptId) === null
     || !positive(value.connectionId)) return null;
   const identity = parseNodeOperationIdentity(value.identity);
-  return identity ? { identity, instanceId: value.instanceId, connectionId: value.connectionId, bulkAttemptId: value.bulkAttemptId } : null;
+  return identity && nodeHistoryOperationOrdinal(identity.operationId) !== null
+    ? { identity, instanceId: value.instanceId, connectionId: value.connectionId, bulkAttemptId: value.bulkAttemptId as string } : null;
 }
 
 export function sameNodeHistoryImport(a: NodeHistoryImportTarget, b: NodeHistoryImportTarget): boolean {
@@ -66,10 +73,11 @@ export function parseNodeProviderHistoryCommand(value: unknown): NodeProviderHis
   if (!target) return null;
   const base = { ...target, method: 'provider-history-import' } as const;
   const fields = ['method', 'operation', ...targetFields];
-  if (value.operation === 'open' && exactNodeFields(value, [...fields, 'workspaceId', 'facet', 'chat'])
+  if (value.operation === 'open' && exactNodeFields(value, [...fields, 'after', 'workspaceId', 'facet', 'chat'])
+    && typeof value.after === 'number' && Number.isSafeInteger(value.after) && value.after >= 0 && value.after < Number(target.identity.operationId)
     && isExecutionIdentity(value.workspaceId) && (value.facet === 'legacy' || value.facet === 'native')) {
     const chat = parseNodeNativeChatReference(value.chat);
-    return chat ? { ...base, operation: 'open', workspaceId: value.workspaceId, facet: value.facet, chat } : null;
+    return chat ? { ...base, operation: 'open', after: value.after, workspaceId: value.workspaceId, facet: value.facet, chat } : null;
   }
   if (value.operation === 'cancel' && exactNodeFields(value, fields)) return { ...base, operation: 'cancel' };
   if (value.operation === 'next' && exactNodeFields(value, [...fields, 'sequence']) && positive(value.sequence)) {

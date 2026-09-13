@@ -35,8 +35,10 @@ import { clientNodeSocketPort, serverNodeSocketPort, type NodeClientSocket } fro
 import { NodeSocketWriter } from '../../server/execution-nodes/transport/socket-writer.js';
 import { NodeBulkSessionChannel, type NodeBulkControlBinding, type NodeBulkSessionBinding } from '../../server/execution-nodes/transport/bulk-session-channel.js';
 import { NodeHistoryReceiverPool } from '../../server/execution-nodes/transport/provider-history-receiver-pool.js';
+import { NodeHistoryOperationIssuer } from '../../server/execution-nodes/provider-history-operations.js';
 import type { RemoteProviderHistoryConnection } from '../../server/execution-nodes/remote-provider-history-import.js';
-import type { NodeSessionAccepted } from '../../server/execution-nodes/transport/session-wire.js';
+import { NODE_HANDSHAKE_TIMEOUT_MS, type NodeSessionAccepted } from '../../server/execution-nodes/transport/session-wire.js';
+import { NodeDeadline } from '../../server/execution-nodes/deadline.js';
 import { DomainError } from '../../server/lib/domain-error.js';
 import type { TestCertificate } from './tls-certificates.js';
 
@@ -71,6 +73,7 @@ export interface NodeSessionFixtureOptions {
   readonly scheduleControllerTimeout?: ControllerNodeHandshakeOptions['scheduleTimeout'];
   readonly scheduleHeartbeat?: NodeControllerHandshakeOptions['scheduleHeartbeat'];
   readonly beforeWorkerConfiguration?: () => Promise<void>;
+  readonly beforeBulkAttachment?: () => Promise<void>;
   readonly sessionCommand?: [string, ...string[]];
   readonly replay?: NodeReplayOptions;
   readonly maxOperations?: number;
@@ -104,6 +107,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
   const controllerBulkFrames = new Set<(frame: NodeBulkSessionDataFrame) => boolean>();
   const nodeBulkFrames = new Set<(frame: NodeBulkSessionDataFrame) => boolean>();
   const historyPool = options.controllerHistoryPool ?? new NodeHistoryReceiverPool();
+  let historyIssuer: { session: NodeSessionIdentity; operations: NodeHistoryOperationIssuer } | null = null;
   let outputPressure: { minimumRecordBytes: number; blocked: PromiseWithResolvers<void>; active: boolean } | null = null;
   let socketBacklog: { bytes: number; writer: NodeSocketWriter } | null = null;
   let nodeWriter: NodeSocketWriter | null = null;
@@ -224,6 +228,11 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
             const bulk = Promise.withResolvers<NodeBulkSessionChannel>(); void bulk.promise.catch(() => {});
             const key = connectionKey(connection.session, connection.connectionId);
             const historyReceiver = historyPool.createReceiver(connection.session, physical.signal);
+            if (!historyIssuer || !sameNodeSession(historyIssuer.session, connection.session)) {
+              historyIssuer?.operations.close();
+              historyIssuer = { session: connection.session, operations: new NodeHistoryOperationIssuer(connection.session, instanceIds) };
+            }
+            const operations = historyIssuer.operations;
             const fixtureConnection: ControllerFixtureConnection = { client, signal: physical.signal, received, validate,
               bulk: bulk.promise, bulkReceived: new Set([(frame) => { if (frame.type === 'node-history-bulk') historyReceiver.receive(frame); }]),
               get currentBulk() { return controllerBindings.get(key)?.channel ?? null; },
@@ -234,7 +243,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
                 const validateHistory = () => { signal.throwIfAborted(); validate(); binding.validate(); };
                 validateHistory();
                 return { nodeId: binding.principal.nodeId, session: binding.session, connectionId: binding.connectionId,
-                  bulkAttemptId: binding.bulkAttemptId, signal, controlSignal: physical.signal, service: client.service, receiver: historyReceiver,
+                  bulkAttemptId: binding.bulkAttemptId, signal, controlSignal: physical.signal, service: client.service, receiver: historyReceiver, operations,
                   bulk: { send: (frame) => captured.send(frame), sendWhenWritable: (...args) => captured.sendWhenWritable(...args) },
                   validate: validateHistory, validateControl: validate };
               } };
@@ -280,6 +289,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     let bulkAttempt = 0;
     const openBulk = (connection: NodeHostedConnection): Promise<NodeBulkSessionChannel> => {
       const attempt = ++bulkAttempt;
+      const bulkAttemptId = coordinator.issueBulkAttempt(connection);
       const pending = Promise.withResolvers<NodeBulkSessionChannel>(); void pending.promise.catch(() => {});
       const controlSignal = AbortSignal.any([physical.signal, connection.lease.signal]);
       controlSignal.throwIfAborted();
@@ -309,24 +319,32 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
           bufferedFrameBytes: (bytes) => port.bufferedFrameBytes(bytes),
           send: (text) => port.send(text), terminate: () => port.terminate(),
         }, { ...socketLimits, signal: bulkPhysical.signal });
-        const opened = channel = new NodeBulkSessionChannel(bulkWriter, { side: 'node', signal: bulkPhysical.signal,
+        const opened = channel = new NodeBulkSessionChannel(bulkWriter, { side: 'node', signal: bulkPhysical.signal, bulkAttemptId,
           binding: { principal: { controllerId: configured.controllerId, nodeId: configured.nodeId }, session: connection.lease.session,
             connectionId: connection.connectionId, instanceIds, signal: controlSignal,
             validate() { coordinator.supervisor.assertConnection(connection.lease); } },
           validate() { bulkPhysical.signal.throwIfAborted(); }, disconnected: closeBulk,
+          async install(binding) {
+            const validate = () => {
+              if (attempt !== bulkAttempt) throw new Error('Synthetic bulk attempt replaced');
+              binding.signal.throwIfAborted();
+            };
+            validate();
+            registeredAttempt = binding.bulkAttemptId;
+            await options.beforeBulkAttachment?.();
+            validate();
+            await coordinator.peer(connection).attachBulk(connection.connectionId, binding.bulkAttemptId);
+            validate();
+            await coordinator.peer(connection).confirmBulk(connection.connectionId, binding.bulkAttemptId, binding.signal, new NodeDeadline(NODE_HANDSHAKE_TIMEOUT_MS));
+            validate();
+            bulk = opened; bulkBinding = binding;
+          },
           received(frame) {
             for (const listener of nodeBulkFrames) if (!listener(frame)) return;
             const submission = coordinator.peer(connection).forward(frame, bulkPhysical.signal);
             void submission.drained.catch(closeBulk);
           } });
-        void opened.ready.then(async (binding) => {
-          if (attempt !== bulkAttempt) { closeBulk(); return; }
-          binding.signal.throwIfAborted();
-          registeredAttempt = binding.bulkAttemptId;
-          await coordinator.peer(connection).attachBulk(connection.connectionId, binding.bulkAttemptId);
-          binding.signal.throwIfAborted();
-          bulk = opened; bulkBinding = binding; pending.resolve(opened);
-        }).catch(closeBulk);
+        void opened.ready.then(() => pending.resolve(opened)).catch(closeBulk);
         opened.start();
       });
       bulkSocket.addEventListener('message', (event) => {
@@ -438,6 +456,7 @@ export async function createNodeSessionFixture(certificate: TestCertificate, tru
     requests: () => requests, upgrades: () => upgrades, bulkUpgrades: () => bulkUpgrades,
     restartController() { controllerBootId = 'synthetic-next-controller-boot'; },
     async dispose() {
+      historyIssuer?.operations.close();
       for (const client of clients) client.terminate();
       await server.stop(true);
       const cleaned = await coordinator.shutdown();

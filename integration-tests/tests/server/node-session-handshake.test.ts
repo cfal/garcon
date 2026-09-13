@@ -108,7 +108,7 @@ describe.skipIf(!nodeSessionSystemdAvailable)('authenticated session handshake o
         const socket = createNodeBulkSocket(pairing);
         const closed = Promise.withResolvers<void>();
         socket.addEventListener('open', () => socket.send(serializeNodeBulkSessionFrame({ type: 'node-bulk-session-hello', version: 1,
-          ...binding, bulkAttemptId: 'synthetic-invalid-binding' })));
+          ...binding, bulkAttemptId: '999' })));
         socket.addEventListener('message', () => closed.reject(new Error('Synthetic invalid bulk binding was accepted')));
         socket.addEventListener('close', () => closed.resolve());
         socket.addEventListener('error', () => closed.reject(new Error('Synthetic bulk upgrade failed before binding validation')));

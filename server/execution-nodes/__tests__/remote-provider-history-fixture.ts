@@ -6,6 +6,7 @@ import { NodeProviderCapacity } from '../../execution-node/provider-capacity.js'
 import { NodeProviderHistoryImportHost } from '../../execution-node/provider-history-host.js';
 import type { NodeWorkerServiceResult } from '../../execution-node/worker/service-protocol.js';
 import { NodeDeadline } from '../deadline.js';
+import { NodeHistoryOperationIssuer } from '../provider-history-operations.js';
 import type { ProviderHistoryImportRequest } from '../provider-history-import.js';
 import { RemoteProviderHistoryImportService, type RemoteProviderHistoryConnection } from '../remote-provider-history-import.js';
 import type { NodeHistoryBulkFrame } from '../transport/provider-history-bulk-wire.js';
@@ -47,18 +48,19 @@ export function historyFixture(load: AgentHistoryImport['load']) {
   const host = new NodeProviderHistoryImportHost({ instance, session, agentId: 'synthetic', signal: control.signal,
     capacity, occupancy, memory: senderMemory, resources, facets: { native: source, legacy: null }, assertAdmission() {},
     capture(target) {
-      if (target.connectionId !== 1 || target.bulkAttemptId !== 'synthetic-bulk') throw new Error('Synthetic wrong physical target');
+      if (target.connectionId !== 1 || target.bulkAttemptId !== '1') throw new Error('Synthetic wrong physical target');
       return { signal: physical, validate: () => physical.throwIfAborted(),
         transfer: (bytes, sequence, grant, descriptor, signal) => sender.transfer({ ...target, sequence, grant }, descriptor, bytes,
           signal, () => physical.throwIfAborted()) };
     },
   });
+  const operations = new NodeHistoryOperationIssuer(session, [instance.instanceId]);
   const commands: NodeProviderHistoryCommand[] = [];
   const deadlines: number[] = [];
   let afterReply = async (_command: NodeProviderHistoryCommand, reply: NodeProviderHistoryReply): Promise<NodeWorkerServiceResult> => reply;
   const binding: RemoteProviderHistoryConnection = {
-    nodeId: instance.nodeId, session, connectionId: 1, bulkAttemptId: 'synthetic-bulk', signal: physical, controlSignal: control.signal,
-    receiver, bulk: { send: (frame) => upstream(frame), async sendWhenWritable(frame) { upstream(frame); } },
+    nodeId: instance.nodeId, session, connectionId: 1, bulkAttemptId: '1', signal: physical, controlSignal: control.signal,
+    receiver, operations, bulk: { send: (frame) => upstream(frame), async sendWhenWritable(frame) { upstream(frame); } },
     validate: () => physical.throwIfAborted(), validateControl: () => control.signal.throwIfAborted(),
     service: { async call(command, signal, deadline) {
       if (command.method !== 'provider-history-import') throw new Error('Synthetic unexpected command');
@@ -74,6 +76,6 @@ export function historyFixture(load: AgentHistoryImport['load']) {
   return { importer, request, binding, control, bulkLifetime, capacity, occupancy, receiver, host, sender, creditTimers, commands, deadlines,
     senderMemory, receiverMemory, afterReply(callback: typeof afterReply) { afterReply = callback; },
     upstream(callback: typeof upstream) { upstream = callback; }, downstream(callback: typeof downstream) { downstream = callback; },
-    async close() { control.abort(); host.close(); receiver.close(); sender.close(); await tick(); },
+    async close() { operations.close(); control.abort(); host.close(); receiver.close(); sender.close(); await tick(); },
   };
 }

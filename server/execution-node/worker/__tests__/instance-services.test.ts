@@ -115,6 +115,21 @@ function fixture() {
     close() { lifetime.abort(); services.close(); host.close(); resources.close(); assembler.close(); writer.close(); } };
 }
 
+test('bulk confirmation requires the exact installed attempt and stays usable while admission is suspended', async () => {
+  const f = fixture();
+  const command = { method: 'confirm-bulk', instanceId: f.location.instanceId, connectionId: 1, bulkAttemptId: '1' } as const;
+  try {
+    expect((await f.services.service(f.connection, command, f.connection.signal)).kind).not.toBe('bulk-installed');
+    f.services.bulkLifetime({ type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: command.bulkAttemptId });
+    f.authority.beginContainment();
+    expect(await f.services.service(f.connection, command, f.connection.signal))
+      .toEqual({ kind: 'bulk-installed', instanceId: command.instanceId, bulkAttemptId: command.bulkAttemptId });
+    f.services.bulkLifetime({ type: 'node-worker-bulk-retired', version: 1, session, connectionId: 1, bulkAttemptId: command.bulkAttemptId });
+    expect((await f.services.service(f.connection, command, f.connection.signal)).kind).not.toBe('bulk-installed');
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
 test.each(['catalog', 'commands', 'configuration', 'login'] as const)('unsettled %s work shares native capacity with every provider facet after reconnect', async (facet) => {
   const f = fixture();
   const capacity = NODE_WORKER_SERVICE_LIMITS.maxProviderRequests - NODE_WORKER_SERVICE_LIMITS.reservedProviderStatusRequests;

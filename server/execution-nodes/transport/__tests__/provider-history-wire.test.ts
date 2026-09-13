@@ -3,12 +3,12 @@ import { parseNodeProviderHistoryCommand, parseNodeProviderHistoryReply, type No
 import { MAX_NODE_HISTORY_ROW_BYTES, NODE_HISTORY_ROW_ENCODING } from '../provider-history-row.js';
 
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
-const target = { identity: { ...session, operationId: 'synthetic-operation' }, instanceId: 'synthetic-instance', connectionId: 1, bulkAttemptId: 'synthetic-bulk' };
+const target = { identity: { ...session, operationId: '1' }, instanceId: 'synthetic-instance', connectionId: 1, bulkAttemptId: '1' };
 const descriptor = { byteLength: 1024, sha256: 'a'.repeat(64) };
 const grant = { ...session, transferId: 'synthetic-transfer' };
 const chat = { chatId: '1000000000000001', agentId: 'synthetic', agentSessionId: 'synthetic-session-id', model: '', nativeSession: null,
   carryOverRevision: '', nativeSeedReceipt: null, settings: null };
-const open = { ...target, method: 'provider-history-import', operation: 'open', workspaceId: 'synthetic-workspace', facet: 'native', chat } as const;
+const open = { ...target, method: 'provider-history-import', operation: 'open', after: 0, workspaceId: 'synthetic-workspace', facet: 'native', chat } as const;
 
 test('strict history commands and replies preserve every cursor and physical identity', () => {
   const commands: NodeProviderHistoryCommand[] = [open, { ...open, facet: 'legacy' },
@@ -35,7 +35,7 @@ test('strict history commands and replies preserve every cursor and physical ide
 });
 
 test('history messages reject missing physical fencing, foreign grants, invalid sequence and oversized descriptors', () => {
-  for (const key of ['identity', 'instanceId', 'connectionId', 'bulkAttemptId', 'facet', 'workspaceId', 'chat']) {
+  for (const key of ['identity', 'instanceId', 'connectionId', 'bulkAttemptId', 'facet', 'workspaceId', 'chat', 'after']) {
     const malformed: Record<string, unknown> = { ...open }; delete malformed[key];
     expect(parseNodeProviderHistoryCommand(malformed)).toBeNull();
   }
@@ -52,4 +52,17 @@ test('history messages reject missing physical fencing, foreign grants, invalid 
   }
   expect(parseNodeProviderHistoryCommand({ ...open, chat: { ...chat, projectPath: '/foreign' } })).toBeNull();
   expect(parseNodeProviderHistoryReply({ ...target, kind: 'provider-history-result', operation: 'failed', code: 'ARBITRARY_PROVIDER_ERROR' })).toBeNull();
+});
+
+
+test('history identities require canonical safe ordinals and an earlier retirement hint', () => {
+  for (const ordinal of ['', '0', '01', '1e3', '-1', '+1', '1.0', 'synthetic-uuid', '9007199254740992', 1, null]) {
+    expect(parseNodeProviderHistoryCommand({ ...open, identity: { ...target.identity, operationId: ordinal } })).toBeNull();
+    expect(parseNodeProviderHistoryCommand({ ...open, bulkAttemptId: ordinal })).toBeNull();
+  }
+  for (const after of [-1, 0.5, 1, 2, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '0', null]) {
+    expect(parseNodeProviderHistoryCommand({ ...open, after })).toBeNull();
+  }
+  expect(parseNodeProviderHistoryCommand({ ...open, identity: { ...target.identity, operationId: String(Number.MAX_SAFE_INTEGER) },
+    bulkAttemptId: String(Number.MAX_SAFE_INTEGER), after: Number.MAX_SAFE_INTEGER - 1 })).not.toBeNull();
 });

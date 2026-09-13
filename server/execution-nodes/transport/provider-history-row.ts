@@ -75,7 +75,8 @@ function countEncodedValues(bytes: Uint8Array): number {
   let string = false;
   let escape = false;
   let token = false;
-  for (const byte of bytes) {
+  for (let index = 0; index < bytes.length; index++) {
+    const byte = bytes[index]!;
     if (string) {
       if (escape) escape = false;
       else if (byte === 92) escape = true;

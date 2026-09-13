@@ -499,10 +499,10 @@ test('service success at expiry remains unknown and cancelled server timers stay
   } finally { held.resolve({ kind: 'unknown' }); f.close(); }
 });
 
-const historyTarget = { identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance',
-  connectionId: 1, bulkAttemptId: 'synthetic-bulk-attempt' };
+const historyTarget = { identity: { ...session, operationId: '1' }, instanceId: 'synthetic-instance',
+  connectionId: 1, bulkAttemptId: '1' };
 const historyCommands: readonly NodeProviderHistoryCommand[] = [
-  { ...historyTarget, method: 'provider-history-import', operation: 'open', facet: 'native', workspaceId: 'synthetic-workspace',
+  { ...historyTarget, method: 'provider-history-import', operation: 'open', after: 0, facet: 'native', workspaceId: 'synthetic-workspace',
     chat: { chatId: '1000000000000000', agentId: 'synthetic-agent', agentSessionId: null, model: '', nativeSession: null,
       carryOverRevision: '', nativeSeedReceipt: null, settings: null } },
   { ...historyTarget, method: 'provider-history-import', operation: 'next', sequence: 1 },
@@ -554,8 +554,8 @@ const historyRow: NodeProviderHistoryReply = { ...historyTarget, kind: 'provider
   encoding: NODE_HISTORY_ROW_ENCODING, descriptor: { byteLength: 3, sha256: 'a'.repeat(64) } };
 const mismatchedHistoryReplies: readonly NodeProviderHistoryReply[] = [
   { ...historyRow, instanceId: 'foreign-instance' },
-  { ...historyRow, bulkAttemptId: 'foreign-attempt' },
-  { ...historyRow, identity: { ...historyTarget.identity, operationId: 'foreign-operation' } },
+  { ...historyRow, bulkAttemptId: '9' },
+  { ...historyRow, identity: { ...historyTarget.identity, operationId: '9' } },
   { ...historyRow, sequence: 2 },
   { ...historyTarget, kind: 'provider-history-result', operation: 'opened' },
   { ...historyTarget, kind: 'provider-history-result', operation: 'transferred', sequence: 1 },

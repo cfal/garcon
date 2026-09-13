@@ -5,7 +5,7 @@ import type { ProviderHistoryImportService } from '../execution-nodes/provider-h
 import { NodeBulkError } from '../execution-nodes/transport/bulk-transfers.js';
 import type { NodeHistoryMemoryBudget } from '../execution-nodes/transport/provider-history-memory.js';
 import { NodeHistoryRowError } from '../execution-nodes/transport/provider-history-row.js';
-import { parseNodeProviderHistoryCommand, sameNodeHistoryImport, type NodeHistoryFacet, type NodeHistoryFailureCode,
+import { MAX_NODE_HISTORY_OPERATIONS, parseNodeProviderHistoryCommand, sameNodeHistoryImport, type NodeHistoryFacet, type NodeHistoryFailureCode,
   type NodeHistoryImportTarget, type NodeProviderHistoryCommand, type NodeProviderHistoryReply } from '../execution-nodes/transport/provider-history-wire.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { NodeExecutionResources } from './execution-resources.js';
@@ -29,7 +29,7 @@ export interface NodeProviderHistoryHostOptions {
   readonly occupancy: Pick<NodeNativeOccupancy, 'reserveExecution'>;
   readonly memory: NodeHistoryMemoryBudget;
   readonly facets: Readonly<Record<NodeHistoryFacet, ProviderHistoryImportService | null>>;
-  readonly maxIdentities?: number;
+  readonly maxWindow?: number;
   readonly createClock?: NodeHistoryCursorOptions['createClock'];
   readonly scheduleTimeout?: NodeHistoryCursorOptions['scheduleTimeout'];
   assertAdmission(target: NodeHistoryImportTarget): void;
@@ -38,21 +38,24 @@ export interface NodeProviderHistoryHostOptions {
 
 interface ImportRecord {
   readonly target: NodeHistoryImportTarget;
+  readonly cancellation: AbortController;
+  opening: boolean;
   cursor: NodeHistoryImportCursor | null;
   validate: (() => void) | null;
   failure: NodeHistoryFailureCode | null;
 }
 
-/** Retains body-free consumed identities; cancellation can reconcile settlement without re-opening a source. */
+/** Separates the permanent consumed floor from bounded records retained through native settlement. */
 export class NodeProviderHistoryImportHost {
-  readonly #records = new Map<string, ImportRecord>();
-  readonly #maxIdentities: number;
+  readonly #records = new Map<number, ImportRecord>();
+  readonly #maxWindow: number;
   readonly #detach: () => void;
+  #consumedThrough = 0;
   #closed = false;
 
   constructor(private readonly options: NodeProviderHistoryHostOptions) {
-    this.#maxIdentities = options.maxIdentities ?? 4096;
-    if (!Number.isSafeInteger(this.#maxIdentities) || this.#maxIdentities < 1) throw new TypeError('Invalid history identity limit');
+    this.#maxWindow = options.maxWindow ?? MAX_NODE_HISTORY_OPERATIONS;
+    if (!Number.isSafeInteger(this.#maxWindow) || this.#maxWindow < 1) throw new TypeError('Invalid history operation window');
     const close = () => this.close();
     this.#detach = () => options.signal.removeEventListener('abort', close);
     options.signal.addEventListener('abort', close, { once: true });
@@ -67,21 +70,33 @@ export class NodeProviderHistoryImportHost {
     const base = { ...target, kind: 'provider-history-result' } as const;
     const fail = (code: NodeHistoryFailureCode): NodeProviderHistoryReply => ({ ...base, operation: 'failed', code });
     if (command.instanceId !== this.options.instance.instanceId || !sameNodeSession(command.identity, this.options.session)) return fail('NODE_HISTORY_INVALID');
-    let record = this.#records.get(command.identity.operationId);
+    const ordinal = Number(command.identity.operationId);
+    let record = this.#records.get(ordinal);
     if (record && !sameNodeHistoryImport(record.target, target)) return fail('NODE_HISTORY_INVALID');
     try {
       signal.throwIfAborted();
       if (this.#closed) return fail('NODE_HISTORY_UNAVAILABLE');
       if (command.operation === 'cancel') {
-        if (!record) record = this.#consume(target);
-        record.cursor?.cancel();
-        return { ...base, operation: 'cancelled', settled: record.cursor === null };
+        if (!record && ordinal > this.#consumedThrough) {
+          try {
+            const binding = this.options.capture(target);
+            binding.signal.throwIfAborted(); binding.validate();
+          } catch { return { ...base, operation: 'cancelled', settled: true }; }
+          record = this.#consume(target);
+        }
+        record?.cancellation.abort(new NodeHistoryCursorError('NODE_HISTORY_UNAVAILABLE', 'History import was cancelled'));
+        return { ...base, operation: 'cancelled', settled: !record || settled(record) };
       }
       this.options.assertAdmission(target);
       if (command.operation === 'open') {
-        if (record) return fail('NODE_HISTORY_INVALID');
+        if (record || ordinal <= this.#consumedThrough) return fail('NODE_HISTORY_INVALID');
+        const binding = this.options.capture(target);
+        binding.signal.throwIfAborted(); binding.validate();
+        this.#compact(command.after);
         record = this.#consume(target);
-        this.#open(record, command);
+        record.opening = true;
+        try { this.#open(record, command, binding); }
+        finally { record.opening = false; }
         return { ...base, operation: 'opened' };
       }
       if (!record?.cursor) return fail(record?.failure ?? 'NODE_HISTORY_UNAVAILABLE');
@@ -94,34 +109,44 @@ export class NodeProviderHistoryImportHost {
       await record.cursor.transfer(command.sequence, command.grant, command.descriptor, signal, deadline);
       return { ...base, operation: 'transferred', sequence: command.sequence };
     } catch (error) {
-      record?.cursor?.cancel(error);
+      record?.cancellation.abort(error);
       const code = failureCode(error);
       if (record) record.failure = code;
       signal.throwIfAborted();
       return fail(code);
-    }
+    } finally { this.#compact(); }
   }
 
   close(): void {
     if (this.#closed) return;
     this.#closed = true; this.#detach();
-    for (const record of this.#records.values()) record.cursor?.cancel(this.options.signal.reason);
+    for (const record of this.#records.values()) record.cancellation.abort(this.options.signal.reason);
+    this.#compact();
   }
 
   #consume(target: NodeHistoryImportTarget): ImportRecord {
-    if (this.#records.size >= this.#maxIdentities) throw new NodeBulkError('NODE_CAPACITY', 'History operation identities are exhausted');
-    const record = { target, cursor: null, validate: null, failure: null };
-    this.#records.set(target.identity.operationId, record);
+    const ordinal = Number(target.identity.operationId);
+    if (ordinal <= this.#consumedThrough || this.#records.has(ordinal)) throw new NodeHistoryCursorError('NODE_HISTORY_INVALID', 'History operation was already consumed');
+    if (this.#records.size >= this.#maxWindow) throw new NodeHistoryCursorError('NODE_HISTORY_UNAVAILABLE', 'History operation window is full');
+    const record = { target, cancellation: new AbortController(), opening: false, cursor: null, validate: null, failure: null };
+    this.#records.set(ordinal, record);
     return record;
   }
 
-  #open(record: ImportRecord, command: Extract<NodeProviderHistoryCommand, { operation: 'open' }>): void {
+  #compact(after = this.#consumedThrough): void {
+    this.#consumedThrough = Math.max(this.#consumedThrough, after);
+    while (this.#records.has(this.#consumedThrough + 1)) this.#consumedThrough++;
+    for (const [ordinal, record] of this.#records) {
+      if (ordinal <= this.#consumedThrough && settled(record)) this.#records.delete(ordinal);
+    }
+  }
+
+  #open(record: ImportRecord, command: Extract<NodeProviderHistoryCommand, { operation: 'open' }>, binding: NodeHistoryPhysicalBinding): void {
     if (command.chat.agentId !== this.options.agentId) throw new NodeHistoryCursorError('NODE_HISTORY_INVALID', 'History provider owner differs');
     const source = this.options.facets[command.facet];
     if (!source) throw new NodeHistoryCursorError('NODE_HISTORY_UNAVAILABLE', 'The history import facet is unavailable');
-    const binding = this.options.capture(record.target);
     const resource = this.options.resources.capture({ ...this.options.instance, workspaceId: command.workspaceId });
-    const signal = AbortSignal.any([this.options.signal, binding.signal, resource.signal]);
+    const signal = AbortSignal.any([this.options.signal, binding.signal, resource.signal, record.cancellation.signal]);
     const validate = () => { signal.throwIfAborted(); binding.validate(); resource.validate(); };
     validate();
     const release = this.options.capacity.reserve('work');
@@ -140,10 +165,13 @@ export class NodeProviderHistoryImportHost {
       void cursor.settled.then((settlement) => {
         record.cursor = null; record.validate = null;
         if (settlement.kind !== 'complete') record.failure = failureCode(settlement.error);
+        this.#compact();
       });
     } catch (error) { native?.release(); release(); throw error; }
   }
 }
+
+function settled(record: ImportRecord): boolean { return !record.opening && record.cursor === null; }
 
 function failureCode(error: unknown): NodeHistoryFailureCode {
   if (error instanceof NodeHistoryRowError || error instanceof NodeHistoryCursorError) return error.code;

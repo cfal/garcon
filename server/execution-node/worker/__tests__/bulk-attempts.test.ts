@@ -6,84 +6,86 @@ import { session } from './lifecycle-fixture.js';
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0)) close(); });
 
-function fixture(maxIdentities?: number) {
+function fixture() {
   const lifetime = new AbortController();
   const authority = new NodeWorkerAuthority({ session, signal: lifetime.signal, poll: () => 0 });
   const control = authority.attach(1);
   authority.openAdmissions(1);
-  const attempts = new NodeWorkerBulkAttempts(authority, maxIdentities);
+  const attempts = new NodeWorkerBulkAttempts(authority);
   cleanup.push(() => { attempts.close(); lifetime.abort(); });
   return { attempts, authority, control };
 }
 
 test('bulk-only replacement aborts the captured attempt without retiring control or its replacement', () => {
   const f = fixture();
-  expect(f.attempts.attach(1, 'first')).toBe(true);
-  const first = f.attempts.capture(1, 'first');
-  expect(f.attempts.attach(1, 'second')).toBe(true);
-  const second = f.attempts.capture(1, 'second');
+  expect(f.attempts.attach(1, '1')).toBe(true);
+  const first = f.attempts.capture(1, '1');
+  expect(f.attempts.attach(1, '2')).toBe(true);
+  const second = f.attempts.capture(1, '2');
   expect(first.signal.aborted).toBe(true);
   expect(() => first.validate()).toThrow();
-  f.attempts.retire(1, 'first');
-  expect(f.attempts.attach(1, 'first')).toBe(false);
-  expect(f.attempts.capture(1, 'second')).toBe(second);
+  f.attempts.retire(1, '1');
+  expect(f.attempts.attach(1, '1')).toBe(false);
+  expect(f.attempts.capture(1, '2')).toBe(second);
   expect(second.signal.aborted).toBe(false);
   f.authority.assertAdmission(f.control);
 });
 
 test('retirement delivered before installation prevents a late installation from acquiring authority', () => {
   const f = fixture();
-  f.attempts.retire(1, 'retired');
-  expect(f.attempts.attach(1, 'retired')).toBe(false);
-  expect(() => f.attempts.capture(1, 'retired')).toThrow();
-  expect(f.attempts.attach(1, 'fresh')).toBe(true);
-  f.attempts.capture(1, 'fresh').validate();
+  f.attempts.retire(1, '1');
+  expect(f.attempts.attach(1, '1')).toBe(false);
+  expect(() => f.attempts.capture(1, '1')).toThrow();
+  expect(f.attempts.attach(1, '2')).toBe(true);
+  f.attempts.capture(1, '2').validate();
 });
 
 test('duplicate live installation keeps the exact lease but a retired duplicate cannot resurrect it', () => {
   const f = fixture();
-  f.attempts.attach(1, 'first');
-  const first = f.attempts.capture(1, 'first');
-  expect(f.attempts.attach(1, 'first')).toBe(true);
-  expect(f.attempts.capture(1, 'first')).toBe(first);
-  f.attempts.retire(1, 'first');
-  f.attempts.retire(1, 'first');
+  f.attempts.attach(1, '1');
+  const first = f.attempts.capture(1, '1');
+  expect(f.attempts.attach(1, '1')).toBe(true);
+  expect(f.attempts.capture(1, '1')).toBe(first);
+  f.attempts.retire(1, '1');
+  f.attempts.retire(1, '1');
   expect(first.signal.aborted).toBe(true);
-  expect(f.attempts.attach(1, 'first')).toBe(false);
+  expect(f.attempts.attach(1, '1')).toBe(false);
 });
 
 test('control replacement fences the old lease and cannot reuse its physical identity', () => {
   const f = fixture();
-  f.attempts.attach(1, 'first');
-  const first = f.attempts.capture(1, 'first');
+  f.attempts.attach(1, '1');
+  const first = f.attempts.capture(1, '1');
   f.authority.attach(2);
   expect(first.signal.aborted).toBe(true);
-  expect(f.attempts.attach(2, 'first')).toBe(false);
-  expect(f.attempts.attach(2, 'second')).toBe(true);
-  const second = f.attempts.capture(2, 'second');
-  expect(() => f.attempts.retire(1, 'second')).toThrow();
+  expect(f.attempts.attach(2, '1')).toBe(false);
+  expect(f.attempts.attach(2, '2')).toBe(true);
+  const second = f.attempts.capture(2, '2');
+  expect(() => f.attempts.retire(1, '2')).toThrow();
   second.validate();
   f.authority.disconnect(2);
   expect(second.signal.aborted).toBe(true);
 });
 
-test.each(['attach', 'retire'] as const)('identity exhaustion through %s fences bulk while preserving other services', (method) => {
-  const f = fixture(2);
-  f.attempts.attach(1, 'first');
-  f.attempts.attach(1, 'second');
-  const current = f.attempts.capture(1, 'second');
-  f.attempts[method](1, 'third');
-  expect(current.signal.aborted).toBe(true);
-  expect(() => f.attempts.capture(1, 'second')).toThrow(expect.objectContaining({ code: 'NODE_CAPACITY' }));
-  expect(f.attempts.attach(1, 'fourth')).toBe(false);
+test('ten thousand bulk replacements do not exhaust history or revive a retired attempt', () => {
+  const f = fixture();
+  for (let ordinal = 1; ordinal <= 10_000; ordinal++) {
+    const id = String(ordinal);
+    expect(f.attempts.attach(1, id)).toBe(true);
+    f.attempts.capture(1, id).validate();
+    f.attempts.retire(1, id);
+  }
+  expect(f.attempts.attach(1, '1')).toBe(false);
+  expect(f.attempts.attach(1, '10001')).toBe(true);
+  f.attempts.capture(1, '10001').validate();
   f.authority.assertAdmission(f.control);
 });
 
 test('logical retirement aborts captures and closes future installation', () => {
   const f = fixture();
-  f.attempts.attach(1, 'first');
-  const first = f.attempts.capture(1, 'first');
+  f.attempts.attach(1, '1');
+  const first = f.attempts.capture(1, '1');
   f.authority.retire();
   expect(first.signal.aborted).toBe(true);
-  expect(() => f.attempts.attach(1, 'second')).toThrow();
+  expect(() => f.attempts.attach(1, '2')).toThrow();
 });

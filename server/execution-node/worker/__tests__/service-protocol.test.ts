@@ -17,7 +17,7 @@ const instanceId = 'synthetic-instance';
 const descriptor = { byteLength: 3, sha256: 'a'.repeat(64) };
 const permission = { stream, handle: 'synthetic-handle', runId: 'synthetic-run', permissionOccurrenceId: '00000000-0000-4000-8000-000000000001' };
 const envelope = { version: NODE_WIRE_VERSION, session, connectionId: 1, requestId: 1 } as const;
-const historyTarget = { identity, instanceId, connectionId: 1, bulkAttemptId: 'synthetic-bulk-attempt' };
+const historyTarget = { identity: { ...identity, operationId: '1' }, instanceId, connectionId: 1, bulkAttemptId: '1' };
 const settingsConfiguration = { model: 'synthetic-model', permissionMode: 'default' as const, thinkingMode: 'none' as const,
   endpoint: null, settings: { ownerId: 'synthetic', schemaVersion: 1, values: {} } };
 const commands: readonly NodeWorkerServiceCommand[] = [
@@ -38,12 +38,13 @@ const commands: readonly NodeWorkerServiceCommand[] = [
   { method: 'provider-configuration', instanceId, operation: 'prepare-update', request: {
     previous: { model: 'synthetic-model', settings: null, endpoint: null }, next: { model: 'synthetic-next', endpoint: null }, patch: {} } },
   { method: 'retire-output', instanceId, stream },
-  { ...historyTarget, method: 'provider-history-import', operation: 'open', facet: 'native', workspaceId: 'synthetic-workspace',
+  { ...historyTarget, method: 'provider-history-import', operation: 'open', after: 0, facet: 'native', workspaceId: 'synthetic-workspace',
     chat: { chatId: '1000000000000000', agentId: 'synthetic-agent', agentSessionId: null, model: '', nativeSession: null,
       carryOverRevision: '', nativeSeedReceipt: null, settings: null } },
   { ...historyTarget, method: 'provider-history-import', operation: 'next', sequence: 1 },
   { ...historyTarget, method: 'provider-history-import', operation: 'transfer', sequence: 1, grant: transfer, descriptor },
   { ...historyTarget, method: 'provider-history-import', operation: 'cancel' },
+  { method: 'confirm-bulk', instanceId, connectionId: 1, bulkAttemptId: historyTarget.bulkAttemptId },
 ];
 const results: readonly NodeWorkerServiceResult[] = [
   { ...historyTarget, kind: 'provider-history-result', operation: 'opened' },
@@ -77,6 +78,7 @@ const results: readonly NodeWorkerServiceResult[] = [
   { kind: 'provider-auth-rejected', instanceId, code: 'OPERATION_UNSUPPORTED' },
   { kind: 'provider-commands', instanceId, workspaceId: 'synthetic-workspace', commands: [{ name: 'review', source: 'skill' }] },
   { kind: 'provider-commands-unavailable', instanceId, workspaceId: 'synthetic-workspace', reason: 'permission-denied' },
+  { kind: 'bulk-installed', instanceId, bulkAttemptId: historyTarget.bulkAttemptId },
 ];
 
 test('private service frames round-trip typed installation, body grants, permissions, catalogs and output recovery', () => {
@@ -105,6 +107,9 @@ test('service payload authorities cannot name a different session from their enc
 
 test('service parsing rejects malformed ownership, cursors, bodies and nested permission fields', () => {
   const invalid = [
+    { method: 'confirm-bulk', instanceId, connectionId: 2, bulkAttemptId: historyTarget.bulkAttemptId },
+    { method: 'confirm-bulk', instanceId, connectionId: 1, bulkAttemptId: '' },
+    { method: 'confirm-bulk', instanceId, connectionId: 1, bulkAttemptId: historyTarget.bulkAttemptId, extra: true },
     { ...commands[0], instanceId: '' }, { ...commands[0], stream: { ...stream, nodeBootId: 'foreign' } },
     { ...commands[1], controlId: 'unexpected' }, { ...commands[2], controlId: null },
     { ...commands[1], descriptor: { ...descriptor, byteLength: 0 } },

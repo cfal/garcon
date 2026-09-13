@@ -10,8 +10,8 @@ import type { NodeBulkTransfersOptions } from '../bulk-transfers.js';
 import type { NodeBulkFrame } from '../bulk-channel-wire.js';
 
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
-const target = { identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance', connectionId: 1,
-  bulkAttemptId: 'synthetic-attempt' };
+const target = { identity: { ...session, operationId: '1' }, instanceId: 'synthetic-instance', connectionId: 1,
+  bulkAttemptId: '1' };
 const port = { send: () => true, sendWhenWritable: async () => {} } satisfies NodeHistoryBulkPort;
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0)) close(); });
@@ -48,14 +48,14 @@ test('different nodes and replacement connections use one controller pool', () =
     receiver.reserve({ ...target, identity }, 1, descriptor(bytes), port, lifetime.signal, () => {});
   const held = reserve(first);
   expect(pool.reservedBytes).toBe(200);
-  expect(() => reserve(second, { ...otherSession, operationId: 'synthetic-other-import' }))
+  expect(() => reserve(second, { ...otherSession, operationId: '2' }))
     .toThrow(expect.objectContaining({ code: 'NODE_CAPACITY' }));
   expect(() => reserve(replacement)).toThrow(expect.objectContaining({ code: 'NODE_CAPACITY' }));
   expect(second.transferCount).toBe(0);
   expect(replacement.transferCount).toBe(0);
   held.close();
   expect(pool.reservedBytes).toBe(0);
-  reserve(second, { ...otherSession, operationId: 'synthetic-other-import' });
+  reserve(second, { ...otherSession, operationId: '2' });
   expect(pool.reservedBytes).toBe(200);
 });
 

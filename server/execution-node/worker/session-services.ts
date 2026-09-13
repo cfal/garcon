@@ -111,6 +111,13 @@ export class NodeWorkerSessionServices {
           authority.assertConnection(connection); signal.throwIfAborted();
           return { kind: 'output-fenced', instanceId: owner.instanceId, stream: owner.stream };
         }
+        case 'confirm-bulk': {
+          if (!this.options.instanceIds.has(command.instanceId)) throw protocol();
+          const attempt = this.#bulkAttempts.capture(connectionId, command.bulkAttemptId);
+          const reply = await this.options.child(command.instanceId).service(connectionId).call(command, signal, deadline);
+          attempt.validate(); signal.throwIfAborted();
+          return reply;
+        }
         case 'provider-session-configuration':
           if (!isNodeSessionConfigurationReconciliation(command)) authority.assertAdmission(connection);
           if (!this.options.instanceIds.has(command.instanceId)) throw protocol();

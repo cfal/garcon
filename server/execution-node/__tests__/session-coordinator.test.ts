@@ -59,6 +59,7 @@ function fixture() {
     admit: mock<Peer['admit']>(async (connectionId) => { calls.push(`admit:${connectionId}`); }),
     disconnect: mock<Peer['disconnect']>(async (connectionId) => { calls.push(`disconnect:${connectionId}`); }),
     attachBulk: mock<Peer['attachBulk']>(async () => {}),
+    confirmBulk: mock<Peer['confirmBulk']>(async () => {}),
     retireBulk: mock<Peer['retireBulk']>(async () => {}),
     closeInput: mock(() => { calls.push('peer-close'); hello.reject(new Error('Synthetic closed peer')); }),
     execution() { throw new Error('Unused synthetic execution client'); },
@@ -547,4 +548,17 @@ test('a worker timeout during live startup retires as startup expiry before host
     expect(f.store.clear).toHaveBeenCalledTimes(1);
     expect(connection.lease.authoritySignal.reason).toMatchObject({ code: 'NODE_READINESS_TIMEOUT' });
   } finally { stopped.resolve(); f.hello.resolve(1234); }
+});
+
+
+test('bulk attempt issuance stays monotone across physical control reconnects', async () => {
+  const f = fixture(); const first = await f.start();
+  expect(f.coordinator.issueBulkAttempt(first)).toBe('1');
+  expect(f.coordinator.issueBulkAttempt(first)).toBe('2');
+  await f.coordinator.disconnect(first);
+  expect(() => f.coordinator.issueBulkAttempt(first)).toThrow();
+  const second = f.coordinator.attach(first.lease.session); await second.ready;
+  expect(f.coordinator.issueBulkAttempt(second)).toBe('3');
+  expect(() => f.coordinator.issueBulkAttempt(first)).toThrow();
+  expect(f.coordinator.issueBulkAttempt(second)).toBe('4');
 });

@@ -19,6 +19,46 @@ const agentId = 'direct-anthropic-compatible';
 const nativeRecord = (f: NodeHistoryFixture, instanceId?: string, content?: string) => createNodeHistoryRecord(f, { instanceId, content });
 
 describe.skipIf(!nodeSessionSystemdAvailable)('native history through WSS and both production worker hops', () => {
+  test('an immediate history import waits for the node to install its physical bulk attempt', async () => {
+    const attaching = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
+    const f = await createNodeSessionFixture(certificate, certificate.trust, {
+      beforeBulkAttachment: () => { attaching.resolve(); return release.promise; },
+    });
+    try {
+      const controller = await f.controller(await f.connect().ready); await recover(controller);
+      const record = await nativeRecord(f);
+      await attaching.promise;
+      let settled = false; let available = false;
+      const reading = importer(f, controller, record.instanceId).then((source) => { available = true; return collect(source, record.request); })
+        .then((rows) => { settled = true; return rows; }, (error: unknown) => { settled = true; throw error; });
+      void reading.catch(() => {});
+      expect(await controller.client.service.call({ method: 'provider-auth', instanceId: record.instanceId, operation: 'status' }, controller.signal))
+        .toMatchObject({ kind: 'provider-auth-status' });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(available).toBe(false); expect(settled).toBe(false);
+      release.resolve();
+      expect((await reading).map(historyRowContent)).toEqual([record.content, 'Synthetic response']);
+      expect(controller.signal.aborted).toBe(false); expect(f.historyPool.reservedBytes).toBe(0);
+    } finally { release.resolve(); await f.dispose(); }
+  }, 30_000);
+
+  test('replacement during held installation fences the old attempt before its callback resumes', async () => {
+    const attaching = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>(); let attempts = 0;
+    const f = await createNodeSessionFixture(certificate, certificate.trust, {
+      async beforeBulkAttachment() { if (++attempts === 1) { attaching.resolve(); await release.promise; } },
+    });
+    try {
+      const node = f.connect(); const controller = await f.controller(await node.ready); await recover(controller);
+      const record = await nativeRecord(f); await attaching.promise;
+      const old = controller.historyConnection().catch((error: unknown) => error);
+      await node.replaceBulk(); expect(await old).toBeInstanceOf(Error);
+      release.resolve();
+      const source = await importer(f, controller, record.instanceId);
+      expect((await collect(source, record.request)).map(historyRowContent)).toEqual([record.content, 'Synthetic response']);
+      expect(controller.signal.aborted).toBe(false); expect(f.processes.size).toBe(1);
+    } finally { release.resolve(); await f.dispose(); }
+  }, 30_000);
+
   test('large rows use credited reverse bulk and colliding native IDs remain instance-qualified', async () => {
     const root = await mkdtemp(path.join(homedir(), 'garcon-history-profiles-'));
     const profiles = ['first', 'second'].map((id) => ({ id: `synthetic-${id}`, agentId, label: id, homeDirectory: path.join(root, id),

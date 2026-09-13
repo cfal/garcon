@@ -45,6 +45,7 @@ function fixture() {
     allWriters.push(port); return port;
   };
   const childExecute = mock(async (_instanceId: string, command: NodeWorkerServiceCommand): Promise<NodeWorkerServiceResult> => {
+    if (command.method === 'confirm-bulk') return { kind: 'bulk-installed', instanceId: command.instanceId, bulkAttemptId: command.bulkAttemptId };
     if (command.method === 'provider-configuration') {
       const snapshot = { model: 'synthetic-model', permissionMode: 'default' as const, thinkingMode: 'none' as const,
         settings: { ownerId: 'synthetic', schemaVersion: 1, values: { instance: _instanceId } }, endpoint: null };
@@ -114,11 +115,31 @@ function fixture() {
     close() { lifetime.abort(); services.close(); router.close(); parent.close(); for (const writer of allWriters) writer.close(); } };
 }
 
+test('bulk readiness waits for the child and cannot confirm an attempt replaced during that wait', async () => {
+  const f = fixture(); const child = Promise.withResolvers<NodeWorkerServiceResult>();
+  const command = { method: 'confirm-bulk', instanceId: first, connectionId: 1, bulkAttemptId: '1' } as const;
+  try {
+    expect((await f.call(command)).kind).not.toBe('bulk-installed');
+    expect(f.childExecute).not.toHaveBeenCalled();
+    f.services.bulkLifetime({ type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: command.bulkAttemptId });
+    f.childExecute.mockImplementationOnce(() => child.promise);
+    let confirmed = false;
+    const confirmation = f.call(command).then((reply) => { confirmed = true; return reply; });
+    await tick(); expect(confirmed).toBe(false); expect(f.childExecute).toHaveBeenCalledTimes(1);
+    f.services.bulkLifetime({ type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: '2' });
+    child.resolve({ kind: 'bulk-installed', instanceId: first, bulkAttemptId: command.bulkAttemptId });
+    expect((await confirmation).kind).not.toBe('bulk-installed');
+    expect(await f.call({ ...command, bulkAttemptId: '2' }))
+      .toEqual({ kind: 'bulk-installed', instanceId: first, bulkAttemptId: '2' });
+    expect(f.failed).not.toHaveBeenCalled();
+  } finally { child.resolve({ kind: 'unknown' }); f.close(); }
+});
+
 test('reverse history chunks and completion remain FIFO while cleanup and status preserve their headroom', async () => {
   const f = fixture(); const release = f.hold('outbound');
   const grant = { ...session, transferId: 'synthetic-history' };
-  const target = { type: 'node-history-bulk', version: 1, identity: { ...session, operationId: 'synthetic-import' },
-    instanceId: first, connectionId: 1, bulkAttemptId: 'synthetic-bulk', sequence: 1, grant } as const;
+  const target = { type: 'node-history-bulk', version: 1, identity: { ...session, operationId: '1' },
+    instanceId: first, connectionId: 1, bulkAttemptId: '1', sequence: 1, grant } as const;
   const chunk: NodeHistoryBulkFrame = { ...target,
     payload: serializeNodeBulkFrame({ type: 'node-bulk-credit-chunk', version: 1, transfer: grant, offset: 0, data: 'YQ==' }) };
   const complete: NodeHistoryBulkFrame = { ...target,

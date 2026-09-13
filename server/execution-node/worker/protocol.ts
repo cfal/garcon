@@ -1,5 +1,6 @@
 import { NODE_WIRE_VERSION, isNormalizedJsonObject } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
+import { nodeBulkAttemptOrdinal } from '../../execution-nodes/transport/bulk-session-wire.js';
 import { parseNodeSessionIdentity, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { parseNodeProviderManifest, type NodeProviderManifest } from '../../execution-nodes/provider-manifest.js';
 import { exactNodeFields, parsePrivateNodeJson } from '../../execution-nodes/transport/private-json.js';
@@ -78,8 +79,8 @@ export function parseNodeWorkerParentText(text: string): NodeWorkerParentMessage
     return configuration ? { type: value.type, ...base, startupTimeoutMs: Number(value.startupTimeoutMs), configuration } : null;
   }
   if (value.type === 'node-worker-bulk-attached' || value.type === 'node-worker-bulk-retired') {
-    return exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'bulkAttemptId']) && isExecutionIdentity(value.bulkAttemptId)
-      ? { type: value.type, ...base, bulkAttemptId: value.bulkAttemptId } : null;
+    return exactNodeFields(value, ['type', 'version', 'session', 'connectionId', 'bulkAttemptId']) && nodeBulkAttemptOrdinal(value.bulkAttemptId) !== null
+      ? { type: value.type, ...base, bulkAttemptId: value.bulkAttemptId as string } : null;
   }
   if (!exactNodeFields(value, ['type', 'version', 'session', 'connectionId'])) return null;
   return value.type === 'node-worker-pulse' || value.type === 'node-worker-attach'

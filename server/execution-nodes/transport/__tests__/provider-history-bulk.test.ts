@@ -17,8 +17,8 @@ function fixture() {
   const descriptor = { byteLength: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') };
   const transfers = new NodeBulkTransfers({ session, authoritySignal: controller.signal });
   const grant = transfers.reserve(owner, descriptor, controller.signal);
-  const target = { identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance', connectionId: 1,
-    bulkAttemptId: 'synthetic-bulk-attempt', sequence: 1, grant };
+  const target = { identity: { ...session, operationId: '1' }, instanceId: 'synthetic-instance', connectionId: 1,
+    bulkAttemptId: '1', sequence: 1, grant };
   const closed = { sender: mock(() => {}), receiver: mock(() => {}) };
   let sender: NodeHistoryBulkChannel;
   let receiver: NodeHistoryBulkChannel;
@@ -76,11 +76,11 @@ test.each(['operation', 'instance', 'sequence', 'attempt', 'grant'] as const)('a
     f.receivePort.send.mockImplementation(() => true);
     const pending = f.sender.sendChunk(serializeNodeBulkChunk(f.target.grant, 0, f.bytes), f.controller.signal);
     const ack = f.frame({ type: 'node-bulk-chunk-ack', version: NODE_WIRE_VERSION, transfer: f.target.grant, nextOffset: f.bytes.length });
-    const changed = field === 'operation' ? { ...ack, identity: { ...ack.identity, operationId: 'synthetic-other' } }
-      : field === 'instance' ? { ...ack, instanceId: 'synthetic-other' }
+    const changed = field === 'operation' ? { ...ack, identity: { ...ack.identity, operationId: '9' } }
+      : field === 'instance' ? { ...ack, instanceId: '9' }
       : field === 'sequence' ? { ...ack, sequence: 2 }
-      : field === 'attempt' ? { ...ack, bulkAttemptId: 'synthetic-other' }
-      : { ...ack, grant: { ...ack.grant, transferId: 'synthetic-other' } };
+      : field === 'attempt' ? { ...ack, bulkAttemptId: '9' }
+      : { ...ack, grant: { ...ack.grant, transferId: '9' } };
     f.sender.receive(changed);
     await expect(pending).rejects.toMatchObject({ code: 'NODE_BULK_UNAVAILABLE' });
     expect(f.closed.sender).toHaveBeenCalledTimes(1);
@@ -137,9 +137,9 @@ test('history envelopes reject extra fields, oversized payloads and mismatched s
   try {
     const valid = f.frame({ type: 'node-bulk-cancel', version: NODE_WIRE_VERSION, transfer: f.target.grant, requestId: 1 });
     for (const invalid of [{ ...valid, extra: true }, { ...valid, sequence: 0 }, { ...valid, payload: 'x'.repeat(100 * 1024) },
-      { ...valid, identity: { ...valid.identity, nodeBootId: 'synthetic-other' } },
+      { ...valid, identity: { ...valid.identity, nodeBootId: '9' } },
       { ...valid, payload: JSON.stringify({ type: 'node-bulk-result', version: NODE_WIRE_VERSION,
-        session: { ...session, nodeBootId: 'synthetic-other' }, command: 'node-bulk-cancel', requestId: 1, result: 'cancelled' }) }]) {
+        session: { ...session, nodeBootId: '9' }, command: 'node-bulk-cancel', requestId: 1, result: 'cancelled' }) }]) {
       expect(parseNodeHistoryBulkText(JSON.stringify(invalid))).toBeNull();
     }
   } finally { f.close(); }

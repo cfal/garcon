@@ -7,7 +7,7 @@ export interface ProviderHistoryImportRequest {
   readonly chat: ProviderNativeChatReference;
 }
 
-/** Delivers ordered, non-empty snapshots of at most 256 rows; normal EOF proves the source completed. */
+/** Delivers ordered, non-empty owned snapshots with reconstructed ChatMessage classes, at most 256 rows per batch; normal EOF proves completion. */
 export interface ProviderHistoryImportService {
   read(request: ProviderHistoryImportRequest, signal: AbortSignal): AsyncIterable<readonly AgentImportedTranscriptRow[]>;
 }

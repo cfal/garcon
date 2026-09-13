@@ -14,7 +14,7 @@ import type { NodeDeadline } from '../execution-nodes/deadline.js';
 
 const logger = createLogger('execution-node:session-coordinator');
 
-type CoordinatorPeer = Pick<NodeWorkerPeer, 'hello' | 'configure' | 'attach' | 'admit' | 'disconnect' | 'attachBulk' | 'retireBulk' | 'closeInput'
+type CoordinatorPeer = Pick<NodeWorkerPeer, 'hello' | 'configure' | 'attach' | 'admit' | 'disconnect' | 'attachBulk' | 'retireBulk' | 'confirmBulk' | 'closeInput'
   | 'execution' | 'forward' | 'waitForRelease'> & {
     service(connectionId: number): Pick<NodeWorkerServiceClient, 'call'>;
   };
@@ -36,6 +36,7 @@ interface HostedAuthority {
   retirements: NodeOutputRetirementRelay | null;
   connection: NodeHostedConnection;
   recovery: HostedRecovery | null;
+  bulkAttempts: number;
 }
 
 interface HostedRecovery {
@@ -100,7 +101,7 @@ export class NodeSessionCoordinator {
     void connected.catch(() => {});
     const connection: NodeHostedConnection = Object.freeze({ connectionId: 1, lease, ready: connected });
     const current: HostedAuthority = { session, signal: lease.authoritySignal, ready, connection,
-      settled: Promise.withResolvers<void>(), host: null, peer: null, monitor: null, retirements: null, recovery: null };
+      settled: Promise.withResolvers<void>(), host: null, peer: null, monitor: null, retirements: null, recovery: null, bulkAttempts: 0 };
     this.#current = current;
     void ready.promise.catch(() => {});
     current.monitor = new NodeSessionLeaseMonitor({ supervisor: this.supervisor, authoritySignal: current.signal,
@@ -155,6 +156,17 @@ export class NodeSessionCoordinator {
     const current = this.#requireConnection(connection);
     if (!current.peer) throw unavailable();
     return current.peer;
+  }
+
+  issueBulkAttempt(connection: NodeHostedConnection): string {
+    const current = this.#requireConnection(connection);
+    const ordinal = current.bulkAttempts + 1;
+    if (!Number.isSafeInteger(ordinal)) {
+      void this.supervisor.executionHostExited(current.session, 'worker-protocol-failed');
+      throw unavailable();
+    }
+    current.bulkAttempts = ordinal;
+    return String(ordinal);
   }
 
   retireOutput(connection: NodeHostedConnection, frame: NodeWorkerOutputRetirement): void {

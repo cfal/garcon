@@ -1,11 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import { NODE_WIRE_VERSION } from '@garcon/server-agent-interface';
 import { isExecutionIdentity } from '../../../common/execution-location.js';
 import { parseNodeSessionIdentity, sameNodeSession, type NodeSessionIdentity } from '../../../common/node-operation.js';
 import { parseNodeWorkerBulkText, type NodeWorkerBulkFrame } from '../../execution-node/worker/bulk-protocol.js';
 import { NodeWorkerTransportError } from '../../execution-node/worker/framing.js';
 import { isNodeBulkData, isNodeBulkReply, parseNodeBulkFrameText, type NodeBulkFrame } from './bulk-channel-wire.js';
-import { parseNodeBulkSessionFrameText, serializeNodeBulkSessionFrame } from './bulk-session-wire.js';
+import { nodeBulkAttemptOrdinal, parseNodeBulkSessionFrameText, serializeNodeBulkSessionFrame, type NodeBulkSessionFrame } from './bulk-session-wire.js';
 import { parseNodeHistoryBulkText, type NodeHistoryBulkFrame } from './provider-history-bulk-wire.js';
 import { NODE_HANDSHAKE_TIMEOUT_MS } from './session-wire.js';
 import type { NodeSocketWriter } from './socket-writer.js';
@@ -35,7 +34,8 @@ interface BulkSessionOptions {
 }
 
 export type NodeBulkSessionOptions = BulkSessionOptions & (
-  | { readonly side: 'node'; readonly binding: NodeBulkControlBinding }
+  | { readonly side: 'node'; readonly binding: NodeBulkControlBinding; readonly bulkAttemptId: string;
+      install(binding: NodeBulkSessionBinding): Promise<void> }
   | { readonly side: 'controller'; readonly principal: PairedNodePrincipal;
       /** Verifies the supplied principal against the current binding before any replacement or mutation. */
       capture(principal: PairedNodePrincipal, session: NodeSessionIdentity, connectionId: number, bulkAttemptId: string): NodeBulkControlBinding }
@@ -50,6 +50,7 @@ export class NodeBulkSessionChannel {
   #binding: NodeBulkSessionBinding | null = null;
   #timer: { cancel(): void } | null = null;
   #started = false;
+  #installing = false;
   #active = false;
 
   constructor(private readonly writer: Pick<NodeSocketWriter, 'send' | 'sendData' | 'sendApplication' | 'sendWhenWritable' | 'sendApplicationWhenWritable' | 'close'>,
@@ -64,7 +65,7 @@ export class NodeBulkSessionChannel {
     else {
       this.#timer = (options.scheduleTimeout ?? scheduleTimeout)(() => this.#close(new NodeWorkerTransportError('NODE_WORKER_TIMEOUT')),
         NODE_HANDSHAKE_TIMEOUT_MS);
-      try { if (options.side === 'node') this.#bind(options.binding, randomUUID()); }
+      try { if (options.side === 'node') this.#bind(options.binding, options.bulkAttemptId); }
       catch (error) { this.#close(error); }
     }
   }
@@ -91,22 +92,26 @@ export class NodeBulkSessionChannel {
         const frame = parseNodeBulkSessionFrameText(text);
         if (!frame) throw protocol();
         if (this.options.side === 'controller') {
-          if (frame.type !== 'node-bulk-session-hello') throw protocol();
-          const binding = this.options.capture(this.options.principal, frame.session, frame.connectionId, frame.bulkAttemptId);
-          if (!sameNodeSession(frame.session, binding.session) || frame.connectionId !== binding.connectionId
-            || binding.principal.nodeId !== this.options.principal.nodeId
-            || binding.principal.controllerId !== this.options.principal.controllerId) throw protocol();
-          this.#bind(binding, frame.bulkAttemptId);
-          this.#validate();
-          if (!this.writer.send(serializeNodeBulkSessionFrame({ ...frame, type: 'node-bulk-session-ready' }))) throw capacity();
+          if (!this.#binding) {
+            if (frame.type !== 'node-bulk-session-hello') throw protocol();
+            const binding = this.options.capture(this.options.principal, frame.session, frame.connectionId, frame.bulkAttemptId);
+            if (!sameNodeSession(frame.session, binding.session) || frame.connectionId !== binding.connectionId
+              || binding.principal.nodeId !== this.options.principal.nodeId
+              || binding.principal.controllerId !== this.options.principal.controllerId) throw protocol();
+            this.#bind(binding, frame.bulkAttemptId);
+            this.#validate();
+            if (!this.writer.send(serializeNodeBulkSessionFrame({ ...frame, type: 'node-bulk-session-ready' }))) throw capacity();
+          } else {
+            if (frame.type !== 'node-bulk-session-installed') throw protocol();
+            this.#assertHandshake(frame);
+            this.#activate();
+          }
         } else {
-          if (!this.#started || frame.type !== 'node-bulk-session-ready' || !sameNodeSession(frame.session, this.#binding!.session)
-            || frame.connectionId !== this.#binding!.connectionId || frame.bulkAttemptId !== this.#binding!.bulkAttemptId) throw protocol();
+          if (!this.#started || this.#installing || frame.type !== 'node-bulk-session-ready') throw protocol();
+          this.#assertHandshake(frame);
+          this.#installing = true;
+          void this.#install(this.options.install, frame).catch((error) => this.#close(error));
         }
-        this.#validate();
-        this.#active = true;
-        this.#timer?.cancel(); this.#timer = null;
-        this.#ready.resolve(this.#binding!);
         return;
       }
       const { frame } = this.#parse(text, this.options.side === 'node' ? 'request' : 'reply');
@@ -133,9 +138,29 @@ export class NodeBulkSessionChannel {
 
   close(): void { this.#close(new NodeWorkerTransportError('NODE_WORKER_CLOSED')); }
 
+  async #install(install: (binding: NodeBulkSessionBinding) => Promise<void>, frame: NodeBulkSessionFrame): Promise<void> {
+    await install(this.#binding!);
+    this.#validate();
+    this.#active = true;
+    if (!this.writer.send(serializeNodeBulkSessionFrame({ ...frame, type: 'node-bulk-session-installed' }))) throw capacity();
+    this.#activate();
+  }
+
+  #activate(): void {
+    this.#validate();
+    this.#active = true;
+    this.#timer?.cancel(); this.#timer = null;
+    this.#ready.resolve(this.#binding!);
+  }
+
+  #assertHandshake(frame: NodeBulkSessionFrame): void {
+    if (!sameNodeSession(frame.session, this.#binding!.session) || frame.connectionId !== this.#binding!.connectionId
+      || frame.bulkAttemptId !== this.#binding!.bulkAttemptId) throw protocol();
+  }
+
   #bind(binding: NodeBulkControlBinding, bulkAttemptId: string): void {
     const session = parseNodeSessionIdentity(binding.session);
-    if (this.#binding || !session || !isExecutionIdentity(bulkAttemptId) || !Number.isSafeInteger(binding.connectionId) || binding.connectionId < 1
+    if (this.#binding || !session || nodeBulkAttemptOrdinal(bulkAttemptId) === null || !Number.isSafeInteger(binding.connectionId) || binding.connectionId < 1
       || !isExecutionIdentity(binding.principal.nodeId) || !isExecutionIdentity(binding.principal.controllerId)
       || !binding.instanceIds.size || binding.instanceIds.size > 64 || [...binding.instanceIds].some((id) => !isExecutionIdentity(id))) throw protocol();
     binding.signal.throwIfAborted();

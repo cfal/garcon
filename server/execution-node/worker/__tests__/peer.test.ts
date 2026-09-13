@@ -9,6 +9,7 @@ import { serializeNodeWorkerService, serializeNodeWorkerOutputSuspension } from 
 import { parseNodeWorkerApplicationText, type NodeWorkerApplicationFrame } from '../application-protocol.js';
 import { parseNodeWorkerBulkText } from '../bulk-protocol.js';
 import { parseNodeBulkFrameText, serializeNodeBulkFrame } from '../../../execution-nodes/transport/bulk-channel-wire.js';
+import { NodeDeadline } from '../../../execution-nodes/deadline.js';
 
 function fixture(options: Pick<NodeWorkerPeerOptions, 'clock' | 'scheduleTimeout' | 'startupTimeoutMs'> = {}) {
   let readable: ReadableStreamDefaultController<Uint8Array>;
@@ -98,6 +99,41 @@ test('worker peer retains the exact configuration sent despite caller mutation b
   } finally { f.close(); }
 });
 
+test('bulk confirmation remains pending after pipe drainage until the owning worker replies', async () => {
+  const f = fixture();
+  try {
+    await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
+    await f.peer.attachBulk(1, '1');
+    let confirmed = false;
+    const confirmation = f.peer.confirmBulk(1, '1', new AbortController().signal, new NodeDeadline(10_000))
+      .then(() => { confirmed = true; });
+    await tick(); expect(confirmed).toBe(false);
+    const request = parseNodeWorkerApplicationText(f.sent.at(-1)!);
+    if (request?.type !== 'node-worker-service-request' || request.command.method !== 'confirm-bulk') throw new Error('Missing synthetic bulk confirmation');
+    expect(request.command).toEqual({ method: 'confirm-bulk', instanceId: 'synthetic-instance', connectionId: 1, bulkAttemptId: '1' });
+    f.application(serializeNodeWorkerService({ type: 'node-worker-service-result', version: 1, session, connectionId: 1, requestId: request.requestId,
+      result: { kind: 'bulk-installed', instanceId: 'synthetic-instance', bulkAttemptId: '1' } }));
+    await confirmation; expect(confirmed).toBe(true); expect(f.failed).not.toHaveBeenCalled();
+  } finally { f.close(); }
+});
+
+test('refused worker installation fails bulk confirmation without closing the worker', async () => {
+  const f = fixture();
+  try {
+    await f.hello(); const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
+    const confirmation = f.peer.confirmBulk(1, '2', new AbortController().signal, new NodeDeadline(10_000));
+    void confirmation.catch(() => {});
+    await tick();
+    const request = parseNodeWorkerApplicationText(f.sent.at(-1)!);
+    if (request?.type !== 'node-worker-service-request') throw new Error('Missing synthetic bulk confirmation');
+    f.application(serializeNodeWorkerService({ type: 'node-worker-service-result', version: 1, session, connectionId: 1, requestId: request.requestId,
+      result: { kind: 'rejected', code: 'NODE_UNAVAILABLE' } }));
+    await expect(confirmation).rejects.toMatchObject({ code: 'NODE_BULK_UNAVAILABLE' });
+    expect(f.failed).not.toHaveBeenCalled(); expect(f.end).not.toHaveBeenCalled();
+    await f.peer.admit(1);
+  } finally { f.close(); }
+});
+
 test('physical bulk lifecycle is forwarded before later service requests and cannot target an old control connection', async () => {
   const f = fixture();
   try {
@@ -105,8 +141,8 @@ test('physical bulk lifecycle is forwarded before later service requests and can
     const ready = f.peer.configure(session, 1, configuration()); f.ready(); await ready;
     const blocked = Promise.withResolvers<void>();
     f.block(blocked.promise);
-    const attached = f.peer.attachBulk(1, 'synthetic-attempt');
-    const retired = f.peer.retireBulk(1, 'synthetic-attempt');
+    const attached = f.peer.attachBulk(1, '1');
+    const retired = f.peer.retireBulk(1, '1');
     const request = f.peer.service(1).call({ method: 'begin-output-recovery' }, new AbortController().signal);
     void request.catch(() => {});
     f.block(Promise.resolve()); blocked.resolve();

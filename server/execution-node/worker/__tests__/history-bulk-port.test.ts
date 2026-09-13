@@ -6,8 +6,8 @@ import { NodeWorkerWriter } from '../writer.js';
 import { session, tick } from './lifecycle-fixture.js';
 
 const grant = { ...session, transferId: 'synthetic-history-grant' };
-const target = { identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance', connectionId: 1,
-  bulkAttemptId: 'synthetic-bulk', sequence: 1, grant };
+const target = { identity: { ...session, operationId: '1' }, instanceId: 'synthetic-instance', connectionId: 1,
+  bulkAttemptId: '1', sequence: 1, grant };
 const frame = (operation: 'chunk' | 'complete' | 'cancel'): NodeHistoryBulkFrame => ({ ...target, type: 'node-history-bulk', version: 1,
   payload: serializeNodeBulkFrame(operation === 'chunk'
     ? { type: 'node-bulk-credit-chunk', version: 1, transfer: grant, offset: 0, data: 'YQ==' }

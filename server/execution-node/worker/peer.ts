@@ -8,6 +8,7 @@ import { nodeWorkerApplicationSession, parseNodeWorkerApplicationText, type Node
 import { NodeWorkerServiceClient } from './service-channel.js';
 import type { NodeWorkerBulkFrame } from './bulk-protocol.js';
 import type { NodeHistoryBulkFrame } from '../../execution-nodes/transport/provider-history-bulk-wire.js';
+import { NodeBulkError } from '../../execution-nodes/transport/bulk-transfers.js';
 import { isNodeBulkData, parseNodeBulkFrameText } from '../../execution-nodes/transport/bulk-channel-wire.js';
 import type { NodeWorkerOutputRetirement } from './output-retirement.js';
 import type { NodeWorkerOutputAcknowledgement } from './service-protocol.js';
@@ -122,6 +123,17 @@ export class NodeWorkerPeer {
   }
   retireBulk(connectionId: number, bulkAttemptId: string): Promise<void> {
     return this.#sendBulkControl('node-worker-bulk-retired', connectionId, bulkAttemptId);
+  }
+
+  async confirmBulk(connectionId: number, bulkAttemptId: string, signal: AbortSignal, deadline: NodeDeadline): Promise<void> {
+    this.#assertPhysical(connectionId);
+    const configuration = this.#configuration!;
+    const instances = configuration.role === 'instance' ? [configuration.instance] : configuration.instances;
+    for (const instance of instances) {
+      const reply = await this.service(connectionId).call({ method: 'confirm-bulk', instanceId: instance.id, connectionId, bulkAttemptId }, signal, deadline);
+      this.#assertPhysical(connectionId); signal.throwIfAborted();
+      if (reply.kind !== 'bulk-installed') throw new NodeBulkError('NODE_BULK_UNAVAILABLE', 'Worker bulk installation is unconfirmed');
+    }
   }
   disconnect(connectionId: number): Promise<void> {
     return this.#connected && connectionId === this.#connectionId ? this.#sendControl('node-worker-disconnect', connectionId) : Promise.resolve();

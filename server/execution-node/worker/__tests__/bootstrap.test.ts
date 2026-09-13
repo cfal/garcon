@@ -62,17 +62,17 @@ test('bulk lifecycle controls reach only the current initialized physical connec
   const f = fixture();
   try {
     f.receive(configureMessage()); f.started.resolve(f.runtime); await tick();
-    const first = { type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: 'first' } as const;
+    const first = { type: 'node-worker-bulk-attached', version: 1, session, connectionId: 1, bulkAttemptId: '1' } as const;
     f.receive(first);
     f.receive({ type: 'node-worker-attach', version: 1, session, connectionId: 2 });
     f.receive({ ...first, type: 'node-worker-bulk-retired' });
-    f.receive({ ...first, connectionId: 2, bulkAttemptId: 'second' });
+    f.receive({ ...first, connectionId: 2, bulkAttemptId: '2' });
     f.receive({ type: 'node-worker-disconnect', version: 1, session, connectionId: 2 });
-    f.receive({ ...first, connectionId: 2, bulkAttemptId: 'late' });
+    f.receive({ ...first, connectionId: 2, bulkAttemptId: '3' });
     expect(f.runtime.control.mock.calls.map(([message]) => message)).toEqual([
       first,
       { type: 'node-worker-attach', version: 1, session, connectionId: 2 },
-      { ...first, connectionId: 2, bulkAttemptId: 'second' },
+      { ...first, connectionId: 2, bulkAttemptId: '2' },
       { type: 'node-worker-disconnect', version: 1, session, connectionId: 2 },
     ]);
     expect(f.failed).not.toHaveBeenCalled();

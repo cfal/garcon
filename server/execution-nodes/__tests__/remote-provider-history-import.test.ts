@@ -24,6 +24,7 @@ test('captured connection ports support class getters and preserve their method 
     get controlSignal() { return f.binding.controlSignal; }
     get service() { return f.binding.service; }
     get receiver() { return f.binding.receiver; }
+    get operations() { return f.binding.operations; }
     get bulk() { return f.binding.bulk; }
     validate() { this.#validations++; f.binding.validate(); }
     validateControl() { this.#cleanups++; f.binding.validateControl(); }
@@ -160,7 +161,7 @@ test('bulk loss fails the captured import and uses surviving control for exact c
   f.downstream(() => f.bulkLifetime.abort(new Error('Synthetic replaced bulk')));
   const iterator = f.importer().read(f.request, caller().signal)[Symbol.asyncIterator]();
   await expect(iterator.next()).rejects.toThrow('Synthetic replaced bulk');
-  expect(f.commands.at(-1)).toMatchObject({ operation: 'cancel', bulkAttemptId: 'synthetic-bulk', connectionId: 1 });
+  expect(f.commands.at(-1)).toMatchObject({ operation: 'cancel', bulkAttemptId: '1', connectionId: 1 });
   expect(f.control.signal.aborted).toBe(false); expect(f.receiver.reservedBytes).toBe(0);
 });
 
@@ -181,4 +182,43 @@ test('a wrong import reply cannot deliver or retarget a row', async () => {
   const iterator = f.importer().read(f.request, caller().signal)[Symbol.asyncIterator]();
   await expect(iterator.next()).rejects.toMatchObject({ code: 'NODE_HISTORY_UNAVAILABLE' });
   expect(f.commands.map((command) => command.operation)).toEqual(['open', 'next', 'cancel']);
+});
+
+test('unused iterables allocate nothing and both facets share one monotonically issued sequence', async () => {
+  const f = fixture(async function* () {});
+  const native = f.importer(); const legacy = f.importer('legacy');
+  for (let i = 0; i < 100; i++) native.read(f.request, caller().signal);
+  await native.read(f.request, caller().signal)[Symbol.asyncIterator]().next();
+  await expect(legacy.read(f.request, caller().signal)[Symbol.asyncIterator]().next()).rejects.toMatchObject({ code: 'NODE_HISTORY_UNAVAILABLE' });
+  await native.read(f.request, caller().signal)[Symbol.asyncIterator]().next();
+  expect(f.commands.filter((command) => command.operation === 'open').map((command) => [command.identity.operationId, command.after]))
+    .toEqual([['1', 0], ['2', 1], ['3', 2]]);
+});
+
+test('a concurrent open retains the earlier outstanding ordinal in its retirement hint', async () => {
+  const released = Promise.withResolvers<void>(); const opened = Promise.withResolvers<void>();
+  const f = fixture(async function* () {});
+  f.afterReply(async (command, reply) => {
+    if (command.operation === 'open' && command.identity.operationId === '1') { opened.resolve(); await released.promise; }
+    return reply;
+  });
+  const first = f.importer().read(f.request, caller().signal)[Symbol.asyncIterator]();
+  const reading = first.next(); await opened.promise;
+  try {
+    await expect(f.importer('legacy').read(f.request, caller().signal)[Symbol.asyncIterator]().next()).rejects.toMatchObject({ code: 'NODE_HISTORY_UNAVAILABLE' });
+    expect(f.commands.filter((command) => command.operation === 'open').map((command) => [command.identity.operationId, command.after]))
+      .toEqual([['1', 0], ['2', 0]]);
+  } finally { released.resolve(); await reading; }
+  await f.importer().read(f.request, caller().signal)[Symbol.asyncIterator]().next();
+  expect(f.commands.filter((command) => command.operation === 'open').at(-1)).toMatchObject({ identity: { operationId: '3' }, after: 2 });
+});
+
+test('abort while paused releases the issuer lease after exact cleanup without another consumer pull', async () => {
+  const f = fixture(async function* () { yield [row()]; });
+  const controller = caller(); const iterator = f.importer().read(f.request, controller.signal)[Symbol.asyncIterator]();
+  await iterator.next(); controller.abort(new Error('Synthetic paused cancellation')); await tick();
+  const operation = f.binding.operations.allocate(f.binding.session, 'synthetic-instance')!;
+  expect(operation).toMatchObject({ operationId: '2', after: 1 });
+  operation.release();
+  await expect(iterator.return!()).rejects.toBe(controller.signal.reason);
 });

@@ -34,7 +34,7 @@ test('worker parent envelopes reject undeclared fields, sessions, roles, version
 });
 
 test.each(['node-worker-bulk-attached', 'node-worker-bulk-retired'] as const)('physical bulk lifecycle %s requires the exact attempt binding', (type) => {
-  const message = { type, version: NODE_WIRE_VERSION, session, connectionId: 2, bulkAttemptId: 'synthetic-bulk-attempt' };
+  const message = { type, version: NODE_WIRE_VERSION, session, connectionId: 2, bulkAttemptId: '1' };
   expect(parseNodeWorkerParentText(serializeNodeWorkerParent(message))).toEqual(message);
   for (const input of [{ ...message, bulkAttemptId: undefined }, { ...message, bulkAttemptId: '' },
     { ...message, bulkAttemptId: 'x'.repeat(257) }, { ...message, startupTimeoutMs: 10 },
@@ -46,7 +46,7 @@ test.each(['node-worker-bulk-attached', 'node-worker-bulk-retired'] as const)('p
 test('worker replies cannot claim duplicate instances or manifests from different nodes', () => {
   const ready = { type: 'node-worker-ready', version: NODE_WIRE_VERSION, session, manifests: [manifest()] };
   for (const input of [{ ...ready, manifests: [manifest(), manifest()] },
-    { ...ready, manifests: [manifest(), { ...manifest(), instanceId: 'synthetic-other', nodeId: 'foreign-node' }] },
+    { ...ready, manifests: [manifest(), { ...manifest(), instanceId: '9', nodeId: 'foreign-node' }] },
     { ...ready, manifests: [{ ...manifest(), credential: 'synthetic-private-value' }] },
     { ...ready, version: 2 }, { ...ready, session: { ...session, nodeBootId: null } },
     { type: 'node-worker-hello', version: 1, role: 'controller', pid: 42 },

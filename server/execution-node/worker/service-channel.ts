@@ -350,6 +350,8 @@ function expectedResult(command: NodeWorkerServiceCommand): (result: NodeWorkerS
   return (result) => {
     if (result.kind === 'unknown' || result.kind === 'rejected') return true;
     switch (method) {
+      case 'confirm-bulk': return result.kind === 'bulk-installed' && result.instanceId === instanceId
+        && result.bulkAttemptId === command.bulkAttemptId;
       case 'provider-history-import': return result.kind === 'provider-history-result' && matchesNodeHistoryReply(command, result);
       case 'provider-session-configuration': {
         if (command.operation === 'prepare') return result.kind === 'provider-session-configuration-prepared' && result.instanceId === instanceId;

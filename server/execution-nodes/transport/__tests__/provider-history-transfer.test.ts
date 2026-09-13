@@ -9,8 +9,8 @@ import { NodeHistoryMemoryBudget } from '../provider-history-memory.js';
 import { encodeNodeHistoryRow } from '../provider-history-row.js';
 
 const session = { controllerBootId: 'synthetic-controller', nodeBootId: 'synthetic-node', logicalSessionId: 'synthetic-session' };
-const target = { identity: { ...session, operationId: 'synthetic-import' }, instanceId: 'synthetic-instance', connectionId: 1,
-  bulkAttemptId: 'synthetic-attempt' };
+const target = { identity: { ...session, operationId: '1' }, instanceId: 'synthetic-instance', connectionId: 1,
+  bulkAttemptId: '1' };
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const close of cleanup.splice(0)) close(); });
@@ -119,11 +119,11 @@ test('same-grant stale import and bulk-attempt envelopes cannot append or acknow
   f.downstream((frame) => { chunk = frame; });
   f.upstream((frame) => { ack = frame; return true; });
   const sending = r.send(); await tick();
-  f.sendDown({ ...chunk!, bulkAttemptId: 'synthetic-old-attempt' });
-  f.sendDown({ ...chunk!, identity: { ...target.identity, operationId: 'synthetic-old-import' } });
+  f.sendDown({ ...chunk!, bulkAttemptId: '9' });
+  f.sendDown({ ...chunk!, identity: { ...target.identity, operationId: '9' } });
   expect(ack).toBeNull();
   f.sendDown(chunk!); expect(ack).not.toBeNull();
-  f.sendUp({ ...ack!, bulkAttemptId: 'synthetic-old-attempt' }); await tick();
+  f.sendUp({ ...ack!, bulkAttemptId: '9' }); await tick();
   expect(f.sent).toEqual(['node-bulk-credit-chunk']);
   f.downstream((frame) => f.sendDown(frame)); f.upstream((frame) => { f.sendUp(frame); return true; });
   f.sendUp(ack!); await sending;

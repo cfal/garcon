@@ -73,6 +73,11 @@ export class NodeWorkerInstanceServices {
   async service(connection: NodeConnectionLease, command: NodeWorkerServiceCommand, signal: AbortSignal, deadline?: NodeDeadline): Promise<NodeWorkerServiceResult> {
     try {
       this.#validate(); this.options.authority.assertConnection(connection); signal.throwIfAborted();
+      if (command.method === 'confirm-bulk') {
+        if (command.instanceId !== this.options.instanceId) throw protocol();
+        this.#bulkAttempts.capture(command.connectionId, command.bulkAttemptId);
+        return { kind: 'bulk-installed', instanceId: command.instanceId, bulkAttemptId: command.bulkAttemptId };
+      }
       if (command.method === 'retire-output') {
         if (command.instanceId !== this.options.instanceId) return { kind: 'rejected', code: 'VALIDATION_FAILED' };
         if (!this.#streams.has(producerStreamKey(command.stream)) && this.#streams.size >= MAX_NODE_STREAM_IDENTITIES) {
