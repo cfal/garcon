@@ -18,6 +18,7 @@
 	import InterAgentMessageRow from './InterAgentMessageRow.svelte';
 	import PreambleApplicationRow from './PreambleApplicationRow.svelte';
 	import PreambleSelectionChangedRow from './PreambleSelectionChangedRow.svelte';
+	import TicketCommandOutcomeRow from './TicketCommandOutcomeRow.svelte';
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
@@ -28,6 +29,7 @@
 		resolveChatReference?: ResolveChatReference;
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		onOpenTicket?: (id: string) => Promise<void>;
 		acquireTransientActivity?: (close: () => void) => () => void;
 		disclosureState?: ConversationDisclosureStatePort;
 	}
@@ -37,6 +39,7 @@
 		resolveChatReference,
 		fileLinkBasePath,
 		onLinkNavigate,
+		onOpenTicket,
 		acquireTransientActivity,
 		disclosureState,
 	}: Props = $props();
@@ -80,6 +83,8 @@
 			</div>
 		{/snippet}
 	</ChatEventCard>
+{:else if message.detail?.type === 'ticket-command-outcome'}
+	<TicketCommandOutcomeRow detail={message.detail} {onOpenTicket} />
 {:else if preambleApplication}
 	<PreambleApplicationRow detail={preambleApplication} />
 {:else if preambleSelectionChanged}

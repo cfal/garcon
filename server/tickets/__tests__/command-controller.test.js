@@ -4,6 +4,7 @@ import { parseGarconTicketCommand } from '../../../common/garcon-ticket-command.
 import { parseGarconTicketResult } from '../../../common/garcon-ticket-result.js';
 import { ticketBytes } from '../../../common/ticket-validation.js';
 import { TICKET_LIMITS } from '../../../common/tickets.js';
+import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import { CHAT_ID, VIEW_ID, ticketFixture } from './fixture.js';
 
@@ -67,6 +68,8 @@ describe('ticket command controller', () => {
     expect(f.service.history({ ticketId: 'G-1' }).items[0].source)
       .toEqual({ chatId: CHAT_ID, transcriptViewId: VIEW_ID, ordinal: 1 });
     expect(f.notices).toHaveLength(1);
+    expect(f.notices[0].content).toBe('Created ticket G-1');
+    expect(f.notices[0].title).toBeUndefined();
     expect(JSON.stringify(f.notices)).not.toContain('Synthetic ticket');
     expect(f.deliveries[0].input.receipt).toBeNull();
   });
@@ -184,13 +187,14 @@ describe('ticket command controller', () => {
     const f = fixture();
     for (let index = 0; index < 15; index++) f.create({ project: '&'.repeat(3000), title: `Synthetic ${index}` });
     const numbers = [];
-    let query = { limit: 100 };
+    let query = { limit: 100, project: '&'.repeat(3000) };
     do {
-      const response = await f.send(`<garcon-ticket-list>${JSON.stringify(query)}</garcon-ticket-list>`);
+      const response = await f.send(`<garcon-ticket-list>${escapeGarconXmlText(JSON.stringify(query))}</garcon-ticket-list>`);
       expect(response.status).toBe('ok');
+      expect(response.context).toEqual({ filters: { project: query.project } });
       expect(ticketBytes(f.deliveries.at(-1).input.content)).toBeLessThanOrEqual(TICKET_LIMITS.markupBytes);
       numbers.push(...response.data.items.map((ticket) => ticket.number));
-      query = { limit: 100, beforeNumber: response.data.nextBeforeNumber, expectedCollectionRevision: response.data.collectionRevision };
+      query = { limit: 100, project: query.project, beforeNumber: response.data.nextBeforeNumber, expectedCollectionRevision: response.data.collectionRevision };
     } while (query.beforeNumber !== null);
     expect(numbers).toEqual(Array.from({ length: 15 }, (_, index) => 15 - index));
     for (let index = 0; index < 5; index++) f.write({ action: 'comment', ticketId: 'G-1', body: `Comment ${index}` });

@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { TICKET_ACTIONS } from '../ticket-commands.js';
-import { garconTicketResultContent, ticketCommandOutcome, ticketMutationReceipt,
+import { garconTicketResultContent, ticketCommandOutcome, ticketCommandContext, ticketMutationReceipt,
   parseGarconTicketResult, parseTicketCommandOutcome, parseTicketCommandResult } from '../garcon-ticket-result.js';
 import { TICKET_LIMITS } from '../tickets.js';
 import { ticketBytes } from '../ticket-validation.js';
+import { parseGarconTicketCommand } from '../garcon-ticket-command.js';
+import { ticketCommandNoticeParts, ticketCommandNoticeText } from '../ticket-command-notice.js';
+import { escapeGarconXmlText } from '../garcon-command-envelope.js';
 
 const version = { storeId: '11111111-1111-4111-8111-111111111111', collectionRevision: 7 };
 const correlation = { requestViewId: '22222222-2222-4222-8222-222222222222', requestOrdinal: 12 };
@@ -31,6 +34,95 @@ function result(command, status = 'ok') {
 }
 
 describe('command-specific ticket results', () => {
+  test.each([
+    ['create', 'Created ticket G-1'], ['update', 'Updated ticket G-1'],
+    ['claim', 'Assigned ticket G-1 to this chat'], ['release', 'Released ticket G-1'],
+    ['reopen', 'Reopened ticket G-1'], ['close', 'Closed ticket G-1'],
+    ['comment', 'Added comment to ticket G-1'], ['comment-edit', 'Edited comment on ticket G-1'],
+    ['comment-delete', 'Deleted comment from ticket G-1'], ['list', 'Listed tickets'],
+    ['read', 'Read ticket G-1'], ['history', 'Read history for ticket G-1'],
+    ['link', 'G-1 updated, added link'], ['unlink', 'G-1 updated, removed link'],
+  ])('describes %s without a redundant title', (command, expected) => {
+    expect(ticketCommandNoticeText(ticketCommandOutcome(result(command)))).toBe(expected);
+    const failure = ticketCommandNoticeText(ticketCommandOutcome(result(command, 'error')));
+    expect(failure).toStartWith("Couldn't ");
+    expect(failure).toContain('TICKET_NOT_FOUND');
+    expect(failure).not.toContain('completed');
+    if (command !== 'list' && command !== 'create') expect(failure).toContain('G-1');
+  });
+
+  test.each(['link', 'unlink'])('preserves both targets and relationship direction for %s', (command) => {
+    for (const kind of ['blocks', 'related']) for (const status of ['ok', 'error']) {
+      const context = ticketCommandContext(parseGarconTicketCommand(
+        `<garcon-ticket-${command} ref="link" ticket-id="G-1" expected-revision="1">{"kind":"${kind}","targetId":"G-2","targetRevision":1}</garcon-ticket-${command}>`,
+      ));
+      const output = { ...result(command, status), context };
+      expect(parseGarconTicketResult(garconTicketResultContent(output))).toEqual(output);
+      const outcome = ticketCommandOutcome(output);
+      expect(parseTicketCommandOutcome(outcome)).toEqual(outcome);
+      expect(ticketCommandNoticeParts(outcome).filter((part) => part.kind === 'ticket'))
+        .toEqual([{ kind: 'ticket', ticketId: 'G-1' }, { kind: 'ticket', ticketId: 'G-2' }]);
+      const label = kind === 'blocks' ? 'blocking' : 'related';
+      expect(ticketCommandNoticeText(outcome)).toBe(status === 'ok'
+        ? `G-1 updated, ${command === 'link' ? 'added' : 'removed'} ${label} link to G-2`
+        : `Couldn't ${command === 'link' ? 'add' : 'remove'} ${label} link from G-1 to G-2: "TICKET_NOT_FOUND"`);
+    }
+  });
+
+  test('round-trips bounded list filters without pagination or Markdown interpretation', () => {
+    const filters = { project: 'Synthetic `<path> & [link](https://example.test)', priority: 0,
+      status: 'in-progress', includeClosed: true, ready: false, label: 'ui', query: 'G-2',
+      assignee: { kind: 'chat', chatId: actor.chatId } };
+    const command = parseGarconTicketCommand(`<garcon-ticket-list>${escapeGarconXmlText(JSON.stringify({ ...filters,
+      limit: 1, beforeNumber: 3, expectedCollectionRevision: 7 }))}</garcon-ticket-list>`);
+    expect(command).not.toBeNull();
+    const context = ticketCommandContext(command);
+    expect(context).toEqual({ filters });
+    for (const status of ['ok', 'error']) {
+      const output = { ...result('list', status), context };
+      expect(parseGarconTicketResult(garconTicketResultContent(output))).toEqual(output);
+      const outcome = ticketCommandOutcome(output);
+      expect(parseTicketCommandOutcome(outcome)).toEqual(outcome);
+      expect(ticketCommandNoticeParts(outcome)).toContainEqual({ kind: 'code', text: filters.project });
+      const prefix = status === 'ok' ? 'Listed tickets' : "Couldn't list tickets";
+      const suffix = status === 'error' ? ': "TICKET_NOT_FOUND"' : '';
+      expect(ticketCommandNoticeText(outcome)).toBe(`${prefix} with filters project ${JSON.stringify(filters.project)}, status "in progress", include closed "true", priority "urgent", label "ui", assignee "chat ${actor.chatId}", ready "false", search "G-2"${suffix}`);
+      expect(ticketCommandNoticeText(outcome)).not.toContain('limit');
+    }
+    expect(ticketCommandContext(parseGarconTicketCommand('<garcon-ticket-list />'))).toEqual({ filters: {} });
+    expect(ticketCommandNoticeText(ticketCommandOutcome({ ...result('list'), context: { filters: {} } }))).toBe('Listed tickets');
+  });
+
+  test.each([
+    ['unassigned', 'unassigned'],
+    [{ kind: 'user', username: 'synthetic-user' }, 'synthetic-user'],
+    [{ kind: 'chat', chatId: actor.chatId }, `chat ${actor.chatId}`],
+  ])('formats the list assignee %j without changing its identity', (assignee, expected) => {
+    const outcome = ticketCommandOutcome({ ...result('list'), context: { filters: { assignee } } });
+    expect(ticketCommandNoticeText(outcome)).toBe(`Listed tickets with filters assignee ${JSON.stringify(expected)}`);
+    expect(ticketCommandNoticeParts(outcome)).toEqual([
+      { kind: 'text', text: 'Listed tickets' },
+      { kind: 'text', text: ' with filters assignee ' },
+      { kind: 'code', text: expected },
+    ]);
+  });
+
+  test('rejects context on the wrong action, unbounded values and private fields', () => {
+    for (const [command, context] of [
+      ['create', { filters: {} }], ['list', { link: { kind: 'blocks', targetId: 'G-2' } }],
+      ['list', { filters: { limit: 1 } }], ['list', { filters: { project: 'a'.repeat(4097) } }],
+      ['list', { filters: { priority: 4 } }], ['list', { filters: { assignee: { kind: 'admin' } } }],
+      ['link', { link: { kind: 'parent', targetId: 'G-2' } }],
+      ['link', { link: { kind: 'blocks', targetId: 'javascript:evil' } }],
+      ['link', { link: { kind: 'blocks', targetId: 'G-2', body: 'private' } }],
+    ]) {
+      const output = { ...result(command), context };
+      expect(() => parseTicketCommandResult(output)).toThrow();
+      expect(parseGarconTicketResult(garconTicketResultContent(output))).toBeNull();
+      expect(parseTicketCommandOutcome(ticketCommandOutcome(output))).toBeNull();
+    }
+  });
+
   test('uses only ticket names for result envelopes and notices', () => {
     for (const command of TICKET_ACTIONS) for (const status of ['ok', 'error']) {
       const expected = result(command, status);

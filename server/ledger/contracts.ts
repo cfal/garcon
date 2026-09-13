@@ -37,7 +37,7 @@ export type LedgerTicketCommandOutcomeDetail = TicketCommandOutcome & {
 };
 
 export function projectLedgerTicketCommandOutcome(detail: JsonObject): TicketCommandOutcome | null {
-  const publicFields = ['type', 'command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode'];
+  const publicFields = ['type', 'command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode', 'context'];
   return parseTicketCommandOutcome(Object.fromEntries(publicFields
     .filter((key) => Object.hasOwn(detail, key)).map((key) => [key, detail[key]])));
 }
