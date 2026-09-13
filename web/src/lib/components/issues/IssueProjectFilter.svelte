@@ -11,7 +11,7 @@
 		onSelect,
 	}: {
 		controller: IssuesController;
-		onSelect: (project: string | undefined) => void;
+		onSelect: (project: string | undefined) => boolean;
 	} = $props();
 	let open = $state(false);
 	let prefix = $state('');
@@ -21,8 +21,7 @@
 	let trigger = $state<HTMLElement | null>(null);
 	const selected = $derived(controller.query.project);
 	function select(project: string | undefined) {
-		onSelect(project);
-		open = false;
+		if (onSelect(project)) open = false;
 	}
 	$effect(() => {
 		if (!open) return;

@@ -41,10 +41,10 @@
 	const hasFilters = $derived(
 		Object.values(controller.query).some((value) => value !== false && value !== undefined),
 	);
-	function apply(extra: Pick<IssueListQuery, 'project' | 'ready' | 'includeClosed'> = {}) {
+	function apply(extra: Pick<IssueListQuery, 'project' | 'ready' | 'includeClosed'> = {}): boolean {
 		clearTimeout(searchTimer);
 		searchTimer = undefined;
-		if (!form) return;
+		if (!form) return false;
 		const data = new FormData(form);
 		const optionalText = (key: string) => String(data.get(key) ?? '').trim() || undefined;
 		try {
@@ -62,8 +62,10 @@
 				...extra,
 			});
 			filterError = false;
+			return true;
 		} catch {
 			filterError = true;
+			return false;
 		}
 	}
 	function scheduleSearch(event: Event) {

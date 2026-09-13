@@ -115,8 +115,35 @@ test("mobile Issues opens, saves and closes without crypto.randomUUID", async ()
       expect(rowGutters.left).toBe(0);
       expect(rowGutters.right).toBeLessThanOrEqual(16);
       await panel.getByRole("button", { name: "Search", exact: true }).click();
+      const projectTrigger = panel.getByRole("button", {
+        name: "Project",
+        exact: true,
+      });
+      const label = panel.getByLabel("Label", { exact: true });
+      await label.fill("x".repeat(65));
+      await projectTrigger.click();
+      await projects
+        .getByRole("button", { name: "Release", exact: true })
+        .click();
+      expect(await projectTrigger.getAttribute("aria-expanded")).toBe("true");
+      expect(await projectTrigger.textContent()).toContain("All projects");
+      expect(await label.inputValue()).toBe("x".repeat(65));
+      expect(await panel.getByRole("alert").textContent()).toContain(
+        "Invalid filter",
+      );
+      await page.keyboard.press("Escape");
       await panel.getByLabel("Label", { exact: true }).fill("bug");
       await panel.getByPlaceholder("Search issues…").press("Enter");
+      await projectTrigger.click();
+      await projects
+        .getByRole("button", { name: "Release", exact: true })
+        .click();
+      expect(await projectTrigger.getAttribute("aria-expanded")).toBe("false");
+      expect(await projectTrigger.textContent()).toContain("Release");
+      await projectTrigger.click();
+      await projects
+        .getByRole("button", { name: "All projects", exact: true })
+        .click();
       await panel.getByRole("button", { name: "Hide search options" }).click();
       const captured = new Deferred<Route>();
       await context.route("**/api/v1/issues/detail?*", async (route) => {

@@ -318,6 +318,39 @@ describe('Issues stable, immediate interactions', () => {
 		expect(controller.query).toEqual({ label: 'bug', query: 'Synthetic', includeClosed: true });
 	});
 
+	it.each(['Release', 'All projects'])(
+		'keeps the picker open when selecting %s fails validation',
+		async (project) => {
+			const { controller } = await mount();
+			controller.setQuery({ project: 'Selected project', query: 'Synthetic' });
+			await controller.refresh();
+			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+			const label = screen.getByLabelText('Label') as HTMLInputElement;
+			await fireEvent.input(label, { target: { value: 'x'.repeat(65) } });
+			const trigger = screen.getByRole('button', { name: 'Project' });
+			await fireEvent.click(trigger);
+			const picker = await screen.findByRole('dialog', { name: 'Project' });
+			await fireEvent.click(await within(picker).findByRole('button', { name: project }));
+			expect(trigger.getAttribute('aria-expanded')).toBe('true');
+			expect(controller.query).toEqual({ project: 'Selected project', query: 'Synthetic' });
+			expect(label.value).toBe('x'.repeat(65));
+			expect(screen.getByRole('alert').textContent).toContain('Invalid filter');
+			await fireEvent.click(trigger);
+			await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Project' })).toBeNull());
+			await fireEvent.input(label, { target: { value: 'bug' } });
+			await fireEvent.click(trigger);
+			await fireEvent.click(
+				await within(await screen.findByRole('dialog', { name: 'Project' })).findByRole('button', {
+					name: project,
+				}),
+			);
+			expect(trigger.getAttribute('aria-expanded')).toBe('false');
+			expect(controller.query.project).toBe(project === 'All projects' ? undefined : project);
+			expect(controller.query).toMatchObject({ label: 'bug', query: 'Synthetic' });
+			expect(screen.queryByRole('alert')).toBeNull();
+		},
+	);
+
 	it.each([false, true])(
 		'groups detail actions and places assignment beside its value (assigned: %s)',
 		async (assigned) => {
