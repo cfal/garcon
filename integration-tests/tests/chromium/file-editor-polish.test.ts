@@ -34,7 +34,27 @@ describe('File editor controls', () => {
       expect(await surface.getByRole('button', { name: 'Open to Side', exact: true }).count()).toBe(
         0,
       );
-      expect(await surface.getByText(path, { exact: true }).count()).toBe(1);
+      const title = surface.getByRole('heading', { level: 2 });
+      expect(await title.getAttribute('title')).toBe(path);
+      markPhase('fitting the file title to the actual toolbar space');
+      await page.setViewportSize({ width: 3200, height: 1000 });
+      await page.waitForFunction((fullPath) => {
+        const heading = document.querySelector('[aria-hidden="false"] [data-file-path-title] h2');
+        return heading?.textContent === fullPath;
+      }, path);
+      await page.screenshot({ path: join(integration.dirs.root, 'file-title-wide.png') });
+      await page.setViewportSize({ width: 1000, height: 800 });
+      await page.waitForFunction((basename) => {
+        const heading = document.querySelector('[aria-hidden="false"] [data-file-path-title] h2');
+        return heading?.textContent === basename;
+      }, filename);
+      const titleBounds = await title.boundingBox();
+      const copyBounds = await surface.getByRole('button', { name: 'Copy file path', exact: true }).boundingBox();
+      expect(titleBounds).not.toBeNull();
+      expect(copyBounds).not.toBeNull();
+      expect(titleBounds!.x + titleBounds!.width).toBeLessThanOrEqual(copyBounds!.x);
+      await page.screenshot({ path: join(integration.dirs.root, 'file-title-narrow.png') });
+      await page.setViewportSize({ width: 1440, height: 1000 });
 
       markPhase('finding and replacing through real keyboard and buttons');
       await source.click();

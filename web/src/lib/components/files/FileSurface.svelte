@@ -20,7 +20,7 @@
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
-	import CopyFilePathButton from './CopyFilePathButton.svelte';
+	import FilePathTitle from './FilePathTitle.svelte';
 	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
 	import FileEditorStatus from './FileEditorStatus.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -43,9 +43,6 @@
 	const files = getFileSessions();
 	const commands = getOptionalWorkbenchCommands();
 	const compact = $derived(presentation === 'mobile');
-	const fullPath = $derived(
-		`${session.canonicalFileRootPath.replace(/\/$/, '')}/${session.relativePath}`,
-	);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		if (session.contentKind === 'markdown') {
@@ -148,21 +145,7 @@
 		class="surface-toolbar flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3"
 		style="container-name: surface-toolbar; container-type: inline-size;"
 	>
-		<div class="min-w-0 flex-1">
-			<div class="flex min-w-0 items-center gap-1.5">
-				<h2 class="truncate text-sm font-medium text-foreground">{session.fileName}</h2>
-				<CopyFilePathButton path={fullPath} />
-				{#if session.dirty}<span
-						class="text-status-warning-foreground"
-						aria-label={m.file_session_unsaved()}>*</span
-					>{/if}
-			</div>
-			{#if !compact}
-				<p class="truncate text-xs text-muted-foreground" title={fullPath}>
-					{fullPath}
-				</p>
-			{/if}
-		</div>
+		<FilePathTitle path={session.fullPath} fileName={session.fileName} dirty={session.dirty} />
 		<ResponsiveSurfaceActions
 			actions={toolbarActions}
 			menuLabel={m.workspace_surface_actions()}

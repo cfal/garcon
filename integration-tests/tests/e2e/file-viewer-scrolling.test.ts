@@ -139,7 +139,7 @@ async function waitForActiveTarget(
       const surface = [
         ...document.querySelectorAll<HTMLElement>('[data-workspace-surface-id^="file:"]'),
       ].find(
-        (candidate) => candidate.querySelector('h2')?.textContent?.trim() === expectedFileName,
+        (candidate) => candidate.querySelector('h2')?.title.endsWith(`/${expectedFileName}`),
       );
       if (!surface) return false;
       if (expectedTarget === 'markdown')
@@ -164,7 +164,7 @@ async function setScrollOffset(
       const surface = [
         ...document.querySelectorAll<HTMLElement>('[data-workspace-surface-id^="file:"]'),
       ].find(
-        (candidate) => candidate.querySelector('h2')?.textContent?.trim() === expectedFileName,
+        (candidate) => candidate.querySelector('h2')?.title.endsWith(`/${expectedFileName}`),
       );
       const element =
         expectedTarget === 'markdown'
@@ -198,7 +198,7 @@ async function expectRestoredOffset(
       const surface = [
         ...document.querySelectorAll<HTMLElement>('[data-workspace-surface-id^="file:"]'),
       ].find(
-        (candidate) => candidate.querySelector('h2')?.textContent?.trim() === expectedFileName,
+        (candidate) => candidate.querySelector('h2')?.title.endsWith(`/${expectedFileName}`),
       );
       const element =
         expectedTarget === 'markdown'
@@ -223,7 +223,7 @@ async function prepareScrollableImage(page: Page, fileName: string): Promise<voi
   await page.evaluate((expectedFileName) => {
     const surface = [
       ...document.querySelectorAll<HTMLElement>('[data-workspace-surface-id^="file:"]'),
-    ].find((candidate) => candidate.querySelector('h2')?.textContent?.trim() === expectedFileName);
+    ].find((candidate) => candidate.querySelector('h2')?.title.endsWith(`/${expectedFileName}`));
     const target = surface?.querySelector<HTMLImageElement>(`img[alt="${expectedFileName}"]`);
     if (!target) throw new Error(`Missing image: ${expectedFileName}`);
     // Supplies layout dimensions because Lightpanda does not decode blob-backed SVG metadata.

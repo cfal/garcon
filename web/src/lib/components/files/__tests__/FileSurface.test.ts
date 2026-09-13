@@ -205,7 +205,7 @@ describe('FileSurface', () => {
 			rendererMode: 'code',
 			onClose: vi.fn(),
 		});
-		expect(screen.getByText('/workspace/src/file.ts').title).toBe('/workspace/src/file.ts');
+		expect(screen.getByRole('heading', { level: 2 }).title).toBe('/workspace/src/file.ts');
 		const header = container.querySelector('header')!;
 		const buttons = within(header).getAllByRole('button');
 		expect(buttons.at(-2)?.getAttribute('aria-label')).toBe(m.editor_settings_button_label());
