@@ -89,6 +89,17 @@ describe('CommandMenu', () => {
 		expect(screen.queryByRole('option')).toBeNull();
 	});
 
+	it('does not execute the highlighted command while Enter commits IME composition', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+		const input = await screen.findByRole('combobox');
+
+		await fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+
+		expect(mocks.appShell.openNewChatDialog).not.toHaveBeenCalled();
+		expect(input.getAttribute('aria-expanded')).toBe('true');
+	});
+
 	it.each([
 		['History', 'git-history'],
 		['Compare', 'git-compare'],

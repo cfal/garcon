@@ -143,6 +143,7 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		if (e.isComposing) return;
 		if (e.key === 'Tab') {
 			const focusable = Array.from(
 				paletteRef?.querySelectorAll<HTMLElement>(
