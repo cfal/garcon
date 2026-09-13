@@ -66,7 +66,9 @@ it.each([false, true])(
 		);
 		const { controller, api, textarea } = await edit();
 		const draft = controller.detail.fieldsDraft!;
-		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+		await fireEvent.click(
+			within(textarea.closest('form')!).getByRole('button', { name: 'Refine prompt' }),
+		);
 		expect(refinementApi.refinePrompt).toHaveBeenCalledWith(
 			{ draft: 'Synthetic description', target: 'issue-description' },
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -98,9 +100,11 @@ it('cancels refinement on unmount and ignores a late response', async () => {
 				resolve = done;
 			}),
 	);
-	const { controller, view } = await edit();
+	const { controller, view, textarea } = await edit();
 	const draft = controller.detail.fieldsDraft!;
-	await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+	await fireEvent.click(
+		within(textarea.closest('form')!).getByRole('button', { name: 'Refine prompt' }),
+	);
 	const signal = vi.mocked(refinementApi.refinePrompt).mock.calls[0][1]!.signal!;
 	view.unmount();
 	expect(signal.aborted).toBe(true);

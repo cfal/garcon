@@ -7,7 +7,7 @@
 	import { isIssueSubmitKey } from '$lib/issues/commands/issue-form.js';
 	import IssueProjectInput from './IssueProjectInput.svelte';
 	import IssueLabelsInput from './IssueLabelsInput.svelte';
-	import IssueDescriptionEditor from './IssueDescriptionEditor.svelte';
+	import IssueTextEditor from './IssueTextEditor.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
@@ -62,7 +62,8 @@
 			required
 		/>
 	</label>
-	<IssueDescriptionEditor
+	<IssueTextEditor
+		kind="description"
 		{draft}
 		{active}
 		onkeydown={keydown}

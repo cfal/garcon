@@ -14,6 +14,7 @@
 		username,
 		onOpenChat,
 		onSubmitted,
+		visible,
 	}: {
 		controller: IssuesController;
 		detail: IssueDetail;
@@ -21,6 +22,7 @@
 		username: string;
 		onOpenChat: (id: string) => void;
 		onSubmitted: () => void;
+		visible: boolean;
 	} = $props();
 	const composer = untrack(() => controller.drafts.open('comment', detail));
 	const editing = $derived(controller.detail.commentEditDraft);
@@ -65,6 +67,7 @@
 					>{#if comment.revision > 1 && !comment.deletedAt}<span>{m.issues_edited()}</span>{/if}
 				</header>
 				{#if editing?.current.commentId === comment.id}<IssueCommentComposer
+						{visible}
 						draft={editing}
 						onCancel={() => {
 							editing?.flush();
@@ -97,6 +100,7 @@
 	{:else}<p class="issue-muted py-4">{m.issues_no_comments()}</p>{/each}
 </div>
 {#if composer}<IssueCommentComposer
+		{visible}
 		draft={composer}
 		onSubmitted={(submitted) => {
 			if (

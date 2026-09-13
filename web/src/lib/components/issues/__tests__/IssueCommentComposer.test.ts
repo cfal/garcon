@@ -1,16 +1,118 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
-import IssueCommentComposer from '../IssueCommentComposer.svelte';
+import IssueCommentComposer from './IssueCommentComposerHost.svelte';
+import * as refinementApi from '$lib/api/prompt-refinement.js';
+import type { RefinePromptResponse } from '$shared/prompt-refinement';
+import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import { issueTestHarness, ISSUE_STORE, syntheticIssue } from './issue-test-harness';
 import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte';
 
 const controllers: IssuesController[] = [];
+vi.mock('$lib/api/prompt-refinement.js', () => ({ refinePrompt: vi.fn() }));
+vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+	default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
+		.default,
+}));
 afterEach(() => {
 	cleanup();
 	for (const controller of controllers.splice(0)) controller.dispose();
+	vi.mocked(refinementApi.refinePrompt).mockReset();
+	resetPromptEditorStub();
 });
 describe('Issue comment submission', () => {
+	function mount() {
+		const fixture = issueTestHarness();
+		controllers.push(fixture.controller);
+		fixture.controller.drafts.setPartition({ storeId: ISSUE_STORE, viewerKey: 'synthetic-viewer' });
+		const draft = fixture.controller.drafts.open('comment', { issue: syntheticIssue() })!;
+		draft.setField('body', 'Synthetic progress');
+		const view = render(IssueCommentComposer, { draft });
+		return { ...fixture, draft, view };
+	}
+
+	it('expands comment text with live synchronization and restores selection', async () => {
+		const { draft } = mount();
+		const input = screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
+		input.setSelectionRange(2, 5, 'backward');
+		await fireEvent.click(screen.getByRole('button', { name: 'Expand comment editor' }));
+		const dialog = within(await screen.findByRole('dialog', { name: 'Comment' }));
+		await fireEvent.input(await dialog.findByRole('textbox', { name: 'Comment' }), {
+			target: { value: 'Updated synthetic progress' },
+		});
+		expect(draft.field('body')).toBe('Updated synthetic progress');
+		await fireEvent.click(dialog.getByRole('button', { name: 'Close expanded editor' }));
+		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+			2,
+			5,
+			'backward',
+		]);
+	});
+
+	it.each([false, true])(
+		'refines the unchanged comment and blocks every submit path (changed: %s)',
+		async (changed) => {
+			let resolve!: (result: RefinePromptResponse) => void;
+			vi.mocked(refinementApi.refinePrompt).mockImplementation(
+				() =>
+					new Promise((done) => {
+						resolve = done;
+					}),
+			);
+			const { draft, api } = mount();
+			const input = screen.getByRole('textbox', { name: 'Comment' });
+			await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+			expect(refinementApi.refinePrompt).toHaveBeenCalledWith(
+				{ draft: 'Synthetic progress', target: 'issue-comment' },
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			);
+			expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+				true,
+			);
+			await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+			await fireEvent.submit(input.closest('form')!);
+			expect(api.mutate).not.toHaveBeenCalled();
+			if (changed) draft.setField('body', 'Newer progress');
+			resolve({ success: true, refinedPrompt: 'Refined progress' });
+			await waitFor(() =>
+				expect(
+					(screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled,
+				).toBe(false),
+			);
+			expect(draft.field('body')).toBe(changed ? 'Newer progress' : 'Refined progress');
+			await fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+			expect(api.mutate.mock.lastCall?.[0].payload).toEqual({
+				action: 'comment',
+				issueId: 'G-1',
+				body: changed ? 'Newer progress' : 'Refined progress',
+			});
+		},
+	);
+
+	it.each(['cancel', 'hide', 'unmount'] as const)(
+		'cancels comment refinement on %s and ignores a late result',
+		async (action) => {
+			let resolve!: (result: RefinePromptResponse) => void;
+			vi.mocked(refinementApi.refinePrompt).mockImplementation(
+				() =>
+					new Promise((done) => {
+						resolve = done;
+					}),
+			);
+			const { draft, view } = mount();
+			await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+			const signal = vi.mocked(refinementApi.refinePrompt).mock.calls[0][1]!.signal!;
+			if (action === 'unmount') view.unmount();
+			else if (action === 'hide') await view.rerender({ draft, visible: false });
+			else await fireEvent.click(screen.getByRole('button', { name: 'Cancel prompt refinement' }));
+			expect(signal.aborted).toBe(true);
+			resolve({ success: true, refinedPrompt: 'Late progress' });
+			await tick();
+			expect(draft.field('body')).toBe('Synthetic progress');
+		},
+	);
+
 	it('does not invoke a destroyed composer’s owner after its request settles', async () => {
 		const { controller, api } = issueTestHarness();
 		controllers.push(controller);

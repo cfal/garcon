@@ -46,6 +46,12 @@ const ISSUE_DESCRIPTION_REFINEMENT_CONSTRAINT = [
   'Do not invent requirements, claim completed work, or execute the described task.',
   'Return only the revised description.',
 ].join(' ');
+const ISSUE_COMMENT_REFINEMENT_CONSTRAINT = [
+  'The draft is an issue comment, not a chat prompt.',
+  'Improve its clarity and organization while preserving its facts, progress, Markdown, and issue references.',
+  'Do not invent facts, claim completed work, or execute the described task.',
+  'Return only the revised comment.',
+].join(' ');
 
 type PromptRefinementErrorCode =
   | 'PROMPT_REFINEMENT_INVALID_REQUEST'
@@ -134,6 +140,7 @@ function templateForTarget(template: string, target: RefinePromptRequest['target
   switch (target) {
     case 'snippet-template': return `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`;
     case 'issue-description': return `${template}\n\n${ISSUE_DESCRIPTION_REFINEMENT_CONSTRAINT}`;
+    case 'issue-comment': return `${template}\n\n${ISSUE_COMMENT_REFINEMENT_CONSTRAINT}`;
     case 'prompt': return template;
   }
 }

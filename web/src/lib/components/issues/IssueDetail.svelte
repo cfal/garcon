@@ -284,6 +284,7 @@
 		>
 	</nav>
 	{#if controller.detail.tab === 'comments'}<IssueDiscussion
+			{visible}
 			{controller}
 			{detail}
 			{chats}

@@ -18,11 +18,15 @@
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		draft,
+		kind,
+		preview = $bindable(false),
 		onkeydown,
 		onPendingChange,
 		active = true,
 	}: {
 		draft: IssueDraftState;
+		kind: 'description' | 'comment';
+		preview?: boolean;
 		onkeydown: (event: KeyboardEvent) => void;
 		onPendingChange: (pending: boolean) => void;
 		active?: boolean;
@@ -33,20 +37,34 @@
 	const editor = new PromptEditorDialogState();
 	const refinement = new PromptRefinementController();
 	let textarea = $state<HTMLTextAreaElement | null>(null);
-	let preview = $state(false);
 	let destroyed = false;
+	const field = $derived(kind === 'description' ? 'description' : 'body');
+	const target = $derived(kind === 'description' ? 'issue-description' : 'issue-comment');
+	const label = $derived(kind === 'description' ? m.issues_description() : m.issues_comment());
+	const focusBookmark = $derived.by(() => {
+		if (kind === 'description')
+			return { kind: 'draft', draftId: draft.current.id, field: 'description' };
+		if (draft.current.kind === 'comment-edit')
+			return {
+				kind: 'comment',
+				issueId: draft.current.issueId,
+				commentId: draft.current.commentId,
+				control: 'editor',
+			};
+		return { kind: 'draft', draftId: draft.current.id, field: 'composer' };
+	});
 	const canRefine = $derived(
 		active &&
 			draft.canEdit &&
 			!refinement.pending &&
 			normalizeRefinePromptRequest({
-				draft: draft.field('description'),
-				target: 'issue-description',
+				draft: draft.field(field),
+				target,
 			}) !== null,
 	);
 	const layer = transientLayerAttachment({
 		registry: transientLayers,
-		id: allocateTransientLayerId('issue-description-refinement'),
+		id: allocateTransientLayerId('issue-text-refinement'),
 		kind: 'prompt-transform',
 		modality: 'nonmodal',
 		onEscape: () => {
@@ -56,7 +74,7 @@
 		restoreFocus: () => void focusEditor(),
 	});
 	function setText(value: string) {
-		if (!refinement.pending) draft.setField('description', value);
+		if (!refinement.pending) draft.setField(field, value);
 	}
 	function expand() {
 		if (!textarea || !draft.canEdit || refinement.pending) return;
@@ -95,10 +113,11 @@
 		if (!canRefine) return;
 		const source = draft;
 		const version = source.current.version;
-		const text = source.field('description');
+		const sourceField = field;
+		const text = source.field(sourceField);
 		onPendingChange(true);
 		try {
-			const result = await refinement.run({ draft: text, target: 'issue-description' });
+			const result = await refinement.run({ draft: text, target });
 			if (destroyed || !active || result.kind !== 'refined' || draft !== source || !source.canEdit)
 				return;
 			if (source.current.version !== version) {
@@ -106,7 +125,7 @@
 				return;
 			}
 			const refined = result.response.refinedPrompt;
-			source.setField('description', refined);
+			source.setField(sourceField, refined);
 			notifications.info(
 				refined === text ? m.prompt_refinement_unchanged() : m.prompt_refinement_refined(),
 			);
@@ -131,9 +150,9 @@
 	});
 </script>
 
-<div class="issue-description-editor" {@attach refinement.pending && !editor.open && layer}>
+<div class="issue-text-editor" {@attach refinement.pending && !editor.open && layer}>
 	<div class="issue-actions">
-		<label class="issue-field-label" for={id}>{m.issues_description()}</label>
+		<label class="issue-field-label" for={id}>{label}</label>
 		<button
 			type="button"
 			class="issue-text-button"
@@ -144,29 +163,28 @@
 			{preview ? m.issues_write() : m.issues_preview()}
 		</button>
 	</div>
-	{#if preview}<IssueMarkdown text={draft.field('description')} />
+	{#if preview}<IssueMarkdown text={draft.field(field)} />
 	{:else}
 		<PromptTextField
 			{id}
 			bind:ref={textarea}
-			bind:value={() => draft.field('description'), setText}
-			rows={6}
+			bind:value={() => draft.field(field), setText}
+			rows={kind === 'description' ? 6 : 4}
+			placeholder={kind === 'comment' ? m.issues_comment_placeholder() : ''}
 			{onkeydown}
 			invalid={false}
 			disabled={!draft.canEdit}
 			readOnly={refinement.pending}
 			canExpand={draft.canEdit}
-			expandLabel={m.issues_description_expand()}
+			expandLabel={kind === 'description'
+				? m.issues_description_expand()
+				: m.issues_comment_expand()}
 			canRefinePrompt={canRefine}
 			isPromptRefinementPending={refinement.pending}
 			onExpand={expand}
 			onRefinePrompt={() => void refine()}
 			dataAttributes={{
-				'data-issue-focus': JSON.stringify({
-					kind: 'draft',
-					draftId: draft.current.id,
-					field: 'description',
-				}),
+				'data-issue-focus': JSON.stringify(focusBookmark),
 				'data-draft-version': draft.current.version,
 			}}
 		/>
@@ -174,9 +192,9 @@
 </div>
 {#if editor.open}
 	<PromptEditorDialog
-		title={m.issues_description()}
-		editorLabel={m.issues_description()}
-		text={draft.field('description')}
+		title={label}
+		editorLabel={label}
+		text={draft.field(field)}
 		selection={editor.selection}
 		focusRequestId={editor.focusRequestId}
 		readOnly={!draft.canEdit || refinement.pending}

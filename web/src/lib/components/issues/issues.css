@@ -655,7 +655,7 @@ textarea.issue-input {
 	flex-direction: column;
 	gap: 5px;
 }
-.issue-description-editor {
+.issue-text-editor {
 	display: flex;
 	flex-direction: column;
 	gap: 5px;

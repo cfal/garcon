@@ -42,6 +42,7 @@
 	"issues_any_label": "Any label",
 	"issues_label_filter_hint": "Filter by a custom issue label, such as bug or frontend.",
 	"issues_description_expand": "Expand description editor",
+	"issues_comment_expand": "Expand comment editor",
 	"issues_detail_loading": "Loading issue…",
 	"issues_project_hint": "Project can be any label; it defaults to the current chat’s project path (the main checkout for Git worktrees).",
 	"issues_create": "Create issue",

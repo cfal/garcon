@@ -5,7 +5,7 @@ import { ISSUE_LIMITS } from './issues.js';
 export const PROMPT_REFINEMENT_DRAFT_MAX_LENGTH = 64_000;
 export const PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH = 64_000;
 
-export type PromptRefinementTarget = 'prompt' | 'snippet-template' | 'issue-description';
+export type PromptRefinementTarget = 'prompt' | 'snippet-template' | 'issue-description' | 'issue-comment';
 
 export interface RefinePromptRequest {
   draft: string;
@@ -18,18 +18,19 @@ export interface RefinePromptResponse {
 }
 
 export function isPromptRefinementTarget(value: unknown): value is PromptRefinementTarget {
-  return value === 'prompt' || value === 'snippet-template' || value === 'issue-description';
+  return value === 'prompt' || value === 'snippet-template'
+    || value === 'issue-description' || value === 'issue-comment';
 }
 
 export function promptRefinementTargetMaxLength(target: PromptRefinementTarget): number {
-  if (target === 'issue-description') return ISSUE_LIMITS.bodyBytes;
+  if (target === 'issue-description' || target === 'issue-comment') return ISSUE_LIMITS.bodyBytes;
   return target === 'snippet-template'
     ? SNIPPET_TEMPLATE_MAX_LENGTH
     : PROMPT_REFINEMENT_DRAFT_MAX_LENGTH;
 }
 
 export function promptRefinementTargetOutputMaxLength(target: PromptRefinementTarget): number {
-  if (target === 'issue-description') return ISSUE_LIMITS.bodyBytes;
+  if (target === 'issue-description' || target === 'issue-comment') return ISSUE_LIMITS.bodyBytes;
   return target === 'snippet-template'
     ? SNIPPET_TEMPLATE_MAX_LENGTH
     : PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH;
@@ -44,7 +45,7 @@ export function normalizeRefinePromptRequest(value: unknown): RefinePromptReques
     return null;
   }
   if (!value.draft.trim() || value.draft.length > promptRefinementTargetMaxLength(value.target)
-    || !fitsIssueDescription(value.draft, value.target)) {
+    || !fitsIssueText(value.draft, value.target)) {
     return null;
   }
   return { draft: value.draft, target: value.target };
@@ -59,13 +60,13 @@ export function normalizeRefinePromptResponse(
   }
   const refinedPrompt = value.refinedPrompt.trim();
   if (!refinedPrompt || refinedPrompt.length > promptRefinementTargetOutputMaxLength(target)
-    || !fitsIssueDescription(refinedPrompt, target)) {
+    || !fitsIssueText(refinedPrompt, target)) {
     return null;
   }
   return { success: true, refinedPrompt };
 }
 
-function fitsIssueDescription(text: string, target: PromptRefinementTarget): boolean {
-  return target !== 'issue-description'
+function fitsIssueText(text: string, target: PromptRefinementTarget): boolean {
+  return (target !== 'issue-description' && target !== 'issue-comment')
     || (text.isWellFormed() && new TextEncoder().encode(text).byteLength <= ISSUE_LIMITS.bodyBytes);
 }
