@@ -5,7 +5,6 @@ import type {
 	IssueLink,
 	IssueLinkKind,
 	IssueListQuery,
-	IssueProjectDefault,
 } from '$shared/issues';
 import type { IssueMutationPayload } from '$shared/issue-commands';
 import { parseIssueListQuery } from '$shared/issue-query';
@@ -69,7 +68,6 @@ export class IssuesController implements PortableSingletonController {
 	createDraft = $state.raw<IssueDraftState | null>(null);
 	closeDraft = $state.raw<IssueDraftState | null>(null);
 	closeConfirmation = $state.raw<IssueCloseConfirmation | null>(null);
-	projectDefault = $state.raw<IssueProjectDefault | null>(null);
 	projectDefaultError = $state<string | null>(null);
 	createdIssueId = $state<string | null>(null);
 	activeLane = $state<'open' | 'in-progress' | 'in-review' | 'closed'>('open');
@@ -574,7 +572,6 @@ export class IssuesController implements PortableSingletonController {
 		});
 		if (!draft) return;
 		this.createDraft = draft;
-		this.projectDefault = null;
 		this.projectDefaultError = null;
 		this.#createRequest?.abort();
 		if (draft.field('project') || draft.dirty || !directory) return;
@@ -585,7 +582,6 @@ export class IssuesController implements PortableSingletonController {
 			const resolved = await this.#api.projectDefault(directory, request.signal);
 			if (this.createDraft !== draft || request.signal.aborted) return;
 			draft.applyDefaultProject(resolved.project, version);
-			if (draft.field('project') === resolved.project) this.projectDefault = resolved;
 		} catch (error) {
 			if (this.createDraft === draft && !request.signal.aborted)
 				this.projectDefaultError =

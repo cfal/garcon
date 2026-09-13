@@ -79,12 +79,7 @@
 					onSubmit={() => void submit()}
 					onRefinementPendingChange={(pending) => (refining = pending)}
 				/>
-				{#if controller.projectDefault}<p class="issue-muted">
-						{controller.projectDefault.kind === 'repository'
-							? m.issues_default_repo()
-							: m.issues_default_folder()}
-					</p>
-				{:else if !draft.field('project')}<p class="issue-muted">
+				{#if !draft.field('project')}<p class="issue-muted">
 						{controller.projectDefaultError ?? m.issues_project_required()}
 					</p>{/if}
 				<IssueDraftFeedback {draft} />

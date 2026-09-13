@@ -598,6 +598,35 @@ describe('Issues surface', () => {
 		});
 	});
 
+	it.each(['repository', 'folder'] as const)(
+		'prefills the project from a %s without displaying default-source text',
+		async (kind) => {
+			const { controller, api } = await mount();
+			api.projectDefault.mockResolvedValueOnce({ project: '/synthetic/project', kind });
+			await controller.beginCreate('/synthetic/context');
+			const dialog = within(await screen.findByRole('dialog'));
+			const project = dialog.getByLabelText('Project') as HTMLInputElement;
+			expect(project.value).toBe('/synthetic/project');
+			expect(dialog.queryByText(/Default from (repository|folder)/)).toBeNull();
+			await fireEvent.input(project, { target: { value: '' } });
+			expect(
+				dialog.getByText('Enter a project name. A chat or folder is not required.'),
+			).toBeTruthy();
+		},
+	);
+
+	it('keeps default lookup failures visible until a project is entered', async () => {
+		const { controller, api } = await mount();
+		api.projectDefault.mockRejectedValueOnce(
+			new ApiError(503, 'Synthetic project lookup unavailable'),
+		);
+		await controller.beginCreate('/synthetic/context');
+		const dialog = within(await screen.findByRole('dialog'));
+		expect(dialog.getByText('Synthetic project lookup unavailable')).toBeTruthy();
+		await fireEvent.input(dialog.getByLabelText('Project'), { target: { value: 'Release' } });
+		expect(dialog.queryByText('Synthetic project lookup unavailable')).toBeNull();
+	});
+
 	it('creates without a chat or filesystem default and opens authoritative detail', async () => {
 		const { controller, api } = await mount(true);
 		expect(screen.getByText('No issues yet')).toBeTruthy();

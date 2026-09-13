@@ -110,8 +110,6 @@
 	"issues_any_assignee": "Any assignee",
 	"issues_label_filter": "Label",
 	"issues_filter_apply": "Search",
-	"issues_default_repo": "Default from repository",
-	"issues_default_folder": "Default from folder",
 	"issues_project_required": "Enter a project name. A chat or folder is not required.",
 	"issues_copy_link": "Copy issue link",
 	"issues_created_outside": "Created outside current filters",
