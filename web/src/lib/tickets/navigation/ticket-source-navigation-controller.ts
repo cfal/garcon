@@ -8,7 +8,7 @@ import * as m from '$lib/paraglide/messages.js';
 type Partition = Pick<TicketBootstrap, 'storeId' | 'viewerKey'>;
 
 export interface TicketSourceNavigationDeps {
-	navigation: TranscriptNavigationController;
+	navigation: Pick<TranscriptNavigationController, 'open'>;
 	notifications: { info(message: string): void; error(message: string): void };
 	resolve?: typeof resolveTicketSource;
 }
@@ -31,22 +31,21 @@ export class TicketSourceNavigationController {
 				getPartition()?.viewerKey === partition.viewerKey,
 			resolve: async (signal) => {
 				const resolution = await (this.deps.resolve ?? resolveTicketSource)(source, signal);
-				return resolution.kind === 'found'
-					? resolution
-					: {
-							kind: resolution.kind === 'transcript-reloaded' ? 'view-changed' : 'unavailable',
-						};
+				if (resolution.kind === 'found') return resolution;
+				if (resolution.kind === 'transcript-reloaded') return { kind: 'view-changed' };
+				return { kind: 'unavailable' };
 			},
 			onResult: (result) => {
 				if (result === 'view-changed') this.deps.notifications.info(m.tickets_source_reloaded());
 				else if (result === 'unavailable') this.deps.notifications.info(m.tickets_source_missing());
 			},
-			onError: (error) =>
-				this.deps.notifications.error(
+			onError: (error) => {
+				const message =
 					error instanceof ApiError && error.errorCode === 'SESSION_NOT_FOUND'
 						? m.tickets_source_chat_missing()
-						: m.tickets_source_failed(),
-				),
+						: m.tickets_source_failed();
+				this.deps.notifications.error(message);
+			},
 		});
 	}
 }

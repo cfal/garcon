@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import {
 	TranscriptNavigationController,
 	type TranscriptNavigationDeps,
@@ -35,12 +36,10 @@ function fixture() {
 	let exists = true;
 	const panel = {
 		chatId: source.chatId,
-		navigateToTranscriptRow: vi.fn<
-			NonNullable<
-				ReturnType<TranscriptNavigationDeps['panels']['panel']>
-			>['navigateToTranscriptRow']
-		>(async () => 'completed'),
-	};
+		navigateToTranscriptRow: vi.fn<ConversationPanelRegistration['navigateToTranscriptRow']>(
+			async () => 'completed',
+		),
+	} satisfies Pick<ConversationPanelRegistration, 'chatId' | 'navigateToTranscriptRow'>;
 	const deps = {
 		workspace: {
 			layout: {

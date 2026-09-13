@@ -56,12 +56,13 @@ export class SearchResultNavigationController {
 					this.deps.notifications.info(m.sidebar_search_target_unavailable());
 				}
 			},
-			onError: (error) =>
-				this.deps.notifications.error(
+			onError: (error) => {
+				const message =
 					error instanceof ApiError && error.errorCode === 'SESSION_NOT_FOUND'
 						? m.sidebar_search_target_chat_missing()
-						: m.sidebar_search_target_failed(),
-				),
+						: m.sidebar_search_target_failed();
+				this.deps.notifications.error(message);
+			},
 		});
 	}
 }
