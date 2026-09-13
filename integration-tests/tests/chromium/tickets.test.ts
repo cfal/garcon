@@ -12,6 +12,55 @@ import {
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
+  test("closes empty new tickets without a discard prompt on desktop and mobile", async () => {
+    await withChromiumFixture("tickets-empty-create", async (fixture) => {
+      const { page, integration } = fixture;
+      await page.goto(integration.garcon.baseUrl, {
+        waitUntil: "domcontentloaded",
+      });
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.getByRole("button", { name: "New ticket", exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        await dialog.waitFor();
+        expect(
+          await dialog
+            .getByText("Enter a project name. A chat or folder is not required.")
+            .count(),
+        ).toBe(0);
+        const title = dialog.getByLabel("Title", { exact: true });
+        await title.fill("Synthetic unsaved ticket");
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await dialog.getByText("Discard this draft?", { exact: true }).waitFor();
+        await title.fill("");
+        await dialog.getByLabel("Description", { exact: true }).fill("  ");
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await dialog.waitFor({ state: "hidden" });
+        expect(
+          await page.evaluate(() =>
+            Object.keys(sessionStorage).some((key) =>
+              key.startsWith("garcon-ticket-draft-v1:"),
+            ),
+          ),
+        ).toBe(false);
+        await page.getByRole("button", { name: "New ticket", exact: true }).click();
+        await dialog.waitFor();
+        expect(
+          await dialog.getByText("Discard this draft?", { exact: true }).count(),
+        ).toBe(0);
+        expect(await title.inputValue()).toBe("");
+        expect(
+          await dialog.getByLabel("Description", { exact: true }).inputValue(),
+        ).toBe("");
+        await page.keyboard.press("Escape");
+        await dialog.waitFor({ state: "hidden" });
+      }
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test("keeps newer editor focus while a status completion waits for authoritative counts", async () => {
     await withChromiumFixture("tickets-status-focus-owner", async (fixture) => {
       const { page, integration } = fixture;

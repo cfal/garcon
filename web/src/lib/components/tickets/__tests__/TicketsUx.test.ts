@@ -142,7 +142,10 @@ describe('Tickets stable, immediate interactions', () => {
 			await fireEvent.input(screen.getByPlaceholderText('Search tickets…'), {
 				target: { value: 'different' },
 			});
+			await fireEvent.change(screen.getByPlaceholderText('Search tickets…'));
+			const signal = api.counts.mock.lastCall?.[1];
 			await fireEvent.submit(screen.getByPlaceholderText('Search tickets…').closest('form')!);
+			expect(signal?.aborted).toBe(false);
 			expect(view.container.querySelector('[data-ticket-id="G-1"]')).not.toBeNull();
 			expect(view.container.querySelector('.ticket-collection')?.textContent).not.toContain(
 				'Loading tickets…',
