@@ -8,6 +8,7 @@ import type {
 } from '$shared/tickets';
 import type { TicketMutationPayload } from '$shared/ticket-commands';
 import { parseTicketListQuery } from '$shared/ticket-query';
+import { stableJsonStringify } from '$shared/json';
 import { ApiError } from '$lib/api/client.js';
 import { ticketsApi, type TicketsApi } from '$lib/api/tickets.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
@@ -195,6 +196,7 @@ export class TicketsController implements PortableSingletonController {
 			limit: _limit,
 			...query
 		} = parseTicketListQuery(input);
+		if (this.loading && stableJsonStringify(query) === stableJsonStringify(this.query)) return;
 		this.query = query;
 		this.#anchors = {};
 		this.createdTicketId = null;

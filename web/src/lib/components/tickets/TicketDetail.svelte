@@ -22,6 +22,7 @@
 	import TicketMutationErrors from './TicketMutationErrors.svelte';
 	import TicketDiscussion from './TicketDiscussion.svelte';
 	import TicketActivity from './TicketActivity.svelte';
+	import TicketChatReference from './TicketChatReference.svelte';
 	import TicketRelationships from './TicketRelationships.svelte';
 	import TicketMarkdown from './TicketMarkdown.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -64,12 +65,6 @@
 	const ownAssignment = $derived(
 		ticket.assignee?.kind === 'user' && ticket.assignee.username === username,
 	);
-	const assigneeLabel = $derived.by(() => {
-		const assignee = ticket.assignee;
-		if (!assignee) return m.tickets_unassigned();
-		if (assignee.kind === 'user') return assignee.username;
-		return chats.find((chat) => chat.id === assignee.chatId)?.title ?? assignee.chatId;
-	});
 	function edit() {
 		controller.detail.fieldsDraft = controller.drafts.open(
 			'fields',
@@ -222,7 +217,9 @@
 			</dd>
 			<dt>{m.tickets_assignee()}</dt>
 			<dd class="ticket-assignee-value">
-				<span>{assigneeLabel}</span>
+				{#if ticket.assignee?.kind === 'chat'}
+					<TicketChatReference chatId={ticket.assignee.chatId} {chats} {onOpenChat} />
+				{:else}<span>{ticket.assignee?.username ?? m.tickets_unassigned()}</span>{/if}
 				{#if ownAssignment || (ticket.status !== 'closed' && !ticket.assignee)}
 					<button
 						type="button"

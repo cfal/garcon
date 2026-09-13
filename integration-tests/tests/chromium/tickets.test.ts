@@ -12,6 +12,106 @@ import {
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
+  test("opens a chat assignee without source-row navigation on desktop and mobile", async () => {
+    await withChromiumFixture("tickets-chat-assignee", async (fixture) => {
+      const { page, integration } = fixture;
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic assigned conversation",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      const bootstrap = parseTicketBootstrap(
+        await integration.client.get("/api/v1/tickets/bootstrap"),
+      );
+      const created = parseTicketWriteResult(
+        await integration.client.post("/api/v1/tickets/mutate", {
+          requestId: crypto.randomUUID(),
+          expectedStoreId: bootstrap.storeId,
+          payload: {
+            action: "create",
+            input: {
+              title: "Synthetic assigned ticket",
+              project: "Release",
+              assignee: { kind: "chat", chatId },
+            },
+          },
+        }),
+      );
+      const sourceRequests: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/api/v1/chats/ticket-source")
+          sourceRequests.push(request.url());
+      });
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(`${integration.garcon.baseUrl}/?ticket=${created.ticket.id}`);
+        const assignee = page.locator(".ticket-assignee-value").getByRole("button");
+        await assignee.waitFor();
+        expect(await assignee.getAttribute("title")).toBe(chatId);
+        if (width === 1440) {
+          await assignee.focus();
+          await page.keyboard.press("Enter");
+        } else await assignee.click();
+        await page.locator(`[data-conversation-panel-chat-id="${chatId}"]`).waitFor();
+        await page.waitForURL((url) => url.pathname === `/chat/${chatId}`);
+      }
+      expect(sourceRequests).toEqual([]);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test("closes empty new tickets without a discard prompt on desktop and mobile", async () => {
+    await withChromiumFixture("tickets-empty-create", async (fixture) => {
+      const { page, integration } = fixture;
+      await page.goto(integration.garcon.baseUrl, {
+        waitUntil: "domcontentloaded",
+      });
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.getByRole("button", { name: "New ticket", exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        await dialog.waitFor();
+        expect(
+          await dialog
+            .getByText("Enter a project name. A chat or folder is not required.")
+            .count(),
+        ).toBe(0);
+        const title = dialog.getByLabel("Title", { exact: true });
+        await title.fill("Synthetic unsaved ticket");
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await dialog.getByText("Discard this draft?", { exact: true }).waitFor();
+        await title.fill("");
+        await dialog.getByLabel("Description", { exact: true }).fill("  ");
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await dialog.waitFor({ state: "hidden" });
+        expect(
+          await page.evaluate(() =>
+            Object.keys(sessionStorage).some((key) =>
+              key.startsWith("garcon-ticket-draft-v1:"),
+            ),
+          ),
+        ).toBe(false);
+        await page.getByRole("button", { name: "New ticket", exact: true }).click();
+        await dialog.waitFor();
+        expect(
+          await dialog.getByText("Discard this draft?", { exact: true }).count(),
+        ).toBe(0);
+        expect(await title.inputValue()).toBe("");
+        expect(
+          await dialog.getByLabel("Description", { exact: true }).inputValue(),
+        ).toBe("");
+        await page.keyboard.press("Escape");
+        await dialog.waitFor({ state: "hidden" });
+      }
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test("keeps newer editor focus while a status completion waits for authoritative counts", async () => {
     await withChromiumFixture("tickets-status-focus-owner", async (fixture) => {
       const { page, integration } = fixture;
