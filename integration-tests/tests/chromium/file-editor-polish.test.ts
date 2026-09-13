@@ -149,6 +149,7 @@ describe('File editor controls', () => {
       const { page, integration } = fixture;
       // Precaching must not bypass the deliberate page-level chunk failure.
       const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Network.enable');
       await cdp.send('Network.setBypassServiceWorker', { bypass: true });
       const filename = 'vim-reload.txt';
       const path = join(integration.dirs.project, filename);
@@ -185,6 +186,7 @@ describe('File editor controls', () => {
       const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
       const source = surface.locator('.cm-content');
       await source.waitFor({ state: 'visible' });
+      await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
       await source.click();
       await source.press('Control+Home');
       await page.keyboard.insertText('unsaved ');
