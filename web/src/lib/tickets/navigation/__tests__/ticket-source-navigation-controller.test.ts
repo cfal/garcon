@@ -1,5 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import {
+	TranscriptNavigationController,
+	type TranscriptNavigationDeps,
+} from '$lib/chat/actions/transcript-navigation-controller.js';
+import {
 	TicketSourceNavigationController,
 	type TicketSourceNavigationDeps,
 } from '../ticket-source-navigation-controller.js';
@@ -33,7 +37,7 @@ function fixture() {
 		chatId: source.chatId,
 		navigateToTranscriptRow: vi.fn<
 			NonNullable<
-				ReturnType<TicketSourceNavigationDeps['panels']['panel']>
+				ReturnType<TranscriptNavigationDeps['panels']['panel']>
 			>['navigateToTranscriptRow']
 		>(async () => 'completed'),
 	};
@@ -67,23 +71,25 @@ function fixture() {
 			kind: 'found',
 			target,
 		})),
-	} satisfies TicketSourceNavigationDeps;
-	const navigator = new TicketSourceNavigationController(deps);
+	} satisfies TranscriptNavigationDeps &
+		Pick<TicketSourceNavigationDeps, 'notifications' | 'resolve'>;
+	const navigation = new TranscriptNavigationController(deps);
+	const navigator = new TicketSourceNavigationController({ ...deps, navigation });
 	return {
 		deps,
 		panel,
-		navigator,
+		navigator: navigation,
 		open: () => navigator.open(source, 'window-one', () => partition),
 		setAuthority: (value: string | null) => {
 			authority = value;
-			navigator.reconcile();
+			navigation.reconcile();
 		},
 		setPartition: (value: typeof partition) => {
 			partition = value;
 		},
 		remove: () => {
 			exists = false;
-			navigator.reconcile();
+			navigation.reconcile();
 		},
 	};
 }
