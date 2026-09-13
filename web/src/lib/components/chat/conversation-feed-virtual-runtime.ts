@@ -396,7 +396,7 @@ export async function settleConversationTarget(input: {
 	isReady(): boolean;
 	scrollBy(delta: number): void;
 	onSettledNode(node: HTMLElement): void;
-}): Promise<'completed' | 'cancelled' | 'not-ready'> {
+}): Promise<'completed' | 'cancelled' | 'not-ready' | 'target-missing'> {
 	let previousRect: { top: number; height: number } | null = null;
 	let stableFrames = 0;
 	for (let attempt = 0; attempt < MAX_TARGET_SETTLE_ITERATIONS; attempt += 1) {
@@ -415,6 +415,7 @@ export async function settleConversationTarget(input: {
 		if (!viewport) return 'not-ready';
 		const nodeRect = node.getBoundingClientRect();
 		const viewportRect = viewport.getBoundingClientRect();
+		if (nodeRect.height <= 0) return 'target-missing';
 		const alignmentDelta =
 			input.viewportOffset === undefined
 				? conversationTargetAlignmentDelta(viewport, node, input.align)

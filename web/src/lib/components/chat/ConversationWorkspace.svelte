@@ -14,7 +14,6 @@
 	} from './conversation-panel-actions.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ResendCandidate } from '$shared/chat-view';
-	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -432,22 +431,6 @@
 			}
 		},
 	};
-	// Consumes an epoch-validated search navigation exactly once, after the
-	// selected chat's transcript has the target row loaded.
-	$effect(() => {
-		const chatId = chatState.activeChatId;
-		if (!chatId || chatState.loadStatus !== 'loaded') return;
-		if (!searchResultNavigation.peek(chatId)) return;
-		if (chatState.transcriptViewId === '') return;
-		const ordinal = searchResultNavigation.take(chatId);
-		if (ordinal === null || ordinal > chatState.lastOrdinal) return;
-		void currentPanel()?.scroll.jumpToMessageRow({
-			chatId,
-			transcriptViewId: chatState.transcriptViewId,
-			rowId: `${chatState.transcriptViewId}:${ordinal}`,
-		});
-	});
-
 	const userMessageNavigator = new UserMessageNavigatorController({
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,

@@ -2437,5 +2437,9 @@
 	"tickets_source_reloaded": "Transcript was reloaded; exact row unavailable.",
 	"tickets_source_missing": "Exact source row unavailable.",
 	"tickets_source_chat_missing": "Source chat is no longer available.",
-	"tickets_source_failed": "Could not open ticket source. Try again."
+	"tickets_source_failed": "Could not open ticket source. Try again.",
+	"sidebar_search_target_reloaded": "Transcript was reloaded; search results refreshed.",
+	"sidebar_search_target_unavailable": "Matching row is hidden or no longer available.",
+	"sidebar_search_target_chat_missing": "Search result chat is no longer available.",
+	"sidebar_search_target_failed": "Could not open search result. Try again."
 }

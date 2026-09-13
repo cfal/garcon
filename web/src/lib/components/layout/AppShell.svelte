@@ -57,6 +57,10 @@
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import SidebarSearchDialogs from '$lib/components/sidebar/SidebarSearchDialogs.svelte';
+	import type {
+		SearchResultNavigationPort,
+		SearchResultSelection,
+	} from '$lib/sidebar/search/search-result-navigation-controller.js';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -157,6 +161,8 @@
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
 	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
+	let searchResultNavigation: SearchResultNavigationPort | null = null;
+	let searchSelectionVersion = 0;
 	const workspaceFullscreen = $derived(
 		!isMobile && workspace.layout.snapshot.fullscreenWindowId !== null,
 	);
@@ -412,7 +418,39 @@
 	});
 
 	function handleChatSelect(chatId: string): void {
+		cancelSearchResultNavigation();
 		void chatNavigation.showChatInCurrentWindow(chatId, { navigate: true });
+	}
+
+	function cancelSearchResultNavigation(): void {
+		searchSelectionVersion++;
+		searchResultNavigation?.cancel();
+	}
+
+	function handleRegisterSearchNavigation(port: SearchResultNavigationPort): () => void {
+		searchResultNavigation = port;
+		return () => {
+			port.cancel();
+			if (searchResultNavigation === port) {
+				searchSelectionVersion++;
+				searchResultNavigation = null;
+			}
+		};
+	}
+
+	async function handleSearchResultSelect(selection: SearchResultSelection): Promise<void> {
+		cancelSearchResultNavigation();
+		const version = searchSelectionVersion;
+		const port = searchResultNavigation;
+		if (isMobile) closeMobileSidebar();
+		// Completes dialog and drawer focus restoration before navigation owns focus.
+		await tick();
+		if (version !== searchSelectionVersion || port !== searchResultNavigation) return;
+		if (!port) {
+			notifications.error(m.sidebar_search_target_failed());
+			return;
+		}
+		await port.open(selection);
 	}
 
 	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
@@ -799,6 +837,7 @@
 				<WorkspaceRoot
 					{isMobile}
 					onRegisterReload={handleRegisterReload}
+					onRegisterSearchNavigation={handleRegisterSearchNavigation}
 					chatActions={workspaceChatActions}
 				/>
 			</div>
@@ -813,10 +852,7 @@
 	</div>
 </div>
 
-<SidebarSearchDialogs
-	chats={sessions.orderedChats}
-	onSelectChat={isMobile ? handleMobileChatSelect : handleChatSelect}
-/>
+<SidebarSearchDialogs chats={sessions.orderedChats} onSelectResult={handleSearchResultSelect} />
 
 <ChatActionDialogs
 	chatDeleteConfirmation={chatActionDialogs.chatDeleteConfirmation}

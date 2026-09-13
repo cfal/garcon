@@ -20,6 +20,7 @@
 		getChatSessions,
 		getAuth,
 		getNotifications,
+		getSidebarSearch,
 		setTicketSourceNavigation,
 		getFileSessions,
 		getGitBranchActions,
@@ -40,6 +41,10 @@
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import { TicketSourceNavigationController } from '$lib/tickets/navigation/ticket-source-navigation-controller.js';
 	import { TranscriptNavigationController } from '$lib/chat/actions/transcript-navigation-controller.js';
+	import {
+		SearchResultNavigationController,
+		type SearchResultNavigationPort,
+	} from '$lib/sidebar/search/search-result-navigation-controller.js';
 	import type {
 		UserMessageNavigatorCommand,
 		UserMessageNavigatorRegistration,
@@ -86,10 +91,12 @@
 	let {
 		isMobile,
 		onRegisterReload,
+		onRegisterSearchNavigation,
 		chatActions,
 	}: {
 		isMobile: boolean;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+		onRegisterSearchNavigation?: (port: SearchResultNavigationPort) => () => void;
 		chatActions: WorkspaceChatActions;
 	} = $props();
 
@@ -136,6 +143,19 @@
 		notifications: getNotifications(),
 	});
 	setTicketSourceNavigation(ticketSourceNavigation);
+	const sidebarSearch = getSidebarSearch();
+	const searchNavigation = new SearchResultNavigationController({
+		navigation: transcriptNavigation,
+		notifications: getNotifications(),
+		discardStaleResult: (target) => sidebarSearch.discardStaleTranscriptResult(target),
+	});
+	$effect(() =>
+		onRegisterSearchNavigation?.({
+			open: (selection) =>
+				searchNavigation.open(selection, isMobile ? 'mobile' : workspace.currentWindowId),
+			cancel: () => transcriptNavigation.invalidate(),
+		}),
+	);
 	$effect(() => {
 		void auth.token;
 		void workspace.focusOwnerRevision;

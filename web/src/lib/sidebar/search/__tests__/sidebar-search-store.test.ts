@@ -2382,98 +2382,64 @@ describe('SidebarSearchStore', () => {
 	});
 });
 
-describe('openTranscriptResult', () => {
-	function resultFor(chatId: string) {
-		return {
-			chatId,
-			transcriptViewId: 'view-1',
-			score: 1,
-			matchedMessageCount: 1,
-			snippets: [
-				{
-					ordinal: 4,
-					role: 'assistant' as const,
-					text: 'needle',
-					highlights: [],
-					timestamp: '2026-01-01T00:00:00.000Z',
-				},
-			],
-		};
-	}
-
-	function navigationStore(overrides: Partial<SidebarSearchStoreDeps> = {}) {
+describe('transcript result targets', () => {
+	function navigationStore() {
 		const store = createSidebarSearchStore({
 			getChats: () => [makeChat({ id: 'chat-1' })],
 			getSelectedChatId: () => null,
 			getTranscriptSearchEnabled: () => true,
 			getSearchResultSort: () => 'relevance',
 			notifyError: vi.fn(),
-			...overrides,
 		});
-		store.transcriptSearchResults = [resultFor('chat-1')];
+		store.transcriptSearchResults = [
+			{
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				score: 1,
+				matchedMessageCount: 1,
+				snippets: [{ ordinal: 4, role: 'assistant', text: 'needle', timestamp: null }],
+			},
+		];
 		return store;
 	}
 
-	it('resolves the view-qualified snippet and opens at its seq', async () => {
-		const navigate = vi.fn(async () => ({ chatId: 'chat-1', ordinal: 4 }));
-		const store = navigationStore({ navigateToSearchResult: navigate });
-		const opened = vi.fn();
+	it('captures the displayed snippet with its immutable view identity', () => {
+		const store = navigationStore();
+		const target = store.transcriptResultTarget('chat-1');
+		expect(target).toEqual({ chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 4 });
+		store.transcriptSearchResults[0]!.transcriptViewId = 'view-2';
+		expect(target?.transcriptViewId).toBe('view-1');
+	});
 
-		await store.openTranscriptResult('chat-1', opened);
+	it('returns no target for a metadata-only match', () => {
+		const store = navigationStore();
+		expect(store.transcriptResultTarget('chat-2')).toBeNull();
+		store.transcriptSearchResults[0]!.snippets = [];
+		expect(store.transcriptResultTarget('chat-1')).toBeNull();
+	});
 
-		expect(navigate).toHaveBeenCalledWith({
+	it('discards a stale view and refreshes the current query', () => {
+		const store = navigationStore();
+		const refresh = vi.spyOn(store, 'refreshTranscriptSearch').mockResolvedValue();
+		store.transcriptSearchQuery = 'needle';
+		store.discardStaleTranscriptResult({
 			chatId: 'chat-1',
 			transcriptViewId: 'view-1',
 			ordinal: 4,
 		});
-		expect(opened).toHaveBeenCalledWith('chat-1', 4);
-	});
-
-	it('removes a stale result, requeries, and opens without a seq', async () => {
-		const navigate = vi.fn(async () => {
-			throw new ApiError(409, 'stale', 'SEARCH_RESULT_STALE');
-		});
-		const search = vi.fn(async () => ({
-			query: 'needle',
-			mode: 'page' as const,
-			snippetLimit: 1,
-			results: [],
-			page: makeSearchPage(0),
-			index: {
-				indexedChatCount: 1,
-				pendingChatCount: 0,
-				failedChatCount: 0,
-				unindexedChatCount: 0,
-				unsupportedChatCount: 0,
-				resultsTruncated: false,
-				failedChats: [],
-				failedChatsOmittedCount: 0,
-			},
-			removedStaleResultCount: 0,
-		}));
-		const store = navigationStore({
-			navigateToSearchResult: navigate,
-			searchChatTranscripts: search,
-		});
-		store.transcriptSearchQuery = 'needle';
-		const opened = vi.fn();
-
-		await store.openTranscriptResult('chat-1', opened);
-
 		expect(store.transcriptSearchResults).toEqual([]);
-		expect(opened).toHaveBeenCalledWith('chat-1', null);
-		expect(search).toHaveBeenCalled();
+		expect(refresh).toHaveBeenCalledWith('needle');
 	});
 
-	it('opens a chat without a transcript snippet directly', async () => {
-		const navigate = vi.fn();
-		const store = navigationStore({ navigateToSearchResult: navigate });
-		store.transcriptSearchResults = [];
-		const opened = vi.fn();
-
-		await store.openTranscriptResult('chat-1', opened);
-
-		expect(navigate).not.toHaveBeenCalled();
-		expect(opened).toHaveBeenCalledWith('chat-1', null);
+	it('does not discard a replacement result because an older view failed', () => {
+		const store = navigationStore();
+		const refresh = vi.spyOn(store, 'refreshTranscriptSearch').mockResolvedValue();
+		store.discardStaleTranscriptResult({
+			chatId: 'chat-1',
+			transcriptViewId: 'old-view',
+			ordinal: 4,
+		});
+		expect(store.transcriptSearchResults).toHaveLength(1);
+		expect(refresh).not.toHaveBeenCalled();
 	});
 });

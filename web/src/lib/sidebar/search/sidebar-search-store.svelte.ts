@@ -9,10 +9,7 @@ import {
 	updateSavedSearch as updateSavedSearchApi,
 	type SavedChatSearch,
 } from '$lib/api/settings';
-import {
-	navigateToSearchResult as navigateToSearchResultApi,
-	searchChatTranscripts as searchChatTranscriptsApi,
-} from '$lib/api/chats';
+import { searchChatTranscripts as searchChatTranscriptsApi } from '$lib/api/chats';
 import { ApiError } from '$lib/api/client';
 import {
 	isEmptyFilter,
@@ -21,6 +18,7 @@ import {
 	type ChatFilterSpec,
 } from '$shared/chat-filter-query';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { TranscriptRowTarget } from '$lib/chat/transcript/transcript-row-navigation.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -85,7 +83,6 @@ export interface SidebarSearchStoreDeps {
 		request: ChatSearchRequest,
 		options?: { signal?: AbortSignal },
 	) => Promise<ChatSearchResponse>;
-	navigateToSearchResult?: typeof navigateToSearchResultApi;
 	waitForTranscriptIndexRetry?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }
 
@@ -252,35 +249,19 @@ export class SidebarSearchStore {
 		);
 	}
 
-	// Revalidates the transcript view before scrolling to a durable row.
-	async openTranscriptResult(
-		chatId: string,
-		onOpen: (chatId: string, seq: number | null) => void,
-	): Promise<void> {
+	transcriptResultTarget(chatId: string): TranscriptRowTarget | null {
 		const result = this.transcriptSearchResultsByChatId.get(chatId);
 		const snippet = result?.snippets[0];
-		if (!result || !snippet) {
-			onOpen(chatId, null);
-			return;
-		}
-		try {
-			const resolved = await (this.deps.navigateToSearchResult ?? navigateToSearchResultApi)({
-				chatId,
-				transcriptViewId: result.transcriptViewId,
-				ordinal: snippet.ordinal,
-			});
-			onOpen(chatId, resolved.ordinal);
-		} catch (error) {
-			if (error instanceof ApiError && error.errorCode === 'SEARCH_RESULT_STALE') {
-				this.transcriptSearchResults = this.transcriptSearchResults.filter(
-					(entry) => entry.chatId !== chatId,
-				);
-				void this.refreshTranscriptSearch(this.transcriptSearchQuery);
-			} else {
-				this.deps.logError?.('Search result navigation failed', error);
-			}
-			onOpen(chatId, null);
-		}
+		return result && snippet
+			? { chatId, transcriptViewId: result.transcriptViewId, ordinal: snippet.ordinal }
+			: null;
+	}
+
+	discardStaleTranscriptResult(target: TranscriptRowTarget): void {
+		const result = this.transcriptSearchResultsByChatId.get(target.chatId);
+		if (result?.transcriptViewId !== target.transcriptViewId) return;
+		this.transcriptSearchResults = this.transcriptSearchResults.filter((entry) => entry !== result);
+		void this.refreshTranscriptSearch(this.transcriptSearchQuery);
 	}
 
 	get isFiltered(): boolean {

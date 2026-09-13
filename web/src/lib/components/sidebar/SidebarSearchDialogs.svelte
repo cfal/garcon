@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
+	import type { SearchResultSelection } from '$lib/sidebar/search/search-result-navigation-controller.js';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
@@ -24,10 +24,10 @@
 
 	interface SidebarSearchDialogsProps {
 		chats: ChatSessionRecord[];
-		onSelectChat: (chatId: string) => void;
+		onSelectResult: (selection: SearchResultSelection) => void;
 	}
 
-	let { chats, onSelectChat }: SidebarSearchDialogsProps = $props();
+	let { chats, onSelectResult }: SidebarSearchDialogsProps = $props();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const minuteClock = getMinuteClock();
@@ -86,11 +86,9 @@
 	});
 
 	function handleSearchSelectChat(chatId: string): void {
+		const target = sidebarSearch.transcriptResultTarget(chatId);
 		sidebarSearch.confirmSearchDialog();
-		void sidebarSearch.openTranscriptResult(chatId, (id, seq) => {
-			if (seq !== null) searchResultNavigation.set(id, seq);
-			onSelectChat(id);
-		});
+		onSelectResult({ chatId, target });
 	}
 
 	function handleApplySavedSearch(search: SavedChatSearch): void {

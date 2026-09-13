@@ -292,4 +292,7 @@
 	newWindowEdges={workspaceSplitAdmissions()}
 />
 
-<SidebarSearchDialogs chats={displayedChats} onSelectChat={onChatSelect} />
+<SidebarSearchDialogs
+	chats={displayedChats}
+	onSelectResult={({ chatId }) => onChatSelect(chatId)}
+/>

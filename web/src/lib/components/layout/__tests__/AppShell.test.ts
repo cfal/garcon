@@ -13,6 +13,7 @@ import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-g
 import { page } from '$lib/mocks/app/state';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
+import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -85,7 +86,7 @@ vi.mock('$lib/components/sidebar/SidebarTagDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/sidebar/SidebarSearchDialogs.svelte', async () => ({
-	default: (await import('./AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellSearchDialogsStub.svelte')).default,
 }));
 
 const AppShell = (await import('../AppShell.svelte')).default;
@@ -249,6 +250,44 @@ describe('AppShell responsive workspace binding', () => {
 		chatNavigation.gotoChat.mockReset();
 		chatNavigation.gotoChat.mockResolvedValue(undefined);
 		chatDraftContext.set.mockReset();
+		searchNavigationPort.open.mockClear();
+		searchNavigationPort.cancel.mockClear();
+	});
+
+	it('waits for the dialog close update and only opens the newest selection', async () => {
+		installContext();
+		render(AppShell);
+		await waitFor(() => expect(screen.getByTestId('workspace-root-stub')).toBeTruthy());
+		screen.getByRole('button', { name: 'First search result' }).click();
+		screen.getByRole('button', { name: 'Second search result' }).click();
+		expect(searchNavigationPort.open).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(searchNavigationPort.open).toHaveBeenCalledExactlyOnceWith({
+				chatId: 'second',
+				target: null,
+			}),
+		);
+	});
+
+	it('a regular chat selection supersedes the pending search close handoff', async () => {
+		installContext();
+		render(AppShell);
+		await waitFor(() => expect(screen.getByTestId('workspace-root-stub')).toBeTruthy());
+		screen.getByRole('button', { name: 'First search result' }).click();
+		screen.getByRole('button', { name: 'Select test chat' }).click();
+		await waitFor(() => expect(chatNavigation.gotoChat).toHaveBeenCalledWith('chat-test'));
+		expect(searchNavigationPort.open).not.toHaveBeenCalled();
+	});
+
+	it('unregistration cancels search before the close handoff finishes', async () => {
+		installContext();
+		const view = render(AppShell);
+		await waitFor(() => expect(screen.getByTestId('workspace-root-stub')).toBeTruthy());
+		screen.getByRole('button', { name: 'First search result' }).click();
+		view.unmount();
+		await Promise.resolve();
+		expect(searchNavigationPort.open).not.toHaveBeenCalled();
+		expect(searchNavigationPort.cancel).toHaveBeenCalled();
 	});
 
 	it('opens a ticket deep link after surface admission without selecting a chat', async () => {

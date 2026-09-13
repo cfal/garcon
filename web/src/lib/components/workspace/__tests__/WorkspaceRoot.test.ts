@@ -38,6 +38,7 @@ const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
 
 vi.mock('$lib/context', () => ({
 	getAuth: () => ({ token: null }),
+	getSidebarSearch: () => ({ discardStaleTranscriptResult: vi.fn() }),
 	setTicketSourceNavigation: () => {},
 	getAppShell: () => testContext.current?.appShell,
 	getChatSessions: () => testContext.current?.sessions,

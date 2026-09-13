@@ -204,7 +204,7 @@
 <button type="button" onclick={() => (sidebarOpen = true)}>Open sidebar</button>
 <button type="button" onclick={() => (sidebarOpen = false)}>Close sidebar</button>
 
-<SidebarSearchDialogs {chats} onSelectChat={() => {}} />
+<SidebarSearchDialogs {chats} onSelectResult={() => {}} />
 
 {#if sidebarOpen}
 	<Sidebar
