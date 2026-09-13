@@ -97,15 +97,21 @@ describe('CurrentChatMenu', () => {
 		expect(openNavigator).toHaveBeenCalledOnce();
 	});
 
-	it('renders mobile Git view commands before chat actions and invokes each callback', async () => {
+	it('renders mobile workspace commands before chat actions and invokes each callback', async () => {
 		const openHistory = vi.fn();
 		const openCompare = vi.fn();
 		const openTickets = vi.fn();
+		const openChatMap = vi.fn();
+		const openCanvas = vi.fn();
+		const openPullRequests = vi.fn();
 		render(CurrentChatMenu, {
 			...props(),
 			onOpenGitHistory: openHistory,
 			onOpenGitCompare: openCompare,
 			onOpenTickets: openTickets,
+			onOpenChatMap: openChatMap,
+			onOpenCanvas: openCanvas,
+			onOpenPullRequests: openPullRequests,
 		});
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 		const history = screen.getByRole('menuitem', {
@@ -121,6 +127,15 @@ describe('CurrentChatMenu', () => {
 		expect(items.indexOf(compare)).toBeLessThan(items.indexOf(share));
 		const tickets = screen.getByRole('menuitem', { name: m.workspace_open_tickets() });
 		expect(items.indexOf(tickets)).toBe(items.indexOf(compare) + 1);
+		for (const label of [
+			m.workspace_open_chat_map(),
+			m.workspace_open_chat_canvas(),
+			m.workspace_open_pull_requests(),
+		]) {
+			expect(items.indexOf(screen.getByRole('menuitem', { name: label }))).toBeLessThan(
+				items.indexOf(share),
+			);
+		}
 		expect(screen.queryByRole('menuitem', { name: m.workspace_fullscreen() })).toBeNull();
 		await fireEvent.click(history);
 		expect(openHistory).toHaveBeenCalledOnce();
@@ -131,6 +146,15 @@ describe('CurrentChatMenu', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_tickets() }));
 		expect(openTickets).toHaveBeenCalledOnce();
+		for (const [label, callback] of [
+			[m.workspace_open_chat_map(), openChatMap],
+			[m.workspace_open_chat_canvas(), openCanvas],
+			[m.workspace_open_pull_requests(), openPullRequests],
+		] as const) {
+			await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+			await fireEvent.click(screen.getByRole('menuitem', { name: label }));
+			expect(callback).toHaveBeenCalledOnce();
+		}
 	});
 
 	it('omits Git view commands when mobile callbacks are not supplied', async () => {
@@ -140,5 +164,28 @@ describe('CurrentChatMenu', () => {
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_compare() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_tickets() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_pull_requests() })).toBeNull();
 	});
+
+	it.each([
+		{ hasChat: false, hasWorkspaceCommands: false, separators: 0 },
+		{ hasChat: false, hasWorkspaceCommands: true, separators: 0 },
+		{ hasChat: true, hasWorkspaceCommands: false, separators: 1 },
+		{ hasChat: true, hasWorkspaceCommands: true, separators: 2 },
+	])(
+		'renders $separators separators with chat=$hasChat and workspace commands=$hasWorkspaceCommands',
+		async ({ hasChat, hasWorkspaceCommands, separators }) => {
+			render(CurrentChatMenu, {
+				...props(),
+				selectedChat: hasChat ? chat() : null,
+				onOpenChatMap: hasWorkspaceCommands ? vi.fn() : undefined,
+			});
+			await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+			expect(
+				screen.getByRole('menu').querySelectorAll('[data-slot="dropdown-menu-separator"]'),
+			).toHaveLength(separators);
+		},
+	);
 });

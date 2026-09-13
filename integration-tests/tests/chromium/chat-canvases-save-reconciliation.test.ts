@@ -18,7 +18,7 @@ for (const nextAction of ['edit', 'delete', 'edit-before-failure'] as const) {
       await integration.client.post(endpoint, { id: 'board', content: { title: 'Original', nodes: [], connections: [] } });
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, 'Open canvas');
+      await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       await page.getByLabel('Choose canvas').waitFor();
       const clockStart = Date.now();
       await page.clock.install({ time: clockStart });

@@ -24,7 +24,7 @@ test('revalidates connection endpoints and chat destinations after remote edits'
     };
     await integration.client.post(endpoint, { id: 'diagram', content });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, { waitUntil: 'domcontentloaded' });
-    await clickWorkspaceWindowAddAction(page, 'Open canvas');
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     await page.getByRole('button', { name: 'Connect', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel(/^From/).selectOption('source');

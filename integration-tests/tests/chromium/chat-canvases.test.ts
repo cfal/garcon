@@ -79,7 +79,7 @@ describe('Chromium Chat Canvas', () => {
           )
           .waitFor();
         await collapseCanonicalFilesWindow(page);
-        await clickWorkspaceWindowAddAction(page, 'Open canvas');
+        await clickWorkspaceWindowAddAction(page, 'Open Canvas');
         await page.locator(node('card')).waitFor({ state: 'visible' });
         markPhase('keeping graph node names in sync with live chat titles');
         await integration.client.updateSessionName(chatId, 'Accessible chat title');
@@ -254,7 +254,7 @@ describe('Chromium Chat Canvas', () => {
             .filter({ has: page.locator('[data-canvas-panel]:visible') });
           await clickWorkspaceWindowAddAction(
             page,
-            'Open chat map',
+            'Open Chat Map',
             (await canvasWindow.getAttribute('data-workspace-window-id'))!,
           );
           await page.locator('[data-chat-map-panel]').waitFor({ state: 'visible' });
@@ -284,10 +284,7 @@ describe('Chromium Chat Canvas', () => {
 
         markPhase('mobile list and form sizing');
         await page.setViewportSize({ width: 390, height: 844 });
-        await page
-          .getByRole('navigation', { name: 'Workspace navigation' })
-          .getByRole('button', { name: 'Canvas', exact: true })
-          .click();
+        await page.locator('[data-canvas-panel]').waitFor({ state: 'visible' });
         await page.getByRole('button', { name: 'List', exact: true }).click();
         await page.locator('[data-canvas-list]').waitFor({ state: 'visible' });
         const geometry = await page
