@@ -11,6 +11,7 @@ const PROTOCOL_PROBE_TIMEOUT_MS = 90_000;
 export interface LiveClaudeProtocolProbe {
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
   readInterruptReceipts(): Promise<LiveClaudeInterruptReceipt[]>;
+  readContextObservations(): Promise<LiveClaudeContextObservation[]>;
   waitForInputStarted(count?: number): Promise<string>;
   waitForInterruptReceipt(count?: number): Promise<LiveClaudeInterruptReceipt>;
   waitForTerminal(
@@ -19,6 +20,16 @@ export interface LiveClaudeProtocolProbe {
     reason: 'aborted_streaming' | 'aborted_tools';
     userMessageUuid: string | null;
   }>;
+}
+
+export type LiveClaudeContextObservation =
+  | { type: 'context-window'; processId: number; model: string; source: string; window: number }
+  | { type: 'flag-environment'; processId: number; keys: string[] }
+  | { type: 'compact-boundary'; processId: number };
+
+interface LiveClaudeProtocolProbeOptions {
+  readonly flagEnvironment?: Record<string, string>;
+  readonly invalidateContextUsage?: boolean;
 }
 
 export interface LiveClaudeInterruptReceipt {
@@ -70,12 +81,14 @@ async function waitForProbeEntry<T extends LiveClaudeProbeEntry>(
 
 export function createLiveClaudeProtocolProbe(
   serverEnvironment: Record<string, string>,
+  options: LiveClaudeProtocolProbeOptions = {},
 ): LiveClaudeProtocolProbe {
   const realBinary = serverEnvironment.CLAUDE_BINARY;
   if (!realBinary) throw new Error('Live Claude protocol probe requires the Claude binary.');
   let startedPath = '';
   let terminalReasonPath = '';
   let interruptReceiptPath = '';
+  let contextPath = '';
 
   return {
     async prepareWorkspace(directories) {
@@ -83,6 +96,7 @@ export function createLiveClaudeProtocolProbe(
       startedPath = join(directories.root, 'claude-started-inputs');
       terminalReasonPath = join(directories.root, 'claude-terminal-results');
       interruptReceiptPath = join(directories.root, 'claude-interrupt-receipts');
+      contextPath = join(directories.root, 'claude-context-observations');
       await writeFile(wrapperPath, `#!/usr/bin/env bash
 exec "$GARCON_LIVE_CLAUDE_BUN_BINARY" "$GARCON_LIVE_CLAUDE_FORWARDER" "$@"
 `, { mode: 0o700 });
@@ -92,7 +106,21 @@ exec "$GARCON_LIVE_CLAUDE_BUN_BINARY" "$GARCON_LIVE_CLAUDE_FORWARDER" "$@"
       serverEnvironment.GARCON_LIVE_CLAUDE_STARTED_PATH = startedPath;
       serverEnvironment.GARCON_LIVE_CLAUDE_TERMINAL_REASON_PATH = terminalReasonPath;
       serverEnvironment.GARCON_LIVE_CLAUDE_INTERRUPT_RECEIPT_PATH = interruptReceiptPath;
+      serverEnvironment.GARCON_LIVE_CLAUDE_CONTEXT_PATH = contextPath;
+      if (options.flagEnvironment) {
+        serverEnvironment.GARCON_LIVE_CLAUDE_FLAG_ENV = JSON.stringify(options.flagEnvironment);
+      }
+      if (options.invalidateContextUsage) serverEnvironment.GARCON_LIVE_CLAUDE_INVALID_CONTEXT = '1';
       serverEnvironment.CLAUDE_BINARY = wrapperPath;
+    },
+    async readContextObservations() {
+      try {
+        return (await readFile(contextPath, 'utf8')).split('\n').filter(Boolean)
+          .map(line => JSON.parse(line) as LiveClaudeContextObservation);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
     },
     async readInterruptReceipts() {
       return (await readProbeEntries(interruptReceiptPath))

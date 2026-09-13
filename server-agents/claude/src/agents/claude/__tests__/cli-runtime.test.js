@@ -91,17 +91,22 @@ function createFakeClaudeProcess(options = {}) {
         const message = JSON.parse(line);
         if (
           message.type !== 'control_request'
-          || !['initialize', 'set_model'].includes(message.request?.subtype)
           || options.autoControls === false
         ) return;
+        let response;
+        if (options.respondToControl) {
+          response = options.respondToControl(message.request);
+        } else if (['initialize', 'set_model'].includes(message.request?.subtype)) {
+          response = { subtype: 'success', response: { commands: [] } };
+        }
+        if (!response) return;
         queueMicrotask(() => {
           if (stdoutClosed) return;
           stdoutController.enqueue(new TextEncoder().encode(JSON.stringify({
             type: 'control_response',
             response: {
-              subtype: 'success',
               request_id: message.request_id,
-              response: { commands: [] },
+              ...response,
             },
           }) + '\n'));
         });
@@ -2008,10 +2013,9 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
   it.each([
     ['custom', 'custom[922k]', 'custom[1m]', '922k'],
-    ['custom[922k]', 'custom[850k]', 'custom[1m]', '850k'],
     ['custom[922k]', 'custom', 'custom', null],
     ['custom[922k]', 'custom[1m]', 'custom[1m]', null],
-  ])('resumes the same session when its context cap changes: %s -> %s', async (from, to, wireModel, cap) => {
+  ])('resumes the same session when adding or removing a context cap: %s -> %s', async (from, to, wireModel, cap) => {
     const originalSpawn = Bun.spawn;
     const first = createFakeClaudeProcess();
     const second = createFakeClaudeProcess();
@@ -2043,6 +2047,271 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     } finally {
       await runtime.shutdown();
       Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('verifies numeric cap changes before sending a prompt and remembers the updated selection', async () => {
+    const originalSpawn = Bun.spawn;
+    let model = 'first[1m]';
+    let cap = '922000';
+    const fake = createFakeClaudeProcess({
+      respondToControl(request) {
+        let response = {};
+        if (request.subtype === 'get_settings') {
+          response = { sources: [{ source: 'flagSettings', settings: { env: { KEEP: 'value' } } }] };
+        } else if (request.subtype === 'apply_flag_settings') {
+          expect(request.settings.env.KEEP).toBe('value');
+          cap = request.settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+        } else if (request.subtype === 'set_model') {
+          model = request.model;
+        } else if (request.subtype === 'get_context_usage') {
+          expect(writtenUserMessages(fake)).toHaveLength(cap === '850000' ? 1 : 2);
+          response = { model, rawMaxTokens: Number(cap), autocompactSource: 'env' };
+        }
+        return { subtype: 'success', response };
+      },
+    });
+    const runtime = createRuntime();
+    Bun.spawn = mock(() => fake.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(fake);
+      await start;
+      for (const next of ['second[850k]', 'second[950k]']) {
+        const resumed = runtime.runClaudeTurn(startOptions({ model: next }));
+        await enqueueResult(fake);
+        await resumed;
+      }
+      const controlsBeforeContinuation = fake.proc.stdin.write.mock.calls
+        .filter(([line]) => JSON.parse(line).type === 'control_request').length;
+      const continued = runtime.runClaudeTurn({
+        agentSessionId: 'expected-session', chatId: 'chat-1', command: 'continue',
+        operation: collectOperation('run-cap-continue').operation,
+      });
+      await enqueueResult(fake);
+      await continued;
+      expect(fake.proc.stdin.write.mock.calls.filter(([line]) => JSON.parse(line).type === 'control_request'))
+        .toHaveLength(controlsBeforeContinuation);
+      expect(fake.proc.stdin.write.mock.calls.map(([line]) => JSON.parse(line).request)
+        .filter(request => request?.subtype === 'set_model'))
+        .toEqual([{ subtype: 'set_model', model: 'second[1m]' }]);
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+      expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it.each(['get_settings', 'apply_flag_settings', 'set_model', 'get_context_usage', 'verification'])
+  ('retires and resumes before delivering the prompt after a failed context update: %s', async failure => {
+    const originalSpawn = Bun.spawn;
+    const first = createFakeClaudeProcess({
+      respondToControl(request) {
+        if (request.subtype === failure) return { subtype: 'error', error: 'synthetic-private-credential' };
+        return { subtype: 'success', response: { sources: [] } };
+      },
+    });
+    const second = createFakeClaudeProcess();
+    const logger = createLogger();
+    const runtime = createRuntime(logger);
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(first);
+      await start;
+      const resumed = runtime.runClaudeTurn(startOptions({ model: 'second[850k]', command: 'next prompt' }));
+      await enqueueResult(second);
+      await resumed;
+      expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(writtenUserMessages(first)).toHaveLength(1);
+      const requests = second.proc.stdin.write.mock.calls.map(([line]) => JSON.parse(line));
+      expect(requests.filter(request => request.type === 'user')).toHaveLength(1);
+      expect(requests.some(request => request.request?.subtype === 'apply_flag_settings')).toBe(false);
+      const args = Bun.spawn.mock.calls[1][0];
+      expect(args).toContain('--resume=expected-session');
+      expect(args[args.indexOf('--model') + 1]).toBe('second[1m]');
+      expect(args[args.indexOf('--autocompact') + 1]).toBe('850k');
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('synthetic-private-credential');
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('rejects concurrent cap changes without retiring the winning resume process', async () => {
+    const originalSpawn = Bun.spawn;
+    let settingsRequests = 0;
+    const first = createFakeClaudeProcess({
+      respondToControl(request) {
+        let response = {};
+        if (request.subtype === 'get_settings') {
+          settingsRequests += 1;
+          // A competing control is held until the first resume has sent its prompt.
+          if (settingsRequests === 2) return;
+          response = { sources: [] };
+        } else if (request.subtype === 'get_context_usage') {
+          response = { model: 'second[1m]', rawMaxTokens: 850_000, autocompactSource: 'env' };
+        }
+        return { subtype: 'success', response };
+      },
+    });
+    const second = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    const pending = [];
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(first);
+      await start;
+      const initialInput = writtenUserMessage(first);
+      const winning = runtime.runClaudeTurn(startOptions({ model: 'second[850k]', command: 'winning prompt' }));
+      const competing = runtime.runClaudeTurn(startOptions({ model: 'second[850k]', command: 'competing prompt' }));
+      const competingError = competing.then(() => null, error => error);
+      pending.push(winning, competingError);
+      await waitForWrittenUserMessage(first, initialInput.uuid);
+      const held = first.proc.stdin.write.mock.calls.map(([line]) => JSON.parse(line))
+        .filter(message => message.request?.subtype === 'get_settings')[1];
+      if (held) {
+        enqueueCliMessage(first, {
+          type: 'control_response',
+          response: { request_id: held.request_id, subtype: 'success', response: { sources: [] } },
+        });
+      }
+      expect(await competingError).toBeInstanceOf(Error);
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+      expect(settingsRequests).toBe(1);
+      expect(first.proc.stdin.end).not.toHaveBeenCalled();
+      expect(writtenUserMessages(first)).toHaveLength(2);
+      await enqueueResult(first);
+      await winning;
+
+      const continued = runtime.runClaudeTurn(startOptions({ model: 'second[850k]' }));
+      pending.push(continued);
+      await enqueueResult(first);
+      await continued;
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      await Promise.allSettled(pending);
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it.each(['cancel', 'shutdown', 'exit'])('handles %s during a context update without reusing the process', async action => {
+    const originalSpawn = Bun.spawn;
+    const pending = deferred();
+    const first = createFakeClaudeProcess({
+      respondToControl(request) {
+        if (request.subtype === 'get_settings') return { subtype: 'success', response: { sources: [] } };
+        if (request.subtype === 'apply_flag_settings') {
+          pending.resolve();
+          return;
+        }
+        return { subtype: 'success', response: {} };
+      },
+    });
+    const second = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    const admission = new AbortController();
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(first);
+      await start;
+      const resumed = runtime.runClaudeTurn(startOptions({
+        model: 'second[850k]',
+        executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+      }));
+      const settled = resumed.then(() => null, error => error);
+      await pending.promise;
+      if (action === 'exit') {
+        first.exit(1);
+        await enqueueResult(second);
+        expect(await settled).toBeNull();
+        expect(Bun.spawn).toHaveBeenCalledTimes(2);
+      } else {
+        if (action === 'shutdown') await runtime.shutdown();
+        else admission.abort(new Error('synthetic cancellation'));
+        expect(await settled).toBeInstanceOf(Error);
+        expect(Bun.spawn).toHaveBeenCalledTimes(1);
+      }
+      expect(writtenUserMessages(first)).toHaveLength(1);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('does not let a failed context update revive a session superseded by another start', async () => {
+    const originalSpawn = Bun.spawn;
+    const pending = deferred();
+    const first = createFakeClaudeProcess({
+      respondToControl(request) {
+        if (request.subtype === 'get_settings') {
+          pending.resolve();
+          return;
+        }
+        return { subtype: 'success', response: {} };
+      },
+    });
+    const second = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(first);
+      await start;
+      const resumed = runtime.runClaudeTurn(startOptions({ model: 'second[850k]' }));
+      const settled = resumed.then(() => null, error => error);
+      await pending.promise;
+      const replacement = runtime.startClaudeCliSession(startOptions({ model: 'replacement[922k]' }));
+      await enqueueResult(second);
+      await replacement;
+      expect(await settled).toBeInstanceOf(Error);
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+      const args = Bun.spawn.mock.calls[1][0];
+      expect(args[args.indexOf('--model') + 1]).toBe('replacement[1m]');
+      expect(writtenUserMessages(first)).toHaveLength(1);
+      expect(writtenUserMessages(second)).toHaveLength(1);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('falls back after a context control timeout without submitting to the stalled process', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetTimeout = globalThis.setTimeout;
+    const timedOut = deferred();
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (delay !== 10_000) return originalSetTimeout(callback, delay, ...args);
+      return originalSetTimeout(() => {
+        callback(...args);
+        timedOut.resolve();
+      }, 1);
+    };
+    const first = createFakeClaudeProcess();
+    const second = createFakeClaudeProcess();
+    const runtime = createRuntime();
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(second.proc);
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'first[922k]' }));
+      await enqueueResult(first);
+      await start;
+      const resumed = runtime.runClaudeTurn(startOptions({ model: 'second[850k]' }));
+      await timedOut.promise;
+      await enqueueResult(second);
+      await resumed;
+      expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(writtenUserMessages(first)).toHaveLength(1);
+      expect(writtenUserMessages(second)).toHaveLength(1);
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+      globalThis.setTimeout = originalSetTimeout;
     }
   });
 

@@ -684,6 +684,34 @@ describe('integration support contracts', () => {
     }
   });
 
+  test('answers Claude context-usage probes without consuming scripted turns', async () => {
+    const fake = FakeClaudeModel.start();
+    try {
+      fake.scriptTurn([]);
+      const body = { model: 'scripted', messages: [{ role: 'user', content: 'synthetic probe' }] };
+      const count = await fetch(`${fake.baseUrl}/v1/messages/count_tokens`, {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      expect(await count.json()).toEqual({ input_tokens: 100 });
+      const completion = await fetch(`${fake.baseUrl}/v1/messages`, {
+        method: 'POST', body: JSON.stringify({ ...body, max_tokens: 1 }),
+      });
+      expect(await completion.json()).toMatchObject({
+        type: 'message', stop_reason: 'max_tokens', usage: { input_tokens: 100, output_tokens: 1 },
+      });
+      expect(fake.requests()).toHaveLength(0);
+      expect(fake.otherRequests()).toEqual(['POST /v1/messages/count_tokens', 'POST /v1/messages (token count)']);
+      const streamed = await fetch(`${fake.baseUrl}/v1/messages`, {
+        method: 'POST', body: JSON.stringify({ ...body, max_tokens: 1, stream: true }),
+      });
+      expect(await streamed.text()).toContain('message_stop');
+      expect(fake.requests()).toHaveLength(1);
+      fake.assertSettled();
+    } finally {
+      fake.stop();
+    }
+  });
+
   test('projects ordered Codex user text and cursor-relative requests', async () => {
     const fake = FakeCodexModel.start();
     try {

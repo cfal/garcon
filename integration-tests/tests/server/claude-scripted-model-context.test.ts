@@ -8,6 +8,7 @@ import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture, type IntegrationDirectories } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
 import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live-claude.js';
+import { createLiveClaudeProtocolProbe } from '../../support/live-claude-protocol-probe.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
@@ -74,14 +75,23 @@ test('Claude validates unstarted chat settings before persistence and can start 
   }
 }, 60_000);
 
-for (const suffix of ['[922k]', '[1m]']) {
-  test(`Claude applies the ${suffix} compaction policy through a real tool turn`, async () => {
+for (const { suffix, nextSuffix, expectsCompaction } of [
+  { suffix: '[922k]', nextSuffix: '[922k]', expectsCompaction: true },
+  { suffix: '[1m]', nextSuffix: '[1m]', expectsCompaction: false },
+  { suffix: '[1000k]', nextSuffix: '[922k]', expectsCompaction: true },
+]) {
+  test(`Claude applies the ${suffix} to ${nextSuffix} compaction policy through a real tool turn`, async () => {
     const environment = await startScriptedClaudeTestEnvironment();
+    const serverEnvironment = {
+      ...environment.serverEnvironment,
+      // The explicit [922k] cap must win; native [1m] preserves this override.
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
+    };
+    const probe = createLiveClaudeProtocolProbe(serverEnvironment);
     const model = `integration-context-model${suffix}`;
     const reply = 'The scripted context turn is complete.';
     const referenceNote = 'Synthetic context entry for the scripted compaction test.';
     const summary = 'The previous turn recorded synthetic reference notes.';
-    const expectsCompaction = suffix === '[922k]';
     try {
       // Reported usage exercises the CLI's budgeting without sending a 900K-token fixture.
       const firstReply = 'The initial reference notes are recorded.';
@@ -116,12 +126,18 @@ for (const suffix of ['[922k]', '[1m]']) {
         });
         const accumulatedCursor = fixture.client.markEvents();
         const accumulated = await fixture.client.runChat({
-          ...liveClaudeRunRequest({ chatId, command: 'Acknowledge the recorded reference notes.' }),
+          ...liveClaudeRunRequest({
+            chatId, command: 'Acknowledge the recorded reference notes.', permissionMode: 'bypassPermissions',
+          }),
           model,
         });
         await waitForVisibleResponse({
           fixture, chatId, turnId: accumulated.turnId, marker: historyReply, afterIndex: accumulatedCursor,
         });
+        const nextModel = `integration-context-model${nextSuffix}`;
+        if (nextModel !== model) {
+          await fixture.client.patch('/api/v1/chats/model', { chatId, model: nextModel });
+        }
         const cursor = fixture.client.markEvents();
         const turn = await fixture.client.runChat({
           ...liveClaudeRunRequest({
@@ -129,7 +145,7 @@ for (const suffix of ['[922k]', '[1m]']) {
             command: 'Run the scripted command, then report completion.',
             permissionMode: 'bypassPermissions',
           }),
-          model,
+          model: nextModel,
         });
         await waitForVisibleResponse({
           fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor,
@@ -145,13 +161,14 @@ for (const suffix of ['[922k]', '[1m]']) {
         }
         expect(requests.every(request =>
           request.body.model === 'integration-context-model')).toBe(true);
+        expect(fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(1);
+        const boundaries = (await probe.readContextObservations()).filter(entry => entry.type === 'compact-boundary');
+        expect(boundaries).toHaveLength(expectsCompaction ? 1 : 0);
+        expect(await Bun.file(join(fixture.dirs.home, '.claude', 'settings.json')).exists()).toBe(false);
         environment.model.assertSettled();
       }, {
-        serverEnvironment: {
-          ...environment.serverEnvironment,
-          // The explicit [922k] cap must win; native [1m] preserves this override.
-          CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
-        },
+        serverEnvironment,
+        prepareWorkspace: probe.prepareWorkspace,
       });
     } finally {
       environment.dispose();
@@ -159,8 +176,11 @@ for (const suffix of ['[922k]', '[1m]']) {
   }, 60_000);
 }
 
-test('Claude preserves the native session and only restarts when the context cap changes', async () => {
+test('Claude updates numeric caps in place through the settings API and restarts for automatic policy', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
+  const probe = createLiveClaudeProtocolProbe(environment.serverEnvironment, {
+    flagEnvironment: { GARCON_SYNTHETIC_CONTEXT_FLAG: 'retained' },
+  });
   try {
     await withIntegrationFixture('claude-model-context-switch', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -168,8 +188,11 @@ test('Claude preserves the native session and only restarts when the context cap
       const selections = [
         { model: 'first[922k]', expectedLaunches: 1 },
         { model: 'second[922k]', expectedLaunches: 1 },
-        { model: 'second[850k]', expectedLaunches: 2 },
-        { model: 'third[1m]', expectedLaunches: 3 },
+        { model: 'second[850k]', expectedLaunches: 1 },
+        { model: 'third[950k]', expectedLaunches: 1 },
+        { model: 'third[1m]', expectedLaunches: 2 },
+        { model: 'third[900k]', expectedLaunches: 3 },
+        { model: 'third[800k]', expectedLaunches: 3 },
       ];
       for (const [index, { model, expectedLaunches }] of selections.entries()) {
         const reply = `Scripted model switch ${index} complete.`;
@@ -201,12 +224,73 @@ test('Claude preserves the native session and only restarts when the context cap
         expect(launches).toHaveLength(expectedLaunches);
       }
       const transcript = await fixture.client.getMessages(chatId);
-      expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(4);
+      expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(selections.length);
       await expect(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'third[99k]' }))
         .rejects.toThrow(/returned 422:.*context suffix/);
-      expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('third[1m]');
+      expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('third[800k]');
+      expect(fixture.garcon.logs.filter(line => line.includes('Claude context window updated without restarting')))
+        .toHaveLength(3);
+      expect(fixture.garcon.logs.some(line => line.includes('Claude context-window update failed'))).toBe(false);
+      const observations = await probe.readContextObservations();
+      const windows = observations.filter(entry => entry.type === 'context-window');
+      expect(windows.map(entry => ({ model: entry.model, source: entry.source, window: entry.window })))
+        .toEqual([
+          { model: 'second[1m]', source: 'env', window: 850_000 },
+          { model: 'third[1m]', source: 'env', window: 950_000 },
+          { model: 'third[1m]', source: 'env', window: 800_000 },
+        ]);
+      expect(windows[0]?.processId).toBe(windows[1]?.processId);
+      expect(windows[2]?.processId).not.toBe(windows[1]?.processId);
+      const environments = observations.filter(entry => entry.type === 'flag-environment');
+      expect(environments).toHaveLength(3);
+      expect(environments.every(entry => entry.keys.includes('GARCON_SYNTHETIC_CONTEXT_FLAG'))).toBe(true);
+      expect(await Bun.file(join(fixture.dirs.home, '.claude', 'settings.json')).exists()).toBe(false);
       environment.model.assertSettled();
-    }, { serverEnvironment: environment.serverEnvironment });
+    }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: probe.prepareWorkspace });
+  } finally {
+    environment.dispose();
+  }
+}, 60_000);
+
+test('Claude retires a mutated process when runtime cap verification fails and delivers the prompt once', async () => {
+  const environment = await startScriptedClaudeTestEnvironment();
+  const probe = createLiveClaudeProtocolProbe(environment.serverEnvironment, { invalidateContextUsage: true });
+  try {
+    await withIntegrationFixture('claude-model-context-fallback', async fixture => {
+      const chatId = fixture.newChatId();
+      const initialReply = 'The initial fallback fixture is ready.';
+      environment.model.scriptTurn([claudeText(initialReply)]);
+      const initialCursor = fixture.client.markEvents();
+      const initial = await fixture.client.startChat({
+        ...liveClaudeStartRequest({ chatId, projectPath: fixture.dirs.project, command: 'Initialize the fallback fixture.' }),
+        model: 'first[922k]',
+      });
+      await waitForVisibleResponse({ fixture, chatId, turnId: initial.turnId, marker: initialReply, afterIndex: initialCursor });
+      const before = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: 'claude' });
+      const model = 'second[850k]';
+      await fixture.client.patch('/api/v1/chats/model', { chatId, model });
+      const reply = 'The fallback turn completed once.';
+      environment.model.scriptTurn([claudeText(reply)]);
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.runChat({
+        ...liveClaudeRunRequest({ chatId, command: 'Execute the fallback verification turn.' }), model,
+      });
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+      const after = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: 'claude' });
+      expect(after.agentSessionId).toBe(before.agentSessionId);
+      expect(environment.model.requests()).toHaveLength(2);
+      expect(environment.model.requests().at(-1)?.body.model).toBe('second');
+      expect(fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(2);
+      expect(fixture.garcon.logs.filter(line => line.includes('Claude context-window update failed'))).toHaveLength(1);
+      const windows = (await probe.readContextObservations()).filter(entry => entry.type === 'context-window');
+      expect(windows).toHaveLength(1);
+      // The real CLI applied the cap; only its verification response was corrupted by the probe.
+      expect(windows[0]).toMatchObject({ model: 'second[1m]', source: 'env', window: 850_000 });
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(2);
+      expect(await Bun.file(join(fixture.dirs.home, '.claude', 'settings.json')).exists()).toBe(false);
+      environment.model.assertSettled();
+    }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: probe.prepareWorkspace });
   } finally {
     environment.dispose();
   }

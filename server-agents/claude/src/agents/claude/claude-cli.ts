@@ -7,9 +7,8 @@ import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
 import { buildClaudeCLIEnvironment } from './cli-environment.js';
 import { resolveClaudeModel } from './model-context.js';
-import {
-  type AgentRuntimeOperation,
-} from '@garcon/server-agent-common/execution/runtime-events';
+import { configureClaudeSessionModel } from './session-model.js';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
   AgentSteerRequest,
   AgentSteerResult,
@@ -82,6 +81,7 @@ const CONVERSATION_RESET_FAILURE = 'Claude CLI cleared the conversation mid-turn
 
 class ClaudeCliRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
+  #resumeOwners = new WeakMap<ClaudeRunningSession, symbol>();
   #processRetirements = new ClaudeProcessRetirementTracker();
   #pendingPermissions = new Set<PendingPermission>();
   #controlBroker: ClaudeControlBroker;
@@ -929,6 +929,9 @@ class ClaudeCliRuntime {
   ): Promise<ReturnType<typeof Bun.spawn>> {
     await session.retirement;
     await this.#processRetirements.wait(session.id, session.chatId);
+    if (this.#shuttingDown || this.#runningSessions.get(session.id) !== session) {
+      throw new Error('Claude session ended before its process could start');
+    }
     if (session.process || session.transport) {
       throw new Error(`Claude session ${session.id} already has a process`);
     }
@@ -1081,12 +1084,14 @@ class ClaudeCliRuntime {
     const activeTurn = this.#beginTurn(session, operation);
 
     const previous = this.#runningSessions.get(agentSessionId);
-    if (previous) await this.#retireSession(previous);
+    // Fences pending reconfiguration on the old session before its retirement can yield.
     this.#runningSessions.set(agentSessionId, session);
-    request.onSessionActivated?.();
 
     let cliVersion: readonly [number, number, number];
     try {
+      if (previous) await this.#retireSession(previous);
+      if (this.#runningSessions.get(agentSessionId) !== session) return agentSessionId;
+      request.onSessionActivated?.();
       cliVersion = await this.#dependencies.versionProbe.assertCompatible(this.#dependencies.binary());
     } catch (error) {
       if (this.#runningSessions.get(agentSessionId) === session) {
@@ -1200,10 +1205,13 @@ class ClaudeCliRuntime {
       await this.#waitForTurnComplete(session.activeTurn);
       assertClaudeExecutionOpen(requestAdmission);
     }
-    if (session.activeTurn) {
+    if (session.activeTurn || this.#resumeOwners.has(session)) {
       throw new Error(`Claude session ${agentSessionId} already has an active turn`);
     }
 
+    // Claims the idle configuration phase too, so a competing resume cannot retire its winner.
+    const resumeOwner = Symbol();
+    this.#resumeOwners.set(session, resumeOwner);
     let ownedTurn: ClaudeActiveTurn | null = null;
     let cleanupVideoAttachments = async () => {};
     try {
@@ -1211,10 +1219,8 @@ class ClaudeCliRuntime {
 
       const desiredOptions = mergeClaudeSessionOptions(session.options, allOpts);
       const desiredModel = desiredOptions.model || '';
-      const resolvedModel = resolveClaudeModel(desiredModel);
-      const currentModel = resolveClaudeModel(session.currentModel);
+      resolveClaudeModel(desiredModel);
       session.options = desiredOptions;
-      session.chatId = chatId;
       session.lastActivityAt = Date.now();
       const desiredThinkingMode = session.options.thinkingMode || 'none';
       const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(
@@ -1234,32 +1240,25 @@ class ClaudeCliRuntime {
         session.currentEnvOverrides,
         session.options.envOverrides,
       );
-      // set_model cannot change --autocompact; resuming reapplies the cap without losing history.
-      // https://github.com/anthropics/claude-agent-sdk-python/blob/3379406f18fcea64617d25663d811dfdde8cd171/src/claude_agent_sdk/_internal/query.py#L697-L704
-      const contextWindowChanged = currentModel.autoCompactWindow !== resolvedModel.autoCompactWindow;
       if (session.process && (
         desiredThinkingMode !== session.currentThinkingMode
         || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
         || permissionStartupChanged
         || envChanged
-        || contextWindowChanged
       )) {
         await this.#retireSessionProcess(session);
       }
 
-      if (!session.process) {
-        // Always resumes because the native transcript owns conversation context.
-        assertClaudeExecutionOpen(requestAdmission);
-        await this.#spawnCLI(session, session.options, true, cliVersion);
-      }
-
-      if (session.process && desiredModel !== session.currentModel) {
-        await this.#controlBroker.request(session.id, {
-          subtype: 'set_model',
-          model: resolvedModel.model,
-        });
-        session.currentModel = desiredModel;
-      }
+      await configureClaudeSessionModel(session, desiredModel, {
+        executionAdmission,
+        controlBroker: this.#controlBroker,
+        logger: this.#dependencies.logger,
+        isCurrentSession: () => !this.#shuttingDown
+          && this.#runningSessions.get(agentSessionId) === session
+          && this.#resumeOwners.get(session) === resumeOwner,
+        retireProcess: () => this.#retireSessionProcess(session),
+        resumeProcess: () => this.#spawnCLI(session, session.options, true, cliVersion),
+      });
 
       if (
         session.currentPermissionMode
@@ -1285,6 +1284,7 @@ class ClaudeCliRuntime {
       }
       throw error;
     } finally {
+      if (this.#resumeOwners.get(session) === resumeOwner) this.#resumeOwners.delete(session);
       await cleanupVideoAttachments();
     }
   }
