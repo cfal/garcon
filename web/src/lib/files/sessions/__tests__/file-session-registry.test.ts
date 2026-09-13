@@ -2083,7 +2083,7 @@ describe('FileSessionRegistry', () => {
 		});
 		const recovery = harness.registry.initializeRecovery('test-user');
 		await vi.waitFor(() =>
-			expect(harness.registry.get(view.viewId)?.pendingSourcePresentation).not.toBeNull(),
+			expect(harness.registry.get(view.viewId)?.pendingSourcePresentation).toBeTruthy(),
 		);
 		let constructors = 0;
 		runtime.resolve({

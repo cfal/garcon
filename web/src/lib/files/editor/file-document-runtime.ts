@@ -166,7 +166,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 				filter: false,
 				});
 		}
-		return createPositionMap(previous, this.#canonical.doc, changes);
+		return createPositionMap(previous, this.#canonical.doc, changes, 1);
 	}
 
 	#runHistoryCommand(viewId: string, command: StateCommand): boolean {
@@ -267,11 +267,17 @@ function documentChanges(previous: string, next: string): ChangeSet {
 }
 
 function createPositionMap(transaction: Transaction): FileDocumentPositionMap;
-function createPositionMap(previous: Text, next: Text, changes: ChangeSet): FileDocumentPositionMap;
+function createPositionMap(
+	previous: Text,
+	next: Text,
+	changes: ChangeSet,
+	cursorAssociation: -1 | 1,
+): FileDocumentPositionMap;
 function createPositionMap(
 	transactionOrPrevious: Transaction | Text,
 	next?: Text,
 	changes?: ChangeSet,
+	cursorAssociation: -1 | 1 = -1,
 ): FileDocumentPositionMap {
 	const previous = transactionOrPrevious instanceof Transaction
 		? transactionOrPrevious.startState.doc
@@ -288,7 +294,7 @@ function createPositionMap(
 			const range = EditorSelection.range(
 				Math.max(0, Math.min(from, previous.length)),
 				Math.max(0, Math.min(to, previous.length)),
-			).map(changeSet);
+			).map(changeSet, cursorAssociation);
 			return { from: range.from, to: range.to };
 		},
 		nextLocation(position) {
