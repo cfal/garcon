@@ -23,7 +23,8 @@ import {
   ticketCommandRequestNoticeDraft,
 } from './garcon-command-request.js';
 import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail, LedgerTicketCommandOutcomeDetail } from './contracts.js';
-import { ticketCommandOutcome, ticketCommandOutcomeContent, parseGarconTicketResult } from '../../common/garcon-ticket-result.js';
+import { ticketCommandOutcome, parseGarconTicketResult } from '../../common/garcon-ticket-result.js';
+import { ticketCommandNoticeText } from '../../common/ticket-command-notice.js';
 import { agentCommandOutcomeContent, agentCommandOutcomeTitle, parseGarconCommandResult } from '../../common/garcon-command-results.js';
 import type { PreambleHistoryEvidence } from './preamble-history.js';
 
@@ -95,8 +96,8 @@ function importedDraftFor(
     const ticketResult = parseGarconTicketResult(original.content);
     if (ticketResult) {
       const outcome = ticketCommandOutcome(ticketResult);
-      return [{ kind: 'notice', at, message: ticketCommandOutcomeContent(outcome),
-        detail: { ...outcome, title: 'Ticket command', nativeResultInput: true } satisfies LedgerTicketCommandOutcomeDetail,
+      return [{ kind: 'notice', at, message: ticketCommandNoticeText(outcome),
+        detail: { ...outcome, nativeResultInput: true } satisfies LedgerTicketCommandOutcomeDetail,
         providerMeta: null }];
     }
     const result = parseGarconCommandResult(original.content);

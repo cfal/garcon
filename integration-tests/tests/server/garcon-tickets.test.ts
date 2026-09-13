@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { garconTicketResultContent, parseGarconTicketResult, type GarconTicketResult } from '../../../common/garcon-ticket-result.js';
+import { garconTicketResultContent, parseGarconTicketResult, ticketCommandOutcome, type GarconTicketResult } from '../../../common/garcon-ticket-result.js';
+import { ticketCommandNoticeText } from '../../../common/ticket-command-notice.js';
+import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { parseTicketBootstrap, parseTicketCommentsPage, parseTicketDetail, parseTicketHistoryPage,
   parseTicketPage, parseTicketProjectDefault } from '../../../common/ticket-responses.js';
@@ -27,6 +29,13 @@ function ticketCommands(fixture: IntegrationFixture, chatId: string) {
     const cursor = fixture.client.markEvents();
     acknowledgment.releaseText('Synthetic acknowledgment received.');
     expect((await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor })).type).toBe('agent-run-finished');
+    const transcript = await fixture.client.getMessages(chatId);
+    const notice = messagesOfType(transcript.messages, 'transcript-notice').find((message) =>
+      message.detail?.type === 'ticket-command-outcome' && message.detail.requestViewId === result.requestViewId
+      && message.detail.requestOrdinal === result.requestOrdinal);
+    expect(notice?.detail).toEqual(ticketCommandOutcome(result));
+    expect(notice?.content).toBe(ticketCommandNoticeText(ticketCommandOutcome(result)));
+    expect(notice?.title).toBeUndefined();
     return result;
   };
 }
@@ -38,6 +47,33 @@ function mutation(result: GarconTicketResult) {
 }
 
 describe('Garcon ticket commands', () => {
+  test('retains descriptive relationship and filter notices through native reload', async () => {
+    await withIntegrationFixture('garcon-ticket-notices', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const emit = ticketCommands(fixture, chatId);
+      const first = mutation(await emit('<garcon-ticket-create ref="first">{"title":"Synthetic first","project":"Release"}</garcon-ticket-create>'));
+      const second = mutation(await emit('<garcon-ticket-create ref="second">{"title":"Synthetic second","project":"Release"}</garcon-ticket-create>'));
+      const link = await emit(`<garcon-ticket-link ref="link" ticket-id="${first.ticketId}" expected-revision="1">{"targetId":"${second.ticketId}","targetRevision":1,"kind":"blocks"}</garcon-ticket-link>`);
+      expect(ticketCommandNoticeText(ticketCommandOutcome(link))).toBe(`${first.ticketId} updated, added blocking link to ${second.ticketId}`);
+      const receipt = mutation(link);
+      const unlink = await emit(`<garcon-ticket-unlink ref="unlink" ticket-id="${first.ticketId}" expected-revision="${receipt.revision}">{"targetId":"${second.ticketId}","targetRevision":${receipt.relatedTicket!.revision},"kind":"blocks"}</garcon-ticket-unlink>`);
+      expect(ticketCommandNoticeText(ticketCommandOutcome(unlink))).toBe(`${first.ticketId} updated, removed blocking link to ${second.ticketId}`);
+      const filters = { project: 'Synthetic `<group> & [link](https://example.test)', priority: 1, label: 'ui' } as const;
+      const list = await emit(`<garcon-ticket-list>${escapeGarconXmlText(JSON.stringify(filters))}</garcon-ticket-list>`);
+      expect(list.status).toBe('ok');
+      expect(list.context).toEqual({ filters });
+      await emit('<garcon-ticket-list />');
+      const before = messagesOfType((await fixture.client.getMessages(chatId)).messages, 'transcript-notice')
+        .filter((message) => message.detail?.type === 'ticket-command-outcome');
+      await fixture.client.reloadChat(chatId);
+      const after = messagesOfType((await fixture.client.getMessages(chatId)).messages, 'transcript-notice')
+        .filter((message) => message.detail?.type === 'ticket-command-outcome');
+      expect(after.map(({ content, title, detail }) => ({ content, title, detail })))
+        .toEqual(before.map(({ content, title, detail }) => ({ content, title, detail })));
+      expect(after).toHaveLength(6);
+    });
+  }, 60_000);
+
   test('uses the captured chat project when Git metadata is broken, through commands and HTTP defaults', async () => {
     await withIntegrationFixture('garcon-tickets-broken-git', async (fixture) => {
       const project = await realpath(fixture.dirs.project);
