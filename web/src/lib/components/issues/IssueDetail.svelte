@@ -204,13 +204,12 @@
 			<button type="button" class="issue-button" disabled={saving} onclick={edit}
 				>{m.issues_edit()}</button
 			>
-			<button
-				type="button"
-				class="issue-button"
-				disabled={saving}
-				onclick={() => onStatus(issue.status === 'closed' ? 'open' : 'closed')}
-				>{issue.status === 'closed' ? m.issues_reopen() : m.issues_close()}</button
-			>
+			{#if issue.status !== 'closed'}<button
+					type="button"
+					class="issue-button"
+					disabled={saving}
+					onclick={() => onStatus('closed')}>{m.issues_close()}</button
+				>{/if}
 		</div>
 		<dl class="issue-properties-read">
 			<dt>{m.issues_project()}</dt>

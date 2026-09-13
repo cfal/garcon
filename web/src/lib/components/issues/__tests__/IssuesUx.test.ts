@@ -232,13 +232,17 @@ describe('Issues stable, immediate interactions', () => {
 
 	it('normalizes search fields without dropping urgent priority or explicit filter flags', async () => {
 		const { controller } = await mount();
-		controller.setQuery({ project: 'Release', ready: false, includeClosed: true });
+		controller.setQuery({
+			project: 'Release',
+			label: 'frontend',
+			ready: false,
+			includeClosed: true,
+		});
 		await controller.refresh();
 		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 		await fireEvent.input(screen.getByPlaceholderText('Search issues…'), {
 			target: { value: '  Synthetic issue  ' },
 		});
-		await fireEvent.input(screen.getByLabelText('Label'), { target: { value: '  frontend  ' } });
 		await fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in-review' } });
 		await fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '0' } });
 		await fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'user:local' } });
@@ -260,34 +264,75 @@ describe('Issues stable, immediate interactions', () => {
 		expect(controller.query).toEqual({});
 	});
 
-	it('disables the project picker until bootstrap is available', async () => {
-		const { controller, api } = issueTestHarness();
-		controllers.push(controller);
-		render(IssuesTestHost, { controller });
-		const trigger = screen.getByRole('button', { name: 'Project' }) as HTMLButtonElement;
-		expect(trigger.disabled).toBe(true);
-		expect(api.facets).not.toHaveBeenCalled();
-		controller.setPresentationVisible(true);
-		await controller.refresh();
-		await tick();
-		expect(trigger.disabled).toBe(false);
-	});
+	it.each(['Project', 'Label'])(
+		'disables the %s picker until bootstrap is available',
+		async (name) => {
+			const { controller, api } = issueTestHarness();
+			controllers.push(controller);
+			render(IssuesTestHost, { controller });
+			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+			const trigger = screen.getByRole('button', { name }) as HTMLButtonElement;
+			expect(trigger.disabled).toBe(true);
+			expect(api.facets).not.toHaveBeenCalled();
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			await tick();
+			expect(trigger.disabled).toBe(false);
+		},
+	);
 
-	it('explains a project load failure and retries when the picker reopens', async () => {
-		const { api } = await mount();
-		api.facets.mockRejectedValueOnce(new ApiError(503, 'Synthetic unavailable projects'));
-		const trigger = screen.getByRole('button', { name: 'Project' });
+	it.each([
+		{ name: 'Project', all: 'All projects', option: 'Release', noun: 'projects' },
+		{ name: 'Label', all: 'Any label', option: 'bug', noun: 'labels' },
+	])(
+		'explains a $name load failure and retries when the picker reopens',
+		async ({ name, all, option, noun }) => {
+			const { api } = await mount();
+			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+			api.facets.mockRejectedValueOnce(new ApiError(503, 'Synthetic unavailable projects'));
+			const trigger = screen.getByRole('button', { name });
+			await fireEvent.click(trigger);
+			const picker = within(await screen.findByRole('dialog', { name }));
+			expect((await picker.findByRole('alert')).textContent).toBe(
+				`Couldn't load ${noun}. Close and reopen to retry.`,
+			);
+			await fireEvent.click(picker.getByRole('button', { name: all }));
+			await fireEvent.click(trigger);
+			const reopened = within(await screen.findByRole('dialog', { name }));
+			expect(await reopened.findByRole('button', { name: option })).toBeTruthy();
+			expect(reopened.queryByRole('alert')).toBeNull();
+			expect(api.facets).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	it('offers Any label first and keeps other filters when searching and selecting labels', async () => {
+		const { controller, api } = await mount();
+		const filters = { project: 'Release', query: 'Synthetic', includeClosed: true };
+		controller.setQuery(filters);
+		await controller.refresh();
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+		expect(api.facets).not.toHaveBeenCalled();
+		const trigger = screen.getByRole('button', { name: 'Label' });
 		await fireEvent.click(trigger);
-		const picker = within(await screen.findByRole('dialog', { name: 'Project' }));
-		expect((await picker.findByRole('alert')).textContent).toBe(
-			"Couldn't load projects. Close and reopen to retry.",
+		const picker = within(await screen.findByRole('dialog', { name: 'Label' }));
+		expect(picker.getAllByRole('button')[0].textContent).toContain('Any label');
+		await fireEvent.input(picker.getByRole('textbox', { name: 'Search labels…' }), {
+			target: { value: 'front' },
+		});
+		const option = await picker.findByRole('button', { name: 'frontend' });
+		expect(api.facets).toHaveBeenLastCalledWith('label', 'front', expect.any(AbortSignal));
+		expect(controller.query).toEqual(filters);
+		await fireEvent.click(option);
+		expect(controller.query).toEqual({ ...filters, label: 'frontend' });
+		expect(trigger.getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(trigger);
+		await fireEvent.click(
+			within(await screen.findByRole('dialog', { name: 'Label' })).getByRole('button', {
+				name: 'Any label',
+			}),
 		);
-		await fireEvent.click(picker.getByRole('button', { name: 'All projects' }));
-		await fireEvent.click(trigger);
-		const reopened = within(await screen.findByRole('dialog', { name: 'Project' }));
-		expect(await reopened.findByRole('button', { name: 'Release' })).toBeTruthy();
-		expect(reopened.queryByRole('alert')).toBeNull();
-		expect(api.facets).toHaveBeenCalledTimes(2);
+		expect(controller.query).toEqual(filters);
+		expect(trigger.textContent).toContain('Any label');
 	});
 
 	it('offers All projects first and keeps other filters when selecting a project', async () => {
@@ -325,19 +370,19 @@ describe('Issues stable, immediate interactions', () => {
 			controller.setQuery({ project: 'Selected project', query: 'Synthetic' });
 			await controller.refresh();
 			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-			const label = screen.getByLabelText('Label') as HTMLInputElement;
-			await fireEvent.input(label, { target: { value: 'x'.repeat(65) } });
+			const search = screen.getByPlaceholderText('Search issues…') as HTMLInputElement;
+			await fireEvent.input(search, { target: { value: 'x'.repeat(257) } });
 			const trigger = screen.getByRole('button', { name: 'Project' });
 			await fireEvent.click(trigger);
 			const picker = await screen.findByRole('dialog', { name: 'Project' });
 			await fireEvent.click(await within(picker).findByRole('button', { name: project }));
 			expect(trigger.getAttribute('aria-expanded')).toBe('true');
 			expect(controller.query).toEqual({ project: 'Selected project', query: 'Synthetic' });
-			expect(label.value).toBe('x'.repeat(65));
+			expect(search.value).toBe('x'.repeat(257));
 			expect(screen.getByRole('alert').textContent).toContain('Invalid filter');
 			await fireEvent.click(trigger);
 			await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Project' })).toBeNull());
-			await fireEvent.input(label, { target: { value: 'bug' } });
+			await fireEvent.input(search, { target: { value: 'Corrected' } });
 			await fireEvent.click(trigger);
 			await fireEvent.click(
 				await within(await screen.findByRole('dialog', { name: 'Project' })).findByRole('button', {
@@ -346,7 +391,7 @@ describe('Issues stable, immediate interactions', () => {
 			);
 			expect(trigger.getAttribute('aria-expanded')).toBe('false');
 			expect(controller.query.project).toBe(project === 'All projects' ? undefined : project);
-			expect(controller.query).toMatchObject({ label: 'bug', query: 'Synthetic' });
+			expect(controller.query).toMatchObject({ query: 'Corrected' });
 			expect(screen.queryByRole('alert')).toBeNull();
 		},
 	);
@@ -385,6 +430,28 @@ describe('Issues stable, immediate interactions', () => {
 		},
 	);
 
+	it.each(['done', 'canceled'] as const)(
+		'offers Reopen only in the status menu for %s issues',
+		async (resolution) => {
+			const { controller, setItems, api } = await mount();
+			setItems([{ ...syntheticIssue(), status: 'closed', resolution }]);
+			controller.select('G-1');
+			await controller.refresh();
+			const detail = within(await screen.findByRole('region', { name: 'Issue details' }));
+			expect(detail.queryByRole('button', { name: 'Reopen' })).toBeNull();
+			expect(detail.queryByRole('button', { name: 'Close issue' })).toBeNull();
+			const status = detail.getByRole('button', { name: 'Change status of G-1' });
+			expect(status.textContent).toContain(resolution === 'done' ? 'Done' : 'Canceled');
+			await fireEvent.click(status);
+			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Reopen' }));
+			expect(api.mutate.mock.lastCall?.[0].payload).toEqual({
+				action: 'reopen',
+				issueId: 'G-1',
+				expectedRevision: 1,
+			});
+		},
+	);
+
 	it('does not reload the collection when Clear has nothing to reset', async () => {
 		const { controller, api } = await mount();
 		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
@@ -398,9 +465,11 @@ describe('Issues stable, immediate interactions', () => {
 		'clears pending input without delayed reapply (composing: %s)',
 		async (composing) => {
 			const { controller, view } = await mount();
+			controller.setQuery({ label: 'bug' });
+			await controller.refresh();
 			await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 			const input = screen.getByPlaceholderText('Search issues…') as HTMLInputElement;
-			const label = screen.getByLabelText('Label') as HTMLInputElement;
+			const label = screen.getByRole('button', { name: 'Label' });
 			const clear = screen.getByRole('button', { name: 'Clear' });
 			expect(input.closest('.issue-search-row')?.contains(clear)).toBe(true);
 			expect(view.container.querySelector('.issue-filter-footer')).toBeNull();
@@ -409,13 +478,9 @@ describe('Issues stable, immediate interactions', () => {
 				target: { value: 'Unapplied search' },
 				isComposing: composing,
 			});
-			await fireEvent.input(label, {
-				target: { value: 'Unapplied label' },
-				isComposing: composing,
-			});
 			await fireEvent.click(clear);
 			expect(input.value).toBe('');
-			expect(label.value).toBe('');
+			expect(label.textContent).toContain('Any label');
 			expect(controller.query).toEqual({});
 			await vi.advanceTimersByTimeAsync(300);
 			expect(controller.query).toEqual({});
@@ -423,15 +488,15 @@ describe('Issues stable, immediate interactions', () => {
 		},
 	);
 
-	it('clears rejected label input as well as the filter error', async () => {
+	it('clears rejected search input as well as the filter error', async () => {
 		const { controller } = await mount();
 		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-		const label = screen.getByLabelText('Label') as HTMLInputElement;
-		await fireEvent.input(label, { target: { value: 'x'.repeat(65) } });
-		await fireEvent.submit(label.closest('form')!);
+		const search = screen.getByPlaceholderText('Search issues…') as HTMLInputElement;
+		await fireEvent.input(search, { target: { value: 'x'.repeat(257) } });
+		await fireEvent.submit(search.closest('form')!);
 		expect(screen.getByRole('alert').textContent).toContain('Invalid filter');
 		await fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-		expect(label.value).toBe('');
+		expect(search.value).toBe('');
 		expect(controller.query).toEqual({});
 		expect(screen.queryByRole('alert')).toBeNull();
 	});

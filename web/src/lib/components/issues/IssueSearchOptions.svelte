@@ -1,6 +1,11 @@
 <script lang="ts">
 	import Filter from '@lucide/svelte/icons/list-filter';
-	import { ISSUE_STATUSES, issueAssigneeQuery, type IssuePriority } from '$shared/issues';
+	import {
+		ISSUE_STATUSES,
+		issueAssigneeQuery,
+		type IssueListQuery,
+		type IssuePriority,
+	} from '$shared/issues';
 	import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
 	import {
 		issuePriorityLabel,
@@ -13,7 +18,7 @@
 		DropdownMenuContent,
 		DropdownMenuCheckboxItem,
 	} from '$lib/components/ui/dropdown-menu';
-	import IssueLabelFilter from './IssueLabelFilter.svelte';
+	import IssueFacetFilter from './IssueFacetFilter.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		controller,
@@ -24,8 +29,9 @@
 		controller: IssuesController;
 		chats: readonly IssueChatSummary[];
 		username: string;
-		onFilter: (change: { ready?: boolean; includeClosed?: boolean }) => void;
+		onFilter: (change: Pick<IssueListQuery, 'label' | 'ready' | 'includeClosed'>) => boolean;
 	} = $props();
+	const labelId = $props.id();
 </script>
 
 <div class="issue-filter-options">
@@ -62,7 +68,15 @@
 			{/each}
 		</select>
 	</label>
-	<IssueLabelFilter {controller} />
+	<div class="issue-field">
+		<label for={labelId}>{m.issues_label_filter()}</label>
+		<IssueFacetFilter
+			id={labelId}
+			{controller}
+			field="label"
+			onSelect={(label) => onFilter({ label })}
+		/>
+	</div>
 	<DropdownMenu>
 		<DropdownMenuTrigger
 			class="issue-button issue-extra-filters"

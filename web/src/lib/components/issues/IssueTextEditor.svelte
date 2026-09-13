@@ -166,6 +166,7 @@
 	{#if preview}<IssueMarkdown text={draft.field(field)} />
 	{:else}
 		<PromptTextField
+			class="has-[textarea:focus-visible]:ring-0"
 			{id}
 			bind:ref={textarea}
 			bind:value={() => draft.field(field), setText}

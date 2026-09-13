@@ -10,7 +10,7 @@
 	import type { IssueChatSummary } from './issue-presentation.js';
 	import type { IssueListQuery, IssuePriority } from '$shared/issues';
 	import { parseIssueAssigneeQuery } from '$shared/issue-validation';
-	import IssueProjectFilter from './IssueProjectFilter.svelte';
+	import IssueFacetFilter from './IssueFacetFilter.svelte';
 	import IssueViewSettings from './IssueViewSettings.svelte';
 	import IssueSearchOptions from './IssueSearchOptions.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -41,7 +41,9 @@
 	const hasFilters = $derived(
 		Object.values(controller.query).some((value) => value !== false && value !== undefined),
 	);
-	function apply(extra: Pick<IssueListQuery, 'project' | 'ready' | 'includeClosed'> = {}): boolean {
+	function apply(
+		extra: Pick<IssueListQuery, 'project' | 'label' | 'ready' | 'includeClosed'> = {},
+	): boolean {
 		clearTimeout(searchTimer);
 		searchTimer = undefined;
 		if (!form) return false;
@@ -55,7 +57,7 @@
 				query: optionalText('query'),
 				status: optionalText('status') as IssueListQuery['status'],
 				priority: priority === undefined ? undefined : (Number(priority) as IssuePriority),
-				label: optionalText('label'),
+				label: controller.query.label,
 				assignee: assignee === undefined ? undefined : parseIssueAssigneeQuery(assignee),
 				ready: controller.query.ready,
 				includeClosed: controller.query.includeClosed,
@@ -71,7 +73,7 @@
 	function scheduleSearch(event: Event) {
 		if (event instanceof InputEvent && event.isComposing) return;
 		const target = event.target;
-		if (!(target instanceof HTMLInputElement) || !['query', 'label'].includes(target.name)) return;
+		if (!(target instanceof HTMLInputElement) || target.name !== 'query') return;
 		clearTimeout(searchTimer);
 		searchTimer = setTimeout(() => apply(), 250);
 	}
@@ -105,7 +107,7 @@
 		}}
 	>
 		<div class="issue-toolbar-heading">
-			<IssueProjectFilter {controller} onSelect={(project) => apply({ project })} />
+			<IssueFacetFilter {controller} field="project" onSelect={(project) => apply({ project })} />
 			<button
 				class="issue-button issue-icon-button"
 				type="button"

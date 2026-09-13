@@ -77,7 +77,10 @@ export function issueTestHarness(initial = [syntheticIssue()]) {
 			items: [],
 			nextBeforeSequence: null,
 		})),
-		facets: vi.fn<IssuesApi['facets']>(async () => ({ ...version(), values: ['Release'] })),
+		facets: vi.fn<IssuesApi['facets']>(async (field) => ({
+			...version(),
+			values: field === 'project' ? ['Release'] : ['bug', 'frontend'],
+		})),
 		projectDefault: vi.fn<IssuesApi['projectDefault']>(async () => ({
 			project: '/repository',
 			kind: 'repository',

@@ -119,21 +119,43 @@ test("mobile Issues opens, saves and closes without crypto.randomUUID", async ()
         name: "Project",
         exact: true,
       });
-      const label = panel.getByLabel("Label", { exact: true });
-      await label.fill("x".repeat(65));
+      const search = panel.getByPlaceholder("Search issues…");
+      await search.fill("x".repeat(257));
       await projectTrigger.click();
       await projects
         .getByRole("button", { name: "Release", exact: true })
         .click();
       expect(await projectTrigger.getAttribute("aria-expanded")).toBe("true");
       expect(await projectTrigger.textContent()).toContain("All projects");
-      expect(await label.inputValue()).toBe("x".repeat(65));
+      expect(await search.inputValue()).toBe("x".repeat(257));
       expect(await panel.getByRole("alert").textContent()).toContain(
         "Invalid filter",
       );
       await page.keyboard.press("Escape");
-      await panel.getByLabel("Label", { exact: true }).fill("bug");
-      await panel.getByPlaceholder("Search issues…").press("Enter");
+      await search.fill("");
+      await search.press("Enter");
+      expect(
+        await search.evaluate((input) => getComputedStyle(input).outlineStyle),
+      ).toBe("none");
+      const labelTrigger = panel.getByRole("button", {
+        name: "Label",
+        exact: true,
+      });
+      await labelTrigger.click();
+      const labels = page.getByRole("dialog", { name: "Label", exact: true });
+      expect(await labels.getByRole("button").first().textContent()).toContain(
+        "Any label",
+      );
+      await labels.getByRole("textbox", { name: "Search labels…" }).fill("bu");
+      await labels.getByRole("button", { name: "bug", exact: true }).click();
+      expect(await labelTrigger.textContent()).toContain("bug");
+      await labelTrigger.click();
+      await labels
+        .getByRole("button", { name: "Any label", exact: true })
+        .click();
+      expect(await labelTrigger.textContent()).toContain("Any label");
+      await labelTrigger.click();
+      await labels.getByRole("button", { name: "bug", exact: true }).click();
       await projectTrigger.click();
       await projects
         .getByRole("button", { name: "Release", exact: true })
@@ -211,6 +233,9 @@ test("mobile Issues opens, saves and closes without crypto.randomUUID", async ()
           ];
           return {
             identityAboveTitle: identity.bottom <= title.top,
+            numberSize: getComputedStyle(
+              detail.querySelector(".issue-detail-identity .issue-id")!,
+            ).fontSize,
             statusBelowTitle: status.top >= title.bottom,
             actions: buttons.map((button) => button.textContent?.trim()),
             assignmentBesideValue: detail.querySelector(
@@ -220,6 +245,7 @@ test("mobile Issues opens, saves and closes without crypto.randomUUID", async ()
         });
       expect(detailGeometry).toMatchObject({
         identityAboveTitle: true,
+        numberSize: "13px",
         statusBelowTitle: true,
         actions: ["Open", "Edit", "Close issue"],
       });
@@ -234,6 +260,14 @@ test("mobile Issues opens, saves and closes without crypto.randomUUID", async ()
       expect(
         await comment.evaluate((input) => getComputedStyle(input).fontSize),
       ).toBe("16px");
+      const editorBorders = await comment.evaluate((input) => ({
+        outline: getComputedStyle(input).outlineStyle,
+        ringWidth: getComputedStyle(input.parentElement!).getPropertyValue(
+          "--tw-ring-shadow",
+        ),
+      }));
+      expect(editorBorders.outline).toBe("none");
+      expect(editorBorders.ringWidth).not.toContain("2px");
       await composer
         .getByRole("button", { name: "Expand comment editor" })
         .click();
@@ -291,11 +325,43 @@ test("mobile Issues opens, saves and closes without crypto.randomUUID", async ()
         .locator(".issue-comment")
         .getByText("Refined synthetic progress", { exact: true })
         .waitFor();
+      await panel
+        .getByRole("button", { name: "Close issue", exact: true })
+        .click();
+      const close = page.getByRole("dialog");
+      await close
+        .getByRole("button", { name: "Close issue", exact: true })
+        .click();
+      const status = panel.getByRole("button", {
+        name: "Change status of G-1",
+      });
+      await page.waitForFunction(() =>
+        document
+          .querySelector(".issue-detail .issue-status-button")
+          ?.textContent?.includes("Done"),
+      );
+      expect(
+        await panel
+          .getByRole("button", { name: "Reopen", exact: true })
+          .count(),
+      ).toBe(0);
+      expect(
+        await panel
+          .getByRole("button", { name: "Close issue", exact: true })
+          .count(),
+      ).toBe(0);
+      await status.click();
+      await page.getByRole("menuitem", { name: "Reopen", exact: true }).click();
+      await panel
+        .getByRole("button", { name: "Close issue", exact: true })
+        .waitFor();
       await panel.getByRole("button", { name: "Back to issues" }).click();
       await panel.getByRole("button", { name: "Search", exact: true }).click();
       expect(
-        await panel.getByLabel("Label", { exact: true }).inputValue(),
-      ).toBe("bug");
+        await panel
+          .getByRole("button", { name: "Label", exact: true })
+          .textContent(),
+      ).toContain("bug");
       await panel
         .getByRole("button", { name: "New issue", exact: true })
         .click();
@@ -460,7 +526,7 @@ test("Issues toolbar stays aligned and search retains the board until results ar
           const lanes = [...panel.querySelectorAll(".issue-lane")].map((lane) =>
             lane.getBoundingClientRect(),
           );
-          const search = rect(".issue-project-picker");
+          const search = rect(".issue-toolbar-heading .issue-facet-picker");
           const button = rect("[data-issue-search-button]");
           const scroll = rect(".issue-lane-scroll");
           const item = rect(".issue-card");
@@ -616,12 +682,27 @@ test("card whitespace opens details and full-width detail preference survives re
         expectedStoreId: bootstrap.storeId,
         payload: {
           action: "create",
-          input: { title: "Synthetic clickable card", project: "Release" },
+          input: {
+            title: "Synthetic clickable card",
+            project: "/synthetic/project",
+          },
         },
       });
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Issues");
+      const row = page.locator('.issue-row[data-issue-id="G-1"]');
+      await row.waitFor();
+      const projectAlignment = await row.evaluate((item) => {
+        const project = item
+          .querySelector('.issue-project[data-path="true"]')!
+          .getBoundingClientRect();
+        const identity = item
+          .querySelector(".issue-id")!
+          .getBoundingClientRect();
+        return project.left - identity.left;
+      });
+      expect(Math.abs(projectAlignment)).toBeLessThanOrEqual(1);
       expect(
         await page
           .getByRole("button", { name: "Close Issues", exact: true })

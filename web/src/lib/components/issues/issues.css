@@ -22,10 +22,10 @@
 	align-items: center;
 	gap: 8px;
 }
-.issue-toolbar-heading > .issue-project-field {
+.issue-toolbar-heading > .issue-facet-filter {
 	flex: 1;
 }
-.issue-toolbar-heading > :not(.issue-project-field) {
+.issue-toolbar-heading > :not(.issue-facet-filter) {
 	flex-shrink: 0;
 }
 .issue-toolbar-heading .issue-button {
@@ -63,7 +63,7 @@
 	background: color-mix(in oklab, hsl(var(--primary)) 88%, hsl(var(--background)));
 }
 .issue-button:disabled,
-.issue-project-picker:disabled,
+.issue-facet-picker:disabled,
 .issue-input:disabled {
 	opacity: 0.5;
 	cursor: default;
@@ -75,11 +75,6 @@
 	color: hsl(var(--foreground));
 	text-align: start;
 	cursor: pointer;
-}
-.issues-surface :is(button, input, textarea, select, summary):focus-visible,
-.issue-dialog :is(button, input, textarea, select, summary):focus-visible {
-	outline: 2px solid hsl(var(--ring));
-	outline-offset: 2px;
 }
 .issue-filter-form {
 	display: block;
@@ -122,10 +117,10 @@
 	color: hsl(var(--muted-foreground));
 	pointer-events: none;
 }
-.issue-project-filter {
+.issue-facet-filter {
 	min-width: 0;
 }
-.issue-project-picker {
+.issue-facet-picker {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -139,17 +134,17 @@
 	text-align: start;
 	cursor: pointer;
 }
-.issue-project-picker > span,
-.issue-project-option > span {
+.issue-facet-picker > span,
+.issue-facet-option > span {
 	flex: 1;
 	min-width: 0;
 }
-.issue-project-picker > svg,
-.issue-project-option > svg {
+.issue-facet-picker > svg,
+.issue-facet-option > svg {
 	flex-shrink: 0;
 	color: hsl(var(--muted-foreground));
 }
-.issue-project-option {
+.issue-facet-option {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -160,13 +155,10 @@
 	text-align: start;
 	cursor: pointer;
 }
-.issue-project-picker:hover:not(:disabled),
-.issue-project-option:hover {
+.issue-facet-picker:hover:not(:disabled),
+.issue-facet-option:hover,
+.issue-facet-option:focus-visible {
 	background: hsl(var(--accent));
-}
-.issue-project-option:focus-visible {
-	outline: 2px solid hsl(var(--ring));
-	outline-offset: -2px;
 }
 .issue-field {
 	display: flex;
@@ -181,6 +173,7 @@
 	margin-right: auto;
 }
 .issue-input {
+	outline: none;
 	display: block;
 	width: 100%;
 	min-width: 0;
@@ -219,6 +212,9 @@ textarea.issue-input {
 	color: hsl(var(--muted-foreground));
 }
 .issue-extra-filters {
+	min-height: 36px;
+}
+.issue-filter-options .issue-facet-picker {
 	min-height: 36px;
 }
 .issue-check {
@@ -307,6 +303,9 @@ textarea.issue-input {
 	font-size: 11px;
 	max-width: 100%;
 }
+.issue-row .issue-project {
+	grid-column: 1 / -1;
+}
 .issue-selected {
 	background: hsl(var(--accent));
 }
@@ -322,11 +321,6 @@ textarea.issue-input {
 .issue-drag {
 	position: relative;
 	z-index: 2;
-}
-.issue-card:has(.issue-open:focus-visible),
-.issue-row:has(.issue-open:focus-visible) {
-	outline: 2px solid hsl(var(--ring));
-	outline-offset: -2px;
 }
 .issue-card-meta {
 	display: flex;
@@ -515,6 +509,9 @@ textarea.issue-input {
 	align-items: center;
 	gap: 6px;
 	margin-bottom: 6px;
+}
+.issue-detail-identity .issue-id {
+	font-size: 13px;
 }
 .issue-assignee-value {
 	display: flex;
@@ -818,7 +815,8 @@ textarea.issue-input {
 	.issue-button {
 		min-height: 38px;
 	}
-	.issue-project-picker {
+	.issue-facet-picker,
+	.issue-filter-options .issue-facet-picker {
 		min-height: 38px;
 	}
 	.issue-drag {
