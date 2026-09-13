@@ -66,10 +66,16 @@ describe('Lightpanda desktop file viewer scrolling', () => {
         MARKDOWN_FILE,
         'markdown',
       );
+      await app.openWorkspaceWindowActions(filesWindowId);
+      await app.clickMenuItem('Pin File Tab');
       await app.selectWorkspaceWindowSurface('Files', filesWindowId);
       await openProjectFile(fixture.page, join(projectPath, TEXT_FILE), TEXT_FILE, 'editor');
+      await app.openWorkspaceWindowActions(filesWindowId);
+      await app.clickMenuItem('Pin File Tab');
       await app.selectWorkspaceWindowSurface('Files', filesWindowId);
       await openProjectFile(fixture.page, join(projectPath, IMAGE_FILE), IMAGE_FILE, 'image');
+      await app.openWorkspaceWindowActions(filesWindowId);
+      await app.clickMenuItem('Pin File Tab');
 
       await app.selectWorkspaceWindowSurface(MARKDOWN_FILE, filesWindowId);
       await waitForActiveTarget(fixture.page, MARKDOWN_FILE, 'markdown');
