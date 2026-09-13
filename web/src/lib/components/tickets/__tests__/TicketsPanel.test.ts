@@ -24,6 +24,47 @@ afterEach(() => {
 });
 
 describe('Tickets surface', () => {
+	it.each(['Synthetic assigned chat', '', null])(
+		'opens a chat assignee from the detail field with title %j',
+		async (title) => {
+			const { controller, setItems, view } = await mount();
+			const chatId = '1000000000000001';
+			const onOpenChat = vi.fn();
+			setItems([{ ...syntheticTicket(), assignee: { kind: 'chat', chatId } }]);
+			controller.select('G-1');
+			await controller.refresh();
+			await view.rerender({ controller, chats: [{ id: chatId, title }], onOpenChat });
+			const assignee = within(view.container.querySelector<HTMLElement>('.ticket-assignee-value')!);
+			const button = assignee.getByRole('button');
+			expect(button.textContent).toContain(title || `Chat ${chatId}`);
+			expect(button.getAttribute('title')).toBe(chatId);
+			expect(onOpenChat).not.toHaveBeenCalled();
+			await fireEvent.click(button);
+			expect(onOpenChat).toHaveBeenCalledExactlyOnceWith(chatId);
+			await view.rerender({ controller, chats: [], onOpenChat });
+			expect(assignee.queryByRole('button')).toBeNull();
+			expect(assignee.getByText(`Deleted chat · ${chatId}`)).toBeTruthy();
+		},
+	);
+
+	it.each(['local', 'another-user', null])(
+		'keeps non-chat assignee %j as plain text',
+		async (username) => {
+			const { controller, setItems, view } = await mount();
+			setItems([{
+				...syntheticTicket(),
+				assignee: username === null ? null : { kind: 'user', username },
+			}]);
+			controller.select('G-1');
+			await controller.refresh();
+			await tick();
+			const assignee = within(view.container.querySelector<HTMLElement>('.ticket-assignee-value')!);
+			const label = username ?? 'Unassigned';
+			expect(assignee.getByText(label).tagName).toBe('SPAN');
+			expect(assignee.queryByRole('button', { name: label })).toBeNull();
+		},
+	);
+
 	it('restores the moved row index when a non-close status change leaves the filter', async () => {
 		vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => {
 			const rects = [new DOMRect(0, 0, 100, 20)];

@@ -12,6 +12,57 @@ import {
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
+  test("opens a chat assignee without source-row navigation on desktop and mobile", async () => {
+    await withChromiumFixture("tickets-chat-assignee", async (fixture) => {
+      const { page, integration } = fixture;
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic assigned conversation",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      const bootstrap = parseTicketBootstrap(
+        await integration.client.get("/api/v1/tickets/bootstrap"),
+      );
+      const created = parseTicketWriteResult(
+        await integration.client.post("/api/v1/tickets/mutate", {
+          requestId: crypto.randomUUID(),
+          expectedStoreId: bootstrap.storeId,
+          payload: {
+            action: "create",
+            input: {
+              title: "Synthetic assigned ticket",
+              project: "Release",
+              assignee: { kind: "chat", chatId },
+            },
+          },
+        }),
+      );
+      const sourceRequests: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/api/v1/chats/ticket-source")
+          sourceRequests.push(request.url());
+      });
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(`${integration.garcon.baseUrl}/?ticket=${created.ticket.id}`);
+        const assignee = page.locator(".ticket-assignee-value").getByRole("button");
+        await assignee.waitFor();
+        expect(await assignee.getAttribute("title")).toBe(chatId);
+        if (width === 1440) {
+          await assignee.focus();
+          await page.keyboard.press("Enter");
+        } else await assignee.click();
+        await page.locator(`[data-conversation-panel-chat-id="${chatId}"]`).waitFor();
+        await page.waitForURL((url) => url.pathname === `/chat/${chatId}`);
+      }
+      expect(sourceRequests).toEqual([]);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test("closes empty new tickets without a discard prompt on desktop and mobile", async () => {
     await withChromiumFixture("tickets-empty-create", async (fixture) => {
       const { page, integration } = fixture;
