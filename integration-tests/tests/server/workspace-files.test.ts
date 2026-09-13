@@ -79,6 +79,26 @@ function fixtureOptions(gate: ReturnType<typeof saveGate>, alias: 'hard-link' | 
 }
 
 describe('workspace files through HTTP', () => {
+  test('selects the identity owner before interpreting its file path', async () => {
+    await withIntegrationFixture('workspace-identity-owner', async (fixture) => {
+      for (const filePath of ['', '/abs', '../outside']) {
+        const query = new URLSearchParams({ chatId: '1000000000000001', path: filePath });
+        const request = () => fetch(`${fixture.garcon.baseUrl}/api/v1/files/identity?${query}`, {
+          headers: { Authorization: `Bearer ${fixture.authToken}` }, signal: AbortSignal.timeout(15_000),
+        });
+        const missing = await request();
+        expect(missing.status).toBe(404);
+        expect(await missing.json()).toEqual({ error: 'Chat not found or missing projectPath' });
+        query.delete('chatId');
+        query.set('projectPath', fixture.dirs.project);
+        const invalid = await request();
+        expect(invalid.status).toBe(400);
+        expect(await invalid.json()).toEqual({ error: filePath === '../outside'
+          ? 'A valid relative file path is required' : 'A relative file path is required' });
+      }
+    }, { authentication: 'account', bindAddress: '0.0.0.0' });
+  }, 30_000);
+
   test('sanitizes unexpected project-inspection failures for listing and identity', async () => {
     await withIntegrationFixture('workspace-file-inspection-error', async (fixture) => {
       const query = new URLSearchParams({ projectPath: join(fixture.dirs.project, 'x'.repeat(300)), path: 'sample.txt' });

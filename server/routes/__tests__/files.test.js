@@ -54,6 +54,22 @@ afterEach(async () => {
 });
 
 describe('files route', () => {
+  it.each(['', '/abs', '../outside'])('selects the identity owner before validating path %j', async (filePath) => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const query = new URLSearchParams({ chatId: '1000000000000001', path: filePath });
+    const url = new URL(`http://localhost/api/v1/files/identity?${query}`);
+    const missing = await routes[url.pathname].GET(new Request(url), url);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'Chat not found or missing projectPath' });
+
+    url.searchParams.delete('chatId');
+    url.searchParams.set('projectPath', projectPath);
+    const invalid = await routes[url.pathname].GET(new Request(url), url);
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ error: filePath === '../outside'
+      ? 'A valid relative file path is required' : 'A relative file path is required' });
+  });
+
   it.each(['list', 'identity'])('sanitizes unexpected %s project-inspection failures', async (operation) => {
     const routes = createFilesRoutes({ getChat: () => null });
     const query = new URLSearchParams({ projectPath: path.join(projectPath, 'x'.repeat(300)), path: 'sample.txt' });
