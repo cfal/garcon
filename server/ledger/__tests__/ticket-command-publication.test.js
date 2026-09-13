@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { garconTicketResultContent, ticketCommandOutcome } from '../../../common/garcon-ticket-result.js';
+import { ticketCommandNoticeText } from '../../../common/ticket-command-notice.js';
 import { TranscriptLedgerService } from '../service.js';
 import { TranscriptLedgerStore } from '../store.js';
 import { ledgerRowsToTranscriptMessages } from '../presentation.js';
@@ -80,22 +81,45 @@ describe('ticket command ledger evidence', () => {
       { message: new UserMessage(LATER, garconTicketResultContent(result)), providerMeta: null },
     ], () => AT);
     expect(drafts[0].detail.type).toBe('ticket-command-request');
-    expect(drafts[1].detail).toEqual({ ...outcome, title: 'Ticket command', nativeResultInput: true });
+    expect(drafts[1].detail).toEqual({ ...outcome, nativeResultInput: true });
+    expect(drafts[1].message).toBe('Created ticket G-1');
     const staged = ledger.stageView(CHAT, drafts, 1);
     ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
     store.closeChat(CHAT);
     const rendered = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT));
     expect(rendered).toHaveLength(1);
     expect(rendered[0].message.detail).toEqual(outcome);
+    expect(rendered[0].message.title).toBeUndefined();
     expect(JSON.stringify(rendered)).not.toContain('nativeResultInput');
     expect(JSON.stringify(rendered)).not.toContain('storeId');
     expect(ledger.conversationMessages(CHAT)).toEqual([]);
     expect(frozenDrafts(rendered.map(({ message }) => message))).toEqual([]);
     expect(calls).toEqual([]);
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
-    ledger.appendNotice(CHAT, staged.viewId, { at: '2026-01-01T01:00:00.000Z', title: 'Ticket command',
+    ledger.appendNotice(CHAT, staged.viewId, { at: '2026-01-01T01:00:00.000Z',
       content: 'Local outcome.', detail: outcome });
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
+  });
+
+  test('live and imported outcomes retain the same safe filter and relationship context', () => {
+    const { ledger } = fixture();
+    const view = ledger.initializeChat(CHAT);
+    for (const [command, context] of [
+      ['list', { filters: { project: 'Synthetic `[group]`', priority: 1 } }],
+      ['link', { link: { kind: 'blocks', targetId: 'G-2' } }],
+    ]) {
+      const result = { command, context, ref: 'synthetic', requestViewId: view.viewId, requestOrdinal: 1,
+        ...(command === 'list' ? {} : { ticketId: 'G-1' }), status: 'error',
+        errorCode: 'TICKET_COMMANDS_DISABLED', message: 'Synthetic failure.' };
+      const detail = ticketCommandOutcome(result);
+      ledger.appendNotice(CHAT, view.viewId, { at: AT, detail, content: ticketCommandNoticeText(detail) });
+      const drafts = importedDrafts([{ message: new UserMessage(AT, garconTicketResultContent(result)), providerMeta: null }], () => AT);
+      expect(drafts[0].detail).toEqual({ ...detail, nativeResultInput: true });
+      const live = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT)).at(-1).message;
+      expect(live.detail.context).toEqual(context);
+      expect(live.content).toBe(drafts[0].message);
+      expect(live.title).toBeUndefined();
+    }
   });
 
   test('read results never persist descriptions or comments in imported notices', () => {

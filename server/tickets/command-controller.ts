@@ -1,8 +1,9 @@
 import { isTicketReadCommand, type GarconTicketCommand, type GarconTicketMutationCommand,
   type GarconTicketReadCommand } from '../../common/garcon-ticket-command.js';
-import { garconTicketResultContent, ticketCommandOutcome, ticketCommandOutcomeContent,
+import { garconTicketResultContent, ticketCommandOutcome, ticketCommandContext,
   ticketMutationReceipt, parseTicketCommandResult, type GarconTicketResult } from '../../common/garcon-ticket-result.js';
 import { parseMarkupTicketMutationPayload } from '../../common/ticket-commands.js';
+import { ticketCommandNoticeText } from '../../common/ticket-command-notice.js';
 import { ticketBytes } from '../../common/ticket-validation.js';
 import { TICKET_LIMITS, type TicketProjectDefault } from '../../common/tickets.js';
 import { AgentCommandReplies, type AgentCommandContext } from '../chats/agent-command-replies.js';
@@ -124,7 +125,7 @@ export class TicketCommandController {
       const detail = ticketCommandOutcome(result);
       try {
         this.options.notices.appendNotice(source.chatId, source.viewId, {
-          title: 'Ticket command', content: ticketCommandOutcomeContent(detail), detail,
+          content: ticketCommandNoticeText(detail), detail,
           at: new Date().toISOString(),
         });
       } catch (error) { this.#replies.report(source, 'ticket-outcome', error); }
@@ -145,7 +146,9 @@ function identity(source: AgentCommandSource, command: GarconTicketCommand) {
   const payload = command.payload;
   const ticketId = payload.action === 'list' || payload.action === 'create' ? undefined
     : 'query' in payload ? payload.query.ticketId : payload.ticketId;
+  const context = ticketCommandContext(command);
   return { command: payload.action, ...(command.ref === undefined ? {} : { ref: command.ref }),
+    ...(context === undefined ? {} : { context }),
     ...(ticketId === undefined ? {} : { ticketId }), requestViewId: source.viewId, requestOrdinal: source.requestOrdinal };
 }
 

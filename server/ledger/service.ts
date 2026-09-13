@@ -133,7 +133,7 @@ interface ActivePermission {
 }
 
 interface TranscriptNoticeInput {
-  readonly title: string;
+  readonly title?: string;
   readonly content: string;
   readonly detail?: TranscriptNoticeDetail;
   readonly at?: string;
@@ -935,10 +935,9 @@ export class TranscriptLedgerService {
 
 function normalizeNotice(input: TranscriptNoticeInput): NormalizedTranscriptNotice {
   const title = parseChatRowTitle(input.title);
-  if (!title) throw new TypeError('Notice title is required');
   return {
     content: parseChatRowContent(input.content),
-    detail: { ...(input.detail ?? {}), title },
+    detail: { ...(input.detail ?? {}), ...(title ? { title } : {}) },
     at: input.at,
   };
 }

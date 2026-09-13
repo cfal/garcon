@@ -1,12 +1,48 @@
 import { TICKET_ACTIONS, type TicketAction } from './ticket-commands.js';
 import type { AgentCommandCorrelation } from './garcon-command-results.js';
-import { isTicketReadAction } from './garcon-ticket-command.js';
+import { isTicketReadAction, type GarconTicketCommand } from './garcon-ticket-command.js';
+import { parseTicketListQuery } from './ticket-query.js';
 import { escapeGarconXmlText, parseGarconCommandEnvelope } from './garcon-command-envelope.js';
 import { parseTicketDetail, parseTicketHistoryPage, parseTicketPage } from './ticket-responses.js';
-import { ticketBytes, storedTicketId, ticketInteger, ticketInvalid, ticketRecord, ticketRef, ticketStatus, ticketUuid } from './ticket-validation.js';
+import { ticketBytes, storedTicketId, ticketInteger, ticketInvalid, ticketLinkKind, ticketRecord, ticketRef, ticketStatus, ticketUuid } from './ticket-validation.js';
 import { isErrorCode } from './error-codes.js';
 import { TICKET_LIMITS, type TicketActivity, type TicketDetail, type TicketErrorCode, type TicketPage,
-  type TicketSequencePage, type TicketStatus, type TicketWriteResult } from './tickets.js';
+  type TicketSequencePage, type TicketStatus, type TicketWriteResult, type TicketListQuery, type TicketLinkKind } from './tickets.js';
+
+const FILTER_KEYS = ['project', 'status', 'includeClosed', 'priority', 'label', 'assignee', 'ready', 'query'] as const;
+export type TicketNoticeContext = {
+  readonly filters?: Pick<TicketListQuery, typeof FILTER_KEYS[number]>;
+  readonly link?: { readonly kind: TicketLinkKind; readonly targetId: string };
+};
+
+function parseNoticeContext(command: TicketAction, value: unknown): TicketNoticeContext {
+  let contextKeys: readonly string[] = [];
+  if (command === 'list') contextKeys = ['filters'];
+  else if (command === 'link' || command === 'unlink') contextKeys = ['link'];
+  const raw = ticketRecord(value, contextKeys);
+  if (raw.filters !== undefined) {
+    const { limit: _limit, ...filters } = parseTicketListQuery(ticketRecord(raw.filters, FILTER_KEYS));
+    return { filters };
+  }
+  if (raw.link !== undefined) {
+    const link = ticketRecord(raw.link, ['kind', 'targetId']);
+    return { link: { kind: ticketLinkKind(link.kind), targetId: storedTicketId(link.targetId) } };
+  }
+  return {};
+}
+
+export function ticketCommandContext(command: GarconTicketCommand): TicketNoticeContext | undefined {
+  const payload = command.payload;
+  if (payload.action === 'list') {
+    const filters = Object.fromEntries(FILTER_KEYS.filter((key) => payload.query[key] !== undefined)
+      .map((key) => [key, payload.query[key]]));
+    return parseNoticeContext('list', { filters });
+  }
+  if (payload.action === 'link' || payload.action === 'unlink') {
+    return { link: { kind: payload.kind, targetId: payload.targetId } };
+  }
+  return undefined;
+}
 
 export interface TicketMutationReceipt {
   readonly storeId: string;
@@ -18,7 +54,7 @@ export interface TicketMutationReceipt {
   readonly relatedTicket?: { readonly id: string; readonly revision: number };
 }
 
-type RequestIdentity<A extends TicketAction> = { readonly command: A }
+type RequestIdentity<A extends TicketAction> = { readonly command: A; readonly context?: TicketNoticeContext }
   & (A extends 'list' | 'read' | 'history' ? { readonly ref?: string } : { readonly ref: string })
   & (A extends 'create' ? { readonly ticketId?: string } : A extends 'list' ? object : { readonly ticketId: string });
 type SuccessIdentity<A extends TicketAction> = RequestIdentity<A> & (A extends 'create' ? { readonly ticketId: string } : unknown);
@@ -65,6 +101,7 @@ function requestIdentity(raw: Record<string, unknown>) {
   if (command === 'list' && raw.ticketId !== undefined) return ticketInvalid('List result cannot target a ticket.');
   const target = raw.ticketId === undefined && (command === 'create' || command === 'list') ? undefined : storedTicketId(raw.ticketId);
   return { command, ...(ref === undefined ? {} : { ref }), ...(target === undefined ? {} : { ticketId: target }),
+    ...(raw.context === undefined ? {} : { context: parseNoticeContext(command, raw.context) }),
     requestViewId: ticketUuid(raw.requestViewId, 'requestViewId'), requestOrdinal: ticketInteger(raw.requestOrdinal, 'requestOrdinal') };
 }
 
@@ -74,7 +111,7 @@ export function parseTicketErrorCode(value: unknown): TicketErrorCode {
 }
 
 export function parseTicketCommandResult(value: unknown): GarconTicketResult {
-  const raw = ticketRecord(value, ['command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'data', 'errorCode', 'message']);
+  const raw = ticketRecord(value, ['command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'data', 'errorCode', 'message', 'context']);
   const identity = requestIdentity(raw);
   if (raw.status === 'error') {
     if (raw.data !== undefined) return ticketInvalid('A ticket error cannot contain result data.');
@@ -107,13 +144,22 @@ const ATTRIBUTES = { command: 'command', ref: 'ref', 'ticket-id': 'ticketId',
 
 export function garconTicketResultContent(result: GarconTicketResult): string {
   const attributes = Object.entries(ATTRIBUTES).flatMap(([name, key]) => {
-    const value = key === 'ticketId' ? ('ticketId' in result ? result.ticketId : undefined) : result[key];
-    if (key === 'command' || value === undefined) return [];
+    if (key === 'command') return [];
+    let value: string | number | undefined;
+    if (key === 'ticketId') {
+      if (!('ticketId' in result)) return [];
+      value = result.ticketId;
+    } else {
+      value = result[key];
+    }
+    if (value === undefined) return [];
     return [`${name}="${escapeGarconXmlText(String(value)).replaceAll('"', '&quot;')}"`];
   });
-  const data = result.status === 'ok' ? result.data : { errorCode: result.errorCode, message: result.message };
+  const body = result.status === 'ok'
+    ? { data: result.data, context: result.context }
+    : { errorCode: result.errorCode, message: result.message, context: result.context };
   const name = `garcon-ticket-${result.command}-result`;
-  return `<${name} ${attributes.join(' ')}>\n${escapeGarconXmlText(JSON.stringify(data))}\n</${name}>`;
+  return `<${name} ${attributes.join(' ')}>\n${escapeGarconXmlText(JSON.stringify(body))}\n</${name}>`;
 }
 
 export function parseGarconTicketResult(content: string): GarconTicketResult | null {
@@ -132,9 +178,8 @@ export function parseGarconTicketResult(content: string): GarconTicketResult | n
       }
       if (typeof raw.requestOrdinal !== 'string' || !/^[1-9][0-9]*$/u.test(raw.requestOrdinal)) return null;
       raw.requestOrdinal = Number(raw.requestOrdinal);
-      const data: unknown = JSON.parse(envelope.body);
-      if (raw.status === 'error') Object.assign(raw, ticketRecord(data, ['errorCode', 'message']));
-      else raw.data = data;
+      Object.assign(raw, ticketRecord(JSON.parse(envelope.body), raw.status === 'error'
+        ? ['errorCode', 'message', 'context'] : ['data', 'context']));
       return parseTicketCommandResult(raw);
     } catch { return null; }
   }
@@ -142,9 +187,10 @@ export function parseGarconTicketResult(content: string): GarconTicketResult | n
 }
 
 export function ticketCommandOutcome(result: GarconTicketResult): TicketCommandOutcome {
-  const { requestViewId, requestOrdinal, command, ref } = result;
+  const { requestViewId, requestOrdinal, command, ref, context } = result;
   const ticketId = 'ticketId' in result ? result.ticketId : undefined;
   const identity = { type: 'ticket-command-outcome' as const, requestViewId, requestOrdinal, command,
+    ...(context === undefined ? {} : { context }),
     ...(ref === undefined ? {} : { ref }), ...(ticketId === undefined ? {} : { ticketId }) };
   if (result.status === 'error') return { ...identity, status: 'error', errorCode: result.errorCode } as TicketCommandOutcome;
   let revision: number | undefined;
@@ -155,7 +201,7 @@ export function ticketCommandOutcome(result: GarconTicketResult): TicketCommandO
 
 export function parseTicketCommandOutcome(value: unknown): TicketCommandOutcome | null {
   try {
-    const raw = ticketRecord(value, ['type', 'command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode']);
+    const raw = ticketRecord(value, ['type', 'command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode', 'context']);
     if (raw.type !== 'ticket-command-outcome') return null;
     const identity = { type: 'ticket-command-outcome' as const, ...requestIdentity(raw) };
     if (raw.status === 'error' && raw.revision === undefined) {
@@ -169,9 +215,4 @@ export function parseTicketCommandOutcome(value: unknown): TicketCommandOutcome 
     if (!identity.ticketId) return null;
     return { ...identity, status: 'ok', revision: ticketInteger(raw.revision, 'revision') } as TicketCommandOutcome;
   } catch { return null; }
-}
-
-export function ticketCommandOutcomeContent(detail: TicketCommandOutcome): string {
-  if (detail.status === 'error') return `Ticket ${detail.command} failed: ${detail.errorCode}.`;
-  return `Ticket ${detail.command} completed${'ticketId' in detail && detail.ticketId ? ` for ${detail.ticketId}` : ''}.`;
 }

@@ -170,6 +170,10 @@ function createHarness(
 		commitIfPresent: () => commit,
 		chatCanvasIfPresent: () => options.canvas ?? null,
 		ticketsIfPresent: () => options.tickets ?? null,
+		tickets: () => {
+			if (!options.tickets) throw new Error('Synthetic tickets controller not configured');
+			return options.tickets;
+		},
 		setPresentationVisible: vi.fn(),
 		disposeSurface: vi.fn((kind: string) => {
 			if (kind === 'commit') commit.resetAfterClose();
@@ -226,6 +230,21 @@ function createHarness(
 }
 
 describe('WorkspaceCoordinator', () => {
+	it.each([false, true])('opens ticket references repeatedly with mobile=%s', async (isMobile) => {
+		const { controller } = ticketTestHarness();
+		try {
+			const { coordinator, layout } = createHarness({ tickets: controller });
+			if (isMobile) await coordinator.enterMobilePresentation();
+			const select = vi.spyOn(controller, 'select').mockImplementation(() => {});
+			for (const id of ['G-2', 'G-7', 'G-2']) await coordinator.openTicket(id);
+			expect(select.mock.calls).toEqual([['G-2'], ['G-7'], ['G-2']]);
+			expect(layout.surface('singleton:tickets')).not.toBeNull();
+			if (isMobile) expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:tickets');
+		} finally {
+			controller.dispose();
+		}
+	});
+
 	it.each(['tab', 'window', 'other-windows'] as const)(
 		'guards retained Tickets drafts before closing %s',
 		async (kind) => {
