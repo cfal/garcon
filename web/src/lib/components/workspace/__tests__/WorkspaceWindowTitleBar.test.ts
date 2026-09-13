@@ -14,6 +14,7 @@ import type {
 	WorkspaceWindowNode,
 } from '$lib/workspace/surface-types.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
@@ -61,6 +62,7 @@ const {
 		surfaceCloseBlocked: false,
 		processingChatIds: new Set<string>(),
 		chatSessions: {} as Record<string, Pick<ChatSessionRecord, 'projectPath'>>,
+		fileSessions: {} as Record<string, Pick<FileViewSession, 'fullPath'>>,
 		terminalSessions: [] as Array<{
 			metadata: { terminalId: string; displaySequence: number; title: string | null };
 		}>,
@@ -120,7 +122,7 @@ vi.mock('$lib/context', () => ({
 		},
 		isChatProcessing: (chatId: string) => runtime.processingChatIds.has(chatId),
 	}),
-	getFileSessions: () => ({ get: () => null }),
+	getFileSessions: () => ({ get: (id: string) => runtime.fileSessions[id] ?? null }),
 	getNotifications: () => ({ error: notificationError }),
 	getTerminalRegistry: () => ({
 		get orderedSessions() {
@@ -282,6 +284,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		runtime.surfaceCloseBlocked = false;
 		runtime.processingChatIds.clear();
 		runtime.chatSessions = { 'chat-a': { projectPath: '/workspace/project-a' } };
+		runtime.fileSessions = {};
 		runtime.terminalSessions = [];
 		runtime.surfaces = { [chatSurface.id]: chatSurface, [gitSurface.id]: gitSurface };
 		vi.stubGlobal('ResizeObserver', undefined);
@@ -324,6 +327,16 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(chatTab.getAttribute('aria-label')).toBe('Chat A');
 		expect(chatTab.getAttribute('title')).toBe('Chat A\n/workspace/project-a\nchat-a');
 		expect(screen.getByRole('tab', { name: 'Git' }).getAttribute('title')).toBe('Git');
+	});
+
+	it('shows the full file path on hover without expanding the tab label', () => {
+		runtime.surfaces[fileSurface.id] = fileSurface;
+		runtime.fileSessions[fileSurface.fileSessionId] = { fullPath: '/workspace/project-a/README.md' };
+		renderTitleBar(workspaceWindow([chatSurface.id, fileSurface.id]));
+
+		const tab = screen.getByRole('tab', { name: 'README.md' });
+		expect(tab.textContent?.trim()).toBe('README.md');
+		expect(tab.title).toBe('/workspace/project-a/README.md');
 	});
 
 	it('uses a window-local tablist when multiple tabs exist', () => {

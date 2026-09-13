@@ -121,6 +121,9 @@
 	function tooltipFor(surfaceId: string): string {
 		const label = labelFor(surfaceId);
 		const surface = workspace.layout.surface(surfaceId);
+		if (surface?.type === 'file') {
+			return files.get(surface.fileSessionId)?.fullPath ?? label;
+		}
 		if (surface?.type !== 'chat' || !surface.chatId) return label;
 		const projectPath = sessions.byId[surface.chatId]?.projectPath;
 		if (!projectPath) return label;

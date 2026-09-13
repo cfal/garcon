@@ -78,6 +78,10 @@ export class FileViewSession {
 		return this.document.fileName;
 	}
 
+	get fullPath(): string {
+		return `${this.canonicalFileRootPath.replace(/\/$/, '')}/${this.relativePath}`;
+	}
+
 	get contentKind() {
 		return this.document.contentKind;
 	}
