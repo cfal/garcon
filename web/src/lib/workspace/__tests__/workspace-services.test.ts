@@ -98,6 +98,7 @@ function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 function assembleWorkspaceServices(
 	localSettings: LocalSettingsStore,
 	fileWorkspaceLayoutRaw: string | null = null,
+	clientId: string | null = 'test-client',
 ): {
 	services: WorkspaceServices;
 	ghCapability: ReturnType<typeof createGhCapabilityStore>;
@@ -125,7 +126,7 @@ function assembleWorkspaceServices(
 			modelCatalog: createModelCatalogStore(),
 			navigation: createNavigationStore(),
 			notifications: createNotificationsStore(),
-			terminalIdentity: { clientId: 'test-client' },
+			terminalIdentity: { clientId },
 			ws,
 			getRouteIdentity: () => '/',
 			onTerminalLauncherDismissed: () => {},
@@ -322,6 +323,20 @@ describe('createWorkspaceServices', () => {
 
 		expect(services.gitQuickSummary.isEnabled).toBe(true);
 		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('unavailable');
+	});
+
+	it('assembles before terminal identity is ready without secure-context-only randomUUID', () => {
+		const unavailable = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+			throw new TypeError('crypto.randomUUID is unavailable');
+		});
+		try {
+			rootLocalSettings = createLocalSettingsStore();
+			({ services } = assembleWorkspaceServices(rootLocalSettings, null, null));
+			expect(services.files).toBeDefined();
+			expect(unavailable).not.toHaveBeenCalled();
+		} finally {
+			unavailable.mockRestore();
+		}
 	});
 
 	it('does not resolve the selected project again for record-only chat updates', async () => {

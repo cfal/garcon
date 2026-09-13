@@ -35,6 +35,7 @@ import {
 	LOCAL_STORAGE_KEYS,
 	SESSION_STORAGE_KEYS,
 } from '$lib/utils/local-persistence.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import {
 	parsePersistedFileWorkspaceLayout,
@@ -427,7 +428,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			};
 		},
 		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
-		browserSessionId: deps.terminalIdentity.clientId ?? `pending-${crypto.randomUUID()}`,
+		browserSessionId: deps.terminalIdentity.clientId ?? `pending-${createRandomId()}`,
 		onOpenError: (request, error) => {
 			console.error('Failed to resolve file identity', error);
 			deps.notifications.error(

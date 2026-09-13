@@ -4,9 +4,12 @@ import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 describe('File editor controls', () => {
-  test('keeps search, settings, and Vim usable across desktop and mobile', async () => {
+  test('keeps search, settings, and Vim usable without randomUUID on desktop and mobile', async () => {
     await withChromiumFixture('file-editor-polish', async (fixture, markPhase) => {
       const { page, integration } = fixture;
+      await page.addInitScript(() => {
+        Object.defineProperty(crypto, 'randomUUID', { value: undefined });
+      });
       const filename = 'editor-fixture.txt';
       const path = join(integration.dirs.project, filename);
       await writeFile(path, 'one one\ntwo\n', 'utf8');
@@ -19,6 +22,7 @@ describe('File editor controls', () => {
       });
       await integration.client.waitForTurnTerminal(chatId, started.turnId);
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe('undefined');
       markPhase('opening a file from the explorer');
       await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
       const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
