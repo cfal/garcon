@@ -328,6 +328,11 @@ export class FakeClaudeModel {
 
   async #handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // get_context_usage performs token-count probes outside the scripted generation queue.
+    if (request.method === 'POST' && url.pathname === '/v1/messages/count_tokens') {
+      this.#otherRequests.push(`${request.method} ${url.pathname}`);
+      return Response.json({ input_tokens: 100 });
+    }
     if (request.method !== 'POST' || url.pathname !== '/v1/messages') {
       this.#otherRequests.push(`${request.method} ${url.pathname}`);
       return Response.json({ error: { type: 'not_found_error', message: 'unsupported path' } }, {
@@ -344,6 +349,20 @@ export class FakeClaudeModel {
     if (!isRecord(body)) {
       this.#issues.push('Messages request body was not an object');
       return sseResponse(errorEvents('invalid request body'));
+    }
+    // Custom model IDs can use a non-streaming, one-token completion to measure input usage.
+    if (body.max_tokens === 1 && body.stream !== true) {
+      this.#otherRequests.push('POST /v1/messages (token count)');
+      return Response.json({
+        id: 'msg_scripted_token_count',
+        type: 'message',
+        role: 'assistant',
+        model: body.model,
+        content: [{ type: 'text', text: 'x' }],
+        stop_reason: 'max_tokens',
+        stop_sequence: null,
+        usage: { input_tokens: 100, output_tokens: 1 },
+      });
     }
     const recordedUserTexts = userTexts(body);
     const recorded: RecordedClaudeModelRequest = {
