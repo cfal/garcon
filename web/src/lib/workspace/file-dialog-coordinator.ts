@@ -168,15 +168,16 @@ export class FileDialogCoordinator {
 		const occupant = occupantId ? this.deps.layout.surface(occupantId) : null;
 		let occupantSessionId: string | null = null;
 		let occupantReserved = false;
+		let releaseFileClose: (() => void) | null = null;
 		try {
 			if (occupant?.type === 'file') {
 				this.deps.reservations.add(occupant.id);
 				occupantReserved = true;
-				const canReplace = await this.deps.files.confirmDestructive(
-					occupant.fileSessionId,
+				releaseFileClose = await this.deps.files.prepareDestructiveViews(
+					[occupant.fileSessionId],
 					'replace-dialog',
 				);
-				if (!canReplace || responsiveGeneration !== this.deps.responsiveGeneration()) {
+				if (!releaseFileClose || responsiveGeneration !== this.deps.responsiveGeneration()) {
 					return 'cancelled';
 				}
 				occupantSessionId = occupant.fileSessionId;
@@ -191,10 +192,11 @@ export class FileDialogCoordinator {
 				},
 				{ publication: plan.publication },
 			);
-			if (occupantSessionId) this.deps.files.destroy(occupantSessionId);
+			if (occupantSessionId) await this.deps.files.destroy(occupantSessionId);
 			if (current) plan.onCurrent();
 			return 'placed';
 		} finally {
+			releaseFileClose?.();
 			if (occupantReserved && occupantId) this.deps.reservations.delete(occupantId);
 		}
 	}

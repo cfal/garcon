@@ -12,9 +12,9 @@
 	import ImageViewer from './ImageViewer.svelte';
 	import EditorSettingsMenu from './EditorSettingsMenu.svelte';
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
-	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
-	import { getFileSessions } from '$lib/context';
+	import { getFileSessions, getOptionalWorkbenchCommands } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
 	import ResponsiveSurfaceActions, {
@@ -22,18 +22,26 @@
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import CopyFilePathButton from './CopyFilePathButton.svelte';
 	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
-	import { startVisibilityPolling } from '$lib/components/shared/visibility-polling.js';
-	import { FILE_FRESHNESS_POLL_MS } from '$lib/files/sessions/file-freshness.js';
+	import FileEditorStatus from './FileEditorStatus.svelte';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	interface Props {
-		session: FileSession;
+		session: FileViewSession;
 		presentation: PresentationHostId;
 		onClose?: () => void;
 		closeDisabled?: boolean;
+		onAppendToChatDraft?: ChatDraftAppend;
 	}
 
-	let { session, presentation, onClose, closeDisabled = false }: Props = $props();
+	let {
+		session,
+		presentation,
+		onClose,
+		closeDisabled = false,
+		onAppendToChatDraft,
+	}: Props = $props();
 	const files = getFileSessions();
+	const commands = getOptionalWorkbenchCommands();
 	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
@@ -49,54 +57,103 @@
 			});
 		}
 		if (session.rendererMode === 'code') {
-			actions.push({
-				id: 'save',
-				label: session.saving ? m.editor_actions_saving() : m.editor_actions_save(),
-				icon: session.saving ? LoaderCircle : Save,
-				iconClass: session.saving ? 'animate-spin' : undefined,
-				onclick: () => void files.save(session.id),
-				disabled: session.loading || session.saving || session.refreshing || !session.dirty,
-				priority: 0,
-				showLabel: true,
-				variant: 'primary',
-			});
+			if (!session.saveOutcomeUnknown)
+				actions.push({
+					id: 'save',
+					label: session.saving ? m.editor_actions_saving() : m.editor_actions_save(),
+					icon: session.saving ? LoaderCircle : Save,
+					iconClass: session.saving ? 'animate-spin' : undefined,
+					onclick: () =>
+						void (commands
+							? commands.execute('file.save', {
+									viewId: session.id,
+									surfaceId: fileSurfaceId(session.id),
+								})
+							: files.save(session.id)),
+					disabled:
+						session.loading ||
+						session.saving ||
+						session.refreshing ||
+						session.mutationGuarded ||
+						session.document.mixedLineEndings ||
+						!session.dirty,
+					priority: 0,
+					showLabel: true,
+					variant: 'primary',
+				});
+			if (presentation !== 'mobile' && presentation !== 'dialog') {
+				actions.push({
+					id: 'open-to-side',
+					label: 'Open to Side',
+					icon: Eye,
+					onclick: openToSide,
+					priority: 2,
+				});
+			}
 		}
 		actions.push({
 			id: 'refresh-file',
 			label: m.file_session_refresh(),
 			icon: RefreshCw,
 			onclick: () => void files.refresh(session.id),
-			disabled: session.loading || session.saving,
+			disabled: session.loading || session.saving || session.mutationGuarded,
 			busy: session.refreshing,
 			priority: 2,
 			iconClass: session.refreshing ? 'animate-spin' : undefined,
 		});
+		if (session.isExternallyStale && session.contentKind !== 'image' && !session.mutationGuarded) {
+			actions.push({
+				id: 'compare-file',
+				label: 'Compare',
+				icon: Eye,
+				onclick: () => void files.showConflict(session.id),
+				priority: 1,
+			});
+		}
+		if (session.dirty || session.saveOutcomeUnknown) {
+			actions.push({
+				id: 'export-file',
+				label: 'Export local copy',
+				icon: Save,
+				onclick: () => void files.exportContent(session.id),
+				priority: 3,
+			});
+		}
 		return actions;
-	});
-
-	$effect(() => {
-		const sessionId = session.id;
-		return startVisibilityPolling({
-			intervalMs: FILE_FRESHNESS_POLL_MS,
-			pollImmediately: true,
-			poll: () => void files.checkFreshness(sessionId),
-		});
 	});
 
 	function showMarkdown(): void {
 		session.markdownMode = 'rendered';
 		session.rendererMode = 'markdown';
+		void files.persistView(session.id);
 	}
 
 	function showSource(): void {
-		session.markdownMode = 'source';
-		session.rendererMode = 'code';
+		void files.showSource(session.id);
+	}
+
+	$effect(() => {
+		if (!commands) return;
+		return commands.registerFileSurface(session.id, {
+			appendToChatDraft: (block) => onAppendToChatDraft?.(block) === 'appended',
+		});
+	});
+
+	$effect(() => {
+		if (commands) return;
+		void files.checkFreshness(session.id);
+	});
+
+	function openToSide(): void {
+		if (presentation === 'mobile' || presentation === 'dialog') return;
+		void files.openToSide(session.id, presentation);
 	}
 </script>
 
 <div
 	data-workspace-surface-id={fileSurfaceId(session.id)}
 	class="flex h-full min-h-0 min-w-0 flex-col bg-background"
+	onfocusin={() => session.noteFocused()}
 >
 	<header
 		class="surface-toolbar flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3"
@@ -144,13 +201,51 @@
 		{/if}
 	</header>
 
-	{#if session.isExternallyStale || session.refreshError}
+	{#if session.isExternallyStale || session.refreshError || session.freshnessError}
 		<FileFreshnessBanner
 			changed={session.isExternallyStale}
 			isRefreshing={session.refreshing}
-			refreshError={session.refreshError}
+			refreshError={session.refreshError ?? session.freshnessError}
 			onRefresh={() => files.refresh(session.id)}
 		/>
+	{/if}
+
+	{#if session.document.recoveryDiscoveryError || session.document.recoveryError}
+		<div
+			class="flex shrink-0 items-center gap-2 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
+			role="status"
+		>
+			<TriangleAlert class="h-4 w-4 shrink-0" />
+			<span class="min-w-0 flex-1">
+				Browser recovery failed: {session.document.recoveryDiscoveryError ??
+					session.document.recoveryError}. Export a local copy.
+			</span>
+			{#if session.document.settledSubmissionRevision}
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={() => void files.retrySaveSettlement(session.id)}
+				>
+					Retry recovery
+				</Button>
+			{:else if session.document.recoveryDiscoveryError}
+				<Button variant="outline" size="sm" onclick={() => void files.retryRecoveryDiscovery()}>
+					Retry recovery
+				</Button>
+			{/if}
+		</div>
+	{/if}
+
+	{#if session.saveOutcomeUnknown}
+		<div
+			class="flex shrink-0 items-center gap-2 border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
+			role="status"
+		>
+			<TriangleAlert class="h-4 w-4 shrink-0" />
+			<span
+				>Save outcome is unknown. This document is locked; copy or export your work before closing.</span
+			>
+		</div>
 	{/if}
 
 	{#if session.saveError}
@@ -189,4 +284,7 @@
 			<CodeEditor {session} />
 		{/if}
 	</div>
+	{#if session.rendererMode === 'code'}
+		<FileEditorStatus {session} {compact} />
+	{/if}
 </div>

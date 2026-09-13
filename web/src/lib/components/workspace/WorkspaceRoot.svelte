@@ -77,6 +77,7 @@
 		ChatDraftAppend,
 		ChatDraftAppendResult,
 	} from '$lib/chat/composer/chat-draft-append.js';
+	import FileDialogHost from '$lib/components/files/FileDialogHost.svelte';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import {
 		renderedPortablePresentations,
@@ -528,6 +529,13 @@
 			terminalId={surface.terminalId}
 			onRename={() => (renamingTerminalId = surface.terminalId)}
 		/>
+	{:else if surface?.type === 'file'}
+		{@const fileSession = fileSessions.get(surface.fileSessionId)}
+		{#if fileSession}
+			<menu.Item onSelect={() => fileSessions.togglePinned(fileSession.id)}>
+				{fileSession.pinned ? 'Unpin File Tab' : 'Pin File Tab'}
+			</menu.Item>
+		{/if}
 	{/if}
 {/snippet}
 
@@ -698,6 +706,8 @@
 		{/each}
 	{/if}
 </div>
+
+<FileDialogHost onAppendToChatDraft={appendToChatDraft} />
 
 {#if gitBranchActions.showNewBranchModal}
 	<NewBranchModal

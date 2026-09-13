@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
 	import { resolveFileLinkFromFile } from '$lib/chat/file-links/file-link-resolver.js';
-	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import {
 		getFileSessions,
 		getLocalSettings,
@@ -12,7 +12,7 @@
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { session, presentation }: { session: FileSession; presentation: PresentationHostId } =
+	let { session, presentation }: { session: FileViewSession; presentation: PresentationHostId } =
 		$props();
 	const files = getFileSessions();
 	const localSettings = getLocalSettings();
@@ -38,6 +38,7 @@
 	function captureScroll(element: HTMLDivElement): void {
 		session.markdownScrollLeft = element.scrollLeft;
 		session.markdownScrollTop = element.scrollTop;
+		session.notePresentationChanged();
 	}
 
 	function navigateFileLink(link: MarkdownLinkNavigateEvent): boolean {

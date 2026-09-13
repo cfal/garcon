@@ -117,6 +117,7 @@ export default defineConfig({
 									id.includes('@codemirror/view') ||
 									id.includes('@codemirror/commands') ||
 									id.includes('@codemirror/merge') ||
+									id.includes('@codemirror/search') ||
 									id.includes('@codemirror/theme-one-dark')
 								)
 									return 'vendor-codemirror-editor';

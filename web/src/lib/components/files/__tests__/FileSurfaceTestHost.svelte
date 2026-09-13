@@ -31,6 +31,7 @@
 		onRefresh = () => undefined,
 		onCheckFreshness = () => undefined,
 		onOpen = () => {},
+		onOpenToSide = () => {},
 		onClose,
 		closeDisabled = false,
 	}: {
@@ -45,6 +46,7 @@
 		onRefresh?: (sessionId: string) => void;
 		onCheckFreshness?: (sessionId: string) => void;
 		onOpen?: (request: FileOpenRequest) => void;
+		onOpenToSide?: (sessionId: string, windowId: string) => void;
 		onClose?: () => void;
 		closeDisabled?: boolean;
 	} = $props();
@@ -98,6 +100,16 @@
 	fileSessions.open = async (request) => {
 		onOpen(request);
 		return null;
+	};
+	fileSessions.openToSide = async (sessionId, windowId) => {
+		onOpenToSide(sessionId, windowId);
+		return null;
+	};
+	fileSessions.showSource = async (sessionId) => {
+		if (sessionId !== session.id) return false;
+		session.markdownMode = 'source';
+		session.rendererMode = 'code';
+		return Boolean(session.editor);
 	};
 
 	localSettings.codeEditorWordWrap = false;

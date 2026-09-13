@@ -27,6 +27,7 @@ export const CODEMIRROR_PACKAGES = [
 	'@codemirror/legacy-modes',
 	'@codemirror/lint',
 	'@codemirror/merge',
+	'@codemirror/search',
 	'@codemirror/state',
 	'@codemirror/theme-one-dark',
 	'@codemirror/view',

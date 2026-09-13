@@ -29,9 +29,17 @@ import { chatBoardApi } from '$lib/api/chat-boards.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
-import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import {
+	getLocalStorageItem,
+	getSessionStorageItem,
+	LOCAL_STORAGE_KEYS,
+	SESSION_STORAGE_KEYS,
+} from '$lib/utils/local-persistence.js';
 import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
-import { parsePersistedWorkspaceLayout } from './layout-schema.js';
+import {
+	parsePersistedFileWorkspaceLayout,
+	parsePersistedWorkspaceLayout,
+} from './layout-schema.js';
 import { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TransientLayerRegistry } from './transient-layers.svelte.js';
 import { createWorkspaceContextStore } from './workspace-context.svelte.js';
@@ -40,6 +48,8 @@ import { WorkspaceDomainBindings } from './workspace-domain-bindings.svelte.js';
 import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
+import { WorkbenchCommandRegistry } from './workbench-commands.svelte.js';
+import { FILE_RECOVERY_DEPLOYMENT_ID } from '$lib/files/persistence/file-recovery-identity.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
 import { WorkspaceHostGeometryState } from './workspace-host-geometry.svelte.js';
@@ -51,8 +61,9 @@ import {
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
-import { computeWindowRects } from './window-tree.js';
+import { computeWindowRects, windowNodeById } from './window-tree.js';
 import {
+	fileSurfaceId,
 	singletonSurfaceId,
 	type DesktopPlacement,
 	type WorkspaceWindowId,
@@ -89,6 +100,7 @@ export function resolveConfiguredFilePlacement(
 export interface WorkspaceRootDependencies {
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
+	userNamespace?: string | null;
 	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	modelCatalog: ModelCatalogStore;
@@ -102,6 +114,7 @@ export interface WorkspaceRootDependencies {
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
 	workspaceLayoutRaw?: string | null;
+	fileWorkspaceLayoutRaw?: string | null;
 }
 
 export interface WorkspaceServices {
@@ -124,6 +137,7 @@ export interface WorkspaceServices {
 	windowDnd: WorkspaceWindowDndController;
 	hostGeometry: WorkspaceHostGeometryState;
 	shortcuts: WorkspaceShortcutDispatcher;
+	commands: WorkbenchCommandRegistry;
 	destroy(): void;
 }
 
@@ -132,9 +146,21 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		deps.workspaceLayoutRaw === undefined
 			? getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayout)
 			: deps.workspaceLayoutRaw;
-	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
+	const sharedRestore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
+	const browserSessionId =
+		deps.terminalIdentity.clientId ?? getSessionStorageItem(SESSION_STORAGE_KEYS.terminalClientId);
+	let fileWorkspaceLayoutRaw = deps.fileWorkspaceLayoutRaw;
+	if (fileWorkspaceLayoutRaw === undefined) {
+		fileWorkspaceLayoutRaw =
+			deps.workspaceLayoutRaw === undefined
+				? getSessionStorageItem(SESSION_STORAGE_KEYS.workspaceFileLayout)
+				: null;
+	}
+	const fileRestore = parsePersistedFileWorkspaceLayout(fileWorkspaceLayoutRaw, browserSessionId);
+	const restore = fileRestore.source === 'valid' ? fileRestore : sharedRestore;
 	const layout = createWorkspaceLayoutStore(restore.snapshot);
 	const persistence = new WorkspaceLayoutPersistence({
+		getBrowserSessionId: () => deps.terminalIdentity.clientId,
 		onError: (_error, retry) => {
 			deps.notifications.error(m.workspace_layout_persistence_failed(), {
 				key: 'workspace-layout-persistence',
@@ -362,10 +388,43 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				return Number.parseInt(deps.localSettings.codeEditorFontSize, 10) || 12;
 			},
 		}),
-		getPlacement: (): WorkspaceCoordinator => {
+		getPlacement: () => {
 			if (!placement) throw new Error('Workspace placement is not ready');
-			return placement;
+			return {
+				placeFileSession: (sessionId, target, publication) =>
+					placement!.placeFileSession(sessionId, target, publication),
+				restoreFileSession: (sessionId, target, publication) =>
+					placement!.restoreFileSession(sessionId, target, publication),
+				focusFileSession: (sessionId) => placement!.focusFileSession(sessionId),
+				closeFileSession: (sessionId) => placement!.closeSurface(fileSurfaceId(sessionId)),
+				filePlacement: (sessionId) => {
+					const surfaceId = fileSurfaceId(sessionId);
+					if (placement!.layout.snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
+					if (placement!.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId)) return 'mobile';
+					return placement!.windowOf(surfaceId);
+				},
+				resolveRestoredPlacement: (host) => {
+					if (host === 'mobile') return undefined;
+					if (host === 'dialog') return { type: 'dialog' };
+					if (windowNodeById(placement!.layout.snapshot.desktopRoot, host)) {
+						return { type: 'window', windowId: host };
+					}
+					return { type: 'new-window', anchorWindowId: placement!.defaultWindowId };
+				},
+				removeUnclaimedRestoredFileSurfaces: async (viewIds) => {
+					const claimed = new Set(viewIds);
+					const orphans = Object.values(placement!.layout.snapshot.surfaces).filter(
+						(surface) =>
+							surface.type === 'file' &&
+							!files.get(surface.fileSessionId) &&
+							!claimed.has(surface.fileSessionId),
+					);
+					for (const surface of orphans) await placement!.closeSurface(surface.id);
+				},
+			};
 		},
+		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
+		browserSessionId: deps.terminalIdentity.clientId ?? `pending-${crypto.randomUUID()}`,
 		onOpenError: (request, error) => {
 			console.error('Failed to resolve file identity', error);
 			deps.notifications.error(
@@ -376,6 +435,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			);
 		},
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
+		userNamespace: deps.userNamespace || null,
+		isDocumentVisible: (documentId) =>
+			[...(files.documents[documentId]?.viewIds ?? [])].some((viewId) =>
+				placement?.isSurfacePresented(fileSurfaceId(viewId)),
+			),
 	});
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
@@ -394,6 +458,10 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished();
 			persistence.schedule(snapshot);
+			for (const session of files.all) {
+				void files.persistView(session.id);
+				files.viewVisibilityChanged(session.id);
+			}
 		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,
@@ -411,12 +479,23 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			});
 		},
 	});
+	const commands = new WorkbenchCommandRegistry({
+		workspace: coordinator,
+		files,
+		terminals,
+		appShell: deps.appShell,
+		ghCapability: deps.ghCapability,
+		filesSurface: () => singletonSurfaces.files(),
+		onError: (error) =>
+			deps.notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
+	});
 	const shortcuts = new WorkspaceShortcutDispatcher({
 		workspace: coordinator,
 		transients: transientLayers,
 		appShell: deps.appShell,
 		navigation: deps.navigation,
 		files,
+		commands,
 		localSettings: deps.localSettings,
 	});
 
@@ -440,12 +519,14 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		windowDnd,
 		hostGeometry,
 		shortcuts,
+		commands,
 		destroy() {
 			windowDnd.endDrag();
 			unregisterWorkspaceInteraction();
 			domainBindings.destroy();
 			terminalLayoutBinding?.destroy();
 			terminals.destroy();
+			void files.destroyAll();
 			surfaceFrames.destroy();
 			singletonSurfaces.destroy();
 			gitQuickSummary.destroy();

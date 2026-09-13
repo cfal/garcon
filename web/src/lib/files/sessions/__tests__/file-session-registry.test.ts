@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { undoDepth } from '@codemirror/commands';
+import { EditorView } from '@codemirror/view';
 import type { CanonicalFileIdentity, FileRevisionResponse } from '$shared/file-contracts';
 import type { FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
@@ -17,6 +19,12 @@ import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
 import { ApiError } from '$lib/api/client.js';
 import { ModuleImportError } from '$lib/utils/module-import-error.js';
+import { FileDocumentRuntime } from '$lib/files/editor/file-document-runtime.js';
+import {
+	createMemoryFileDraftRepository,
+	type SpaFileDraftV1,
+	type SpaFileViewV1,
+} from '$lib/files/persistence/file-draft-repository.js';
 
 const testEditorRuntime: FileEditorRuntimeModule =
 	await import('$lib/files/editor/code-editor-controller.svelte.js');
@@ -52,6 +60,28 @@ function editorRuntime(): Promise<FileEditorRuntimeModule> {
 	return Promise.resolve(testEditorRuntime);
 }
 
+function storedDraft(
+	overrides: Partial<SpaFileDraftV1> &
+		Pick<SpaFileDraftV1, 'documentId' | 'normalizedRelativePath' | 'content'>,
+): SpaFileDraftV1 {
+	return {
+		schemaVersion: 1,
+		deploymentId: 'test-deployment',
+		userNamespace: 'test-user',
+		browserSessionId: 'test-session',
+		canonicalFileRootPath: '/workspace',
+		diskRevision: 'v1:initial',
+		baselineContent: 'initial',
+		bufferVersion: 1,
+		savedAt: 1,
+		generation: 1,
+		unknownSubmission: null,
+		closed: false,
+		...overrides,
+		displayPath: overrides.displayPath ?? overrides.normalizedRelativePath,
+	};
+}
+
 function createHarness(
 	options: {
 		placementResult?: FilePlacementResult;
@@ -61,11 +91,15 @@ function createHarness(
 		onPublish?: (registry: FileSessionRegistry) => void | Promise<void>;
 		loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
 		reloadApplication?: () => void;
+		draftRepository?: import('$lib/files/persistence/file-draft-repository.js').FileDraftRepository;
+		saveSoftTimeoutMs?: number;
+		placement?: FilePlacementPort;
+		userNamespace?: string | null;
 	} = {},
 ) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
 	const focusCalls: string[] = [];
-	const placement: FilePlacementPort = {
+	const defaultPlacement: FilePlacementPort = {
 		async placeFileSession(sessionId, target, publication) {
 			placementCalls.push({ sessionId, target });
 			if (options.placementResult === 'cancelled') return 'cancelled';
@@ -77,6 +111,7 @@ function createHarness(
 			focusCalls.push(sessionId);
 		},
 	};
+	const placement = options.placement ?? defaultPlacement;
 	const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
 		success: true as const,
 		identity: identity(relativePath.replace(/^alias\//, '')),
@@ -120,6 +155,10 @@ function createHarness(
 			},
 		}),
 		getPlacement: () => placement,
+		draftRepository: options.draftRepository ?? createMemoryFileDraftRepository(),
+		deploymentId: 'test-deployment',
+		userNamespace: options.userNamespace === undefined ? 'test-user' : options.userNamespace,
+		browserSessionId: 'test-session',
 		resolveFileIdentity,
 		getFileRevision,
 		readText,
@@ -127,6 +166,7 @@ function createHarness(
 		saveText,
 		loadEditorRuntime: options.loadEditorRuntime,
 		reloadApplication: options.reloadApplication,
+		saveSoftTimeoutMs: options.saveSoftTimeoutMs,
 		onOpenError,
 	});
 	return {
@@ -382,6 +422,69 @@ describe('FileSessionRegistry', () => {
 		expect(opened.content).toBe('initial');
 	});
 
+	it('retries editor initialization after switching Markdown to source', async () => {
+		const loadEditorRuntime = vi.fn(editorRuntime);
+		loadEditorRuntime.mockRejectedValueOnce(new Error('Editor chunk unavailable'));
+		const harness = createHarness({ loadEditorRuntime });
+		const opened = await harness.registry.open(request('README.md'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+
+		await expect(harness.registry.showSource(opened.id)).resolves.toBe(false);
+		expect(opened.loadError).toBe('Editor chunk unavailable');
+		expect(opened.loadedRevision).toBe('v1:initial');
+
+		await harness.registry.reload(opened.id);
+
+		expect(loadEditorRuntime).toHaveBeenCalledTimes(2);
+		expect(harness.readText).toHaveBeenCalledOnce();
+		expect(opened.loadError).toBeNull();
+		expect(opened.editor).toBeTruthy();
+	});
+
+	it('preserves source-editor initialization errors across automatic disk reloads', async () => {
+		const loadEditorRuntime = vi.fn(editorRuntime);
+		loadEditorRuntime.mockRejectedValueOnce(new Error('Editor chunk unavailable'));
+		const harness = createHarness({ loadEditorRuntime });
+		const opened = await harness.registry.open(request('README.md'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		await expect(harness.registry.showSource(opened.id)).resolves.toBe(false);
+		harness.getFileRevision.mockResolvedValueOnce({ status: 'ready', revision: 'v1:external' });
+		harness.readText.mockResolvedValueOnce({
+			content: 'external content',
+			path: '/workspace/README.md',
+			revision: 'v1:external',
+		});
+
+		await harness.registry.checkFreshness(opened.id);
+
+		expect(opened.content).toBe('external content');
+		expect(opened.loadError).toBe('Editor chunk unavailable');
+		expect(opened.editor).toBeNull();
+		await harness.registry.reload(opened.id);
+		expect(opened.loadError).toBeNull();
+		expect(opened.editor).toBeTruthy();
+	});
+
+	it('reloads the page for a cached module failure after switching Markdown to source', async () => {
+		const reloadApplication = vi.fn();
+		const loadEditorRuntime = vi
+			.fn<() => Promise<FileEditorRuntimeModule>>()
+			.mockRejectedValue(new ModuleImportError(new Error('Editor chunk unavailable')));
+		const harness = createHarness({ loadEditorRuntime, reloadApplication });
+		const opened = await harness.registry.open(request('README.md'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+
+		await expect(harness.registry.showSource(opened.id)).resolves.toBe(false);
+		expect(opened.loadErrorRequiresPageReload).toBe(true);
+		await harness.registry.reload(opened.id);
+
+		expect(reloadApplication).toHaveBeenCalledOnce();
+		expect(loadEditorRuntime).toHaveBeenCalledOnce();
+	});
+
 	it('reloads the page when a browser-cached editor module import fails', async () => {
 		const reloadApplication = vi.fn();
 		const loadEditorRuntime = vi
@@ -420,12 +523,148 @@ describe('FileSessionRegistry', () => {
 		const opened = await harness.registry.open(request('src/disposed.ts'));
 		if (!opened) throw new Error('Expected file session');
 
-		harness.registry.destroy(opened.id);
+		const destruction = harness.registry.destroy(opened.id);
 		runtime.resolve(await editorRuntime());
+		await destruction;
 
 		await vi.waitFor(() => expect(opened.loading).toBe(false));
 		expect(opened.editor).toBeNull();
 		expect(harness.registry.get(opened.id)).toBeNull();
+	});
+
+	it('serializes reopening behind last-view recovery cleanup', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const allowDelete = deferred<void>();
+		const deleteDraft = repository.deleteDraft.bind(repository);
+		repository.deleteDraft = vi.fn(async (documentId, generation) => {
+			await allowDelete.promise;
+			await deleteDraft(documentId, generation);
+		});
+		const harness = createHarness({ draftRepository: repository });
+		const opened = await harness.registry.open(request('src/reopen.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+
+		const destruction = harness.registry.destroy(opened.id);
+		await vi.waitFor(() => expect(harness.registry.get(opened.id)).toBeNull());
+		const reopening = harness.registry.open(request('src/reopen.ts'));
+		let reopenedEarly = false;
+		void reopening.then(() => (reopenedEarly = true));
+		await Promise.resolve();
+		expect(reopenedEarly).toBe(false);
+
+		allowDelete.resolve();
+		await destruction;
+		const reopened = await reopening;
+		if (!reopened) throw new Error('Expected reopened file session');
+		await vi.waitFor(() => expect(reopened.loading).toBe(false));
+		expect(harness.registry.documents[reopened.document.id]).toBe(reopened.document);
+		expect(reopened.document.editorRuntime).not.toBeNull();
+		reopened.content = 'reopened edit';
+		await harness.registry.flushRecovery();
+		expect(await repository.getDrafts('test-user', 'test-deployment', 'test-session')).toHaveLength(
+			1,
+		);
+	});
+
+	it('waits for teardowns appended while reopening the same identity', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const allowFirstDelete = deferred<void>();
+		const allowSecondDelete = deferred<void>();
+		const deleteView = repository.deleteView.bind(repository);
+		let deleteViewCount = 0;
+		repository.deleteView = vi.fn(async (viewId, userNamespace, deploymentId, browserSessionId) => {
+			deleteViewCount += 1;
+			await (deleteViewCount === 1 ? allowFirstDelete.promise : allowSecondDelete.promise);
+			await deleteView(viewId, userNamespace, deploymentId, browserSessionId);
+		});
+		const harness = createHarness({ draftRepository: repository });
+		const first = await harness.registry.open(request('src/chained-reopen.ts'));
+		if (!first) throw new Error('Expected first file session');
+		const second = await harness.registry.open({
+			...request('src/chained-reopen.ts'),
+			openToSide: true,
+		});
+		if (!second) throw new Error('Expected second file session');
+		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
+
+		const firstDestruction = harness.registry.destroy(first.id);
+		await vi.waitFor(() => expect(repository.deleteView).toHaveBeenCalledTimes(1));
+		const reopening = harness.registry.open(request('src/chained-reopen.ts'));
+		await vi.waitFor(() => expect(harness.resolveFileIdentity).toHaveBeenCalledTimes(3));
+		await Promise.resolve();
+		let reopenedEarly = false;
+		void reopening.then(() => (reopenedEarly = true));
+		const secondDestruction = harness.registry.destroy(second.id);
+
+		allowFirstDelete.resolve();
+		await vi.waitFor(() => expect(repository.deleteView).toHaveBeenCalledTimes(2));
+		await Promise.resolve();
+		expect(reopenedEarly).toBe(false);
+
+		allowSecondDelete.resolve();
+		await Promise.all([firstDestruction, secondDestruction]);
+		const reopened = await reopening;
+		if (!reopened) throw new Error('Expected reopened file session');
+		await vi.waitFor(() => expect(reopened.loading).toBe(false));
+		expect(reopened.id).not.toBe(first.id);
+		expect(reopened.id).not.toBe(second.id);
+		expect(harness.registry.documents[reopened.document.id]).toBe(reopened.document);
+		reopened.content = 'reopened edit';
+		await harness.registry.flushRecovery();
+		expect(await repository.getDrafts('test-user', 'test-deployment', 'test-session')).toHaveLength(
+			1,
+		);
+	});
+
+	it('rechecks teardown after a same-identity side open waits in the creation queue', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const allowPlacement = deferred<void>();
+		const allowDelete = deferred<void>();
+		const deleteView = repository.deleteView.bind(repository);
+		repository.deleteView = vi.fn(async (viewId, userNamespace, deploymentId, browserSessionId) => {
+			await allowDelete.promise;
+			await deleteView(viewId, userNamespace, deploymentId, browserSessionId);
+		});
+		let placementCount = 0;
+		const placement: FilePlacementPort = {
+			async placeFileSession(_sessionId, _target, publication) {
+				placementCount += 1;
+				if (placementCount === 2) await allowPlacement.promise;
+				publication.publish();
+				return 'placed';
+			},
+			async focusFileSession() {},
+		};
+		const harness = createHarness({ draftRepository: repository, placement });
+		const original = await harness.registry.open(request('src/queued-reopen.ts'));
+		if (!original) throw new Error('Expected original file session');
+		await vi.waitFor(() => expect(original.loading).toBe(false));
+
+		const blocker = harness.registry.open(request('src/placement-blocker.ts'));
+		await vi.waitFor(() => expect(placementCount).toBe(2));
+		const reopening = harness.registry.open({
+			...request('src/queued-reopen.ts'),
+			openToSide: true,
+		});
+		await vi.waitFor(() => expect(harness.resolveFileIdentity).toHaveBeenCalledTimes(3));
+		const destruction = harness.registry.destroy(original.id);
+		await vi.waitFor(() => expect(repository.deleteView).toHaveBeenCalledOnce());
+
+		allowPlacement.resolve();
+		await blocker;
+		await Promise.resolve();
+		expect(placementCount).toBe(2);
+
+		allowDelete.resolve();
+		await destruction;
+		const reopened = await reopening;
+		if (!reopened) throw new Error('Expected reopened file session');
+		await vi.waitFor(() => expect(reopened.loading).toBe(false));
+		expect(placementCount).toBe(3);
+		expect(harness.registry.documents[reopened.document.id]).toBe(reopened.document);
+		expect(reopened.document).not.toBe(original.document);
+		expect(reopened.document.editorRuntime).not.toBeNull();
 	});
 
 	it('focuses an existing identity without moving or duplicating it', async () => {
@@ -493,6 +732,122 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.guardRequest).toBeNull();
 	});
 
+	it('guards overlapping closes when their reservations remove the final document views', async () => {
+		const harness = createHarness();
+		const first = await harness.registry.open(request('src/concurrent-close.ts'));
+		if (!first) throw new Error('Expected first file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+		const second = await harness.registry.open({
+			...request('src/concurrent-close.ts'),
+			openToSide: true,
+		});
+		if (!second) throw new Error('Expected second file session');
+		first.content = 'local edits';
+
+		const firstAdmission = harness.registry.prepareDestructiveViews([first.id], 'close');
+		const secondAdmission = harness.registry.prepareDestructiveViews([second.id], 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(second.id));
+		harness.registry.resolveGuard('cancel');
+
+		const firstRelease = await firstAdmission;
+		expect(firstRelease).toBeTypeOf('function');
+		await expect(secondAdmission).resolves.toBeNull();
+		firstRelease?.();
+		expect(harness.registry.guardRequest).toBeNull();
+
+		const admissionAfterRelease = await harness.registry.prepareDestructiveViews(
+			[first.id],
+			'close',
+		);
+		expect(admissionAfterRelease).toBeTypeOf('function');
+		expect(harness.registry.guardRequest).toBeNull();
+		admissionAfterRelease?.();
+	});
+
+	it('rejects a discard close when the buffer changes during recovery deletion', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const opened = await harness.registry.open(request('src/discard-race.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'old edit';
+		const deletion = deferred<void>();
+		const deleteDraft = repository.deleteDraft.bind(repository);
+		vi.spyOn(repository, 'deleteDraft').mockImplementation(async (...args) => {
+			await deletion.promise;
+			await deleteDraft(...args);
+		});
+
+		const closing = harness.registry.prepareDestructiveViews([opened.id], 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(opened.id));
+		harness.registry.resolveGuard('discard');
+		await vi.waitFor(() => expect(repository.deleteDraft).toHaveBeenCalled());
+		opened.content = 'new edit after discard';
+		deletion.resolve();
+
+		await expect(closing).resolves.toBeNull();
+		expect(opened.content).toBe('new edit after discard');
+		expect(opened.dirty).toBe(true);
+	});
+
+	it('revalidates every discarded document after all bulk-close decisions settle', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const first = await harness.registry.open(request('src/bulk-first.ts'));
+		const second = await harness.registry.open(request('src/bulk-second.ts'));
+		if (!first || !second) throw new Error('Expected file sessions');
+		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
+		first.content = 'first edit';
+		second.content = 'second edit';
+		const secondDeletion = deferred<void>();
+		const deleteDraft = repository.deleteDraft.bind(repository);
+		let deletionCount = 0;
+		vi.spyOn(repository, 'deleteDraft').mockImplementation(async (...args) => {
+			deletionCount += 1;
+			if (deletionCount === 2) await secondDeletion.promise;
+			await deleteDraft(...args);
+		});
+
+		const closing = harness.registry.prepareDestructiveViews([first.id, second.id], 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(first.id));
+		harness.registry.resolveGuard('discard');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(second.id));
+		harness.registry.resolveGuard('discard');
+		await vi.waitFor(() => expect(deletionCount).toBe(2));
+		first.content = 'new edit during the second decision';
+		secondDeletion.resolve();
+
+		await expect(closing).resolves.toBeNull();
+		expect(first.content).toBe('new edit during the second decision');
+		expect(first.dirty).toBe(true);
+	});
+
+	it('releases close reservations when recovery deletion rejects', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const first = await harness.registry.open(request('src/failed-close.ts'));
+		if (!first) throw new Error('Expected first file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+		const second = await harness.registry.open({
+			...request('src/failed-close.ts'),
+			openToSide: true,
+		});
+		if (!second) throw new Error('Expected second file session');
+		first.content = 'first edit';
+		vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('quota'));
+
+		const failed = harness.registry.prepareDestructiveViews([first.id, second.id], 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest).toBeTruthy());
+		harness.registry.resolveGuard('discard');
+		await expect(failed).rejects.toThrow('quota');
+		first.content = 'second edit';
+
+		const singleViewClose = await harness.registry.prepareDestructiveViews([first.id], 'close');
+		expect(singleViewClose).toBeTypeOf('function');
+		expect(harness.registry.guardRequest).toBeNull();
+		singleViewClose?.();
+	});
+
 	it('cancels an owned guard when its session is destroyed', async () => {
 		const harness = createHarness();
 		const first = await harness.registry.open(request('src/first.ts'));
@@ -506,7 +861,7 @@ describe('FileSessionRegistry', () => {
 
 		const firstDecision = harness.registry.confirmDestructive(first.id, 'refresh');
 		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(first.id));
-		harness.registry.destroy(first.id);
+		await harness.registry.destroy(first.id);
 		await expect(firstDecision).resolves.toBe(false);
 
 		const secondDecision = harness.registry.confirmDestructive(second.id, 'close');
@@ -515,7 +870,7 @@ describe('FileSessionRegistry', () => {
 		await expect(secondDecision).resolves.toBe(true);
 	});
 
-	it('keeps dirty content and placement state after save failure', async () => {
+	it('guards an ambiguous save failure as an unknown outcome', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('src/file.ts'));
 		if (!opened) throw new Error('Expected file session');
@@ -527,7 +882,24 @@ describe('FileSessionRegistry', () => {
 		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
 		expect(opened.dirty).toBe(true);
 		expect(opened.content).toBe('changed');
-		expect(opened.saveError).toBe('Disk full');
+		expect(opened.saveOutcomeUnknown).toBe(true);
+		expect(opened.saveError).toContain('outcome is unknown');
+	});
+
+	it('guards an INTERNAL_ERROR Save response as an unknown outcome', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/internal-save-error.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'changed';
+		harness.saveText.mockRejectedValueOnce(
+			new ApiError(500, 'Internal server error', 'INTERNAL_ERROR'),
+		);
+
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+
+		expect(opened.saveOutcomeUnknown).toBe(true);
+		expect(opened.document.pendingSubmission?.content).toBe('changed');
 	});
 
 	it('keeps edits made during a save dirty and serializes saves per session', async () => {
@@ -574,13 +946,13 @@ describe('FileSessionRegistry', () => {
 				expectedRevision: 'v1:first-save',
 				conflictResolution: 'reject',
 			},
-			{ signal: expect.any(AbortSignal) },
+			{ signal: expect.any(AbortSignal), timeoutMs: null },
 		);
 		expect(opened.baseline).toBe('newer edit');
 		expect(opened.dirty).toBe(false);
 	});
 
-	it('aborts an in-flight save when its session is destroyed', async () => {
+	it('keeps an in-flight save alive when its last view is destroyed', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('src/file.ts'));
 		if (!opened) throw new Error('Expected file session');
@@ -599,12 +971,13 @@ describe('FileSessionRegistry', () => {
 		await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
 		const signal = harness.saveText.mock.calls[0]?.[1]?.signal;
 		expect(signal).toBeInstanceOf(AbortSignal);
-		harness.registry.destroy(opened.id);
-		expect(signal?.aborted).toBe(true);
-		pending.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+		const destruction = harness.registry.destroy(opened.id);
+		expect(signal?.aborted).toBe(false);
+		pending.reject(new Error('connection lost'));
 
+		await destruction;
 		await expect(save).resolves.toBe(false);
-		expect(opened.saveError).toBeNull();
+		expect(opened.saveOutcomeUnknown).toBe(true);
 	});
 
 	it('ignores a freshness response that started before save', async () => {
@@ -625,6 +998,56 @@ describe('FileSessionRegistry', () => {
 
 		expect(opened.loadedRevision).toBe('v1:saved');
 		expect(opened.isExternallyStale).toBe(false);
+	});
+
+	it('preserves history when a freshness response crosses Save acknowledgement', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/poll-save.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		if (!opened.editor) throw new Error('Expected a loaded code editor');
+		const host = document.createElement('div');
+		document.body.append(host);
+		const lease = opened.editor.attach(host);
+		const editorElement = host.querySelector<HTMLElement>('.cm-editor');
+		if (!editorElement) throw new Error('Expected CodeMirror editor');
+		const editor = EditorView.findFromDOM(editorElement);
+		if (!editor) throw new Error('Expected CodeMirror view');
+		try {
+			editor.dispatch({ changes: { from: 0, insert: 'saved edit ' }, userEvent: 'input.type' });
+			const saveResponse = deferred<{
+				success: true;
+				path: string;
+				message: string;
+				revision: string;
+			}>();
+			harness.saveText.mockReturnValueOnce(saveResponse.promise);
+			const save = harness.registry.save(opened.id);
+			await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
+			const freshness = deferred<FileRevisionResponse>();
+			harness.getFileRevision.mockReturnValueOnce(freshness.promise);
+			const check = harness.registry.checkFreshness(opened.id);
+			saveResponse.resolve({
+				success: true,
+				path: '/workspace/src/poll-save.ts',
+				message: 'saved',
+				revision: 'v1:saved',
+			});
+			await expect(save).resolves.toBe(true);
+			const runtime = opened.document.editorRuntime;
+			if (!(runtime instanceof FileDocumentRuntime)) throw new Error('Expected document runtime');
+			const depth = undoDepth(runtime.canonicalState);
+
+			freshness.resolve({ status: 'ready', revision: 'v1:initial' });
+			await check;
+
+			expect(undoDepth(runtime.canonicalState)).toBe(depth);
+			expect(harness.readText).toHaveBeenCalledOnce();
+			expect(opened.loadedRevision).toBe('v1:saved');
+		} finally {
+			opened.editor.detach(lease);
+			host.remove();
+		}
 	});
 
 	it('re-prompts a destructive guard when edits arrive during Save', async () => {
@@ -685,12 +1108,19 @@ describe('FileSessionRegistry', () => {
 			revision: 'v1:external',
 		});
 
+		harness.readText.mockResolvedValueOnce({
+			content: 'external',
+			path: '/workspace/src/first.ts',
+			revision: 'v1:external',
+		});
 		await harness.registry.checkFreshness(first.id);
 
-		expect(first.isExternallyStale).toBe(true);
+		expect(first.isExternallyStale).toBe(false);
+		expect(first.content).toBe('external');
+		expect(first.loadedRevision).toBe('v1:external');
 		expect(second.isExternallyStale).toBe(false);
 		await harness.registry.checkFreshness(first.id);
-		expect(harness.getFileRevision).toHaveBeenCalledTimes(1);
+		expect(harness.getFileRevision).toHaveBeenCalledTimes(2);
 	});
 
 	it('treats deletion as stale without turning polling errors into changes', async () => {
@@ -709,6 +1139,54 @@ describe('FileSessionRegistry', () => {
 		expect(missing.isExternallyStale).toBe(true);
 		expect(offline.isExternallyStale).toBe(false);
 		expect(offline.freshnessError).toBe('offline');
+	});
+
+	it('preserves edits made while polling reads changed disk content', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/poll-race.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		const read = deferred<{ content: string; path: string; revision: string }>();
+		harness.getFileRevision.mockResolvedValueOnce({ status: 'ready', revision: 'v1:external' });
+		harness.readText.mockReturnValueOnce(read.promise);
+
+		const check = harness.registry.checkFreshness(opened.id);
+		await vi.waitFor(() => expect(harness.readText).toHaveBeenCalledTimes(2));
+		opened.content = 'local while polling';
+		read.resolve({
+			content: 'external',
+			path: '/workspace/src/poll-race.ts',
+			revision: 'v1:external',
+		});
+		await check;
+
+		expect(opened.content).toBe('local while polling');
+		expect(opened.dirty).toBe(true);
+		expect(opened.isExternallyStale).toBe(true);
+		expect(opened.document.diskContent).toBe('external');
+	});
+
+	it('keeps polling a missing document and reloads it when recreated', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/recreated.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		harness.getFileRevision
+			.mockResolvedValueOnce({ status: 'missing' })
+			.mockResolvedValueOnce({ status: 'ready', revision: 'v1:recreated' });
+		harness.readText.mockResolvedValueOnce({
+			content: 'recreated',
+			path: '/workspace/src/recreated.ts',
+			revision: 'v1:recreated',
+		});
+
+		await harness.registry.checkFreshness(opened.id);
+		expect(opened.document.missing).toBe(true);
+		await harness.registry.checkFreshness(opened.id);
+
+		expect(opened.document.missing).toBe(false);
+		expect(opened.content).toBe('recreated');
+		expect(opened.loadedRevision).toBe('v1:recreated');
 	});
 
 	it('keeps current content mounted while a refresh loads the latest revision', async () => {
@@ -826,6 +1304,29 @@ describe('FileSessionRegistry', () => {
 		expect(opened.saveError).toBeNull();
 	});
 
+	it('accepts the displayed disk snapshot from a stale Save decision', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+		opened.isExternallyStale = true;
+		harness.readText.mockResolvedValueOnce({
+			content: 'disk',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:disk',
+		});
+
+		const save = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:disk'));
+		harness.registry.resolveOverwrite('accept-disk');
+		await save;
+
+		expect(opened.content).toBe('disk');
+		expect(opened.loadedRevision).toBe('v1:disk');
+		expect(opened.dirty).toBe(false);
+	});
+
 	it('confirms an already-stale save before sending one overwrite request', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('src/file.ts'));
@@ -838,7 +1339,7 @@ describe('FileSessionRegistry', () => {
 		const save = harness.registry.save(opened.id);
 		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.sessionId).toBe(opened.id));
 		expect(harness.saveText).not.toHaveBeenCalled();
-		harness.registry.resolveOverwrite('overwrite');
+		harness.registry.resolveOverwrite('overwrite', 'merged local');
 
 		await expect(save).resolves.toBe(true);
 		expect(harness.saveText).toHaveBeenCalledOnce();
@@ -846,12 +1347,14 @@ describe('FileSessionRegistry', () => {
 			{
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
-				content: 'local',
+				content: 'merged local',
 				expectedRevision: 'v1:initial',
 				conflictResolution: 'overwrite',
 			},
-			{ signal: expect.any(AbortSignal) },
+			{ signal: expect.any(AbortSignal), timeoutMs: null },
 		);
+		expect(opened.content).toBe('merged local');
+		expect(opened.dirty).toBe(false);
 	});
 
 	it('retries one captured snapshot after explicit overwrite confirmation', async () => {
@@ -879,11 +1382,203 @@ describe('FileSessionRegistry', () => {
 				expectedRevision: 'v1:initial',
 				conflictResolution: 'overwrite',
 			},
-			{ signal: expect.any(AbortSignal) },
+			{ signal: expect.any(AbortSignal), timeoutMs: null },
 		);
 		expect(opened.loadedRevision).toBe('v1:saved');
 		expect(opened.isExternallyStale).toBe(false);
 		expect(opened.dirty).toBe(false);
+	});
+
+	it('applies a merge to the buffer version shown after a Save conflict', async () => {
+		const harness = createHarness();
+		const firstSave = deferred<{
+			success: true;
+			path: string;
+			message: string;
+			revision: string;
+		}>();
+		harness.saveText.mockReturnValueOnce(firstSave.promise);
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'submitted local';
+
+		const save = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
+		opened.content = 'later local that will be compared';
+		firstSave.reject(new ApiError(409, 'File changed on disk', 'FILE_REVISION_CONFLICT'));
+		await vi.waitFor(() =>
+			expect(harness.registry.overwriteRequest?.localContent).toBe(
+				'later local that will be compared',
+			),
+		);
+		harness.registry.resolveOverwrite('save-checked', 'explicit merged result');
+
+		await expect(save).resolves.toBe(true);
+		expect(opened.content).toBe('explicit merged result');
+		expect(opened.baseline).toBe('explicit merged result');
+		expect(opened.dirty).toBe(false);
+	});
+
+	it('executes a checked Save selected from the comparison workflow', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+		harness.readText.mockResolvedValueOnce({
+			content: 'disk',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:disk',
+		});
+
+		const compare = harness.registry.showConflict(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:disk'));
+		harness.registry.resolveOverwrite('save-checked');
+		await compare;
+
+		expect(harness.saveText).toHaveBeenCalledWith(
+			expect.objectContaining({
+				content: 'local',
+				expectedRevision: 'v1:disk',
+				conflictResolution: 'reject',
+			}),
+			{ signal: expect.any(AbortSignal), timeoutMs: null },
+		);
+	});
+
+	it('keeps mixed-line-ending comparison actions nonmutating', async () => {
+		const harness = createHarness();
+		harness.readText
+			.mockResolvedValueOnce({
+				content: 'a\r\nb\nc',
+				path: '/workspace/src/mixed.ts',
+				revision: 'v1:mixed',
+			})
+			.mockResolvedValue({
+				content: 'disk',
+				path: '/workspace/src/mixed.ts',
+				revision: 'v1:disk',
+			});
+		const opened = await harness.registry.open(request('src/mixed.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		expect(opened.document.mixedLineEndings).toBe(true);
+
+		const checked = harness.registry.showConflict(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
+		harness.registry.resolveOverwrite('save-checked', 'normalized checked');
+		await checked;
+
+		const overwrite = harness.registry.showConflict(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
+		harness.registry.resolveOverwrite('overwrite', 'normalized overwrite');
+		await overwrite;
+
+		expect(harness.saveText).not.toHaveBeenCalled();
+		expect(opened.content).not.toContain('normalized');
+	});
+
+	it('submits against the exact disk revision displayed by the conflict dialog', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+		harness.readText.mockResolvedValueOnce({
+			content: 'disk-r3',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:r3',
+		});
+
+		const compare = harness.registry.showConflict(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:r3'));
+		opened.document.diskRevision = 'v1:r4';
+		opened.document.diskContent = 'disk-r4';
+		harness.registry.resolveOverwrite('save-checked', 'merged');
+		await compare;
+
+		expect(harness.saveText).toHaveBeenCalledWith(
+			expect.objectContaining({ content: 'merged', expectedRevision: 'v1:r3' }),
+			{ signal: expect.any(AbortSignal), timeoutMs: null },
+		);
+		expect(opened.content).toBe('merged');
+		expect(opened.dirty).toBe(false);
+	});
+
+	it('blocks Accept Disk while a Save outcome is unknown', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+		opened.document.saveOutcome = 'unknown';
+		opened.document.pendingSubmission = {
+			submissionId: 'pending',
+			resourceKey: opened.identityKey,
+			expectedDiskRevision: opened.loadedRevision!,
+			submittedBufferVersion: opened.document.bufferVersion,
+			conflictIntent: 'overwrite',
+			content: 'submitted',
+			startedAt: 1,
+		};
+
+		await harness.registry.showConflict(opened.id);
+
+		expect(harness.registry.overwriteRequest).toBeNull();
+		expect(opened.content).toBe('local');
+	});
+
+	it('rejects Accept Disk after the local buffer changes behind the comparison', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/accept-disk-race.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'displayed local';
+		harness.readText.mockResolvedValueOnce({
+			content: 'displayed disk',
+			path: '/workspace/src/accept-disk-race.ts',
+			revision: 'v1:disk',
+		});
+
+		const comparison = harness.registry.showConflict(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
+		opened.content = 'newer local edit';
+		harness.registry.resolveOverwrite('accept-disk');
+		await comparison;
+
+		expect(opened.content).toBe('newer local edit');
+		expect(opened.dirty).toBe(true);
+		expect(opened.saveError).toContain('buffer changed');
+	});
+
+	it('keeps Save ownership through a conflict retry that times out', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository, saveSoftTimeoutMs: 1 });
+		const retry = deferred<{ success: true; path: string; message: string; revision: string }>();
+		harness.saveText
+			.mockRejectedValueOnce(new ApiError(409, 'File changed', 'FILE_REVISION_CONFLICT'))
+			.mockReturnValueOnce(retry.promise);
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+
+		const save = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
+		expect(opened.pendingMutationCount).toBe(1);
+		harness.registry.resolveOverwrite('overwrite');
+		await expect(save).resolves.toBe(false);
+		expect(opened.saveOutcomeUnknown).toBe(true);
+		expect(opened.pendingMutationCount).toBe(1);
+		retry.resolve({
+			success: true,
+			path: '/workspace/src/file.ts',
+			message: 'saved',
+			revision: 'v1:late',
+		});
+		await vi.waitFor(() => expect(opened.saveOutcomeUnknown).toBe(false));
+		expect(opened.pendingMutationCount).toBe(0);
 	});
 
 	it('serializes overwrite dialogs across independent sessions', async () => {
@@ -981,7 +1676,7 @@ describe('FileSessionRegistry', () => {
 
 		const refresh = harness.registry.refresh(opened.id);
 		await vi.waitFor(() => expect(opened.refreshing).toBe(true));
-		harness.registry.destroy(opened.id);
+		await harness.registry.destroy(opened.id);
 		pending.resolve({ blob: new Blob(['abandoned']), revision: 'v1:abandoned' });
 		await refresh;
 
@@ -1031,6 +1726,725 @@ describe('FileSessionRegistry', () => {
 
 		expect(opened.loadedRevision).toBe('v1:refreshed');
 		expect(opened.isExternallyStale).toBe(false);
+	});
+
+	it('guards Retry after an identity probe fails for a restored dirty draft', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const putRecent = vi.spyOn(repository, 'putRecent');
+		const putNavigation = vi.spyOn(repository, 'putNavigation');
+		const draft = storedDraft({
+			documentId: 'restored-document',
+			normalizedRelativePath: 'src/restored.ts',
+			content: 'alpha\nbeta\ngamma',
+			bufferVersion: 7,
+		});
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'restored-view',
+			documentId: draft.documentId,
+			canonicalFileRootPath: draft.canonicalFileRootPath,
+			normalizedRelativePath: draft.normalizedRelativePath,
+			rendererMode: 'code',
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+			scrollLeft: 4,
+			scrollTop: 8,
+			markdownScrollLeft: 12,
+			markdownScrollTop: 173,
+			imageMode: 'manual',
+			imageScale: 1.75,
+			imageScrollLeft: 32,
+			imageScrollTop: 48,
+			folds: [],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putDraft(draft);
+		await repository.putView(view);
+		const harness = createHarness({ draftRepository: repository });
+		harness.resolveFileIdentity.mockRejectedValueOnce(new Error('Identity unavailable'));
+
+		await harness.registry.ready();
+		const restored = harness.registry.get(view.viewId);
+
+		expect(restored?.document.id).toBe(draft.documentId);
+		expect(restored?.content).toBe('alpha\nbeta\ngamma');
+		expect(restored?.dirty).toBe(true);
+		expect(restored?.textScrollTop).toBe(8);
+		expect(restored?.markdownScrollLeft).toBe(12);
+		expect(restored?.markdownScrollTop).toBe(173);
+		expect(restored?.image).toEqual({
+			mode: 'manual',
+			scale: 1.75,
+			scrollLeft: 32,
+			scrollTop: 48,
+		});
+		expect(restored?.editorState?.selection.main.from).toBe(7);
+		expect(restored?.editorState?.selection.main.to).toBe(9);
+		expect(restored?.loadError).toBe('Identity unavailable');
+		expect(harness.readText).not.toHaveBeenCalled();
+		expect(putRecent).not.toHaveBeenCalled();
+		expect(putNavigation).not.toHaveBeenCalled();
+		if (!restored) throw new Error('Expected restored file');
+		const retry = harness.registry.reload(restored.id);
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.reason).toBe('refresh'));
+		harness.registry.resolveGuard('cancel');
+		await retry;
+		expect(restored.content).toBe(draft.content);
+		expect(harness.readText).not.toHaveBeenCalled();
+	});
+
+	it('restores CRLF metadata for a Markdown draft without initializing an editor', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(
+			storedDraft({
+				documentId: 'markdown-document',
+				normalizedRelativePath: 'README.md',
+				baselineContent: 'first\r\nsecond',
+				content: 'first\r\nsecond local',
+				bufferVersion: 2,
+				closed: true,
+			}),
+		);
+		const harness = createHarness({ draftRepository: repository });
+
+		await harness.registry.ready();
+		const [restored] = Object.values(harness.registry.documents);
+
+		expect(restored?.contentKind).toBe('markdown');
+		expect(restored?.lineSeparator).toBe('\r\n');
+		expect(restored?.mixedLineEndings).toBe(false);
+		expect(restored?.editorRuntime).toBeNull();
+	});
+
+	it('persists Markdown and image presentation state with a file view', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const opened = await harness.registry.open(request('src/presentation.md'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.markdownScrollLeft = 14;
+		opened.markdownScrollTop = 91;
+		opened.image = { mode: 'manual', scale: 2, scrollLeft: 27, scrollTop: 63 };
+
+		await harness.registry.persistView(opened.id);
+
+		const [stored] = await repository.getViews('test-user', 'test-deployment', 'test-session');
+		expect(stored).toMatchObject({
+			markdownScrollLeft: 14,
+			markdownScrollTop: 91,
+			imageMode: 'manual',
+			imageScale: 2,
+			imageScrollLeft: 27,
+			imageScrollTop: 63,
+		});
+	});
+
+	it('restores a missing clean file as an actionable placeholder', async () => {
+		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+		const repository = createMemoryFileDraftRepository();
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'missing-view',
+			documentId: 'missing-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'missing.ts',
+			rendererMode: 'code',
+			line: 1,
+			column: 1,
+			endLine: 1,
+			endColumn: 1,
+			scrollLeft: 0,
+			scrollTop: 0,
+			folds: [],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putView(view);
+		const harness = createHarness({ draftRepository: repository });
+		harness.getFileRevision.mockResolvedValue({ status: 'missing' });
+		harness.resolveFileIdentity.mockRejectedValueOnce(
+			new ApiError(404, 'File not found', 'FILE_NOT_FOUND'),
+		);
+
+		await harness.registry.ready();
+		const restored = harness.registry.get(view.viewId);
+
+		expect(restored?.document.missing).toBe(true);
+		expect(restored?.loadError).toBe('File not found');
+		if (!restored) throw new Error('Expected restored missing file');
+		harness.readText.mockResolvedValueOnce({
+			content: 'recreated',
+			path: '/workspace/missing.ts',
+			revision: 'v1:recreated',
+		});
+		await harness.registry.reload(restored.id);
+		expect(restored.loadedRevision).toBe('v1:recreated');
+		harness.getFileRevision.mockResolvedValue({ status: 'ready', revision: 'v1:recreated' });
+		harness.getFileRevision.mockClear();
+		harness.registry.viewVisibilityChanged(view.viewId);
+		await vi.waitFor(() => expect(harness.getFileRevision).toHaveBeenCalledOnce());
+	});
+
+	it('retries a restored missing image through the binary reader', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putView({
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'missing-image-view',
+			documentId: 'missing-image-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'missing.png',
+			rendererMode: 'image',
+			line: 1,
+			column: 1,
+			endLine: 1,
+			endColumn: 1,
+			scrollLeft: 0,
+			scrollTop: 0,
+			folds: [],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		});
+		const harness = createHarness({ draftRepository: repository });
+		harness.resolveFileIdentity.mockRejectedValueOnce(
+			new ApiError(404, 'File not found', 'FILE_NOT_FOUND'),
+		);
+		await harness.registry.ready();
+		const restored = harness.registry.get('missing-image-view');
+		if (!restored) throw new Error('Expected restored image placeholder');
+
+		await harness.registry.reload(restored.id);
+
+		expect(restored.contentKind).toBe('image');
+		expect(harness.readContent).toHaveBeenCalledTimes(1);
+		expect(harness.readText).not.toHaveBeenCalled();
+	});
+
+	it('recreates a missing file-only window and groups its restored views', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const storedView = (
+			viewId: string,
+			relativePath: string,
+			updatedAt: number,
+		): SpaFileViewV1 => ({
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId,
+			documentId: `${viewId}-document`,
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: relativePath,
+			rendererMode: 'code',
+			line: 1,
+			column: 1,
+			endLine: 1,
+			endColumn: 1,
+			scrollLeft: 0,
+			scrollTop: 0,
+			folds: [],
+			pinned: true,
+			preview: false,
+			updatedAt,
+			placement: 'window-file-only',
+		});
+		await repository.putView(storedView('restored-a', 'src/a.ts', 1));
+		await repository.putView(storedView('restored-b', 'src/b.ts', 2));
+		const targets: Array<DesktopPlacement | undefined> = [];
+		const placements = new Map<string, PresentationHostId>();
+		const placement: FilePlacementPort = {
+			async placeFileSession(sessionId, target, publication) {
+				targets.push(target);
+				publication.publish();
+				let host: PresentationHostId = 'dialog';
+				if (target?.type === 'new-window') host = 'window-restored';
+				else if (target?.type === 'window') host = target.windowId;
+				placements.set(sessionId, host);
+				return 'placed';
+			},
+			async focusFileSession() {},
+			filePlacement: (sessionId) => placements.get(sessionId) ?? null,
+			resolveRestoredPlacement: (host) => {
+				if (host === 'window-file-only') {
+					return { type: 'new-window', anchorWindowId: 'window-main' };
+				}
+				if (host === 'mobile' || host === 'dialog') return undefined;
+				return { type: 'window', windowId: host };
+			},
+		};
+		const harness = createHarness({ draftRepository: repository, placement });
+
+		await harness.registry.ready();
+
+		expect(targets).toEqual([
+			{ type: 'new-window', anchorWindowId: 'window-main' },
+			{ type: 'window', windowId: 'window-restored' },
+		]);
+	});
+
+	it('removes retained file surfaces that are not owned by recovered view records', async () => {
+		const removeUnclaimedRestoredFileSurfaces = vi.fn(async () => undefined);
+		const harness = createHarness({
+			placement: {
+				async placeFileSession(_sessionId, _target, publication) {
+					publication.publish();
+					return 'placed';
+				},
+				async focusFileSession() {},
+				removeUnclaimedRestoredFileSurfaces,
+			},
+		});
+
+		await harness.registry.ready();
+
+		expect(removeUnclaimedRestoredFileSurfaces).toHaveBeenCalledWith([]);
+	});
+
+	it('waits for an authenticated recovery namespace before loading records', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const record = storedDraft({
+			documentId: 'authenticated-document',
+			normalizedRelativePath: 'auth.ts',
+			diskRevision: null,
+			baselineContent: '',
+			content: 'private draft',
+			closed: true,
+		});
+		await repository.putDraft(record);
+		const harness = createHarness({ draftRepository: repository, userNamespace: null });
+
+		expect(harness.registry.documents[record.documentId]).toBeUndefined();
+		await harness.registry.initializeRecovery('test-user');
+
+		expect(harness.registry.documents[record.documentId]?.content).toBe('private draft');
+	});
+
+	it('retains a stored draft when recovery finds a divergent live dirty buffer', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository, userNamespace: null });
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'newer live edit';
+		await repository.putDraft(
+			storedDraft({
+				documentId: 'older-stored-draft',
+				normalizedRelativePath: 'src/file.ts',
+				content: 'older unsaved edit',
+			}),
+		);
+
+		await harness.registry.initializeRecovery('test-user');
+
+		expect(opened.content).toBe('newer live edit');
+		expect(opened.document.recoveryGuard).toBe(true);
+		expect(opened.document.recoveryDiscoveryError).toContain('newer unsaved buffer');
+		const [stored] = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
+		expect(stored?.content).toBe('older unsaved edit');
+	});
+
+	it('guards canonical mutations when scoped recovery discovery fails', async () => {
+		const repository = createMemoryFileDraftRepository();
+		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('storage unavailable'));
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+
+		expect(opened.document.recoveryGuard).toBe(true);
+		expect(opened.document.recoveryDiscoveryError).toBe('storage unavailable');
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+
+		await harness.registry.retryRecoveryDiscovery();
+		expect(opened.document.recoveryGuard).toBe(false);
+		expect(opened.document.recoveryDiscoveryError).toBeNull();
+	});
+
+	it('adopts a recovered draft into an already-open document before unlocking recovery', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft({
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			documentId: 'restored-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'src/file.ts',
+			displayPath: 'src/file.ts',
+			diskRevision: 'v1:restored',
+			baselineContent: 'restored base',
+			content: 'recovered edit',
+			bufferVersion: 5,
+			savedAt: 1,
+			generation: 5,
+			unknownSubmission: {
+				submissionId: 'unknown-save',
+				resourceKey: JSON.stringify(['/workspace', 'src/file.ts']),
+				expectedDiskRevision: 'v1:restored',
+				submittedBufferVersion: 4,
+				conflictIntent: 'overwrite',
+				content: 'submitted edit',
+				startedAt: 1,
+			},
+			closed: false,
+		});
+		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('storage unavailable'));
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+
+		await harness.registry.retryRecoveryDiscovery();
+
+		expect(opened.content).toBe('recovered edit');
+		expect(opened.baseline).toBe('restored base');
+		expect(opened.loadedRevision).toBe('v1:restored');
+		expect(opened.document.diskRevision).toBe('v1:initial');
+		expect(opened.isExternallyStale).toBe(true);
+		expect(opened.saveOutcomeUnknown).toBe(true);
+		expect(opened.document.recoveryGuard).toBe(false);
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+		const [adopted] = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
+		expect(adopted?.localDocumentId).toBe(opened.document.id);
+		expect(adopted?.unknownSubmission?.submissionId).toBe('unknown-save');
+	});
+
+	it('does not restore recovery records from another namespace or deployment', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const foreign = storedDraft({
+			deploymentId: 'other-deployment',
+			userNamespace: 'other-user',
+			browserSessionId: 'other-browser',
+			documentId: 'foreign-document',
+			normalizedRelativePath: 'secret.ts',
+			diskRevision: null,
+			baselineContent: null,
+			content: 'foreign',
+			closed: true,
+		});
+		await repository.putDraft(foreign);
+		const harness = createHarness({ draftRepository: repository });
+
+		await harness.registry.ready();
+
+		expect(harness.registry.documents[foreign.documentId]).toBeUndefined();
+	});
+
+	it('does not restore an explicitly closed last clean view', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const first = createHarness({ draftRepository: repository });
+		const opened = await first.registry.open(request('src/closed.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		await first.registry.destroy(opened.id);
+
+		const restored = createHarness({ draftRepository: repository });
+		await restored.registry.ready();
+
+		expect(restored.registry.all).toEqual([]);
+	});
+
+	it('initializes a side-view editor during placement publication', async () => {
+		let registry!: FileSessionRegistry;
+		const harness = createHarness({
+			async onPublish(current) {
+				registry = current;
+				const published = current.all.at(-1);
+				if (current.all.length > 1) {
+					await vi.waitFor(() => expect(published?.editor).toBeTruthy());
+				}
+			},
+		});
+		const first = await harness.registry.open(request('src/shared.ts'));
+		if (!first) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+
+		const second = await harness.registry.open({ ...request('src/shared.ts'), openToSide: true });
+
+		expect(registry).toBe(harness.registry);
+		expect(second?.editor).toBeTruthy();
+	});
+
+	it('creates a source editor when a Markdown preview enters edit mode', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('README.md'));
+		if (!opened) throw new Error('Expected Markdown view');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		expect(opened.rendererMode).toBe('markdown');
+		expect(opened.editor).toBeNull();
+
+		await expect(harness.registry.showSource(opened.id)).resolves.toBe(true);
+
+		expect(opened.rendererMode).toBe('code');
+		expect(opened.editor).toBeTruthy();
+	});
+
+	it('preserves a dirty document when opening another view', async () => {
+		const harness = createHarness();
+		const first = await harness.registry.open(request('src/shared.ts'));
+		if (!first) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+		first.content = 'local edits';
+
+		const second = await harness.registry.open({
+			...request('src/shared.ts'),
+			openToSide: true,
+		});
+		if (!second) throw new Error('Expected second view');
+		await vi.waitFor(() => expect(second.editor).toBeTruthy());
+
+		expect(second.document).toBe(first.document);
+		expect(first.content).toBe('local edits');
+		expect(first.dirty).toBe(true);
+		expect(harness.readText).toHaveBeenCalledTimes(1);
+	});
+
+	it('leaves a shared document unchanged when side placement is cancelled', async () => {
+		let placements = 0;
+		const harness = createHarness({
+			placement: {
+				async placeFileSession(_sessionId, _target, publication) {
+					placements += 1;
+					if (placements > 1) return 'cancelled';
+					publication.publish();
+					return 'placed';
+				},
+				async focusFileSession() {},
+			},
+		});
+		const first = await harness.registry.open(request('src/shared.ts'));
+		if (!first) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+		first.content = 'local edits';
+
+		await expect(
+			harness.registry.open({ ...request('src/shared.ts'), openToSide: true }),
+		).resolves.toBeNull();
+
+		expect(first.content).toBe('local edits');
+		expect(first.loading).toBe(false);
+		expect(first.document.viewIds.size).toBe(1);
+	});
+
+	it('pins an existing preview when it is explicitly reopened', async () => {
+		const harness = createHarness();
+		const preview = await harness.registry.open({
+			...request('src/preview.ts'),
+			preview: true,
+		});
+		if (!preview) throw new Error('Expected preview session');
+		expect(preview.preview).toBe(true);
+
+		const reopened = await harness.registry.open(request('src/preview.ts'));
+
+		expect(reopened).toBe(preview);
+		expect(preview.preview).toBe(false);
+		expect(preview.pinned).toBe(true);
+	});
+
+	it('pins a pending preview when an explicit open joins its placement', async () => {
+		const placement = deferred<void>();
+		let publish: (() => void) | null = null;
+		const harness = createHarness({
+			placement: {
+				async placeFileSession(_sessionId, _target, publication) {
+					publish = publication.publish;
+					await placement.promise;
+					publication.publish();
+					return 'placed';
+				},
+				async focusFileSession() {},
+			},
+		});
+		const previewOpen = harness.registry.open({
+			...request('src/pending-preview.ts'),
+			preview: true,
+		});
+		await vi.waitFor(() => expect(publish).not.toBeNull());
+		const explicitOpen = harness.registry.open(request('src/pending-preview.ts'));
+		placement.resolve();
+
+		const [preview, reopened] = await Promise.all([previewOpen, explicitOpen]);
+		expect(reopened).toBe(preview);
+		expect(preview?.preview).toBe(false);
+		expect(preview?.pinned).toBe(true);
+	});
+
+	it('keeps a late Save acknowledgement settled after the soft timeout', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository, saveSoftTimeoutMs: 1 });
+		const pending = deferred<{ success: true; path: string; message: string; revision: string }>();
+		harness.saveText.mockReturnValueOnce(pending.promise);
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'submitted';
+
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+		expect(opened.saveOutcomeUnknown).toBe(true);
+		opened.content = 'later edit';
+		expect(opened.content).toBe('later edit');
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+		pending.resolve({
+			success: true,
+			path: '/workspace/src/file.ts',
+			message: 'saved',
+			revision: 'v1:late',
+		});
+		await vi.waitFor(() => expect(opened.saveOutcomeUnknown).toBe(false));
+
+		expect(opened.document.pendingSubmission).toBeNull();
+		expect(opened.baseline).toBe('submitted');
+		expect(opened.content).toBe('later edit');
+		expect(opened.dirty).toBe(true);
+		const [draft] = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
+		expect(draft?.content).toBe('later edit');
+		expect(draft?.unknownSubmission).toBeNull();
+	});
+
+	it('does not clear an unknown overwrite when polling sees matching content', async () => {
+		const harness = createHarness({ saveSoftTimeoutMs: 1 });
+		const pending = deferred<{ success: true; path: string; message: string; revision: string }>();
+		harness.saveText.mockReturnValueOnce(pending.promise);
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'submitted';
+		opened.isExternallyStale = true;
+		const save = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
+		harness.registry.resolveOverwrite('overwrite');
+		await expect(save).resolves.toBe(false);
+		harness.getFileRevision.mockResolvedValueOnce({ status: 'ready', revision: 'v1:matching' });
+		harness.readText.mockResolvedValueOnce({
+			content: 'submitted',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:matching',
+		});
+
+		await harness.registry.checkFreshness(opened.id);
+
+		expect(opened.saveOutcomeUnknown).toBe(true);
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+		pending.reject(new Error('connection lost'));
+	});
+
+	it('guards a dirty refresh even when another view remains open', async () => {
+		const harness = createHarness();
+		const first = await harness.registry.open(request('src/shared.ts'));
+		if (!first) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+		await harness.registry.open({ ...request('src/shared.ts'), openToSide: true });
+		first.content = 'local edits';
+
+		const refresh = harness.registry.refresh(first.id);
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.reason).toBe('refresh'));
+		harness.registry.resolveGuard('cancel');
+		await refresh;
+
+		expect(first.content).toBe('local edits');
+	});
+
+	it('deduplicates a bulk last-view guard by document', async () => {
+		const harness = createHarness();
+		const first = await harness.registry.open(request('src/shared.ts'));
+		if (!first) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(first.loading).toBe(false));
+		const second = await harness.registry.open({ ...request('src/shared.ts'), openToSide: true });
+		if (!second) throw new Error('Expected second view');
+		first.content = 'local edits';
+
+		const decision = harness.registry.confirmDestructiveViews([first.id, second.id], 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBeTruthy());
+		harness.registry.resolveGuard('discard');
+
+		await expect(decision).resolves.toBe(true);
+		expect(first.dirty).toBe(false);
+		expect(first.content).toBe(first.baseline);
+	});
+
+	it('refuses recovery cleanup while another tab owns a protected draft', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(
+			storedDraft({
+				browserSessionId: 'other-tab',
+				documentId: 'other-tab-draft',
+				normalizedRelativePath: 'other.ts',
+				diskRevision: null,
+				baselineContent: '',
+				content: 'protected',
+			}),
+		);
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+
+		await expect(harness.registry.clearRecovery()).resolves.toBe(false);
+		expect(await repository.getDrafts('test-user', 'test-deployment', 'other-tab')).toHaveLength(1);
+	});
+
+	it('refuses recovery cleanup while a dirty document is open', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+
+		await expect(harness.registry.clearRecovery()).resolves.toBe(false);
+	});
+
+	it('guards live documents and atomically preserves drafts created during recovery cleanup', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const clearNamespace = repository.clearNamespaceIfUnprotected.bind(repository);
+		const cleanupStarted = deferred<void>();
+		const releaseCleanup = deferred<void>();
+		vi.spyOn(repository, 'clearNamespaceIfUnprotected').mockImplementation(async (...args) => {
+			cleanupStarted.resolve();
+			await releaseCleanup.promise;
+			return clearNamespace(...args);
+		});
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+
+		const cleanup = harness.registry.clearRecovery();
+		await cleanupStarted.promise;
+		expect(opened.document.mutationGuarded).toBe(true);
+		await repository.putDraft(
+			storedDraft({
+				documentId: 'concurrent-draft',
+				normalizedRelativePath: 'src/concurrent.ts',
+				content: 'new unsaved work',
+			}),
+		);
+		releaseCleanup.resolve();
+
+		await expect(cleanup).resolves.toBe(false);
+		expect(opened.document.mutationGuarded).toBe(false);
+		expect(await repository.getDrafts('test-user', 'test-deployment', 'test-session')).toHaveLength(
+			1,
+		);
 	});
 
 	it('retries a failed file read without replacing the session', async () => {

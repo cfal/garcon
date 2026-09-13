@@ -3,6 +3,10 @@ import type {
 	CompletionSoundVisibility,
 } from '$lib/stores/local-settings.svelte.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import {
+	indexedDbRequest,
+	indexedDbTransactionCompletion,
+} from '$lib/utils/indexed-db.js';
 
 const DATABASE_NAME = 'garcon-local-media';
 const DATABASE_VERSION = 1;
@@ -52,16 +56,6 @@ export function validateCustomCompletionSound(
 	return null;
 }
 
-function transactionCompletion(transaction: IDBTransaction): Promise<void> {
-	return new Promise((resolve, reject) => {
-		transaction.oncomplete = () => resolve();
-		transaction.onabort = () =>
-			reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
-		transaction.onerror = () =>
-			reject(transaction.error ?? new Error('IndexedDB transaction failed'));
-	});
-}
-
 function openDatabase(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
 		const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
@@ -82,13 +76,10 @@ async function runStoreRequest<T>(
 	const database = await openDatabase();
 	try {
 		const transaction = database.transaction(STORE_NAME, mode);
-		const completion = transactionCompletion(transaction);
+		const completion = indexedDbTransactionCompletion(transaction);
 		const request = operation(transaction.objectStore(STORE_NAME));
 		const [result] = await Promise.all([
-			new Promise<T>((resolve, reject) => {
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error ?? new Error('Sound storage request failed'));
-			}),
+			indexedDbRequest(request, 'Sound storage request failed'),
 			completion,
 		]);
 		return result;

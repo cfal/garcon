@@ -18,7 +18,7 @@
 		SNIPPET_TRIGGER_MAX_LENGTH,
 		snippetTriggerValidationError,
 	} from '$lib/chat/composer/snippet-trigger.js';
-	import { getAppShell, getLocalSettings } from '$lib/context';
+	import { getAppShell, getFileSessions, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 	import ThemeSettingsCard from './ThemeSettingsCard.svelte';
@@ -30,6 +30,8 @@
 
 	const ls = getLocalSettings();
 	const appShell = getAppShell();
+	const files = getFileSessions();
+	let recoveryCleanupStatus = $state<string | null>(null);
 	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
 		{ value: 'none', label: m.settings_chat_max_width_none },
 		{ value: 'large', label: m.settings_chat_max_width_large },
@@ -91,6 +93,12 @@
 			}
 		});
 	});
+
+	async function clearFileRecovery(): Promise<void> {
+		recoveryCleanupStatus = (await files.clearRecovery())
+			? 'File recovery data cleared.'
+			: 'Close or save dirty files before clearing recovery data.';
+	}
 
 	function commitSnippetTrigger(): void {
 		const error = snippetTriggerValidationError(snippetTriggerDraft);
@@ -293,6 +301,22 @@
 					'markdownViewerOpenPlacement',
 					ls.markdownViewerOpenPlacement,
 				)}
+			</div>
+			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
+				<div class="min-w-0">
+					<div class="text-sm font-medium text-foreground">File recovery data</div>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						Remove browser-stored file drafts, restored views, recents, and navigation history.
+					</p>
+					{#if recoveryCleanupStatus}
+						<p class="mt-0.5 text-xs text-muted-foreground" role="status">
+							{recoveryCleanupStatus}
+						</p>
+					{/if}
+				</div>
+				<Button variant="outline" size="sm" onclick={() => void clearFileRecovery()}>
+					Clear recovery data
+				</Button>
 			</div>
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="min-w-0">

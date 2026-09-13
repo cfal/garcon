@@ -56,7 +56,18 @@
 			: null,
 	);
 	let overwriteRequest = $state(
-		initialRequest === 'overwrite' ? { sessionId: 'file-session', fileName: 'dirty.ts' } : null,
+		initialRequest === 'overwrite'
+			? {
+					sessionId: 'file-session',
+					fileName: 'dirty.ts',
+					baseContent: 'base',
+					localContent: 'local',
+					diskContent: 'disk',
+					diskRevision: 'v1:disk',
+					localBufferVersion: 1,
+					lineSeparator: '\n' as const,
+				}
+			: null,
 	);
 	let thresholdRequest = $state(
 		initialRequest === 'threshold'

@@ -36,6 +36,21 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 	{ id: 'open-settings', label: m.settings_shortcut_open_settings },
 	{ id: 'scroll-half-page-up', label: m.settings_shortcut_scroll_half_page_up },
 	{ id: 'scroll-half-page-down', label: m.settings_shortcut_scroll_half_page_down },
+	{ id: 'file-save', label: m.editor_actions_save },
+	{ id: 'editor-find', label: () => 'Find in File' },
+	{ id: 'editor-replace', label: () => 'Replace in File' },
+	{ id: 'editor-go-to-line', label: () => 'Go to Line' },
+	{ id: 'editor-go-to-matching-bracket', label: () => 'Go to Matching Bracket' },
+	{ id: 'editor-indent', label: () => 'Indent Line' },
+	{ id: 'editor-outdent', label: () => 'Outdent Line' },
+	{ id: 'editor-toggle-comment', label: () => 'Toggle Comment' },
+	{ id: 'editor-duplicate-line-up', label: () => 'Duplicate Line Up' },
+	{ id: 'editor-duplicate-line-down', label: () => 'Duplicate Line Down' },
+	{ id: 'editor-move-line-up', label: () => 'Move Line Up' },
+	{ id: 'editor-move-line-down', label: () => 'Move Line Down' },
+	{ id: 'editor-delete-line', label: () => 'Delete Line' },
+	{ id: 'file-navigate-back', label: () => 'Go Back in File History' },
+	{ id: 'file-navigate-forward', label: () => 'Go Forward in File History' },
 ];
 
 export const CONFIGURABLE_SHORTCUTS: readonly ShortcutEntry[] = [

@@ -36,6 +36,7 @@ export const SESSION_STORAGE_KEYS = {
 	pendingChatId: 'pendingChatId',
 	terminalClientId: 'terminal_client_id_v1',
 	terminalLauncherDismissed: 'terminal_launcher_dismissed_v1',
+	workspaceFileLayout: 'workspace_file_layout_v1',
 } as const;
 
 export type ChatDraftStorageKey = `${typeof LOCAL_STORAGE_PREFIXES.chatDraft}${string}`;

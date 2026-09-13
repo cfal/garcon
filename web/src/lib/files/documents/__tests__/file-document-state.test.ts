@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest';
+import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+
+function document() {
+	return new FileDocumentState(
+		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
+		'["/workspace","src/file.ts"]',
+	);
+}
+
+describe('FileDocumentState', () => {
+	it('owns buffer dirtiness without a mounted editor', () => {
+		const value = document();
+		value.baseline = 'initial';
+		value.content = 'changed';
+
+		expect(value.currentContent()).toBe('changed');
+		expect(value.dirty).toBe(true);
+		expect(value.bufferVersion).toBe(1);
+	});
+
+	it('guards destructive mutations for unknown and recovery settlement states', () => {
+		const value = document();
+		value.saveOutcome = 'unknown';
+		expect(value.mutationGuarded).toBe(true);
+		value.saveOutcome = 'idle';
+		value.recoveryGuard = true;
+		expect(value.mutationGuarded).toBe(true);
+	});
+});

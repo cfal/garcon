@@ -74,7 +74,7 @@ function windowCountOf(snapshot: WorkspaceLayoutSnapshot): number {
 
 function createHarness(
 	options: {
-		confirmDestructive?: (sessionId: string) => Promise<boolean>;
+		confirmDestructive?: (sessionId: string, reason?: string) => Promise<boolean>;
 		terminate?: (terminalId: string, requestId: string) => Promise<void>;
 		surfaceFrames?: SurfaceFrameRegistry;
 		fileEditor?: { prepareRendererTransfer(): void };
@@ -131,14 +131,28 @@ function createHarness(
 		);
 	}
 	const workspaceInteractionGate = new WorkspaceInteractionGate();
+	const confirmDestructive = options.confirmDestructive ?? vi.fn(async () => true);
+	const fileCloseReleases: Array<ReturnType<typeof vi.fn>> = [];
+	const confirmDestructiveViews = vi.fn(async (sessionIds: readonly string[]) => {
+		for (const sessionId of sessionIds)
+			if (!(await confirmDestructive(sessionId, 'close'))) return false;
+		return true;
+	});
 	const files = {
-		confirmDestructive: options.confirmDestructive ?? vi.fn(async () => true),
+		confirmDestructive,
+		confirmDestructiveViews,
+		prepareDestructiveViews: vi.fn(async (sessionIds: readonly string[]) => {
+			if (!(await confirmDestructiveViews(sessionIds))) return null;
+			const release = vi.fn();
+			fileCloseReleases.push(release);
+			return release;
+		}),
 		destroy: vi.fn(),
 		get: vi.fn(() =>
 			options.fileEditor || options.filePendingMutationCount !== undefined
 				? {
 						editor: options.fileEditor ?? null,
-						pendingMutationCount: options.filePendingMutationCount ?? 0,
+						mutationGuarded: (options.filePendingMutationCount ?? 0) > 0,
 					}
 				: null,
 		),
@@ -220,6 +234,7 @@ function createHarness(
 	return {
 		coordinator,
 		files,
+		fileCloseReleases,
 		layout,
 		terminals,
 		appShell,
@@ -420,6 +435,28 @@ describe('WorkspaceCoordinator', () => {
 			fileSurfaceId('window-file'),
 		);
 		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(fileSurfaceId('window-file'));
+	});
+
+	it('publishes a restored file session without changing retained tab activity', async () => {
+		const { coordinator, layout } = createHarness();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: 'file:restored', type: 'file', fileSessionId: 'restored' },
+					windowId: 'window-main',
+				},
+			]),
+		);
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		const retainedTabs = structuredClone(windowTabs(layout.snapshot, 'window-main'));
+
+		await coordinator.restoreFileSession('restored', undefined, publication);
+
+		expect(publication.publish).toHaveBeenCalledOnce();
+		expect(publication.rollback).not.toHaveBeenCalled();
+		expect(windowTabs(layout.snapshot, 'window-main')).toEqual(retainedTabs);
 	});
 
 	it('rolls back the publication when file placement fails to publish', async () => {
@@ -1197,7 +1234,9 @@ describe('WorkspaceCoordinator', () => {
 
 	it('destroys a mobile file session and returns to Chat when it is closed', async () => {
 		const confirmDestructive = vi.fn(async () => true);
-		const { coordinator, files, layout, appShell } = createHarness({ confirmDestructive });
+		const { coordinator, files, fileCloseReleases, layout, appShell } = createHarness({
+			confirmDestructive,
+		});
 		await coordinator.enterMobilePresentation();
 		await coordinator.placeFileSession('mobile-file');
 		const surfaceId = fileSurfaceId('mobile-file');
@@ -1212,6 +1251,26 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(fileCloseReleases).toHaveLength(1);
+		expect(fileCloseReleases[0]).toHaveBeenCalledOnce();
+	});
+
+	it('releases file close admission when layout publication fails', async () => {
+		const { coordinator, files, fileCloseReleases, layout } = createHarness({
+			failLayoutPublishAt: 2,
+		});
+		await coordinator.placeFileSession('publication-failure', {
+			type: 'window',
+			windowId: 'window-main',
+		});
+		const surfaceId = fileSurfaceId('publication-failure');
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(files.destroy).toHaveBeenCalledWith('publication-failure');
+		expect(fileCloseReleases).toHaveLength(1);
+		expect(fileCloseReleases[0]).toHaveBeenCalledOnce();
 	});
 
 	it('keeps a dirty mobile file visible when destructive Close is cancelled', async () => {
@@ -1847,6 +1906,76 @@ describe('WorkspaceCoordinator', () => {
 			([kind]) => kind === 'git',
 		);
 		expect(gitVisibility.at(-1)).toEqual(['git', false]);
+	});
+
+	it('routes configurable file shortcuts through the command registry', async () => {
+		const { coordinator, transientLayers, appShell, files } = createHarness();
+		await coordinator.placeFileSession('shortcut-file', {
+			type: 'window',
+			windowId: 'window-main',
+		});
+		coordinator.focusOwner = {
+			kind: 'surface',
+			surfaceId: fileSurfaceId('shortcut-file'),
+		};
+		const execute = vi.fn(async () => true);
+		const dispatcher = new WorkspaceShortcutDispatcher({
+			workspace: coordinator,
+			transients: transientLayers,
+			appShell: appShell as never,
+			navigation: {} as never,
+			files: files as never,
+			commands: { execute },
+			localSettings: { globalShortcuts: { 'file-save': { key: 'k', ctrl: true } } },
+		});
+		const event = new KeyboardEvent('keydown', {
+			key: 'k',
+			ctrlKey: true,
+			cancelable: true,
+		});
+
+		dispatcher.handle(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(execute).toHaveBeenCalledWith('file.save', {
+			viewId: 'shortcut-file',
+			surfaceId: fileSurfaceId('shortcut-file'),
+		});
+	});
+
+	it('routes core editor shortcuts through the command registry', async () => {
+		const { coordinator, transientLayers, appShell, files } = createHarness();
+		await coordinator.placeFileSession('shortcut-file', {
+			type: 'window',
+			windowId: 'window-main',
+		});
+		coordinator.focusOwner = {
+			kind: 'surface',
+			surfaceId: fileSurfaceId('shortcut-file'),
+		};
+		const execute = vi.fn(async () => true);
+		const dispatcher = new WorkspaceShortcutDispatcher({
+			workspace: coordinator,
+			transients: transientLayers,
+			appShell: appShell as never,
+			navigation: {} as never,
+			files: files as never,
+			commands: { execute },
+			localSettings: { globalShortcuts: {} },
+		});
+		const event = new KeyboardEvent('keydown', {
+			key: 'ArrowDown',
+			altKey: true,
+			cancelable: true,
+		});
+
+		dispatcher.handle(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(execute).toHaveBeenCalledWith('editor.move-line-down', {
+			viewId: 'shortcut-file',
+			surfaceId: fileSurfaceId('shortcut-file'),
+		});
 	});
 
 	it('does not route shortcuts through a stale hidden surface owner', () => {

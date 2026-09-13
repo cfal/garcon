@@ -109,6 +109,7 @@
 				<FileSurface
 					{session}
 					{presentation}
+					{onAppendToChatDraft}
 					onClose={() => void workspace.closeSurface(surface.id)}
 					closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
 				/>

@@ -1,5 +1,4 @@
 import type {
-	PersistedWorkspaceLayoutNode,
 	PersistedWorkspaceLayoutV2,
 	PersistedWorkspaceSurfaceRef,
 } from '$shared/workspace-layout';
@@ -8,6 +7,7 @@ import {
 	PORTABLE_SINGLETON_KINDS,
 	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
+	fileSurfaceId,
 	portableSingletonDescriptor,
 	terminalSurfaceId,
 	type DesktopWorkspaceNode,
@@ -35,6 +35,31 @@ export interface WorkspaceLayoutParseResult {
 	snapshot: WorkspaceLayoutSnapshot;
 }
 
+type PersistedFileSurfaceRef = { type: 'file'; viewId: string };
+type BrowserPersistedWorkspaceSurfaceRef = PersistedWorkspaceSurfaceRef | PersistedFileSurfaceRef;
+type BrowserPersistedWorkspaceLayoutNode =
+	| {
+			type: 'window';
+			id: string;
+			order: BrowserPersistedWorkspaceSurfaceRef[];
+			active: BrowserPersistedWorkspaceSurfaceRef | null;
+			mru: BrowserPersistedWorkspaceSurfaceRef[];
+	  }
+	| {
+			type: 'partition';
+			id: string;
+			direction: 'horizontal' | 'vertical';
+			ratio: number;
+			children: [BrowserPersistedWorkspaceLayoutNode, BrowserPersistedWorkspaceLayoutNode];
+	  };
+
+export interface BrowserPersistedFileWorkspaceLayoutV1 {
+	version: 1;
+	browserSessionId: string;
+	root: BrowserPersistedWorkspaceLayoutNode;
+	unplacedTerminalIds: string[];
+}
+
 export const WORKSPACE_LAYOUT_MAX_PARSE_DEPTH = 64;
 export const WORKSPACE_LAYOUT_MAX_PARSE_NODES = 256;
 export const WORKSPACE_LAYOUT_MAX_TAB_REFS = 2048;
@@ -44,7 +69,10 @@ class WorkspaceLayoutBudgetExceeded extends Error {}
 
 const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>(PORTABLE_SINGLETON_KINDS);
 
-function parseV2Ref(value: unknown): PersistedWorkspaceSurfaceRef | null {
+function parseV2Ref(
+	value: unknown,
+	includeFiles = false,
+): BrowserPersistedWorkspaceSurfaceRef | null {
 	if (!isRecord(value)) return null;
 	if (value.type === 'chat' && (value.chatId === null || typeof value.chatId === 'string')) {
 		return { type: 'chat', chatId: value.chatId };
@@ -59,18 +87,28 @@ function parseV2Ref(value: unknown): PersistedWorkspaceSurfaceRef | null {
 	if (value.type === 'terminal' && typeof value.terminalId === 'string' && value.terminalId) {
 		return { type: 'terminal', terminalId: value.terminalId };
 	}
+	if (includeFiles && value.type === 'file' && typeof value.viewId === 'string' && value.viewId) {
+		return { type: 'file', viewId: value.viewId };
+	}
 	return null;
 }
 
-function globalRefKey(ref: Exclude<PersistedWorkspaceSurfaceRef, { type: 'chat' }>): string {
-	return ref.type === 'singleton' ? `singleton:${ref.kind}` : terminalSurfaceId(ref.terminalId);
+function globalRefKey(
+	ref: Exclude<BrowserPersistedWorkspaceSurfaceRef, { type: 'chat' }>,
+): string {
+	if (ref.type === 'singleton') return `singleton:${ref.kind}`;
+	if (ref.type === 'terminal') return terminalSurfaceId(ref.terminalId);
+	return fileSurfaceId(ref.viewId);
 }
 
 function descriptorForGlobalRef(
-	ref: Exclude<PersistedWorkspaceSurfaceRef, { type: 'chat' }>,
+	ref: Exclude<BrowserPersistedWorkspaceSurfaceRef, { type: 'chat' }>,
 ): SurfaceDescriptor {
 	if (ref.type === 'terminal') {
 		return { id: terminalSurfaceId(ref.terminalId), type: 'terminal', terminalId: ref.terminalId };
+	}
+	if (ref.type === 'file') {
+		return { id: fileSurfaceId(ref.viewId), type: 'file', fileSessionId: ref.viewId };
 	}
 	return portableSingletonDescriptor(ref.kind);
 }
@@ -93,7 +131,7 @@ interface TreeBuildState {
 }
 
 function restoredRefSurfaceId(
-	ref: PersistedWorkspaceSurfaceRef,
+	ref: BrowserPersistedWorkspaceSurfaceRef,
 	windowId: WorkspaceWindowId,
 ): string {
 	return ref.type === 'chat' ? chatViewSurfaceId(windowId) : globalRefKey(ref);
@@ -102,6 +140,7 @@ function restoredRefSurfaceId(
 function restoreWindow(
 	node: Record<string, unknown>,
 	state: TreeBuildState,
+	includeFiles: boolean,
 ): WorkspaceWindowNode | null {
 	const id = asWindowId(node.id);
 	if (!id || !Array.isArray(node.order)) return null;
@@ -113,7 +152,7 @@ function restoreWindow(
 	const order: string[] = [];
 	let chatPlaced = false;
 	for (const rawRef of orderRefs) {
-		const ref = parseV2Ref(rawRef);
+		const ref = parseV2Ref(rawRef, includeFiles);
 		if (!ref) continue;
 		if (ref.type === 'chat') {
 			if (chatPlaced) continue;
@@ -131,14 +170,14 @@ function restoreWindow(
 	}
 	if (order.length === 0) return null;
 	const orderSet = new Set(order);
-	const activeRef = parseV2Ref(node.active);
+	const activeRef = parseV2Ref(node.active, includeFiles);
 	const activeKey = activeRef ? restoredRefSurfaceId(activeRef, id) : null;
 	const activeId = activeKey && orderSet.has(activeKey) ? activeKey : order[0];
 	const persistedMru: string[] = [];
 	const persistedMruSet = new Set<string>();
 	if (Array.isArray(node.mru)) {
 		for (const rawRef of node.mru.slice(0, orderRefs.length)) {
-			const ref = parseV2Ref(rawRef);
+			const ref = parseV2Ref(rawRef, includeFiles);
 			if (!ref) continue;
 			const surfaceId = restoredRefSurfaceId(ref, id);
 			if (!orderSet.has(surfaceId) || persistedMruSet.has(surfaceId)) continue;
@@ -154,7 +193,12 @@ function restoreWindow(
 	return { type: 'window', id, tabs: { order, activeId, mru } };
 }
 
-function restoreNode(node: unknown, state: TreeBuildState, depth = 1): DesktopWorkspaceNode | null {
+function restoreNode(
+	node: unknown,
+	state: TreeBuildState,
+	includeFiles = false,
+	depth = 1,
+): DesktopWorkspaceNode | null {
 	state.visitedNodes += 1;
 	if (
 		depth > WORKSPACE_LAYOUT_MAX_PARSE_DEPTH ||
@@ -163,12 +207,12 @@ function restoreNode(node: unknown, state: TreeBuildState, depth = 1): DesktopWo
 		throw new WorkspaceLayoutBudgetExceeded();
 	}
 	if (!isRecord(node)) return null;
-	if (node.type === 'window') return restoreWindow(node, state);
+	if (node.type === 'window') return restoreWindow(node, state, includeFiles);
 	if (node.type !== 'partition') return null;
 	const id = asPartitionId(node.id);
 	if (!id || !Array.isArray(node.children) || node.children.length !== 2) return null;
-	const first = restoreNode(node.children[0], state, depth + 1);
-	const second = restoreNode(node.children[1], state, depth + 1);
+	const first = restoreNode(node.children[0], state, includeFiles, depth + 1);
+	const second = restoreNode(node.children[1], state, includeFiles, depth + 1);
 	if (!first) return second;
 	if (!second) return first;
 	if (node.direction !== 'horizontal' && node.direction !== 'vertical') return null;
@@ -263,14 +307,14 @@ function parseUnplacedTerminalIds(
 	return [...terminalIds];
 }
 
-function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
+function parseV2(value: Record<string, unknown>, includeFiles = false): WorkspaceLayoutParseResult {
 	const state: TreeBuildState = {
 		surfaces: {},
 		seenGlobalSurfaceIds: new Set(),
 		visitedNodes: 0,
 		visitedTabRefs: 0,
 	};
-	const restored = restoreNode(value.root, state);
+	const restored = restoreNode(value.root, state, includeFiles);
 	if (!restored) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
 	const root = enforceWindowResourceCeiling(restored);
 	pruneUnplacedDescriptors(root, state);
@@ -304,6 +348,28 @@ export function parsePersistedWorkspaceLayout(rawV2: string | null): WorkspaceLa
 	}
 }
 
+export function parsePersistedFileWorkspaceLayout(
+	raw: string | null,
+	browserSessionId: string | null,
+): WorkspaceLayoutParseResult {
+	if (raw === null || browserSessionId === null) {
+		return { source: 'absent', snapshot: canonicalWorkspaceSnapshot() };
+	}
+	try {
+		const value: unknown = JSON.parse(raw);
+		if (
+			!isRecord(value) ||
+			value.version !== 1 ||
+			value.browserSessionId !== browserSessionId
+		) {
+			throw new Error('Unsupported file layout version or browser session');
+		}
+		return parseV2(value, true);
+	} catch {
+		return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
+	}
+}
+
 function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef | null {
 	if (surface.type === 'chat') return { type: 'chat', chatId: surface.chatId };
 	if (surface.type === 'terminal') return { type: 'terminal', terminalId: surface.terminalId };
@@ -311,25 +377,41 @@ function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef 
 	return null;
 }
 
-function serializeNode(
+function browserPersistedRef(surface: SurfaceDescriptor): BrowserPersistedWorkspaceSurfaceRef | null {
+	if (surface.type === 'file') return { type: 'file', viewId: surface.fileSessionId };
+	return persistedRef(surface);
+}
+
+type PersistedNode<Ref> =
+	| { type: 'window'; id: string; order: Ref[]; active: Ref | null; mru: Ref[] }
+	| {
+			type: 'partition';
+			id: string;
+			direction: 'horizontal' | 'vertical';
+			ratio: number;
+			children: [PersistedNode<Ref>, PersistedNode<Ref>];
+	  };
+
+function serializeNode<Ref>(
 	node: DesktopWorkspaceNode,
 	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
-): PersistedWorkspaceLayoutNode {
+	toRef: (surface: SurfaceDescriptor) => Ref | null,
+): PersistedNode<Ref> {
 	if (node.type === 'window') {
 		const order = node.tabs.order.flatMap((surfaceId) => {
-			const ref = surfaces[surfaceId] ? persistedRef(surfaces[surfaceId]) : null;
+			const ref = surfaces[surfaceId] ? toRef(surfaces[surfaceId]) : null;
 			return ref ? [ref] : [];
 		});
 		const activeSurface = surfaces[node.tabs.activeId];
 		const mru = node.tabs.mru.flatMap((surfaceId) => {
-			const ref = surfaces[surfaceId] ? persistedRef(surfaces[surfaceId]) : null;
+			const ref = surfaces[surfaceId] ? toRef(surfaces[surfaceId]) : null;
 			return ref ? [ref] : [];
 		});
 		return {
 			type: 'window',
 			id: node.id,
 			order,
-			active: activeSurface ? persistedRef(activeSurface) : null,
+			active: activeSurface ? toRef(activeSurface) : null,
 			mru,
 		};
 	}
@@ -339,8 +421,8 @@ function serializeNode(
 		direction: node.direction,
 		ratio: node.ratio,
 		children: [
-			serializeNode(node.children[0], surfaces),
-			serializeNode(node.children[1], surfaces),
+			serializeNode(node.children[0], surfaces, toRef),
+			serializeNode(node.children[1], surfaces, toRef),
 		],
 	};
 }
@@ -350,7 +432,19 @@ export function serializeWorkspaceLayout(
 ): PersistedWorkspaceLayoutV2 {
 	return {
 		version: 2,
-		root: serializeNode(snapshot.desktopRoot, snapshot.surfaces),
+		root: serializeNode(snapshot.desktopRoot, snapshot.surfaces, persistedRef),
+		unplacedTerminalIds: [...snapshot.unplacedTerminalIds],
+	};
+}
+
+export function serializeFileWorkspaceLayout(
+	snapshot: WorkspaceLayoutSnapshot,
+	browserSessionId: string,
+): BrowserPersistedFileWorkspaceLayoutV1 {
+	return {
+		version: 1,
+		browserSessionId,
+		root: serializeNode(snapshot.desktopRoot, snapshot.surfaces, browserPersistedRef),
 		unplacedTerminalIds: [...snapshot.unplacedTerminalIds],
 	};
 }

@@ -1,7 +1,7 @@
-import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 
 export function shouldWaitForFileRenderer(
-	session: Pick<FileSession, 'rendererMode' | 'loading' | 'loadError'> | null,
+	session: Pick<FileViewSession, 'rendererMode' | 'loading' | 'loadError'> | null,
 ): boolean {
 	return Boolean(session?.rendererMode === 'code' && !session.loading && !session.loadError);
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { history } from '@codemirror/commands';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
@@ -170,7 +171,7 @@ describe('CodeEditorController', () => {
 		expect(controller.currentContent()).toBe('first\r\nsecond');
 
 		controller.detach(lease);
-		session.editorState = EditorState.create({ doc: 'first\nsecond!' });
+		session.content = 'first\r\nsecond!';
 		const editedLease = controller.attach(parent());
 
 		expect(session.dirty).toBe(true);
@@ -187,7 +188,7 @@ describe('CodeEditorController', () => {
 		expect(controller.currentContent()).toBe('first\rsecond');
 
 		controller.detach(lease);
-		session.editorState = EditorState.create({ doc: 'first\nsecond!' });
+		session.content = 'first\rsecond!';
 		const editedLease = controller.attach(parent());
 
 		expect(session.dirty).toBe(true);
@@ -230,6 +231,113 @@ describe('CodeEditorController', () => {
 		controller.detach(lease);
 	});
 
+	it('opens an accessible Find and Replace panel with selection-only results', async () => {
+		const { controller } = createController();
+		const host = parent();
+		controller.attach(host);
+
+		expect(controller.run('find')).toBe(true);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const search = document.querySelector<HTMLInputElement>('input[name="search"]');
+		const replace = document.querySelector<HTMLInputElement>('input[name="replace"]');
+		const selectionOnly = document.querySelector<HTMLInputElement>('input[name="selection"]');
+		if (!search || !replace || !selectionOnly) throw new Error('Expected search controls');
+		expect(selectionOnly.disabled).toBe(true);
+		search.value = 'missing';
+		search.dispatchEvent(new Event('input'));
+
+		expect(search.getAttribute('aria-label')).toBe('Find');
+		expect(replace.getAttribute('aria-label')).toBe('Replace');
+		expect(selectionOnly.getAttribute('aria-label')).toBe('Selection only');
+		expect(document.querySelector('.cm-search [role="status"]')?.textContent).toBe('No results');
+		search.value = 'first';
+		search.dispatchEvent(new Event('input'));
+		replace.value = 'replacement';
+		replace.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }),
+		);
+		expect(controller.currentContent()).toBe('first\nsecond\nthird');
+	});
+
+	it('maps a selection-only search scope through replacements', async () => {
+		const { session, controller } = createController();
+		session.content = 'a a a';
+		const host = parent();
+		controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!);
+		if (!view) throw new Error('Expected CodeMirror view');
+		view.dispatch({ selection: { anchor: 0, head: 3 } });
+		controller.run('find');
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const search = document.querySelector<HTMLInputElement>('input[name="search"]');
+		const selectionOnly = document.querySelector<HTMLInputElement>('input[name="selection"]');
+		const replaceAll = [...document.querySelectorAll<HTMLButtonElement>('.cm-search button')].find(
+			(button) => button.textContent === 'Replace all',
+		);
+		if (!search || !selectionOnly || !replaceAll) throw new Error('Expected search controls');
+		search.value = 'a';
+		search.dispatchEvent(new Event('input'));
+		selectionOnly.checked = true;
+		selectionOnly.dispatchEvent(new Event('change'));
+
+		expect(() => replaceAll.click()).not.toThrow();
+		replaceAll.click();
+
+		expect(controller.currentContent()).toBe('  a');
+	});
+
+	it('focuses Replace when opened through its command', async () => {
+		const { controller } = createController();
+		const host = parent();
+		controller.attach(host);
+
+		expect(controller.run('replace')).toBe(true);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		expect(document.activeElement?.getAttribute('name')).toBe('replace');
+	});
+
+	it('dismisses the Go to Line dialog through the local Escape path', async () => {
+		const { controller } = createController();
+		const host = parent();
+		controller.attach(host);
+
+		expect(controller.run('go-to-line')).toBe(true);
+		expect(host.querySelector('.cm-goto-line')).not.toBeNull();
+		expect(controller.closeDialog()).toBe(true);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		expect(host.querySelector('.cm-goto-line')).toBeNull();
+	});
+
+	it('selects the next occurrence as an additional range', () => {
+		const { session, controller } = createController();
+		session.content = 'word word';
+		const host = parent();
+		controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!);
+		if (!view) throw new Error('Expected CodeMirror view');
+		view.dispatch({ selection: { anchor: 0, head: 4 } });
+
+		expect(controller.run('select-next-occurrence')).toBe(true);
+		expect(view.state.selection.ranges).toHaveLength(2);
+	});
+
+	it('routes Undo and Redo through canonical document history', () => {
+		const { session, controller } = createController();
+		const host = parent();
+		controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!);
+		if (!view) throw new Error('Expected CodeMirror view');
+		view.dispatch({ changes: { from: 0, insert: 'x' }, userEvent: 'input.type' });
+
+		expect(controller.run('undo')).toBe(true);
+		expect(controller.currentContent()).toBe('first\nsecond\nthird');
+		expect(controller.run('redo')).toBe(true);
+		expect(controller.currentContent()).toBe('xfirst\nsecond\nthird');
+		expect(session.dirty).toBe(true);
+	});
+
 	it('makes an attached editor read-only while refresh is pending', () => {
 		const { session, controller } = createController();
 		session.editorState = null;
@@ -242,6 +350,36 @@ describe('CodeEditorController', () => {
 		session.refreshing = false;
 		controller.reconfigure();
 		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(false);
+		controller.detach(lease);
+	});
+
+	it('reapplies dynamic configuration when a retained editor reattaches', () => {
+		const { session, controller } = createController();
+		const firstLease = controller.attach(parent());
+		session.refreshing = true;
+		controller.reconfigure();
+		controller.detach(firstLease);
+		session.refreshing = false;
+
+		const secondLease = controller.attach(parent());
+
+		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(false);
+		controller.detach(secondLease);
+	});
+
+	it('applies restored scroll after the attached editor is measured', async () => {
+		const { session, controller } = createController();
+		const host = parent();
+		const lease = controller.attach(host);
+		session.textScrollLeft = 12;
+		session.textScrollTop = 80;
+
+		controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, []);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		const scroller = host.querySelector<HTMLElement>('.cm-scroller');
+		expect(scroller?.scrollLeft).toBe(12);
+		expect(scroller?.scrollTop).toBe(80);
 		controller.detach(lease);
 	});
 });

@@ -1,11 +1,12 @@
 <script lang="ts">
-	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
-	import { getLocalSettings } from '$lib/context';
+	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
+	import { getLocalSettings, getOptionalWorkspaceShortcuts } from '$lib/context';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
-	let { session }: { session: FileSession } = $props();
+	let { session }: { session: FileViewSession } = $props();
 	const localSettings = getLocalSettings();
+	const shortcuts = getOptionalWorkspaceShortcuts();
 	const frame = getSurfaceFrameBridge();
 	let editorContainer = $state<HTMLDivElement | null>(null);
 	let lease: number | null = null;
@@ -27,10 +28,7 @@
 				lease = controller.attach(element);
 				const scrollElement = controller.scrollElement;
 				if (scrollElement) {
-					unregisterScrollRegion = registerNativeWorkspaceScrollRegion(
-						scrollElement,
-						'primary',
-					);
+					unregisterScrollRegion = registerNativeWorkspaceScrollRegion(scrollElement, 'primary');
 				}
 			},
 			detach,
@@ -39,12 +37,32 @@
 	});
 
 	$effect(() => {
+		const element = editorContainer;
+		if (!shortcuts || !element) return;
+		return shortcuts.registerLocalShortcutOwner(element, (event) => {
+			if (event.isComposing) return false;
+			if (event.key !== 'Escape') return false;
+			const consume = () => {
+				event.preventDefault();
+				event.stopPropagation();
+				event.stopImmediatePropagation();
+				return true;
+			};
+			if (session.editor?.closeDialog() || session.editor?.closeSearch()) return consume();
+			const surface = element.closest<HTMLElement>('[data-workspace-surface-id]');
+			if (!surface) return false;
+			surface.tabIndex = -1;
+			surface.focus();
+			return consume();
+		});
+	});
+
+	$effect(() => {
 		localSettings.codeEditorWordWrap;
 		localSettings.codeEditorLineNumbers;
 		localSettings.codeEditorFontSize;
 		session.readOnly;
-		session.showDiff;
-		session.oldContent;
+		session.document.mixedLineEndings;
 		session.editor?.reconfigure();
 	});
 </script>

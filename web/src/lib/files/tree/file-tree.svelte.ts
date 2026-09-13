@@ -57,7 +57,13 @@ export interface FileTreeNavigationError {
 }
 
 export type FileTreeDirectoryTargetReason =
-	'initial' | 'directory-row' | 'parent-row' | 'breadcrumb' | 'home' | 'chat-project';
+	| 'initial'
+	| 'directory-row'
+	| 'parent-row'
+	| 'breadcrumb'
+	| 'home'
+	| 'chat-project'
+	| 'reveal-file';
 
 export interface FileTreeDirectoryTarget {
 	path: string;
@@ -322,6 +328,12 @@ export class FileTreeStore {
 		return this.#filteredRows;
 	}
 
+	get knownFiles(): readonly FileTreeEntry[] {
+		return this.#materializedRows.flatMap((row) =>
+			row.entry.type === 'file' ? [row.entry] : [],
+		);
+	}
+
 	setProjectState(projectState: WorkspaceProjectState): void {
 		if (projectState.kind === 'absent') {
 			this.#projectRequestsAllowed = false;
@@ -450,6 +462,25 @@ export class FileTreeStore {
 			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
 			captureAsChatProject,
 		});
+	}
+
+	async revealFile(relativePath: string): Promise<boolean> {
+		const fileRootPath = this.fileRootPath;
+		if (!fileRootPath) return false;
+		const segments = relativePath.split('/').filter(Boolean);
+		const fileName = segments.pop();
+		if (!fileName) return false;
+		const directoryPath = segments.length
+			? `${fileRootPath.replace(/\/$/, '')}/${segments.join('/')}`
+			: fileRootPath;
+		await this.navigateTo({
+			path: directoryPath,
+			label: segments.at(-1) ?? this.currentDirectoryLabel,
+			breadcrumbs: [],
+			reason: 'reveal-file',
+			focusPathOnSuccess: `${directoryPath.replace(/\/$/, '')}/${fileName}`,
+		});
+		return this.readyResponse?.entries.some((entry) => entry.relativePath === relativePath) ?? false;
 	}
 
 	async retryNavigation(): Promise<void> {

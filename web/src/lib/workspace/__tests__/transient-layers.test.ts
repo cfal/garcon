@@ -108,6 +108,7 @@ describe('TransientLayerRegistry', () => {
 		});
 		const event = keyboardEscape();
 
+		expect(layers.topVisibleKind()).toBe('menu');
 		expect(layers.handleEscape(event)).toBe(true);
 		expect(event.defaultPrevented).toBe(true);
 		expect(closeMenu).toHaveBeenCalledOnce();

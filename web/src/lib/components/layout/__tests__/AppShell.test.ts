@@ -64,9 +64,6 @@ vi.mock('$lib/components/shared/NotificationHost.svelte', async () => ({
 vi.mock('../../chat/NewChatDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('../../files/FileDialogHost.svelte', async () => ({
-	default: (await import('./AppShellGenericStub.svelte')).default,
-}));
 vi.mock('../../files/FileDirtyUnloadGuard.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));

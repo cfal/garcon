@@ -580,6 +580,28 @@ describe('KeyboardShortcuts', () => {
 		expect(appShell.requestNewChat).not.toHaveBeenCalled();
 	});
 
+	it('lets a locally owned editor close Find before its file dialog', () => {
+		const onTransientEscape = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'file-dialog',
+			transientSurface: true,
+			localShortcutOwner: (event) => event.key === 'Escape',
+			onLocalKeydown,
+			onTransientEscape,
+		});
+
+		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+		);
+
+		expect(onLocalKeydown).toHaveBeenCalledOnce();
+		expect(onTransientEscape).not.toHaveBeenCalled();
+	});
+
 	it('lets the top transient consume Escape before a local editor owner', () => {
 		const onTransientEscape = vi.fn();
 		const onLocalKeydown = vi.fn();

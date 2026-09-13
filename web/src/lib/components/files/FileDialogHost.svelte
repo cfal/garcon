@@ -21,7 +21,10 @@
 	} from '$lib/workspace/surface-frame-context.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { shouldWaitForFileRenderer } from './file-renderer-frame.js';
+	import FileConflictComparison from './FileConflictComparison.svelte';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
+	let { onAppendToChatDraft }: { onAppendToChatDraft?: ChatDraftAppend } = $props();
 	const files = getFileSessions();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
@@ -124,7 +127,7 @@
 									{m.file_session_loading()}
 								</div>
 							{:then FileSurface}
-								<FileSurface {session} presentation="dialog" />
+								<FileSurface {session} presentation="dialog" {onAppendToChatDraft} />
 							{:catch error}
 								<SurfaceErrorState
 									message={error instanceof Error
@@ -196,14 +199,18 @@
 				})}
 			</Dialog.Description>
 		</Dialog.Header>
-		<Dialog.Footer>
-			<Button variant="ghost" onclick={() => files.resolveOverwrite('cancel')}
-				>{m.file_session_cancel()}</Button
-			>
-			<Button variant="destructive" onclick={() => files.resolveOverwrite('overwrite')}
-				>{m.file_session_save_anyway()}</Button
-			>
-		</Dialog.Footer>
+		{#if files.overwriteRequest}
+			<FileConflictComparison
+				baseContent={files.overwriteRequest.baseContent}
+				localContent={files.overwriteRequest.localContent}
+				diskContent={files.overwriteRequest.diskContent}
+				lineSeparator={files.overwriteRequest.lineSeparator}
+				onCancel={() => files.resolveOverwrite('cancel')}
+				onAcceptDisk={() => files.resolveOverwrite('accept-disk')}
+				onSaveChecked={(content) => files.resolveOverwrite('save-checked', content)}
+				onOverwrite={(content) => files.resolveOverwrite('overwrite', content)}
+			/>
+		{/if}
 	</Dialog.Content>
 </Dialog.Root>
 

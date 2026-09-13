@@ -8,33 +8,28 @@
 		getAppShell,
 		getGhCapability,
 		getNotifications,
+		getOptionalWorkbenchCommands,
 		getTerminalRegistry,
 		getTransientLayers,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-
-	interface CommandItem {
-		id: string;
-		label: string;
-		description?: string;
-		category: string;
-		action: () => void;
-	}
+	import type { WorkbenchCommand } from '$lib/workspace/workbench-commands.svelte.js';
 
 	const categories = {
 		chat: m.command_category_chat(),
 		navigation: m.command_category_navigation(),
 		workspace: m.command_category_workspace(),
 	} as const;
+	const knownFilePrefix = 'file.open-known:';
 
-	const workspace = getWorkspaceCoordinator();
-	const terminals = getTerminalRegistry();
-	const appShell = getAppShell();
-	const ghCapability = getGhCapability();
-	const notifications = getNotifications();
+	const commandRegistry = getOptionalWorkbenchCommands();
+	const workspace = commandRegistry ? null : getWorkspaceCoordinator();
+	const terminals = commandRegistry ? null : getTerminalRegistry();
+	const appShell = commandRegistry ? null : getAppShell();
+	const ghCapability = commandRegistry ? null : getGhCapability();
+	const notifications = commandRegistry ? null : getNotifications();
 	const transientLayers = getTransientLayers();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
@@ -46,130 +41,49 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let paletteRef = $state<HTMLDivElement | null>(null);
 
-	function reportTerminalAction(operation: Promise<unknown>): void {
-		void operation.catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
+
+	function legacyCommands(): WorkbenchCommand[] {
+		if (!workspace || !terminals || !appShell || !ghCapability || !notifications) return [];
+		const report = (operation: Promise<unknown>) => void operation.catch((error) =>
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
+		);
+		const open = (id: string, label: string, kind: Parameters<typeof workspace.openSingleton>[0]): WorkbenchCommand => ({
+			id, label, category: 'Workspace', defaultBindings: [], isEnabled: () => true,
+			run: () => report(workspace.openSingleton(kind)),
 		});
-	}
-
-	function reportOpenError(error: unknown): void {
-		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-	}
-
-	let commands = $derived.by<CommandItem[]>(() => {
 		return [
-			{
-				id: 'new-chat',
-				label: m.command_new_chat(),
-				description: m.command_new_chat_desc(),
-				category: categories.chat,
-				action: () => {
-					appShell.openNewChatDialog();
-				},
-			},
-			{
-				id: 'open-settings',
-				label: m.command_open_settings(),
-				description: m.command_open_settings_desc(),
-				category: categories.navigation,
-				action: () => appShell.openSettings(),
-			},
-			{
-				id: 'workspace-chat',
-				label: m.command_switch_to_chat(),
-				description: m.command_open_panel({ panel: m.workspace_surface_chat() }),
-				category: categories.workspace,
-				action: () => void workspace.focusChat(),
-			},
-			{
-				id: 'workspace-files',
-				label: m.command_switch_to_files(),
-				description: m.command_open_panel({ panel: m.workspace_surface_files() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('files').catch(reportOpenError),
-			},
-			{
-				id: 'workspace-chat-map',
-				label: m.workspace_open_chat_map(),
-				description: m.command_open_panel({ panel: m.workspace_surface_chat_map() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('chat-map').catch(reportOpenError),
-			},
-			{
-				id: 'workspace-chat-canvas',
-				label: m.workspace_open_chat_canvas(),
-				description: m.command_open_panel({ panel: m.workspace_surface_chat_canvas() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('chat-canvas').catch(reportOpenError),
-			},
-			{
-				id: 'workspace-chat-board',
-				label: m.workspace_open_chat_board(),
-				description: m.command_open_panel({ panel: m.workspace_surface_chat_board() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('chat-board').catch(reportOpenError),
-			},
-			{
-				id: 'workspace-terminal',
-				label: m.command_switch_to_terminal(),
-				description: m.command_open_panel({ panel: m.workspace_surface_terminal() }),
-				category: categories.workspace,
-				action: () => reportTerminalAction(workspace.focusMostRecentTerminalOrCreate()),
-			},
-			...(terminals.listStatus === 'ready' &&
-			terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
-				? [
-						{
-							id: 'workspace-new-terminal',
-							label: m.workspace_new_terminal(),
-							description: m.command_new_terminal_description(),
-							category: categories.workspace,
-							action: () =>
-								reportTerminalAction(
-									workspace.createTerminalInAvailableSpace('command-menu:new-terminal'),
-								),
-						},
-					]
-				: []),
-			{
-				id: 'workspace-git',
-				label: m.command_switch_to_git(),
-				description: m.command_open_panel({ panel: m.workspace_surface_git_workbench() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('git').catch(reportOpenError),
-			},
-			{
-				id: 'workspace-git-history',
-				label: m.workspace_surface_git_history(),
-				description: m.command_open_panel({ panel: m.workspace_surface_git_history() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('git-history').catch(reportOpenError),
-			},
-			{
-				id: 'workspace-git-compare',
-				label: m.workspace_surface_git_compare(),
-				description: m.command_open_panel({ panel: m.workspace_surface_git_compare() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('git-compare').catch(reportOpenError),
-			},
-			...(ghCapability.available || !ghCapability.hasChecked
-				? [
-						{
-							id: 'workspace-pull-requests',
-							label: m.workspace_surface_pull_requests(),
-							description: m.command_open_panel({ panel: m.workspace_surface_pull_requests() }),
-							category: categories.workspace,
-							action: () => void workspace.openSingleton('pull-requests').catch(reportOpenError),
-						},
-					]
-				: []),
-			{
-				id: 'workspace-commit',
-				label: m.workspace_surface_commit(),
-				description: m.command_open_panel({ panel: m.workspace_surface_commit() }),
-				category: categories.workspace,
-				action: () => void workspace.openSingleton('commit').catch(reportOpenError),
-			},
+			{ id: 'new-chat', label: m.command_new_chat(), description: m.command_new_chat_desc(), category: 'Chat', defaultBindings: [], isEnabled: () => true, run: () => appShell.openNewChatDialog() },
+			{ id: 'open-settings', label: m.command_open_settings(), description: m.command_open_settings_desc(), category: 'Navigation', defaultBindings: [], isEnabled: () => true, run: () => appShell.openSettings() },
+			{ id: 'workspace-chat', label: m.command_switch_to_chat(), category: 'Workspace', defaultBindings: [], isEnabled: () => true, run: () => void workspace.focusChat() },
+			open('workspace-files', m.command_switch_to_files(), 'files'),
+			open('workspace-chat-map', m.workspace_open_chat_map(), 'chat-map'),
+			open('workspace-chat-canvas', m.workspace_open_chat_canvas(), 'chat-canvas'),
+			open('workspace-chat-board', m.workspace_open_chat_board(), 'chat-board'),
+			{ id: 'workspace-terminal', label: m.command_switch_to_terminal(), category: 'Workspace', defaultBindings: [], isEnabled: () => true, run: () => report(workspace.focusMostRecentTerminalOrCreate()) },
+			...(terminals.listStatus === 'ready' && terminals.orderedSessions.length < 5 ? [{ id: 'workspace-new-terminal', label: m.workspace_new_terminal(), category: 'Workspace' as const, defaultBindings: [], isEnabled: () => true, run: () => report(workspace.createTerminalInAvailableSpace('command-menu:new-terminal')) }] : []),
+			open('workspace-git', m.command_switch_to_git(), 'git'),
+			open('workspace-git-history', m.workspace_surface_git_history(), 'git-history'),
+			open('workspace-git-compare', m.workspace_surface_git_compare(), 'git-compare'),
+			...(ghCapability.available || !ghCapability.hasChecked ? [open('workspace-pull-requests', m.workspace_surface_pull_requests(), 'pull-requests')] : []),
+			open('workspace-commit', m.workspace_surface_commit(), 'commit'),
+		];
+	}
+
+	let commandContext = $derived(commandRegistry?.context() ?? { viewId: null, surfaceId: null });
+	let commands = $derived.by<WorkbenchCommand[]>(() => {
+		const registered = commandRegistry?.available(commandContext) ?? legacyCommands();
+		if (!commandRegistry) return [...registered];
+		return [
+			...registered,
+			...commandRegistry.knownFileLocations.map((location) => ({
+				id: `${knownFilePrefix}${location.key}`,
+				label: `Open ${location.displayPath}`,
+				description: 'Known file',
+				category: 'File' as const,
+				defaultBindings: [],
+				isEnabled: () => true,
+				run: () => commandRegistry.openLocation(location),
+			})),
 		];
 	});
 
@@ -183,6 +97,10 @@
 
 	let filteredCommands = $derived(query.trim() ? fuse.search(query).map((r) => r.item) : commands);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
+
+	function isEnabled(command: WorkbenchCommand): boolean {
+		return command.isEnabled(commandContext);
+	}
 
 	function optionIdFor(commandId: string): string {
 		return `${uid}-command-${commandId}`;
@@ -214,8 +132,13 @@
 		else open();
 	}
 
-	function selectItem(item: CommandItem) {
-		item.action();
+	function selectItem(item: WorkbenchCommand) {
+		if (!isEnabled(item)) return;
+		if (commandRegistry && !item.id.startsWith(knownFilePrefix)) {
+			void commandRegistry.execute(item.id, commandContext);
+		} else {
+			void item.run(commandContext);
+		}
 		close();
 	}
 
@@ -336,7 +259,9 @@
 							data-cmd-index={i}
 							role="option"
 							aria-selected={i === selectedIndex}
-							class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors {i ===
+							aria-disabled={!isEnabled(item)}
+							disabled={!isEnabled(item)}
+							class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 {i ===
 							selectedIndex
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"

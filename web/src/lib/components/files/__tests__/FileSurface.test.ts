@@ -170,6 +170,46 @@ describe('FileSurface', () => {
 		expect((refresh as HTMLButtonElement).disabled).toBe(false);
 	});
 
+	it('opens the full editor status as a touch-sized mobile sheet', async () => {
+		render(FileSurfaceTestHost, {
+			presentation: 'mobile',
+			rendererMode: 'code',
+			loading: false,
+		});
+
+		const trigger = screen.getByRole('button', { name: 'Show full editor status' });
+		await fireEvent.click(trigger);
+
+		expect(screen.getByRole('dialog', { name: 'Full editor status' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Close' }).className).toContain('text-base');
+	});
+
+	it('offers Open to Side only in a desktop window', async () => {
+		const onOpenToSide = vi.fn();
+		render(FileSurfaceTestHost, {
+			presentation: 'window-main',
+			rendererMode: 'code',
+			loading: false,
+			onOpenToSide,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open to Side' }));
+		expect(onOpenToSide).toHaveBeenCalledWith(expect.any(String), 'window-main');
+	});
+
+	it.each(['mobile', 'dialog'] as const)(
+		'does not offer Open to Side in the %s presentation',
+		(presentation) => {
+			render(FileSurfaceTestHost, {
+				presentation,
+				rendererMode: 'code',
+				loading: false,
+			});
+
+			expect(screen.queryByRole('button', { name: 'Open to Side' })).toBeNull();
+		},
+	);
+
 	it('disables Save while a refresh is pending', () => {
 		render(FileSurfaceTestHost, {
 			presentation: 'window-main',
@@ -202,6 +242,18 @@ describe('FileSurface', () => {
 		});
 
 		await waitFor(() => expect(onCheckFreshness).toHaveBeenCalledOnce());
+	});
+
+	it('switches a Markdown preview into its source editor', async () => {
+		render(FileSurfaceTestHost, {
+			presentation: 'window-main',
+			rendererMode: 'markdown',
+			loading: false,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: m.file_session_edit() }));
+
+		expect(screen.getByRole('button', { name: m.file_session_view() })).toBeTruthy();
 	});
 
 	it('passes the dialog presentation to Markdown link navigation', async () => {

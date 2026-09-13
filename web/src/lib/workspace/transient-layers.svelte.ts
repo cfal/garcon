@@ -115,6 +115,10 @@ export class TransientLayerRegistry {
 		return Boolean(this.#topVisibleLayer('main-inert')?.element()?.contains(target));
 	}
 
+	topVisibleKind(): TransientLayerKind | null {
+		return this.#topVisibleLayer()?.kind ?? null;
+	}
+
 	#topVisibleLayer(modality?: TransientLayerModality): RegisteredLayer | null {
 		return (
 			this.#layers

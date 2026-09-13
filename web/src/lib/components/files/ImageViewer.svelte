@@ -11,11 +11,11 @@
 		type ZoomPoint,
 		type ZoomSize,
 	} from '$lib/components/shared/zoom-viewport.js';
-	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { session }: { session: FileSession } = $props();
+	let { session }: { session: FileViewSession } = $props();
 	let imageElement: HTMLImageElement | null = $state(null);
 	let viewportElement: HTMLDivElement | null = $state(null);
 
@@ -103,6 +103,7 @@
 		session.image.scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale));
 		session.image.scrollLeft = 0;
 		session.image.scrollTop = 0;
+		session.notePresentationChanged();
 		correctingScroll = true;
 		viewport.scrollLeft = 0;
 		viewport.scrollTop = 0;
@@ -120,6 +121,7 @@
 		if (!viewport || correctingScroll) return;
 		session.image.scrollLeft = viewport.scrollLeft;
 		session.image.scrollTop = viewport.scrollTop;
+		session.notePresentationChanged();
 	}
 
 	function restoreManualFocalPoint(anchor: ZoomAnchor): void {
@@ -129,6 +131,7 @@
 		restoreZoomAnchor(viewportElement, imageRect, anchor);
 		session.image.scrollLeft = viewportElement.scrollLeft;
 		session.image.scrollTop = viewportElement.scrollTop;
+		session.notePresentationChanged();
 		scheduleScrollRelease();
 	}
 

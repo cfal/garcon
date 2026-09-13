@@ -9,14 +9,20 @@ function dispatchBeforeUnload(): boolean {
 }
 
 describe('FileDirtyUnloadGuard', () => {
-	it('guards only while at least one file session is dirty', async () => {
-		const view = render(FileDirtyUnloadGuardTestHost, { dirty: false });
+	it('guards dirty buffers and every nonterminal Save state', async () => {
+		const view = render(FileDirtyUnloadGuardTestHost, { dirty: false, saveOutcome: 'idle' });
 		expect(dispatchBeforeUnload()).toBe(false);
 
-		await view.rerender({ dirty: true });
+		await view.rerender({ dirty: true, saveOutcome: 'idle' });
 		expect(dispatchBeforeUnload()).toBe(true);
 
-		await view.rerender({ dirty: false });
+		await view.rerender({ dirty: false, saveOutcome: 'saving' });
+		expect(dispatchBeforeUnload()).toBe(true);
+
+		await view.rerender({ dirty: false, saveOutcome: 'unknown' });
+		expect(dispatchBeforeUnload()).toBe(true);
+
+		await view.rerender({ dirty: false, saveOutcome: 'idle' });
 		expect(dispatchBeforeUnload()).toBe(false);
 	});
 });

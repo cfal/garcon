@@ -577,6 +577,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.focusOwner.kind !== 'chat-list' && this.focusOwner.surfaceId === surfaceId;
 		this.#reservedSurfaceIds.add(surfaceId);
 		let releaseCanvasClose: (() => void) | null = null;
+		let releaseFileClose: (() => void) | null = null;
 		try {
 			if (surface.type === 'singleton' && surface.kind === 'tickets') {
 				const tickets = this.#deps.singletons.ticketsIfPresent();
@@ -620,8 +621,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				}
 			}
 			if (surface.type === 'file') {
-				if (!(await this.#deps.files.confirmDestructive(surface.fileSessionId, 'close')))
-					return false;
+				releaseFileClose = await this.#deps.files.prepareDestructiveViews(
+					[surface.fileSessionId],
+					'close',
+				);
+				if (!releaseFileClose) return false;
 			}
 			const sourceWindowId = this.#presentation.windowOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
@@ -662,7 +666,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			if (removalBlocked) return false;
 			this.#presentation.clearAttachmentError(surfaceId);
 			if (wasDialog) this.#fileDialog.clearReturnSurface();
-			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
+			if (surface.type === 'file') await this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
 			if (surface.type === 'singleton') {
 				if (surface.kind === 'commit') this.#deps.singletons.commitIfPresent()?.discardDrafts();
@@ -684,6 +688,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			return true;
 		} finally {
 			releaseCanvasClose?.();
+			releaseFileClose?.();
 			this.#reservedSurfaceIds.delete(surfaceId);
 			if (surface.type === 'terminal') {
 				await this.#terminalPlacement.afterPlacementReleased(surface.terminalId);
@@ -746,15 +751,33 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		target?: DesktopPlacement,
 		publication?: { publish(): void; rollback(): void },
 	): Promise<FilePlacementResult> {
+		return this.#placeFileSession(sessionId, target, publication, 'interactive');
+	}
+
+	async restoreFileSession(
+		sessionId: string,
+		target?: DesktopPlacement,
+		publication?: { publish(): void; rollback(): void },
+	): Promise<FilePlacementResult> {
+		return this.#placeFileSession(sessionId, target, publication, 'restoration');
+	}
+
+	async #placeFileSession(
+		sessionId: string,
+		target: DesktopPlacement | undefined,
+		publication: { publish(): void; rollback(): void } | undefined,
+		intent: 'interactive' | 'restoration',
+	): Promise<FilePlacementResult> {
 		const surfaceId = fileSurfaceId(sessionId);
 		if (this.layout.surface(surfaceId)) {
-			await this.focusFileSession(sessionId);
+			publication?.publish();
+			if (intent === 'interactive') await this.focusFileSession(sessionId);
 			return 'placed';
 		}
 		if (this.isMobile) return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
 		const destination = target ?? { type: 'dialog' as const };
 		if (destination.type === 'dialog') return this.#fileDialog.placeNew(sessionId, publication);
-		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		if (intent === 'interactive') this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		if (destination.type === 'new-window') {
 			const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
 			const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
@@ -783,7 +806,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			);
 			if (!this.layout.surface(surfaceId))
 				throw new Error(`File surface was not placed: ${surfaceId}`);
-			if (current) this.#presentation.presentSurface(surfaceId);
+			if (current && intent === 'interactive') this.#presentation.presentSurface(surfaceId);
 			return 'placed';
 		}
 		const current = await this.#presentation.commit(
@@ -796,14 +819,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
 						windowId,
 					},
-					{ type: 'activate-window-tab', windowId, surfaceId },
+					...(intent === 'interactive'
+						? [{ type: 'activate-window-tab' as const, windowId, surfaceId }]
+						: []),
 				];
 			},
 			{ publication },
 		);
 		if (!this.layout.surface(surfaceId))
 			throw new Error(`File surface was not placed: ${surfaceId}`);
-		if (current) this.#presentation.presentSurface(surfaceId);
+		if (current && intent === 'interactive') this.#presentation.presentSurface(surfaceId);
 		return 'placed';
 	}
 
@@ -876,17 +901,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async switchTerminalSurface(currentTerminalId: string, nextTerminalId: string): Promise<void> {
 		await this.#terminalPlacement.switch(currentTerminalId, nextTerminalId);
 	}
-
 	async handleTerminalSessionTerminated(terminalId: string): Promise<void> {
 		await this.#terminalPlacement.handleTerminated(terminalId);
 	}
-
 	async focusMostRecentTerminalOrCreate(
 		preferredWindowId: WorkspaceWindowId = this.defaultWindowId,
 	): Promise<void> {
 		await this.#terminalPlacement.focusMostRecentOrCreate(preferredWindowId);
 	}
-
 	async enterMobilePresentation(): Promise<void> {
 		await this.#presentation.enterMobilePresentation();
 	}

@@ -2,6 +2,7 @@
 	import Settings from '../Settings.svelte';
 	import {
 		setAppShell,
+		setFileSessions,
 		setGhCapability,
 		setLocalSettings,
 		setModelCatalog,
@@ -187,6 +188,7 @@
 	});
 
 	setAppShell(untrack(() => appShell));
+	setFileSessions({ clearRecovery: async () => true } as never);
 	setRemoteSettings(untrack(() => remoteSettings));
 	setLocalSettings(localSettings);
 	setThemeRuntime({

@@ -95,7 +95,10 @@ function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	};
 }
 
-function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
+function assembleWorkspaceServices(
+	localSettings: LocalSettingsStore,
+	fileWorkspaceLayoutRaw: string | null = null,
+): {
 	services: WorkspaceServices;
 	ghCapability: ReturnType<typeof createGhCapabilityStore>;
 	chatSessions: ReturnType<typeof createChatSessionsStore>;
@@ -116,6 +119,7 @@ function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 			chatBoardInvalidations: createChatBoardInvalidationHub(),
 			ticketsInvalidations: new TicketsInvalidationHub(),
 			chatSessions,
+			userNamespace: 'test-user',
 			ghCapability,
 			localSettings,
 			modelCatalog: createModelCatalogStore(),
@@ -127,6 +131,7 @@ function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 			onTerminalLauncherDismissed: () => {},
 			isTerminalLauncherDismissed: () => false,
 			workspaceLayoutRaw: null,
+			fileWorkspaceLayoutRaw,
 		}),
 		ghCapability,
 		chatSessions,
@@ -238,6 +243,48 @@ describe('createWorkspaceServices', () => {
 		});
 	});
 
+	it('restores the browser-owned file window topology before file recovery', () => {
+		rootLocalSettings = createLocalSettingsStore();
+		const raw = JSON.stringify({
+			version: 1,
+			browserSessionId: 'test-client',
+			root: {
+				type: 'partition',
+				id: 'partition-file-side',
+				direction: 'horizontal',
+				ratio: 0.63,
+				children: [
+					{
+						type: 'window',
+						id: 'window-main',
+						order: [{ type: 'chat', chatId: null }],
+						active: { type: 'chat', chatId: null },
+						mru: [{ type: 'chat', chatId: null }],
+					},
+					{
+						type: 'window',
+						id: 'window-side',
+						order: [{ type: 'file', viewId: 'restored-view' }],
+						active: { type: 'file', viewId: 'restored-view' },
+						mru: [{ type: 'file', viewId: 'restored-view' }],
+					},
+				],
+			},
+			unplacedTerminalIds: [],
+		});
+
+		({ services } = assembleWorkspaceServices(rootLocalSettings, raw));
+
+		expect(services.layout.snapshot.desktopRoot).toMatchObject({
+			type: 'partition',
+			id: 'partition-file-side',
+			ratio: 0.63,
+		});
+		expect(windowIdOfSurface(services.layout.snapshot.desktopRoot, 'file:restored-view')).toBe(
+			'window-side',
+		);
+	});
+
 	it('assembles the coordinator and keeps root-owned domain bindings reactive', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		rootLocalSettings.showQuickCommitTray = false;
@@ -254,6 +301,8 @@ describe('createWorkspaceServices', () => {
 		expect(services.workspaceInteractionGate).toBeDefined();
 		expect(services.surfaceFrames).toBeDefined();
 		expect(services.shortcuts).toBeDefined();
+		expect(services.commands.commands.some((command) => command.id === 'file.save')).toBe(true);
+		expect(services.commands.commands.some((command) => command.id === 'editor.find')).toBe(true);
 		expect(services.gitQuickSummary.isEnabled).toBe(false);
 		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('available');
 

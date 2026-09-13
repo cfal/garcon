@@ -1,6 +1,13 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
-import { apiFetch, apiGet, apiPut, apiPostForm, parseApiResponse } from './client.js';
+import {
+	apiFetch,
+	apiGet,
+	apiPut,
+	apiPostForm,
+	parseApiResponse,
+	type ApiFetchOptions,
+} from './client.js';
 import {
 	FILE_REVISION_HEADER,
 	isFileRevision,
@@ -135,7 +142,7 @@ export async function resolveFileIdentity(
 /** Saves text content to a file. */
 export async function saveText(
 	params: SaveTextParams,
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<SaveTextResponse> {
 	const { content, expectedRevision, conflictResolution, ...rest } = params;
 	const qs = buildFileQuery(rest);

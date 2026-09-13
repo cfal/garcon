@@ -46,7 +46,6 @@
 	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
-	import FileDialogHost from '../files/FileDialogHost.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
 	import WorkspaceCloseGuard from '$lib/components/workspace/WorkspaceCloseGuard.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';
@@ -897,7 +896,6 @@
 />
 
 <NewChatDialog />
-<FileDialogHost />
 <FileDirtyUnloadGuard />
 <WorkspaceCloseGuard />
 <NotificationHost {notifications} desktopInlineStartPx={notificationDesktopInlineStartPx} />

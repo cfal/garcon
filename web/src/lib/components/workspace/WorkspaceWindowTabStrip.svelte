@@ -3,7 +3,12 @@
 	import { mergeProps } from 'bits-ui';
 	import { tabbable } from 'tabbable';
 	import { ContextMenu, ContextMenuTrigger } from '$lib/components/ui/context-menu';
-	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
+	import {
+		getChatSessions,
+		getFileSessions,
+		getNotifications,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
 	import type {
 		ActiveSurfaceKind,
 		WorkspaceWindowId,
@@ -57,6 +62,7 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const sessions = getChatSessions();
+	const files = getFileSessions();
 	const notifications = getNotifications();
 	let tabViewport: HTMLDivElement | null = $state(null);
 	let measurementRail: HTMLDivElement | null = $state(null);
@@ -172,7 +178,10 @@
 		tabPresentation = resolveWindowTabPresentation({
 			order: tabs.order,
 			activeId: tabs.activeId,
-			pinnedIds: [],
+			pinnedIds: tabs.order.filter((surfaceId) => {
+				const surface = workspace.layout.surface(surfaceId);
+				return surface?.type === 'file' && Boolean(files.get(surface.fileSessionId)?.pinned);
+			}),
 			availableWidth: capacity.contentWidth,
 			widths,
 			gap: tabGap,

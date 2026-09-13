@@ -29,6 +29,28 @@ describe('WorkspaceLayoutPersistence', () => {
 		persistence.destroy();
 	});
 
+	it('persists a file-aware topology for the owning browser session', () => {
+		vi.useFakeTimers();
+		const write = vi.fn();
+		const writeSession = vi.fn();
+		const persistence = new WorkspaceLayoutPersistence({
+			write,
+			writeSession,
+			getBrowserSessionId: () => 'browser-session',
+		});
+		const snapshot = canonicalWorkspaceSnapshot();
+
+		persistence.schedule(snapshot);
+		vi.advanceTimersByTime(WORKSPACE_PERSISTENCE_DELAY_MS);
+
+		expect(writeSession).toHaveBeenCalledOnce();
+		expect(JSON.parse(writeSession.mock.calls[0][1])).toMatchObject({
+			version: 1,
+			browserSessionId: 'browser-session',
+		});
+		persistence.destroy();
+	});
+
 	it('flushes on pagehide and hidden visibility, then removes listeners', () => {
 		vi.useFakeTimers();
 		const write = vi.fn();

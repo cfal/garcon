@@ -114,6 +114,7 @@ export class WorkspaceWindowDestructionService {
 		let releasedTerminalIds: string[] = [];
 		let removalPlanned = false;
 		let releaseCanvasClose: (() => void) | null = null;
+		let releaseFileCloses: (() => void) | null = null;
 		try {
 			if (
 				removedDescriptors.some(
@@ -126,7 +127,8 @@ export class WorkspaceWindowDestructionService {
 					if (!releaseCanvasClose) return false;
 				}
 			}
-			if (!(await this.#confirmDestruction(removedDescriptors))) return false;
+			releaseFileCloses = await this.#prepareDestruction(removedDescriptors);
+			if (!releaseFileCloses) return false;
 			const plan: WorkspaceMutationPlan = (latest) => {
 				removalPlanned = false;
 				const latestWindows = collectWindowNodes(latest.desktopRoot);
@@ -162,6 +164,7 @@ export class WorkspaceWindowDestructionService {
 			return true;
 		} finally {
 			releaseCanvasClose?.();
+			releaseFileCloses?.();
 			for (const windowId of reservedWindowIds) this.deps.windowReservations.delete(windowId);
 			for (const surfaceId of affectedSurfaceIds) this.deps.surfaceReservations.delete(surfaceId);
 			for (const terminalId of releasedTerminalIds) {
@@ -187,7 +190,7 @@ export class WorkspaceWindowDestructionService {
 		if (!surface) return true;
 		if (this.deps.gitMutations?.pendingCount(surfaceId)) return true;
 		if (surface.type === 'file') {
-			return (this.deps.files.get(surface.fileSessionId)?.pendingMutationCount ?? 0) > 0;
+			return this.deps.files.get(surface.fileSessionId)?.mutationGuarded ?? false;
 		}
 		if (surface.type === 'singleton' && surface.kind === 'commit') {
 			return !(this.deps.singletons.commitIfPresent()?.canClose ?? true);
@@ -197,13 +200,15 @@ export class WorkspaceWindowDestructionService {
 		return false;
 	}
 
-	async #confirmDestruction(descriptors: readonly SurfaceDescriptor[]): Promise<boolean> {
+	async #prepareDestruction(
+		descriptors: readonly SurfaceDescriptor[],
+	): Promise<(() => void) | null> {
 		const ticketSurface = descriptors.find(
 			(surface) => surface.type === 'singleton' && surface.kind === 'tickets',
 		);
 		if (ticketSurface) {
 			const tickets = this.deps.singletons.ticketsIfPresent();
-			if (tickets?.drafts.pending) return false;
+			if (tickets?.drafts.pending) return null;
 			tickets?.drafts.flush();
 			if (
 				tickets?.drafts.needsExitGuard &&
@@ -214,7 +219,7 @@ export class WorkspaceWindowDestructionService {
 					confirmLabel: m.tickets_close_surface(),
 				}))
 			)
-				return false;
+				return null;
 		}
 		const commit = descriptors.find(
 			(surface): surface is Extract<SurfaceDescriptor, { type: 'singleton'; kind: 'commit' }> =>
@@ -222,7 +227,7 @@ export class WorkspaceWindowDestructionService {
 		);
 		if (commit) {
 			const controller = this.deps.singletons.commitIfPresent();
-			if (controller && !controller.canClose) return false;
+			if (controller && !controller.canClose) return null;
 			const draftCount = controller?.retainedDraftCount ?? 0;
 			if (
 				draftCount > 0 &&
@@ -236,21 +241,20 @@ export class WorkspaceWindowDestructionService {
 					confirmLabel: m.commit_surface_discard_close(),
 				}))
 			) {
-				return false;
+				return null;
 			}
 		}
-		for (const surface of descriptors) {
-			if (surface.type !== 'file') continue;
-			if (!(await this.deps.files.confirmDestructive(surface.fileSessionId, 'close'))) return false;
-		}
-		return true;
+		const fileSessionIds = descriptors.flatMap((surface) =>
+			surface.type === 'file' ? [surface.fileSessionId] : [],
+		);
+		return this.deps.files.prepareDestructiveViews(fileSessionIds, 'close');
 	}
 
 	async #disposeRemovedDescriptors(descriptors: readonly SurfaceDescriptor[]): Promise<void> {
 		for (const surface of descriptors) {
 			this.deps.clearAttachmentError(surface.id);
 			if (surface.type === 'file') {
-				this.deps.files.destroy(surface.fileSessionId);
+				await this.deps.files.destroy(surface.fileSessionId);
 				continue;
 			}
 			if (surface.type === 'terminal') continue;

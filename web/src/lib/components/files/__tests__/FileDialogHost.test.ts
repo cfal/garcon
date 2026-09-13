@@ -110,7 +110,7 @@ describe('FileDialogHost', () => {
 		render(FileDialogHostTestHost, { request: 'overwrite', onResolve });
 
 		expect(await screen.findByText(m.file_session_overwrite_title())).toBeTruthy();
-		const overwrite = screen.getByRole('button', { name: m.file_session_save_anyway() });
+		const overwrite = screen.getByRole('button', { name: 'Replace disk' });
 		expect(overwrite.getAttribute('data-slot')).toBe('button');
 		expect(overwrite.className).toContain('bg-destructive');
 		await fireEvent.click(overwrite);

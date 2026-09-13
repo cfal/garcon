@@ -411,7 +411,12 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 		workspace,
 		windowDnd,
 		surfaceFrames: new SurfaceFrameRegistry(),
-		fileSessions: { get: () => null },
+		fileSessions: {
+			get: () => null,
+			get guardRequest() { return null; },
+			get overwriteRequest() { return null; },
+			get thresholdRequest() { return null; },
+		},
 		terminals,
 		localSettings,
 		sessions: {
