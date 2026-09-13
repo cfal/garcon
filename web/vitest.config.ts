@@ -6,6 +6,7 @@ import { CODEMIRROR_PACKAGES } from './codemirror-packages.ts';
 const TEST_OPTIMIZED_DEPENDENCIES = [
 	...CODEMIRROR_PACKAGES.filter((packageName) => packageName !== '@codemirror/legacy-modes'),
 	'katex',
+	'@replit/codemirror-vim',
 ];
 const IMPORT_AUDIT_ENABLED = process.env.VITEST_IMPORT_AUDIT === '1';
 // Uses process workers under Bun because Vitest's thread pools require unavailable Node Worker stdout streams.
@@ -57,7 +58,7 @@ export default defineConfig({
 			deps: {
 				// CodeMirror extensions rely on instanceof checks from @codemirror/state.
 				// Inline the whole family so Vitest cannot mix externalized and Vite-transformed copies.
-				inline: [...CODEMIRROR_PACKAGES],
+				inline: [...CODEMIRROR_PACKAGES, '@replit/codemirror-vim', '@replit/codemirror-vim-core'],
 			},
 		},
 		alias: {

@@ -40,8 +40,18 @@ describe('LocalSettingsStore', () => {
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 		expect(store.steerWithCtrlEnter).toBe(true);
+		expect(store.codeEditorVimMode).toBe(false);
 
 		store.destroy();
+	});
+
+	it('persists the Vim toggle', () => {
+		const store = createLocalSettingsStore();
+		store.set('codeEditorVimMode', true);
+		const restored = createLocalSettingsStore();
+		expect(restored.codeEditorVimMode).toBe(true);
+		store.destroy();
+		restored.destroy();
 	});
 
 	it('persists fixed and System theme preferences atomically', () => {

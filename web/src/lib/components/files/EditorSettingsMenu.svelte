@@ -1,87 +1,75 @@
 <script lang="ts">
-	import * as Popover from '$lib/components/ui/popover';
-	import { Button } from '$lib/components/ui/button';
-	import { Switch } from '$lib/components/ui/switch';
-	import * as Select from '$lib/components/ui/select';
+	import {
+		DropdownMenu,
+		DropdownMenuTrigger,
+		DropdownMenuContent,
+		DropdownMenuCheckboxItem,
+		DropdownMenuSeparator,
+		DropdownMenuSub,
+		DropdownMenuSubTrigger,
+		DropdownMenuSubContent,
+		DropdownMenuRadioGroup,
+		DropdownMenuRadioItem,
+	} from '$lib/components/ui/dropdown-menu';
 	import Settings from '@lucide/svelte/icons/settings';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { getLocalSettings } from '$lib/context';
 	import { FONT_SIZE_OPTIONS } from '$lib/utils/font-size.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
-
-	let menuOpen = $state(false);
-
-	function setCodeEditorFontSize(size: string): void {
-		localSettings.set('codeEditorFontSize', size);
-	}
-
-	function toggleWordWrap(): void {
-		localSettings.toggle('codeEditorWordWrap');
-	}
-
-	function toggleLineNumbers(): void {
-		localSettings.toggle('codeEditorLineNumbers');
-	}
+	const narrow = new MediaQuery('(max-width: 480px)');
+	let trigger = $state<HTMLElement | null>(null);
 </script>
 
-<Popover.Root bind:open={menuOpen}>
-	<Popover.Trigger>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={m.editor_settings_button_label()}
-			title={m.editor_settings_button_label()}
-		>
-			<Settings class="w-4 h-4" />
-		</Button>
-	</Popover.Trigger>
-
-	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
-		<div class="bg-card text-foreground rounded-md border border-border">
-			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_appearance_settings_code_editor_font_size_label()}
-				</div>
-				<Select.Root
-					type="single"
+<DropdownMenu>
+	<DropdownMenuTrigger
+		bind:ref={trigger}
+		class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		aria-label={m.editor_settings_button_label()}
+		title={m.editor_settings_button_label()}
+	>
+		<Settings class="size-4" />
+	</DropdownMenuTrigger>
+	<DropdownMenuContent class="w-56" align="end" getFocusReturnTarget={() => trigger}>
+		<DropdownMenuSub>
+			<DropdownMenuSubTrigger>
+				<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
+					<span>{m.settings_appearance_settings_code_editor_font_size_label()}</span>
+					<span class="text-xs text-muted-foreground">{localSettings.codeEditorFontSize}px</span>
+				</span>
+			</DropdownMenuSubTrigger>
+			<DropdownMenuSubContent class="w-36" side={narrow.current ? 'bottom' : 'right'} align="end">
+				<DropdownMenuRadioGroup
 					value={localSettings.codeEditorFontSize}
-					onValueChange={(value) => {
-						if (value) setCodeEditorFontSize(value);
-					}}
+					onValueChange={(value) => localSettings.set('codeEditorFontSize', value)}
 				>
-					<Select.Trigger class="w-[80px]" size="sm">
-						{localSettings.codeEditorFontSize}px
-					</Select.Trigger>
-					<Select.Content>
-						{#each FONT_SIZE_OPTIONS as size (size)}
-							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
-			</div>
-
-			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_appearance_settings_code_editor_word_wrap_label()}
-				</div>
-				<Switch
-					checked={localSettings.codeEditorWordWrap}
-					onCheckedChange={toggleWordWrap}
-					aria-label={m.settings_appearance_settings_code_editor_word_wrap_label()}
-				/>
-			</div>
-
-			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_appearance_settings_code_editor_line_numbers_label()}
-				</div>
-				<Switch
-					checked={localSettings.codeEditorLineNumbers}
-					onCheckedChange={toggleLineNumbers}
-					aria-label={m.settings_appearance_settings_code_editor_line_numbers_label()}
-				/>
-			</div>
-		</div>
-	</Popover.Content>
-</Popover.Root>
+					{#each FONT_SIZE_OPTIONS as size (size)}
+						<DropdownMenuRadioItem value={size} closeOnSelect={false}
+							>{size}px</DropdownMenuRadioItem
+						>
+					{/each}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuSubContent>
+		</DropdownMenuSub>
+		<DropdownMenuSeparator />
+		<DropdownMenuCheckboxItem
+			checked={localSettings.codeEditorWordWrap}
+			onCheckedChange={(value) => localSettings.set('codeEditorWordWrap', value)}
+			closeOnSelect={false}
+			>{m.settings_appearance_settings_code_editor_word_wrap_label()}</DropdownMenuCheckboxItem
+		>
+		<DropdownMenuCheckboxItem
+			checked={localSettings.codeEditorLineNumbers}
+			onCheckedChange={(value) => localSettings.set('codeEditorLineNumbers', value)}
+			closeOnSelect={false}
+			>{m.settings_appearance_settings_code_editor_line_numbers_label()}</DropdownMenuCheckboxItem
+		>
+		<DropdownMenuSeparator />
+		<DropdownMenuCheckboxItem
+			checked={localSettings.codeEditorVimMode}
+			onCheckedChange={(value) => localSettings.set('codeEditorVimMode', value)}
+			closeOnSelect={false}>Vim mode</DropdownMenuCheckboxItem
+		>
+	</DropdownMenuContent>
+</DropdownMenu>

@@ -378,6 +378,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				placement?.defaultWindowId ?? 'window-main',
 			),
 		getEditorSettings: () => ({
+			get vimMode() {
+				return deps.localSettings.codeEditorVimMode;
+			},
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;
 			},

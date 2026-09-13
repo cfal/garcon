@@ -15,6 +15,7 @@ export interface FileEditorRuntimeModule {
 	CodeEditorController: new (
 		session: FileViewSession,
 		settings: EditorPresentationSettings,
+		onSave?: () => void,
 	) => CodeEditorController;
 }
 
@@ -26,6 +27,7 @@ interface FileDocumentIoOptions {
 	getSession(sessionId: string): FileViewSession | null;
 	getDocument(documentId: string): FileDocumentState | null;
 	getEditorSettings(): EditorPresentationSettings;
+	save?(sessionId: string): void;
 	getFileRevision?: typeof getFileRevision;
 	readText?: typeof readText;
 	readContent?: typeof readContent;
@@ -113,6 +115,7 @@ export class FileDocumentIoCoordinator {
 					session.editor = new runtime.CodeEditorController(
 						session,
 						this.options.getEditorSettings(),
+						() => this.options.save?.(session.id),
 					);
 				}
 			} catch (error) {
@@ -160,7 +163,11 @@ export class FileDocumentIoCoordinator {
 			const runtime = await this.#loadEditorRuntime();
 			if (this.options.getSession(session.id) !== session || session.editor) return;
 			const recovered = session.document.editorInitializationFailed;
-			session.editor = new runtime.CodeEditorController(session, this.options.getEditorSettings());
+			session.editor = new runtime.CodeEditorController(
+				session,
+				this.options.getEditorSettings(),
+				() => this.options.save?.(session.id),
+			);
 			session.document.editorInitializationFailed = false;
 			if (recovered) {
 				session.loadError = null;

@@ -10,12 +10,14 @@
 		onFocus = () => undefined,
 		closeDialog = () => false,
 		closeSearch = () => false,
+		vimOwnsKey = () => false,
 		onRegisterShortcut = () => undefined,
 	}: {
 		focusRequestToken?: number;
 		onFocus?: () => void;
 		closeDialog?: () => boolean;
 		closeSearch?: () => boolean;
+		vimOwnsKey?: (event: KeyboardEvent) => boolean;
 		onRegisterShortcut?: (handler: (event: KeyboardEvent) => boolean) => void;
 	} = $props();
 
@@ -25,6 +27,7 @@
 		readOnly: false,
 		document: { mixedLineEndings: false },
 		editor: {
+			vim: { error: null, ownsKey: (event: KeyboardEvent) => vimOwnsKey(event) },
 			attach: () => 1,
 			detach: () => undefined,
 			focus: () => onFocus(),
@@ -40,7 +43,10 @@
 
 	setSurfaceFrameBridge(() => frameBridge);
 	setWorkspaceShortcuts({
-		registerLocalShortcutOwner: (_element: HTMLElement, handler: (event: KeyboardEvent) => boolean) => {
+		registerLocalShortcutOwner: (
+			_element: HTMLElement,
+			handler: (event: KeyboardEvent) => boolean,
+		) => {
 			onRegisterShortcut(handler);
 			return () => undefined;
 		},

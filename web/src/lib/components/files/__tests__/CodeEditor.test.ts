@@ -3,6 +3,53 @@ import { describe, expect, it, vi } from 'vitest';
 import CodeEditorFocusTestHost from './CodeEditorFocusTestHost.svelte';
 
 describe('CodeEditor', () => {
+	it.each(['Escape', 'r', 'd'])('leaves Vim %s events for the editor plugin', async (key) => {
+		const registration: { handler: ((event: KeyboardEvent) => boolean) | null } = { handler: null };
+		render(CodeEditorFocusTestHost, {
+			vimOwnsKey: () => true,
+			onRegisterShortcut: (handler) => (registration.handler = handler),
+		});
+		await waitFor(() => expect(registration.handler).not.toBeNull());
+		const event = new KeyboardEvent('keydown', {
+			key,
+			ctrlKey: key !== 'Escape',
+			cancelable: true,
+		});
+		const stop = vi.spyOn(event, 'stopPropagation');
+		expect(registration.handler?.(event)).toBe(true);
+		expect(event.defaultPrevented).toBe(false);
+		expect(stop).not.toHaveBeenCalled();
+	});
+	it('leaves unowned shortcuts and composing events untouched', async () => {
+		const registration: { handler: ((event: KeyboardEvent) => boolean) | null } = { handler: null };
+		const vimOwnsKey = vi.fn(() => false);
+		const closeDialog = vi.fn(() => false);
+		const closeSearch = vi.fn(() => false);
+		render(CodeEditorFocusTestHost, {
+			vimOwnsKey,
+			closeDialog,
+			closeSearch,
+			onRegisterShortcut: (handler) => (registration.handler = handler),
+		});
+		await waitFor(() => expect(registration.handler).not.toBeNull());
+		const event = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, cancelable: true });
+		expect(registration.handler?.(event)).toBe(false);
+		expect(event.defaultPrevented).toBe(false);
+		expect(vimOwnsKey).toHaveBeenCalledOnce();
+
+		const composing = new KeyboardEvent('keydown', {
+			key: 'r',
+			ctrlKey: true,
+			isComposing: true,
+			cancelable: true,
+		});
+		expect(registration.handler?.(composing)).toBe(false);
+		expect(composing.defaultPrevented).toBe(false);
+		expect(vimOwnsKey).toHaveBeenCalledOnce();
+		expect(closeDialog).not.toHaveBeenCalled();
+		expect(closeSearch).not.toHaveBeenCalled();
+	});
+
 	it('releases Escape focus to the owning workbench surface', async () => {
 		const registration: { handler: ((event: KeyboardEvent) => boolean) | null } = {
 			handler: null,

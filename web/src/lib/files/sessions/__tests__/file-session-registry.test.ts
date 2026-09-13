@@ -184,6 +184,36 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
+	it('admits application reload only when every document is clean and Saves have settled', async () => {
+		const reloadApplication = vi.fn();
+		const { registry } = createHarness({ reloadApplication });
+		try {
+			const first = await registry.open(request('first.txt'));
+			const second = await registry.open(request('second.txt'));
+			if (!first || !second) throw new Error('Expected two open views');
+			await vi.waitFor(() => expect(second.loadedRevision).toBe('v1:initial'));
+			first.document.applyUserEdit('unsaved');
+			registry.reloadApplication();
+			expect(reloadApplication).not.toHaveBeenCalled();
+			expect(first.document.currentContent()).toBe('unsaved');
+			first.document.applyUserEdit(first.baseline);
+			for (const outcome of ['preparing', 'saving', 'settling', 'unknown'] as const) {
+				first.document.saveOutcome = outcome;
+				registry.reloadApplication();
+				expect(reloadApplication).not.toHaveBeenCalled();
+			}
+			const publishedViews = registry.sessions;
+			registry.sessions = { [second.id]: second };
+			registry.reloadApplication();
+			expect(reloadApplication).not.toHaveBeenCalled();
+			first.document.saveOutcome = 'idle';
+			registry.reloadApplication();
+			expect(reloadApplication).toHaveBeenCalledOnce();
+			registry.sessions = publishedViews;
+		} finally {
+			await registry.destroyAll();
+		}
+	});
 	it('canonicalizes a resolved chat link with its authoritative file root', async () => {
 		const harness = createHarness();
 		const resolved = resolveFileLinkTarget('src/file.ts', {
@@ -2016,9 +2046,7 @@ describe('FileSessionRegistry', () => {
 		runtime.resolve(testEditorRuntime);
 		await recovery;
 
-		expect(
-			await repository.getViews('test-user', 'test-deployment', 'test-session'),
-		).toEqual([]);
+		expect(await repository.getViews('test-user', 'test-deployment', 'test-session')).toEqual([]);
 	});
 
 	it('does not recreate a closed Markdown view after delayed source initialization', async () => {
@@ -2037,9 +2065,7 @@ describe('FileSessionRegistry', () => {
 		runtime.resolve(testEditorRuntime);
 		await showing;
 
-		expect(
-			await repository.getViews('test-user', 'test-deployment', 'test-session'),
-		).toEqual([]);
+		expect(await repository.getViews('test-user', 'test-deployment', 'test-session')).toEqual([]);
 	});
 
 	it('constructs one editor when restoration and document joining initialize concurrently', async () => {
@@ -2088,9 +2114,7 @@ describe('FileSessionRegistry', () => {
 		let constructors = 0;
 		runtime.resolve({
 			CodeEditorController: class extends testEditorRuntime.CodeEditorController {
-				constructor(
-					...args: ConstructorParameters<typeof testEditorRuntime.CodeEditorController>
-				) {
+				constructor(...args: ConstructorParameters<typeof testEditorRuntime.CodeEditorController>) {
 					super(...args);
 					constructors += 1;
 				}

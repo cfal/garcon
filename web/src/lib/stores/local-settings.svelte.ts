@@ -157,6 +157,7 @@ export interface LocalSettingsSnapshot {
 	sidebarSortMode: SidebarSortMode;
 	sidebarSearchResultSort: ChatSearchSort;
 	codeEditorWordWrap: boolean;
+	codeEditorVimMode: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
 	gitDiffFontSize: string;
@@ -189,6 +190,7 @@ type BooleanLocalSettingKey =
 	| 'sidebarVisible'
 	| 'sidebarGroupNestedProjectPaths'
 	| 'codeEditorWordWrap'
+	| 'codeEditorVimMode'
 	| 'codeEditorLineNumbers';
 
 const DEFAULTS: LocalSettingsSnapshot = {
@@ -219,6 +221,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarSortMode: 'manual',
 	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
+	codeEditorVimMode: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
 	gitDiffFontSize: '12',
@@ -391,6 +394,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
 		sidebarSearchResultSort: parseSidebarSearchResultSort(parsed.sidebarSearchResultSort),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
+		codeEditorVimMode: parseBoolean(parsed.codeEditorVimMode, DEFAULTS.codeEditorVimMode),
 		codeEditorLineNumbers: parseBoolean(
 			parsed.codeEditorLineNumbers,
 			DEFAULTS.codeEditorLineNumbers,
@@ -475,6 +479,7 @@ export class LocalSettingsStore {
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
+	codeEditorVimMode = $state(DEFAULTS.codeEditorVimMode);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
 	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
@@ -593,6 +598,7 @@ export class LocalSettingsStore {
 			sidebarSortMode: this.sidebarSortMode,
 			sidebarSearchResultSort: this.sidebarSearchResultSort,
 			codeEditorWordWrap: this.codeEditorWordWrap,
+			codeEditorVimMode: this.codeEditorVimMode,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
 			gitDiffFontSize: this.gitDiffFontSize,
@@ -639,6 +645,7 @@ export class LocalSettingsStore {
 		this.sidebarSortMode = snap.sidebarSortMode;
 		this.sidebarSearchResultSort = snap.sidebarSearchResultSort;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
+		this.codeEditorVimMode = snap.codeEditorVimMode;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;
 		this.codeEditorFontSize = snap.codeEditorFontSize;
 		this.gitDiffFontSize = snap.gitDiffFontSize;

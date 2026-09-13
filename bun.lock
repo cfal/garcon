@@ -252,6 +252,7 @@
         "@humanspeak/svelte-markdown": "^1.9.0",
         "@lezer/highlight": "^1.2.3",
         "@lucide/svelte": "^1.41.0",
+        "@replit/codemirror-vim": "6.4.0",
         "@tailwindcss/typography": "^0.5.20",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/addon-web-links": "^0.12.0",
@@ -299,6 +300,7 @@
   },
   "patchedDependencies": {
     "@xyflow/system@0.0.82": "patches/@xyflow%2Fsystem@0.0.82.patch",
+    "@replit/codemirror-vim@6.4.0": "patches/@replit%2Fcodemirror-vim@6.4.0.patch",
     "@xyflow/svelte@1.6.6": "patches/@xyflow%2Fsvelte@1.6.6.patch",
     "d3-drag@3.0.0": "patches/d3-drag@3.0.0.patch",
   },
@@ -712,6 +714,10 @@
     "@protobufjs/pool": ["@protobufjs/pool@1.1.0", "", {}, "sha512-0kELaGSIDBKvcgS4zkjz1PeddatrjYcmMWOlAuAPwAeccUrPHdUqo/J6LiymHHEiJT5NrF1UVwxY14f+fy4WQw=="],
 
     "@protobufjs/utf8": ["@protobufjs/utf8@1.1.2", "", {}, "sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug=="],
+
+    "@replit/codemirror-vim": ["@replit/codemirror-vim@6.4.0", "", { "dependencies": { "@replit/codemirror-vim-core": "^0.1.0" }, "peerDependencies": { "@codemirror/commands": "6.x.x", "@codemirror/language": "6.x.x", "@codemirror/search": "6.x.x", "@codemirror/state": "6.x.x", "@codemirror/view": "6.x.x" } }, "sha512-t9UMDNhkmeAkl0uRbiJVotv97bGD6mf4GyJJoEbrjUqa/Pov0s9eL+4AaI0Xto3OGri17i9qwIpT0JbVlVXt8A=="],
+
+    "@replit/codemirror-vim-core": ["@replit/codemirror-vim-core@0.1.0", "", {}, "sha512-1i6EBKpcNfDKvTmTh6N6g9lL6udD5t+uFNh4JCqozRnVlvUGOps7h/QzS2ne4zcvPUjvApKpmcP7Grc3fNbZiQ=="],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.5", "", { "os": "android", "cpu": "arm" }, "sha512-DLe/i+l8ynIBY7XEQ191TeZvCoowIGa18R+dIV30GW7DiOtp74i/xX8hs8GUjW5ARV7VZuie3d6AumSmCwbeRA=="],
 

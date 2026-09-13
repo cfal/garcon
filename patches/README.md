@@ -1,4 +1,17 @@
-# Graph interaction cancellation
+# Dependency Patches
+
+## Vim shared history
+
+`@replit/codemirror-vim@6.4.0` accepts per-editor `undo`, `redo`, and `save`
+callbacks through its extension options. Garcon's documents own history rather
+than individual CodeMirror views; Vim normal and Ex commands must use the same
+canonical history and checked Save as the workbench. No global Vim mappings or
+commands are overwritten. Keep ESM, CJS, and both declaration files aligned on
+upgrade. Integration coverage lives in `file-vim-mode.test.ts`.
+
+Reference: [Vim adapter](https://github.com/replit/codemirror-vim/blob/8640966b6977f84d2197e6adfd521fb737184587/packages/codemirror-vim/src/cm_adapter.ts#L112).
+
+## Graph patches
 
 The pinned graph engine has no complete gesture abort. These Bun patches add
 `abortInteractions(host)` (re-exported by `@xyflow/svelte`) for connection,

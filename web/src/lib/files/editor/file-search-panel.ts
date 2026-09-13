@@ -1,16 +1,30 @@
 import { StateEffect, StateField, type EditorState } from '@codemirror/state';
-import type { EditorView, Panel } from '@codemirror/view';
+import type { EditorView, Panel, ViewUpdate } from '@codemirror/view';
+import { mount, unmount } from 'svelte';
+import X from '@lucide/svelte/icons/x';
+import ChevronRight from '@lucide/svelte/icons/chevron-right';
+import ArrowUp from '@lucide/svelte/icons/arrow-up';
+import ArrowDown from '@lucide/svelte/icons/arrow-down';
+import CaseSensitive from '@lucide/svelte/icons/case-sensitive';
+import Regex from '@lucide/svelte/icons/regex';
+import WholeWord from '@lucide/svelte/icons/whole-word';
+import TextSelect from '@lucide/svelte/icons/text-select';
+import ListChecks from '@lucide/svelte/icons/list-checks';
+import Replace from '@lucide/svelte/icons/replace';
+import ReplaceAll from '@lucide/svelte/icons/replace-all';
 import {
 	SearchQuery,
 	closeSearchPanel,
 	findNext,
 	findPrevious,
 	getSearchQuery,
+	openSearchPanel,
 	replaceAll,
 	replaceNext,
 	selectMatches,
 	setSearchQuery,
 } from '@codemirror/search';
+import './file-search-panel.css';
 
 interface SearchScope {
 	from: number;
@@ -31,6 +45,7 @@ export const fileSearchScope = StateField.define<SearchScope | null>({
 				: scope;
 		for (const effect of transaction.effects) {
 			if (effect.is(setFileSearchScope)) next = effect.value;
+			if (effect.is(setSearchQuery) && effect.value.test !== withinFileSearchScope) next = null;
 		}
 		return next;
 	},
@@ -46,6 +61,8 @@ function withinFileSearchScope(
 	return Boolean(scope && from >= scope.from && to <= scope.to);
 }
 
+const searchPanels = new WeakMap<EditorView, FileSearchPanel>();
+
 class FileSearchPanel implements Panel {
 	readonly dom: HTMLElement;
 	readonly top = true;
@@ -56,6 +73,14 @@ class FileSearchPanel implements Panel {
 	readonly #wordField: HTMLInputElement;
 	readonly #selectionField: HTMLInputElement;
 	readonly #result: HTMLSpanElement;
+	readonly #replaceRow: HTMLDivElement;
+	readonly #disclosure: HTMLButtonElement;
+	readonly #navigationButtons: HTMLButtonElement[];
+	readonly #replaceButtons: HTMLButtonElement[];
+	readonly #disposeIcons: (() => void)[] = [];
+	#matches: SearchScope[] = [];
+	#truncated = false;
+	#countTimer: ReturnType<typeof setTimeout> | undefined;
 	#query = new SearchQuery({ search: '' });
 
 	constructor(readonly view: EditorView) {
@@ -72,29 +97,46 @@ class FileSearchPanel implements Panel {
 		this.#result.setAttribute('aria-live', 'polite');
 		this.#result.className = 'cm-search-results';
 		this.dom = document.createElement('div');
-		this.dom.className = 'cm-search';
-		this.dom.append(
+		this.dom.className = 'cm-search cm-file-search';
+		this.dom.setAttribute('role', 'search');
+		this.dom.setAttribute('aria-label', 'Find and replace');
+		this.#disclosure = this.#button('Toggle Replace', ChevronRight, () => {
+			this.#expandReplace(Boolean(this.#replaceRow.hidden));
+		});
+		this.#disclosure.classList.add('cm-file-search-disclosure');
+		this.#disclosure.setAttribute('aria-expanded', 'false');
+		const field = document.createElement('div');
+		field.className = 'cm-file-search-field';
+		field.append(
 			this.#searchField,
-			this.#button('Previous', () => findPrevious(view)),
-			this.#button('Next', () => findNext(view)),
-			this.#button('All', () => selectMatches(view)),
-			this.#label(this.#caseField, 'Match case'),
-			this.#label(this.#regexpField, 'Regex'),
-			this.#label(this.#wordField, 'Whole word'),
-			this.#label(this.#selectionField, 'Selection only'),
-			this.#result,
+			this.#label(this.#caseField, CaseSensitive),
+			this.#label(this.#wordField, WholeWord),
+			this.#label(this.#regexpField, Regex),
 		);
-		if (!view.state.readOnly) {
-			this.dom.append(
-				document.createElement('br'),
-				this.#replaceField,
-				this.#button('Replace', () => replaceNext(view)),
-				this.#button('Replace all', () => replaceAll(view)),
-			);
-		}
-		const close = this.#button('Close', () => closeSearchPanel(view));
+		this.#navigationButtons = [
+			this.#button('Previous match', ArrowUp, () => findPrevious(view)),
+			this.#button('Next match', ArrowDown, () => findNext(view)),
+			this.#button('Select all matches', ListChecks, () => selectMatches(view)),
+		];
+		const actions = document.createElement('div');
+		actions.className = 'cm-file-search-actions';
+		actions.append(
+			this.#result,
+			...this.#navigationButtons,
+			this.#label(this.#selectionField, TextSelect),
+		);
+		const close = this.#button('Close search', X, () => closeSearchPanel(view));
 		close.name = 'close';
-		this.dom.append(close);
+		close.classList.add('cm-file-search-close');
+		this.#replaceRow = document.createElement('div');
+		this.#replaceRow.className = 'cm-file-search-replace';
+		this.#replaceRow.hidden = true;
+		this.#replaceButtons = [
+			this.#button('Replace', Replace, () => replaceNext(view)),
+			this.#button('Replace all', ReplaceAll, () => replaceAll(view)),
+		];
+		this.#replaceRow.append(this.#replaceField, ...this.#replaceButtons);
+		this.dom.append(this.#disclosure, field, actions, close, this.#replaceRow);
 		for (const field of [
 			this.#searchField,
 			this.#replaceField,
@@ -103,23 +145,46 @@ class FileSearchPanel implements Panel {
 			this.#wordField,
 			this.#selectionField,
 		]) {
-			field.addEventListener('input', () => this.#commit());
-			field.addEventListener('change', () => this.#commit());
+			field.addEventListener(field.type === 'checkbox' ? 'change' : 'input', () => this.#commit());
 		}
 		this.dom.addEventListener('keydown', (event) => this.#keydown(event));
 		this.#sync(getSearchQuery(view.state));
+		this.#updateControls();
 	}
 
 	mount(): void {
+		this.#searchField.focus();
 		this.#searchField.select();
 	}
 
-	update(): void {
+	update(update: ViewUpdate): void {
 		this.#selectionField.disabled =
 			this.#searchScope() === null && this.view.state.selection.main.empty;
 		const query = getSearchQuery(this.view.state);
 		if (!query.eq(this.#query)) this.#sync(query);
+		else if (update.docChanged || update.startState.field(fileSearchScope) !== this.#searchScope())
+			this.#scheduleCount();
 		else this.#announce();
+		this.#updateControls();
+	}
+
+	destroy(): void {
+		clearTimeout(this.#countTimer);
+		searchPanels.delete(this.view);
+		for (const dispose of this.#disposeIcons) dispose();
+	}
+
+	openReplace(): void {
+		if (this.view.state.readOnly) return;
+		this.#expandReplace(true);
+		this.#replaceField.focus();
+		this.#replaceField.select();
+	}
+
+	#expandReplace(expanded: boolean): void {
+		this.#replaceRow.hidden = !expanded;
+		this.#disclosure.setAttribute('aria-expanded', String(expanded));
+		this.view.requestMeasure();
 	}
 
 	#commit(): void {
@@ -138,11 +203,9 @@ class FileSearchPanel implements Panel {
 		const effects = [];
 		if (nextScope !== currentScope) effects.push(setFileSearchScope.of(nextScope));
 		if (!query.eq(this.#query)) {
-			this.#query = query;
 			effects.push(setSearchQuery.of(query));
 		}
 		if (effects.length > 0) this.view.dispatch({ effects });
-		this.#announce();
 	}
 
 	#searchScope(): SearchScope | null {
@@ -163,26 +226,81 @@ class FileSearchPanel implements Panel {
 		this.#regexpField.checked = query.regexp;
 		this.#wordField.checked = query.wholeWord;
 		this.#selectionField.checked = query.test === withinFileSearchScope;
-		this.#announce();
+		this.#scheduleCount();
+	}
+
+	#scheduleCount(): void {
+		clearTimeout(this.#countTimer);
+		this.#matches = [];
+		this.#truncated = false;
+		this.#result.textContent = '';
+		this.#searchField.setAttribute(
+			'aria-invalid',
+			String(Boolean(this.#query.search && !this.#query.valid)),
+		);
+		if (!this.#query.valid) {
+			this.#countTimer = undefined;
+			this.#announce();
+			return;
+		}
+		// Counts stay off the typing path and selection-only updates reuse the bounded match cache.
+		this.#countTimer = setTimeout(() => {
+			this.#countTimer = undefined;
+			const cursor = this.#query.getCursor(this.view.state);
+			for (let match = cursor.next(); !match.done; match = cursor.next()) {
+				if (this.#matches.length === 1000) {
+					this.#truncated = true;
+					break;
+				}
+				this.#matches.push({ from: match.value.from, to: match.value.to });
+			}
+			this.#announce();
+			this.#updateControls();
+		}, 100);
 	}
 
 	#announce(): void {
-		if (!this.#query.valid || !this.#query.search) {
-			this.#result.textContent = '';
-			return;
+		if (this.#countTimer !== undefined) return;
+		const count = this.#matches.length;
+		const selection = this.view.state.selection.main;
+		const index = this.#matches.findIndex(
+			({ from, to }) => from === selection.from && to === selection.to,
+		);
+		const total = `${count}${this.#truncated ? '+' : ''}`;
+		let message: string;
+		if (!this.#query.search) {
+			message = '';
+		} else if (!this.#query.valid) {
+			message = 'Invalid regex';
+		} else if (count === 0) {
+			message = 'No results';
+		} else if (index >= 0) {
+			message = `${index + 1} of ${total}`;
+		} else {
+			message = `${total} ${count === 1 ? 'match' : 'matches'}`;
 		}
-		let count = 0;
-		const cursor = this.#query.getCursor(this.view.state);
-		while (!cursor.next().done) count += 1;
-		if (count === 0) {
-			this.#result.textContent = 'No results';
-			return;
-		}
-		this.#result.textContent = `${count} ${count === 1 ? 'result' : 'results'}`;
+		if (this.#result.textContent !== message) this.#result.textContent = message;
+		this.#result.dataset.empty = String(Boolean(this.#query.search && count === 0));
+	}
+
+	#updateControls(): void {
+		const noMatches =
+			!this.#query.valid || (this.#countTimer === undefined && this.#matches.length === 0);
+		for (const button of this.#navigationButtons) button.disabled = noMatches;
+		this.#replaceField.disabled = this.view.state.readOnly;
+		for (const control of this.#replaceButtons)
+			control.disabled = this.view.state.readOnly || noMatches;
+		this.#disclosure.disabled = this.view.state.readOnly;
 	}
 
 	#keydown(event: KeyboardEvent): void {
 		if (event.isComposing) return;
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			closeSearchPanel(this.view);
+			return;
+		}
 		if (event.key !== 'Enter') return;
 		if (event.target === this.#searchField) {
 			event.preventDefault();
@@ -199,8 +317,12 @@ class FileSearchPanel implements Panel {
 	#textField(name: string, label: string): HTMLInputElement {
 		const input = document.createElement('input');
 		input.name = name;
+		input.type = 'text';
+		input.placeholder = label;
+		input.autocomplete = 'off';
+		input.spellcheck = false;
 		input.setAttribute('aria-label', label);
-		input.className = 'cm-textfield';
+		input.className = 'cm-file-search-input';
 		return input;
 	}
 
@@ -212,23 +334,42 @@ class FileSearchPanel implements Panel {
 		return input;
 	}
 
-	#button(label: string, run: () => boolean): HTMLButtonElement {
+	#button(label: string, icon: typeof X, run: () => unknown): HTMLButtonElement {
 		const button = document.createElement('button');
 		button.type = 'button';
-		button.className = 'cm-button';
-		button.textContent = label;
+		button.className = 'cm-file-search-button';
+		button.title = label;
+		this.#icon(icon, button);
 		button.setAttribute('aria-label', label);
 		button.onclick = () => run();
 		return button;
 	}
 
-	#label(input: HTMLInputElement, label: string): HTMLLabelElement {
+	#label(input: HTMLInputElement, icon: typeof X): HTMLLabelElement {
 		const element = document.createElement('label');
-		element.append(input, label);
+		element.className = 'cm-file-search-toggle';
+		element.title = input.getAttribute('aria-label') ?? '';
+		element.append(input);
+		this.#icon(icon, element);
 		return element;
+	}
+
+	#icon(icon: typeof X, target: HTMLElement): void {
+		const instance = mount(icon, { target, props: { size: 16, 'aria-hidden': 'true' } });
+		this.#disposeIcons.push(() => {
+			void unmount(instance);
+		});
 	}
 }
 
 export function createFileSearchPanel(view: EditorView): Panel {
-	return new FileSearchPanel(view);
+	const panel = new FileSearchPanel(view);
+	searchPanels.set(view, panel);
+	return panel;
+}
+
+export function openFileReplacePanel(view: EditorView): boolean {
+	openSearchPanel(view);
+	searchPanels.get(view)?.openReplace();
+	return true;
 }

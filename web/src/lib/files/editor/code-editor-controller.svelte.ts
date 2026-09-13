@@ -48,9 +48,11 @@ import { loadCodeMirrorLanguageForFile } from '$lib/files/editor/language-loader
 import {
 	createFileSearchPanel,
 	fileSearchScope,
+	openFileReplacePanel,
 } from '$lib/files/editor/file-search-panel.js';
 import { fileExtension } from '$lib/utils/file-kind.js';
 import { FileDocumentRuntime } from '$lib/files/editor/file-document-runtime.js';
+import { FileVimMode } from '$lib/files/editor/file-vim-mode.svelte.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
 
@@ -59,6 +61,7 @@ export interface EditorPresentationSettings {
 	readonly wordWrap: boolean;
 	readonly showLineNumbers: boolean;
 	readonly fontSize: number;
+	readonly vimMode?: boolean;
 }
 
 export type FileEditorCommand =
@@ -110,6 +113,12 @@ const retainedDefaultKeymap = defaultKeymap.filter(
 );
 
 export class CodeEditorController {
+	readonly vim = new FileVimMode({
+		getView: () => this.#view,
+		undo: () => this.#runtime.undo(this.session.id),
+		redo: () => this.#runtime.redo(this.session.id),
+		save: () => this.onSave?.(),
+	});
 	#view: EditorView | null = null;
 	#languageCompartment = new Compartment();
 	#dynamicCompartment = new Compartment();
@@ -133,6 +142,7 @@ export class CodeEditorController {
 	constructor(
 		readonly session: FileViewSession,
 		private readonly settings: EditorPresentationSettings,
+		private readonly onSave?: () => void,
 	) {
 		const existing = session.document.editorRuntime;
 		this.#runtime =
@@ -147,7 +157,9 @@ export class CodeEditorController {
 		this.#adapter = {
 			id: session.id,
 			currentState: (): EditorState =>
-				this.#view?.state ?? this.session.editorState ?? this.createState(this.#runtime.canonicalState.doc),
+				this.#view?.state ??
+				this.session.editorState ??
+				this.createState(this.#runtime.canonicalState.doc),
 			applySourceTransactions: (transactions) => {
 				const view = this.#view;
 				if (!view) return;
@@ -214,6 +226,11 @@ export class CodeEditorController {
 			scrollTo: scrollSnapshot ?? undefined,
 			dispatchTransactions: (transactions) => {
 				if (this.#view !== attachedView || lease !== this.#rendererGeneration) return;
+				if (
+					attachedView.state.readOnly &&
+					transactions.some((transaction) => transaction.docChanged)
+				)
+					return;
 				this.#runtime.dispatchSource(this.#adapter, transactions);
 			},
 		});
@@ -264,7 +281,10 @@ export class CodeEditorController {
 	}
 
 	reconfigure(): void {
-		this.#view?.dispatch({ effects: this.#dynamicCompartment.reconfigure(this.dynamicExtensions()) });
+		this.#view?.dispatch({
+			effects: this.#dynamicCompartment.reconfigure(this.dynamicExtensions()),
+		});
+		this.vim.configure(Boolean(this.settings.vimMode));
 	}
 
 	focus(): void {
@@ -351,14 +371,15 @@ export class CodeEditorController {
 		if (!view) return false;
 		if (command === 'undo') return this.#runtime.undo(this.session.id);
 		if (command === 'redo') return this.#runtime.redo(this.session.id);
+		if (command === 'find' || command === 'replace' || command === 'go-to-line')
+			this.vim.dismissDialog();
 		if (command === 'replace') {
-			openSearchPanel(view);
-			requestAnimationFrame(() =>
-				view.dom.querySelector<HTMLInputElement>('input[name="replace"]')?.focus(),
-			);
-			return true;
+			return openFileReplacePanel(view);
 		}
-		const commands: Record<Exclude<FileEditorCommand, 'undo' | 'redo' | 'replace'>, (view: EditorView) => boolean> = {
+		const commands: Record<
+			Exclude<FileEditorCommand, 'undo' | 'redo' | 'replace'>,
+			(view: EditorView) => boolean
+		> = {
 			find: openSearchPanel,
 			'go-to-line': gotoLine,
 			'go-to-matching-bracket': cursorMatchingBracket,
@@ -432,11 +453,15 @@ export class CodeEditorController {
 		this.#languageGeneration += 1;
 	}
 
-	private createState(content: string | import('@codemirror/state').Text, selection?: EditorSelection): EditorState {
+	private createState(
+		content: string | import('@codemirror/state').Text,
+		selection?: EditorSelection,
+	): EditorState {
 		const editorState = EditorState.create({
 			doc: content,
 			selection,
 			extensions: [
+				this.vim.compartment.of([]),
 				EditorState.allowMultipleSelections.of(true),
 				highlightActiveLineGutter(),
 				highlightSpecialChars(),
@@ -495,6 +520,7 @@ export class CodeEditorController {
 		const configuredFontSize = this.settings.fontSize;
 		const extensions: Extension[] = [
 			EditorView.theme({
+				'&': { isolation: 'isolate' },
 				'.cm-content, .cm-gutters': {
 					fontSize: `${Math.max(MIN_TOUCH_EDITOR_FONT_SIZE, configuredFontSize)}px`,
 					fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -562,7 +588,9 @@ export class CodeEditorController {
 		const loaded = await loadCodeMirrorLanguageForFile({ filePath: this.session.relativePath });
 		if (generation !== this.#languageGeneration || !this.#view) return;
 		this.#syntaxLabel = loaded?.key ?? syntaxLabel(this.session.relativePath);
-		this.#view.dispatch({ effects: this.#languageCompartment.reconfigure(loaded?.extensions ?? []) });
+		this.#view.dispatch({
+			effects: this.#languageCompartment.reconfigure(loaded?.extensions ?? []),
+		});
 	}
 }
 

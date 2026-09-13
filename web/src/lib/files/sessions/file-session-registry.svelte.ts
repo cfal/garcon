@@ -200,6 +200,9 @@ export class FileSessionRegistry {
 			getSession: (sessionId) => this.get(sessionId),
 			getDocument: (documentId) => this.documents[documentId] ?? null,
 			getEditorSettings: () => this.#editorSettings(),
+			save: (sessionId) => {
+				void this.save(sessionId);
+			},
 			getFileRevision: deps.getFileRevision,
 			readText: deps.readText,
 			readContent: deps.readContent,
@@ -225,7 +228,12 @@ export class FileSessionRegistry {
 	}
 
 	get hasUnloadProtectedSessions(): boolean {
-		return this.all.some((session) => session.dirty || session.document.saveOutcome !== 'idle');
+		return Object.values(this.documents).some((doc) => doc.dirty || doc.saveOutcome !== 'idle');
+	}
+
+	reloadApplication(): void {
+		if (this.hasUnloadProtectedSessions) return;
+		(this.deps.reloadApplication ?? (() => window.location.reload()))();
 	}
 
 	get sessionCount(): number {
@@ -976,6 +984,9 @@ export class FileSessionRegistry {
 			},
 			get wordWrap() {
 				return settings.wordWrap;
+			},
+			get vimMode() {
+				return settings.vimMode;
 			},
 			get showLineNumbers() {
 				return settings.showLineNumbers;

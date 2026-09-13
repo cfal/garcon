@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { history } from '@codemirror/commands';
@@ -8,8 +8,10 @@ import { CodeEditorController } from '$lib/files/editor/code-editor-controller.s
 import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 const mounted: HTMLElement[] = [];
+const controllers: CodeEditorController[] = [];
 
 afterEach(() => {
+	for (const controller of controllers.splice(0)) controller.dispose();
 	for (const element of mounted) element.remove();
 	mounted.length = 0;
 });
@@ -50,10 +52,144 @@ function createController() {
 			return 12;
 		},
 	};
-	return { session, controller: new CodeEditorController(session, settings) };
+	const controller = new CodeEditorController(session, settings);
+	controllers.push(controller);
+	return { session, controller };
 }
 
 describe('CodeEditorController', () => {
+	it('keeps Find compact, counts matches, navigates, and expands Replace on demand', async () => {
+		const { session, controller } = createController();
+		session.content = 'word word word';
+		const host = parent();
+		controller.attach(host);
+		controller.run('find');
+		const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+		const row = host.querySelector<HTMLElement>('.cm-file-search-replace')!;
+		expect(row.hidden).toBe(true);
+		search.value = 'word';
+		search.dispatchEvent(new Event('input'));
+		const result = host.querySelector('[role="status"]')!;
+		await vi.waitFor(() => expect(result.textContent).toBe('3 matches'));
+		host.querySelector<HTMLButtonElement>('[aria-label="Next match"]')!.click();
+		expect(result.textContent).toMatch(/^[1-3] of 3$/);
+		controller.run('replace');
+		expect(row.hidden).toBe(false);
+		expect(document.activeElement?.getAttribute('name')).toBe('replace');
+		session.refreshing = true;
+		controller.reconfigure();
+		expect(host.querySelector<HTMLButtonElement>('[aria-label="Replace all"]')!.disabled).toBe(
+			true,
+		);
+		expect(host.querySelector<HTMLInputElement>('input[name="replace"]')!.disabled).toBe(true);
+	});
+
+	it('keeps singular and cleared search announcements distinct from no results', async () => {
+		const { controller } = createController();
+		const host = parent();
+		controller.attach(host);
+		controller.run('find');
+		const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+		const result = host.querySelector<HTMLElement>('[role="status"]')!;
+		search.value = 'first';
+		search.dispatchEvent(new Event('input'));
+		await vi.waitFor(() => expect(result.textContent).toBe('1 match'));
+		expect(result.dataset.empty).toBe('false');
+
+		search.value = '';
+		search.dispatchEvent(new Event('input'));
+		expect(result.textContent).toBe('');
+		expect(result.dataset.empty).toBe('false');
+		expect(search.getAttribute('aria-invalid')).toBe('false');
+	});
+
+	it('counts only the captured selection and reports invalid regex without native controls', async () => {
+		const { session, controller } = createController();
+		session.content = 'word word word';
+		const host = parent();
+		controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		view.dispatch({ selection: { anchor: 0, head: 9 } });
+		controller.run('find');
+		const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+		search.value = 'word';
+		search.dispatchEvent(new Event('input'));
+		const scope = host.querySelector<HTMLInputElement>('input[name="selection"]')!;
+		scope.click();
+		await vi.waitFor(() =>
+			expect(host.querySelector('[role="status"]')?.textContent).toBe('2 matches'),
+		);
+		host.querySelector<HTMLInputElement>('input[name="regexp"]')!.click();
+		search.value = '[';
+		search.dispatchEvent(new Event('input'));
+		expect(search.getAttribute('aria-invalid')).toBe('true');
+		expect(host.querySelector('[role="status"]')?.textContent).toBe('Invalid regex');
+		expect(host.querySelector<HTMLButtonElement>('[aria-label="Next match"]')!.disabled).toBe(true);
+		for (const button of host.querySelectorAll('.cm-file-search button')) {
+			expect(button.querySelector('svg')).not.toBeNull();
+			expect(button.getAttribute('aria-label')).toBeTruthy();
+		}
+	});
+
+	it('bounds match counts and keeps composing Escape inside Find', async () => {
+		const { session, controller } = createController();
+		session.content = 'a '.repeat(1100);
+		const host = parent();
+		controller.attach(host);
+		controller.run('find');
+		const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+		search.value = 'a';
+		search.dispatchEvent(new Event('input'));
+		await vi.waitFor(() =>
+			expect(host.querySelector('[role="status"]')?.textContent).toBe('1000+ matches'),
+		);
+		const composing = new KeyboardEvent('keydown', {
+			key: 'Escape',
+			isComposing: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		search.dispatchEvent(composing);
+		expect(composing.defaultPrevented).toBe(false);
+		expect(host.querySelector('.cm-file-search')).not.toBeNull();
+		search.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+		);
+		expect(host.querySelector('.cm-file-search')).toBeNull();
+	});
+	it.each([
+		['ab(?=c)', '1 of 1', false, 'Xc'],
+		['ab$', 'No results', true, 'abc'],
+	] as const)(
+		'keeps full regex context for scoped %s counts and replacement',
+		async (query, count, disabled, result) => {
+			const { session, controller } = createController();
+			session.content = 'abc';
+			const host = parent();
+			controller.attach(host);
+			const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+			view.dispatch({ selection: { anchor: 0, head: 2 } });
+			controller.run('replace');
+			const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+			search.value = query;
+			search.dispatchEvent(new Event('input'));
+			host.querySelector<HTMLInputElement>('input[name="regexp"]')!.click();
+			host.querySelector<HTMLInputElement>('input[name="selection"]')!.click();
+			const replace = host.querySelector<HTMLInputElement>('input[name="replace"]')!;
+			replace.value = 'X';
+			replace.dispatchEvent(new Event('input'));
+			await vi.waitFor(() =>
+				expect(host.querySelector('[role="status"]')?.textContent).toBe(count),
+			);
+			expect(host.querySelector<HTMLButtonElement>('[aria-label="Next match"]')!.disabled).toBe(
+				disabled,
+			);
+			const replaceAll = host.querySelector<HTMLButtonElement>('[aria-label="Replace all"]')!;
+			expect(replaceAll.disabled).toBe(disabled);
+			replaceAll.click();
+			expect(controller.currentContent()).toBe(result);
+		},
+	);
 	it('moves one editor state and its scroll position between hosts', async () => {
 		const { session, controller } = createController();
 		const firstParent = parent();
@@ -249,7 +385,9 @@ describe('CodeEditorController', () => {
 		expect(search.getAttribute('aria-label')).toBe('Find');
 		expect(replace.getAttribute('aria-label')).toBe('Replace');
 		expect(selectionOnly.getAttribute('aria-label')).toBe('Selection only');
-		expect(document.querySelector('.cm-search [role="status"]')?.textContent).toBe('No results');
+		await vi.waitFor(() =>
+			expect(document.querySelector('.cm-search [role="status"]')?.textContent).toBe('No results'),
+		);
 		search.value = 'first';
 		search.dispatchEvent(new Event('input'));
 		replace.value = 'replacement';
@@ -271,8 +409,9 @@ describe('CodeEditorController', () => {
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		const search = document.querySelector<HTMLInputElement>('input[name="search"]');
 		const selectionOnly = document.querySelector<HTMLInputElement>('input[name="selection"]');
-		const replaceAll = [...document.querySelectorAll<HTMLButtonElement>('.cm-search button')].find(
-			(button) => button.textContent === 'Replace all',
+		controller.run('replace');
+		const replaceAll = document.querySelector<HTMLButtonElement>(
+			'.cm-search button[aria-label="Replace all"]',
 		);
 		if (!search || !selectionOnly || !replaceAll) throw new Error('Expected search controls');
 		search.value = 'a';

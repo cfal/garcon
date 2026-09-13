@@ -18,6 +18,7 @@ import type { FileLocation } from '$lib/files/navigation/file-navigation-store.s
 import type { FilesSurfaceController } from './singleton-surfaces.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
+import { windowIdOfSurface } from './window-tree.js';
 
 export type WorkbenchCommandCategory = 'Chat' | 'Navigation' | 'Workspace' | 'Editor' | 'File';
 
@@ -163,6 +164,11 @@ export class WorkbenchCommandRegistry {
 
 	#createCommands(): WorkbenchCommand[] {
 		const always = () => true;
+		const fileWindowId = ({ viewId, surfaceId }: WorkbenchCommandContext) => {
+			if (this.deps.workspace.isMobile || !viewId || !surfaceId || !this.deps.files.get(viewId))
+				return null;
+			return windowIdOfSurface(this.deps.workspace.layout.snapshot.desktopRoot, surfaceId);
+		};
 		const editor = (
 			id: string,
 			label: string,
@@ -217,6 +223,19 @@ export class WorkbenchCommandRegistry {
 				run: ({ viewId }) => (viewId ? this.deps.files.save(viewId) : undefined),
 			},
 			editor('editor.find', 'Find', 'find', defaultBindingsFor('editor-find')),
+			{
+				id: 'file.open-to-side',
+				label: 'Open to Side',
+				category: 'File',
+				defaultBindings: [],
+				isVisible: (context) => Boolean(fileWindowId(context)),
+				isEnabled: (context) => Boolean(fileWindowId(context)),
+				run: (context) => {
+					const windowId = fileWindowId(context);
+					if (context.viewId && windowId)
+						return this.deps.files.openToSide(context.viewId, windowId);
+				},
+			},
 			editor('editor.replace', 'Replace', 'replace', defaultBindingsFor('editor-replace')),
 			editor(
 				'editor.go-to-line',

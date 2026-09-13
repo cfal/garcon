@@ -12,7 +12,7 @@ import FileSurfaceTestHost from './FileSurfaceTestHost.svelte';
 afterEach(cleanup);
 
 describe('FileSurface', () => {
-	const portablePresentations = ['window-main', 'window-sidebar', 'mobile'] as const;
+	const portablePresentations = ['dialog', 'mobile'] as const;
 	const rendererModes = ['code', 'markdown', 'image'] as const;
 	const closeCases = portablePresentations.flatMap((presentation) =>
 		rendererModes.map((rendererMode) => ({ presentation, rendererMode })),
@@ -37,7 +37,7 @@ describe('FileSurface', () => {
 	it('invokes and disables the supplied Close intent', async () => {
 		const onClose = vi.fn();
 		const rendered = render(FileSurfaceTestHost, {
-			presentation: 'window-main',
+			presentation: 'mobile',
 			onClose,
 			closeDisabled: false,
 		});
@@ -46,7 +46,7 @@ describe('FileSurface', () => {
 		expect(onClose).toHaveBeenCalledOnce();
 
 		await rendered.rerender({
-			presentation: 'window-main',
+			presentation: 'mobile',
 			onClose,
 			closeDisabled: true,
 		});
@@ -65,7 +65,7 @@ describe('FileSurface', () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		try {
 			const { container } = render(FileSurfaceTestHost, {
-				presentation: 'window-main',
+				presentation: 'dialog',
 				rendererMode: 'code',
 				dirty: true,
 				onClose: vi.fn(),
@@ -91,9 +91,6 @@ describe('FileSurface', () => {
 						width: widths[element.dataset.surfaceActionMeasure ?? ''] ?? 0,
 					}) as DOMRect;
 			}
-			const fixedControl = root.firstElementChild as HTMLElement | null;
-			if (!fixedControl) throw new Error('Expected fixed editor settings control');
-			fixedControl.getBoundingClientRect = () => ({ width: 32 }) as DOMRect;
 			const menuMeasure = container.querySelector<HTMLElement>(
 				'[data-surface-action-overflow-measure]',
 			);
@@ -111,7 +108,7 @@ describe('FileSurface', () => {
 			expect(screen.getByRole('button', { name: m.file_session_refresh() })).toBeTruthy();
 			expect(header.lastElementChild).toBe(close);
 
-			await setWidth(130);
+			await setWidth(80);
 			expect(screen.getByRole('button', { name: m.file_session_close() })).toBe(close);
 			expect(screen.queryByRole('button', { name: m.editor_actions_save() })).toBeNull();
 			expect(screen.getByRole('button', { name: m.file_session_refresh() })).toBeTruthy();
@@ -184,20 +181,7 @@ describe('FileSurface', () => {
 		expect(screen.getByRole('button', { name: 'Close' }).className).toContain('text-base');
 	});
 
-	it('offers Open to Side only in a desktop window', async () => {
-		const onOpenToSide = vi.fn();
-		render(FileSurfaceTestHost, {
-			presentation: 'window-main',
-			rendererMode: 'code',
-			loading: false,
-			onOpenToSide,
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Open to Side' }));
-		expect(onOpenToSide).toHaveBeenCalledWith(expect.any(String), 'window-main');
-	});
-
-	it.each(['mobile', 'dialog'] as const)(
+	it.each(['window-main', 'mobile', 'dialog'] as const)(
 		'does not offer Open to Side in the %s presentation',
 		(presentation) => {
 			render(FileSurfaceTestHost, {
@@ -209,6 +193,42 @@ describe('FileSurface', () => {
 			expect(screen.queryByRole('button', { name: 'Open to Side' })).toBeNull();
 		},
 	);
+
+	it.each(['window-main', 'window-sidebar'] as const)('uses tab Close in %s', (presentation) => {
+		render(FileSurfaceTestHost, { presentation, onClose: vi.fn() });
+		expect(screen.queryByRole('button', { name: m.file_session_close() })).toBeNull();
+	});
+
+	it('shows the absolute path and keeps editor settings immediately before Close', () => {
+		const { container } = render(FileSurfaceTestHost, {
+			presentation: 'dialog',
+			rendererMode: 'code',
+			onClose: vi.fn(),
+		});
+		expect(screen.getByText('/workspace/src/file.ts').title).toBe('/workspace/src/file.ts');
+		const header = container.querySelector('header')!;
+		const buttons = within(header).getAllByRole('button');
+		expect(buttons.at(-2)?.getAttribute('aria-label')).toBe(m.editor_settings_button_label());
+		expect(buttons.at(-1)?.getAttribute('aria-label')).toBe(m.file_session_close());
+	});
+
+	it('uses checkable settings and a font-size submenu', async () => {
+		localStorage.clear();
+		render(FileSurfaceTestHost, { presentation: 'window-main', rendererMode: 'code' });
+		await fireEvent.click(screen.getByRole('button', { name: m.editor_settings_button_label() }));
+		const vim = screen.getByRole('menuitemcheckbox', { name: 'Vim mode' });
+		expect(vim.getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(vim);
+		expect(vim.getAttribute('aria-checked')).toBe('true');
+		expect(screen.getByRole('menuitemcheckbox', { name: /Word wrap/i })).toBeTruthy();
+		const font = screen.getByRole('menuitem', { name: /Font size/i });
+		await fireEvent.keyDown(font, { key: 'ArrowRight' });
+		await waitFor(() => expect(screen.getByRole('menuitemradio', { name: '16px' })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: '16px' }));
+		expect(screen.getByRole('menuitemradio', { name: '16px' }).getAttribute('aria-checked')).toBe(
+			'true',
+		);
+	});
 
 	it('disables Save while a refresh is pending', () => {
 		render(FileSurfaceTestHost, {

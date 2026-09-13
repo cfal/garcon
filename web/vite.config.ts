@@ -109,6 +109,7 @@ export default defineConfig({
 							name(id) {
 								if (id.includes('@xterm/')) return 'vendor-xterm';
 								if (id.includes('node_modules/katex')) return 'vendor-katex';
+								if (id.includes('@replit/codemirror-vim')) return 'vendor-codemirror-vim';
 
 								const languageChunk = codeMirrorLanguageChunk(id);
 								if (languageChunk) return languageChunk;

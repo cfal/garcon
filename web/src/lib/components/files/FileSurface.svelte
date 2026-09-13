@@ -43,6 +43,9 @@
 	const files = getFileSessions();
 	const commands = getOptionalWorkbenchCommands();
 	const compact = $derived(presentation === 'mobile');
+	const fullPath = $derived(
+		`${session.canonicalFileRootPath.replace(/\/$/, '')}/${session.relativePath}`,
+	);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		if (session.contentKind === 'markdown') {
@@ -81,15 +84,6 @@
 					showLabel: true,
 					variant: 'primary',
 				});
-			if (presentation !== 'mobile' && presentation !== 'dialog') {
-				actions.push({
-					id: 'open-to-side',
-					label: 'Open to Side',
-					icon: Eye,
-					onclick: openToSide,
-					priority: 2,
-				});
-			}
 		}
 		actions.push({
 			id: 'refresh-file',
@@ -143,11 +137,6 @@
 		if (commands) return;
 		void files.checkFreshness(session.id);
 	});
-
-	function openToSide(): void {
-		if (presentation === 'mobile' || presentation === 'dialog') return;
-		void files.openToSide(session.id, presentation);
-	}
 </script>
 
 <div
@@ -162,15 +151,15 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<h2 class="truncate text-sm font-medium text-foreground">{session.fileName}</h2>
-				<CopyFilePathButton path={session.relativePath} />
+				<CopyFilePathButton path={fullPath} />
 				{#if session.dirty}<span
 						class="text-status-warning-foreground"
 						aria-label={m.file_session_unsaved()}>*</span
 					>{/if}
 			</div>
 			{#if !compact}
-				<p class="truncate text-xs text-muted-foreground" title={session.relativePath}>
-					{session.relativePath}
+				<p class="truncate text-xs text-muted-foreground" title={fullPath}>
+					{fullPath}
 				</p>
 			{/if}
 		</div>
@@ -178,16 +167,13 @@
 			actions={toolbarActions}
 			menuLabel={m.workspace_surface_actions()}
 			class="ml-2"
-		>
-			{#snippet fixed()}
-				{#if session.rendererMode === 'markdown'}
-					<MarkdownViewerSettingsMenu />
-				{:else if session.rendererMode === 'code'}
-					<EditorSettingsMenu />
-				{/if}
-			{/snippet}
-		</ResponsiveSurfaceActions>
-		{#if onClose}
+		/>
+		{#if session.rendererMode === 'markdown'}
+			<MarkdownViewerSettingsMenu />
+		{:else if session.rendererMode === 'code'}
+			<EditorSettingsMenu />
+		{/if}
+		{#if onClose && (compact || presentation === 'dialog')}
 			<Button
 				variant="ghost"
 				size="icon-sm"

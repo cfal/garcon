@@ -8,8 +8,19 @@
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import FileDirtyUnloadGuard from '../FileDirtyUnloadGuard.svelte';
+	import FileVimLoadError from '../FileVimLoadError.svelte';
 
-	let { dirty, saveOutcome = 'idle' }: { dirty: boolean; saveOutcome?: FileSaveOutcome } = $props();
+	let {
+		dirty,
+		saveOutcome = 'idle',
+		showVimError = false,
+		onReload,
+	}: {
+		dirty: boolean;
+		saveOutcome?: FileSaveOutcome;
+		showVimError?: boolean;
+		onReload?: () => void;
+	} = $props();
 	const initial = untrack(() => ({ dirty, saveOutcome }));
 	const documentState = new FileDocumentState(
 		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
@@ -19,6 +30,7 @@
 	documentState.dirty = initial.dirty;
 	documentState.saveOutcome = initial.saveOutcome;
 	const files = new FileSessionRegistry({
+		reloadApplication: () => onReload?.(),
 		getIsMobile: () => false,
 		getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
 		getDefaultPlacement: () => ({ type: 'dialog' }),
@@ -42,3 +54,4 @@
 </script>
 
 <FileDirtyUnloadGuard />
+{#if showVimError}<FileVimLoadError />{/if}

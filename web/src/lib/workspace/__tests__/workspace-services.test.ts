@@ -236,6 +236,16 @@ describe('createWorkspaceServices', () => {
 		});
 		const opened = await opening;
 		if (!opened) throw new Error('Expected file to open');
+		const context = { viewId: opened.id, surfaceId: placedSurfaceId };
+		const sideCommand = services.commands
+			.available(context)
+			.find((command) => command.id === 'file.open-to-side');
+		expect(sideCommand?.isEnabled(context)).toBe(true);
+		const openToSide = vi.spyOn(services.files, 'openToSide').mockResolvedValue(null);
+		expect(await services.commands.execute('file.open-to-side', context)).toBe(true);
+		expect(openToSide).toHaveBeenCalledWith(opened.id, windowId);
+		expect(sideCommand?.isEnabled({ viewId: opened.id, surfaceId: 'unplaced-dialog' })).toBe(false);
+		openToSide.mockRestore();
 		await vi.waitFor(() => {
 			expect(windowNodeById(services!.layout.snapshot.desktopRoot, windowId)?.tabs.activeId).toBe(
 				placedSurfaceId,

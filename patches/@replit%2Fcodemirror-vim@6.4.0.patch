@@ -1,0 +1,111 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 88ec9b9b61047c079bb8dd8b8261d4548c0725dc..963a2f9b91fd0dcbfa9381377d4e6fbdecbd84d9 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -122,12 +122,15 @@ function dispatchChange(cm, transaction) {
+     }
+     return view.dispatch(transaction);
+ }
++const vimHostCommands = state.Facet.define({ combine: values => values[0] || {} });
+ function runHistoryCommand(cm, revert) {
+     var _a;
+     if (cm.curOp) {
+         cm.curOp.$changeStart = undefined;
+     }
+-    (revert ? commands.undo : commands.redo)(cm.cm6);
++    const command = cm.cm6.state.facet(vimHostCommands)[revert ? 'undo' : 'redo'];
++    if (command) command(cm.cm6);
++    else (revert ? commands.undo : commands.redo)(cm.cm6);
+     let changeStartIndex = (_a = cm.curOp) === null || _a === void 0 ? void 0 : _a.$changeStart;
+     // vim mode expects the changed text to be either selected or cursor placed at the start
+     if (changeStartIndex != null) {
+@@ -800,7 +803,7 @@ CodeMirror.commands = {
+         commands.indentSelection(cm.cm6);
+     },
+     newlineAndIndentContinueComment: undefined,
+-    save: undefined,
++    save: cm => cm.cm6.state.facet(vimHostCommands).save?.(cm.cm6),
+ };
+ CodeMirror.isWordChar = function (ch) {
+     return wordChar.test(ch);
+@@ -1699,6 +1702,7 @@ function statusPanel(view) {
+ }
+ function vim(options = {}) {
+     return [
++        vimHostCommands.of(options),
+         vimStyle,
+         vimPlugin,
+         hideNativeSelection,
+diff --git a/dist/index.d.cts b/dist/index.d.cts
+index 9fdbcaec78784ecafa963535b25c9241e3b9eab3..aff4fa1e48518dff58f2229520a2bca25a6972f8 100644
+--- a/dist/index.d.cts
++++ b/dist/index.d.cts
+@@ -1253,6 +1253,9 @@ declare const Vim$1: {
+ };
+ export declare function vim(options?: {
+ 	status?: boolean;
++	undo?: (view: EditorView) => boolean;
++	redo?: (view: EditorView) => boolean;
++	save?: (view: EditorView) => void;
+ }): Extension;
+ export declare function getCM(view: EditorView): CodeMirror | null;
+ 
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 9fdbcaec78784ecafa963535b25c9241e3b9eab3..aff4fa1e48518dff58f2229520a2bca25a6972f8 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1253,6 +1253,9 @@ declare const Vim$1: {
+ };
+ export declare function vim(options?: {
+ 	status?: boolean;
++	undo?: (view: EditorView) => boolean;
++	redo?: (view: EditorView) => boolean;
++	save?: (view: EditorView) => void;
+ }): Extension;
+ export declare function getCM(view: EditorView): CodeMirror | null;
+ 
+diff --git a/dist/index.js b/dist/index.js
+index f0b243a40e4c4605811a774078a5a25d1fa5ae54..e3a759ae731b5def142e5a1a4086e9e2fd193f87 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,5 +1,5 @@
+ import { initVim } from '@replit/codemirror-vim-core';
+-import { EditorSelection, MapMode, Prec, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
++import { EditorSelection, MapMode, Prec, RangeSetBuilder, StateEffect, StateField, Facet } from '@codemirror/state';
+ import { foldCode, matchBrackets, indentUnit, ensureSyntaxTree, StringStream } from '@codemirror/language';
+ import * as View from '@codemirror/view';
+ import { EditorView, runScopeHandlers, Direction, ViewPlugin, Decoration, showPanel } from '@codemirror/view';
+@@ -102,12 +102,15 @@ function dispatchChange(cm, transaction) {
+     }
+     return view.dispatch(transaction);
+ }
++const vimHostCommands = Facet.define({ combine: values => values[0] || {} });
+ function runHistoryCommand(cm, revert) {
+     var _a;
+     if (cm.curOp) {
+         cm.curOp.$changeStart = undefined;
+     }
+-    (revert ? undo : redo)(cm.cm6);
++    const command = cm.cm6.state.facet(vimHostCommands)[revert ? 'undo' : 'redo'];
++    if (command) command(cm.cm6);
++    else (revert ? undo : redo)(cm.cm6);
+     let changeStartIndex = (_a = cm.curOp) === null || _a === void 0 ? void 0 : _a.$changeStart;
+     // vim mode expects the changed text to be either selected or cursor placed at the start
+     if (changeStartIndex != null) {
+@@ -780,7 +783,7 @@ CodeMirror.commands = {
+         indentSelection(cm.cm6);
+     },
+     newlineAndIndentContinueComment: undefined,
+-    save: undefined,
++    save: cm => cm.cm6.state.facet(vimHostCommands).save?.(cm.cm6),
+ };
+ CodeMirror.isWordChar = function (ch) {
+     return wordChar.test(ch);
+@@ -1679,6 +1682,7 @@ function statusPanel(view) {
+ }
+ function vim(options = {}) {
+     return [
++        vimHostCommands.of(options),
+         vimStyle,
+         vimPlugin,
+         hideNativeSelection,

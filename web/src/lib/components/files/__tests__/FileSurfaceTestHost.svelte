@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
 		setFileSessions,
 		setLocalSettings,
@@ -31,7 +31,7 @@
 		onRefresh = () => undefined,
 		onCheckFreshness = () => undefined,
 		onOpen = () => {},
-		onOpenToSide = () => {},
+		onReady,
 		onClose,
 		closeDisabled = false,
 	}: {
@@ -46,7 +46,7 @@
 		onRefresh?: (sessionId: string) => void;
 		onCheckFreshness?: (sessionId: string) => void;
 		onOpen?: (request: FileOpenRequest) => void;
-		onOpenToSide?: (sessionId: string, windowId: string) => void;
+		onReady?: (session: FileSession, frame: SurfaceFrameBridge) => void;
 		onClose?: () => void;
 		closeDisabled?: boolean;
 	} = $props();
@@ -101,10 +101,6 @@
 		onOpen(request);
 		return null;
 	};
-	fileSessions.openToSide = async (sessionId, windowId) => {
-		onOpenToSide(sessionId, windowId);
-		return null;
-	};
 	fileSessions.showSource = async (sessionId) => {
 		if (sessionId !== session.id) return false;
 		session.markdownMode = 'source';
@@ -147,9 +143,18 @@
 	if (session.rendererMode !== 'image') {
 		session.editor = new CodeEditorController(session, {
 			editorThemeId: 'standard-light',
-			wordWrap: false,
-			showLineNumbers: true,
-			fontSize: 12,
+			get wordWrap() {
+				return localSettings.codeEditorWordWrap;
+			},
+			get showLineNumbers() {
+				return localSettings.codeEditorLineNumbers;
+			},
+			get fontSize() {
+				return Number(localSettings.codeEditorFontSize);
+			},
+			get vimMode() {
+				return localSettings.codeEditorVimMode;
+			},
 		});
 	}
 
@@ -158,7 +163,12 @@
 	setLocalSettings(localSettings);
 	setNotifications(notifications);
 	setWorkspaceLayout(workspaceLayout);
-	onDestroy(() => localSettings.destroy());
+	onMount(() => onReady?.(session, frameBridge));
+	onDestroy(() => {
+		frameBridge.deactivate();
+		session.editor?.dispose();
+		localSettings.destroy();
+	});
 </script>
 
 <FileSurface {session} {presentation} {onClose} {closeDisabled} />
