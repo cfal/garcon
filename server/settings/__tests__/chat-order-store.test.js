@@ -5,7 +5,7 @@ function projectSettings(overrides = {}) {
   return {
     features: {
       transcriptSearch: { enabled: false },
-      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, issues: true },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, tickets: true },
     },
     ui: {},
     paths: {},

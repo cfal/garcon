@@ -124,14 +124,14 @@
 			</div>
 			<div class="flex items-center justify-between gap-4">
 				<div>
-					<label for="issues-enabled" class="text-sm text-foreground">{m.settings_enable_issues()}</label>
-					<p class="text-xs text-muted-foreground">{m.settings_issues_description()}</p>
+					<label for="tickets-enabled" class="text-sm text-foreground">{m.settings_enable_tickets()}</label>
+					<p class="text-xs text-muted-foreground">{m.settings_tickets_description()}</p>
 				</div>
 				<Switch
-					id="issues-enabled"
-					checked={commands?.issues ?? true}
+					id="tickets-enabled"
+					checked={commands?.tickets ?? true}
 					disabled={isSaving}
-					onCheckedChange={(checked) => void setCommandSetting('issues', checked)}
+					onCheckedChange={(checked) => void setCommandSetting('tickets', checked)}
 				/>
 			</div>
 		</div>

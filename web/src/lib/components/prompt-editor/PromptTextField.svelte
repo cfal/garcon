@@ -3,6 +3,7 @@
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Square from '@lucide/svelte/icons/square';
 	import { Button } from '$lib/components/ui/button';
+	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -15,7 +16,9 @@
 		disabled?: boolean;
 		rows?: number;
 		textareaClass?: string;
+		class?: string;
 		describedBy?: string;
+		dataAttributes?: Record<`data-${string}`, string | number>;
 		canExpand: boolean;
 		expandLabel: string;
 		canRefinePrompt: boolean;
@@ -35,7 +38,9 @@
 		disabled = false,
 		rows = 4,
 		textareaClass = '',
+		class: className,
 		describedBy = '',
+		dataAttributes = {},
 		canExpand,
 		expandLabel,
 		canRefinePrompt,
@@ -50,11 +55,15 @@
 </script>
 
 <div
-	class="overflow-hidden rounded-md border border-input bg-background has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring"
+	class={cn(
+		'overflow-hidden rounded-md border border-input bg-background has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring',
+		className,
+	)}
 	class:border-destructive={invalid}
 	aria-busy={isPromptRefinementPending}
 >
 	<textarea
+		{...dataAttributes}
 		bind:this={ref}
 		bind:value
 		{id}

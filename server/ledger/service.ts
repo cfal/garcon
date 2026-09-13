@@ -49,7 +49,7 @@ import {
   type ChatIdRequestSink,
   type AgentStartRequestSink,
   type AgentScheduleRequestSink,
-  type IssueCommandRequestSink,
+  type TicketCommandRequestSink,
   type AgentResumeRequestSink,
   type AgentStopRequestSink,
   type InterAgentMessageRequestSink,
@@ -113,7 +113,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly agentResumes?: AgentResumeRequestSink;
   readonly agentStops?: AgentStopRequestSink;
   readonly agentSchedules?: AgentScheduleRequestSink;
-  readonly issueCommands?: IssueCommandRequestSink;
+  readonly ticketCommands?: TicketCommandRequestSink;
 }
 
 export interface PermissionResolutionClaim {
@@ -157,7 +157,7 @@ export class TranscriptLedgerService {
   readonly #agentResumes: AgentResumeRequestSink;
   readonly #agentStops: AgentStopRequestSink;
   readonly #agentSchedules: AgentScheduleRequestSink;
-  readonly #issueCommands: IssueCommandRequestSink;
+  readonly #ticketCommands: TicketCommandRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -178,7 +178,7 @@ export class TranscriptLedgerService {
     this.#agentResumes = options.agentResumes ?? { request: () => undefined };
     this.#agentStops = options.agentStops ?? { request: () => undefined };
     this.#agentSchedules = options.agentSchedules ?? { request: () => undefined };
-    this.#issueCommands = options.issueCommands ?? { request: () => undefined };
+    this.#ticketCommands = options.ticketCommands ?? { request: () => undefined };
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -573,8 +573,8 @@ export class TranscriptLedgerService {
     return this.#store.page(chatId, viewId, limit, before);
   }
 
-  issueOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
-    return this.#store.issueOutcomeOrdinal(chatId, viewId, requestOrdinal);
+  ticketOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
+    return this.#store.ticketOutcomeOrdinal(chatId, viewId, requestOrdinal);
   }
 
   rowsAfter(
@@ -742,7 +742,7 @@ export class TranscriptLedgerService {
           agentResumes: this.#agentResumes,
           agentStops: this.#agentStops,
           agentSchedules: this.#agentSchedules,
-          issueCommands: this.#issueCommands,
+          ticketCommands: this.#ticketCommands,
           committedRows: committed,
         });
         if (committed.length > 0) {

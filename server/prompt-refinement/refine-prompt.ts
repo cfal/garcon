@@ -40,6 +40,18 @@ const SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT = [
   'Supported tokens are {{arguments}}, {{project_path}}, and {{chat_id}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}.',
   'Do not add, remove, reorder, escape, or unescape these tokens.',
 ].join(' ');
+const TICKET_DESCRIPTION_REFINEMENT_CONSTRAINT = [
+  'The draft is a ticket description, not a chat prompt.',
+  'Improve its clarity and organization while preserving its facts, requirements, Markdown, and ticket references.',
+  'Do not invent requirements, claim completed work, or execute the described task.',
+  'Return only the revised description.',
+].join(' ');
+const TICKET_COMMENT_REFINEMENT_CONSTRAINT = [
+  'The draft is a ticket comment, not a chat prompt.',
+  'Improve its clarity and organization while preserving its facts, progress, Markdown, and ticket references.',
+  'Do not invent facts, claim completed work, or execute the described task.',
+  'Return only the revised comment.',
+].join(' ');
 
 type PromptRefinementErrorCode =
   | 'PROMPT_REFINEMENT_INVALID_REQUEST'
@@ -125,9 +137,12 @@ function renderTemplate(template: string, draft: string): string {
 }
 
 function templateForTarget(template: string, target: RefinePromptRequest['target']): string {
-  return target === 'snippet-template'
-    ? `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`
-    : template;
+  switch (target) {
+    case 'snippet-template': return `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`;
+    case 'ticket-description': return `${template}\n\n${TICKET_DESCRIPTION_REFINEMENT_CONSTRAINT}`;
+    case 'ticket-comment': return `${template}\n\n${TICKET_COMMENT_REFINEMENT_CONSTRAINT}`;
+    case 'prompt': return template;
+  }
 }
 
 function classifyPromptRefinementError(error: unknown): PromptRefinementError {

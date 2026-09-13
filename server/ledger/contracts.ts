@@ -29,16 +29,16 @@ import {
 } from '../../common/preambles.js';
 import type { PreamblePrefixReceipt } from '../../common/preamble-prefix.js';
 import { parseAgentCommandOutcome, type AgentCommandOutcomeNoticeDetail } from '../../common/garcon-command-results.js';
-import { parseIssueCommandOutcome, type IssueCommandOutcome } from '../../common/garcon-issue-result.js';
+import { parseTicketCommandOutcome, type TicketCommandOutcome } from '../../common/garcon-ticket-result.js';
 
-export type LedgerIssueCommandOutcomeDetail = IssueCommandOutcome & {
+export type LedgerTicketCommandOutcomeDetail = TicketCommandOutcome & {
   readonly nativeResultInput?: true;
   readonly title?: string;
 };
 
-export function projectLedgerIssueCommandOutcome(detail: JsonObject): IssueCommandOutcome | null {
-  const publicFields = ['type', 'command', 'ref', 'issueId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode'];
-  return parseIssueCommandOutcome(Object.fromEntries(publicFields
+export function projectLedgerTicketCommandOutcome(detail: JsonObject): TicketCommandOutcome | null {
+  const publicFields = ['type', 'command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode'];
+  return parseTicketCommandOutcome(Object.fromEntries(publicFields
     .filter((key) => Object.hasOwn(detail, key)).map((key) => [key, detail[key]])));
 }
 

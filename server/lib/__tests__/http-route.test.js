@@ -50,10 +50,10 @@ function resetConfigMocks() {
 describe('http route wrapping', () => {
   it('preserves the no-store route policy on authentication rejection before handler admission', async () => {
     const handler = mock(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(markRouteNoStore(handler), '/api/v1/issues', 'GET');
+    const wrapped = wrapRoute(markRouteNoStore(handler), '/api/v1/tickets', 'GET');
     for (const authorization of [null, 'Bearer invalid']) {
       authenticateHttpRequest.mockResolvedValueOnce({ principal: null, errorResponse: Response.json({ error: 'Unauthorized' }, { status: 401 }) });
-      const response = await wrapped(new Request('http://localhost/api/v1/issues', { headers: authorization ? { Authorization: authorization } : {} }));
+      const response = await wrapped(new Request('http://localhost/api/v1/tickets', { headers: authorization ? { Authorization: authorization } : {} }));
       expect(response.status).toBe(401);
       expect(response.headers.get('Cache-Control')).toBe('no-store');
     }

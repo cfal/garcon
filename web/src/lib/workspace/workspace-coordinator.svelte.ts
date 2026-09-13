@@ -573,17 +573,17 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#reservedSurfaceIds.add(surfaceId);
 		let releaseCanvasClose: (() => void) | null = null;
 		try {
-			if (surface.type === 'singleton' && surface.kind === 'issues') {
-				const issues = this.#deps.singletons.issuesIfPresent();
-				if (issues?.drafts.pending) return false;
-				issues?.drafts.flush();
+			if (surface.type === 'singleton' && surface.kind === 'tickets') {
+				const tickets = this.#deps.singletons.ticketsIfPresent();
+				if (tickets?.drafts.pending) return false;
+				tickets?.drafts.flush();
 				if (
-					issues?.drafts.needsExitGuard &&
+					tickets?.drafts.needsExitGuard &&
 					!(await this.#confirmClose({
 						surfaceId,
-						title: m.issues_close_surface_title(),
-						description: m.issues_close_surface_description(),
-						confirmLabel: m.issues_close_surface(),
+						title: m.tickets_close_surface_title(),
+						description: m.tickets_close_surface_description(),
+						confirmLabel: m.tickets_close_surface(),
 					}))
 				)
 					return false;

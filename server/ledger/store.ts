@@ -79,7 +79,7 @@ import {
   preparePreambleInput,
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
-import { findIssueOutcomeOrdinal } from './issue-outcome-query.js';
+import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
 
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -389,10 +389,10 @@ export class TranscriptLedgerStore {
     });
   }
 
-  issueOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
+  ticketOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {
     return this.#read(chatId, (entry) => {
       this.#assertCurrent(entry, viewId);
-      return findIssueOutcomeOrdinal(entry.db, viewId, requestOrdinal);
+      return findTicketOutcomeOrdinal(entry.db, viewId, requestOrdinal);
     });
   }
 

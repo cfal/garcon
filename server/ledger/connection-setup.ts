@@ -9,7 +9,7 @@ import type { LedgerRow } from './contracts.js';
 import { transcriptViewId, type TranscriptView, type TranscriptViewId } from './contracts.js';
 import { lstatIfExists, statSizeIfExists } from './file-stat.js';
 import { asError, nextOrdinal, runQuery, runTransaction } from './sqlite-operations.js';
-import { ISSUE_OUTCOME_INDEX_SQL } from './issue-outcome-query.js';
+import { TICKET_OUTCOME_INDEX_SQL } from './ticket-outcome-query.js';
 
 const LEDGER_SCHEMA_VERSION = 2;
 
@@ -77,7 +77,7 @@ export function createSchema(db: Database): void {
         ON transcript_rows(view_id, client_message_id)
         WHERE client_message_id IS NOT NULL;
     `);
-    db.exec(ISSUE_OUTCOME_INDEX_SQL);
+    db.exec(TICKET_OUTCOME_INDEX_SQL);
     db.exec(`PRAGMA user_version = ${LEDGER_SCHEMA_VERSION}`);
   });
 }
@@ -96,7 +96,7 @@ export function validateSchema(db: Database): void {
   if (required.size > 0) throw new LedgerSchemaError('Transcript ledger schema is incomplete');
   if (version === 1) {
     runTransaction(db, () => {
-      db.exec(ISSUE_OUTCOME_INDEX_SQL);
+      db.exec(TICKET_OUTCOME_INDEX_SQL);
       db.exec(`PRAGMA user_version = ${LEDGER_SCHEMA_VERSION}`);
     });
   }

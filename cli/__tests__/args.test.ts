@@ -197,10 +197,10 @@ describe('parseCliArgs', () => {
       'start',
       '--agent', 'codex',
       '--model', 'gpt',
-      'list', 'the', 'open', 'issues',
+      'list', 'the', 'open', 'tickets',
     ], ENV)).toMatchObject({
       kind: 'start',
-      prompt: 'list the open issues',
+      prompt: 'list the open tickets',
     });
   });
 

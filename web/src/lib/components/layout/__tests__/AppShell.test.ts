@@ -12,7 +12,7 @@ import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.j
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 import { page } from '$lib/mocks/app/state';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
-import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte.js';
+import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -251,26 +251,26 @@ describe('AppShell responsive workspace binding', () => {
 		chatDraftContext.set.mockReset();
 	});
 
-	it('opens an issue deep link after surface admission without selecting a chat', async () => {
+	it('opens a ticket deep link after surface admission without selecting a chat', async () => {
 		const workspace = installContext();
 		const opened = deferred<void>();
 		const openSingletonAsTab = vi.fn<WorkspaceCoordinator['openSingletonAsTab']>(
 			() => opened.promise,
 		);
 		Object.assign(workspace, { openSingletonAsTab });
-		const issues = { select: vi.fn<IssuesController['select']>() } satisfies Pick<
-			IssuesController,
+		const tickets = { select: vi.fn<TicketsController['select']>() } satisfies Pick<
+			TicketsController,
 			'select'
 		>;
-		testContext.current!.singletons = { issues: () => issues };
-		page.url = new URL('http://localhost/?issue=ISS-42');
+		testContext.current!.singletons = { tickets: () => tickets };
+		page.url = new URL('http://localhost/?ticket=G-42');
 		render(AppShell);
 		await waitFor(() =>
-			expect(openSingletonAsTab).toHaveBeenCalledWith('issues', workspace.currentWindowId),
+			expect(openSingletonAsTab).toHaveBeenCalledWith('tickets', workspace.currentWindowId),
 		);
-		expect(issues.select).not.toHaveBeenCalled();
+		expect(tickets.select).not.toHaveBeenCalled();
 		opened.resolve(undefined);
-		await waitFor(() => expect(issues.select).toHaveBeenCalledWith('ISS-42'));
+		await waitFor(() => expect(tickets.select).toHaveBeenCalledWith('G-42'));
 		expect(chatNavigation.gotoChat).not.toHaveBeenCalled();
 	});
 

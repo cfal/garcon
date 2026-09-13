@@ -20,10 +20,10 @@ import {
   chatIdRequestNoticeDraft,
   agentActionRequestNoticeDraft,
   interAgentSendRequestNoticeDraft,
-  issueCommandRequestNoticeDraft,
+  ticketCommandRequestNoticeDraft,
 } from './garcon-command-request.js';
-import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail, LedgerIssueCommandOutcomeDetail } from './contracts.js';
-import { issueCommandOutcome, issueCommandOutcomeContent, parseGarconIssueResult } from '../../common/garcon-issue-result.js';
+import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail, LedgerTicketCommandOutcomeDetail } from './contracts.js';
+import { ticketCommandOutcome, ticketCommandOutcomeContent, parseGarconTicketResult } from '../../common/garcon-ticket-result.js';
 import { agentCommandOutcomeContent, agentCommandOutcomeTitle, parseGarconCommandResult } from '../../common/garcon-command-results.js';
 import type { PreambleHistoryEvidence } from './preamble-history.js';
 
@@ -72,8 +72,8 @@ function importedDraftFor(
         : []),
       ...commandTransform.commands.map((command) => {
         switch (command.type) {
-          case 'issue':
-            return issueCommandRequestNoticeDraft(at, command);
+          case 'ticket':
+            return ticketCommandRequestNoticeDraft(at, command);
           case 'start-agent':
           case 'resume-agent':
           case 'stop-agent':
@@ -92,11 +92,11 @@ function importedDraftFor(
     ];
   }
   if (original.type === 'user-message') {
-    const issueResult = parseGarconIssueResult(original.content);
-    if (issueResult) {
-      const outcome = issueCommandOutcome(issueResult);
-      return [{ kind: 'notice', at, message: issueCommandOutcomeContent(outcome),
-        detail: { ...outcome, title: 'Issue command', nativeResultInput: true } satisfies LedgerIssueCommandOutcomeDetail,
+    const ticketResult = parseGarconTicketResult(original.content);
+    if (ticketResult) {
+      const outcome = ticketCommandOutcome(ticketResult);
+      return [{ kind: 'notice', at, message: ticketCommandOutcomeContent(outcome),
+        detail: { ...outcome, title: 'Ticket command', nativeResultInput: true } satisfies LedgerTicketCommandOutcomeDetail,
         providerMeta: null }];
     }
     const result = parseGarconCommandResult(original.content);

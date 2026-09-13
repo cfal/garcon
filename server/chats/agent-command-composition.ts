@@ -3,9 +3,9 @@ import type { StoredControlInputEntry } from '../chat-execution/control-state.js
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { errorMessage } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
-import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink, IssueCommandRequestSink } from '../ledger/garcon-command-publication.js';
-import { IssueCommandController } from '../issues/command-controller.js';
-import type { IssueRuntime } from '../issues/setup.js';
+import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink, TicketCommandRequestSink } from '../ledger/garcon-command-publication.js';
+import { TicketCommandController } from '../tickets/command-controller.js';
+import type { TicketRuntime } from '../tickets/setup.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
@@ -23,7 +23,7 @@ import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { ChatIdAllocator } from './chat-id-allocator.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 
-type AgentCommandSetting = 'chatIdDiscovery' | 'sendMessage' | 'startAgent' | 'resumeAgent' | 'schedule' | 'issues';
+type AgentCommandSetting = 'chatIdDiscovery' | 'sendMessage' | 'startAgent' | 'resumeAgent' | 'schedule' | 'tickets';
 const logger = createLogger('agent-commands');
 
 interface AgentCommandCompositionOptions {
@@ -38,7 +38,7 @@ interface AgentCommandCompositionOptions {
   readonly turns: Pick<CommandLedger, 'waitForTurnTerminal'>;
   readonly chatIds: ChatIdAllocator;
   readonly scheduler: ScheduledPromptScheduler;
-  readonly issues: IssueRuntime;
+  readonly tickets: TicketRuntime;
 }
 
 export class AgentCommandComposition {
@@ -49,12 +49,12 @@ export class AgentCommandComposition {
   #resumes: AgentResumeController | null = null;
   #stops: AgentStopController | null = null;
   #schedules: AgentScheduleController | null = null;
-  #issues: IssueCommandController | null = null;
+  #tickets: TicketCommandController | null = null;
 
-  readonly issueCommands: IssueCommandRequestSink = {
+  readonly ticketCommands: TicketCommandRequestSink = {
     request: (source, command) => {
-      if (!this.#issues) throw new Error('Issue command controller is not initialized');
-      this.#issues.request(source, command);
+      if (!this.#tickets) throw new Error('Ticket command controller is not initialized');
+      this.#tickets.request(source, command);
     },
   };
 
@@ -107,9 +107,9 @@ export class AgentCommandComposition {
   initialize(options: AgentCommandCompositionOptions): void {
     if (this.#chatIdDiscovery) throw new Error('Agent command controllers are already initialized');
     this.#notices = options.notices;
-    this.#issues = new IssueCommandController({
+    this.#tickets = new TicketCommandController({
       ...options,
-      isEnabled: () => commandEnabled(options.settings, 'issues'),
+      isEnabled: () => commandEnabled(options.settings, 'tickets'),
     });
     this.#starts = new AgentStartController({
       ...options,
@@ -150,7 +150,7 @@ export class AgentCommandComposition {
     this.#resumes?.discardSource(chatId);
     this.#stops?.discardSource(chatId);
     this.#schedules?.discardSource(chatId);
-    this.#issues?.discardSource(chatId);
+    this.#tickets?.discardSource(chatId);
     this.#chatIdDiscovery?.discard(chatId);
     this.interAgentMessages.discardSource(chatId);
   }
@@ -160,7 +160,7 @@ export class AgentCommandComposition {
     this.#resumes?.shutdown();
     this.#stops?.shutdown();
     this.#schedules?.shutdown();
-    this.#issues?.shutdown();
+    this.#tickets?.shutdown();
   }
 }
 

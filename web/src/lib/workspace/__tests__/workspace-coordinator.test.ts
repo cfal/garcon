@@ -1,7 +1,7 @@
 import { tick } from 'svelte';
 import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
-import type { IssuesController } from '$lib/issues/catalog/issues-controller.svelte';
-import { issueTestHarness } from '$lib/components/issues/__tests__/issue-test-harness';
+import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte';
+import { ticketTestHarness } from '$lib/components/tickets/__tests__/ticket-test-harness';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
@@ -81,7 +81,7 @@ function createHarness(
 		filePendingMutationCount?: number;
 		commitCanClose?: boolean;
 		canvas?: Pick<CanvasController, 'prepareClose'>;
-		issues?: IssuesController;
+		tickets?: TicketsController;
 		pendingGitSurfaceIds?: readonly string[];
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialActiveSurfaceId?: string;
@@ -169,7 +169,7 @@ function createHarness(
 		commit,
 		commitIfPresent: () => commit,
 		chatCanvasIfPresent: () => options.canvas ?? null,
-		issuesIfPresent: () => options.issues ?? null,
+		ticketsIfPresent: () => options.tickets ?? null,
 		setPresentationVisible: vi.fn(),
 		disposeSurface: vi.fn((kind: string) => {
 			if (kind === 'commit') commit.resetAfterClose();
@@ -227,35 +227,35 @@ function createHarness(
 
 describe('WorkspaceCoordinator', () => {
 	it.each(['tab', 'window', 'other-windows'] as const)(
-		'guards retained Issues drafts before closing %s',
+		'guards retained Tickets drafts before closing %s',
 		async (kind) => {
-			const { controller } = issueTestHarness();
+			const { controller } = ticketTestHarness();
 			controller.setPresentationVisible(true);
 			await controller.refresh();
 			await controller.beginCreate(null);
 			controller.createDraft!.setField('title', 'Retained synthetic draft');
 			try {
-				const { coordinator, layout, singletons } = createHarness({ issues: controller });
-				await coordinator.openSingletonAsTab('issues', 'window-files');
+				const { coordinator, layout, singletons } = createHarness({ tickets: controller });
+				await coordinator.openSingletonAsTab('tickets', 'window-files');
 				const close = () =>
 					kind === 'tab'
-						? coordinator.closeSurface('singleton:issues')
+						? coordinator.closeSurface('singleton:tickets')
 						: kind === 'window'
 							? coordinator.closeWindow('window-files')
 							: coordinator.closeOtherWindows('window-main');
 				const canceled = close();
 				await vi.waitFor(() =>
-					expect(coordinator.closeGuardRequest?.surfaceId).toBe('singleton:issues'),
+					expect(coordinator.closeGuardRequest?.surfaceId).toBe('singleton:tickets'),
 				);
 				coordinator.resolveCloseGuard(false);
 				expect(await canceled).toBe(false);
-				expect(layout.surface('singleton:issues')).not.toBeNull();
-				expect(singletons.disposeSurface).not.toHaveBeenCalledWith('issues');
+				expect(layout.surface('singleton:tickets')).not.toBeNull();
+				expect(singletons.disposeSurface).not.toHaveBeenCalledWith('tickets');
 				const confirmed = close();
 				await vi.waitFor(() => expect(coordinator.closeGuardRequest).not.toBeNull());
 				coordinator.resolveCloseGuard(true);
 				expect(await confirmed).toBe(true);
-				expect(singletons.disposeSurface).toHaveBeenCalledWith('issues');
+				expect(singletons.disposeSurface).toHaveBeenCalledWith('tickets');
 			} finally {
 				controller.dispose();
 			}

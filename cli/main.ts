@@ -25,9 +25,9 @@ import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
-import { applyIssueStdin, runIssueCommand } from './issue-commands.js';
-import { issueLineOutput } from './issue-output.js';
-import { readIssueStdin } from './issue-stdin.js';
+import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
+import { ticketLineOutput } from './ticket-output.js';
+import { readTicketStdin } from './ticket-stdin.js';
 
 export interface MainOptions {
   signal?: AbortSignal;
@@ -187,7 +187,7 @@ export async function main(
 ): Promise<number> {
   const output = options.output ?? createCliOutput();
   let command: ParsedCliCommand | undefined;
-  let issueSubmissionStarted = false;
+  let ticketSubmissionStarted = false;
   try {
     command = parseCliArgs(argv);
     if (command.kind === 'help') {
@@ -198,12 +198,12 @@ export async function main(
       process.stdout.write(`${packageJson.version}\n`);
       return 0;
     }
-    if (command.kind === 'issue') {
-      const issueCommand = command.readsBodyFromStdin
-        ? applyIssueStdin(command, await readConfiguredStdin(options,
-          (signal) => readIssueStdin(Bun.stdin.stream(), signal))) : command;
-      const client = await connectedClient(issueCommand, options);
-      await runIssueCommand(issueCommand, client, output, options.signal, () => { issueSubmissionStarted = true; });
+    if (command.kind === 'ticket') {
+      const ticketCommand = command.readsBodyFromStdin
+        ? applyTicketStdin(command, await readConfiguredStdin(options,
+          (signal) => readTicketStdin(Bun.stdin.stream(), signal))) : command;
+      const client = await connectedClient(ticketCommand, options);
+      await runTicketCommand(ticketCommand, client, output, options.signal, () => { ticketSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'list') {
@@ -366,10 +366,10 @@ export async function main(
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {
-      output.diagnostic(command?.kind === 'issue'
-        ? issueSubmissionStarted
-          ? 'terminal interrupted; the issue save is not confirmed. Retry with the printed identity and identical body.'
-          : 'terminal interrupted; no issue mutation was submitted'
+      output.diagnostic(command?.kind === 'ticket'
+        ? ticketSubmissionStarted
+          ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
+          : 'terminal interrupted; no ticket mutation was submitted'
         : interruptDiagnostic(command));
       return 130;
     }
@@ -377,7 +377,7 @@ export async function main(
       ? error
       : new CliError('submission', error instanceof Error ? error.message : String(error), 3);
     const diagnostic = `${cliError.phase}: ${cliError.message}`;
-    output.diagnostic(command?.kind === 'issue' || argv.includes('issue') ? issueLineOutput(diagnostic) : diagnostic);
+    output.diagnostic(command?.kind === 'ticket' || argv.includes('ticket') ? ticketLineOutput(diagnostic) : diagnostic);
     return cliError.exitCode;
   }
 }

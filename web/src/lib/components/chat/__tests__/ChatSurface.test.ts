@@ -23,6 +23,7 @@ vi.mock('$lib/context', () => ({
 		supportsUpdateProjectPath: () => true,
 	}),
 	getOptionalTransientLayers: () => null,
+	getWorkspaceCoordinator: () => ({ focusMobileSingleton: vi.fn() }),
 	getGitViewLauncher: () => ({
 		openHistory: vi.fn(),
 		openCompare: vi.fn(),

@@ -4,6 +4,7 @@
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
+	import Tickets from '@lucide/svelte/icons/tickets';
 	import Info from '@lucide/svelte/icons/info';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -27,6 +28,7 @@
 		onOpenUserMessageNavigator,
 		onOpenGitHistory,
 		onOpenGitCompare,
+		onOpenTickets,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -45,6 +47,7 @@
 		onOpenUserMessageNavigator?: () => void;
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
+		onOpenTickets?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -56,7 +59,7 @@
 	} = $props();
 </script>
 
-{#if onOpenGitHistory || onOpenGitCompare}
+{#if onOpenGitHistory || onOpenGitCompare || onOpenTickets}
 	{#if onOpenGitHistory}
 		<menu.Item onSelect={onOpenGitHistory}>
 			<History />
@@ -67,6 +70,12 @@
 		<menu.Item onSelect={onOpenGitCompare}>
 			<GitCompareArrows />
 			{m.workspace_open_git_compare()}
+		</menu.Item>
+	{/if}
+	{#if onOpenTickets}
+		<menu.Item onSelect={onOpenTickets}>
+			<Tickets />
+			{m.workspace_open_tickets()}
 		</menu.Item>
 	{/if}
 	<menu.Separator />

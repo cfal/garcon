@@ -11,7 +11,7 @@ import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controll
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
-import { issueTestHarness } from '$lib/components/issues/__tests__/issue-test-harness';
+import { ticketTestHarness } from '$lib/components/tickets/__tests__/ticket-test-harness';
 
 const registries: SingletonSurfaceRegistry[] = [];
 
@@ -135,43 +135,43 @@ function createRegistry() {
 }
 
 describe('SingletonSurfaceRegistry', () => {
-	it('constructs Issues lazily and retains its global controller across visibility and project changes', async () => {
-		const harness = issueTestHarness();
-		const createIssues = vi.fn(() => harness.controller);
+	it('constructs Tickets lazily and retains its global controller across visibility and project changes', async () => {
+		const harness = ticketTestHarness();
+		const createTickets = vi.fn(() => harness.controller);
 		const gitDeps = createGitSurfaceTestDeps();
 		const registry = new SingletonSurfaceRegistry({
 			...gitDeps,
-			createIssues,
+			createTickets,
 			createCommit: () => new CommitController(gitDeps),
 			createPullRequests: () => new PullRequestsStore(),
 		});
 		registries.push(registry);
-		expect(registry.issuesIfPresent()).toBeNull();
-		expect(createIssues).not.toHaveBeenCalled();
-		registry.setPresentationVisible('issues', true);
-		const issues = registry.issues();
-		await issues.refresh();
+		expect(registry.ticketsIfPresent()).toBeNull();
+		expect(createTickets).not.toHaveBeenCalled();
+		registry.setPresentationVisible('tickets', true);
+		const tickets = registry.tickets();
+		await tickets.refresh();
 		expect(harness.api.bootstrap).toHaveBeenCalledOnce();
 		expect(registry.hasVisibleProjectSurface).toBe(false);
-		registry.setPresentationVisible('issues', false);
-		expect(registry.issues()).toBe(issues);
-		const dispose = vi.spyOn(issues, 'dispose');
-		registry.disposeSurface('issues');
+		registry.setPresentationVisible('tickets', false);
+		expect(registry.tickets()).toBe(tickets);
+		const dispose = vi.spyOn(tickets, 'dispose');
+		registry.disposeSurface('tickets');
 		expect(dispose).toHaveBeenCalledOnce();
-		expect(registry.issuesIfPresent()).toBeNull();
+		expect(registry.ticketsIfPresent()).toBeNull();
 	});
-	it('retains the Issues exit guard after closing a renderer with old-store recovery', () => {
-		const harness = issueTestHarness();
+	it('retains the Tickets exit guard after closing a renderer with old-store recovery', () => {
+		const harness = ticketTestHarness();
 		const gitDeps = createGitSurfaceTestDeps();
 		const registry = new SingletonSurfaceRegistry({
 			...gitDeps,
-			createIssues: () => harness.controller,
+			createTickets: () => harness.controller,
 			createCommit: () => new CommitController(gitDeps),
 			createPullRequests: () => new PullRequestsStore(),
 		});
 		registries.push(registry);
-		const issues = registry.issues();
-		issues.drafts.oldEntries = [
+		const tickets = registry.tickets();
+		tickets.drafts.oldEntries = [
 			{
 				partition: {
 					storeId: '22222222-2222-4222-8222-222222222222',
@@ -180,8 +180,8 @@ describe('SingletonSurfaceRegistry', () => {
 				entry: { key: 'synthetic-old-recovery', raw: 'Synthetic old-store draft', draft: null },
 			},
 		];
-		registry.disposeSurface('issues');
-		expect(registry.issuesIfPresent()).toBe(issues);
+		registry.disposeSurface('tickets');
+		expect(registry.ticketsIfPresent()).toBe(tickets);
 		const exit = new Event('beforeunload', { cancelable: true });
 		window.dispatchEvent(exit);
 		expect(exit.defaultPrevented).toBe(true);

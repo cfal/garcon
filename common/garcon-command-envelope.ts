@@ -1,5 +1,5 @@
 import { normalizeGarconCommandBody } from './garcon-command-text.js';
-import { ISSUE_ACTIONS, type IssueAction } from './issue-commands.js';
+import { TICKET_ACTIONS, type TicketAction } from './ticket-commands.js';
 
 export const GARCON_COMMAND_ENVELOPE_MAX_BYTES = 64 * 1024;
 const encoder = new TextEncoder();
@@ -14,8 +14,8 @@ export interface GarconCommandEnvelope {
 }
 
 export type GarconEnvelopeCommand = 'send-message' | 'start-agent' | 'resume-agent' | 'stop-agent' | 'schedule'
-  | `issue-${IssueAction}`;
-const ISSUE_ENVELOPES = ISSUE_ACTIONS.map((action): GarconEnvelopeCommand => `issue-${action}`);
+  | `ticket-${TicketAction}`;
+const TICKET_ENVELOPES = TICKET_ACTIONS.map((action): GarconEnvelopeCommand => `ticket-${action}`);
 
 export interface GarconEnvelopeSpan {
   readonly command: GarconEnvelopeCommand;
@@ -24,7 +24,7 @@ export interface GarconEnvelopeSpan {
 }
 
 export function garconEnvelopeCommandAt(content: string, start: number): GarconEnvelopeCommand | null {
-  for (const command of ['send-message', 'start-agent', 'resume-agent', 'stop-agent', 'schedule', ...ISSUE_ENVELOPES] as const) {
+  for (const command of ['send-message', 'start-agent', 'resume-agent', 'stop-agent', 'schedule', ...TICKET_ENVELOPES] as const) {
     const prefix = `<garcon-${command}`;
     if (content.startsWith(prefix, start) && /[\s/>]|^$/.test(content[start + prefix.length] ?? '')) return command;
   }

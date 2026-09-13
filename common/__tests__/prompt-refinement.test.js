@@ -7,8 +7,18 @@ import {
   promptRefinementTargetOutputMaxLength,
 } from '../prompt-refinement.js';
 import { SNIPPET_TEMPLATE_MAX_LENGTH } from '../snippets.js';
+import { TICKET_LIMITS } from '../tickets.js';
 
 describe('prompt refinement contracts', () => {
+  it.each(['ticket-description', 'ticket-comment'])('bounds %s by UTF-8 bytes on both sides', (target) => {
+    const text = 'é'.repeat(TICKET_LIMITS.bodyBytes / 2);
+    expect(normalizeRefinePromptRequest({ draft: text, target })).not.toBeNull();
+    expect(normalizeRefinePromptRequest({ draft: `${text}a`, target })).toBeNull();
+    expect(normalizeRefinePromptResponse({ success: true, refinedPrompt: text }, target)).not.toBeNull();
+    expect(normalizeRefinePromptResponse({ success: true, refinedPrompt: `${text}a` }, target)).toBeNull();
+    expect(normalizeRefinePromptRequest({ draft: '\uD800', target })).toBeNull();
+    expect(normalizeRefinePromptResponse({ success: true, refinedPrompt: '\uD800' }, target)).toBeNull();
+  });
   it('preserves request whitespace while rejecting blank drafts', () => {
     expect(normalizeRefinePromptRequest({ draft: '  improve this  ', target: 'prompt' })).toEqual({
       draft: '  improve this  ',

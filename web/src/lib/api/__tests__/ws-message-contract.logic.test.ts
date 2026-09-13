@@ -71,7 +71,7 @@ function makeSettingsSnapshot(
 		version: 2,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, issues: true },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, tickets: true },
 		},
 		ui: {},
 		uiEffective: {},
@@ -521,7 +521,7 @@ describe('parseServerWsMessage', () => {
 			startAgent: true,
 			resumeAgent: true,
 			schedule: true,
-			issues: true,
+			tickets: true,
 		});
 		expect(
 			(settingsChanged as SettingsChangedMessage).settings.ui.hiddenBashCommandPatterns,

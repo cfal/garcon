@@ -17,7 +17,7 @@ import {
   isLedgerCliRowNoticeDetail,
   isLedgerPreambleSelectionChangedNoticeDetail,
   projectLedgerAgentCommandOutcome,
-  projectLedgerIssueCommandOutcome,
+  projectLedgerTicketCommandOutcome,
   type LedgerRow,
 } from './contracts.js';
 
@@ -86,7 +86,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return new TranscriptNoticeMessage(
         row.at,
         row.message,
-        projectLedgerAgentCommandOutcome(row.detail) ?? projectLedgerIssueCommandOutcome(row.detail)
+        projectLedgerAgentCommandOutcome(row.detail) ?? projectLedgerTicketCommandOutcome(row.detail)
           ?? parseTranscriptNoticeDetail(row.detail) ?? undefined,
         typeof row.detail.title === 'string' && row.detail.title ? row.detail.title : undefined,
       );

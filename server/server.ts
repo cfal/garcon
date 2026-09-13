@@ -108,7 +108,7 @@ import {
 } from './snippets/service.js';
 import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
-import { initializeIssues } from './issues/setup.js';
+import { initializeTickets } from './tickets/setup.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -309,7 +309,7 @@ export async function startServer(): Promise<void> {
       agentResumes: agentCommands.agentResumes,
       agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
-      issueCommands: agentCommands.issueCommands,
+      ticketCommands: agentCommands.ticketCommands,
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
@@ -401,13 +401,13 @@ export async function startServer(): Promise<void> {
     );
     const preambles = await initializePreambleService(workspaceDir);
     const chatBoardRuntime = await initializeChatBoardRuntime({ workspaceDir, registry: chatRegistry, chatMutationLock, archiveState: settings });
-    const issues = initializeIssues(workspaceDir, {
+    const tickets = initializeTickets(workspaceDir, {
       chatExists: (chatId) => chatRegistry.hasChat(chatId),
       commandsEnabled: () => {
         const commands = settings.getFeatureSettings().agentCommands;
-        return commands.enabled && commands.issues;
+        return commands.enabled && commands.tickets;
       },
-      onInvalidated: (revision) => eventWiring?.broadcastIssuesInvalidated(revision),
+      onInvalidated: (revision) => eventWiring?.broadcastTicketsInvalidated(revision),
     });
     const chatPreambleSelection = initializeChatPreambleSelectionService({
       preambles,
@@ -653,7 +653,7 @@ export async function startServer(): Promise<void> {
       turns: commandLedger,
       chatIds,
       scheduler: scheduledPrompts,
-      issues,
+      tickets,
     });
 
     const snippetStore = new SnippetStore(workspaceDir);
@@ -722,7 +722,7 @@ export async function startServer(): Promise<void> {
       processing: chatProcessingActivity,
       metadata,
       chatViews: chatViewPages,
-      issueSources: transcriptReader,
+      ticketSources: transcriptReader,
       shareSnapshots: transcriptReader,
       agents: agentRegistry,
       telegramNotifier,
@@ -738,7 +738,7 @@ export async function startServer(): Promise<void> {
       preambles,
       chatPreambleSelection,
       ...chatBoardRuntime,
-      issues,
+      tickets,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,
@@ -964,7 +964,7 @@ export async function startServer(): Promise<void> {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
-        issues.close();
+        tickets.close();
         if (runtimeFilePath) {
           try {
             await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);

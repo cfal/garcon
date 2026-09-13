@@ -4,6 +4,7 @@
 		getChatSessions,
 		getConversationPanels,
 		getGitViewLauncher,
+		getWorkspaceCoordinator,
 		getModelCatalog,
 		type WorkspaceChatActions,
 	} from '$lib/context';
@@ -65,6 +66,7 @@
 	const conversationPanels = getConversationPanels();
 	const modelCatalog = getModelCatalog();
 	const gitViews = getGitViewLauncher();
+	const workspace = getWorkspaceCoordinator();
 	const transcriptCache =
 		untrack(() => providedTranscriptCache) ??
 		new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
@@ -113,7 +115,6 @@
 		openUserMessageNavigator = command;
 		onRegisterUserMessageNavigator?.(command);
 	}
-
 </script>
 
 {#snippet currentChatMenu(shadow: boolean)}
@@ -133,6 +134,7 @@
 			onOpenGitCompare={isMobile
 				? () => void gitViews.openCompare({ presentation: 'mobile' })
 				: undefined}
+			onOpenTickets={isMobile ? () => void workspace.focusMobileSingleton('tickets') : undefined}
 			onRename={() => chatActions.requestRename(selectedChat)}
 			onDetails={() => chatActions.requestDetails(selectedChat)}
 			onReload={() => chatActions.reload(selectedChat)}
