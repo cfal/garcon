@@ -279,6 +279,10 @@ export class FileSessionRegistry {
 			adoptDocument: (document, generation) => this.#drafts?.adopt(document, generation),
 			persistDocument: (document) => this.#drafts?.settle(document) ?? Promise.resolve(),
 			openView: (record, document, target) => this.#openRestoredView(record, document, target),
+			completeViewRestoration: (session) => {
+				this.#enableViewPersistence(session);
+				return this.#persistView(session);
+			},
 			resolveRestoredPlacement: (host) =>
 				this.deps.getPlacement().resolveRestoredPlacement?.(host) ?? defaultRestoredPlacement(host),
 			removeUnclaimedRestoredFileSurfaces: (viewIds) =>
@@ -559,16 +563,12 @@ export class FileSessionRegistry {
 		if (this.guardRequest?.sessionId === sessionId) this.resolveGuard('cancel');
 		if (this.overwriteRequest?.sessionId === sessionId) this.resolveOverwrite('cancel');
 		const document = session.document;
-		if (preserveView) await this.#persistView(session).catch(() => undefined);
-		else if (this.#userNamespace) {
-			await this.#draftRepository
-				.deleteView(sessionId, this.#userNamespace, this.#deploymentId, this.#browserSessionId)
-				.catch(() => undefined);
-		}
+		const finishViewClose = this.#viewRecovery?.prepareViewClose(session, preserveView);
 		session.dispose();
 		const next = { ...this.sessions };
 		delete next[sessionId];
 		this.sessions = next;
+		await finishViewClose?.().catch(() => undefined);
 		if (document.viewIds.size > 0) return;
 		await this.#drafts?.closeDocument(document).catch(() => undefined);
 		this.#io.stopPolling(document.id);
@@ -647,9 +647,7 @@ export class FileSessionRegistry {
 		const existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
 		const document = existingDocument ?? new FileDocumentState(identity, key);
 		const session = new FileViewSession(document, viewId);
-		session.onPresentationChanged = () => {
-			void this.#persistView(session).catch(() => undefined);
-		};
+		if (request.reason !== 'restored-view') this.#enableViewPersistence(session);
 		session.rendererMode = resolveFileRendererMode(identity.normalizedRelativePath, request.mode);
 		session.preview = Boolean(request.preview);
 		session.pinned = !session.preview;
@@ -711,7 +709,9 @@ export class FileSessionRegistry {
 		}
 		this.#io.startPolling(document.id);
 		if (request.reason !== 'restored-view') this.#recordNavigation(session);
-		void this.#persistView(session, request.origin).catch(() => undefined);
+		if (request.reason !== 'restored-view') {
+			void this.#persistView(session, request.origin).catch(() => undefined);
+		}
 		return session;
 	}
 
@@ -909,6 +909,12 @@ export class FileSessionRegistry {
 
 	async #persistView(session: FileViewSession, origin?: PresentationHostId): Promise<void> {
 		await this.#viewRecovery?.persistView(session, origin);
+	}
+
+	#enableViewPersistence(session: FileViewSession): void {
+		session.onPresentationChanged = () => {
+			void this.#persistView(session).catch(() => undefined);
+		};
 	}
 
 	async #openRestoredView(

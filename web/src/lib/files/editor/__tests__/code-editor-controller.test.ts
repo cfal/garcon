@@ -323,6 +323,46 @@ describe('CodeEditorController', () => {
 		expect(view.state.selection.ranges).toHaveLength(2);
 	});
 
+	it('retains the default insert-blank-line shortcut', () => {
+		const { controller } = createController();
+		const host = parent();
+		controller.attach(host);
+		const content = host.querySelector<HTMLElement>('.cm-content');
+		if (!content) throw new Error('Expected CodeMirror content');
+
+		content.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'Enter',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(controller.currentContent()).toBe('first\nsecond\n\nthird');
+	});
+
+	it('retains the default additional-cursor shortcut', () => {
+		const { controller } = createController();
+		const host = parent();
+		controller.attach(host);
+		const content = host.querySelector<HTMLElement>('.cm-content');
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!);
+		if (!content || !view) throw new Error('Expected CodeMirror editor');
+
+		content.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'ArrowDown',
+				ctrlKey: true,
+				altKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(view.state.selection.ranges).toHaveLength(2);
+	});
+
 	it('routes Undo and Redo through canonical document history', () => {
 		const { session, controller } = createController();
 		const host = parent();

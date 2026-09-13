@@ -148,7 +148,7 @@ export class WorkspaceShortcutDispatcher {
 	}
 
 	handle(event: KeyboardEvent): void {
-		if (event.defaultPrevented) return;
+		if (event.defaultPrevented || event.isComposing) return;
 		const topTransientKind = this.deps.transients.topVisibleKind();
 		if (
 			event.key === 'Escape' &&

@@ -5,9 +5,9 @@ import {
 	highlightSpecialChars,
 	drawSelection,
 	dropCursor,
-		highlightActiveLine,
-		getDialog,
-		keymap,
+	highlightActiveLine,
+	getDialog,
+	keymap,
 	panels,
 } from '@codemirror/view';
 import { EditorSelection, EditorState, Compartment, Prec, type Extension } from '@codemirror/state';
@@ -20,9 +20,8 @@ import {
 	indentMore,
 	moveLineDown,
 	moveLineUp,
-	standardKeymap,
+	defaultKeymap,
 	toggleComment,
-	toggleTabFocusMode,
 } from '@codemirror/commands';
 import {
 	foldAll,
@@ -95,6 +94,20 @@ export interface EditorStatusSnapshot {
 }
 
 const MIN_TOUCH_EDITOR_FONT_SIZE = 16;
+const CONFIGURABLE_EDITOR_BINDINGS = new Set([
+	'Alt-ArrowUp',
+	'Shift-Alt-ArrowUp',
+	'Alt-ArrowDown',
+	'Shift-Alt-ArrowDown',
+	'Mod-[',
+	'Mod-]',
+	'Shift-Mod-k',
+	'Shift-Mod-\\',
+	'Mod-/',
+]);
+const retainedDefaultKeymap = defaultKeymap.filter(
+	(binding) => !binding.key || !CONFIGURABLE_EDITOR_BINDINGS.has(binding.key),
+);
 
 export class CodeEditorController {
 	#view: EditorView | null = null;
@@ -131,12 +144,6 @@ export class CodeEditorController {
 			this.#runtime.canonicalState.doc,
 			session.editorState?.selection,
 		);
-		if (session.restoredFolds.length > 0) {
-			session.editorState = session.editorState.update({
-				effects: session.restoredFolds.map((range) => foldEffect.of(range)),
-			}).state;
-			session.restoredFolds = [];
-		}
 		this.#adapter = {
 			id: session.id,
 			currentState: (): EditorState =>
@@ -159,6 +166,7 @@ export class CodeEditorController {
 			},
 		};
 		this.#unregisterRuntime = this.#runtime.register(this.#adapter);
+		this.restorePendingPresentation();
 	}
 
 	get isAttached(): boolean {
@@ -320,7 +328,7 @@ export class CodeEditorController {
 		const view = this.#view;
 		if (view) view.update([transaction]);
 		this.session.editorState = transaction.state;
-		this.session.restoredFolds = [];
+		this.session.pendingSourcePresentation = null;
 		const scrollLeft = this.session.textScrollLeft;
 		const scrollTop = this.session.textScrollTop;
 		requestAnimationFrame(() => {
@@ -329,6 +337,13 @@ export class CodeEditorController {
 			view.scrollDOM.scrollTop = scrollTop;
 			this.#captureScroll(view);
 		});
+	}
+
+	restorePendingPresentation(): boolean {
+		const presentation = this.session.pendingSourcePresentation;
+		if (!presentation) return false;
+		this.restorePresentation(presentation.selection, presentation.folds);
+		return true;
 	}
 
 	run(command: FileEditorCommand): boolean {
@@ -465,10 +480,9 @@ export class CodeEditorController {
 					]),
 				),
 				keymap.of([
-					...standardKeymap,
+					...retainedDefaultKeymap,
 					...foldKeymap,
 					{ key: 'Tab', run: indentMore, shift: indentLess },
-					{ key: 'Ctrl-m', mac: 'Shift-Alt-m', run: toggleTabFocusMode },
 				]),
 				this.#languageCompartment.of([]),
 				this.#dynamicCompartment.of(this.dynamicExtensions()),

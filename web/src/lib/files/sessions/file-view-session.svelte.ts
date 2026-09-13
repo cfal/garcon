@@ -12,6 +12,16 @@ export interface ImageViewState {
 	scrollTop: number;
 }
 
+export interface FileSourcePresentation {
+	selection: {
+		line: number;
+		column: number;
+		endLine: number;
+		endColumn: number;
+	};
+	folds: readonly { from: number; to: number }[];
+}
+
 export function defaultImageViewState(): ImageViewState {
 	return { mode: 'fit', scale: 1, scrollLeft: 0, scrollTop: 0 };
 }
@@ -33,7 +43,7 @@ export class FileViewSession {
 	textScrollTop = 0;
 	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
-	restoredFolds: readonly { from: number; to: number }[] = [];
+	pendingSourcePresentation: FileSourcePresentation | null = null;
 	pinned = $state(true);
 	preview = $state(false);
 	lastFocusedAt = $state(Date.now());
@@ -279,10 +289,14 @@ export class FileViewSession {
 		}, 250);
 	}
 
-	dispose(): void {
+	stopPresentationPersistence(): void {
 		if (this.#presentationTimer) clearTimeout(this.#presentationTimer);
 		this.#presentationTimer = null;
 		this.onPresentationChanged = null;
+	}
+
+	dispose(): void {
+		this.stopPresentationPersistence();
 		this.editor?.dispose();
 		this.editor = null;
 		this.document.detachView(this.id);

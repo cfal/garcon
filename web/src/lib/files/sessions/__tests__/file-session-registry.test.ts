@@ -532,6 +532,31 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.get(opened.id)).toBeNull();
 	});
 
+	it('drains pending view checkpoints before deleting a closed view', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const allowPut = deferred<void>();
+		const putView = repository.putView.bind(repository);
+		repository.putView = vi.fn(async (record) => {
+			await allowPut.promise;
+			await putView(record);
+		});
+		const deleteView = vi.spyOn(repository, 'deleteView');
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = await harness.registry.open(request('src/closing-view.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(repository.putView).toHaveBeenCalled());
+
+		const destruction = harness.registry.destroy(opened.id);
+		await vi.waitFor(() => expect(harness.registry.get(opened.id)).toBeNull());
+
+		expect(deleteView).not.toHaveBeenCalled();
+		allowPut.resolve();
+		await destruction;
+		expect(deleteView).toHaveBeenCalledOnce();
+		expect(await repository.getViews('test-user', 'test-deployment', 'test-session')).toEqual([]);
+	});
+
 	it('serializes reopening behind last-view recovery cleanup', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const allowDelete = deferred<void>();
@@ -1822,6 +1847,82 @@ describe('FileSessionRegistry', () => {
 		expect(restored?.lineSeparator).toBe('\r\n');
 		expect(restored?.mixedLineEndings).toBe(false);
 		expect(restored?.editorRuntime).toBeNull();
+	});
+
+	it('retains restored source presentation until a Markdown preview enters edit mode', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const view: SpaFileViewV1 = {
+			schemaVersion: 1,
+			deploymentId: 'test-deployment',
+			userNamespace: 'test-user',
+			browserSessionId: 'test-session',
+			viewId: 'markdown-preview-view',
+			documentId: 'markdown-preview-document',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'README.md',
+			rendererMode: 'markdown',
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+			scrollLeft: 6,
+			scrollTop: 30,
+			folds: [{ from: 15, to: 29 }],
+			pinned: true,
+			preview: false,
+			updatedAt: 1,
+			placement: 'window-main',
+		};
+		await repository.putView(view);
+		const harness = createHarness({ draftRepository: repository, userNamespace: null });
+		const loaded = deferred<{
+			content: string;
+			path: string;
+			revision: string;
+		}>();
+		harness.readText.mockReturnValueOnce(loaded.promise);
+
+		const recovery = harness.registry.initializeRecovery('test-user');
+		await vi.waitFor(() => expect(harness.registry.get(view.viewId)).not.toBeNull());
+		const inFlight = harness.registry.get(view.viewId);
+		expect(inFlight?.onPresentationChanged).toBeNull();
+		loaded.resolve({
+			content: '# Heading\nbody\n\n## Next\nmore',
+			path: '/workspace/README.md',
+			revision: 'v1:markdown',
+		});
+		await recovery;
+		const restored = harness.registry.get(view.viewId);
+		if (!restored) throw new Error('Expected restored Markdown preview');
+		expect(restored.onPresentationChanged).not.toBeNull();
+		expect(restored.rendererMode).toBe('markdown');
+		expect(restored.editor).toBeNull();
+		expect(restored.pendingSourcePresentation).toEqual({
+			selection: { line: 2, column: 2, endLine: 2, endColumn: 4 },
+			folds: view.folds,
+		});
+		const [persistedPreview] = await repository.getViews(
+			'test-user',
+			'test-deployment',
+			'test-session',
+		);
+		expect(persistedPreview).toMatchObject({
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+			folds: view.folds,
+		});
+
+		await expect(harness.registry.showSource(restored.id)).resolves.toBe(true);
+
+		expect(restored.editor?.selectionLocation()).toEqual({
+			line: 2,
+			column: 2,
+			endLine: 2,
+			endColumn: 4,
+		});
+		expect(restored.editor?.folds()).toEqual(view.folds);
 	});
 
 	it('persists Markdown and image presentation state with a file view', async () => {

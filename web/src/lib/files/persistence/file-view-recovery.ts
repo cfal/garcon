@@ -34,6 +34,7 @@ interface FileViewRecoveryOptions {
 		document: FileDocumentState | null,
 		target?: DesktopPlacement,
 	): Promise<FileViewSession | null>;
+	completeViewRestoration(session: FileViewSession): Promise<void>;
 	resolveRestoredPlacement(host: PresentationHostId): DesktopPlacement | undefined;
 	removeUnclaimedRestoredFileSurfaces(viewIds: readonly string[]): Promise<void>;
 	ensureEditor(session: FileViewSession): Promise<void>;
@@ -46,6 +47,8 @@ interface FileViewRecoveryOptions {
 
 export class FileViewRecovery {
 	readonly #restoredPlacements = new Map<PresentationHostId, PresentationHostId>();
+	readonly #pendingWrites = new Map<string, Set<Promise<void>>>();
+	readonly #closingViewIds = new Set<string>();
 
 	constructor(private readonly options: FileViewRecoveryOptions) {}
 
@@ -80,15 +83,26 @@ export class FileViewRecovery {
 		}
 	}
 
-	async persistView(session: FileViewSession, origin?: PresentationHostId): Promise<void> {
+	snapshotView(session: FileViewSession, origin?: PresentationHostId): SpaFileViewV1 {
 		const placement = this.options.getPlacement(session.id) ?? origin ?? 'dialog';
-		const selection = session.editor?.selectionLocation() ?? {
-			line: session.requestedLine ?? 1,
-			column: session.requestedColumn ?? 1,
-			endLine: session.requestedLine ?? 1,
-			endColumn: session.requestedColumn ?? 1,
-		};
-		await this.options.repository.putView({
+		const requestedSelection = session.requestedLine
+			? {
+					line: session.requestedLine,
+					column: session.requestedColumn ?? 1,
+					endLine: session.requestedLine,
+					endColumn: session.requestedColumn ?? 1,
+				}
+			: null;
+		const selection =
+			session.editor?.selectionLocation() ??
+			requestedSelection ??
+			session.pendingSourcePresentation?.selection ?? {
+				line: 1,
+				column: 1,
+				endLine: 1,
+				endColumn: 1,
+			};
+		return {
 			schemaVersion: 1,
 			deploymentId: this.options.deploymentId,
 			userNamespace: this.options.userNamespace,
@@ -107,12 +121,54 @@ export class FileViewRecovery {
 			imageScale: session.image.scale,
 			imageScrollLeft: session.image.scrollLeft,
 			imageScrollTop: session.image.scrollTop,
-			folds: session.editor?.folds() ?? [],
+			folds: session.editor?.folds() ?? session.pendingSourcePresentation?.folds ?? [],
 			pinned: session.pinned,
 			preview: session.preview,
 			updatedAt: Date.now(),
 			placement,
+		};
+	}
+
+	persistView(session: FileViewSession, origin?: PresentationHostId): Promise<void> {
+		if (this.#closingViewIds.has(session.id)) return Promise.resolve();
+		const record = this.snapshotView(session, origin);
+		const operation = Promise.resolve().then(() => this.persistViewSnapshot(record));
+		let pending = this.#pendingWrites.get(session.id);
+		if (!pending) {
+			pending = new Set();
+			this.#pendingWrites.set(session.id, pending);
+		}
+		pending.add(operation);
+		return operation.finally(() => {
+			pending.delete(operation);
+			if (pending.size === 0) this.#pendingWrites.delete(session.id);
 		});
+	}
+
+	persistViewSnapshot(record: SpaFileViewV1): Promise<void> {
+		return this.options.repository.putView(record);
+	}
+
+	prepareViewClose(session: FileViewSession, preserveView: boolean): () => Promise<void> {
+		const record = preserveView ? this.snapshotView(session) : null;
+		session.stopPresentationPersistence();
+		this.#closingViewIds.add(session.id);
+		return async () => {
+			try {
+				await this.#drainWrites(session.id);
+				if (record) await this.persistViewSnapshot(record);
+				else {
+					await this.options.repository.deleteView(
+						session.id,
+						this.options.userNamespace,
+						this.options.deploymentId,
+						this.options.browserSessionId,
+					);
+				}
+			} finally {
+				this.#closingViewIds.delete(session.id);
+			}
+		};
 	}
 
 	async clear(documents: readonly FileDocumentState[]): Promise<boolean> {
@@ -172,18 +228,21 @@ export class FileViewRecovery {
 					check();
 				});
 			}
-			await this.options.ensureEditor(restored);
-			restored.requestedLine = null;
-			restored.requestedColumn = null;
-			restored.editor?.restorePresentation(
-				{
+			const sourcePresentation = {
+				selection: {
 					line: record.line,
 					column: record.column,
 					endLine: record.endLine,
 					endColumn: record.endColumn,
 				},
-				record.folds,
-			);
+				folds: record.folds,
+			};
+			restored.pendingSourcePresentation = sourcePresentation;
+			await this.options.ensureEditor(restored);
+			restored.requestedLine = null;
+			restored.requestedColumn = null;
+			restored.editor?.restorePendingPresentation();
+			await this.options.completeViewRestoration(restored).catch(() => undefined);
 		}
 	}
 
@@ -278,6 +337,14 @@ export class FileViewRecovery {
 		} catch (error) {
 			document.missing = error instanceof ApiError && error.status === 404;
 			document.loadError = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	async #drainWrites(viewId: string): Promise<void> {
+		let pending = this.#pendingWrites.get(viewId);
+		while (pending?.size) {
+			await Promise.allSettled([...pending]);
+			pending = this.#pendingWrites.get(viewId);
 		}
 	}
 }

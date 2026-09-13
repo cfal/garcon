@@ -1978,6 +1978,39 @@ describe('WorkspaceCoordinator', () => {
 		});
 	});
 
+	it('leaves composing editor shortcuts to the input method', async () => {
+		const { coordinator, transientLayers, appShell, files } = createHarness();
+		await coordinator.placeFileSession('shortcut-file', {
+			type: 'window',
+			windowId: 'window-main',
+		});
+		coordinator.focusOwner = {
+			kind: 'surface',
+			surfaceId: fileSurfaceId('shortcut-file'),
+		};
+		const execute = vi.fn(async () => true);
+		const dispatcher = new WorkspaceShortcutDispatcher({
+			workspace: coordinator,
+			transients: transientLayers,
+			appShell: appShell as never,
+			navigation: {} as never,
+			files: files as never,
+			commands: { execute },
+			localSettings: { globalShortcuts: {} },
+		});
+		const event = new KeyboardEvent('keydown', {
+			key: 'ArrowDown',
+			altKey: true,
+			cancelable: true,
+		});
+		Object.defineProperty(event, 'isComposing', { value: true });
+
+		dispatcher.handle(event);
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(execute).not.toHaveBeenCalled();
+	});
+
 	it('does not route shortcuts through a stale hidden surface owner', () => {
 		const { coordinator, transientLayers, appShell, files } = createHarness();
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:pull-requests' };
