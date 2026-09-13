@@ -8,7 +8,13 @@
 	import { DropdownMenuContent } from '$lib/components/ui/dropdown-menu';
 	import { ContextMenuContent } from '$lib/components/ui/context-menu';
 	import type { MenuPrimitives } from '$lib/components/ui/menu-primitives.js';
-	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
+	import {
+		getChatSessions,
+		getFileSessions,
+		getNotifications,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
+	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
 	import type {
 		ActiveSurfaceKind,
 		WorkspaceWindowEdge,
@@ -22,6 +28,7 @@
 	import { workspaceSplitBlockMessage } from '$lib/workspace/workspace-split-blocked-error.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceWindowChatMetadata from './WorkspaceWindowChatMetadata.svelte';
+	import WorkspaceWindowCopyItem from './WorkspaceWindowCopyItem.svelte';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -53,6 +60,7 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const sessions = getChatSessions();
+	const files = getFileSessions();
 	const notifications = getNotifications();
 	const tabActions = $derived(
 		resolveWorkspaceWindowTabActions(
@@ -69,7 +77,12 @@
 		const chat = sessions.byId[surface.chatId];
 		return chat ? { chatId: surface.chatId, projectPath: chat.projectPath } : null;
 	});
-	const contentClass = $derived(chatMetadata ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-64');
+	const filePath = $derived(
+		surface?.type === 'file' ? files.get(surface.fileSessionId)?.fullPath : null,
+	);
+	const contentClass = $derived(
+		chatMetadata || filePath ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-64',
+	);
 
 	function surfaceKind(targetSurfaceId: string): ActiveSurfaceKind {
 		const targetSurface = workspace.layout.surface(targetSurfaceId);
@@ -218,6 +231,15 @@
 			chatId={chatMetadata.chatId}
 		/>
 		<menu.Separator data-workspace-chat-metadata-separator />
+	{/if}
+	{#if filePath}
+		<WorkspaceWindowCopyItem
+			{menu}
+			label={m.file_path_copy()}
+			value={filePath}
+			displayValue={formatCompactProjectPath(filePath)}
+		/>
+		<menu.Separator />
 	{/if}
 	{#if hiddenSurfaceIds.length > 0}
 		<menu.Label>{m.workspace_open_tabs()}</menu.Label>
