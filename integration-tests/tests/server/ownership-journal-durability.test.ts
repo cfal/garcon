@@ -77,15 +77,25 @@ describe('ownership journal durability through HTTP', () => {
   test('revalidates relocation against the owner installed while filesystem validation waits', async () => {
     const entered = new Deferred<void>();
     const release = new Deferred<void>();
+    const gateToken = crypto.randomUUID();
     const gate = Bun.serve({
       hostname: '0.0.0.0', port: 0,
-      async fetch() {
+      async fetch(request) {
+        if (request.headers.get('authorization') !== `Bearer ${gateToken}`)
+          return new Response(null, { status: 401 });
         entered.resolve();
         await release.promise;
         return new Response(null, { status: 204 });
       },
     });
     try {
+      for (const authorization of ['', 'Bearer unrelated']) {
+        const response = await fetch(`http://127.0.0.1:${gate.port}`, {
+          headers: { authorization }, signal: AbortSignal.timeout(1_000),
+        });
+        expect(response.status).toBe(401);
+        expect(entered.settled).toBeFalse();
+      }
       await withIntegrationFixture('journal-relocation-owner-race', async (fixture) => {
         const chatId = fixture.newChatId();
         const started = await fixture.client.startDirectChat({
@@ -140,6 +150,7 @@ describe('ownership journal durability through HTTP', () => {
         resolveServerEnvironment: (directories) => ({
           GARCON_TEST_JOURNAL_FAULT_DIR: directories.root,
           GARCON_TEST_RELOCATION_GATE: `http://127.0.0.1:${gate.port}`,
+          GARCON_TEST_JOURNAL_GATE_TOKEN: gateToken,
         }),
       });
     } finally {
@@ -186,9 +197,12 @@ describe('ownership journal durability through HTTP', () => {
     const completionEntered = new Deferred<void>();
     const retryEntered = new Deferred<void>();
     const release = new Deferred<void>();
+    const gateToken = crypto.randomUUID();
     const gate = Bun.serve({
       hostname: '0.0.0.0', port: 0,
       async fetch(request) {
+        if (request.headers.get('authorization') !== `Bearer ${gateToken}`)
+          return new Response(null, { status: 401 });
         const stage = new URL(request.url).pathname;
         if (stage === '/completion') completionEntered.resolve();
         else if (stage === '/retry') retryEntered.resolve();
@@ -198,6 +212,16 @@ describe('ownership journal durability through HTTP', () => {
       },
     });
     try {
+      for (const stage of ['completion', 'retry']) {
+        for (const authorization of ['', 'Bearer unrelated']) {
+          const response = await fetch(`http://127.0.0.1:${gate.port}/${stage}`, {
+            headers: { authorization }, signal: AbortSignal.timeout(1_000),
+          });
+          expect(response.status).toBe(401);
+          expect(completionEntered.settled).toBeFalse();
+          expect(retryEntered.settled).toBeFalse();
+        }
+      }
       await withIntegrationFixture('journal-delete-retry-race', async (fixture) => {
         const chatId = fixture.newChatId();
         const agent = fixture.directAgents.openAi;
@@ -244,6 +268,7 @@ describe('ownership journal durability through HTTP', () => {
         resolveServerEnvironment: (directories) => ({
           GARCON_TEST_JOURNAL_FAULT_DIR: directories.root,
           GARCON_TEST_DELETE_RETRY_GATE: `http://127.0.0.1:${gate.port}/`,
+          GARCON_TEST_JOURNAL_GATE_TOKEN: gateToken,
         }),
       });
     } finally {

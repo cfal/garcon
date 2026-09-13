@@ -23,10 +23,15 @@ const writingFile = new AsyncLocalStorage<string>();
 const originalAccess = fs.access.bind(fs);
 const relocationGate = process.env.GARCON_TEST_RELOCATION_GATE;
 const deleteRetryGate = process.env.GARCON_TEST_DELETE_RETRY_GATE;
+const gateToken = process.env.GARCON_TEST_JOURNAL_GATE_TOKEN;
+if ((relocationGate || deleteRetryGate) && !gateToken)
+  throw new Error('Synthetic journal barriers require a token');
 
 fs.access = async (...args: Parameters<typeof fs.access>) => {
   if (relocationGate && args[0] === join(fixtureRoot, 'project', 'relocation-destination')) {
-    const response = await fetch(relocationGate, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetch(relocationGate, {
+      headers: { authorization: `Bearer ${gateToken}` }, signal: AbortSignal.timeout(10_000),
+    });
     if (!response.ok) throw new Error('Synthetic relocation barrier failed');
   }
   return originalAccess(...args);
@@ -85,7 +90,9 @@ AgentOwnershipJournal.prototype.delete = async function (chatId: string) {
 
 async function reachDeleteRetryGate(stage: 'completion' | 'retry'): Promise<void> {
   if (!deleteRetryGate) throw new Error('Synthetic delete race requires its barrier');
-  const response = await fetch(new URL(stage, deleteRetryGate), { signal: AbortSignal.timeout(10_000) });
+  const response = await fetch(new URL(stage, deleteRetryGate), {
+    headers: { authorization: `Bearer ${gateToken}` }, signal: AbortSignal.timeout(10_000),
+  });
   if (!response.ok) throw new Error('Synthetic delete barrier failed');
 }
 
