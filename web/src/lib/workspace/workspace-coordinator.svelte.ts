@@ -449,6 +449,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		);
 	}
 
+	async openTicket(id: string): Promise<void> {
+		await this.openSingletonAsTab('tickets', this.currentWindowId);
+		this.#deps.singletons.tickets().select(id);
+	}
+
 	async openSingletonAsTab(
 		kind: PortableSingletonKind,
 		windowId: WorkspaceWindowId,

@@ -786,6 +786,7 @@
 					{:else if asNotice}
 						<TranscriptNoticeRow
 							message={asNotice}
+							onOpenTicket={(id) => workspace.openTicket(id)}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
 							{acquireTransientActivity}

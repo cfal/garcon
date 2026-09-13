@@ -1,5 +1,6 @@
 import type { TicketActivity, TicketPriority, TicketStatus } from '$shared/tickets';
 import * as m from '$lib/paraglide/messages.js';
+import { ticketHref } from '$lib/tickets/catalog/ticket-deep-link.js';
 
 export function ticketStatusLabel(status: TicketStatus): string {
 	return {
@@ -37,7 +38,5 @@ export function isTicketProjectPath(project: string): boolean {
 }
 
 export function ticketDeepLink(ticketId: string): string {
-	const url = new URL('/', window.location.origin);
-	url.searchParams.set('ticket', ticketId);
-	return url.href;
+	return new URL(ticketHref(ticketId), window.location.origin).href;
 }

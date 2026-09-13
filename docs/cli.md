@@ -51,6 +51,8 @@ Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create a
 
 Read the current revision before a field or workflow mutation. Comment append does not need a ticket revision and does not advance it. Claim atomically assigns the caller (or declared chat) and moves Open to In progress; release removes only that caller's assignment. Neither is an access-control lock. `--from-chat` records declared provenance alongside the actual HTTP principal; it cannot grant permission to edit a chat-authored comment.
 
+Agent ticket commands produce one concise transcript notice per command, with clickable ticket IDs in the workspace. Relationship notices name both tickets and the link kind; list notices include supplied filters as literal values. Each notice keeps its own source address, including when an assistant message contains multiple commands. Native `garcon-ticket-*-result` envelopes carry JSON `{data, context?}` on success or `{errorCode, message, context?}` on failure. Optional context contains only list filters or relationship kind/target, so native history reload can reconstruct the same notices without copying ticket descriptions or comment bodies.
+
 Additional mutations:
 
 ```bash
