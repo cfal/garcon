@@ -26,8 +26,7 @@ describe('File editor controls', () => {
       await surface.getByRole('heading', { name: 'Initial preview', exact: true }).waitFor();
       expect(await surface.locator('.cm-editor').count()).toBe(0);
       await writeFile(path, '# Updated preview\n', 'utf8');
-      await surface.getByRole('button', { name: 'View actions', exact: true }).click();
-      await page.getByRole('menuitem', { name: 'Refresh', exact: true }).click();
+      await surface.getByRole('button', { name: 'Refresh', exact: true }).click();
       await surface.getByRole('heading', { name: 'Updated preview', exact: true }).waitFor();
       expect(
         await surface.getByRole('heading', { name: 'Initial preview', exact: true }).count(),

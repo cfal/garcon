@@ -18,7 +18,7 @@ test('opens a known file in the split window where the palette was invoked', asy
     await integration.client.waitForTurnTerminal(chatId, started.turnId);
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     await page.locator('[data-file-tree-entry-text]').filter({ hasText: 'first.md' }).click();
-    const first = page.locator('[data-workspace-surface-id^="file:"]').filter({
+    const first = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]').filter({
       has: page.getByRole('heading', { name: 'First file', exact: true }),
     });
     await first.waitFor({ state: 'visible' });
@@ -31,7 +31,7 @@ test('opens a known file in the split window where the palette was invoked', asy
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await palette.getByRole('combobox').fill('second.md');
     await palette.getByRole('option', { name: 'Open second.md Known file File' }).click();
-    const second = page.locator('[data-workspace-surface-id^="file:"]').filter({
+    const second = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]').filter({
       has: page.getByRole('heading', { name: 'Second file', exact: true }),
     });
     await second.waitFor({ state: 'visible' });
