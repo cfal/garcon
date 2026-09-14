@@ -768,6 +768,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		intent: 'interactive' | 'restoration',
 	): Promise<FilePlacementResult> {
 		const surfaceId = fileSurfaceId(sessionId);
+		const surface = { id: surfaceId, type: 'file' as const, fileSessionId: sessionId };
 		if (this.layout.surface(surfaceId)) {
 			publication?.publish();
 			if (intent === 'interactive') await this.focusFileSession(sessionId);
@@ -778,12 +779,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			if (intent === 'interactive')
 				return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
 			await this.#presentation.commit(
-				[
-					{
-						type: 'register-surface',
-						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-					},
-				],
+				[{ type: 'register-surface', surface }],
 				{ publication },
 			);
 			return 'placed';
@@ -807,7 +803,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					return [
 						{
 							type: 'register-surface-in-new-window',
-							surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+							surface,
 							targetWindowId: anchor,
 							edge,
 							newWindowId,
@@ -829,7 +825,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				return [
 					{
 						type: 'register-surface',
-						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+						surface,
 						windowId,
 					},
 					...(intent === 'interactive'
