@@ -31,6 +31,9 @@ describe('FileConflictComparison', () => {
 
 		expect(await screen.findByText(m.file_conflict_failed())).toBeTruthy();
 		expect(screen.queryByText(failure.message)).toBeNull();
+		for (const name of ['Accept disk', 'Save against displayed disk', 'Replace disk']) {
+			expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+		}
 		await fireEvent.click(screen.getByRole('button', { name: m.common_cancel() }));
 		expect(onCancel).toHaveBeenCalledOnce();
 	});
@@ -103,6 +106,14 @@ describe('FileConflictComparison', () => {
 		expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
 		await fireEvent.keyDown(tabs[0]!, { key: 'ArrowRight' });
 		expect(document.activeElement).toBe(tabs[1]);
+		await vi.waitFor(() =>
+			expect(
+				(screen.getByRole('button', { name: 'Replace disk' }) as HTMLButtonElement).disabled,
+			).toBe(false),
+		);
+		expect(screen.getByRole('group', { name: m.file_conflict_comparison() })).toBeTruthy();
+		expect(document.querySelectorAll('[aria-label="Comparison snapshot"]')).toHaveLength(1);
+		expect(document.querySelectorAll('[aria-label="Resolution copy"]')).toHaveLength(1);
 		await fireEvent.click(screen.getByRole('button', { name: 'Save against displayed disk' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Replace disk' }));
 		expect(onSaveChecked).toHaveBeenCalledWith('local');

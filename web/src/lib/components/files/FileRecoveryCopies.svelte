@@ -11,12 +11,14 @@
 	const files = getFileSessions();
 	const diff = lazyRenderer(() => import('./FileConflictDiff.svelte'));
 	let selectedId = $state<string | null>(null);
+	let comparisonReady = $state(false);
 	const selected = $derived(
 		session.document.recoveredCopies.find((copy) => copy.id === selectedId),
 	);
 	const busy = $derived(session.document.resolvingRecovery);
 	const choiceDisabled = $derived(
-		busy ||
+		!comparisonReady ||
+			busy ||
 			session.document.recoveryGuard ||
 			session.document.saveController !== null ||
 			session.document.pendingMutationCount > 0,
@@ -32,7 +34,7 @@
 	class="max-h-44 shrink-0 overflow-auto border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
 	aria-label={m.file_recovery_copy_title()}
 >
-	{#each session.document.recoveredCopies as copy (copy.id)}
+	{#each session.document.recoveredCopies as copy, index (copy.id)}
 		<svelte:boundary>
 			<div class="flex flex-wrap items-center gap-2 py-1">
 				<span class="min-w-0 flex-1"
@@ -41,14 +43,23 @@
 						>{new Date(copy.savedAt).toLocaleString()}</time
 					></span
 				>
-				<Button variant="outline" size="sm" onclick={() => (selectedId = copy.id)}
-					>{m.file_session_compare()}</Button
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={() => (selectedId = copy.id)}
+					aria-label={m.file_recovery_compare_named({
+						number: index + 1,
+						savedAt: new Date(copy.savedAt).toLocaleString(),
+					})}>{m.file_session_compare()}</Button
 				>
 				<Button
 					variant="outline"
 					size="sm"
 					onclick={() => void files.exportContent(session.id, copy.id)}
-					>{m.file_recovery_export_copy()}</Button
+					aria-label={m.file_recovery_export_named({
+						number: index + 1,
+						savedAt: new Date(copy.savedAt).toLocaleString(),
+					})}>{m.file_recovery_export_copy()}</Button
 				>
 			</div>
 			{#snippet failed()}{m.file_recovery_resolution_failed()}{/snippet}
@@ -82,6 +93,9 @@
 						local={selected.content}
 						lineSeparator={session.document.lineSeparator}
 						readOnly
+						comparisonLabel={m.file_recovery_current_copy()}
+						localLabel={m.file_recovery_copy_title()}
+						onReady={(ready) => (comparisonReady = ready)}
 					/>
 				{/key}
 			{:catch}

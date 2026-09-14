@@ -30,6 +30,7 @@
 		onOverwrite(content: string): void;
 	} = $props();
 	let selected = $state<'base' | 'disk'>('disk');
+	let comparisonReady = $state(false);
 	const snapshot = $derived({ baseContent, localContent, diskContent });
 	let resolvedContent = $derived(snapshot.localContent);
 	const comparison = $derived(selected === 'base' ? baseContent : (diskContent ?? ''));
@@ -89,7 +90,12 @@
 			</div>
 		{:then FileConflictDiff}
 			{#key snapshot}
-				<FileConflictDiff {comparison} {lineSeparator} bind:local={resolvedContent} />
+				<FileConflictDiff
+					{comparison}
+					{lineSeparator}
+					bind:local={resolvedContent}
+					onReady={(ready) => (comparisonReady = ready)}
+				/>
 			{/key}
 		{:catch}
 			<div
@@ -101,16 +107,19 @@
 	</div>
 	<div class="flex flex-wrap justify-end gap-2">
 		<Button variant="ghost" onclick={onCancel}>{m.common_cancel()}</Button>
-		<Button variant="outline" onclick={onAcceptDisk} disabled={diskContent === null}
-			>{m.file_conflict_accept_disk()}</Button
+		<Button
+			variant="outline"
+			onclick={onAcceptDisk}
+			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_accept_disk()}</Button
 		>
-		<Button onclick={() => onSaveChecked(resolvedContent)} disabled={diskContent === null}
-			>{m.file_conflict_save_checked()}</Button
+		<Button
+			onclick={() => onSaveChecked(resolvedContent)}
+			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_save_checked()}</Button
 		>
 		<Button
 			variant="destructive"
 			onclick={() => onOverwrite(resolvedContent)}
-			disabled={diskContent === null}>{m.file_conflict_replace_disk()}</Button
+			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_replace_disk()}</Button
 		>
 	</div>
 </div>

@@ -113,6 +113,7 @@ describe('FileDialogHost', () => {
 		const overwrite = screen.getByRole('button', { name: 'Replace disk' });
 		expect(overwrite.getAttribute('data-slot')).toBe('button');
 		expect(overwrite.className).toContain('bg-destructive');
+		await vi.waitFor(() => expect((overwrite as HTMLButtonElement).disabled).toBe(false));
 		await fireEvent.click(overwrite);
 		expect(onResolve).toHaveBeenCalledWith('overwrite');
 	});

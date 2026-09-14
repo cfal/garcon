@@ -198,7 +198,7 @@ test.each([
         const recovery = surface.getByRole('region', {
           name: 'Recovered copy',
         });
-        await recovery.getByRole('button', { name: 'Compare', exact: true }).click();
+        await recovery.getByRole('button', { name: /^Compare recovered copy/ }).click();
         const comparison = page.getByRole('dialog', {
           name: 'Recovered copy',
           exact: true,
