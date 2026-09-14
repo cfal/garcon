@@ -251,14 +251,12 @@
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
 			if (!fileRecoveryInitialized) {
-				const userId = auth.user?.id;
+				const userId = untrack(() => auth.user?.id);
 				if (authDisabled || userId) {
 					fileRecoveryInitialized = true;
 					const namespace = authDisabled ? 'local' : `user:${userId}`;
 					untrack(() => {
-						void terminalIdentity.ready.then((clientId) =>
-							fileSessions.initializeRecovery(namespace, clientId),
-						);
+						void fileSessions.initializeRecovery(namespace);
 					});
 				}
 			}

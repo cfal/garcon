@@ -7,9 +7,10 @@ import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.sv
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import FilesPanelTestHost from './FilesPanelTestHost.svelte';
 import { setFilesPanelTestContext } from './files-panel-test-context.js';
-import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
-import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
-import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
+import {
+	createMemoryFileDraftRepository,
+	fileDraftKey,
+} from '$lib/files/persistence/file-draft-repository.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
@@ -39,37 +40,33 @@ describe('FilesPanel', () => {
 		presentation: 'window-main' | 'mobile';
 		projectState: WorkspaceProjectState;
 	}>)(
-		'exposes recovered documents independently of project availability ($presentation, $projectState.kind)',
+		'exposes stored drafts independently of project availability ($presentation, $projectState.kind)',
 		async ({ presentation, projectState }) => {
 			const focusFileSession = vi.fn(async () => {});
 			const notifications = new NotificationsStore();
-			const resolveFileIdentity = vi.fn();
+			const repository = createMemoryFileDraftRepository();
+			const draftId = fileDraftKey('user', 'deployment', '/workspace', 'draft.txt');
+			await repository.putDraft({
+				schemaVersion: 1,
+				userNamespace: 'user',
+				deploymentId: 'deployment',
+				documentId: draftId,
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'draft.txt',
+				content: 'local text',
+				savedAt: 1,
+			});
 			const fileSessions = new FileSessionRegistry({
 				getIsMobile: () => presentation === 'mobile',
 				getDefaultPlacement: () => ({ type: 'dialog' }),
 				getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
 				getPlacement: () => ({ placeFileSession: vi.fn(), focusFileSession }),
-				resolveFileIdentity,
-				draftRepository: createMemoryFileDraftRepository(),
+				draftRepository: repository,
+				deploymentId: 'deployment',
 			});
-			const documents = ['dirty', 'unknown', 'clean', 'ordinary'].map((name) => {
-				const document = new FileDocumentState(
-					{
-						canonicalFileRootPath: '/workspace',
-						normalizedRelativePath: `${name}.txt`,
-					},
-					name,
-				);
-				document.recovered = name !== 'ordinary';
-				document.dirty = name === 'dirty' || name === 'ordinary';
-				document.saveOutcome = name === 'unknown' ? 'unknown' : 'idle';
-				document.missing = true;
-				return document;
-			});
-			const sessions = [...documents, documents[0]!].map(
-				(document) => new FileViewSession(document),
-			);
-			fileSessions.sessions = Object.fromEntries(sessions.map((session) => [session.id, session]));
+			await fileSessions.initializeRecovery('user');
+			const open = vi.spyOn(fileSessions, 'open').mockResolvedValue(null);
+			const exportDraft = vi.spyOn(fileSessions, 'exportDraft').mockReturnValue(undefined);
 			const gitSurfaceDeps = createGitSurfaceTestDeps();
 			const singletonSurfaces = new SingletonSurfaceRegistry({
 				...gitSurfaceDeps,
@@ -79,38 +76,30 @@ describe('FilesPanel', () => {
 			setFilesPanelTestContext({ fileSessions, singletonSurfaces, notifications });
 			try {
 				render(FilesPanelTestHost, { presentation, focusFileSession, projectState });
-				if (presentation !== 'mobile') {
-					expect(screen.queryByRole('region', { name: 'Recovered files' })).toBeNull();
-					return;
-				}
-				expect(screen.getAllByRole('button', { name: '/workspace/dirty.txt' })).toHaveLength(1);
+				expect(Object.keys(fileSessions.sessions)).toHaveLength(0);
 				expect(
 					screen
 						.getByRole('region', { name: 'Recovered files' })
 						.closest('[inert], [aria-hidden="true"]'),
 				).toBeNull();
-				if (projectState.kind !== 'absent') {
-					expect(screen.getByText('Project folder unavailable')).toBeTruthy();
-				}
-				focusFileSession.mockRejectedValueOnce(new Error('Could not present recovered file'));
-				await fireEvent.click(screen.getByRole('button', { name: '/workspace/dirty.txt' }));
+				open.mockRejectedValueOnce(new Error('Could not open draft'));
+				await fireEvent.click(screen.getByRole('button', { name: 'draft.txt' }));
 				await waitFor(() =>
 					expect(notifications.items).toMatchObject([
-						{ tone: 'error', message: 'Could not present recovered file' },
+						{ tone: 'error', message: 'Could not open draft' },
 					]),
 				);
-				await fireEvent.click(screen.getByRole('button', { name: '/workspace/dirty.txt' }));
-				await fireEvent.click(screen.getByRole('button', { name: '/workspace/unknown.txt' }));
-				expect(focusFileSession.mock.calls).toEqual([
-					[sessions[0]!.id],
-					[sessions[0]!.id],
-					[sessions[1]!.id],
-				]);
-				expect(resolveFileIdentity).not.toHaveBeenCalled();
-				expect(screen.queryByRole('button', { name: '/workspace/clean.txt' })).toBeNull();
-				expect(screen.queryByRole('button', { name: '/workspace/ordinary.txt' })).toBeNull();
-				documents[0]!.dirty = false;
-				documents[1]!.saveOutcome = 'idle';
+				await fireEvent.click(screen.getByRole('button', { name: 'draft.txt' }));
+				expect(open).toHaveBeenLastCalledWith({
+					fileRootPath: '/workspace',
+					relativePath: 'draft.txt',
+					mode: 'code',
+					origin: presentation,
+					reason: 'user-open',
+				});
+				await fireEvent.click(screen.getByRole('button', { name: 'Export draft for draft.txt' }));
+				expect(exportDraft).toHaveBeenCalledWith(draftId);
+				await fileSessions.clearRecovery();
 				await waitFor(() =>
 					expect(screen.queryByRole('region', { name: 'Recovered files' })).toBeNull(),
 				);

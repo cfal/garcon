@@ -3,136 +3,119 @@ import { FileDocumentState } from '$lib/files/documents/file-document-state.svel
 import {
 	FILE_DRAFT_MAX_INTERVAL_MS,
 	FileDraftCoordinator,
-} from '$lib/files/persistence/file-draft-coordinator.js';
+} from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
 
 function document() {
 	const value = new FileDocumentState(
 		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
-		'["/workspace","src/file.ts"]',
-		'document-1',
+		'file',
 	);
 	value.baseline = 'initial';
 	value.content = 'changed';
 	return value;
 }
+function harness(durable = true) {
+	const repository = createMemoryFileDraftRepository(durable);
+	const coordinator = new FileDraftCoordinator({
+		repository,
+		deploymentId: 'deployment',
+		userNamespace: 'user',
+	});
+	return { repository, coordinator };
+}
 
 describe('FileDraftCoordinator', () => {
-	it('recovers its write queue after a transient repository failure', async () => {
-		const repository = createMemoryFileDraftRepository();
-		const putDraft = vi.spyOn(repository, 'putDraft');
-		putDraft.mockRejectedValueOnce(new Error('quota'));
-		const coordinator = new FileDraftCoordinator({
-			repository,
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
-		});
+	it('does not warn about unavailable storage when a clean document needs no backup', async () => {
+		const { coordinator } = harness(false);
 		const value = document();
+		value.dirty = false;
+		await coordinator.closeDocument(value);
+		expect(value.recoveryError).toBeNull();
+		coordinator.destroy();
+	});
 
-		await expect(coordinator.persistSubmission(value)).rejects.toThrow('quota');
-		await expect(coordinator.persistSubmission(value)).resolves.toBeUndefined();
+	it('reports checkpoint failure and retries without rejecting editor operations', async () => {
+		const { repository, coordinator } = harness();
+		const putDraft = vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('quota'));
+		const value = document();
+		await expect(coordinator.settle(value)).resolves.toBeUndefined();
+		expect(value.recoveryError).toBe('quota');
+		await coordinator.settle(value);
+		expect(value.recoveryError).toBeNull();
 		expect(putDraft).toHaveBeenCalledTimes(2);
+		coordinator.destroy();
 	});
 
-	it('refuses Save admission when browser storage is not durable', async () => {
-		const coordinator = new FileDraftCoordinator({
-			repository: createMemoryFileDraftRepository(false),
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
-		});
-
-		await expect(coordinator.persistSubmission(document())).rejects.toThrow(
-			'Browser recovery storage is unavailable',
-		);
+	it('marks unavailable storage without guarding the document', async () => {
+		const { coordinator } = harness(false);
+		const value = document();
+		await coordinator.settle(value);
+		expect(value.recoveryError).toBeTruthy();
+		expect(value.canDiscard).toBe(true);
+		coordinator.destroy();
 	});
 
-	it('continues restored draft generations instead of writing stale records', async () => {
-		const repository = createMemoryFileDraftRepository();
-		const coordinator = new FileDraftCoordinator({
-			repository,
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
+	it('uses one draft slot across close and reopen', async () => {
+		const { repository, coordinator } = harness();
+		await coordinator.closeDocument(document());
+		const reopened = document();
+		reopened.content = 'newer edit';
+		await coordinator.settle(reopened);
+		const records = await repository.getDrafts('user', 'deployment');
+		expect(records).toHaveLength(1);
+		expect(records[0].content).toBe('newer edit');
+		coordinator.destroy();
+	});
+
+	it('serializes a checkpoint before a later successful Save cleanup', async () => {
+		const { repository, coordinator } = harness();
+		const put = repository.putDraft.bind(repository);
+		let release!: () => void;
+		vi.spyOn(repository, 'putDraft').mockImplementationOnce(async (record) => {
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await put(record);
 		});
 		const value = document();
-		coordinator.adopt(value, 9);
-
-		await coordinator.persistSubmission(value);
-
-		const [record] = await repository.getDrafts('user', 'deployment', 'browser');
-		expect(record?.generation).toBe(10);
+		const checkpoint = coordinator.settle(value);
+		await vi.waitFor(() => expect(repository.putDraft).toHaveBeenCalled());
+		value.baseline = value.content;
+		value.dirty = false;
+		const cleanup = coordinator.settle(value);
+		release();
+		await Promise.all([checkpoint, cleanup]);
+		expect(await repository.getDrafts('user', 'deployment')).toEqual([]);
+		coordinator.destroy();
 	});
 
 	it('checkpoints continuous edits at the maximum interval', async () => {
 		vi.useFakeTimers();
+		const { repository, coordinator } = harness();
 		try {
-			const repository = createMemoryFileDraftRepository();
 			const putDraft = vi.spyOn(repository, 'putDraft');
-			const coordinator = new FileDraftCoordinator({
-				repository,
-				deploymentId: 'deployment',
-				userNamespace: 'user',
-				browserSessionId: 'browser',
-			});
 			const value = document();
 			for (let elapsed = 0; elapsed < FILE_DRAFT_MAX_INTERVAL_MS; elapsed += 500) {
 				coordinator.schedule(value);
 				await vi.advanceTimersByTimeAsync(500);
 			}
-
-			expect(putDraft).toHaveBeenCalled();
+			expect(putDraft).toHaveBeenCalledOnce();
 		} finally {
+			coordinator.destroy();
 			vi.useRealTimers();
 		}
 	});
 
-	it('persists the immutable document snapshot before releasing it', async () => {
-		const repository = createMemoryFileDraftRepository();
-		const coordinator = new FileDraftCoordinator({
-			repository,
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
-		});
-		const value = document();
-
-		await coordinator.closeDocument(value);
-		value.setStoredContent('stale');
-
-		const [record] = await repository.getDrafts('user', 'deployment', 'browser');
-		expect(record?.content).toBe('changed');
-	});
-
-	it('retains the checkpoint generation until a detached Save settles', async () => {
-		const repository = createMemoryFileDraftRepository();
-		const coordinator = new FileDraftCoordinator({
-			repository,
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
-		});
-		const value = document();
-		value.pendingSubmission = {
-			submissionId: 'submission',
-			resourceKey: value.identityKey,
-			expectedDiskRevision: 'v1:initial',
-			submittedBufferVersion: value.bufferVersion,
-			conflictIntent: 'reject',
-			content: value.content,
-			startedAt: 1,
-		};
-		value.saveOutcome = 'unknown';
-		await coordinator.persistSubmission(value);
-
-		await coordinator.closeDocument(value);
-		value.baseline = value.content;
-		value.dirty = false;
-		value.pendingSubmission = null;
-		value.saveOutcome = 'settling';
-		await coordinator.acknowledge(value);
-
-		expect(await repository.getDrafts('user', 'deployment', 'browser')).toEqual([]);
+	it('discovers drafts without publishing live documents and forgets an explicit discard', async () => {
+		const { repository, coordinator } = harness();
+		await coordinator.closeDocument(document());
+		await coordinator.initialize();
+		const draft = coordinator.available[0];
+		expect(draft.content).toBe('changed');
+		await coordinator.discard(draft);
+		expect(coordinator.available).toEqual([]);
+		expect(await repository.getDrafts('user', 'deployment')).toEqual([]);
+		coordinator.destroy();
 	});
 });

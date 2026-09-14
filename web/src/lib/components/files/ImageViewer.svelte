@@ -103,7 +103,6 @@
 		session.image.scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale));
 		session.image.scrollLeft = 0;
 		session.image.scrollTop = 0;
-		session.notePresentationChanged();
 		correctingScroll = true;
 		viewport.scrollLeft = 0;
 		viewport.scrollTop = 0;
@@ -121,7 +120,6 @@
 		if (!viewport || correctingScroll) return;
 		session.image.scrollLeft = viewport.scrollLeft;
 		session.image.scrollTop = viewport.scrollTop;
-		session.notePresentationChanged();
 	}
 
 	function restoreManualFocalPoint(anchor: ZoomAnchor): void {
@@ -131,7 +129,6 @@
 		restoreZoomAnchor(viewportElement, imageRect, anchor);
 		session.image.scrollLeft = viewportElement.scrollLeft;
 		session.image.scrollTop = viewportElement.scrollTop;
-		session.notePresentationChanged();
 		scheduleScrollRelease();
 	}
 

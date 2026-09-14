@@ -5,10 +5,7 @@ import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
-import {
-	FileSessionRegistry,
-	type FileOpenRequest,
-} from '$lib/files/sessions/file-session-registry.svelte.js';
+import { type FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import FileSurfaceTestHost from './FileSurfaceTestHost.svelte';
 
@@ -233,6 +230,21 @@ describe('FileSurface', () => {
 		);
 	});
 
+	it('keeps Save available when browser backup fails', async () => {
+		render(FileSurfaceTestHost, {
+			presentation: 'window-main',
+			rendererMode: 'code',
+			loading: false,
+			dirty: true,
+			onReady: (session) => {
+				session.document.recoveryError = 'Storage unavailable';
+			},
+		});
+		expect(await screen.findByText('Local recovery unavailable: Storage unavailable')).toBeTruthy();
+		const save = screen.getByRole<HTMLButtonElement>('button', { name: 'Save' });
+		expect(save.disabled).toBe(false);
+	});
+
 	it('disables Save while a refresh is pending', () => {
 		render(FileSurfaceTestHost, {
 			presentation: 'window-main',
@@ -245,7 +257,7 @@ describe('FileSurface', () => {
 		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
 	});
 
-	it.each(['readOnly', 'mixedLineEndings', 'missingRevision', 'recoveryGuard'] as const)(
+	it.each(['readOnly', 'mixedLineEndings', 'missingRevision'] as const)(
 		'disables Save for %s documents',
 		async (guard) => {
 			render(FileSurfaceTestHost, {
@@ -303,26 +315,6 @@ describe('FileSurface', () => {
 		expect(announcement.textContent?.trim()).toBe('Modified');
 		expect(announcement.contains(within(footer).getByText('Ln 1, Col 1'))).toBe(false);
 		expect(announcement.querySelector('button')).toBeNull();
-	});
-
-	it('keeps Markdown preview usable when background view persistence rejects', async () => {
-		const persist = vi
-			.spyOn(FileSessionRegistry.prototype, 'persistView')
-			.mockRejectedValue(new Error('View storage unavailable'));
-		try {
-			render(FileSurfaceTestHost, {
-				presentation: 'window-main',
-				rendererMode: 'markdown',
-				loading: false,
-			});
-			await fireEvent.click(screen.getByRole('button', { name: m.file_session_edit() }));
-			await fireEvent.click(screen.getByRole('button', { name: m.file_session_view() }));
-
-			expect(persist).toHaveBeenCalledOnce();
-			expect(screen.getByRole('button', { name: m.file_session_edit() })).toBeTruthy();
-		} finally {
-			persist.mockRestore();
-		}
 	});
 
 	it('passes the dialog presentation to Markdown link navigation', async () => {

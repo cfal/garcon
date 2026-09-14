@@ -11,36 +11,33 @@ function dispatchBeforeUnload(): boolean {
 }
 
 describe('FileDirtyUnloadGuard', () => {
-	it('handles rejected background view writes without weakening the unload guard', async () => {
+	it('flushes best-effort drafts on pagehide without weakening the unload guard', async () => {
 		const persist = vi
-			.spyOn(FileSessionRegistry.prototype, 'persistView')
-			.mockRejectedValue(new Error('View storage unavailable'));
+			.spyOn(FileSessionRegistry.prototype, 'flushRecovery')
+			.mockResolvedValue(undefined);
 		try {
 			render(FileDirtyUnloadGuardTestHost, { dirty: true });
 			window.dispatchEvent(new Event('pagehide'));
 			await tick();
 
-			expect(persist).toHaveBeenCalledWith('file-view');
+			expect(persist).toHaveBeenCalledOnce();
 			expect(dispatchBeforeUnload()).toBe(true);
 		} finally {
 			persist.mockRestore();
 		}
 	});
 
-	it('guards dirty buffers and every nonterminal Save state', async () => {
-		const view = render(FileDirtyUnloadGuardTestHost, { dirty: false, saveOutcome: 'idle' });
+	it('guards dirty buffers and active Saves', async () => {
+		const view = render(FileDirtyUnloadGuardTestHost, { dirty: false, saving: false });
 		expect(dispatchBeforeUnload()).toBe(false);
 
-		await view.rerender({ dirty: true, saveOutcome: 'idle' });
+		await view.rerender({ dirty: true, saving: false });
 		expect(dispatchBeforeUnload()).toBe(true);
 
-		await view.rerender({ dirty: false, saveOutcome: 'saving' });
+		await view.rerender({ dirty: false, saving: true });
 		expect(dispatchBeforeUnload()).toBe(true);
 
-		await view.rerender({ dirty: false, saveOutcome: 'unknown' });
-		expect(dispatchBeforeUnload()).toBe(true);
-
-		await view.rerender({ dirty: false, saveOutcome: 'idle' });
+		await view.rerender({ dirty: false, saving: false });
 		expect(dispatchBeforeUnload()).toBe(false);
 	});
 });

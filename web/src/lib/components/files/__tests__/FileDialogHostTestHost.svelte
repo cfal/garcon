@@ -11,6 +11,7 @@
 	} from '$lib/context';
 	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 	import { fileSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
+	import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import {
@@ -28,7 +29,7 @@
 		onMove = () => undefined,
 		notifications = createNotificationsStore(),
 	}: {
-		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file';
+		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'draft';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
 		moveError?: Error;
@@ -82,6 +83,7 @@
 				}
 			: null,
 	);
+	let draftRequest = $state(initialRequest === 'draft' ? { fileName: 'draft.txt' } : null);
 	const localSettings = createLocalSettingsStore();
 
 	setAppShell({
@@ -116,7 +118,25 @@
 		frameVersion: () => 0,
 		retryPresentation: async () => undefined,
 	} as never);
-	setFileSessions({
+	const files: Pick<
+		FileSessionRegistry,
+		| 'get'
+		| 'guardRequest'
+		| 'thresholdRequest'
+		| 'overwriteRequest'
+		| 'draftRequest'
+		| 'resolveGuard'
+		| 'resolveOverwrite'
+		| 'resolveThreshold'
+		| 'resolveDraft'
+	> = {
+		get draftRequest() {
+			return draftRequest;
+		},
+		resolveDraft: (choice) => {
+			draftRequest = null;
+			onResolve(choice);
+		},
 		get guardRequest() {
 			return guardRequest;
 		},
@@ -139,7 +159,8 @@
 			thresholdRequest = null;
 			onResolve(choice);
 		},
-	} as never);
+	};
+	setFileSessions(files as FileSessionRegistry);
 	onDestroy(() => localSettings.destroy());
 </script>
 

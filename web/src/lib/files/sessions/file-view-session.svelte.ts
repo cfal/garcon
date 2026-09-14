@@ -1,9 +1,6 @@
 import type { EditorState, StateEffect } from '@codemirror/state';
 import type { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
-import type {
-	FileDocumentPositionMap,
-	FileDocumentState,
-} from '$lib/files/documents/file-document-state.svelte.js';
+import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 
 export type FileRendererMode = 'code' | 'markdown' | 'image';
@@ -13,16 +10,6 @@ export interface ImageViewState {
 	scale: number;
 	scrollLeft: number;
 	scrollTop: number;
-}
-
-export interface FileSourcePresentation {
-	selection: {
-		line: number;
-		column: number;
-		endLine: number;
-		endColumn: number;
-	};
-	folds: readonly { from: number; to: number }[];
 }
 
 export function defaultImageViewState(): ImageViewState {
@@ -46,20 +33,13 @@ export class FileViewSession {
 	textScrollTop = 0;
 	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
-	pendingSourcePresentation: FileSourcePresentation | null = null;
 	lastFocusedAt = $state(Date.now());
-	onPresentationChanged: (() => void) | null = null;
-	#presentationTimer: ReturnType<typeof setTimeout> | null = null;
-	readonly #stopDocumentChanges: () => void;
 
 	constructor(document: FileDocumentState, id = createRandomId()) {
 		this.id = id;
 		this.document = document;
 		this.documentId = document.id;
 		document.attachView(this.id);
-		this.#stopDocumentChanges = document.onChange((positionMap) => {
-			if (positionMap) this.#mapPendingSourcePresentation(positionMap);
-		});
 	}
 
 	get identityKey(): string {
@@ -142,10 +122,6 @@ export class FileViewSession {
 		return this.document.saving;
 	}
 
-	get saveOutcomeUnknown(): boolean {
-		return this.document.saveOutcomeUnknown;
-	}
-
 	get mutationGuarded(): boolean {
 		return this.document.mutationGuarded;
 	}
@@ -214,14 +190,6 @@ export class FileViewSession {
 		this.document.imageObjectUrl = value;
 	}
 
-	get pendingMutationCount(): number {
-		return this.document.pendingMutationCount;
-	}
-
-	set pendingMutationCount(value: number) {
-		this.document.pendingMutationCount = value;
-	}
-
 	get loadedRevision() {
 		return this.document.loadedRevision;
 	}
@@ -279,51 +247,11 @@ export class FileViewSession {
 
 	noteFocused(): void {
 		this.lastFocusedAt = Date.now();
-		this.notePresentationChanged();
-	}
-
-	notePresentationChanged(): void {
-		if (this.#presentationTimer) clearTimeout(this.#presentationTimer);
-		this.#presentationTimer = setTimeout(() => {
-			this.#presentationTimer = null;
-			this.onPresentationChanged?.();
-		}, 250);
-	}
-
-	stopPresentationPersistence(): void {
-		if (this.#presentationTimer) clearTimeout(this.#presentationTimer);
-		this.#presentationTimer = null;
-		this.onPresentationChanged = null;
 	}
 
 	dispose(): void {
-		this.stopPresentationPersistence();
-		this.#stopDocumentChanges();
 		this.editor?.dispose();
 		this.editor = null;
 		this.document.detachView(this.id);
-	}
-
-	#mapPendingSourcePresentation(positionMap: FileDocumentPositionMap): void {
-		const pending = this.pendingSourcePresentation;
-		if (!pending) return;
-		const selection = positionMap.mapRange(
-			positionMap.previousPosition(pending.selection.line, pending.selection.column),
-			positionMap.previousPosition(pending.selection.endLine, pending.selection.endColumn),
-		);
-		const start = positionMap.nextLocation(selection.from);
-		const end = positionMap.nextLocation(selection.to);
-		this.pendingSourcePresentation = {
-			selection: {
-				line: start.line,
-				column: start.column,
-				endLine: end.line,
-				endColumn: end.column,
-			},
-			folds: pending.folds
-				.map(({ from, to }) => positionMap.mapRange(from, to))
-				.filter(({ from, to }) => from < to),
-		};
-		this.notePresentationChanged();
 	}
 }

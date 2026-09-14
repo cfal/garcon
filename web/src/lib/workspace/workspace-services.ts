@@ -29,17 +29,9 @@ import { chatBoardApi } from '$lib/api/chat-boards.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
-import {
-	getLocalStorageItem,
-	getSessionStorageItem,
-	LOCAL_STORAGE_KEYS,
-	SESSION_STORAGE_KEYS,
-} from '$lib/utils/local-persistence.js';
+import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
-import {
-	parsePersistedFileWorkspaceLayout,
-	parsePersistedWorkspaceLayout,
-} from './layout-schema.js';
+import { parsePersistedWorkspaceLayout } from './layout-schema.js';
 import { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TransientLayerRegistry } from './transient-layers.svelte.js';
 import { createWorkspaceContextStore } from './workspace-context.svelte.js';
@@ -61,7 +53,7 @@ import {
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
-import { computeWindowRects, windowNodeById } from './window-tree.js';
+import { computeWindowRects } from './window-tree.js';
 import {
 	fileSurfaceId,
 	singletonSurfaceId,
@@ -113,7 +105,6 @@ export interface WorkspaceRootDependencies {
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
 	workspaceLayoutRaw?: string | null;
-	fileWorkspaceLayoutRaw?: string | null;
 }
 
 export interface WorkspaceServices {
@@ -145,21 +136,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		deps.workspaceLayoutRaw === undefined
 			? getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayout)
 			: deps.workspaceLayoutRaw;
-	const sharedRestore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
-	const browserSessionId =
-		deps.terminalIdentity.clientId ?? getSessionStorageItem(SESSION_STORAGE_KEYS.terminalClientId);
-	let fileWorkspaceLayoutRaw = deps.fileWorkspaceLayoutRaw;
-	if (fileWorkspaceLayoutRaw === undefined) {
-		fileWorkspaceLayoutRaw =
-			deps.workspaceLayoutRaw === undefined
-				? getSessionStorageItem(SESSION_STORAGE_KEYS.workspaceFileLayout)
-				: null;
-	}
-	const fileRestore = parsePersistedFileWorkspaceLayout(fileWorkspaceLayoutRaw, browserSessionId);
-	const restore = fileRestore.source === 'valid' ? fileRestore : sharedRestore;
+	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
 	const layout = createWorkspaceLayoutStore(restore.snapshot);
 	const persistence = new WorkspaceLayoutPersistence({
-		getBrowserSessionId: () => deps.terminalIdentity.clientId,
 		onError: (_error, retry) => {
 			deps.notifications.error(m.workspace_layout_persistence_failed(), {
 				key: 'workspace-layout-persistence',
@@ -201,14 +180,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		projectResolution,
 	);
 	let placement: WorkspaceCoordinator | null = null;
-	let filePresentations = new Map<string, { host: PresentationHostId | null; visible: boolean }>();
-	const filePlacement = (sessionId: string): PresentationHostId | null => {
-		if (!placement) return null;
-		const surfaceId = fileSurfaceId(sessionId);
-		if (placement.layout.snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
-		if (placement.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId)) return 'mobile';
-		return placement.windowOf(surfaceId);
-	};
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
 		connection: deps.ws,
@@ -403,36 +374,23 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			return {
 				placeFileSession: (sessionId, target, publication) =>
 					placement!.placeFileSession(sessionId, target, publication),
-				restoreFileSession: (sessionId, target, publication) =>
-					placement!.restoreFileSession(sessionId, target, publication),
 				focusFileSession: (sessionId) => placement!.focusFileSession(sessionId),
-				recoveryHost: () => (deps.appShell.isMobile ? 'mobile' : placement!.defaultWindowId),
-				filePlacement,
-				resolveRestoredPlacement: (host) => {
-					if (host === 'mobile') return undefined;
-					if (host === 'dialog') return { type: 'dialog' };
-					if (windowNodeById(placement!.layout.snapshot.desktopRoot, host)) {
-						return { type: 'window', windowId: host };
-					}
-					return { type: 'new-window', anchorWindowId: placement!.defaultWindowId };
-				},
-				removeUnclaimedRestoredFileSurfaces: async (viewIds) => {
-					const claimed = new Set(viewIds);
-					const orphans = Object.values(placement!.layout.snapshot.surfaces).filter(
-						(surface) =>
-							surface.type === 'file' &&
-							!files.get(surface.fileSessionId) &&
-							!claimed.has(surface.fileSessionId),
-					);
-					for (const surface of orphans) await placement!.closeSurface(surface.id);
-				},
 			};
 		},
 		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
 		onRecoveryError: (document, error) => {
 			deps.notifications.error(
 				m.file_recovery_checkpoint_failed({ fileName: document.fileName, detail: error.message }),
-				{ key: `file-recovery:${document.id}`, timeoutMs: null },
+				{
+					key: `file-recovery:${document.id}`,
+					timeoutMs: null,
+					action: {
+						label: m.file_recovery_retry(),
+						onClick: () => {
+							void files.flushRecovery();
+						},
+					},
+				},
 			);
 		},
 		onOpenError: (request, error) => {
@@ -467,16 +425,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished();
 			persistence.schedule(snapshot);
-			const next = new Map<string, { host: PresentationHostId | null; visible: boolean }>();
-			for (const session of files.all) {
-				const host = filePlacement(session.id);
-				const visible = placement?.isSurfacePresented(fileSurfaceId(session.id)) ?? false;
-				const previous = filePresentations.get(session.id);
-				if (previous?.host !== host) session.notePresentationChanged();
-				if (previous?.visible !== visible) files.viewVisibilityChanged(session.id);
-				next.set(session.id, { host, visible });
-			}
-			filePresentations = next;
+			for (const session of files.all) files.viewVisibilityChanged(session.id);
 		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,

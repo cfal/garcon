@@ -2,85 +2,33 @@ import { describe, expect, it } from 'vitest';
 import {
 	createFileDraftRepository,
 	createMemoryFileDraftRepository,
+	fileDraftKey,
 	FILE_DRAFT_DOCUMENT_LIMIT_BYTES,
-	type FileRecentLocationV1,
-	type SpaFileDraftV1,
-	type SpaFileViewV1,
+	FILE_DRAFT_LIMIT,
+	type FileDraft,
 } from '$lib/files/persistence/file-draft-repository.js';
 
-function recent(userNamespace: string, deploymentId: string): FileRecentLocationV1 {
+function draft(path = 'file.ts', userNamespace = 'user', deploymentId = 'deployment'): FileDraft {
 	return {
 		schemaVersion: 1,
 		userNamespace,
 		deploymentId,
-		key: 'shared-key',
+		documentId: fileDraftKey(userNamespace, deploymentId, '/workspace', path),
 		canonicalFileRootPath: '/workspace',
-		normalizedRelativePath: 'src/file.ts',
-		displayPath: 'src/file.ts',
-		revision: null,
-		line: 1,
-		column: 1,
-		viewPreference: 'source',
-		timestamp: 1,
-	};
-}
-
-function view(
-	userNamespace: string,
-	deploymentId: string,
-	browserSessionId = 'browser',
-): SpaFileViewV1 {
-	return {
-		schemaVersion: 1,
-		userNamespace,
-		deploymentId,
-		browserSessionId,
-		viewId: 'shared-view',
-		documentId: 'document',
-		canonicalFileRootPath: '/workspace',
-		normalizedRelativePath: 'src/file.ts',
-		rendererMode: 'code',
-		line: 1,
-		column: 1,
-		endLine: 1,
-		endColumn: 1,
-		scrollLeft: 0,
-		scrollTop: 0,
-		folds: [],
-		updatedAt: 1,
-		placement: 'window-main',
+		normalizedRelativePath: path,
+		content: 'changed',
+		savedAt: 1,
 	};
 }
 
 describe('file draft repository', () => {
-	it('atomically adopts a recovered draft under a live document key', async () => {
+	it('overwrites the one backup per file instead of creating recovery copies', async () => {
 		const repository = createMemoryFileDraftRepository();
-		const draft: SpaFileDraftV1 = {
-			schemaVersion: 1,
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
-			documentId: 'restored-document',
-			canonicalFileRootPath: '/workspace',
-			normalizedRelativePath: 'src/file.ts',
-			displayPath: 'src/file.ts',
-			diskRevision: 'v1:restored',
-			baselineContent: 'base',
-			content: 'local',
-			bufferVersion: 3,
-			savedAt: 1,
-			generation: 7,
-			unknownSubmission: null,
-			closed: false,
-		};
-		await repository.putDraft(draft);
-		const [stored] = await repository.getDrafts('user', 'deployment', 'browser');
-
-		const adopted = await repository.adoptDraft(stored!, 'live-document');
-
-		expect(adopted.localDocumentId).toBe('live-document');
-		expect(adopted.documentId).not.toBe(draft.documentId);
-		expect(await repository.getDrafts('user', 'deployment', 'browser')).toEqual([adopted]);
+		await repository.putDraft(draft());
+		await repository.putDraft({ ...draft(), content: 'latest', savedAt: 2 });
+		expect(await repository.getDrafts('user', 'deployment')).toEqual([
+			{ ...draft(), content: 'latest', savedAt: 2 },
+		]);
 	});
 
 	it('retries a transient IndexedDB open failure', async () => {
@@ -88,137 +36,56 @@ describe('file draft repository', () => {
 		const indexedDb = {
 			open() {
 				attempts += 1;
-				const request: Record<string, unknown> = {
-					result: undefined,
-					error: new Error('open failed'),
-				};
-				queueMicrotask(() => (request.onerror as (() => void) | null)?.());
-				return request as unknown as IDBOpenDBRequest;
+				throw new Error('open failed');
 			},
-		};
+		} satisfies Pick<IDBFactory, 'open'>;
 		const repository = createFileDraftRepository(indexedDb);
-
-		await expect(repository.getRecents('user', 'deployment')).rejects.toThrow('open failed');
-		await expect(repository.getRecents('user', 'deployment')).rejects.toThrow('open failed');
+		await expect(repository.getDrafts('user', 'deployment')).rejects.toThrow('open failed');
+		await expect(repository.getDrafts('user', 'deployment')).rejects.toThrow('open failed');
 		expect(attempts).toBe(2);
 	});
 
-	it('keeps recents and view IDs isolated by user and deployment', async () => {
+	it('isolates backups and clearing by user and deployment', async () => {
 		const repository = createMemoryFileDraftRepository();
-		await repository.putRecent(recent('user-a', 'deployment-a'));
-		await repository.putRecent(recent('user-b', 'deployment-a'));
-		await repository.putView(view('user-a', 'deployment-a'));
-		await repository.putView(view('user-b', 'deployment-a'));
-
-		expect(await repository.getRecents('user-a', 'deployment-a')).toHaveLength(1);
-		expect(await repository.getRecents('user-b', 'deployment-a')).toHaveLength(1);
-		expect(await repository.getViews('user-a', 'deployment-a', 'browser')).toHaveLength(1);
-		expect(await repository.getViews('user-b', 'deployment-a', 'browser')).toHaveLength(1);
+		await repository.putDraft(draft('file.ts', 'user-a'));
+		await repository.putDraft(draft('file.ts', 'user-b'));
+		await repository.putDraft(draft('file.ts', 'user-a', 'other-deployment'));
+		await repository.clearDrafts('user-a', 'deployment');
+		expect(await repository.getDrafts('user-a', 'deployment')).toEqual([]);
+		expect(await repository.getDrafts('user-b', 'deployment')).toHaveLength(1);
+		expect(await repository.getDrafts('user-a', 'other-deployment')).toHaveLength(1);
 	});
 
-	it('keeps same-user view ownership isolated between browser sessions', async () => {
+	it('evicts the oldest backup when the retained file limit is reached', async () => {
 		const repository = createMemoryFileDraftRepository();
-		await repository.putView(view('user', 'deployment', 'tab-a'));
-		await repository.putView(view('user', 'deployment', 'tab-b'));
-
-		expect(await repository.getViews('user', 'deployment', 'tab-a')).toHaveLength(1);
-		expect(await repository.getViews('user', 'deployment', 'tab-b')).toHaveLength(1);
-		await repository.deleteView('shared-view', 'user', 'deployment', 'tab-a');
-		expect(await repository.getViews('user', 'deployment', 'tab-a')).toEqual([]);
-		expect(await repository.getViews('user', 'deployment', 'tab-b')).toHaveLength(1);
+		for (let i = 0; i <= FILE_DRAFT_LIMIT; i++) {
+			await repository.putDraft({ ...draft(i + '.txt'), savedAt: i });
+		}
+		const records = await repository.getDrafts('user', 'deployment');
+		expect(records).toHaveLength(FILE_DRAFT_LIMIT);
+		expect(records.some((record) => record.normalizedRelativePath === '0.txt')).toBe(false);
 	});
 
-	it('rejects one draft beyond the per-document recovery budget', async () => {
+	it('enforces the per-file boundary without removing an existing backup on failure', async () => {
 		const repository = createMemoryFileDraftRepository();
-		await expect(
-			repository.putDraft({
-				schemaVersion: 1,
-				deploymentId: 'deployment',
-				userNamespace: 'user',
-				browserSessionId: 'browser',
-				documentId: 'large',
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: 'large.txt',
-				displayPath: 'large.txt',
-				diskRevision: null,
-				baselineContent: null,
-				content: 'x'.repeat(FILE_DRAFT_DOCUMENT_LIMIT_BYTES / 2),
-				bufferVersion: 1,
-				savedAt: 1,
-				generation: 1,
-				unknownSubmission: null,
-				closed: false,
-			}),
-		).rejects.toThrow('too large');
+		const content = 'x'.repeat(FILE_DRAFT_DOCUMENT_LIMIT_BYTES / 2);
+		await repository.putDraft({ ...draft(), content });
+		await expect(repository.putDraft({ ...draft(), content: content + 'x' })).rejects.toThrow(
+			'too large',
+		);
+		expect((await repository.getDrafts('user', 'deployment'))[0].content).toBe(content);
 	});
 
-	it('clears only the requested recovery namespace', async () => {
+	it('evicts older backups to stay within the total byte budget', async () => {
 		const repository = createMemoryFileDraftRepository();
-		await repository.putRecent(recent('user-a', 'deployment-a'));
-		await repository.putRecent(recent('user-b', 'deployment-a'));
-
-		await expect(
-			repository.clearNamespaceIfUnprotected('user-a', 'deployment-a'),
-		).resolves.toBe(true);
-
-		expect(await repository.getRecents('user-a', 'deployment-a')).toEqual([]);
-		expect(await repository.getRecents('user-b', 'deployment-a')).toHaveLength(1);
-	});
-
-	it('clears shared navigation while retaining recovery owned by another browser session', async () => {
-		const repository = createMemoryFileDraftRepository();
-		await repository.putRecent(recent('user', 'deployment'));
-		await repository.putNavigation({
-			schemaVersion: 1,
-			userNamespace: 'user',
-			deploymentId: 'deployment',
-			key: JSON.stringify(['user', 'deployment']),
-			entries: [recent('user', 'deployment')],
-			index: 0,
-			updatedAt: 1,
-		});
-		await repository.putView(view('user', 'deployment', 'tab-a'));
-		await repository.putView(view('user', 'deployment', 'tab-b'));
-
-		await expect(
-			repository.clearNamespaceIfUnprotected('user', 'deployment', 'tab-a'),
-		).resolves.toBe(true);
-
-		expect(await repository.getRecents('user', 'deployment')).toEqual([]);
-		expect(await repository.getNavigation('user', 'deployment')).toBeNull();
-		expect(await repository.getViews('user', 'deployment', 'tab-a')).toEqual([]);
-		expect(await repository.getViews('user', 'deployment', 'tab-b')).toHaveLength(1);
-	});
-
-	it('keeps the entire namespace when any draft remains protected', async () => {
-		const repository = createMemoryFileDraftRepository();
-		await repository.putRecent(recent('user', 'deployment'));
-		await repository.putView(view('user', 'deployment'));
-		await repository.putDraft({
-			schemaVersion: 1,
-			deploymentId: 'deployment',
-			userNamespace: 'user',
-			browserSessionId: 'browser',
-			documentId: 'protected-draft',
-			canonicalFileRootPath: '/workspace',
-			normalizedRelativePath: 'src/file.ts',
-			displayPath: 'src/file.ts',
-			diskRevision: 'v1:base',
-			baselineContent: 'base',
-			content: 'unsaved',
-			bufferVersion: 1,
-			savedAt: 1,
-			generation: 1,
-			unknownSubmission: null,
-			closed: false,
-		});
-
-		await expect(
-			repository.clearNamespaceIfUnprotected('user', 'deployment', 'browser'),
-		).resolves.toBe(false);
-
-		expect(await repository.getDrafts('user', 'deployment', 'browser')).toHaveLength(1);
-		expect(await repository.getViews('user', 'deployment', 'browser')).toHaveLength(1);
-		expect(await repository.getRecents('user', 'deployment')).toHaveLength(1);
+		const content = 'x'.repeat(FILE_DRAFT_DOCUMENT_LIMIT_BYTES / 2);
+		for (let i = 0; i < 5; i++) {
+			await repository.putDraft({ ...draft(i + '.txt'), content, savedAt: i });
+		}
+		expect(
+			(await repository.getDrafts('user', 'deployment')).map(
+				(record) => record.normalizedRelativePath,
+			),
+		).toEqual(['4.txt', '3.txt', '2.txt', '1.txt']);
 	});
 });

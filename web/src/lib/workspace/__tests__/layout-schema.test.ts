@@ -6,9 +6,7 @@ import {
 	canonicalWorkspaceSnapshot,
 } from '../canonical-layout';
 import {
-	parsePersistedFileWorkspaceLayout,
 	parsePersistedWorkspaceLayout,
-	serializeFileWorkspaceLayout,
 	serializeWorkspaceLayout,
 	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
 	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
@@ -674,41 +672,6 @@ describe('workspace layout V2 schema', () => {
 		expect(serialized).not.toContain('dialog');
 		expect(serialized).not.toContain('mobile');
 		expect(serialized).not.toContain('file:f1');
-	});
-
-	it('round-trips file-only windows through browser-session topology persistence', () => {
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'register-surface-in-new-window',
-				surface: { id: 'file:side', type: 'file', fileSessionId: 'side' },
-				targetWindowId: CANONICAL_WINDOW_ID,
-				edge: 'right',
-				newWindowId: 'window-side',
-				partitionId: 'partition-file-side',
-			},
-			{ type: 'set-partition-ratio', partitionId: 'partition-file-side', ratio: 0.64 },
-		]);
-		const persisted = serializeFileWorkspaceLayout(snapshot, 'browser-session');
-		const restored = parsePersistedFileWorkspaceLayout(
-			JSON.stringify(persisted),
-			'browser-session',
-		);
-
-		expect(restored.source).toBe('valid');
-		expect(serializeFileWorkspaceLayout(restored.snapshot, 'browser-session')).toEqual(persisted);
-		expect(windowNodeById(restored.snapshot.desktopRoot, 'window-side')?.tabs).toEqual({
-			order: ['file:side'],
-			activeId: 'file:side',
-			mru: ['file:side'],
-		});
-		expect(restored.snapshot.surfaces['file:side']).toEqual({
-			id: 'file:side',
-			type: 'file',
-			fileSessionId: 'side',
-		});
-		expect(
-			parsePersistedFileWorkspaceLayout(JSON.stringify(persisted), 'other-session').source,
-		).toBe('fallback');
 	});
 
 	it('uses the one-Chat-window canonical layout when storage is absent', () => {

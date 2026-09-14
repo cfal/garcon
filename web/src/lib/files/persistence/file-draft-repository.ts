@@ -1,73 +1,26 @@
-import { MAX_FILE_VIEW_BYTES, type FileRevision } from '$shared/file-contracts';
+import type { FileRevision } from '$shared/file-contracts';
 import * as m from '$lib/paraglide/messages.js';
-import type { LocalSaveSubmission } from '$lib/files/documents/file-document-state.svelte.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
 
 export const FILE_DRAFT_DATABASE_NAME = 'garcon-file-drafts-v1';
 export const FILE_DRAFT_STORE_NAME = 'drafts';
-export const FILE_VIEW_STORE_NAME = 'views';
 export const FILE_RECENT_STORE_NAME = 'recents';
 export const FILE_NAVIGATION_STORE_NAME = 'navigation';
 export const FILE_DRAFT_SCHEMA_VERSION = 2;
-// Structured-clone strings are budgeted as UTF-16, with three snapshots per Save plus metadata.
-export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 3 * 2 * MAX_FILE_VIEW_BYTES + 64 * 1024;
-export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 2 * FILE_DRAFT_DOCUMENT_LIMIT_BYTES;
-export const FILE_CLOSED_DRAFT_LIMIT = 20;
+export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 24 * 1024 * 1024;
+export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024;
+export const FILE_DRAFT_LIMIT = 20;
 export const FILE_RECENT_LIMIT = 100;
-export const FILE_VIEW_LIMIT = 100;
 
-export class FileDraftOwnershipError extends Error {
-	constructor() {
-		super(m.file_recovery_draft_owned());
-	}
-}
-
-export interface SpaFileDraftV1 {
+export interface FileDraft {
 	schemaVersion: 1;
 	deploymentId: string;
 	userNamespace: string;
-	browserSessionId: string;
 	documentId: string;
-	localDocumentId?: string;
 	canonicalFileRootPath: string;
 	normalizedRelativePath: string;
-	displayPath: string;
-	diskRevision: FileRevision | null;
-	baselineContent: string | null;
 	content: string;
-	bufferVersion: number;
 	savedAt: number;
-	generation: number;
-	unknownSubmission: LocalSaveSubmission | null;
-	closed: boolean;
-}
-
-export interface SpaFileViewV1 {
-	schemaVersion: 1;
-	deploymentId: string;
-	userNamespace: string;
-	viewId: string;
-	localViewId?: string;
-	browserSessionId: string;
-	documentId: string;
-	canonicalFileRootPath: string;
-	normalizedRelativePath: string;
-	rendererMode: 'code' | 'markdown' | 'image';
-	line: number;
-	column: number;
-	endLine: number;
-	endColumn: number;
-	scrollLeft: number;
-	scrollTop: number;
-	markdownScrollLeft?: number;
-	markdownScrollTop?: number;
-	imageMode?: 'fit' | 'manual';
-	imageScale?: number;
-	imageScrollLeft?: number;
-	imageScrollTop?: number;
-	folds: readonly { from: number; to: number }[];
-	updatedAt: number;
-	placement: 'dialog' | 'mobile' | `window-${string}`;
 }
 
 export interface FileRecentLocationV1 {
@@ -98,27 +51,10 @@ export interface FileNavigationHistoryV1 {
 
 export interface FileDraftRepository {
 	readonly durable: boolean;
-	putDraft(record: SpaFileDraftV1): Promise<void>;
-	adoptDraft(record: SpaFileDraftV1, localDocumentId: string): Promise<SpaFileDraftV1>;
-	resolveDraftConflict(source: SpaFileDraftV1, replacement: SpaFileDraftV1): Promise<void>;
-	deleteDraft(documentId: string, generation: number): Promise<void>;
-	getDrafts(
-		userNamespace: string,
-		deploymentId: string,
-		browserSessionId: string,
-	): Promise<SpaFileDraftV1[]>;
-	putView(record: SpaFileViewV1): Promise<void>;
-	deleteView(
-		viewId: string,
-		userNamespace: string,
-		deploymentId: string,
-		browserSessionId: string,
-	): Promise<void>;
-	getViews(
-		userNamespace: string,
-		deploymentId: string,
-		browserSessionId: string,
-	): Promise<SpaFileViewV1[]>;
+	putDraft(record: FileDraft): Promise<void>;
+	deleteDraft(documentId: string): Promise<void>;
+	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraft[]>;
+	clearDrafts(userNamespace: string, deploymentId: string): Promise<void>;
 	putRecent(record: FileRecentLocationV1): Promise<void>;
 	getRecents(userNamespace: string, deploymentId: string): Promise<FileRecentLocationV1[]>;
 	putNavigation(record: FileNavigationHistoryV1): Promise<void>;
@@ -126,11 +62,6 @@ export interface FileDraftRepository {
 		userNamespace: string,
 		deploymentId: string,
 	): Promise<FileNavigationHistoryV1 | null>;
-	clearNamespaceIfUnprotected(
-		userNamespace: string,
-		deploymentId: string,
-		browserSessionId?: string,
-	): Promise<boolean>;
 	close(): void;
 }
 
@@ -154,123 +85,33 @@ export function createFileDraftRepository(
 	return {
 		durable: true,
 		async putDraft(record) {
-			assertDraftSize(record);
-			const database = await open();
-			await runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const existing = await indexedDbRequest<SpaFileDraftV1[]>(store.getAll());
-				const current = existing.find((entry) => entry.documentId === record.documentId);
-				if (current && current.generation > record.generation) return;
-				const retained = existing.filter((entry) => entry.documentId !== record.documentId);
-				assertDraftCapacity(record, retained);
+			await runTransaction(await open(), FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
+				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
+				for (const id of draftEvictions(record, records)) {
+					await indexedDbRequest(store.delete(id));
+				}
 				await indexedDbRequest(store.put(record));
 			});
 		},
-		async adoptDraft(record, localDocumentId) {
-			const database = await open();
-			return runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const stored = await indexedDbRequest<SpaFileDraftV1 | undefined>(
-					store.get(record.documentId),
-				);
-				if (!stored) throw new Error(m.file_recovery_draft_unavailable());
-				const targetId = scopedRecordKey(
-					stored.userNamespace,
-					stored.deploymentId,
-					stored.browserSessionId,
-					localDocumentId,
-				);
-				if (targetId !== stored.documentId) {
-					const target = await indexedDbRequest<SpaFileDraftV1 | undefined>(store.get(targetId));
-					if (target) throw new FileDraftOwnershipError();
-				}
-				const adopted = { ...stored, documentId: targetId, localDocumentId };
-				await indexedDbRequest(store.put(adopted));
-				if (targetId !== stored.documentId) await indexedDbRequest(store.delete(stored.documentId));
-				return adopted;
-			});
+		async deleteDraft(documentId) {
+			await write(await open(), FILE_DRAFT_STORE_NAME, (store) => store.delete(documentId));
 		},
-		async deleteDraft(documentId, generation) {
-			const database = await open();
-			await runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const existing = await indexedDbRequest<SpaFileDraftV1 | undefined>(store.get(documentId));
-				if (existing && existing.generation > generation) return;
-				await indexedDbRequest(store.delete(documentId));
-			});
+		async getDrafts(userNamespace, deploymentId) {
+			return latestDrafts(
+				await getAll<FileDraft>(await open(), FILE_DRAFT_STORE_NAME),
+				userNamespace,
+				deploymentId,
+			);
 		},
-		async resolveDraftConflict(source, replacement) {
-			const database = await open();
-			await runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const records = await indexedDbRequest<SpaFileDraftV1[]>(store.getAll());
-				assertRecoveryReplacement(records, source, replacement);
-				await indexedDbRequest(store.put(replacement));
-				if (source.documentId !== replacement.documentId)
-					await indexedDbRequest(store.delete(source.documentId));
-			});
-		},
-		async getDrafts(userNamespace, deploymentId, browserSessionId) {
-			return (await getAll<SpaFileDraftV1>(await open(), FILE_DRAFT_STORE_NAME))
-				.filter(
-					(record) =>
-						record.schemaVersion === 1 &&
-						record.userNamespace === userNamespace &&
-						record.deploymentId === deploymentId &&
-						record.browserSessionId === browserSessionId,
-				)
-				.map((record) => structuredClone(record));
-		},
-		async putView(record) {
-			const database = await open();
-			await runTransaction(database, FILE_VIEW_STORE_NAME, 'readwrite', async (store) => {
-				await indexedDbRequest(
-					store.put({
-						...record,
-						viewId: scopedRecordKey(
-							record.userNamespace,
-							record.deploymentId,
-							record.browserSessionId,
-							record.viewId,
-						),
-						localViewId: record.viewId,
-					}),
-				);
-				const records = (await indexedDbRequest<SpaFileViewV1[]>(store.getAll()))
-					.filter(
-						(entry) =>
-							entry.userNamespace === record.userNamespace &&
-							entry.deploymentId === record.deploymentId &&
-							entry.browserSessionId === record.browserSessionId,
-					)
-					.sort((first, second) => second.updatedAt - first.updatedAt);
-				for (const stale of records.slice(FILE_VIEW_LIMIT)) {
-					await indexedDbRequest(store.delete(stale.viewId));
-				}
-			});
-		},
-		async deleteView(viewId, userNamespace, deploymentId, browserSessionId) {
-			const database = await open();
-			await runTransaction(database, FILE_VIEW_STORE_NAME, 'readwrite', async (store) => {
-				const records = await indexedDbRequest<SpaFileViewV1[]>(store.getAll());
+		async clearDrafts(userNamespace, deploymentId) {
+			await runTransaction(await open(), FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
+				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
 				for (const record of records) {
-					if (
-						(record.localViewId ?? record.viewId) === viewId &&
-						record.userNamespace === userNamespace &&
-						record.deploymentId === deploymentId &&
-						record.browserSessionId === browserSessionId
-					) {
-						await indexedDbRequest(store.delete(record.viewId));
+					if (record.userNamespace === userNamespace && record.deploymentId === deploymentId) {
+						await indexedDbRequest(store.delete(record.documentId));
 					}
 				}
 			});
-		},
-		async getViews(userNamespace, deploymentId, browserSessionId) {
-			return (await getAll<SpaFileViewV1>(await open(), FILE_VIEW_STORE_NAME))
-				.filter(
-					(record) =>
-						record.schemaVersion === 1 &&
-						record.userNamespace === userNamespace &&
-						record.deploymentId === deploymentId &&
-						record.browserSessionId === browserSessionId,
-				)
-				.map((record) => (record.localViewId ? { ...record, viewId: record.localViewId } : record));
 		},
 		async putRecent(record) {
 			const database = await open();
@@ -317,39 +158,6 @@ export function createFileDraftRepository(
 				)) ?? null
 			);
 		},
-		async clearNamespaceIfUnprotected(userNamespace, deploymentId, browserSessionId) {
-			const database = await open();
-			const storeNames = [
-				FILE_DRAFT_STORE_NAME,
-				FILE_VIEW_STORE_NAME,
-				FILE_RECENT_STORE_NAME,
-				FILE_NAVIGATION_STORE_NAME,
-			];
-			return runDatabaseTransaction(database, storeNames, 'readwrite', async (transaction) => {
-				const drafts = await indexedDbRequest<SpaFileDraftV1[]>(
-					transaction.objectStore(FILE_DRAFT_STORE_NAME).getAll(),
-				);
-				if (drafts.some((record) => isProtectedDraft(record, userNamespace, deploymentId))) {
-					return false;
-				}
-				for (const storeName of storeNames) {
-					const store = transaction.objectStore(storeName);
-					const records = await indexedDbRequest<Array<Record<string, unknown>>>(store.getAll());
-					for (const record of records) {
-						if (
-							record.userNamespace === userNamespace &&
-							record.deploymentId === deploymentId &&
-							(![FILE_DRAFT_STORE_NAME, FILE_VIEW_STORE_NAME].includes(storeName) ||
-								browserSessionId === undefined ||
-								record.browserSessionId === browserSessionId)
-						) {
-							await indexedDbRequest(store.delete(record[keyPathForStore(storeName)] as string));
-						}
-					}
-				}
-				return true;
-			});
-		},
 		close() {
 			void databasePromise?.then(
 				(database) => database.close(),
@@ -361,100 +169,26 @@ export function createFileDraftRepository(
 }
 
 export function createMemoryFileDraftRepository(durable = true): FileDraftRepository {
-	const drafts = new Map<string, SpaFileDraftV1>();
-	const views = new Map<string, SpaFileViewV1>();
+	const drafts = new Map<string, FileDraft>();
 	const recents = new Map<string, FileRecentLocationV1>();
 	const navigation = new Map<string, FileNavigationHistoryV1>();
 	return {
 		durable,
 		async putDraft(record) {
-			assertDraftSize(record);
-			const current = drafts.get(record.documentId);
-			if (current && current.generation > record.generation) return;
-			assertDraftCapacity(
-				record,
-				[...drafts.values()].filter((entry) => entry.documentId !== record.documentId),
-			);
+			for (const id of draftEvictions(record, [...drafts.values()])) drafts.delete(id);
 			drafts.set(record.documentId, structuredClone(record));
 		},
-		async adoptDraft(record, localDocumentId) {
-			const stored = drafts.get(record.documentId);
-			if (!stored) throw new Error(m.file_recovery_draft_unavailable());
-			const targetId = scopedRecordKey(
-				stored.userNamespace,
-				stored.deploymentId,
-				stored.browserSessionId,
-				localDocumentId,
-			);
-			if (targetId !== stored.documentId && drafts.has(targetId)) {
-				throw new FileDraftOwnershipError();
+		async deleteDraft(documentId) {
+			drafts.delete(documentId);
+		},
+		async getDrafts(userNamespace, deploymentId) {
+			return structuredClone(latestDrafts([...drafts.values()], userNamespace, deploymentId));
+		},
+		async clearDrafts(userNamespace, deploymentId) {
+			for (const [id, record] of drafts) {
+				if (record.userNamespace === userNamespace && record.deploymentId === deploymentId)
+					drafts.delete(id);
 			}
-			const adopted = { ...stored, documentId: targetId, localDocumentId };
-			drafts.set(targetId, structuredClone(adopted));
-			if (targetId !== stored.documentId) drafts.delete(stored.documentId);
-			return adopted;
-		},
-		async deleteDraft(documentId, generation) {
-			const existing = drafts.get(documentId);
-			if (!existing || existing.generation <= generation) drafts.delete(documentId);
-		},
-		async resolveDraftConflict(source, replacement) {
-			assertRecoveryReplacement([...drafts.values()], source, replacement);
-			drafts.set(replacement.documentId, structuredClone(replacement));
-			if (source.documentId !== replacement.documentId) drafts.delete(source.documentId);
-		},
-		async getDrafts(userNamespace, deploymentId, browserSessionId) {
-			return [...drafts.values()]
-				.filter(
-					(record) =>
-						record.schemaVersion === 1 &&
-						record.userNamespace === userNamespace &&
-						record.deploymentId === deploymentId &&
-						record.browserSessionId === browserSessionId,
-				)
-				.map((record) => structuredClone(record));
-		},
-		async putView(record) {
-			views.set(
-				scopedRecordKey(
-					record.userNamespace,
-					record.deploymentId,
-					record.browserSessionId,
-					record.viewId,
-				),
-				structuredClone(record),
-			);
-			const scoped = [...views.entries()]
-				.filter(
-					([, entry]) =>
-						entry.userNamespace === record.userNamespace &&
-						entry.deploymentId === record.deploymentId &&
-						entry.browserSessionId === record.browserSessionId,
-				)
-				.sort(([, first], [, second]) => second.updatedAt - first.updatedAt);
-			for (const [key] of scoped.slice(FILE_VIEW_LIMIT)) views.delete(key);
-		},
-		async deleteView(viewId, userNamespace, deploymentId, browserSessionId) {
-			for (const [key, record] of views) {
-				if (
-					record.viewId === viewId &&
-					record.userNamespace === userNamespace &&
-					record.deploymentId === deploymentId &&
-					record.browserSessionId === browserSessionId
-				) {
-					views.delete(key);
-				}
-			}
-		},
-		async getViews(userNamespace, deploymentId, browserSessionId) {
-			return [...views.values()]
-				.filter(
-					(record) =>
-						record.userNamespace === userNamespace &&
-						record.deploymentId === deploymentId &&
-						record.browserSessionId === browserSessionId,
-				)
-				.map((record) => structuredClone(record));
 		},
 		async putRecent(record) {
 			recents.set(
@@ -484,28 +218,6 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 		async getNavigation(userNamespace, deploymentId) {
 			return structuredClone(navigation.get(navigationKey(userNamespace, deploymentId)) ?? null);
 		},
-		async clearNamespaceIfUnprotected(userNamespace, deploymentId, browserSessionId) {
-			const matchesNamespace = (record: { userNamespace: string; deploymentId: string }) =>
-				record.userNamespace === userNamespace && record.deploymentId === deploymentId;
-			const matchesSession = (record: { browserSessionId: string }) =>
-				browserSessionId === undefined || record.browserSessionId === browserSessionId;
-			if (
-				[...drafts.values()].some((record) => isProtectedDraft(record, userNamespace, deploymentId))
-			) {
-				return false;
-			}
-			for (const [key, record] of drafts) {
-				if (matchesNamespace(record) && matchesSession(record)) drafts.delete(key);
-			}
-			for (const [key, record] of views) {
-				if (matchesNamespace(record) && matchesSession(record)) views.delete(key);
-			}
-			for (const [key, record] of recents) {
-				if (matchesNamespace(record)) recents.delete(key);
-			}
-			navigation.delete(navigationKey(userNamespace, deploymentId));
-			return true;
-		},
 		close() {},
 	};
 }
@@ -520,7 +232,6 @@ export function navigationKey(userNamespace: string, deploymentId: string): stri
 
 function keyPathForStore(storeName: string): string {
 	if (storeName === FILE_DRAFT_STORE_NAME) return 'documentId';
-	if (storeName === FILE_VIEW_STORE_NAME) return 'viewId';
 	return 'key';
 }
 
@@ -542,7 +253,6 @@ function openDatabase(
 			}
 			for (const storeName of [
 				FILE_DRAFT_STORE_NAME,
-				FILE_VIEW_STORE_NAME,
 				FILE_RECENT_STORE_NAME,
 				FILE_NAVIGATION_STORE_NAME,
 			]) {
@@ -621,93 +331,63 @@ async function runDatabaseTransaction<T>(
 	}
 }
 
-function isProtectedDraft(
-	record: SpaFileDraftV1,
+export function fileDraftKey(
 	userNamespace: string,
 	deploymentId: string,
-): boolean {
-	return (
-		record.userNamespace === userNamespace &&
-		record.deploymentId === deploymentId &&
-		(record.unknownSubmission !== null || record.content !== (record.baselineContent ?? ''))
+	canonicalFileRootPath: string,
+	normalizedRelativePath: string,
+): string {
+	return scopedRecordKey(
+		userNamespace,
+		deploymentId,
+		canonicalFileRootPath,
+		normalizedRelativePath,
 	);
 }
 
-function assertDraftSize(record: SpaFileDraftV1): void {
-	if (draftBytes(record) > FILE_DRAFT_DOCUMENT_LIMIT_BYTES) {
-		throw new Error(m.file_recovery_document_limit());
+function latestDrafts(
+	records: readonly FileDraft[],
+	userNamespace: string,
+	deploymentId: string,
+): FileDraft[] {
+	const latest = new Map<string, FileDraft>();
+	for (const record of [...records].sort((a, b) => b.savedAt - a.savedAt)) {
+		if (
+			record.schemaVersion !== 1 ||
+			record.userNamespace !== userNamespace ||
+			record.deploymentId !== deploymentId
+		)
+			continue;
+		const key = fileDraftKey(
+			userNamespace,
+			deploymentId,
+			record.canonicalFileRootPath,
+			record.normalizedRelativePath,
+		);
+		if (!latest.has(key)) latest.set(key, record);
 	}
+	return [...latest.values()].slice(0, FILE_DRAFT_LIMIT);
 }
 
-function assertRecoveryReplacement(
-	records: readonly SpaFileDraftV1[],
-	source: SpaFileDraftV1,
-	replacement: SpaFileDraftV1,
-): void {
-	const stored = records.find((record) => record.documentId === source.documentId);
-	const target = records.find((record) => record.documentId === replacement.documentId);
-	if (
-		!stored ||
-		stored.generation !== source.generation ||
-		stored.savedAt !== source.savedAt ||
-		stored.content !== source.content ||
-		stored.unknownSubmission?.submissionId !== source.unknownSubmission?.submissionId ||
-		(target && target.generation >= replacement.generation) ||
-		(target && target.localDocumentId !== replacement.localDocumentId) ||
-		(source.unknownSubmission &&
-			source.unknownSubmission.submissionId !== replacement.unknownSubmission?.submissionId) ||
-		(target?.unknownSubmission &&
-			target.unknownSubmission.submissionId !== replacement.unknownSubmission?.submissionId) ||
-		source.userNamespace !== replacement.userNamespace ||
-		source.deploymentId !== replacement.deploymentId ||
-		source.browserSessionId !== replacement.browserSessionId ||
-		source.canonicalFileRootPath !== replacement.canonicalFileRootPath ||
-		source.normalizedRelativePath !== replacement.normalizedRelativePath
-	)
-		throw new Error(m.file_recovery_copy_changed());
-	assertDraftSize(replacement);
-	const retained = records.filter(
-		(record) =>
-			record.documentId !== source.documentId && record.documentId !== replacement.documentId,
-	);
-	assertDraftCapacity(replacement, retained);
-}
-
-function assertDraftCapacity(record: SpaFileDraftV1, retained: readonly SpaFileDraftV1[]): void {
-	const scoped = retained.filter(
-		(entry) =>
-			entry.userNamespace === record.userNamespace && entry.deploymentId === record.deploymentId,
-	);
-	if (
-		scoped.reduce((sum, entry) => sum + draftBytes(entry), draftBytes(record)) >
-		FILE_DRAFT_TOTAL_LIMIT_BYTES
-	) {
-		throw new Error(m.file_recovery_storage_limit());
+function draftEvictions(record: FileDraft, records: readonly FileDraft[]): string[] {
+	let bytes = record.content.length * 2;
+	if (bytes > FILE_DRAFT_DOCUMENT_LIMIT_BYTES) throw new Error(m.file_recovery_document_limit());
+	let count = 1;
+	const evicted: string[] = [];
+	for (const entry of [...records].sort((a, b) => b.savedAt - a.savedAt)) {
+		if (entry.userNamespace !== record.userNamespace || entry.deploymentId !== record.deploymentId)
+			continue;
+		if (
+			(entry.canonicalFileRootPath === record.canonicalFileRootPath &&
+				entry.normalizedRelativePath === record.normalizedRelativePath) ||
+			count >= FILE_DRAFT_LIMIT ||
+			bytes + entry.content.length * 2 > FILE_DRAFT_TOTAL_LIMIT_BYTES
+		) {
+			evicted.push(entry.documentId);
+		} else {
+			count += 1;
+			bytes += entry.content.length * 2;
+		}
 	}
-	const closed = scoped.filter(
-		(entry) =>
-			entry.browserSessionId === record.browserSessionId &&
-			entry.closed &&
-			entry.unknownSubmission === null,
-	);
-	if (
-		record.closed &&
-		record.unknownSubmission === null &&
-		closed.length >= FILE_CLOSED_DRAFT_LIMIT
-	) {
-		throw new Error(m.file_recovery_closed_limit());
-	}
-}
-
-function draftBytes(record: SpaFileDraftV1): number {
-	const { baselineContent, content, unknownSubmission } = record;
-	const textLength =
-		(baselineContent?.length ?? 0) + content.length + (unknownSubmission?.content.length ?? 0);
-	const metadata = {
-		...record,
-		baselineContent: null,
-		content: '',
-		unknownSubmission: unknownSubmission ? { ...unknownSubmission, content: '' } : null,
-	};
-	return 2 * (textLength + JSON.stringify(metadata).length);
+	return evicted;
 }

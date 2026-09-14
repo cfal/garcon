@@ -6,11 +6,9 @@
 	let expanded = $state(false);
 	const status = $derived(session.editor?.status);
 	const saveLabel = $derived.by(() => {
-		if (session.saveOutcomeUnknown) return m.editor_status_save_unknown();
 		if (session.document.mixedLineEndings) return m.editor_status_mixed_endings();
 		if (session.document.missing) return m.editor_status_missing();
 		if (session.readOnly) return m.editor_status_read_only();
-		if (session.document.recoveryError) return m.editor_status_recovery_failed();
 		if (session.saving) return m.editor_actions_saving();
 		if (session.document.recovered) return m.editor_status_recovered();
 		if (session.isExternallyStale) return m.editor_status_disk_changed();
@@ -33,10 +31,7 @@
 			onclick={() => (expanded = !expanded)}
 		></button>
 	{/if}
-	<span
-		role="status"
-		class="truncate"
-		class:text-status-warning-foreground={session.dirty || session.saveOutcomeUnknown}
+	<span role="status" class="truncate" class:text-status-warning-foreground={session.dirty}
 		>{saveLabel}</span
 	>
 	{#if status}

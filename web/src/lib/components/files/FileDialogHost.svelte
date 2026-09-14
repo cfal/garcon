@@ -208,7 +208,6 @@
 				onCancel={() => files.resolveOverwrite('cancel')}
 				onAcceptDisk={() => files.resolveOverwrite('accept-disk')}
 				onSaveChecked={(content) => files.resolveOverwrite('save-checked', content)}
-				onOverwrite={(content) => files.resolveOverwrite('overwrite', content)}
 			/>
 		{/if}
 	</Dialog.Content>
@@ -230,6 +229,28 @@
 				>{m.file_session_cancel()}</Button
 			>
 			<Button onclick={() => files.resolveThreshold('open')}>{m.file_session_open_anyway()}</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={Boolean(files.draftRequest)} requestClose={() => files.resolveDraft('cancel')}>
+	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
+		<Dialog.Header>
+			<Dialog.Title>{m.file_recovery_draft_title()}</Dialog.Title>
+			<Dialog.Description
+				>{m.file_recovery_draft_description({
+					fileName: files.draftRequest?.fileName ?? '',
+				})}</Dialog.Description
+			>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="ghost" onclick={() => files.resolveDraft('cancel')}
+				>{m.common_cancel()}</Button
+			>
+			<Button variant="outline" onclick={() => files.resolveDraft('discard')}
+				>{m.file_session_discard()}</Button
+			>
+			<Button onclick={() => files.resolveDraft('resume')}>{m.file_recovery_resume()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

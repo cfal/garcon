@@ -5,6 +5,26 @@ import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
+	it.each([
+		['Resume draft', 'resume'],
+		['Discard', 'discard'],
+		['Cancel', 'cancel'],
+	])('resolves a draft prompt through %s', async (name, choice) => {
+		const onResolve = vi.fn();
+		render(FileDialogHostTestHost, { request: 'draft', onResolve });
+		expect(await screen.findByRole('dialog', { name: 'Recover local changes?' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name }));
+		expect(onResolve).toHaveBeenCalledWith(choice);
+	});
+
+	it('cancels a draft prompt with Escape', async () => {
+		const onResolve = vi.fn();
+		render(FileDialogHostTestHost, { request: 'draft', onResolve });
+		await screen.findByRole('dialog', { name: 'Recover local changes?' });
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() => expect(onResolve).toHaveBeenCalledWith('cancel'));
+	});
+
 	it('offers one move-to-window control for the dialog file', async () => {
 		const onMove = vi.fn();
 		render(FileDialogHostTestHost, { request: 'file', onMove });
@@ -105,17 +125,17 @@ describe('FileDialogHost', () => {
 		expect(onResolve).toHaveBeenCalledWith('discard');
 	});
 
-	it('requires an explicit destructive choice before overwriting external changes', async () => {
+	it('offers only revision-checked saving after comparing external changes', async () => {
 		const onResolve = vi.fn();
 		render(FileDialogHostTestHost, { request: 'overwrite', onResolve });
 
 		expect(await screen.findByText(m.file_session_overwrite_title())).toBeTruthy();
-		const overwrite = screen.getByRole('button', { name: 'Replace disk' });
+		const overwrite = screen.getByRole('button', { name: 'Save against displayed disk' });
 		expect(overwrite.getAttribute('data-slot')).toBe('button');
-		expect(overwrite.className).toContain('bg-destructive');
+		expect(screen.queryByRole('button', { name: 'Replace disk' })).toBeNull();
 		await vi.waitFor(() => expect((overwrite as HTMLButtonElement).disabled).toBe(false));
 		await fireEvent.click(overwrite);
-		expect(onResolve).toHaveBeenCalledWith('overwrite');
+		expect(onResolve).toHaveBeenCalledWith('save-checked');
 	});
 
 	it('cancels an overwrite request when Escape dismisses it', async () => {

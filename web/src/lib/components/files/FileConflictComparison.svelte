@@ -18,7 +18,6 @@
 		onCancel,
 		onAcceptDisk,
 		onSaveChecked,
-		onOverwrite,
 	}: {
 		baseContent: string;
 		localContent: string;
@@ -27,7 +26,6 @@
 		onCancel(): void;
 		onAcceptDisk(): void;
 		onSaveChecked(content: string): void;
-		onOverwrite(content: string): void;
 	} = $props();
 	let selected = $state<'base' | 'disk'>('disk');
 	let comparisonReady = $state(false);
@@ -115,11 +113,6 @@
 		<Button
 			onclick={() => onSaveChecked(resolvedContent)}
 			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_save_checked()}</Button
-		>
-		<Button
-			variant="destructive"
-			onclick={() => onOverwrite(resolvedContent)}
-			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_replace_disk()}</Button
 		>
 	</div>
 </div>

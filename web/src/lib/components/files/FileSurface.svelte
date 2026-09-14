@@ -23,7 +23,6 @@
 	import FilePathTitle from './FilePathTitle.svelte';
 	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
 	import FileEditorStatus from './FileEditorStatus.svelte';
-	import FileRecoveryCopies from './FileRecoveryCopies.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { canSaveFileChanges } from '$lib/files/persistence/file-write-policy.js';
 
@@ -58,7 +57,7 @@
 				showLabel: true,
 			});
 		}
-		if (session.rendererMode === 'code' && !session.saveOutcomeUnknown) {
+		if (session.rendererMode === 'code') {
 			actions.push({
 				id: 'save',
 				label: session.saving ? m.editor_actions_saving() : m.editor_actions_save(),
@@ -94,7 +93,7 @@
 				priority: 1,
 			});
 		}
-		if (session.dirty || session.saveOutcomeUnknown) {
+		if (session.dirty) {
 			actions.push({
 				id: 'export-file',
 				label: m.file_session_export_local_copy(),
@@ -109,19 +108,10 @@
 	function showMarkdown(): void {
 		session.markdownMode = 'rendered';
 		session.rendererMode = 'markdown';
-		void files.persistView(session.id).catch(() => undefined);
 	}
 
 	function showSource(): void {
 		void files.showSource(session.id);
-	}
-
-	function retryRecovery(): void {
-		if (session.document.settledSubmissionRevision) {
-			void files.retrySaveSettlement(session.id);
-		} else {
-			void files.retryRecoveryDiscovery();
-		}
 	}
 
 	$effect(() => {
@@ -174,35 +164,18 @@
 		/>
 	{/if}
 
-	{#if session.document.recoveryDiscoveryError || session.document.recoveryError}
-		<div
-			class="flex shrink-0 items-center gap-2 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
-			role="status"
-		>
-			<TriangleAlert class="h-4 w-4 shrink-0" />
-			<span class="min-w-0 flex-1">
-				{m.file_recovery_failed({
-					detail: session.document.recoveryDiscoveryError ?? session.document.recoveryError ?? '',
-				})}
-			</span>
-			{#if session.document.settledSubmissionRevision || session.document.recoveryDiscoveryError}
-				<Button variant="outline" size="sm" onclick={retryRecovery}
-					>{m.file_recovery_retry()}</Button
-				>
-			{/if}
-		</div>
-	{/if}
-	{#if session.document.recoveredCopies.length > 0}
-		<FileRecoveryCopies {session} />
-	{/if}
-
-	{#if session.saveOutcomeUnknown}
+	{#if session.document.recoveryError}
 		<div
 			class="flex shrink-0 items-center gap-2 border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
 			role="status"
 		>
 			<TriangleAlert class="h-4 w-4 shrink-0" />
-			<span>{m.file_save_outcome_unknown_warning()}</span>
+			<span class="min-w-0 flex-1"
+				>{m.file_recovery_failed({ detail: session.document.recoveryError })}</span
+			>
+			<Button variant="outline" size="sm" onclick={() => void files.flushRecovery()}
+				>{m.common_retry()}</Button
+			>
 		</div>
 	{/if}
 
@@ -211,7 +184,7 @@
 			class="flex shrink-0 items-center gap-2 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
 		>
 			<TriangleAlert class="h-4 w-4 shrink-0" />
-			<span class="truncate">{session.saveError}</span>
+			<span class="min-w-0 break-words">{session.saveError}</span>
 		</div>
 	{/if}
 

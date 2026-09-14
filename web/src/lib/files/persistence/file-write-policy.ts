@@ -6,7 +6,6 @@ export function canSubmitFileWrite(session: FileViewSession): boolean {
 		session.loading ||
 		session.saving ||
 		session.refreshing ||
-		// Mutation guards include unknown Save outcomes, even when observed disk content matches.
 		session.document.mutationGuarded ||
 		!session.loadedRevision ||
 		session.readOnly ||

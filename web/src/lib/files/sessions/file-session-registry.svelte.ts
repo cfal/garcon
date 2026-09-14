@@ -16,29 +16,24 @@ import {
 	FileViewSession,
 	type FileRendererMode,
 } from '$lib/files/sessions/file-view-session.svelte.js';
-import {
-	FileDocumentState,
-	type FileRecoveryChoice,
-} from '$lib/files/documents/file-document-state.svelte.js';
+import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import {
 	createFileDraftRepository,
 	type FileDraftRepository,
-	type SpaFileViewV1,
+	type FileDraft,
 } from '$lib/files/persistence/file-draft-repository.js';
-import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.js';
+import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import {
 	FileDocumentIoCoordinator,
 	type FileDiskSnapshot,
 	type FileEditorRuntimeModule,
 } from '$lib/files/persistence/file-document-io-coordinator.js';
 import {
-	FILE_SAVE_SOFT_TIMEOUT_MS,
+	FILE_SAVE_TIMEOUT_MS,
 	FileSaveCoordinator,
 	isFileRevisionConflict,
 } from '$lib/files/persistence/file-save-coordinator.js';
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
-import { FileViewRecovery } from '$lib/files/persistence/file-view-recovery.js';
-import { prepareRestoredView } from '$lib/files/persistence/restored-file-view.js';
 import {
 	canSaveFileChanges,
 	canSubmitFileWrite,
@@ -72,7 +67,7 @@ export interface FileOpenRequest {
 	mode: FileOpenMode;
 	origin: PresentationHostId;
 	target?: DesktopPlacement;
-	reason: 'user-open' | 'responsive-restore' | 'restored-view';
+	reason: 'user-open' | 'responsive-restore';
 	openToSide?: boolean;
 	line?: number;
 	col?: number;
@@ -84,16 +79,7 @@ export interface FilePlacementPort {
 		target: DesktopPlacement | undefined,
 		publication: { publish(): void; rollback(): void },
 	): Promise<FilePlacementResult>;
-	restoreFileSession?(
-		sessionId: string,
-		target: DesktopPlacement | undefined,
-		publication: { publish(): void; rollback(): void },
-	): Promise<FilePlacementResult>;
 	focusFileSession(sessionId: string): Promise<void>;
-	filePlacement?(sessionId: string): PresentationHostId | null;
-	recoveryHost?(): PresentationHostId;
-	resolveRestoredPlacement?(host: PresentationHostId): DesktopPlacement | undefined;
-	removeUnclaimedRestoredFileSurfaces?(viewIds: readonly string[]): Promise<void>;
 }
 
 export interface FileGuardRequest {
@@ -113,7 +99,7 @@ export interface FileOverwriteRequest {
 	lineSeparator: '\n' | '\r' | '\r\n';
 }
 
-type FileConflictChoice = 'save-checked' | 'overwrite' | 'accept-disk' | 'cancel';
+type FileConflictChoice = 'save-checked' | 'accept-disk' | 'cancel';
 
 interface FileConflictDecision {
 	choice: FileConflictChoice;
@@ -146,22 +132,16 @@ export interface FileSessionsDeps {
 	draftRepository?: FileDraftRepository;
 	deploymentId?: string;
 	isDocumentVisible?(documentId: string): boolean;
-	saveSoftTimeoutMs?: number;
+	saveTimeoutMs?: number;
 }
 
 export type { FileEditorRuntimeModule };
 
 export const FILE_SESSION_SOFT_LIMIT = 32;
-export { FILE_SAVE_SOFT_TIMEOUT_MS };
+export { FILE_SAVE_TIMEOUT_MS };
 
 export function fileIdentityKey(root: string, relativePath: string): string {
 	return JSON.stringify([root, relativePath]);
-}
-
-function defaultRestoredPlacement(host: PresentationHostId): DesktopPlacement | undefined {
-	if (host === 'mobile') return undefined;
-	if (host === 'dialog') return { type: 'dialog' };
-	return { type: 'window', windowId: host };
 }
 
 export class FileSessionRegistry {
@@ -170,6 +150,7 @@ export class FileSessionRegistry {
 	guardRequest = $state<FileGuardRequest | null>(null);
 	overwriteRequest = $state<FileOverwriteRequest | null>(null);
 	thresholdRequest = $state<FileThresholdRequest | null>(null);
+	draftRequest = $state<{ fileName: string } | null>(null);
 
 	#documentIdByIdentity = new Map<string, string>();
 	#pendingByIdentity = new Map<string, Promise<FileViewSession | null>>();
@@ -181,15 +162,13 @@ export class FileSessionRegistry {
 	#decisionQueue = new SerialQueue();
 	#editorThemeId: RendererThemeId = 'standard-light';
 	readonly #draftRepository: FileDraftRepository;
-	#drafts: FileDraftCoordinator | null = null;
-	#viewRecovery: FileViewRecovery | null = null;
+	#drafts = $state.raw<FileDraftCoordinator | null>(null);
+	#draftResolve: ((choice: 'resume' | 'discard' | 'cancel') => void) | null = null;
 	readonly #io: FileDocumentIoCoordinator;
 	readonly #saves: FileSaveCoordinator;
 	readonly #deploymentId: string;
 	#userNamespace: string | null = null;
 	#initialization: Promise<void> = Promise.resolve();
-	#recoveryDiscoveryGuarded = false;
-	#recoveryDiscoveryError: string | null = null;
 	#destroyed = false;
 	navigation = $state.raw<FileNavigationStore | null>(null);
 
@@ -213,9 +192,7 @@ export class FileSessionRegistry {
 		});
 		this.#saves = new FileSaveCoordinator({
 			saveText: deps.saveText ?? saveText,
-			getDrafts: () => this.#drafts,
-			getSoftTimeoutMs: () => deps.saveSoftTimeoutMs ?? FILE_SAVE_SOFT_TIMEOUT_MS,
-			reconfigure: (document) => this.#reconfigureDocumentViews(document),
+			getTimeoutMs: () => deps.saveTimeoutMs ?? FILE_SAVE_TIMEOUT_MS,
 		});
 	}
 
@@ -224,13 +201,15 @@ export class FileSessionRegistry {
 	}
 
 	get hasUnloadProtectedSessions(): boolean {
-		return Object.values(this.documents).some(
-			(doc) =>
-				doc.dirty ||
-				doc.saveOutcome !== 'idle' ||
-				doc.recoveredCopies.length > 0 ||
-				doc.resolvingRecovery,
-		);
+		return Object.values(this.documents).some((document) => document.dirty || document.saving);
+	}
+
+	get recoveredDrafts(): readonly FileDraft[] {
+		return this.#drafts?.available ?? [];
+	}
+
+	get recoveryError(): string | null {
+		return this.#drafts?.error ?? null;
 	}
 
 	reloadApplication(): void {
@@ -250,73 +229,25 @@ export class FileSessionRegistry {
 		return this.#initialization;
 	}
 
-	initializeRecovery(userNamespace: string, browserSessionId: string): Promise<void> {
+	initializeRecovery(userNamespace: string): Promise<void> {
 		if (this.#userNamespace === userNamespace) return this.#initialization;
 		if (this.#userNamespace !== null) throw new Error('File recovery is already initialized');
 		this.#userNamespace = userNamespace;
-		this.#drafts = new FileDraftCoordinator({
+		const drafts = new FileDraftCoordinator({
 			repository: this.#draftRepository,
 			deploymentId: this.#deploymentId,
 			userNamespace,
-			browserSessionId,
 			onError: this.deps.onRecoveryError,
 		});
+		this.#drafts = drafts;
 		this.navigation = new FileNavigationStore(this.#draftRepository, {
 			deploymentId: this.#deploymentId,
 			userNamespace,
 		});
-		this.#viewRecovery = new FileViewRecovery({
-			repository: this.#draftRepository,
-			deploymentId: this.#deploymentId,
-			userNamespace,
-			browserSessionId,
-			navigation: this.navigation,
-			getPlacement: (sessionId) => this.deps.getPlacement().filePlacement?.(sessionId) ?? null,
-			getRecoveryHost: () =>
-				this.deps.getPlacement().recoveryHost?.() ??
-				(this.deps.getIsMobile() ? 'mobile' : 'window-main'),
-			getSession: (sessionId) => this.get(sessionId),
-			identityKey: fileIdentityKey,
-			findDocument: (key) => {
-				const documentId = this.#documentIdByIdentity.get(key);
-				return documentId ? (this.documents[documentId] ?? null) : null;
-			},
-			getDocuments: () => Object.values(this.documents),
-			publishDocument: (document, generation) => {
-				this.#publishDocument(document);
-				this.#drafts?.adopt(document, generation);
-			},
-			adoptDocument: (document, generation) => this.#drafts?.adopt(document, generation),
-			persistDocument: (document) => this.#drafts?.settle(document) ?? Promise.resolve(),
-			resolveDraftConflict: (document, source, choice) =>
-				this.#drafts!.resolveRecoveryConflict(document, source, choice),
-			reconfigureDocument: (document) => this.#reconfigureDocumentViews(document),
-			openView: (record, document, target) => this.#openRestoredView(record, document, target),
-			completeViewRestoration: (session) => {
-				this.#enableViewPersistence(session);
-				return this.#persistView(session);
-			},
-			resolveRestoredPlacement: (host) =>
-				this.deps.getPlacement().resolveRestoredPlacement?.(host) ?? defaultRestoredPlacement(host),
-			removeUnclaimedRestoredFileSurfaces: (viewIds) =>
-				this.deps.getPlacement().removeUnclaimedRestoredFileSurfaces?.(viewIds) ??
-				Promise.resolve(),
-			ensureEditor: (session) => this.#io.ensureEditorForView(session),
-			waitForDocumentLoad: (documentId) => this.#io.waitForDocumentLoad(documentId),
-			reconcileDocument: (documentId) => this.#io.reconcileDocument(documentId),
-			pollDocument: (documentId) => this.#io.startPolling(documentId),
-			isDestroyed: () => this.#destroyed,
-			setDiscoveryGuard: (guarded, error = '') => {
-				this.#recoveryDiscoveryGuarded = guarded;
-				this.#recoveryDiscoveryError = error || null;
-				for (const document of Object.values(this.documents)) {
-					document.recoveryGuard = guarded;
-					document.recoveryDiscoveryError = this.#recoveryDiscoveryError;
-					this.#reconfigureDocumentViews(document);
-				}
-			},
-		});
-		this.#initialization = this.#viewRecovery.initialize();
+		this.#initialization = Promise.all([
+			drafts.initialize(),
+			this.navigation.restore().catch(() => undefined),
+		]).then(() => this.#pruneOpenDrafts());
 		return this.#initialization;
 	}
 
@@ -353,27 +284,22 @@ export class FileSessionRegistry {
 			existing.requestLocation(request.line, request.col);
 			await this.deps.getPlacement().focusFileSession(existing.id);
 			this.#recordNavigation(existing);
-			void this.#persistView(existing).catch(() => undefined);
 			return existing;
 		}
-		const pending =
-			request.openToSide || request.reason === 'restored-view'
-				? null
-				: this.#pendingByIdentity.get(key);
+		const pending = request.openToSide ? null : this.#pendingByIdentity.get(key);
 		if (pending) {
 			const session = await pending;
 			if (session) {
 				session.requestLocation(request.line, request.col);
 				await this.deps.getPlacement().focusFileSession(session.id);
 				this.#recordNavigation(session);
-				void this.#persistView(session).catch(() => undefined);
 			}
 			return session;
 		}
 		const operation = this.#creationQueue.enqueue(() =>
 			this.#createAndOpen(identity, key, request),
 		);
-		if (!request.openToSide && request.reason !== 'restored-view') {
+		if (!request.openToSide) {
 			this.#pendingByIdentity.set(key, operation);
 		}
 		try {
@@ -384,62 +310,55 @@ export class FileSessionRegistry {
 	}
 
 	async save(sessionId: string): Promise<boolean> {
-		await this.#initialization;
 		const session = this.get(sessionId);
-		if (!session) return false;
-		const expectedRevision = session.loadedRevision;
-		if (!expectedRevision || !canSaveFileChanges(session)) return false;
-		const submittedContent = session.document.currentContent();
-		const submittedBufferVersion = session.document.bufferVersion;
-		const controller = new AbortController();
-		let requestDetached = false;
-		session.saveController = controller;
-		session.document.saveOutcome = 'preparing';
-		session.saveError = null;
-		session.pendingMutationCount += 1;
-		this.#io.invalidateFreshness(session);
-		this.#reconfigureDocumentViews(session.document);
+		const revision = session?.loadedRevision;
+		if (!session || !revision || !canSaveFileChanges(session)) return false;
+		const content = session.document.currentContent();
+		const controller = this.#beginSave(session.document);
 		try {
-			if (session.isExternallyStale) {
-				const outcome = await this.#resolveConflictAndSubmit(session, controller);
-				requestDetached = outcome === 'unknown';
-				return outcome === 'saved';
-			}
-
+			if (session.isExternallyStale)
+				return await this.#resolveConflictAndSubmit(session, controller);
 			try {
-				const outcome = await this.#saves.submit(
-					session.document,
-					submittedContent,
-					submittedBufferVersion,
-					'reject',
-					controller,
-					expectedRevision,
-					true,
-				);
-				requestDetached = outcome === 'unknown';
-				return outcome === 'saved';
+				await this.#saves.submit(session.document, content, controller, revision);
+				return true;
 			} catch (error) {
 				if (!isFileRevisionConflict(error)) throw error;
 				session.isExternallyStale = true;
-				const outcome = await this.#resolveConflictAndSubmit(session, controller);
-				requestDetached = outcome === 'unknown';
-				return outcome === 'saved';
+				return await this.#resolveConflictAndSubmit(session, controller);
 			}
 		} catch (error) {
-			if (this.get(session.id) !== session && session.document.viewIds.size === 0) return false;
 			session.saveError = error instanceof Error ? error.message : String(error);
 			return false;
 		} finally {
-			if (!requestDetached) this.#saves.finishAttempt(session.document, controller);
+			this.#finishSave(session.document, controller);
 		}
 	}
 
+	#beginSave(document: FileDocumentState): AbortController {
+		const controller = new AbortController();
+		document.saveController = controller;
+		document.saving = true;
+		document.saveError = null;
+		return controller;
+	}
+
+	#finishSave(document: FileDocumentState, controller: AbortController): void {
+		if (document.saveController !== controller) return;
+		document.saveController = null;
+		document.saving = false;
+		void this.#drafts?.settle(document);
+	}
+
 	async refresh(sessionId: string): Promise<void> {
-		return this.#io.refresh(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
+		await this.#io.refresh(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
+		const session = this.get(sessionId);
+		if (session) this.#completeDraftRecovery(session);
 	}
 
 	async reload(sessionId: string): Promise<void> {
 		await this.#io.reload(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
+		const session = this.get(sessionId);
+		if (session) this.#completeDraftRecovery(session);
 	}
 
 	checkFreshness(sessionId: string): Promise<void> {
@@ -498,7 +417,7 @@ export class FileSessionRegistry {
 				if (!session.document.editorRuntime) session.content = session.baseline;
 				session.dirty = false;
 				const discardedVersion = session.document.bufferVersion;
-				await this.#drafts?.clear(session.document);
+				await this.#drafts?.settle(session.document);
 				return (
 					this.get(session.id) === session &&
 					session.document.bufferVersion === discardedVersion &&
@@ -526,26 +445,22 @@ export class FileSessionRegistry {
 		resolve({ choice, snapshot, resolvedContent: resolvedContent ?? snapshot.localContent });
 	}
 
-	async destroy(sessionId: string, preserveView = false): Promise<void> {
+	async destroy(sessionId: string): Promise<void> {
 		const session = this.get(sessionId);
 		if (!session) return;
-		await this.#teardowns.run(session.identityKey, () =>
-			this.#destroySession(session, preserveView),
-		);
+		await this.#teardowns.run(session.identityKey, () => this.#destroySession(session));
 	}
 
-	async #destroySession(session: FileViewSession, preserveView: boolean): Promise<void> {
+	async #destroySession(session: FileViewSession): Promise<void> {
 		const sessionId = session.id;
 		if (this.get(sessionId) !== session) return;
 		if (this.guardRequest?.sessionId === sessionId) this.resolveGuard('cancel');
 		if (this.overwriteRequest?.sessionId === sessionId) this.resolveOverwrite('cancel');
 		const document = session.document;
-		const finishViewClose = this.#viewRecovery?.prepareViewClose(session, preserveView);
 		session.dispose();
 		const next = { ...this.sessions };
 		delete next[sessionId];
 		this.sessions = next;
-		await finishViewClose?.().catch(() => undefined);
 		if (document.viewIds.size > 0) return;
 		await this.#drafts?.closeDocument(document).catch(() => undefined);
 		this.#io.stopPolling(document.id);
@@ -558,7 +473,8 @@ export class FileSessionRegistry {
 
 	async destroyAll(): Promise<void> {
 		this.#destroyed = true;
-		for (const session of [...this.all]) await this.destroy(session.id, true);
+		this.resolveDraft('cancel');
+		for (const session of [...this.all]) await this.destroy(session.id);
 		this.#io.destroy();
 		this.#drafts?.destroy();
 	}
@@ -591,7 +507,6 @@ export class FileSessionRegistry {
 		identity: CanonicalFileIdentity,
 		key: string,
 		request: FileOpenRequest,
-		viewId?: string,
 	): Promise<FileViewSession | null> {
 		if (this.sessionCount >= FILE_SESSION_SOFT_LIMIT && request.reason === 'user-open') {
 			const choice = await new Promise<FileThresholdChoice>((resolve) => {
@@ -605,9 +520,27 @@ export class FileSessionRegistry {
 		if (this.#destroyed) return null;
 		const existingDocumentId = this.#documentIdByIdentity.get(key);
 		const existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
+		const draft = !existingDocument
+			? this.#drafts?.find(identity.canonicalFileRootPath, identity.normalizedRelativePath)
+			: undefined;
+		let recoveredContent: string | undefined;
+		if (draft) {
+			const choice = await this.#decisionQueue.enqueue(
+				() =>
+					new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
+						this.#openMainInert(() => {
+							this.#draftResolve = resolve;
+							this.draftRequest = { fileName: identity.normalizedRelativePath };
+						});
+					}),
+			);
+			if (choice === 'cancel' || this.#destroyed) return null;
+			if (choice === 'resume') recoveredContent = draft.content;
+			else await this.#drafts?.discard(draft);
+		}
 		const document = existingDocument ?? new FileDocumentState(identity, key);
-		const session = new FileViewSession(document, viewId);
-		if (request.reason !== 'restored-view') this.#enableViewPersistence(session);
+		if (recoveredContent !== undefined) document.pendingRecoveryContent = recoveredContent;
+		const session = new FileViewSession(document);
 		session.rendererMode = resolveFileRendererMode(identity.normalizedRelativePath, request.mode);
 		if (!existingDocument) {
 			document.contentKind = fileContentKind(identity.normalizedRelativePath, session.rendererMode);
@@ -642,14 +575,7 @@ export class FileSessionRegistry {
 				? undefined
 				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode, request.origin));
 			const placement = this.deps.getPlacement();
-			const place =
-				request.reason === 'restored-view' && placement.restoreFileSession
-					? placement.restoreFileSession.bind(placement)
-					: placement.placeFileSession.bind(placement);
-			placementResult = await place(session.id, target, {
-				publish,
-				rollback,
-			});
+			placementResult = await placement.placeFileSession(session.id, target, { publish, rollback });
 		} catch (error) {
 			rollback();
 			session.dispose();
@@ -663,13 +589,10 @@ export class FileSessionRegistry {
 		if (existingDocument) {
 			void this.#io.joinDocument(session);
 		} else {
-			void this.#io.loadInitial(session);
+			void this.#io.loadInitial(session).then(() => this.#completeDraftRecovery(session));
 		}
 		this.#io.startPolling(document.id);
-		if (request.reason !== 'restored-view') {
-			this.#recordNavigation(session);
-			void this.#persistView(session, request.origin).catch(() => undefined);
-		}
+		this.#recordNavigation(session);
 		return session;
 	}
 
@@ -679,74 +602,87 @@ export class FileSessionRegistry {
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return;
 		const decision = await this.#confirmConflict(session, disk);
-		if (decision.choice === 'cancel' || decision.choice === 'accept-disk') return;
-		const revision = decision.snapshot.diskRevision;
-		if (!revision || !canSubmitFileWrite(session)) return;
-		const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
-		const controller = new AbortController();
-		session.saveController = controller;
-		session.document.saveOutcome = 'preparing';
-		session.pendingMutationCount += 1;
-		this.#reconfigureDocumentViews(session.document);
-		let detached = false;
+		if (
+			decision.choice !== 'save-checked' ||
+			!decision.snapshot.diskRevision ||
+			!canSubmitFileWrite(session)
+		)
+			return;
+		this.#applyConflictResolution(session, decision);
+		const controller = this.#beginSave(session.document);
 		try {
-			const outcome = await this.#saves.submit(
+			await this.#saves.submit(
 				session.document,
 				decision.resolvedContent,
-				resolvedBufferVersion,
-				decision.choice === 'overwrite' ? 'overwrite' : 'reject',
 				controller,
-				revision,
+				decision.snapshot.diskRevision,
 			);
-			detached = outcome === 'unknown';
 		} catch (error) {
 			session.saveError = error instanceof Error ? error.message : String(error);
 		} finally {
-			if (!detached) this.#saves.finishAttempt(session.document, controller);
+			this.#finishSave(session.document, controller);
 		}
 	}
 
-	retryRecoveryDiscovery(): Promise<void> {
-		if (!this.#viewRecovery) return Promise.resolve();
-		this.#initialization = this.#viewRecovery.initialize();
-		return this.#initialization;
+	resolveDraft(choice: 'resume' | 'discard' | 'cancel'): void {
+		const resolve = this.#draftResolve;
+		this.#draftResolve = null;
+		this.draftRequest = null;
+		resolve?.(choice);
 	}
 
-	retrySaveSettlement(sessionId: string): Promise<boolean> {
-		const session = this.get(sessionId);
-		return session ? this.#saves.retrySettlement(session.document) : Promise.resolve(false);
+	async retryRecoveryDiscovery(): Promise<void> {
+		await this.#drafts?.initialize();
+		this.#pruneOpenDrafts();
 	}
 
-	resolveRecoveredCopy(
-		sessionId: string,
-		copyId: string,
-		choice: FileRecoveryChoice,
-	): Promise<boolean> {
-		const session = this.get(sessionId);
-		return session && this.#viewRecovery
-			? this.#viewRecovery.resolveCopy(session.document, copyId, choice)
-			: Promise.resolve(false);
+	#pruneOpenDrafts(): void {
+		// Live buffers take precedence over startup backups, except a Resume still awaiting disk.
+		for (const document of Object.values(this.documents)) {
+			if (document.pendingRecoveryContent !== null) continue;
+			this.#drafts?.opened(document.canonicalFileRootPath, document.relativePath);
+			if (document.dirty) void this.#drafts?.settle(document);
+		}
+	}
+
+	#completeDraftRecovery(session: FileViewSession): void {
+		if (
+			session.loadError ||
+			!session.loadedRevision ||
+			session.document.pendingRecoveryContent !== null
+		)
+			return;
+		if (!this.#drafts?.find(session.canonicalFileRootPath, session.relativePath)) return;
+		this.#drafts.opened(session.canonicalFileRootPath, session.relativePath);
+		void this.#drafts.settle(session.document);
 	}
 
 	async clearRecovery(): Promise<boolean> {
-		return this.#viewRecovery?.clear(Object.values(this.documents)) ?? false;
+		if (this.hasUnloadProtectedSessions) return false;
+		const cleared = (await this.#drafts?.clear()) ?? false;
+		if (cleared) {
+			for (const document of Object.values(this.documents)) document.pendingRecoveryContent = null;
+		}
+		return cleared;
 	}
 
-	async exportContent(sessionId: string, recoveredCopyId?: string): Promise<void> {
+	async exportContent(sessionId: string): Promise<void> {
 		const session = this.get(sessionId);
-		if (!session || typeof document === 'undefined') return;
-		const content = recoveredCopyId
-			? session.document.recoveredCopies.find((copy) => copy.id === recoveredCopyId)?.content
-			: session.document.currentContent();
-		if (content === undefined) return;
-		const blob = new Blob([content], {
-			type: 'text/plain;charset=utf-8',
-		});
-		const url = URL.createObjectURL(blob);
+		if (session) this.#download(session.document.currentContent(), session.fileName);
+	}
+
+	exportDraft(documentId: string): void {
+		const draft = this.recoveredDrafts.find((entry) => entry.documentId === documentId);
+		if (draft)
+			this.#download(draft.content, draft.normalizedRelativePath.split('/').pop() ?? 'draft.txt');
+	}
+
+	#download(content: string, fileName: string): void {
+		const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
 		try {
 			const anchor = document.createElement('a');
 			anchor.href = url;
-			anchor.download = session.fileName;
+			anchor.download = fileName;
 			anchor.click();
 		} finally {
 			URL.revokeObjectURL(url);
@@ -756,24 +692,19 @@ export class FileSessionRegistry {
 	async #resolveConflictAndSubmit(
 		session: FileViewSession,
 		controller: AbortController,
-	): Promise<'saved' | 'unknown' | 'cancelled'> {
+	): Promise<boolean> {
 		const disk = await this.#io.loadConflictSnapshot(session);
-		if (!disk) return 'cancelled';
-		session.saveError = null;
+		if (!disk) return false;
 		const decision = await this.#confirmConflict(session, disk, true);
-		if (decision.choice === 'cancel' || decision.choice === 'accept-disk') {
-			return 'cancelled';
-		}
-		if (!decision.snapshot.diskRevision) return 'cancelled';
-		const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
-		return this.#saves.submit(
+		if (decision.choice !== 'save-checked' || !decision.snapshot.diskRevision) return false;
+		this.#applyConflictResolution(session, decision);
+		await this.#saves.submit(
 			session.document,
 			decision.resolvedContent,
-			resolvedBufferVersion,
-			decision.choice === 'overwrite' ? 'overwrite' : 'reject',
 			controller,
 			decision.snapshot.diskRevision,
 		);
+		return true;
 	}
 
 	#confirmConflict(
@@ -799,9 +730,7 @@ export class FileSessionRegistry {
 			});
 			if (
 				this.get(session.id) !== session ||
-				(!allowOwnedMutation && session.document.mutationGuarded) ||
-				session.saveOutcomeUnknown ||
-				session.document.recoveryGuard
+				(!allowOwnedMutation && session.document.mutationGuarded)
 			) {
 				return cancelled();
 			}
@@ -814,13 +743,9 @@ export class FileSessionRegistry {
 			if (
 				decision.choice !== 'cancel' &&
 				(this.get(session.id) !== session ||
-					session.saveOutcomeUnknown ||
-					session.document.recoveryGuard ||
-					session.document.recoveredCopies.length > 0 ||
-					session.document.resolvingRecovery ||
 					(!allowOwnedMutation && session.document.mutationGuarded))
 			) {
-				session.saveError = m.file_recovery_incomplete();
+				session.saveError = m.file_conflict_buffer_changed();
 				return cancelled();
 			}
 			if (
@@ -832,8 +757,6 @@ export class FileSessionRegistry {
 			}
 			if (
 				decision.choice === 'accept-disk' &&
-				!session.saveOutcomeUnknown &&
-				!session.document.recoveryGuard &&
 				decision.snapshot.diskContent !== null &&
 				decision.snapshot.diskRevision
 			) {
@@ -842,20 +765,19 @@ export class FileSessionRegistry {
 					content: decision.snapshot.diskContent,
 					revision: decision.snapshot.diskRevision,
 				});
-				await this.#drafts?.clear(session.document);
+				await this.#drafts?.settle(session.document);
 			}
 			return this.get(session.id) === session ? decision : cancelled();
 		});
 	}
 
-	#applyConflictResolution(session: FileViewSession, decision: FileConflictDecision): number {
+	#applyConflictResolution(session: FileViewSession, decision: FileConflictDecision): void {
 		if (session.document.bufferVersion !== decision.snapshot.localBufferVersion) {
-			return decision.snapshot.localBufferVersion;
+			return;
 		}
 		if (decision.resolvedContent !== session.document.currentContent()) {
 			session.document.applyUserEdit(decision.resolvedContent);
 		}
-		return session.document.bufferVersion;
 	}
 
 	#mostRecentViewId(documentId: string): string | undefined {
@@ -879,11 +801,6 @@ export class FileSessionRegistry {
 		});
 	}
 
-	async persistView(sessionId: string): Promise<void> {
-		const session = this.get(sessionId);
-		if (session) await this.#persistView(session);
-	}
-
 	flushRecovery(): Promise<void> {
 		return this.#drafts?.flush() ?? Promise.resolve();
 	}
@@ -899,56 +816,15 @@ export class FileSessionRegistry {
 		session.markdownMode = 'source';
 		session.rendererMode = 'code';
 		await this.#io.ensureEditorForView(session);
-		await this.#persistView(session);
 		return Boolean(session.editor);
 	}
 
-	async #persistView(session: FileViewSession, origin?: PresentationHostId): Promise<void> {
-		await this.#viewRecovery?.persistView(session, origin);
-	}
-
-	#enableViewPersistence(session: FileViewSession): void {
-		session.onPresentationChanged = () => {
-			void this.#persistView(session).catch(() => undefined);
-		};
-	}
-
-	async #openRestoredView(
-		record: SpaFileViewV1,
-		recovered: FileDocumentState | null,
-		target?: DesktopPlacement,
-	): Promise<FileViewSession | null> {
-		const prepared = await prepareRestoredView(
-			record,
-			recovered,
-			(input) => (this.deps.resolveFileIdentity ?? resolveFileIdentity)(input),
-			fileIdentityKey,
-			target,
-		);
-		const key = fileIdentityKey(
-			prepared.identity.canonicalFileRootPath,
-			prepared.identity.normalizedRelativePath,
-		);
-		if (prepared.document && !this.#documentIdByIdentity.has(key)) {
-			this.#publishDocument(prepared.document);
-		}
-		return this.#creationQueue.enqueue(() =>
-			this.#createAndOpen(prepared.identity, key, prepared.request, record.viewId),
-		);
-	}
-
 	#publishDocument(document: FileDocumentState): void {
-		document.recoveryGuard = this.#recoveryDiscoveryGuarded;
-		document.recoveryDiscoveryError = this.#recoveryDiscoveryError;
 		this.documents = { ...this.documents, [document.id]: document };
 		this.#documentIdByIdentity.set(document.identityKey, document.id);
 		document.onChange(() => {
 			this.#drafts?.schedule(document);
 		});
-	}
-
-	#reconfigureDocumentViews(document: FileDocumentState): void {
-		for (const viewId of document.viewIds) this.get(viewId)?.editor?.reconfigure();
 	}
 
 	#openMainInert<T>(commitOpen: () => T): T {

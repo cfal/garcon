@@ -538,11 +538,6 @@ export class WorkspacePresentationController {
 		if (current) this.focusPresentedSurface(surfaceId);
 	}
 
-	async restoreSurfaceRenderer(surfaceId: string): Promise<void> {
-		const host = this.#presentationHostOf(surfaceId);
-		if (host && this.isSurfacePresented(surfaceId)) await this.#frames.retry(surfaceId, host);
-	}
-
 	presentSurface(surfaceId: string): void {
 		const generation = ++this.#focusIntentGeneration;
 		this.lastFocusedSurfaceId = surfaceId;

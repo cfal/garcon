@@ -55,7 +55,7 @@ describe('Settings', () => {
 			await screen.findByText('Could not clear file recovery data. Try again.');
 			expect(button.hasAttribute('disabled')).toBe(false);
 			await fireEvent.click(button);
-			await screen.findByText('File recovery data cleared.');
+			await screen.findByText('Stored file drafts cleared.');
 			expect(onClearRecovery).toHaveBeenCalledTimes(2);
 		} finally {
 			rendered.unmount();

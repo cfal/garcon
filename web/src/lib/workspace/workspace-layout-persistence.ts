@@ -1,6 +1,6 @@
 import type { WorkspaceLayoutSnapshot } from './surface-types.js';
-import { serializeFileWorkspaceLayout, serializeWorkspaceLayout } from './layout-schema.js';
-import { LOCAL_STORAGE_KEYS, SESSION_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import { serializeWorkspaceLayout } from './layout-schema.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { setLocalStorageWithCacheRecovery } from '$lib/utils/local-storage-cache-recovery.js';
 
 export const WORKSPACE_PERSISTENCE_DELAY_MS = 250;
@@ -9,17 +9,11 @@ interface WorkspaceLayoutPersistenceOptions {
 	windowTarget?: Pick<Window, 'addEventListener' | 'removeEventListener'>;
 	documentTarget?: Pick<Document, 'addEventListener' | 'removeEventListener' | 'visibilityState'>;
 	write?: (key: string, value: string) => void;
-	writeSession?: (key: string, value: string) => void;
-	getBrowserSessionId?: () => string | null;
 	onError?: (error: Error, retry: () => void) => void;
 }
 
 function defaultWrite(key: string, value: string): void {
 	setLocalStorageWithCacheRecovery(globalThis.localStorage, key, value);
-}
-
-function defaultSessionWrite(key: string, value: string): void {
-	globalThis.sessionStorage.setItem(key, value);
 }
 
 export class WorkspaceLayoutPersistence {
@@ -30,8 +24,6 @@ export class WorkspaceLayoutPersistence {
 	#window: Pick<Window, 'addEventListener' | 'removeEventListener'>;
 	#document: Pick<Document, 'addEventListener' | 'removeEventListener' | 'visibilityState'>;
 	#write: (key: string, value: string) => void;
-	#writeSession: (key: string, value: string) => void;
-	#getBrowserSessionId: () => string | null;
 	#onError: ((error: Error, retry: () => void) => void) | undefined;
 	#pageHide = () => this.flush();
 	#visibility = () => {
@@ -42,8 +34,6 @@ export class WorkspaceLayoutPersistence {
 		this.#window = options.windowTarget ?? window;
 		this.#document = options.documentTarget ?? document;
 		this.#write = options.write ?? defaultWrite;
-		this.#writeSession = options.writeSession ?? defaultSessionWrite;
-		this.#getBrowserSessionId = options.getBrowserSessionId ?? (() => null);
 		this.#onError = options.onError;
 		this.#window.addEventListener('pagehide', this.#pageHide);
 		this.#document.addEventListener('visibilitychange', this.#visibility);
@@ -71,13 +61,6 @@ export class WorkspaceLayoutPersistence {
 				LOCAL_STORAGE_KEYS.workspaceLayout,
 				JSON.stringify(serializeWorkspaceLayout(snapshot)),
 			);
-			const browserSessionId = this.#getBrowserSessionId();
-			if (browserSessionId) {
-				this.#writeSession(
-					SESSION_STORAGE_KEYS.workspaceFileLayout,
-					JSON.stringify(serializeFileWorkspaceLayout(snapshot, browserSessionId)),
-				);
-			}
 			this.#pending = null;
 			this.#failed = false;
 			this.#reportedFailure = false;

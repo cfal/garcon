@@ -11,7 +11,6 @@ import {
 	type TransactionSpec,
 } from '@codemirror/state';
 import type {
-	FileDocumentPositionMap,
 	FileDocumentRuntimePort,
 	FileDocumentState,
 } from '$lib/files/documents/file-document-state.svelte.js';
@@ -119,7 +118,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			this.#lastOrigin = adapter.id;
 			adapter.applySourceTransactions([transaction]);
 			this.#broadcast(adapter.id, canonicalTransaction, false);
-			this.#documentChanged(positionMapForTransaction(canonicalTransaction));
+			this.#documentChanged();
 		}
 	}
 
@@ -143,7 +142,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = transaction.state;
 		this.#lastOrigin = null;
 		this.#broadcast('', transaction, false);
-		this.#documentChanged(positionMapForTransaction(transaction));
+		this.#documentChanged();
 	}
 
 	synchronizeDocument(content: string): void {
@@ -156,8 +155,8 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			return;
 		}
 		Object.assign(this.document, metadata);
-		const positionMap = this.#replaceDocument(normalized);
-		this.#documentChanged(positionMap);
+		this.#replaceDocument(normalized);
+		this.#documentChanged();
 	}
 
 	acceptBaseline(content: string): void {
@@ -168,14 +167,14 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	replaceFromDisk(content: string): void {
 		Object.assign(this.document, fileTextMetadata(content));
 		this.document.baseline = content;
-		const positionMap = this.#replaceDocument(normalizeDocument(content));
+		this.#replaceDocument(normalizeDocument(content));
 		this.document.dirty = false;
 		this.document.bufferVersion += 1;
 		this.#baseline = this.#normalizeBaseline();
-		this.document.notifyChanged(positionMap);
+		this.document.notifyChanged();
 	}
 
-	#replaceDocument(content: Text): FileDocumentPositionMap {
+	#replaceDocument(content: Text): void {
 		const previous = this.#canonical.doc;
 		const changes = documentChanges(previous.toString(), content.toString());
 		this.#canonical = this.#createCanonicalState(content);
@@ -189,7 +188,6 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 				filter: false,
 			});
 		}
-		return createPositionMap(previous, this.#canonical.doc, changes, 1);
 	}
 
 	#runHistoryCommand(viewId: string, command: StateCommand): boolean {
@@ -207,7 +205,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = transaction.state;
 		this.#lastOrigin = viewId;
 		this.#broadcast(viewId, transaction, true);
-		this.#documentChanged(positionMapForTransaction(transaction));
+		this.#documentChanged();
 		return true;
 	}
 
@@ -229,10 +227,10 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		}
 	}
 
-	#documentChanged(positionMap: FileDocumentPositionMap): void {
+	#documentChanged(): void {
 		this.document.bufferVersion += 1;
 		this.document.dirty = !this.#matchesBaseline();
-		this.document.notifyChanged(positionMap);
+		this.document.notifyChanged();
 	}
 
 	#matchesBaseline(): boolean {
@@ -283,36 +281,7 @@ function documentChanges(previous: string, next: string): ChangeSet {
 	);
 }
 
-function positionMapForTransaction(transaction: Transaction): FileDocumentPositionMap {
-	return createPositionMap(transaction.startState.doc, transaction.newDoc, transaction.changes, -1);
-}
-
 export function documentPosition(doc: Text, line: number, column: number): number {
 	const lineInfo = doc.line(Math.max(1, Math.min(line, doc.lines)));
 	return Math.min(lineInfo.from + Math.max(0, column - 1), lineInfo.to);
-}
-
-function createPositionMap(
-	previous: Text,
-	mappedDocument: Text,
-	changeSet: ChangeSet,
-	cursorAssociation: -1 | 1,
-): FileDocumentPositionMap {
-	return {
-		previousPosition(line, column) {
-			return documentPosition(previous, line, column);
-		},
-		mapRange(from, to) {
-			const range = EditorSelection.range(
-				Math.max(0, Math.min(from, previous.length)),
-				Math.max(0, Math.min(to, previous.length)),
-			).map(changeSet, cursorAssociation);
-			return { from: range.from, to: range.to };
-		},
-		nextLocation(position) {
-			const mappedPosition = Math.max(0, Math.min(position, mappedDocument.length));
-			const lineInfo = mappedDocument.lineAt(mappedPosition);
-			return { line: lineInfo.number, column: mappedPosition - lineInfo.from + 1 };
-		},
-	};
 }

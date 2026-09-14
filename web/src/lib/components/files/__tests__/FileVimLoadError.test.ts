@@ -10,9 +10,9 @@ it('offers reload rather than a failed-import retry and disables it while work i
 	expect(screen.queryByRole('button', { name: 'Retry Vim mode' })).toBeNull();
 	await fireEvent.click(reload);
 	expect(onReload).not.toHaveBeenCalled();
-	await rendered.rerender({ dirty: false, saveOutcome: 'unknown', showVimError: true, onReload });
+	await rendered.rerender({ dirty: false, saving: true, showVimError: true, onReload });
 	expect(reload.disabled).toBe(true);
-	await rendered.rerender({ dirty: false, saveOutcome: 'idle', showVimError: true, onReload });
+	await rendered.rerender({ dirty: false, saving: false, showVimError: true, onReload });
 	expect(reload.disabled).toBe(false);
 	await fireEvent.click(reload);
 	expect(onReload).toHaveBeenCalledOnce();

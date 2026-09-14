@@ -60,7 +60,6 @@
 	function captureScroll(element: HTMLDivElement): void {
 		session.markdownScrollLeft = element.scrollLeft;
 		session.markdownScrollTop = element.scrollTop;
-		session.notePresentationChanged();
 	}
 
 	function navigateFileLink(link: MarkdownLinkNavigateEvent): boolean {

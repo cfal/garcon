@@ -44,18 +44,13 @@ describe('CodeEditor lifecycle', () => {
 				search.focus();
 				const guards = [
 					(value: boolean) => {
-						documentState.resolvingRecovery = value;
+						documentState.readOnly = value;
 					},
 					(value: boolean) => {
-						documentState.recoveryGuard = value;
+						documentState.mixedLineEndings = value;
 					},
 					(value: boolean) => {
 						documentState.refreshing = value;
-					},
-					(value: boolean) => {
-						documentState.recoveredCopies = value
-							? [{ id: 'copy', content: 'recovered', savedAt: 1, hasUnknownSubmission: false }]
-							: [];
 					},
 				];
 				for (const guard of guards) {
@@ -66,8 +61,8 @@ describe('CodeEditor lifecycle', () => {
 					guard(false);
 					await waitFor(() => expect(session.editorState?.facet(EditorState.readOnly)).toBe(false));
 				}
+				EditorView.findFromDOM(renderer as HTMLElement)!.dispatch({ selection: { anchor: 5 } });
 				bridge.deactivate();
-				controller.restorePresentation({ line: 1, column: 6, endLine: 1, endColumn: 6 }, []);
 				await waitFor(() => expect(rendered.getByText('Ln 1, Col 6')).toBeTruthy());
 				const sibling = new FileViewSession(documentState);
 				const siblingController = new CodeEditorController(sibling, {

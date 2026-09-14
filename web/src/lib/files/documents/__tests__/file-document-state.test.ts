@@ -19,12 +19,12 @@ describe('FileDocumentState', () => {
 		expect(value.bufferVersion).toBe(1);
 	});
 
-	it('guards destructive mutations for unknown and recovery settlement states', () => {
+	it('guards destructive mutations only during live operations', () => {
 		const value = document();
-		value.saveOutcome = 'unknown';
+		value.saving = true;
 		expect(value.mutationGuarded).toBe(true);
-		value.saveOutcome = 'idle';
-		value.recoveryGuard = true;
-		expect(value.mutationGuarded).toBe(true);
+		value.saving = false;
+		value.recoveryError = 'storage unavailable';
+		expect(value.mutationGuarded).toBe(false);
 	});
 });

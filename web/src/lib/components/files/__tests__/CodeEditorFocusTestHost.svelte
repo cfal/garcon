@@ -26,7 +26,7 @@
 	void frameBridge.activate(false);
 	const session = {
 		readOnly: false,
-		document: { mixedLineEndings: false, recoveryGuard: false, recoveredCopies: [] },
+		document: { mixedLineEndings: false },
 		editor: {
 			vim: { error: null, ownsKey: (event: KeyboardEvent) => vimOwnsKey(event) },
 			attach: () => 1,

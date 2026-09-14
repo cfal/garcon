@@ -29,28 +29,6 @@ describe('WorkspaceLayoutPersistence', () => {
 		persistence.destroy();
 	});
 
-	it('persists a file-aware topology for the owning browser session', () => {
-		vi.useFakeTimers();
-		const write = vi.fn();
-		const writeSession = vi.fn();
-		const persistence = new WorkspaceLayoutPersistence({
-			write,
-			writeSession,
-			getBrowserSessionId: () => 'browser-session',
-		});
-		const snapshot = canonicalWorkspaceSnapshot();
-
-		persistence.schedule(snapshot);
-		vi.advanceTimersByTime(WORKSPACE_PERSISTENCE_DELAY_MS);
-
-		expect(writeSession).toHaveBeenCalledOnce();
-		expect(JSON.parse(writeSession.mock.calls[0][1])).toMatchObject({
-			version: 1,
-			browserSessionId: 'browser-session',
-		});
-		persistence.destroy();
-	});
-
 	it('flushes on pagehide and hidden visibility, then removes listeners', () => {
 		vi.useFakeTimers();
 		const write = vi.fn();
@@ -59,13 +37,19 @@ describe('WorkspaceLayoutPersistence', () => {
 		window.dispatchEvent(new PageTransitionEvent('pagehide'));
 		expect(write).toHaveBeenCalledOnce();
 
-		persistence.schedule({ ...canonicalWorkspaceSnapshot(), unplacedTerminalIds: ['terminal-700'] });
+		persistence.schedule({
+			...canonicalWorkspaceSnapshot(),
+			unplacedTerminalIds: ['terminal-700'],
+		});
 		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
 		document.dispatchEvent(new Event('visibilitychange'));
 		expect(write).toHaveBeenCalledTimes(2);
 
 		persistence.destroy();
-		persistence.schedule({ ...canonicalWorkspaceSnapshot(), unplacedTerminalIds: ['terminal-800'] });
+		persistence.schedule({
+			...canonicalWorkspaceSnapshot(),
+			unplacedTerminalIds: ['terminal-800'],
+		});
 		window.dispatchEvent(new PageTransitionEvent('pagehide'));
 		expect(write).toHaveBeenCalledTimes(2);
 	});
@@ -84,14 +68,19 @@ describe('WorkspaceLayoutPersistence', () => {
 		expect(persistence.hasError).toBe(true);
 		expect(onError).toHaveBeenCalledOnce();
 
-		persistence.schedule({ ...canonicalWorkspaceSnapshot(), unplacedTerminalIds: ['terminal-640'] });
+		persistence.schedule({
+			...canonicalWorkspaceSnapshot(),
+			unplacedTerminalIds: ['terminal-640'],
+		});
 		vi.advanceTimersByTime(WORKSPACE_PERSISTENCE_DELAY_MS * 2);
 		expect(write).toHaveBeenCalledOnce();
 
 		shouldFail = false;
 		expect(persistence.retry()).toBe(true);
 		expect(persistence.hasError).toBe(false);
-		expect(JSON.parse(write.mock.calls.at(-1)?.[1] ?? '{}').unplacedTerminalIds).toEqual(['terminal-640']);
+		expect(JSON.parse(write.mock.calls.at(-1)?.[1] ?? '{}').unplacedTerminalIds).toEqual([
+			'terminal-640',
+		]);
 		persistence.destroy();
 	});
 });

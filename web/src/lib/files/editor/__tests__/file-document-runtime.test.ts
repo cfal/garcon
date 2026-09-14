@@ -1,7 +1,6 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it, vi } from 'vitest';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
-import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import {
 	FileDocumentRuntime,
 	type FileDocumentViewAdapter,
@@ -250,47 +249,5 @@ describe('FileDocumentRuntime', () => {
 		runtime.replaceFromDisk(`${prefix}abc`);
 
 		expect(atStart.state().selection.main.head).toBe(prefix.length);
-	});
-
-	it('maps a deferred cursor with the same association as an initialized disk replacement', () => {
-		const value = document();
-		const initial = 'one\ntwo';
-		const runtime = new FileDocumentRuntime(value, initial);
-		const preview = new FileViewSession(value, 'preview');
-		preview.pendingSourcePresentation = {
-			selection: { line: 2, column: 1, endLine: 2, endColumn: 1 },
-			folds: [],
-		};
-
-		runtime.replaceFromDisk('one\nzero\ntwo');
-
-		expect(preview.pendingSourcePresentation?.selection).toEqual({
-			line: 3,
-			column: 1,
-			endLine: 3,
-			endColumn: 1,
-		});
-		preview.dispose();
-	});
-
-	it('maps a deferred cursor with the same association as an initialized synchronization', () => {
-		const value = document();
-		const initial = 'one\ntwo';
-		new FileDocumentRuntime(value, initial);
-		const preview = new FileViewSession(value, 'preview');
-		preview.pendingSourcePresentation = {
-			selection: { line: 2, column: 1, endLine: 2, endColumn: 1 },
-			folds: [],
-		};
-
-		value.content = 'one\nzero\ntwo';
-
-		expect(preview.pendingSourcePresentation?.selection).toEqual({
-			line: 3,
-			column: 1,
-			endLine: 3,
-			endColumn: 1,
-		});
-		preview.dispose();
 	});
 });

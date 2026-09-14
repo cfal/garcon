@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
+import { foldEffect, foldedRanges } from '@codemirror/language';
 import { history } from '@codemirror/commands';
 import { SearchQuery } from '@codemirror/search';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
-import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
@@ -66,63 +66,28 @@ describe('CodeEditorController', () => {
 			const { session, controller } = createController();
 			const initial = 'aX-middle-Yz';
 			session.document.editorRuntime!.replaceFromDisk(initial);
-			if (attached) controller.attach(parent());
-			controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, [
-				{ from: 3, to: 9 },
-			]);
-			expect(controller.folds()).toEqual([{ from: 3, to: 9 }]);
+			const host = parent();
+			controller.attach(host);
+			const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+			view.dispatch({ selection: { anchor: 0 }, effects: foldEffect.of({ from: 3, to: 9 }) });
+			if (!attached) controller.detach();
+			const folds = () => {
+				const ranges: { from: number; to: number }[] = [];
+				foldedRanges(session.editorState!).between(
+					0,
+					session.editorState!.doc.length,
+					(from, to) => {
+						ranges.push({ from, to });
+					},
+				);
+				return ranges;
+			};
+			expect(folds()).toEqual([{ from: 3, to: 9 }]);
 			session.document.editorRuntime!.replaceFromDisk('aXX-middle-YYz');
-			expect(controller.folds()).toEqual([{ from: 4, to: 10 }]);
+			expect(folds()).toEqual([{ from: 4, to: 10 }]);
 			expect(session.editorState?.selection.main.head).toBe(0);
 			if (!attached) controller.attach(parent());
 			expect(session.editorState?.selection.main.head).toBe(0);
-		},
-	);
-
-	it.each([false, true])(
-		'drops stale restored folds before shared edits (attached: %s)',
-		(attached) => {
-			const { session, controller } = createController();
-			session.document.editorRuntime!.replaceFromDisk('short');
-			const host = parent();
-			if (attached) controller.attach(host);
-			controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, [
-				{ from: 1, to: 3 },
-				{ from: 2, to: 200 },
-				{ from: -1, to: 2 },
-				{ from: 2, to: 2 },
-				{ from: 3, to: 2 },
-				{ from: 1.5, to: 3 },
-				{ from: 0, to: NaN },
-			]);
-			expect(controller.folds()).toEqual([{ from: 1, to: 3 }]);
-			if (!attached) controller.attach(host);
-			const sibling = new FileViewSession(session.document);
-			const siblingController = new CodeEditorController(sibling, {
-				editorThemeId: 'standard-light',
-				wordWrap: false,
-				showLineNumbers: true,
-				fontSize: 12,
-			});
-			controllers.push(siblingController);
-			const siblingHost = parent();
-			siblingController.attach(siblingHost);
-			const view = EditorView.findFromDOM(siblingHost.querySelector<HTMLElement>('.cm-editor')!)!;
-			const changed = vi.fn();
-			const stop = session.document.onChange(changed);
-			expect(() =>
-				view.dispatch({ changes: { from: 5, insert: '!' }, userEvent: 'input.type' }),
-			).not.toThrow();
-			expect(session.document.currentContent()).toBe('short!');
-			expect(session.dirty).toBe(true);
-			expect(changed).toHaveBeenCalledOnce();
-			expect(session.editorState?.doc.toString()).toBe('short!');
-			expect(view.state.doc.toString()).toBe('short!');
-			expect(controller.run('undo')).toBe(true);
-			expect(view.state.doc.toString()).toBe('short');
-			expect(session.dirty).toBe(false);
-			stop();
-			sibling.dispose();
 		},
 	);
 
@@ -446,7 +411,6 @@ describe('CodeEditorController', () => {
 				bubbles: true,
 				cancelable: true,
 			}),
-			'editor',
 		);
 
 		// Direct dispatch behavior is covered by CodeMirror; the controller keeps
@@ -716,21 +680,5 @@ describe('CodeEditorController', () => {
 
 		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(false);
 		controller.detach(secondLease);
-	});
-
-	it('applies restored scroll after the attached editor is measured', async () => {
-		const { session, controller } = createController();
-		const host = parent();
-		const lease = controller.attach(host);
-		session.textScrollLeft = 12;
-		session.textScrollTop = 80;
-
-		controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, []);
-		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-		const scroller = host.querySelector<HTMLElement>('.cm-scroller');
-		expect(scroller?.scrollLeft).toBe(12);
-		expect(scroller?.scrollTop).toBe(80);
-		controller.detach(lease);
 	});
 });

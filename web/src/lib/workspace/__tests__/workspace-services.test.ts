@@ -17,14 +17,11 @@ import type { ProjectTarget } from '$shared/project-resolution';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
-import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
+import { windowNodeById } from '../window-tree.js';
 import { FILE_SHORTCUT_COMMANDS } from '../workspace-shortcuts.js';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
-import { FileViewRecovery } from '$lib/files/persistence/file-view-recovery.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
-import * as draftRepositories from '$lib/files/persistence/file-draft-repository.js';
-import { FILE_RECOVERY_DEPLOYMENT_ID } from '$lib/files/persistence/file-recovery-identity.js';
 import {
 	MIN_WINDOW_WIDTH_PX,
 	WORKSPACE_RESIZE_BOUND_SAFETY_PX,
@@ -104,7 +101,6 @@ function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 
 function assembleWorkspaceServices(
 	localSettings: LocalSettingsStore,
-	fileWorkspaceLayoutRaw: string | null = null,
 	clientId: string | null = 'test-client',
 ): {
 	services: WorkspaceServices;
@@ -137,9 +133,8 @@ function assembleWorkspaceServices(
 		onTerminalLauncherDismissed: () => {},
 		isTerminalLauncherDismissed: () => false,
 		workspaceLayoutRaw: null,
-		fileWorkspaceLayoutRaw,
 	});
-	if (clientId) void services.files.initializeRecovery('test-user', clientId);
+	if (clientId) void services.files.initializeRecovery('test-user');
 	return { services, ghCapability, chatSessions };
 }
 
@@ -182,10 +177,7 @@ describe('createWorkspaceServices', () => {
 			{ readOnly: true },
 			{ mixedLineEndings: true },
 			{ loadedRevision: null },
-			{ recoveryGuard: true },
-			{ pendingMutationCount: 1 },
-			{ saveOutcome: 'saving' },
-			{ saveOutcome: 'unknown' },
+			{ saving: true },
 		] satisfies Partial<FileDocumentState>[]) {
 			const original = Object.fromEntries(
 				Object.keys(guard).map((key) => [key, Reflect.get(session.document, key)]),
@@ -226,13 +218,6 @@ describe('createWorkspaceServices', () => {
 				{ readOnly: true },
 				{ refreshing: true },
 				{ mixedLineEndings: true },
-				{ recoveryGuard: true },
-				{ resolvingRecovery: true },
-				{
-					recoveredCopies: [
-						{ id: 'copy', content: 'recovered', savedAt: 1, hasUnknownSubmission: false },
-					],
-				},
 			] satisfies Partial<FileDocumentState>[]) {
 				const original = Object.fromEntries(
 					Object.keys(guard).map((key) => [key, Reflect.get(session.document, key)]),
@@ -256,8 +241,8 @@ describe('createWorkspaceServices', () => {
 				Object.assign(session.document, original);
 			}
 			expect(run).not.toHaveBeenCalled();
-			for (const saveOutcome of ['idle', 'saving', 'unknown'] as const) {
-				session.document.saveOutcome = saveOutcome;
+			for (const saving of [false, true]) {
+				session.document.saving = saving;
 				for (const command of commands) expect(command.isEnabled(context), command.id).toBe(true);
 			}
 		} finally {
@@ -322,162 +307,6 @@ describe('createWorkspaceServices', () => {
 		localSettings.destroy();
 	});
 
-	it('routes new-window file opens even when background view persistence rejects', async () => {
-		localStorage.clear();
-		rootLocalSettings = createLocalSettingsStore();
-		rootLocalSettings.set('textEditorOpenPlacement', 'new-window');
-		({ services } = assembleWorkspaceServices(rootLocalSettings));
-		const persist = vi
-			.spyOn(FileViewRecovery.prototype, 'persistView')
-			.mockRejectedValue(new Error('View storage unavailable'));
-
-		const opening = services.files.open({
-			fileRootPath: '/workspace',
-			relativePath: 'from-main.ts',
-			mode: 'code',
-			origin: 'window-main',
-			reason: 'user-open',
-		});
-		await vi.waitFor(() => {
-			const snapshot = services!.layout.snapshot;
-			const fileSurface = Object.keys(snapshot.surfaces).find((id) => id.startsWith('file:'));
-			expect(fileSurface).toBeDefined();
-			const windowId = windowIdOfSurface(snapshot.desktopRoot, fileSurface!);
-			expect(windowId).not.toBeNull();
-			expect(windowId).not.toBe('window-main');
-		});
-		const snapshot = services.layout.snapshot;
-		const placedSurfaceId = Object.keys(snapshot.surfaces).find((id) => id.startsWith('file:'))!;
-		const windowId = windowIdOfSurface(snapshot.desktopRoot, placedSurfaceId)!;
-		services.surfaceFrames.register(placedSurfaceId, windowId, {
-			element: document.createElement('div'),
-			attachRetainedRenderer: () => {},
-			focusPrimary: () => {},
-		});
-		const opened = await opening;
-		if (!opened) throw new Error('Expected file to open');
-		expect(persist).toHaveBeenCalledWith(opened, 'window-main');
-		const context = { viewId: opened.id, surfaceId: placedSurfaceId };
-		expect(services.commands.isEnabled('editor.find', context)).toBe(false);
-		expect(services.commands.isEnabled('unknown-command', context)).toBe(false);
-		const sideCommand = services.commands
-			.available(context)
-			.find((command) => command.id === 'file.open-to-side');
-		expect(sideCommand?.isEnabled(context)).toBe(true);
-		const openToSide = vi.spyOn(services.files, 'openToSide').mockResolvedValue(null);
-		expect(await services.commands.execute('file.open-to-side', context)).toBe(true);
-		expect(openToSide).toHaveBeenCalledWith(opened.id, windowId);
-		expect(sideCommand?.isEnabled({ viewId: opened.id, surfaceId: 'unplaced-dialog' })).toBe(false);
-		openToSide.mockRestore();
-		await vi.waitFor(() => {
-			expect(windowNodeById(services!.layout.snapshot.desktopRoot, windowId)?.tabs.activeId).toBe(
-				placedSurfaceId,
-			);
-		});
-	});
-
-	it('persists changed file placement without polling or writing for unrelated layout changes', async () => {
-		localStorage.clear();
-		const repository = draftRepositories.createMemoryFileDraftRepository();
-		vi.spyOn(draftRepositories, 'createFileDraftRepository').mockReturnValue(repository);
-		const putView = vi.spyOn(repository, 'putView');
-		rootLocalSettings = createLocalSettingsStore();
-		({ services } = assembleWorkspaceServices(rootLocalSettings));
-		const workspace = services;
-		workspace.hostGeometry.size = { width: 2000, height: 900 };
-		await workspace.files.ready();
-		const waitForFrame = workspace.surfaceFrames.waitFor.bind(workspace.surfaceFrames);
-		vi.spyOn(workspace.surfaceFrames, 'waitFor').mockImplementation((expectation) => {
-			const pending = waitForFrame(expectation);
-			workspace.surfaceFrames.register(expectation.surfaceId, expectation.host, {
-				element: document.createElement('div'),
-				attachRetainedRenderer: () => {},
-				focusPrimary: () => {},
-			});
-			return pending;
-		});
-		const opened = await workspace.files.open({
-			fileRootPath: '/workspace',
-			relativePath: 'layout.ts',
-			mode: 'code',
-			origin: 'window-main',
-			reason: 'user-open',
-		});
-		if (!opened) throw new Error('Expected file to open');
-		vi.useFakeTimers();
-		await vi.advanceTimersByTimeAsync(250);
-		putView.mockClear();
-		const visibilityChanged = vi.spyOn(workspace.files, 'viewVisibilityChanged');
-
-		const surfaceId = `file:${opened.id}`;
-		await workspace.coordinator.moveTabToNewWindow(surfaceId, DEFAULT_WINDOW, 'right');
-		const destination = windowIdOfSurface(workspace.layout.snapshot.desktopRoot, surfaceId);
-		expect(destination).not.toBeNull();
-		expect(destination).not.toBe(DEFAULT_WINDOW);
-		await vi.advanceTimersByTimeAsync(100);
-		const partition = workspace.layout.snapshot.desktopRoot;
-		if (partition.type !== 'partition') throw new Error('Expected split workspace');
-		await workspace.coordinator.setPartitionRatio(partition.id, 0.6);
-		await vi.advanceTimersByTimeAsync(149);
-		expect(putView).not.toHaveBeenCalled();
-		await vi.advanceTimersByTimeAsync(1);
-		expect(putView).toHaveBeenCalledOnce();
-		expect(putView).toHaveBeenCalledWith(
-			expect.objectContaining({ viewId: opened.id, placement: destination }),
-		);
-		await expect(
-			repository.getViews('test-user', FILE_RECOVERY_DEPLOYMENT_ID, 'test-client'),
-		).resolves.toEqual([expect.objectContaining({ viewId: opened.id, placement: destination })]);
-		putView.mockClear();
-		visibilityChanged.mockClear();
-		await workspace.coordinator.setPartitionRatio(partition.id, 0.7);
-		await vi.advanceTimersByTimeAsync(250);
-		expect(putView).not.toHaveBeenCalled();
-		expect(visibilityChanged).not.toHaveBeenCalled();
-	});
-
-	it('restores the browser-owned file window topology before file recovery', () => {
-		rootLocalSettings = createLocalSettingsStore();
-		const raw = JSON.stringify({
-			version: 1,
-			browserSessionId: 'test-client',
-			root: {
-				type: 'partition',
-				id: 'partition-file-side',
-				direction: 'horizontal',
-				ratio: 0.63,
-				children: [
-					{
-						type: 'window',
-						id: 'window-main',
-						order: [{ type: 'chat', chatId: null }],
-						active: { type: 'chat', chatId: null },
-						mru: [{ type: 'chat', chatId: null }],
-					},
-					{
-						type: 'window',
-						id: 'window-side',
-						order: [{ type: 'file', viewId: 'restored-view' }],
-						active: { type: 'file', viewId: 'restored-view' },
-						mru: [{ type: 'file', viewId: 'restored-view' }],
-					},
-				],
-			},
-			unplacedTerminalIds: [],
-		});
-
-		({ services } = assembleWorkspaceServices(rootLocalSettings, raw));
-
-		expect(services.layout.snapshot.desktopRoot).toMatchObject({
-			type: 'partition',
-			id: 'partition-file-side',
-			ratio: 0.63,
-		});
-		expect(windowIdOfSurface(services.layout.snapshot.desktopRoot, 'file:restored-view')).toBe(
-			'window-side',
-		);
-	});
-
 	it('assembles the coordinator and keeps root-owned domain bindings reactive', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		rootLocalSettings.showQuickCommitTray = false;
@@ -519,7 +348,7 @@ describe('createWorkspaceServices', () => {
 		});
 		try {
 			rootLocalSettings = createLocalSettingsStore();
-			({ services } = assembleWorkspaceServices(rootLocalSettings, null, null));
+			({ services } = assembleWorkspaceServices(rootLocalSettings, null));
 			expect(services.files).toBeDefined();
 			expect(unavailable).not.toHaveBeenCalled();
 		} finally {

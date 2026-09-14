@@ -33,10 +33,8 @@ import {
 import {
 	foldAll,
 	foldCode,
-	foldEffect,
 	foldGutter,
 	foldKeymap,
-	foldedRanges,
 	indentOnInput,
 	syntaxHighlighting,
 	defaultHighlightStyle,
@@ -231,7 +229,6 @@ export class CodeEditorController {
 			},
 		};
 		this.#unregisterRuntime = this.#runtime.register(this.#adapter);
-		this.restorePendingPresentation();
 	}
 
 	get isAttached(): boolean {
@@ -243,7 +240,7 @@ export class CodeEditorController {
 	}
 
 	get status(): EditorStatusSnapshot {
-		this.#statusVersion;
+		void this.#statusVersion;
 		const current = this.#view?.state ?? this.session.editorState;
 		const selection = current?.selection.main;
 		const line = current && selection ? current.doc.lineAt(selection.head) : null;
@@ -376,55 +373,6 @@ export class CodeEditorController {
 		};
 	}
 
-	folds(): readonly { from: number; to: number }[] {
-		const current = this.#view?.state ?? this.session.editorState;
-		if (!current) return [];
-		const ranges: { from: number; to: number }[] = [];
-		foldedRanges(current).between(0, current.doc.length, (from, to) => {
-			ranges.push({ from, to });
-		});
-		return ranges;
-	}
-
-	restorePresentation(
-		selection: { line: number; column: number; endLine: number; endColumn: number },
-		folds: readonly { from: number; to: number }[],
-	): void {
-		const current = this.#view?.state ?? this.session.editorState;
-		if (!current) return;
-		const transaction = current.update({
-			selection: EditorSelection.range(
-				documentPosition(current.doc, selection.line, selection.column),
-				documentPosition(current.doc, selection.endLine, selection.endColumn),
-			),
-			effects: folds
-				.filter(
-					({ from, to }) =>
-						Number.isInteger(from) &&
-						Number.isInteger(to) &&
-						0 <= from &&
-						from < to &&
-						to <= current.doc.length,
-				)
-				.map((range) => foldEffect.of(range)),
-		});
-		const view = this.#view;
-		if (view) view.update([transaction]);
-		this.session.editorState = transaction.state;
-		if (!view) this.#statusVersion += 1;
-		this.session.pendingSourcePresentation = null;
-		const scrollLeft = this.session.textScrollLeft;
-		const scrollTop = this.session.textScrollTop;
-		this.#restoreScrollAfterFrame(view, scrollLeft, scrollTop);
-	}
-
-	restorePendingPresentation(): boolean {
-		const presentation = this.session.pendingSourcePresentation;
-		if (!presentation) return false;
-		this.restorePresentation(presentation.selection, presentation.folds);
-		return true;
-	}
-
 	run(command: FileEditorCommand): boolean {
 		const view = this.#view;
 		if (!view || !this.canRun(command)) return false;
@@ -444,12 +392,7 @@ export class CodeEditorController {
 
 	get #readOnly(): boolean {
 		return (
-			this.session.readOnly ||
-			this.session.refreshing ||
-			this.session.document.recoveryGuard ||
-			this.session.document.resolvingRecovery ||
-			this.session.document.recoveredCopies.length > 0 ||
-			this.session.document.mixedLineEndings
+			this.session.readOnly || this.session.refreshing || this.session.document.mixedLineEndings
 		);
 	}
 
@@ -600,7 +543,6 @@ export class CodeEditorController {
 		this.session.editorScrollSnapshot = view.scrollSnapshot();
 		this.session.textScrollLeft = view.scrollDOM.scrollLeft;
 		this.session.textScrollTop = view.scrollDOM.scrollTop;
-		this.session.notePresentationChanged();
 	}
 
 	#stateWithCanonicalDocument(current: EditorState): EditorState {

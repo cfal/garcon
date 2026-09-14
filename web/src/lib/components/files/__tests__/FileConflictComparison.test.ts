@@ -26,12 +26,11 @@ describe('FileConflictComparison', () => {
 			onCancel,
 			onAcceptDisk: vi.fn(),
 			onSaveChecked: vi.fn(),
-			onOverwrite: vi.fn(),
 		});
 
 		expect(await screen.findByText(m.file_conflict_failed())).toBeTruthy();
 		expect(screen.queryByText(failure.message)).toBeNull();
-		for (const name of ['Accept disk', 'Save against displayed disk', 'Replace disk']) {
+		for (const name of ['Accept disk', 'Save against displayed disk']) {
 			expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
 		}
 		await fireEvent.click(screen.getByRole('button', { name: m.common_cancel() }));
@@ -50,7 +49,6 @@ describe('FileConflictComparison', () => {
 				onCancel: vi.fn(),
 				onAcceptDisk: vi.fn(),
 				onSaveChecked,
-				onOverwrite: vi.fn(),
 			};
 			const rendered = render(FileConflictComparison, props);
 			const resolutionEditor = () => {
@@ -82,7 +80,6 @@ describe('FileConflictComparison', () => {
 
 	it('exposes complete tab semantics and explicit resolution actions', async () => {
 		const onSaveChecked = vi.fn();
-		const onOverwrite = vi.fn();
 		render(FileConflictComparison, {
 			baseContent: 'base',
 			localContent: 'local',
@@ -91,7 +88,6 @@ describe('FileConflictComparison', () => {
 			onCancel: vi.fn(),
 			onAcceptDisk: vi.fn(),
 			onSaveChecked,
-			onOverwrite,
 		});
 
 		const tabs = screen.getAllByRole('tab');
@@ -108,16 +104,16 @@ describe('FileConflictComparison', () => {
 		expect(document.activeElement).toBe(tabs[1]);
 		await vi.waitFor(() =>
 			expect(
-				(screen.getByRole('button', { name: 'Replace disk' }) as HTMLButtonElement).disabled,
+				(screen.getByRole('button', { name: 'Save against displayed disk' }) as HTMLButtonElement)
+					.disabled,
 			).toBe(false),
 		);
 		expect(screen.getByRole('group', { name: m.file_conflict_comparison() })).toBeTruthy();
 		expect(document.querySelectorAll('[aria-label="Comparison snapshot"]')).toHaveLength(1);
 		expect(document.querySelectorAll('[aria-label="Resolution copy"]')).toHaveLength(1);
 		await fireEvent.click(screen.getByRole('button', { name: 'Save against displayed disk' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Replace disk' }));
+		expect(screen.queryByRole('button', { name: 'Replace disk' })).toBeNull();
 		expect(onSaveChecked).toHaveBeenCalledWith('local');
-		expect(onOverwrite).toHaveBeenCalledWith('local');
 	});
 
 	it('disables every disk-mutating action when the disk snapshot is unavailable', () => {
@@ -129,7 +125,6 @@ describe('FileConflictComparison', () => {
 			onCancel: vi.fn(),
 			onAcceptDisk: vi.fn(),
 			onSaveChecked: vi.fn(),
-			onOverwrite: vi.fn(),
 		});
 
 		expect(
@@ -138,9 +133,6 @@ describe('FileConflictComparison', () => {
 		expect(
 			(screen.getByRole('button', { name: 'Save against displayed disk' }) as HTMLButtonElement)
 				.disabled,
-		).toBe(true);
-		expect(
-			(screen.getByRole('button', { name: 'Replace disk' }) as HTMLButtonElement).disabled,
 		).toBe(true);
 	});
 });

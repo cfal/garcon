@@ -77,23 +77,13 @@ export class FileDocumentIoCoordinator {
 		this.#polling.visibilityChanged(documentId);
 	}
 
-	async waitForDocumentLoad(documentId: string): Promise<void> {
-		await this.#documentLoads.get(documentId);
-	}
-
-	async reconcileDocument(documentId: string): Promise<void> {
-		await this.waitForDocumentLoad(documentId);
-		await this.#checkDocumentFreshness(documentId);
-	}
-
 	destroy(): void {
 		this.#polling.destroy();
 	}
 
 	async loadInitial(session: FileViewSession): Promise<void> {
 		const document = session.document;
-		if (document.dirty || document.saveOutcomeUnknown || document.recoveredCopies.length > 0)
-			return;
+		if (document.dirty) return;
 		const existing = this.#documentLoads.get(document.id);
 		if (existing) {
 			await existing;
@@ -118,6 +108,11 @@ export class FileDocumentIoCoordinator {
 				]);
 				if (!this.#isCurrentInitialLoad(document, controller)) return;
 				this.commitLoadedContent(session, loaded);
+				if (document.pendingRecoveryContent !== null) {
+					document.applyUserEdit(document.pendingRecoveryContent);
+					document.pendingRecoveryContent = null;
+					document.recovered = document.dirty;
+				}
 				if (runtime && this.options.getSession(session.id) === session && !session.editor) {
 					session.editor = new runtime.CodeEditorController(
 						session,
@@ -194,7 +189,6 @@ export class FileDocumentIoCoordinator {
 		const session = this.options.getSession(sessionId);
 		if (
 			!session ||
-			session.saveOutcomeUnknown ||
 			session.loading ||
 			session.refreshing ||
 			session.saving ||
@@ -302,22 +296,11 @@ export class FileDocumentIoCoordinator {
 				session.document.missing = false;
 				return;
 			}
-			if (
-				!session.dirty &&
-				!session.saving &&
-				!session.saveOutcomeUnknown &&
-				session.document.recoveredCopies.length === 0 &&
-				!session.document.resolvingRecovery &&
-				session.contentKind !== 'image'
-			) {
+			if (!session.dirty && !session.saving && session.contentKind !== 'image') {
 				const bufferVersion = session.document.bufferVersion;
 				const loaded = await this.#readLatest(session, controller.signal);
 				if (!this.#isCurrentFreshness(session, controller, generation, loadedRevision)) return;
-				if (
-					session.document.bufferVersion !== bufferVersion ||
-					session.dirty ||
-					session.document.recoveredCopies.length > 0
-				) {
+				if (session.document.bufferVersion !== bufferVersion || session.dirty) {
 					session.document.diskContent = loaded.kind === 'text' ? loaded.content : null;
 					session.document.diskRevision = loaded.revision;
 					session.isExternallyStale = true;
