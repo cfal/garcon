@@ -5,11 +5,12 @@ export interface FileTextMetadata {
 
 export function fileTextMetadata(content: string): FileTextMetadata {
 	const withoutCrLf = content.replaceAll('\r\n', '');
-	const lineSeparator = content.includes('\r\n')
-		? '\r\n'
-		: content.includes('\r')
-			? '\r'
-			: '\n';
+	let lineSeparator: FileTextMetadata['lineSeparator'] = '\n';
+	if (content.includes('\r\n')) {
+		lineSeparator = '\r\n';
+	} else if (content.includes('\r')) {
+		lineSeparator = '\r';
+	}
 	const kinds =
 		Number(content.includes('\r\n')) +
 		Number(withoutCrLf.includes('\r')) +

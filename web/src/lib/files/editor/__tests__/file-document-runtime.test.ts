@@ -1,5 +1,5 @@
 import { EditorState } from '@codemirror/state';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import {
@@ -36,6 +36,33 @@ function adapter(id: string, doc = 'abc', anchor = doc.length, readOnly = false)
 }
 
 describe('FileDocumentRuntime', () => {
+	it('serializes each canonical change only once', () => {
+		const value = document();
+		const runtime = new FileDocumentRuntime(value, 'abc');
+		const content = vi.spyOn(runtime, 'content');
+
+		runtime.applyUserEdit('abcd');
+
+		expect(content).toHaveBeenCalledOnce();
+		expect(value.dirty).toBe(true);
+		expect(value.currentContent()).toBe('abcd');
+		content.mockRestore();
+	});
+
+	it.each(['', 'a\nb\n', 'a\rb\r', 'a\r\nb\r\n', 'a\rb\r\nc\n'])(
+		'normalizes %j with the same line boundaries as CodeMirror',
+		(content) => {
+			const runtime = new FileDocumentRuntime(document(), content);
+			const expected = EditorState.create({ doc: content }).doc;
+
+			expect(runtime.canonicalState.doc.eq(expected)).toBe(true);
+			runtime.replaceFromDisk(`prefix\r\n${content}`);
+			expect(
+				runtime.canonicalState.doc.eq(EditorState.create({ doc: `prefix\r\n${content}` }).doc),
+			).toBe(true);
+		},
+	);
+
 	it('converges alternating view edits and isolates their undo groups', () => {
 		const value = document();
 		const runtime = new FileDocumentRuntime(value, 'abc');

@@ -4,13 +4,11 @@ import {
 	ChangeSet,
 	EditorSelection,
 	EditorState,
+	Text,
 	Transaction,
-	type Extension,
-	type Text,
 	type StateCommand,
 	type TransactionSpec,
 } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
 import type {
 	FileDocumentPositionMap,
 	FileDocumentRuntimePort,
@@ -18,9 +16,9 @@ import type {
 } from '$lib/files/documents/file-document-state.svelte.js';
 import { fileTextMetadata } from '$lib/files/documents/file-text-metadata.js';
 
-export const mirroredDocumentChange = Annotation.define<string>();
+const mirroredDocumentChange = Annotation.define<string>();
 
-interface DocumentViewAdapter {
+export interface FileDocumentViewAdapter {
 	readonly id: string;
 	currentState(): EditorState;
 	applySourceTransactions(transactions: readonly Transaction[]): void;
@@ -29,14 +27,14 @@ interface DocumentViewAdapter {
 
 export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	#canonical: EditorState;
-	readonly #views = new Map<string, DocumentViewAdapter>();
+	readonly #views = new Map<string, FileDocumentViewAdapter>();
 	#lastOrigin: string | null = null;
 
 	constructor(
 		readonly document: FileDocumentState,
 		content: string,
 	) {
-		this.#canonical = this.#createCanonicalState(normalizeDocument(content).toString());
+		this.#canonical = this.#createCanonicalState(normalizeDocument(content));
 		Object.assign(document, fileTextMetadata(content));
 		document.setStoredContent(this.#serializeDocument());
 		document.editorRuntime = this;
@@ -50,14 +48,14 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		return this.#serializeDocument();
 	}
 
-	register(adapter: DocumentViewAdapter): () => void {
+	register(adapter: FileDocumentViewAdapter): () => void {
 		this.#views.set(adapter.id, adapter);
 		return () => {
 			if (this.#views.get(adapter.id) === adapter) this.#views.delete(adapter.id);
 		};
 	}
 
-	dispatchSource(adapter: DocumentViewAdapter, transactions: readonly Transaction[]): void {
+	dispatchSource(adapter: FileDocumentViewAdapter, transactions: readonly Transaction[]): void {
 		if (this.#views.get(adapter.id) !== adapter) return;
 		for (const transaction of transactions) {
 			if (transaction.startState !== adapter.currentState()) return;
@@ -68,7 +66,10 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			}
 
 			const originChanged = this.#lastOrigin !== null && this.#lastOrigin !== adapter.id;
-			const selection = this.#clampSelection(transaction.startState.selection);
+			const selection = clampSelection(
+				transaction.startState.selection,
+				this.#canonical.doc.length,
+			);
 			this.#canonical = this.#canonical.update({
 				selection,
 				annotations: Transaction.addToHistory.of(false),
@@ -96,7 +97,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			this.#lastOrigin = adapter.id;
 			adapter.applySourceTransactions([transaction]);
 			this.#broadcast(adapter.id, canonicalTransaction, false);
-			this.#documentChanged(createPositionMap(canonicalTransaction));
+			this.#documentChanged(positionMapForTransaction(canonicalTransaction));
 		}
 	}
 
@@ -120,7 +121,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = transaction.state;
 		this.#lastOrigin = null;
 		this.#broadcast('', transaction, false);
-		this.#documentChanged(createPositionMap(transaction));
+		this.#documentChanged(positionMapForTransaction(transaction));
 	}
 
 	synchronizeDocument(content: string): void {
@@ -133,7 +134,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 			return;
 		}
 		Object.assign(this.document, metadata);
-		const positionMap = this.#replaceDocument(normalized.toString());
+		const positionMap = this.#replaceDocument(normalized);
 		this.#documentChanged(positionMap);
 	}
 
@@ -145,16 +146,16 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	replaceFromDisk(content: string): void {
 		Object.assign(this.document, fileTextMetadata(content));
 		this.document.baseline = content;
-		const positionMap = this.#replaceDocument(normalizeDocument(content).toString());
+		const positionMap = this.#replaceDocument(normalizeDocument(content));
 		this.document.dirty = false;
 		this.document.bufferVersion += 1;
 		this.document.setStoredContent(this.content());
 		this.document.notifyChanged(positionMap);
 	}
 
-	#replaceDocument(content: string): FileDocumentPositionMap {
+	#replaceDocument(content: Text): FileDocumentPositionMap {
 		const previous = this.#canonical.doc;
-		const changes = documentChanges(previous.toString(), content);
+		const changes = documentChanges(previous.toString(), content.toString());
 		this.#canonical = this.#createCanonicalState(content);
 		this.#lastOrigin = null;
 		for (const adapter of this.#views.values()) {
@@ -164,7 +165,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 				selection: current.selection.map(changes, 1),
 				annotations: [Transaction.addToHistory.of(false), mirroredDocumentChange.of('disk')],
 				filter: false,
-				});
+			});
 		}
 		return createPositionMap(previous, this.#canonical.doc, changes, 1);
 	}
@@ -184,7 +185,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = transaction.state;
 		this.#lastOrigin = viewId;
 		this.#broadcast(viewId, transaction, true);
-		this.#documentChanged(createPositionMap(transaction));
+		this.#documentChanged(positionMapForTransaction(transaction));
 		return true;
 	}
 
@@ -208,13 +209,10 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 
 	#documentChanged(positionMap: FileDocumentPositionMap): void {
 		this.document.bufferVersion += 1;
-		this.document.dirty = this.content() !== this.document.baseline;
-		this.document.setStoredContent(this.content());
+		const content = this.content();
+		this.document.dirty = content !== this.document.baseline;
+		this.document.setStoredContent(content);
 		this.document.notifyChanged(positionMap);
-	}
-
-	#clampSelection(selection: EditorSelection): EditorSelection {
-		return clampSelection(selection, this.#canonical.doc.length);
 	}
 
 	#serializeDocument(): string {
@@ -223,12 +221,11 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		return separator === '\n' ? content : content.replaceAll('\n', separator);
 	}
 
-	#createCanonicalState(content: string): EditorState {
-		const extensions: Extension[] = [
-			EditorState.allowMultipleSelections.of(true),
-			history({ minDepth: 100 }),
-		];
-		return EditorState.create({ doc: content, extensions });
+	#createCanonicalState(content: Text): EditorState {
+		return EditorState.create({
+			doc: content,
+			extensions: [EditorState.allowMultipleSelections.of(true), history({ minDepth: 100 })],
+		});
 	}
 }
 
@@ -242,7 +239,7 @@ function clampSelection(selection: EditorSelection, length: number): EditorSelec
 }
 
 function normalizeDocument(content: string): Text {
-	return EditorState.create({ doc: content.replaceAll('\r\n', '\n').replaceAll('\r', '\n') }).doc;
+	return Text.of(content.split(/\r\n?|\n/));
 }
 
 function documentChanges(previous: string, next: string): ChangeSet {
@@ -266,29 +263,24 @@ function documentChanges(previous: string, next: string): ChangeSet {
 	);
 }
 
-function createPositionMap(transaction: Transaction): FileDocumentPositionMap;
+function positionMapForTransaction(transaction: Transaction): FileDocumentPositionMap {
+	return createPositionMap(transaction.startState.doc, transaction.newDoc, transaction.changes, -1);
+}
+
+export function documentPosition(doc: Text, line: number, column: number): number {
+	const lineInfo = doc.line(Math.max(1, Math.min(line, doc.lines)));
+	return Math.min(lineInfo.from + Math.max(0, column - 1), lineInfo.to);
+}
+
 function createPositionMap(
 	previous: Text,
-	next: Text,
-	changes: ChangeSet,
+	mappedDocument: Text,
+	changeSet: ChangeSet,
 	cursorAssociation: -1 | 1,
-): FileDocumentPositionMap;
-function createPositionMap(
-	transactionOrPrevious: Transaction | Text,
-	next?: Text,
-	changes?: ChangeSet,
-	cursorAssociation: -1 | 1 = -1,
 ): FileDocumentPositionMap {
-	const previous = transactionOrPrevious instanceof Transaction
-		? transactionOrPrevious.startState.doc
-		: transactionOrPrevious;
-	const mappedDocument = transactionOrPrevious instanceof Transaction ? transactionOrPrevious.newDoc : next;
-	const changeSet = transactionOrPrevious instanceof Transaction ? transactionOrPrevious.changes : changes;
-	if (!mappedDocument || !changeSet) throw new Error('Document position mapping requires both documents');
 	return {
 		previousPosition(line, column) {
-			const lineInfo = previous.line(Math.max(1, Math.min(line, previous.lines)));
-			return Math.min(lineInfo.from + Math.max(0, column - 1), lineInfo.to);
+			return documentPosition(previous, line, column);
 		},
 		mapRange(from, to) {
 			const range = EditorSelection.range(
@@ -304,6 +296,3 @@ function createPositionMap(
 		},
 	};
 }
-
-export type FileDocumentViewAdapter = DocumentViewAdapter;
-export type EditorCommandTarget = Pick<EditorView, 'state' | 'dispatch'>;

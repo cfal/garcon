@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages.js';
 import {
 	EditorView,
 	lineNumbers,
@@ -10,7 +11,14 @@ import {
 	keymap,
 	panels,
 } from '@codemirror/view';
-import { EditorSelection, EditorState, Compartment, Prec, type Extension } from '@codemirror/state';
+import {
+	EditorSelection,
+	EditorState,
+	Compartment,
+	Prec,
+	type Extension,
+	type Text,
+} from '@codemirror/state';
 import {
 	copyLineDown,
 	copyLineUp,
@@ -51,7 +59,11 @@ import {
 	openFileReplacePanel,
 } from '$lib/files/editor/file-search-panel.js';
 import { fileExtension } from '$lib/utils/file-kind.js';
-import { FileDocumentRuntime } from '$lib/files/editor/file-document-runtime.js';
+import {
+	FileDocumentRuntime,
+	documentPosition,
+	type FileDocumentViewAdapter,
+} from '$lib/files/editor/file-document-runtime.js';
 import { FileVimMode } from '$lib/files/editor/file-vim-mode.svelte.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
@@ -97,6 +109,7 @@ export interface EditorStatusSnapshot {
 }
 
 const MIN_TOUCH_EDITOR_FONT_SIZE = 16;
+const INDENTATION_SAMPLE_LENGTH = 16 * 1024;
 const CONFIGURABLE_EDITOR_BINDINGS = new Set([
 	'Alt-ArrowUp',
 	'Shift-Alt-ArrowUp',
@@ -111,6 +124,27 @@ const CONFIGURABLE_EDITOR_BINDINGS = new Set([
 const retainedDefaultKeymap = defaultKeymap.filter(
 	(binding) => !binding.key || !CONFIGURABLE_EDITOR_BINDINGS.has(binding.key),
 );
+const EDITOR_COMMANDS: Record<
+	Exclude<FileEditorCommand, 'undo' | 'redo' | 'replace'>,
+	(view: EditorView) => boolean
+> = {
+	find: openSearchPanel,
+	'go-to-line': gotoLine,
+	'go-to-matching-bracket': cursorMatchingBracket,
+	indent: indentMore,
+	outdent: indentLess,
+	'toggle-comment': toggleComment,
+	fold: foldCode,
+	unfold: unfoldCode,
+	'fold-all': foldAll,
+	'unfold-all': unfoldAll,
+	'duplicate-line-up': copyLineUp,
+	'duplicate-line-down': copyLineDown,
+	'move-line-up': moveLineUp,
+	'move-line-down': moveLineDown,
+	'delete-line': deleteLine,
+	'select-next-occurrence': selectNextOccurrence,
+};
 
 export class CodeEditorController {
 	readonly vim = new FileVimMode({
@@ -126,14 +160,10 @@ export class CodeEditorController {
 	#rendererGeneration = 0;
 	#unregisterRuntime: (() => void) | null = null;
 	#statusVersion = $state(0);
+	#indentationCache: { doc: Text; label: string } | null = null;
 	readonly #runtime: FileDocumentRuntime;
-	readonly #adapter: {
-		id: string;
-		currentState(): EditorState;
-		applySourceTransactions(transactions: readonly import('@codemirror/state').Transaction[]): void;
-		applyDocumentSpec(spec: import('@codemirror/state').TransactionSpec): void;
-	};
-	#syntaxLabel = $state('Plain Text');
+	readonly #adapter: FileDocumentViewAdapter;
+	#syntaxLabel = $state<string>(m.editor_status_plain_text());
 	readonly #handleScroll = (): void => {
 		const view = this.#view;
 		if (view) this.#captureScroll(view);
@@ -149,7 +179,6 @@ export class CodeEditorController {
 			existing instanceof FileDocumentRuntime
 				? existing
 				: new FileDocumentRuntime(session.document, session.content);
-		session.document.editorRuntime = this.#runtime;
 		session.editorState = this.createState(
 			this.#runtime.canonicalState.doc,
 			session.editorState?.selection,
@@ -203,10 +232,17 @@ export class CodeEditorController {
 			column: line && selection ? selection.head - line.from + 1 : 1,
 			selectionCount: current?.selection.ranges.length ?? 1,
 			selectedCharacters,
-			indentation: indentationLabel(current?.doc.toString() ?? this.session.content),
+			indentation: this.#indentationLabel(current?.doc ?? this.#runtime.canonicalState.doc),
 			eol: lineSeparatorLabel(this.session.document.lineSeparator),
 			syntax: this.#syntaxLabel,
 		};
+	}
+
+	#indentationLabel(doc: Text): string {
+		if (this.#indentationCache?.doc !== doc) {
+			this.#indentationCache = { doc, label: indentationLabel(doc) };
+		}
+		return this.#indentationCache.label;
 	}
 
 	attach(parent: HTMLElement): number {
@@ -334,16 +370,21 @@ export class CodeEditorController {
 	): void {
 		const current = this.#view?.state ?? this.session.editorState;
 		if (!current) return;
-		const position = (line: number, column: number) => {
-			const lineInfo = current.doc.line(Math.max(1, Math.min(line, current.doc.lines)));
-			return Math.min(lineInfo.from + Math.max(0, column - 1), lineInfo.to);
-		};
 		const transaction = current.update({
 			selection: EditorSelection.range(
-				position(selection.line, selection.column),
-				position(selection.endLine, selection.endColumn),
+				documentPosition(current.doc, selection.line, selection.column),
+				documentPosition(current.doc, selection.endLine, selection.endColumn),
 			),
-			effects: folds.map((range) => foldEffect.of(range)),
+			effects: folds
+				.filter(
+					({ from, to }) =>
+						Number.isInteger(from) &&
+						Number.isInteger(to) &&
+						0 <= from &&
+						from < to &&
+						to <= current.doc.length,
+				)
+				.map((range) => foldEffect.of(range)),
 		});
 		const view = this.#view;
 		if (view) view.update([transaction]);
@@ -351,12 +392,7 @@ export class CodeEditorController {
 		this.session.pendingSourcePresentation = null;
 		const scrollLeft = this.session.textScrollLeft;
 		const scrollTop = this.session.textScrollTop;
-		requestAnimationFrame(() => {
-			if (this.#view !== view || !view) return;
-			view.scrollDOM.scrollLeft = scrollLeft;
-			view.scrollDOM.scrollTop = scrollTop;
-			this.#captureScroll(view);
-		});
+		this.#restoreScrollAfterFrame(view, scrollLeft, scrollTop);
 	}
 
 	restorePendingPresentation(): boolean {
@@ -376,28 +412,7 @@ export class CodeEditorController {
 		if (command === 'replace') {
 			return openFileReplacePanel(view);
 		}
-		const commands: Record<
-			Exclude<FileEditorCommand, 'undo' | 'redo' | 'replace'>,
-			(view: EditorView) => boolean
-		> = {
-			find: openSearchPanel,
-			'go-to-line': gotoLine,
-			'go-to-matching-bracket': cursorMatchingBracket,
-			indent: indentMore,
-			outdent: indentLess,
-			'toggle-comment': toggleComment,
-			fold: foldCode,
-			unfold: unfoldCode,
-			'fold-all': foldAll,
-			'unfold-all': unfoldAll,
-			'duplicate-line-up': copyLineUp,
-			'duplicate-line-down': copyLineDown,
-			'move-line-up': moveLineUp,
-			'move-line-down': moveLineDown,
-			'delete-line': deleteLine,
-			'select-next-occurrence': selectNextOccurrence,
-		};
-		return commands[command](view);
+		return EDITOR_COMMANDS[command](view);
 	}
 
 	closeSearch(): boolean {
@@ -421,10 +436,14 @@ export class CodeEditorController {
 		this.session.dirty = false;
 		this.session.textScrollLeft = scrollLeft;
 		this.session.textScrollTop = scrollTop;
+		this.#restoreScrollAfterFrame(view, scrollLeft, scrollTop);
+	}
+
+	#restoreScrollAfterFrame(view: EditorView | null, left: number, top: number): void {
 		requestAnimationFrame(() => {
 			if (this.#view !== view || !view) return;
-			view.scrollDOM.scrollLeft = scrollLeft;
-			view.scrollDOM.scrollTop = scrollTop;
+			view.scrollDOM.scrollLeft = left;
+			view.scrollDOM.scrollTop = top;
 			this.#captureScroll(view);
 		});
 	}
@@ -433,10 +452,11 @@ export class CodeEditorController {
 		const view = this.#view;
 		const lineNumber = this.session.requestedLine;
 		if (!view || !lineNumber || lineNumber < 1) return;
-		const line = Math.max(1, Math.min(lineNumber, view.state.doc.lines));
-		const lineInfo = view.state.doc.line(line);
-		const columnOffset = Math.max(0, (this.session.requestedColumn ?? 1) - 1);
-		const position = Math.min(lineInfo.from + columnOffset, lineInfo.to);
+		const position = documentPosition(
+			view.state.doc,
+			lineNumber,
+			this.session.requestedColumn ?? 1,
+		);
 		view.dispatch({
 			selection: { anchor: position },
 			effects: EditorView.scrollIntoView(position, { y: 'start' }),
@@ -453,10 +473,7 @@ export class CodeEditorController {
 		this.#languageGeneration += 1;
 	}
 
-	private createState(
-		content: string | import('@codemirror/state').Text,
-		selection?: EditorSelection,
-	): EditorState {
+	private createState(content: Text, selection?: EditorSelection): EditorState {
 		const editorState = EditorState.create({
 			doc: content,
 			selection,
@@ -594,12 +611,14 @@ export class CodeEditorController {
 	}
 }
 
-function indentationLabel(content: string): string {
-	const indented = content.split(/\r\n?|\n/).find((line) => /^\s+\S/.test(line));
-	if (!indented) return 'Spaces: 2';
-	const match = indented.match(/^[\t ]+/)?.[0] ?? '';
-	if (match.includes('\t')) return 'Tabs';
-	return `Spaces: ${Math.max(1, match.length)}`;
+function indentationLabel(doc: Text): string {
+	for (const line of doc.iterRange(0, Math.min(doc.length, INDENTATION_SAMPLE_LENGTH))) {
+		if (!/^\s+\S/.test(line)) continue;
+		const match = line.match(/^[\t ]+/)?.[0] ?? '';
+		if (match.includes('\t')) return m.editor_status_tabs();
+		return m.editor_status_spaces({ count: Math.max(1, match.length) });
+	}
+	return m.editor_status_spaces({ count: 2 });
 }
 
 function lineSeparatorLabel(separator: '\n' | '\r' | '\r\n'): 'LF' | 'CR' | 'CRLF' {
@@ -614,7 +633,7 @@ function lineSeparatorLabel(separator: '\n' | '\r' | '\r\n'): 'LF' | 'CR' | 'CRL
 }
 
 function syntaxLabel(path: string): string {
-	return fileExtension(path).toUpperCase() || 'Plain Text';
+	return fileExtension(path).toUpperCase() || m.editor_status_plain_text();
 }
 
 function historyCommandForInputType(inputType: string): 'undo' | 'redo' | null {

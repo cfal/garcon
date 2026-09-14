@@ -3,7 +3,8 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { history } from '@codemirror/commands';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
-import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
+import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
@@ -58,6 +59,79 @@ function createController() {
 }
 
 describe('CodeEditorController', () => {
+	it.each([false, true])(
+		'drops stale restored folds before shared edits (attached: %s)',
+		(attached) => {
+			const { session, controller } = createController();
+			controller.replaceContentFromDisk('short');
+			const host = parent();
+			if (attached) controller.attach(host);
+			controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, [
+				{ from: 1, to: 3 },
+				{ from: 2, to: 200 },
+				{ from: -1, to: 2 },
+				{ from: 2, to: 2 },
+				{ from: 3, to: 2 },
+				{ from: 1.5, to: 3 },
+				{ from: 0, to: NaN },
+			]);
+			expect(controller.folds()).toEqual([{ from: 1, to: 3 }]);
+			if (!attached) controller.attach(host);
+			const sibling = new FileViewSession(session.document);
+			const siblingController = new CodeEditorController(sibling, {
+				editorThemeId: 'standard-light',
+				wordWrap: false,
+				showLineNumbers: true,
+				fontSize: 12,
+			});
+			controllers.push(siblingController);
+			const siblingHost = parent();
+			siblingController.attach(siblingHost);
+			const view = EditorView.findFromDOM(siblingHost.querySelector<HTMLElement>('.cm-editor')!)!;
+			const changed = vi.fn();
+			const stop = session.document.onChange(changed);
+			expect(() =>
+				view.dispatch({ changes: { from: 5, insert: '!' }, userEvent: 'input.type' }),
+			).not.toThrow();
+			expect(session.document.currentContent()).toBe('short!');
+			expect(session.dirty).toBe(true);
+			expect(changed).toHaveBeenCalledOnce();
+			expect(session.editorState?.doc.toString()).toBe('short!');
+			expect(view.state.doc.toString()).toBe('short!');
+			expect(controller.run('undo')).toBe(true);
+			expect(view.state.doc.toString()).toBe('short');
+			expect(session.dirty).toBe(false);
+			stop();
+			sibling.dispose();
+		},
+	);
+
+	it('caches bounded indentation sampling across cursor updates and invalidates it after edits', () => {
+		const { session, controller } = createController();
+		controller.replaceContentFromDisk('first\n    second\nthird');
+		const host = parent();
+		controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		const sample = vi.spyOn(view.state.doc, 'iterRange');
+		expect(controller.status.indentation).toBe('Spaces: 4');
+		view.dispatch({ selection: { anchor: 0 } });
+		expect(controller.status.line).toBe(1);
+		expect(controller.status.indentation).toBe('Spaces: 4');
+		expect(sample).toHaveBeenCalledOnce();
+		view.dispatch({ changes: { from: 6, to: 10, insert: '\t' }, userEvent: 'input.type' });
+		expect(controller.status.indentation).toBe('Tabs');
+		expect(controller.run('undo')).toBe(true);
+		expect(controller.status.indentation).toBe('Spaces: 4');
+		controller.replaceContentFromDisk('x'.repeat(12_000_000));
+		const largeDocument = session.editorState!.doc;
+		const stringify = vi.spyOn(largeDocument, 'toString');
+		const largeSample = vi.spyOn(largeDocument, 'iterRange');
+		expect(controller.status.indentation).toBe('Spaces: 2');
+		expect(controller.status.indentation).toBe('Spaces: 2');
+		expect(stringify).not.toHaveBeenCalled();
+		expect(largeSample).toHaveBeenCalledExactlyOnceWith(0, 16 * 1024);
+	});
+
 	it('keeps Find compact, counts matches, navigates, and expands Replace on demand', async () => {
 		const { session, controller } = createController();
 		session.content = 'word word word';

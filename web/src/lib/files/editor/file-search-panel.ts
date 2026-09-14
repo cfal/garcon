@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages.js';
 import { StateEffect, StateField, type EditorState } from '@codemirror/state';
 import type { EditorView, Panel, ViewUpdate } from '@codemirror/view';
 import { mount, unmount } from 'svelte';
@@ -25,6 +26,9 @@ import {
 	setSearchQuery,
 } from '@codemirror/search';
 import './file-search-panel.css';
+
+const MATCH_COUNT_LIMIT = 1000;
+const COUNT_DEBOUNCE_MS = 100;
 
 interface SearchScope {
 	from: number;
@@ -84,13 +88,13 @@ class FileSearchPanel implements Panel {
 	#query = new SearchQuery({ search: '' });
 
 	constructor(readonly view: EditorView) {
-		this.#searchField = this.#textField('search', 'Find');
+		this.#searchField = this.#textField('search', m.editor_command_find());
 		this.#searchField.setAttribute('main-field', 'true');
-		this.#replaceField = this.#textField('replace', 'Replace');
-		this.#caseField = this.#checkbox('case', 'Match case');
-		this.#regexpField = this.#checkbox('regexp', 'Regular expression');
-		this.#wordField = this.#checkbox('word', 'Whole word');
-		this.#selectionField = this.#checkbox('selection', 'Selection only');
+		this.#replaceField = this.#textField('replace', m.editor_command_replace());
+		this.#caseField = this.#checkbox('case', m.editor_search_match_case());
+		this.#regexpField = this.#checkbox('regexp', m.editor_search_regex());
+		this.#wordField = this.#checkbox('word', m.editor_search_whole_word());
+		this.#selectionField = this.#checkbox('selection', m.editor_search_selection_only());
 		this.#selectionField.disabled = view.state.selection.main.empty;
 		this.#result = document.createElement('span');
 		this.#result.setAttribute('role', 'status');
@@ -99,24 +103,24 @@ class FileSearchPanel implements Panel {
 		this.dom = document.createElement('div');
 		this.dom.className = 'cm-search cm-file-search';
 		this.dom.setAttribute('role', 'search');
-		this.dom.setAttribute('aria-label', 'Find and replace');
-		this.#disclosure = this.#button('Toggle Replace', ChevronRight, () => {
+		this.dom.setAttribute('aria-label', m.editor_search_title());
+		this.#disclosure = this.#button(m.editor_search_toggle_replace(), ChevronRight, () => {
 			this.#expandReplace(Boolean(this.#replaceRow.hidden));
 		});
 		this.#disclosure.classList.add('cm-file-search-disclosure');
 		this.#disclosure.setAttribute('aria-expanded', 'false');
-		const field = document.createElement('div');
-		field.className = 'cm-file-search-field';
-		field.append(
+		const searchControls = document.createElement('div');
+		searchControls.className = 'cm-file-search-field';
+		searchControls.append(
 			this.#searchField,
 			this.#label(this.#caseField, CaseSensitive),
 			this.#label(this.#wordField, WholeWord),
 			this.#label(this.#regexpField, Regex),
 		);
 		this.#navigationButtons = [
-			this.#button('Previous match', ArrowUp, () => findPrevious(view)),
-			this.#button('Next match', ArrowDown, () => findNext(view)),
-			this.#button('Select all matches', ListChecks, () => selectMatches(view)),
+			this.#button(m.editor_search_previous(), ArrowUp, () => findPrevious(view)),
+			this.#button(m.editor_search_next(), ArrowDown, () => findNext(view)),
+			this.#button(m.editor_search_select_all(), ListChecks, () => selectMatches(view)),
 		];
 		const actions = document.createElement('div');
 		actions.className = 'cm-file-search-actions';
@@ -125,18 +129,18 @@ class FileSearchPanel implements Panel {
 			...this.#navigationButtons,
 			this.#label(this.#selectionField, TextSelect),
 		);
-		const close = this.#button('Close search', X, () => closeSearchPanel(view));
+		const close = this.#button(m.editor_search_close(), X, () => closeSearchPanel(view));
 		close.name = 'close';
 		close.classList.add('cm-file-search-close');
 		this.#replaceRow = document.createElement('div');
 		this.#replaceRow.className = 'cm-file-search-replace';
 		this.#replaceRow.hidden = true;
 		this.#replaceButtons = [
-			this.#button('Replace', Replace, () => replaceNext(view)),
-			this.#button('Replace all', ReplaceAll, () => replaceAll(view)),
+			this.#button(m.editor_command_replace(), Replace, () => replaceNext(view)),
+			this.#button(m.editor_search_replace_all(), ReplaceAll, () => replaceAll(view)),
 		];
 		this.#replaceRow.append(this.#replaceField, ...this.#replaceButtons);
-		this.dom.append(this.#disclosure, field, actions, close, this.#replaceRow);
+		this.dom.append(this.#disclosure, searchControls, actions, close, this.#replaceRow);
 		for (const field of [
 			this.#searchField,
 			this.#replaceField,
@@ -214,7 +218,7 @@ class FileSearchPanel implements Panel {
 
 	#selectedSearchRange(): { from: number; to: number } | null {
 		const selection = this.view.state.selection.main;
-		if (!this.#selectionField.checked || selection.empty) return null;
+		if (selection.empty) return null;
 		return { from: selection.from, to: selection.to };
 	}
 
@@ -248,7 +252,7 @@ class FileSearchPanel implements Panel {
 			this.#countTimer = undefined;
 			const cursor = this.#query.getCursor(this.view.state);
 			for (let match = cursor.next(); !match.done; match = cursor.next()) {
-				if (this.#matches.length === 1000) {
+				if (this.#matches.length === MATCH_COUNT_LIMIT) {
 					this.#truncated = true;
 					break;
 				}
@@ -256,7 +260,7 @@ class FileSearchPanel implements Panel {
 			}
 			this.#announce();
 			this.#updateControls();
-		}, 100);
+		}, COUNT_DEBOUNCE_MS);
 	}
 
 	#announce(): void {
@@ -271,13 +275,13 @@ class FileSearchPanel implements Panel {
 		if (!this.#query.search) {
 			message = '';
 		} else if (!this.#query.valid) {
-			message = 'Invalid regex';
+			message = m.editor_search_invalid_regex();
 		} else if (count === 0) {
-			message = 'No results';
+			message = m.editor_search_no_results();
 		} else if (index >= 0) {
-			message = `${index + 1} of ${total}`;
+			message = m.editor_search_result_position({ current: index + 1, total });
 		} else {
-			message = `${total} ${count === 1 ? 'match' : 'matches'}`;
+			message = m.editor_search_match_count({ count, total });
 		}
 		if (this.#result.textContent !== message) this.#result.textContent = message;
 		this.#result.dataset.empty = String(Boolean(this.#query.search && count === 0));
