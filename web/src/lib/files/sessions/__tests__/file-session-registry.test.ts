@@ -210,6 +210,95 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
+	it('does not offer a previous disk snapshot after a comparison read fails', async () => {
+		const harness = createHarness();
+		const session = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		session.content = 'local';
+		harness.readText.mockResolvedValueOnce({
+			content: 'disk two',
+			revision: 'v1:two',
+			path: '/workspace/file.txt',
+		});
+		const first = harness.registry.showConflict(session.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:two'));
+		harness.registry.resolveOverwrite('cancel');
+		await first;
+		harness.readText.mockRejectedValueOnce(new Error('disk unavailable'));
+		await harness.registry.showConflict(session.id);
+		expect(harness.registry.overwriteRequest).toBeNull();
+		expect(session.document.diskRevision).toBeNull();
+		expect(session.document.diskContent).toBeNull();
+		expect(session.refreshError).toBe('disk unavailable');
+		expect(harness.saveText).not.toHaveBeenCalled();
+		await harness.registry.destroyAll();
+	});
+
+	it('ignores a superseded comparison read even when it ignores abort', async () => {
+		const harness = createHarness();
+		const session = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		session.content = 'local';
+		const old = deferred<Awaited<ReturnType<typeof harness.readText>>>();
+		harness.readText.mockReturnValueOnce(old.promise);
+		const first = harness.registry.showConflict(session.id);
+		harness.readText.mockResolvedValueOnce({
+			content: 'disk three',
+			revision: 'v1:three',
+			path: '/workspace/file.txt',
+		});
+		const second = harness.registry.showConflict(session.id);
+		await vi.waitFor(() =>
+			expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:three'),
+		);
+		harness.registry.resolveOverwrite('cancel');
+		await second;
+		old.resolve({ content: 'disk two', revision: 'v1:two', path: '/workspace/file.txt' });
+		await first;
+		expect(harness.registry.overwriteRequest).toBeNull();
+		expect(session.document.diskRevision).toBe('v1:three');
+		await harness.registry.destroyAll();
+	});
+
+	it.each(['refresh', 'reload'] as const)(
+		'guards %s of a dirty recovered buffer without a stored revision',
+		async (action) => {
+			const repository = createMemoryFileDraftRepository();
+			const harness = createHarness({ draftRepository: repository });
+			const session = (await harness.registry.open(request('file.txt')))!;
+			await vi.waitFor(() => expect(session.loading).toBe(false));
+			session.document.loadedRevision = null;
+			session.document.recovered = true;
+			session.content = 'recovered edit';
+			harness.readText.mockClear();
+			const refresh = harness.registry[action](session.id);
+			await vi.waitFor(() => expect(harness.registry.guardRequest?.reason).toBe('refresh'));
+			harness.registry.resolveGuard('cancel');
+			await refresh;
+			expect(session.content).toBe('recovered edit');
+			expect(harness.readText).not.toHaveBeenCalled();
+			await harness.registry.flushRecovery();
+			expect(
+				(await repository.getDrafts('test-user', 'test-deployment', 'test-session'))[0]?.content,
+			).toBe('recovered edit');
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it('reports a recovery guard raised while Accept disk is awaiting a decision', async () => {
+		const harness = createHarness();
+		const session = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		session.content = 'local';
+		const comparison = harness.registry.showConflict(session.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).not.toBeNull());
+		session.document.recoveryGuard = true;
+		harness.registry.resolveOverwrite('accept-disk');
+		await comparison;
+		expect(session.content).toBe('local');
+		expect(session.saveError).toBeTruthy();
+		await harness.registry.destroyAll();
+	});
 	it.each(['saved', 'rejected', 'detached'] as const)(
 		'releases only its own Save reservation after %s',
 		async (outcome) => {

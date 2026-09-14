@@ -23,6 +23,11 @@ type LoadedFileContent =
 	| { kind: 'text'; content: string; revision: FileRevision }
 	| { kind: 'image'; blob: Blob; revision: FileRevision };
 
+export interface FileDiskSnapshot {
+	readonly content: string;
+	readonly revision: FileRevision;
+}
+
 interface FileDocumentIoOptions {
 	getSession(sessionId: string): FileViewSession | null;
 	getDocument(documentId: string): FileDocumentState | null;
@@ -87,7 +92,8 @@ export class FileDocumentIoCoordinator {
 
 	async loadInitial(session: FileViewSession): Promise<void> {
 		const document = session.document;
-		if (document.recoveredCopies.length > 0) return;
+		if (document.dirty || document.saveOutcomeUnknown || document.recoveredCopies.length > 0)
+			return;
 		const existing = this.#documentLoads.get(document.id);
 		if (existing) {
 			await existing;
@@ -196,12 +202,12 @@ export class FileDocumentIoCoordinator {
 		) {
 			return;
 		}
+		if (session.dirty && !(await confirmDestructive(sessionId))) return;
+		if (!this.#canRefresh(session)) return;
 		if (!session.loadedRevision) {
 			await this.loadInitial(session);
 			return;
 		}
-		if (session.dirty && !(await confirmDestructive(sessionId))) return;
-		if (!this.#canRefresh(session)) return;
 
 		this.invalidateFreshness(session);
 		const generation = ++session.refreshGeneration;
@@ -242,7 +248,7 @@ export class FileDocumentIoCoordinator {
 			return;
 		}
 		if (!session.loadedRevision) {
-			await this.loadInitial(session);
+			await this.refresh(sessionId, confirmDestructive);
 			if (session.loadedRevision) {
 				session.loadError = null;
 				session.loadErrorRequiresPageReload = false;
@@ -338,21 +344,43 @@ export class FileDocumentIoCoordinator {
 		}
 	}
 
-	async loadConflictSnapshot(session: FileViewSession): Promise<void> {
+	async loadConflictSnapshot(session: FileViewSession): Promise<FileDiskSnapshot | null> {
+		const document = session.document;
+		document.conflictController?.abort();
+		const controller = new AbortController();
+		document.conflictController = controller;
+		document.diskContent = null;
+		document.diskRevision = null;
+		document.refreshError = null;
+		const current = () =>
+			this.options.getDocument(document.id) === document &&
+			document.conflictController === controller &&
+			!controller.signal.aborted;
 		try {
-			const result = await (this.options.readText ?? readText)({
-				projectPath: session.canonicalFileRootPath,
-				filePath: session.relativePath,
-			});
-			session.document.missing = false;
-			session.document.diskContent = result.content;
-			session.document.diskRevision = result.revision;
+			const result = await (this.options.readText ?? readText)(
+				{
+					projectPath: session.canonicalFileRootPath,
+					filePath: session.relativePath,
+				},
+				{ signal: controller.signal },
+			);
+			if (!current()) return null;
+			document.missing = false;
+			document.diskContent = result.content;
+			document.diskRevision = result.revision;
+			return Object.freeze({ content: result.content, revision: result.revision });
 		} catch (error) {
-			session.refreshError = error instanceof Error ? error.message : String(error);
+			if (current() && !isAbortError(error))
+				document.refreshError = error instanceof Error ? error.message : String(error);
+			return null;
+		} finally {
+			if (document.conflictController === controller) document.conflictController = null;
 		}
 	}
 
 	commitLoadedContent(session: FileViewSession, loaded: LoadedFileContent): void {
+		session.document.conflictController?.abort();
+		session.document.conflictController = null;
 		if (loaded.kind === 'image') {
 			const objectUrl = URL.createObjectURL(loaded.blob);
 			if (session.imageObjectUrl) URL.revokeObjectURL(session.imageObjectUrl);

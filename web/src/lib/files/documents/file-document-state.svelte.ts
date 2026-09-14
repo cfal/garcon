@@ -81,6 +81,7 @@ export class FileDocumentState {
 	loadController: AbortController | null = null;
 	saveController: AbortController | null = null;
 	freshnessController: AbortController | null = null;
+	conflictController: AbortController | null = null;
 	refreshController: AbortController | null = null;
 	freshnessGeneration = 0;
 	refreshGeneration = 0;
@@ -175,6 +176,7 @@ export class FileDocumentState {
 		this.loadController?.abort();
 		this.freshnessGeneration += 1;
 		this.freshnessController?.abort();
+		this.conflictController?.abort();
 		this.refreshGeneration += 1;
 		this.refreshController?.abort();
 		if (this.imageObjectUrl) URL.revokeObjectURL(this.imageObjectUrl);

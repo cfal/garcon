@@ -28,6 +28,7 @@ import {
 import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.js';
 import {
 	FileDocumentIoCoordinator,
+	type FileDiskSnapshot,
 	type FileEditorRuntimeModule,
 } from '$lib/files/persistence/file-document-io-coordinator.js';
 import {
@@ -397,7 +398,7 @@ export class FileSessionRegistry {
 		this.#reconfigureDocumentViews(session.document);
 		try {
 			if (session.isExternallyStale) {
-				const outcome = await this.#resolveConflictAndSubmit(session, controller, expectedRevision);
+				const outcome = await this.#resolveConflictAndSubmit(session, controller);
 				requestDetached = outcome === 'unknown';
 				return outcome === 'saved';
 			}
@@ -417,7 +418,7 @@ export class FileSessionRegistry {
 			} catch (error) {
 				if (!isFileRevisionConflict(error)) throw error;
 				session.isExternallyStale = true;
-				const outcome = await this.#resolveConflictAndSubmit(session, controller, expectedRevision);
+				const outcome = await this.#resolveConflictAndSubmit(session, controller);
 				requestDetached = outcome === 'unknown';
 				return outcome === 'saved';
 			}
@@ -672,11 +673,12 @@ export class FileSessionRegistry {
 	async showConflict(sessionId: string): Promise<void> {
 		const session = this.get(sessionId);
 		if (!session || session.document.mutationGuarded) return;
-		await this.#io.loadConflictSnapshot(session);
-		if (session.document.diskContent === null || !session.document.diskRevision) return;
-		const decision = await this.#confirmConflict(session);
+		const disk = await this.#io.loadConflictSnapshot(session);
+		if (!disk) return;
+		const decision = await this.#confirmConflict(session, disk);
 		if (decision.choice === 'cancel' || decision.choice === 'accept-disk') return;
-		if (!canSubmitFileWrite(session)) return;
+		const revision = decision.snapshot.diskRevision;
+		if (!revision || !canSubmitFileWrite(session)) return;
 		const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
 		const controller = new AbortController();
 		session.saveController = controller;
@@ -691,7 +693,7 @@ export class FileSessionRegistry {
 				resolvedBufferVersion,
 				decision.choice === 'overwrite' ? 'overwrite' : 'reject',
 				controller,
-				decision.snapshot.diskRevision!,
+				revision,
 			);
 			detached = outcome === 'unknown';
 		} catch (error) {
@@ -751,14 +753,15 @@ export class FileSessionRegistry {
 	async #resolveConflictAndSubmit(
 		session: FileViewSession,
 		controller: AbortController,
-		expectedRevision: FileRevision,
 	): Promise<'saved' | 'unknown' | 'cancelled'> {
-		await this.#io.loadConflictSnapshot(session);
-		const decision = await this.#confirmConflict(session, true);
+		const disk = await this.#io.loadConflictSnapshot(session);
+		if (!disk) return 'cancelled';
+		session.saveError = null;
+		const decision = await this.#confirmConflict(session, disk, true);
 		if (decision.choice === 'cancel' || decision.choice === 'accept-disk') {
-			session.saveError = null;
 			return 'cancelled';
 		}
+		if (!decision.snapshot.diskRevision) return 'cancelled';
 		const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
 		return this.#saves.submit(
 			session.document,
@@ -766,12 +769,13 @@ export class FileSessionRegistry {
 			resolvedBufferVersion,
 			decision.choice === 'overwrite' ? 'overwrite' : 'reject',
 			controller,
-			decision.snapshot.diskRevision ?? expectedRevision,
+			decision.snapshot.diskRevision,
 		);
 	}
 
 	#confirmConflict(
 		session: FileViewSession,
+		disk: FileDiskSnapshot,
 		allowOwnedMutation = false,
 	): Promise<FileConflictDecision> {
 		return this.#decisionQueue.enqueue(async () => {
@@ -780,8 +784,8 @@ export class FileSessionRegistry {
 				fileName: session.fileName,
 				baseContent: session.baseline,
 				localContent: session.document.currentContent(),
-				diskContent: session.document.diskContent,
-				diskRevision: session.document.diskRevision,
+				diskContent: disk.content,
+				diskRevision: disk.revision,
 				localBufferVersion: session.document.bufferVersion,
 				lineSeparator: session.document.lineSeparator,
 			};
@@ -804,6 +808,18 @@ export class FileSessionRegistry {
 					this.overwriteRequest = snapshot;
 				});
 			});
+			if (
+				decision.choice !== 'cancel' &&
+				(this.get(session.id) !== session ||
+					session.saveOutcomeUnknown ||
+					session.document.recoveryGuard ||
+					session.document.recoveredCopies.length > 0 ||
+					session.document.resolvingRecovery ||
+					(!allowOwnedMutation && session.document.mutationGuarded))
+			) {
+				session.saveError = m.file_recovery_incomplete();
+				return cancelled();
+			}
 			if (
 				decision.choice === 'accept-disk' &&
 				session.document.bufferVersion !== decision.snapshot.localBufferVersion
