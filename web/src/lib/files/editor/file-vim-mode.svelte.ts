@@ -29,12 +29,12 @@ export class FileVimMode {
 		const generation = ++this.#generation;
 		const view = this.host.getView();
 		if (!view) return;
-		this.error = null;
 		if (!enabled) {
+			this.error = null;
 			if (this.#module?.getCM(view)) view.dispatch({ effects: this.compartment.reconfigure([]) });
 			return;
 		}
-		if (this.#module?.getCM(view)) return;
+		if (this.error || this.#module?.getCM(view)) return;
 		void loadVim()
 			.then((module) => {
 				if (generation !== this.#generation || view !== this.host.getView()) return;

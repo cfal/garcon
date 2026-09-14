@@ -264,6 +264,7 @@ describe('File editor controls', () => {
       expect(chunkRequests).toBe(1);
       expect(await surface.getByRole('button', { name: 'Retry Vim mode' }).count()).toBe(0);
       const expectedNetworkErrors = fixture.browserErrors.splice(0);
+      expect(expectedNetworkErrors.length).toBeGreaterThan(0);
       expect(expectedNetworkErrors.every((error) => error.includes('net::ERR_FAILED'))).toBe(true);
 
       markPhase('saving before the explicit application reload');
