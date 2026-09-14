@@ -191,7 +191,9 @@ export class CodeEditorController {
 				: new FileDocumentRuntime(session.document, session.content);
 		session.editorState = this.createState(
 			this.#runtime.canonicalState.doc,
-			session.editorState?.selection,
+			session.editorState
+				? clampSelection(session.editorState.selection, this.#runtime.canonicalState.doc.length)
+				: undefined,
 		);
 		this.#adapter = {
 			id: session.id,

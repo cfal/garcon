@@ -60,6 +60,20 @@ function createController() {
 }
 
 describe('CodeEditorController', () => {
+	it('clamps retained selection when rebuilding after a canonical shrink', () => {
+		const { session, controller } = createController();
+		controller.dispose();
+		session.document.editorRuntime!.replaceFromDisk('x');
+		const rebuilt = new CodeEditorController(session, {
+			editorThemeId: 'standard-light',
+			wordWrap: false,
+			showLineNumbers: true,
+			fontSize: 12,
+		});
+		controllers.push(rebuilt);
+		expect(session.editorState?.selection.main.head).toBe(1);
+	});
+
 	it.each([false, true])(
 		'preserves unaffected folds between disk edits (attached: %s)',
 		(attached) => {
