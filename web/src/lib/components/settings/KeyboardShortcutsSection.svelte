@@ -66,14 +66,15 @@
 
 	function reportAssignment(
 		binding: GlobalShortcutBinding,
-		unassignedId: GlobalShortcutId | null,
+		unassignedIds: GlobalShortcutId[],
 	): void {
-		feedback = unassignedId
-			? m.settings_shortcut_conflict_reassigned({
-					shortcut: formatGlobalShortcut(binding, isMac).join('+'),
-					command: shortcutLabel(unassignedId),
-				})
-			: null;
+		feedback =
+			unassignedIds.length > 0
+				? m.settings_shortcut_conflict_reassigned({
+						shortcut: formatGlobalShortcut(binding, isMac).join('+'),
+						command: unassignedIds.map(shortcutLabel).join(', '),
+					})
+				: null;
 	}
 
 	function handleBindingKeydown(event: KeyboardEvent, id: GlobalShortcutId): void {
@@ -91,7 +92,7 @@
 		const result = assignGlobalShortcut(ls.globalShortcuts, id, binding);
 		ls.set('globalShortcuts', result.overrides);
 		recordingId = null;
-		reportAssignment(binding, result.unassignedId);
+		reportAssignment(binding, result.unassignedIds);
 	}
 
 	function removeShortcut(id: GlobalShortcutId): void {
@@ -105,7 +106,7 @@
 		ls.set('globalShortcuts', result.overrides);
 		recordingId = null;
 		const binding = getEffectiveGlobalShortcut(id, result.overrides);
-		if (binding) reportAssignment(binding, result.unassignedId);
+		if (binding) reportAssignment(binding, result.unassignedIds);
 	}
 </script>
 
