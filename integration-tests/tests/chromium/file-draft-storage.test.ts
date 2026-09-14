@@ -112,14 +112,26 @@ describe('File draft storage failures', () => {
           userNamespace: record.userNamespace,
           deploymentId: record.deploymentId,
           browserSessionId: record.browserSessionId,
-          documentId: 'current', localDocumentId: 'current',
+          documentId: 'current',
+          localDocumentId: 'current',
           canonicalFileRootPath: record.canonicalFileRootPath,
           normalizedRelativePath: record.normalizedRelativePath,
-          displayPath: 'file.txt', diskRevision: 'v1:initial', baselineContent: 'initial',
-          content: 'current edit', bufferVersion: 1, generation: 1, savedAt: 1,
-          unknownSubmission: null, closed: false,
+          displayPath: 'file.txt',
+          diskRevision: 'v1:initial',
+          baselineContent: 'initial',
+          content: 'current edit',
+          bufferVersion: 1,
+          generation: 1,
+          savedAt: 1,
+          unknownSubmission: null,
+          closed: false,
         };
-        const alternate = { ...currentDraft, documentId: 'alternate', localDocumentId: 'alternate', content: 'alternate edit' };
+        const alternate = {
+          ...currentDraft,
+          documentId: 'alternate',
+          localDocumentId: 'alternate',
+          content: 'alternate edit',
+        };
         await repository.putDraft(currentDraft);
         await repository.putDraft(alternate);
         const replacement = { ...currentDraft, generation: 2, content: alternate.content };
@@ -129,12 +141,28 @@ describe('File draft storage failures', () => {
           if (this.name === 'drafts') this.transaction.abort();
           return request;
         };
-        try { await repository.resolveDraftConflict(alternate, replacement); }
-        catch (error) { failures.push((error as Error).name); }
-        finally { IDBObjectStore.prototype.delete = originalDelete; }
-        const afterAbortedChoice = (await repository.getDrafts(record.userNamespace, record.deploymentId, record.browserSessionId)).map((draft) => draft.content).sort();
+        try {
+          await repository.resolveDraftConflict(alternate, replacement);
+        } catch (error) {
+          failures.push((error as Error).name);
+        } finally {
+          IDBObjectStore.prototype.delete = originalDelete;
+        }
+        const afterAbortedChoice = (
+          await repository.getDrafts(
+            record.userNamespace,
+            record.deploymentId,
+            record.browserSessionId,
+          )
+        )
+          .map((draft) => draft.content)
+          .sort();
         await repository.resolveDraftConflict(alternate, replacement);
-        const afterChoice = await repository.getDrafts(record.userNamespace, record.deploymentId, record.browserSessionId);
+        const afterChoice = await repository.getDrafts(
+          record.userNamespace,
+          record.deploymentId,
+          record.browserSessionId,
+        );
         repository.close();
 
         await new Promise<void>((resolve, reject) => {
@@ -157,7 +185,12 @@ describe('File draft storage failures', () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         return { failures, retained, unhandled, afterAbortedChoice, afterChoice };
       }, source);
-      expect(result.failures).toEqual(['AbortError', 'pruning failed', 'AbortError', 'VersionError']);
+      expect(result.failures).toEqual([
+        'AbortError',
+        'pruning failed',
+        'AbortError',
+        'VersionError',
+      ]);
       expect(result.retained).toEqual([]);
       expect(result.afterAbortedChoice).toEqual(['alternate edit', 'current edit']);
       expect(result.afterChoice).toHaveLength(1);
