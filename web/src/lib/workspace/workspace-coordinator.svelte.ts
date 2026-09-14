@@ -908,14 +908,17 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async switchTerminalSurface(currentTerminalId: string, nextTerminalId: string): Promise<void> {
 		await this.#terminalPlacement.switch(currentTerminalId, nextTerminalId);
 	}
+
 	async handleTerminalSessionTerminated(terminalId: string): Promise<void> {
 		await this.#terminalPlacement.handleTerminated(terminalId);
 	}
+
 	async focusMostRecentTerminalOrCreate(
 		preferredWindowId: WorkspaceWindowId = this.defaultWindowId,
 	): Promise<void> {
 		await this.#terminalPlacement.focusMostRecentOrCreate(preferredWindowId);
 	}
+
 	async enterMobilePresentation(): Promise<void> {
 		await this.#presentation.enterMobilePresentation();
 	}
