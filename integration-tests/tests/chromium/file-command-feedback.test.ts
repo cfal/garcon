@@ -64,10 +64,11 @@ test('reports command outcomes, reveals after tree startup, and restores status 
 
     markPhase('using the mobile status disclosure without a modal focus trap');
     await page.setViewportSize({ width: 390, height: 844 });
-    const trigger = page.getByRole('button', { name: 'Show full editor status', exact: true });
+    const trigger = page.getByRole('button', { name: /^(Show|Hide) full editor status$/ });
     await trigger.click();
     const details = page.getByRole('group', { name: 'Full editor status', exact: true });
     await details.waitFor({ state: 'visible' });
+    expect(await trigger.getAttribute('aria-label')).toBe('Hide full editor status');
     expect(await trigger.getAttribute('aria-controls')).toBe(await details.getAttribute('id'));
     const bounds = await details.boundingBox();
     expect(bounds).not.toBeNull();
