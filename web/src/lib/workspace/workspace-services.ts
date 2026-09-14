@@ -371,11 +371,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		}),
 		getPlacement: () => {
 			if (!placement) throw new Error('Workspace placement is not ready');
-			return {
-				placeFileSession: (sessionId, target, publication) =>
-					placement!.placeFileSession(sessionId, target, publication),
-				focusFileSession: (sessionId) => placement!.focusFileSession(sessionId),
-			};
+			return placement;
 		},
 		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
 		onRecoveryError: (document, error) => {

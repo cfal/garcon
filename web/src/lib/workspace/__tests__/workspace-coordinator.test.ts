@@ -293,12 +293,11 @@ describe('WorkspaceCoordinator', () => {
 			try {
 				const { coordinator, layout, singletons } = createHarness({ tickets: controller });
 				await coordinator.openSingletonAsTab('tickets', 'window-files');
-				const close = () =>
-					kind === 'tab'
-						? coordinator.closeSurface('singleton:tickets')
-						: kind === 'window'
-							? coordinator.closeWindow('window-files')
-							: coordinator.closeOtherWindows('window-main');
+				const close = () => {
+					if (kind === 'tab') return coordinator.closeSurface('singleton:tickets');
+					if (kind === 'window') return coordinator.closeWindow('window-files');
+					return coordinator.closeOtherWindows('window-main');
+				};
 				const canceled = close();
 				await vi.waitFor(() =>
 					expect(coordinator.closeGuardRequest?.surfaceId).toBe('singleton:tickets'),

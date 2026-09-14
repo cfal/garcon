@@ -123,29 +123,20 @@
 			owner?.kind === 'chat-list' ? false : onFocusNextTab(),
 		cycleWindowFocus: () => onCycleWindowFocus(),
 		get focusOwner() {
-			return focusOwner === 'chat-list'
-				? { kind: 'chat-list' as const }
-				: {
-						kind: 'surface' as const,
-						surfaceId:
-							focusOwner === 'file'
-								? 'file:file-session'
-								: focusOwner === 'terminal'
-									? 'terminal:one'
-									: CANONICAL_CHAT_SURFACE_ID,
-					};
+			if (focusOwner === 'chat-list') return { kind: 'chat-list' as const };
+			let surfaceId: string = CANONICAL_CHAT_SURFACE_ID;
+			if (focusOwner === 'file') surfaceId = 'file:file-session';
+			else if (focusOwner === 'terminal') surfaceId = 'terminal:one';
+			return { kind: 'surface' as const, surfaceId };
 		},
 		layout: {
-			surface: (surfaceId: string) =>
-				surfaceId === 'file:file-session'
-					? { id: surfaceId, type: 'file', fileSessionId: 'file-session' }
-					: surfaceId === 'terminal:one'
-						? { id: surfaceId, type: 'terminal', terminalId: 'one' }
-						: {
-								id: CANONICAL_CHAT_SURFACE_ID,
-								type: 'chat' as const,
-								chatId: 'chat-1',
-							},
+			surface: (surfaceId: string) => {
+				if (surfaceId === 'file:file-session')
+					return { id: surfaceId, type: 'file', fileSessionId: 'file-session' };
+				if (surfaceId === 'terminal:one')
+					return { id: surfaceId, type: 'terminal', terminalId: 'one' };
+				return { id: CANONICAL_CHAT_SURFACE_ID, type: 'chat', chatId: 'chat-1' };
+			},
 		},
 	} satisfies WorkspaceShortcutDeps['workspace'];
 	const transients = new TransientLayerRegistry(new WorkspaceInteractionGate());

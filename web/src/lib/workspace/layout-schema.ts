@@ -1,4 +1,5 @@
 import type {
+	PersistedWorkspaceLayoutNode,
 	PersistedWorkspaceLayoutV2,
 	PersistedWorkspaceSurfaceRef,
 } from '$shared/workspace-layout';
@@ -311,36 +312,25 @@ function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef 
 	return null;
 }
 
-type PersistedNode<Ref> =
-	| { type: 'window'; id: string; order: Ref[]; active: Ref | null; mru: Ref[] }
-	| {
-			type: 'partition';
-			id: string;
-			direction: 'horizontal' | 'vertical';
-			ratio: number;
-			children: [PersistedNode<Ref>, PersistedNode<Ref>];
-	  };
-
-function serializeNode<Ref>(
+function serializeNode(
 	node: DesktopWorkspaceNode,
 	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
-	toRef: (surface: SurfaceDescriptor) => Ref | null,
-): PersistedNode<Ref> {
+): PersistedWorkspaceLayoutNode {
 	if (node.type === 'window') {
 		const order = node.tabs.order.flatMap((surfaceId) => {
-			const ref = surfaces[surfaceId] ? toRef(surfaces[surfaceId]) : null;
+			const ref = surfaces[surfaceId] ? persistedRef(surfaces[surfaceId]) : null;
 			return ref ? [ref] : [];
 		});
 		const activeSurface = surfaces[node.tabs.activeId];
 		const mru = node.tabs.mru.flatMap((surfaceId) => {
-			const ref = surfaces[surfaceId] ? toRef(surfaces[surfaceId]) : null;
+			const ref = surfaces[surfaceId] ? persistedRef(surfaces[surfaceId]) : null;
 			return ref ? [ref] : [];
 		});
 		return {
 			type: 'window',
 			id: node.id,
 			order,
-			active: activeSurface ? toRef(activeSurface) : null,
+			active: activeSurface ? persistedRef(activeSurface) : null,
 			mru,
 		};
 	}
@@ -350,8 +340,8 @@ function serializeNode<Ref>(
 		direction: node.direction,
 		ratio: node.ratio,
 		children: [
-			serializeNode(node.children[0], surfaces, toRef),
-			serializeNode(node.children[1], surfaces, toRef),
+			serializeNode(node.children[0], surfaces),
+			serializeNode(node.children[1], surfaces),
 		],
 	};
 }
@@ -361,7 +351,7 @@ export function serializeWorkspaceLayout(
 ): PersistedWorkspaceLayoutV2 {
 	return {
 		version: 2,
-		root: serializeNode(snapshot.desktopRoot, snapshot.surfaces, persistedRef),
+		root: serializeNode(snapshot.desktopRoot, snapshot.surfaces),
 		unplacedTerminalIds: [...snapshot.unplacedTerminalIds],
 	};
 }

@@ -27,14 +27,14 @@ export interface WorkbenchCommandContext {
 	surfaceId: string | null;
 }
 
-export interface WorkbenchCommand<Context = WorkbenchCommandContext> {
+export interface WorkbenchCommand {
 	id: string;
 	label: string;
 	description?: string;
 	category: WorkbenchCommandCategory;
-	isEnabled(context: Context): boolean;
-	isVisible?(context: Context): boolean;
-	run(context: Context): unknown | Promise<unknown>;
+	isEnabled(context: WorkbenchCommandContext): boolean;
+	isVisible?(context: WorkbenchCommandContext): boolean;
+	run(context: WorkbenchCommandContext): unknown | Promise<unknown>;
 }
 
 export interface FileCommandSurfacePort {

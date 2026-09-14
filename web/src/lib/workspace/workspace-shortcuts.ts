@@ -189,11 +189,9 @@ export class WorkspaceShortcutDispatcher {
 			this.deps.appShell.requestNewChat();
 			return;
 		}
-		const halfPageDirection: WorkspaceHalfPageDirection | null = matches('scroll-half-page-up')
-			? 'earlier'
-			: matches('scroll-half-page-down')
-				? 'later'
-				: null;
+		let halfPageDirection: WorkspaceHalfPageDirection | null = null;
+		if (matches('scroll-half-page-up')) halfPageDirection = 'earlier';
+		else if (matches('scroll-half-page-down')) halfPageDirection = 'later';
 		if (halfPageDirection) {
 			// Terminal input is the sole exception; editable targets still use workspace scrolling.
 			if (ownerDescriptor?.type === 'terminal') return;
