@@ -268,6 +268,7 @@ describe('createWorkspaceServices', () => {
 			tone: 'error',
 			message: 'Open a chat composer first.',
 		});
+		expect(assembled.notifications.items.filter((item) => item.tone === 'info')).toHaveLength(1);
 		removeCurrent();
 		expect(services.commands.isEnabled('file.send-to-chat', context)).toBe(false);
 	});

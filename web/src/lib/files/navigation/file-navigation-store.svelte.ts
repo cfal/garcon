@@ -66,10 +66,8 @@ export class FileNavigationStore {
 			this.#pendingNavigation = null;
 		} else {
 			this.#cancelPendingNavigation();
-			this.#history = this.#history.slice(0, this.#index + 1);
-			this.#history.push(location);
 			this.#history = pruneNewestLocations(
-				this.#history,
+				[...this.#history.slice(0, this.#index + 1), location],
 				FILE_NAVIGATION_LIMIT,
 				FILE_NAVIGATION_BYTE_LIMIT,
 			);

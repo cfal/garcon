@@ -233,10 +233,12 @@ export class WorkspaceShortcutDispatcher {
 				const commandContext = { viewId: descriptor.fileSessionId, surfaceId: descriptor.id };
 				const fileCommand = FILE_SHORTCUT_COMMANDS.find(([id]) => matches(id))?.[1] ?? null;
 				if (fileCommand) {
-					if (
-						fileCommand !== 'file.save' &&
-						!this.deps.commands.isEnabled(fileCommand, commandContext)
-					) {
+					// File history must not fall through to browser navigation at its boundaries.
+					const ownsBrowserShortcut =
+						fileCommand === 'file.save' ||
+						fileCommand === 'file.navigate-back' ||
+						fileCommand === 'file.navigate-forward';
+					if (!ownsBrowserShortcut && !this.deps.commands.isEnabled(fileCommand, commandContext)) {
 						return;
 					}
 					event.preventDefault();

@@ -594,9 +594,11 @@ describe('KeyboardShortcuts', () => {
 			onTransientEscape,
 		});
 
-		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-		);
+		screen
+			.getByRole('textbox', { name: 'Transient input' })
+			.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+			);
 
 		expect(onLocalKeydown).toHaveBeenCalledOnce();
 		expect(onTransientEscape).not.toHaveBeenCalled();
@@ -903,6 +905,26 @@ describe('KeyboardShortcuts', () => {
 			expect(execute).not.toHaveBeenCalled();
 		},
 	);
+
+	it.each([
+		['ArrowLeft', 'file.navigate-back'],
+		['ArrowRight', 'file.navigate-forward'],
+	])('suppresses browser navigation for disabled file history %s', (key, command) => {
+		const execute = vi.fn(async () => false);
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			commands: { execute, isEnabled: () => false },
+		});
+		const event = new KeyboardEvent('keydown', { key, altKey: true, cancelable: true });
+		window.dispatchEvent(event);
+		expect(event.defaultPrevented).toBe(true);
+		expect(execute).toHaveBeenCalledWith(command, {
+			viewId: 'file-session',
+			surfaceId: 'file:file-session',
+		});
+	});
 
 	it('still suppresses native Save when the file command is disabled', () => {
 		render(KeyboardShortcutsHost, {

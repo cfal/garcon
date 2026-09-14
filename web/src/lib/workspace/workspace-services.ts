@@ -449,7 +449,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		filesSurfaceIfPresent: () => singletonSurfaces.filesIfPresent(),
 		onError: (error) =>
 			deps.notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
-		onInfo: (message) => deps.notifications.info(message),
+		onInfo: (message) => deps.notifications.info(message, { key: 'file-command-feedback' }),
 	});
 	const shortcuts = new WorkspaceShortcutDispatcher({
 		workspace: coordinator,

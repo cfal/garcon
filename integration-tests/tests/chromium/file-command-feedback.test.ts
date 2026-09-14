@@ -17,11 +17,25 @@ test('reports command outcomes, reveals after tree startup, and restores status 
       agent: integration.directAgents.openAi,
     });
     await integration.client.waitForTurnTerminal(chatId, started.turnId);
+    await page.goto(integration.garcon.baseUrl);
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
     const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
     const source = surface.locator('.cm-content');
     await source.waitFor({ state: 'visible' });
+
+    markPhase('suppressing browser Back at the first file-history entry');
+    await source.evaluate((element) => {
+      element.addEventListener('keydown', (event) => {
+        if (event instanceof KeyboardEvent && event.altKey && event.key === 'ArrowLeft') {
+          element.setAttribute('data-history-key-prevented', String(event.defaultPrevented));
+        }
+      });
+    });
+    await source.press('Control+Home');
+    await source.press('Alt+ArrowLeft');
+    expect(await source.getAttribute('data-history-key-prevented')).toBe('true');
+    expect(page.url()).toBe(`${integration.garcon.baseUrl}/chat/${chatId}`);
 
     async function command(label: string): Promise<void> {
       await source.click();

@@ -76,8 +76,13 @@ describe('FilesSurfaceController reveal', () => {
 			controller.setPresentationVisible(true);
 			controller.revealFile('/workspace', 'cancelled/file.ts');
 			if (action === 'hide') controller.setPresentationVisible(false);
-			else if (action === 'dispose') controller.dispose();
-			else
+			else if (action === 'dispose') {
+				controller.dispose();
+				controller.setProjectState({
+					kind: 'available',
+					project: { chatId: 'chat', projectPath: '/workspace', effectiveProjectKey: '/workspace' },
+				});
+			} else
 				controller.setProjectState({
 					kind: 'available',
 					project: { chatId: 'other', projectPath: '/other', effectiveProjectKey: '/other' },
@@ -86,7 +91,7 @@ describe('FilesSurfaceController reveal', () => {
 			await initial.promise;
 			flushSync();
 			controller.setPresentationVisible(true);
-			await Promise.resolve();
+			await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
 			flushSync();
 			expect(controller.tree.focusPathAfterNavigation).toBeNull();
 			expect(getTree).not.toHaveBeenCalledWith(
@@ -108,6 +113,7 @@ describe('FilesSurfaceController reveal', () => {
 		controller.revealFile('/workspace', 'resolved.ts');
 		flushSync();
 		expect(getTree).toHaveBeenCalledTimes(1);
+		expect(controller.tree.readyResponse).not.toBeNull();
 		controller.setProjectState({
 			kind: 'available',
 			project: { chatId: 'chat', projectPath: '/workspace', effectiveProjectKey: '/workspace' },
