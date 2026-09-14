@@ -4,7 +4,7 @@
 
 	let { session, compact = false }: { session: FileViewSession; compact?: boolean } = $props();
 	let expanded = $state(false);
-	let trigger: HTMLButtonElement;
+	let trigger = $state<HTMLButtonElement>();
 	const detailsId = $props.id();
 	const status = $derived(session.editor?.status);
 	const saveLabel = $derived.by(() => {
@@ -65,7 +65,7 @@
 					class="rounded-md px-3 py-2 text-base hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					onclick={() => {
 						expanded = false;
-						trigger.focus();
+						trigger?.focus();
 					}}>{m.editor_actions_close()}</button
 				>
 			</div>
