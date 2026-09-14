@@ -87,6 +87,7 @@ export class FileDocumentIoCoordinator {
 
 	async loadInitial(session: FileViewSession): Promise<void> {
 		const document = session.document;
+		if (document.recoveredCopies.length > 0) return;
 		const existing = this.#documentLoads.get(document.id);
 		if (existing) {
 			await existing;
@@ -191,7 +192,7 @@ export class FileDocumentIoCoordinator {
 			session.loading ||
 			session.refreshing ||
 			session.saving ||
-			session.pendingMutationCount > 0
+			session.mutationGuarded
 		) {
 			return;
 		}
@@ -299,12 +300,18 @@ export class FileDocumentIoCoordinator {
 				!session.dirty &&
 				!session.saving &&
 				!session.saveOutcomeUnknown &&
+				session.document.recoveredCopies.length === 0 &&
+				!session.document.resolvingRecovery &&
 				session.contentKind !== 'image'
 			) {
 				const bufferVersion = session.document.bufferVersion;
 				const loaded = await this.#readLatest(session, controller.signal);
 				if (!this.#isCurrentFreshness(session, controller, generation, loadedRevision)) return;
-				if (session.document.bufferVersion !== bufferVersion || session.dirty) {
+				if (
+					session.document.bufferVersion !== bufferVersion ||
+					session.dirty ||
+					session.document.recoveredCopies.length > 0
+				) {
 					session.document.diskContent = loaded.kind === 'text' ? loaded.content : null;
 					session.document.diskRevision = loaded.revision;
 					session.isExternallyStale = true;
@@ -433,7 +440,7 @@ export class FileDocumentIoCoordinator {
 			!session.loading &&
 			!session.refreshing &&
 			!session.saving &&
-			session.pendingMutationCount === 0
+			!session.mutationGuarded
 		);
 	}
 

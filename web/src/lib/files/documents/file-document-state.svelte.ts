@@ -14,6 +14,15 @@ export interface LocalSaveSubmission {
 	startedAt: number;
 }
 
+export type FileRecoveryChoice = 'keep-current' | 'use-recovered';
+
+export interface FileRecoveredCopy {
+	id: string;
+	content: string;
+	savedAt: number;
+	hasUnknownSubmission: boolean;
+}
+
 export interface FileDocumentRuntimePort {
 	content(): string;
 	applyUserEdit(content: string): void;
@@ -55,6 +64,9 @@ export class FileDocumentState {
 	readOnly = $state(false);
 	missing = $state(false);
 	recovered = $state(false);
+	recoveredCopies = $state.raw<readonly FileRecoveredCopy[]>([]);
+	resolvingRecovery = $state(false);
+	recoveryResolutionError = $state<string | null>(null);
 	recoveryError = $state<string | null>(null);
 	recoveryGuard = $state(false);
 	recoveryDiscoveryError = $state<string | null>(null);
@@ -113,7 +125,13 @@ export class FileDocumentState {
 	}
 
 	get mutationGuarded(): boolean {
-		return this.saveOutcomeUnknown || this.recoveryGuard || this.pendingMutationCount > 0;
+		return (
+			this.saveOutcomeUnknown ||
+			this.recoveryGuard ||
+			this.recoveredCopies.length > 0 ||
+			this.resolvingRecovery ||
+			this.pendingMutationCount > 0
+		);
 	}
 
 	get canDiscard(): boolean {

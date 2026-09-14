@@ -1,4 +1,8 @@
-import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+import type {
+	FileDocumentState,
+	FileRecoveryChoice,
+} from '$lib/files/documents/file-document-state.svelte.js';
+import { fileTextMetadata } from '$lib/files/documents/file-text-metadata.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	scopedRecordKey,
@@ -38,6 +42,47 @@ export class FileDraftCoordinator {
 	adopt(document: FileDocumentState, generation: number): void {
 		const pending = this.#entry(document);
 		pending.generation = Math.max(pending.generation, generation);
+	}
+
+	async resolveRecoveryConflict(
+		document: FileDocumentState,
+		source: SpaFileDraftV1,
+		choice: FileRecoveryChoice,
+	): Promise<void> {
+		if (!this.options.repository.durable) throw new Error(m.file_recovery_storage_unavailable());
+		const currentSubmission = document.pendingSubmission;
+		if (
+			currentSubmission &&
+			source.unknownSubmission &&
+			currentSubmission.submissionId !== source.unknownSubmission.submissionId
+		) {
+			throw new Error(m.file_recovery_multiple_submissions());
+		}
+		const pending = this.#entry(document);
+		this.#clearTimers(pending);
+		pending.generation = Math.max(pending.generation, source.generation) + 1;
+		const replacement = this.#record(document, pending.generation, false);
+		replacement.unknownSubmission = currentSubmission ?? source.unknownSubmission;
+		if (choice === 'use-recovered') {
+			replacement.content = source.content;
+			replacement.baselineContent = source.baselineContent;
+			replacement.diskRevision = source.diskRevision;
+			replacement.bufferVersion += 1;
+		}
+		await this.#enqueue(pending, async () => {
+			await this.options.repository.resolveDraftConflict(source, replacement);
+			document.pendingSubmission = replacement.unknownSubmission;
+			if (replacement.unknownSubmission) document.saveOutcome = 'unknown';
+			if (choice === 'use-recovered') {
+				document.loadedRevision = replacement.diskRevision;
+				document.baseline = replacement.baselineContent ?? '';
+				Object.assign(document, fileTextMetadata(replacement.content));
+				document.applyUserEdit(replacement.content);
+				document.bufferVersion = Math.max(document.bufferVersion, replacement.bufferVersion);
+				document.dirty = document.currentContent() !== document.baseline;
+			}
+			document.recoveryError = null;
+		});
 	}
 
 	schedule(document: FileDocumentState): void {
@@ -156,6 +201,8 @@ export class FileDraftCoordinator {
 	async #checkpoint(pending: PendingCheckpoint, closed = pending.closed): Promise<void> {
 		this.#clearTimers(pending);
 		const document = pending.document;
+		// Lifecycle flushes during a choice must snapshot the committed copy, not the old buffer.
+		if (document.resolvingRecovery) await pending.queue;
 		if (!this.options.repository.durable) {
 			const error = new Error(m.file_recovery_storage_unavailable());
 			document.recoveryError = error.message;

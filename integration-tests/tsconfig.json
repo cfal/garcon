@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "rewriteRelativeImportExtensions": true,
     "types": ["@types/bun", "../web/node_modules/svelte"],
-    "paths": { "$shared/*": ["../common/*"] }
+    "paths": { "$shared/*": ["../common/*"], "$lib/*": ["../web/src/lib/*"] }
   },
   "include": ["./**/*.ts", "../common/**/*.ts"],
   "exclude": ["node_modules"]

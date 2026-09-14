@@ -16,7 +16,10 @@ import {
 	FileViewSession,
 	type FileRendererMode,
 } from '$lib/files/sessions/file-view-session.svelte.js';
-import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+import {
+	FileDocumentState,
+	type FileRecoveryChoice,
+} from '$lib/files/documents/file-document-state.svelte.js';
 import {
 	createFileDraftRepository,
 	type FileDraftRepository,
@@ -35,7 +38,10 @@ import {
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { FileViewRecovery } from '$lib/files/persistence/file-view-recovery.js';
 import { prepareRestoredView } from '$lib/files/persistence/restored-file-view.js';
-import { canSaveFileChanges, canSubmitFileWrite } from '$lib/files/persistence/file-write-policy.js';
+import {
+	canSaveFileChanges,
+	canSubmitFileWrite,
+} from '$lib/files/persistence/file-write-policy.js';
 import {
 	fileContentKind,
 	navigationViewPreference,
@@ -216,7 +222,13 @@ export class FileSessionRegistry {
 	}
 
 	get hasUnloadProtectedSessions(): boolean {
-		return Object.values(this.documents).some((doc) => doc.dirty || doc.saveOutcome !== 'idle');
+		return Object.values(this.documents).some(
+			(doc) =>
+				doc.dirty ||
+				doc.saveOutcome !== 'idle' ||
+				doc.recoveredCopies.length > 0 ||
+				doc.resolvingRecovery,
+		);
 	}
 
 	reloadApplication(): void {
@@ -272,6 +284,9 @@ export class FileSessionRegistry {
 			},
 			adoptDocument: (document, generation) => this.#drafts?.adopt(document, generation),
 			persistDocument: (document) => this.#drafts?.settle(document) ?? Promise.resolve(),
+			resolveDraftConflict: (document, source, choice) =>
+				this.#drafts!.resolveRecoveryConflict(document, source, choice),
+			reconfigureDocument: (document) => this.#reconfigureDocumentViews(document),
 			openView: (record, document, target) => this.#openRestoredView(record, document, target),
 			completeViewRestoration: (session) => {
 				this.#enableViewPersistence(session);
@@ -697,14 +712,29 @@ export class FileSessionRegistry {
 		return session ? this.#saves.retrySettlement(session.document) : Promise.resolve(false);
 	}
 
+	resolveRecoveredCopy(
+		sessionId: string,
+		copyId: string,
+		choice: FileRecoveryChoice,
+	): Promise<boolean> {
+		const session = this.get(sessionId);
+		return session && this.#viewRecovery
+			? this.#viewRecovery.resolveCopy(session.document, copyId, choice)
+			: Promise.resolve(false);
+	}
+
 	async clearRecovery(): Promise<boolean> {
 		return this.#viewRecovery?.clear(Object.values(this.documents)) ?? false;
 	}
 
-	async exportContent(sessionId: string): Promise<void> {
+	async exportContent(sessionId: string, recoveredCopyId?: string): Promise<void> {
 		const session = this.get(sessionId);
 		if (!session || typeof document === 'undefined') return;
-		const blob = new Blob([session.document.currentContent()], {
+		const content = recoveredCopyId
+			? session.document.recoveredCopies.find((copy) => copy.id === recoveredCopyId)?.content
+			: session.document.currentContent();
+		if (content === undefined) return;
+		const blob = new Blob([content], {
 			type: 'text/plain;charset=utf-8',
 		});
 		const url = URL.createObjectURL(blob);

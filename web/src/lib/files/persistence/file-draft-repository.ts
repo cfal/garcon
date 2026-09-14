@@ -16,6 +16,12 @@ export const FILE_CLOSED_DRAFT_LIMIT = 20;
 export const FILE_RECENT_LIMIT = 100;
 export const FILE_VIEW_LIMIT = 100;
 
+export class FileDraftOwnershipError extends Error {
+	constructor() {
+		super(m.file_recovery_draft_owned());
+	}
+}
+
 export interface SpaFileDraftV1 {
 	schemaVersion: 1;
 	deploymentId: string;
@@ -94,6 +100,7 @@ export interface FileDraftRepository {
 	readonly durable: boolean;
 	putDraft(record: SpaFileDraftV1): Promise<void>;
 	adoptDraft(record: SpaFileDraftV1, localDocumentId: string): Promise<SpaFileDraftV1>;
+	resolveDraftConflict(source: SpaFileDraftV1, replacement: SpaFileDraftV1): Promise<void>;
 	deleteDraft(documentId: string, generation: number): Promise<void>;
 	getDrafts(
 		userNamespace: string,
@@ -177,7 +184,7 @@ export function createFileDraftRepository(
 				);
 				if (targetId !== stored.documentId) {
 					const target = await indexedDbRequest<SpaFileDraftV1 | undefined>(store.get(targetId));
-					if (target) throw new Error(m.file_recovery_draft_owned());
+					if (target) throw new FileDraftOwnershipError();
 				}
 				const adopted = { ...stored, documentId: targetId, localDocumentId };
 				await indexedDbRequest(store.put(adopted));
@@ -191,6 +198,16 @@ export function createFileDraftRepository(
 				const existing = await indexedDbRequest<SpaFileDraftV1 | undefined>(store.get(documentId));
 				if (existing && existing.generation > generation) return;
 				await indexedDbRequest(store.delete(documentId));
+			});
+		},
+		async resolveDraftConflict(source, replacement) {
+			const database = await open();
+			await runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
+				const records = await indexedDbRequest<SpaFileDraftV1[]>(store.getAll());
+				assertRecoveryReplacement(records, source, replacement);
+				await indexedDbRequest(store.put(replacement));
+				if (source.documentId !== replacement.documentId)
+					await indexedDbRequest(store.delete(source.documentId));
 			});
 		},
 		async getDrafts(userNamespace, deploymentId, browserSessionId) {
@@ -338,7 +355,10 @@ export function createFileDraftRepository(
 			});
 		},
 		close() {
-			void databasePromise?.then((database) => database.close());
+			void databasePromise?.then(
+				(database) => database.close(),
+				() => undefined,
+			);
 			databasePromise = null;
 		},
 	};
@@ -367,7 +387,7 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 				localDocumentId,
 			);
 			if (targetId !== stored.documentId && drafts.has(targetId)) {
-				throw new Error(m.file_recovery_draft_owned());
+				throw new FileDraftOwnershipError();
 			}
 			const adopted = { ...stored, documentId: targetId, localDocumentId };
 			drafts.set(targetId, structuredClone(adopted));
@@ -377,6 +397,11 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 		async deleteDraft(documentId, generation) {
 			const existing = drafts.get(documentId);
 			if (!existing || existing.generation <= generation) drafts.delete(documentId);
+		},
+		async resolveDraftConflict(source, replacement) {
+			assertRecoveryReplacement([...drafts.values()], source, replacement);
+			drafts.set(replacement.documentId, structuredClone(replacement));
+			if (source.documentId !== replacement.documentId) drafts.delete(source.documentId);
 		},
 		async getDrafts(userNamespace, deploymentId, browserSessionId) {
 			return [...drafts.values()]
@@ -550,9 +575,21 @@ async function runDatabaseTransaction<T>(
 ): Promise<T> {
 	const transaction = database.transaction(storeNames, mode);
 	const completion = indexedDbTransactionCompletion(transaction);
-	const result = await operation(transaction);
-	await completion;
-	return result;
+	// A request failure also aborts the transaction; both promises must be observed.
+	void completion.catch(() => undefined);
+	try {
+		const result = await operation(transaction);
+		await completion;
+		return result;
+	} catch (error) {
+		try {
+			transaction.abort();
+		} catch {
+			// A completed or already aborted transaction cannot be aborted again.
+		}
+		await completion.catch(() => undefined);
+		throw error;
+	}
 }
 
 function isProtectedDraft(
@@ -570,6 +607,45 @@ function isProtectedDraft(
 function assertDraftSize(record: SpaFileDraftV1): void {
 	if (draftBytes(record) > FILE_DRAFT_DOCUMENT_LIMIT_BYTES) {
 		throw new Error(m.file_recovery_document_limit());
+	}
+}
+
+function assertRecoveryReplacement(
+	records: readonly SpaFileDraftV1[],
+	source: SpaFileDraftV1,
+	replacement: SpaFileDraftV1,
+): void {
+	const stored = records.find((record) => record.documentId === source.documentId);
+	const target = records.find((record) => record.documentId === replacement.documentId);
+	if (
+		!stored ||
+		stored.generation !== source.generation ||
+		stored.savedAt !== source.savedAt ||
+		stored.content !== source.content ||
+		stored.unknownSubmission?.submissionId !== source.unknownSubmission?.submissionId ||
+		(target && target.generation >= replacement.generation) ||
+		(target && target.localDocumentId !== replacement.localDocumentId) ||
+		(source.unknownSubmission &&
+			source.unknownSubmission.submissionId !== replacement.unknownSubmission?.submissionId) ||
+		(target?.unknownSubmission &&
+			target.unknownSubmission.submissionId !== replacement.unknownSubmission?.submissionId) ||
+		source.userNamespace !== replacement.userNamespace ||
+		source.deploymentId !== replacement.deploymentId ||
+		source.browserSessionId !== replacement.browserSessionId ||
+		source.canonicalFileRootPath !== replacement.canonicalFileRootPath ||
+		source.normalizedRelativePath !== replacement.normalizedRelativePath
+	)
+		throw new Error(m.file_recovery_copy_changed());
+	assertDraftSize(replacement);
+	const retained = records.filter(
+		(record) =>
+			record.documentId !== source.documentId && record.documentId !== replacement.documentId,
+	);
+	if (
+		retained.reduce((sum, record) => sum + draftBytes(record), draftBytes(replacement)) >
+		FILE_DRAFT_TOTAL_LIMIT_BYTES
+	) {
+		throw new Error(m.file_recovery_storage_limit());
 	}
 }
 

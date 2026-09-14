@@ -2725,28 +2725,250 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.documents[record.documentId]?.content).toBe('private draft');
 	});
 
-	it('retains a stored draft when recovery finds a divergent live dirty buffer', async () => {
+	it.each(['keep-current', 'use-recovered'] as const)(
+		'resolves divergent live and recovered copies with %s',
+		async (choice) => {
+			const repository = createMemoryFileDraftRepository();
+			const harness = createHarness({ draftRepository: repository, userNamespace: null });
+			const opened = await harness.registry.open(request('src/file.ts'));
+			if (!opened) throw new Error('Expected file session');
+			await vi.waitFor(() => expect(opened.loading).toBe(false));
+			opened.content = 'newer live edit';
+			const unrelated = await harness.registry.open(request('unrelated.ts'));
+			if (!unrelated) throw new Error('Expected unrelated file');
+			await repository.putDraft(
+				storedDraft({
+					documentId: 'older-stored-draft',
+					normalizedRelativePath: 'src/file.ts',
+					content: 'older unsaved edit',
+				}),
+			);
+
+			await harness.registry.initializeRecovery('test-user', 'test-session');
+
+			expect(opened.content).toBe('newer live edit');
+			expect(opened.document.recoveryGuard).toBe(false);
+			expect(opened.document.recoveryDiscoveryError).toBeNull();
+			expect(opened.document.recoveredCopies).toMatchObject([
+				{ id: 'older-stored-draft', content: 'older unsaved edit' },
+			]);
+			expect(unrelated.document.mutationGuarded).toBe(false);
+			await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+			await expect(harness.registry.confirmDestructive(opened.id, 'close')).resolves.toBe(false);
+			expect(
+				(await repository.getDrafts('test-user', 'test-deployment', 'test-session'))
+					.map((draft) => draft.content)
+					.sort(),
+			).toEqual(['newer live edit', 'older unsaved edit']);
+			await harness.registry.retryRecoveryDiscovery();
+			expect(opened.document.recoveredCopies).toHaveLength(1);
+			expect(opened.document.recoveryGuard).toBe(false);
+			await expect(
+				harness.registry.resolveRecoveredCopy(opened.id, 'older-stored-draft', choice),
+			).resolves.toBe(true);
+			expect(opened.content).toBe(
+				choice === 'keep-current' ? 'newer live edit' : 'older unsaved edit',
+			);
+			expect(opened.document.recoveredCopies).toEqual([]);
+			expect(opened.document.mutationGuarded).toBe(false);
+			const records = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
+			expect(records).toHaveLength(1);
+			expect(records[0]?.content).toBe(opened.content);
+			await expect(harness.registry.save(opened.id)).resolves.toBe(true);
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it.each(['same', 'different'])(
+		'restores %s-content drafts for one identity without a global lock',
+		async (variant) => {
+			const repository = createMemoryFileDraftRepository();
+			await repository.putDraft(
+				storedDraft({
+					documentId: 'first',
+					normalizedRelativePath: 'copies.ts',
+					content: 'first edit',
+				}),
+			);
+			await repository.putDraft(
+				storedDraft({
+					documentId: 'second',
+					normalizedRelativePath: 'copies.ts',
+					content: variant === 'same' ? 'first edit' : 'second edit',
+				}),
+			);
+			const harness = createHarness({ draftRepository: repository });
+			await harness.registry.ready();
+			expect(Object.keys(harness.registry.documents)).toHaveLength(1);
+			const opened = harness.registry.all[0]!;
+			expect(opened.document.recoveryGuard).toBe(false);
+			expect(opened.document.recoveredCopies).toHaveLength(1);
+			await harness.registry.retryRecoveryDiscovery();
+			expect(opened.document.recoveredCopies).toHaveLength(1);
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it.each(['keep-current', 'use-recovered'] as const)(
+		'retains an alternate unknown submission after %s',
+		async (choice) => {
+			const repository = createMemoryFileDraftRepository();
+			const harness = createHarness({ draftRepository: repository, userNamespace: null });
+			const opened = await harness.registry.open(request('unknown-copy.ts'));
+			if (!opened) throw new Error('Expected live file');
+			await vi.waitFor(() => expect(opened.loading).toBe(false));
+			opened.content = 'current edit';
+			const source = storedDraft({
+				documentId: 'unknown-copy',
+				normalizedRelativePath: 'unknown-copy.ts',
+				content: 'recovered edit',
+				baselineContent: 'recovered base',
+				diskRevision: 'v1:recovered',
+				unknownSubmission: {
+					submissionId: 'unfinished',
+					resourceKey: opened.document.identityKey,
+					expectedDiskRevision: 'v1:recovered',
+					submittedBufferVersion: 1,
+					conflictIntent: 'overwrite',
+					content: 'submitted snapshot',
+					startedAt: 1,
+				},
+			});
+			await repository.putDraft(source);
+			await harness.registry.initializeRecovery('test-user', 'test-session');
+			await expect(
+				harness.registry.resolveRecoveredCopy(opened.id, source.documentId, choice),
+			).resolves.toBe(true);
+			expect(opened.document.pendingSubmission).toEqual(source.unknownSubmission);
+			expect(opened.saveOutcomeUnknown).toBe(true);
+			expect(opened.baseline).toBe(choice === 'use-recovered' ? 'recovered base' : 'initial');
+			expect(opened.loadedRevision).toBe(
+				choice === 'use-recovered' ? 'v1:recovered' : 'v1:initial',
+			);
+			await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+			const records = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
+			expect(records).toHaveLength(1);
+			expect(records[0]?.unknownSubmission).toEqual(source.unknownSubmission);
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it('retains both copies after failed resolution and retries without mutating the live buffer early', async () => {
 		const repository = createMemoryFileDraftRepository();
-		const harness = createHarness({ draftRepository: repository, userNamespace: null });
-		const opened = await harness.registry.open(request('src/file.ts'));
-		if (!opened) throw new Error('Expected file session');
-		await vi.waitFor(() => expect(opened.loading).toBe(false));
-		opened.content = 'newer live edit';
 		await repository.putDraft(
 			storedDraft({
-				documentId: 'older-stored-draft',
-				normalizedRelativePath: 'src/file.ts',
-				content: 'older unsaved edit',
+				documentId: 'first',
+				normalizedRelativePath: 'copies.ts',
+				content: 'first edit',
 			}),
 		);
+		await repository.putDraft(
+			storedDraft({
+				documentId: 'second',
+				normalizedRelativePath: 'copies.ts',
+				content: 'second edit',
+			}),
+		);
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = harness.registry.all[0]!;
+		const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const resolve = vi
+			.spyOn(repository, 'resolveDraftConflict')
+			.mockRejectedValueOnce(new Error('storage unavailable'));
+		try {
+			await expect(
+				harness.registry.resolveRecoveredCopy(opened.id, 'second', 'use-recovered'),
+			).resolves.toBe(false);
+			expect(opened.content).toBe('first edit');
+			expect(opened.document.recoveryResolutionError).toBeTruthy();
+			expect(opened.document.recoveredCopies).toHaveLength(1);
+			expect(
+				await repository.getDrafts('test-user', 'test-deployment', 'test-session'),
+			).toHaveLength(2);
+			await expect(
+				harness.registry.resolveRecoveredCopy(opened.id, 'second', 'use-recovered'),
+			).resolves.toBe(true);
+			expect(opened.content).toBe('second edit');
+			expect(resolve).toHaveBeenCalledTimes(2);
+		} finally {
+			report.mockRestore();
+			await harness.registry.destroyAll();
+		}
+	});
 
-		await harness.registry.initializeRecovery('test-user', 'test-session');
+	it('serializes lifecycle checkpoints with an in-flight recovery choice', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(
+			storedDraft({
+				documentId: 'first',
+				normalizedRelativePath: 'copies.ts',
+				content: 'first edit',
+			}),
+		);
+		await repository.putDraft(
+			storedDraft({
+				documentId: 'second',
+				normalizedRelativePath: 'copies.ts',
+				content: 'second edit',
+			}),
+		);
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = harness.registry.all[0]!;
+		const commit = repository.resolveDraftConflict.bind(repository);
+		const started = deferred<void>();
+		const release = deferred<void>();
+		vi.spyOn(repository, 'resolveDraftConflict').mockImplementation(async (...args) => {
+			started.resolve();
+			await release.promise;
+			await commit(...args);
+		});
+		const choice = harness.registry.resolveRecoveredCopy(opened.id, 'second', 'use-recovered');
+		await started.promise;
+		expect(opened.content).toBe('first edit');
+		const checkpoint = harness.registry.flushRecovery();
+		release.resolve();
+		await expect(choice).resolves.toBe(true);
+		await checkpoint;
+		const records = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
+		expect(records).toHaveLength(1);
+		expect(records[0]?.content).toBe('second edit');
+		await harness.registry.destroyAll();
+	});
 
-		expect(opened.content).toBe('newer live edit');
-		expect(opened.document.recoveryGuard).toBe(true);
-		expect(opened.document.recoveryDiscoveryError).toContain('newer unsaved buffer');
-		const [stored] = await repository.getDrafts('test-user', 'test-deployment', 'test-session');
-		expect(stored?.content).toBe('older unsaved edit');
+	it('does not discard either of two distinct unfinished submissions when choosing a copy', async () => {
+		const repository = createMemoryFileDraftRepository();
+		for (const id of ['first', 'second']) {
+			await repository.putDraft(
+				storedDraft({
+					documentId: id,
+					normalizedRelativePath: 'copies.ts',
+					content: `${id} edit`,
+					unknownSubmission: {
+						submissionId: id,
+						resourceKey: JSON.stringify(['/workspace', 'copies.ts']),
+						expectedDiskRevision: 'v1:initial',
+						submittedBufferVersion: 1,
+						conflictIntent: 'overwrite',
+						content: `${id} submitted`,
+						startedAt: 1,
+					},
+				}),
+			);
+		}
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = harness.registry.all[0]!;
+		await expect(
+			harness.registry.resolveRecoveredCopy(opened.id, 'second', 'use-recovered'),
+		).resolves.toBe(false);
+		expect(opened.document.recoveryResolutionError).toContain('different unfinished Saves');
+		expect(opened.document.recoveredCopies).toHaveLength(1);
+		expect(await repository.getDrafts('test-user', 'test-deployment', 'test-session')).toHaveLength(
+			2,
+		);
+		await harness.registry.destroyAll();
 	});
 
 	it('guards canonical mutations when scoped recovery discovery fails', async () => {

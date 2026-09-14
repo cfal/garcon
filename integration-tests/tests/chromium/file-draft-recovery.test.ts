@@ -29,6 +29,29 @@ function storedViewCount(page: Page): Promise<number> {
   );
 }
 
+function storedDraftContents(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () =>
+      new Promise<string[]>((resolve, reject) => {
+        const request = indexedDB.open('garcon-file-drafts-v1');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction('drafts', 'readonly');
+          const read = transaction.objectStore('drafts').getAll();
+          transaction.oncomplete = () => {
+            database.close();
+            resolve(read.result.map((draft) => draft.content));
+          };
+          transaction.onabort = () => {
+            database.close();
+            reject(transaction.error);
+          };
+        };
+      }),
+  );
+}
+
 async function holdFilesPanelChunk(page: Page, release: Promise<void>): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Network.enable');
@@ -49,6 +72,168 @@ async function holdFilesPanelChunk(page: Page, release: Promise<void>): Promise<
     },
   );
 }
+
+test.each([
+  {
+    width: 1440,
+    choice: 'Use recovered copy',
+    expected: 'alternate recovered edit',
+  },
+  {
+    width: 390,
+    choice: 'Keep current copy',
+    expected: 'current recovered edit',
+  },
+] as const)(
+  'resolves same-identity recovery copies at $width px without writing to disk',
+  async ({ width, choice, expected }) => {
+    await withChromiumFixture(
+      `file-recovery-copies-${width}`,
+      async ({ page, integration, assertNoBrowserErrors }, markPhase) => {
+        const filename = 'recovery-copies.txt';
+        const path = join(integration.dirs.project, filename);
+        await writeFile(path, 'initial', 'utf8');
+        const chatId = integration.newChatId();
+        const started = await integration.client.startDirectChat({
+          chatId,
+          content: 'recovery copies fixture',
+          projectPath: integration.dirs.project,
+          agent: integration.directAgents.openAi,
+        });
+        await integration.client.waitForTurnTerminal(chatId, started.turnId);
+        const chatUrl = `${integration.garcon.baseUrl}/chat/${chatId}`;
+        await page.goto(chatUrl);
+        await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+        const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
+        const source = surface.locator('.cm-content');
+        await source.waitFor({ state: 'visible' });
+        await source.click();
+        await source.press('Control+a');
+        await page.keyboard.insertText('current recovered edit');
+        await browserExpect
+          .poll(() => storedDraftContents(page))
+          .toContain('current recovered edit');
+        page.on('dialog', async (dialog) => {
+          await dialog.accept();
+        });
+        await page.goto(`${integration.garcon.baseUrl}/robots.txt`);
+        markPhase('seeding a second durable lineage for the same resource');
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve, reject) => {
+              const request = indexedDB.open('garcon-file-drafts-v1');
+              request.onerror = () => reject(request.error);
+              request.onsuccess = () => {
+                const database = request.result;
+                const transaction = database.transaction('drafts', 'readwrite');
+                const store = transaction.objectStore('drafts');
+                const read = store.getAll();
+                read.onsuccess = () => {
+                  const draft = read.result.find(
+                    (entry) => entry.normalizedRelativePath === 'recovery-copies.txt',
+                  );
+                  if (!draft) {
+                    transaction.abort();
+                    return;
+                  }
+                  store.delete(draft.documentId);
+                  store.put({
+                    ...draft,
+                    localDocumentId: 'a-current',
+                    documentId: JSON.stringify([
+                      draft.userNamespace,
+                      draft.deploymentId,
+                      draft.browserSessionId,
+                      'a-current',
+                    ]),
+                  });
+                  store.put({
+                    ...draft,
+                    localDocumentId: 'z-alternate',
+                    documentId: JSON.stringify([
+                      draft.userNamespace,
+                      draft.deploymentId,
+                      draft.browserSessionId,
+                      'z-alternate',
+                    ]),
+                    content: 'alternate recovered edit',
+                    savedAt: draft.savedAt + 1,
+                  });
+                };
+                transaction.oncomplete = () => {
+                  database.close();
+                  resolve();
+                };
+                transaction.onabort = () => {
+                  database.close();
+                  reject(transaction.error ?? new Error('No original recovery draft'));
+                };
+              };
+            }),
+        );
+        await page.setViewportSize({ width, height: 1000 });
+        await page.goto(chatUrl);
+        if (width < 640) {
+          await page
+            .getByRole('navigation', { name: 'Workspace navigation' })
+            .getByRole('button', { name: 'Files', exact: true })
+            .click();
+          await page
+            .getByRole('region', { name: 'Recovered files' })
+            .getByRole('button', { name: path, exact: true })
+            .click();
+        } else {
+          await page.getByRole('tab').filter({ hasText: filename }).click();
+        }
+        const recovery = surface.getByRole('region', {
+          name: 'Recovered copy',
+        });
+        await recovery.getByRole('button', { name: 'Compare', exact: true }).click();
+        const comparison = page.getByRole('dialog', {
+          name: 'Recovered copy',
+          exact: true,
+        });
+        await browserExpect(comparison.locator('.cm-content')).toHaveCount(2);
+        const bounds = await comparison.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+        if (width > 640) expect(bounds!.width).toBeGreaterThan(900);
+        await page.screenshot({
+          path: join(integration.dirs.root, `recovery-comparison-${width}.png`),
+        });
+        await comparison.getByRole('button', { name: choice, exact: true }).click();
+        await browserExpect(comparison).toHaveCount(0);
+        await browserExpect(source).toHaveText(expected);
+        await browserExpect.poll(() => storedDraftContents(page)).toEqual([expected]);
+        expect(await readFile(path, 'utf8')).toBe('initial');
+
+        markPhase('checking the separate disk conflict surface at the same viewport');
+        await writeFile(path, 'external change', 'utf8');
+        await source.press('Control+s');
+        const conflict = page.getByRole('dialog').filter({
+          has: page.getByRole('button', {
+            name: 'Save against displayed disk',
+            exact: true,
+          }),
+        });
+        await browserExpect(conflict.locator('.cm-content')).toHaveCount(2);
+        const conflictBounds = await conflict.boundingBox();
+        expect(conflictBounds).not.toBeNull();
+        expect(conflictBounds!.x).toBeGreaterThanOrEqual(0);
+        expect(conflictBounds!.x + conflictBounds!.width).toBeLessThanOrEqual(width);
+        if (width > 640) expect(conflictBounds!.width).toBeGreaterThan(900);
+        await page.screenshot({
+          path: join(integration.dirs.root, `disk-comparison-${width}.png`),
+        });
+        await conflict.getByRole('button', { name: 'Cancel', exact: true }).click();
+        expect(await readFile(path, 'utf8')).toBe('external change');
+        assertNoBrowserErrors();
+      },
+    );
+  },
+  180_000,
+);
 
 test.each([
   { presentation: 'desktop', deleted: 'file' },
@@ -162,13 +347,18 @@ test.each([
             const projectUnavailable = page
               .locator('[data-workspace-surface-id="singleton:files"]')
               .getByText('Project folder unavailable', { exact: true });
-            const recoveredFiles = page.getByRole('region', { name: 'Recovered files' });
+            const recoveredFiles = page.getByRole('region', {
+              name: 'Recovered files',
+            });
             if (deleted === 'project') {
               await browserExpect(projectUnavailable).toBeVisible();
               await browserExpect(recoveredFiles).toHaveCount(0);
               releaseFilesChunk.resolve();
             }
-            const entry = recoveredFiles.getByRole('button', { name: path, exact: true });
+            const entry = recoveredFiles.getByRole('button', {
+              name: path,
+              exact: true,
+            });
             await browserExpect(entry).toHaveCount(1);
             if (deleted === 'project') {
               await browserExpect(projectUnavailable).toBeVisible();
@@ -185,7 +375,10 @@ test.each([
           });
           if (presentation === 'mobile') {
             await fileSurface.getByRole('button', { name: 'View actions', exact: true }).click();
-            exportAction = page.getByRole('menuitem', { name: 'Export local copy', exact: true });
+            exportAction = page.getByRole('menuitem', {
+              name: 'Export local copy',
+              exact: true,
+            });
           }
           await exportAction.waitFor();
           const downloadPromise = page.waitForEvent('download');

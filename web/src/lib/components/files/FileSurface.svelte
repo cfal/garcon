@@ -23,6 +23,7 @@
 	import FilePathTitle from './FilePathTitle.svelte';
 	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
 	import FileEditorStatus from './FileEditorStatus.svelte';
+	import FileRecoveryCopies from './FileRecoveryCopies.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { canSaveFileChanges } from '$lib/files/persistence/file-write-policy.js';
 
@@ -190,6 +191,9 @@
 				>
 			{/if}
 		</div>
+	{/if}
+	{#if session.document.recoveredCopies.length > 0}
+		<FileRecoveryCopies {session} />
 	{/if}
 
 	{#if session.saveOutcomeUnknown}

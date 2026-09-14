@@ -1,6 +1,10 @@
-import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+import {
+	FileDocumentState,
+	type FileRecoveryChoice,
+} from '$lib/files/documents/file-document-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
+import { FileDraftOwnershipError } from '$lib/files/persistence/file-draft-repository.js';
 import type {
 	FileDraftRepository,
 	SpaFileDraftV1,
@@ -11,6 +15,7 @@ import { fileContentKind, resolveFileRendererMode } from '$lib/files/sessions/fi
 import { fileTextMetadata } from '$lib/files/documents/file-text-metadata.js';
 import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types.js';
 import { createRandomId } from '$lib/utils/random-id.js';
+import { SerialQueue } from '$lib/utils/serial-queue.js';
 
 interface FileViewRecoveryOptions {
 	repository: FileDraftRepository;
@@ -26,6 +31,12 @@ interface FileViewRecoveryOptions {
 	publishDocument(document: FileDocumentState, generation: number): void;
 	adoptDocument(document: FileDocumentState, generation: number): void;
 	persistDocument(document: FileDocumentState): Promise<void>;
+	resolveDraftConflict(
+		document: FileDocumentState,
+		source: SpaFileDraftV1,
+		choice: FileRecoveryChoice,
+	): Promise<void>;
+	reconfigureDocument(document: FileDocumentState): void;
 	openView(
 		record: SpaFileViewV1,
 		document: FileDocumentState | null,
@@ -47,10 +58,65 @@ export class FileViewRecovery {
 	readonly #pendingWrites = new Map<string, Set<Promise<void>>>();
 	readonly #closingViewIds = new Set<string>();
 	readonly #restoringViewIds = new Set<string>();
+	readonly #recoveredCopies = new Map<string, SpaFileDraftV1>();
+	readonly #operations = new SerialQueue();
 
 	constructor(private readonly options: FileViewRecoveryOptions) {}
 
-	async initialize(): Promise<void> {
+	resolveCopy(
+		document: FileDocumentState,
+		copyId: string,
+		choice: FileRecoveryChoice,
+	): Promise<boolean> {
+		return this.#operations.enqueue(() => this.#resolveCopy(document, copyId, choice));
+	}
+
+	async #resolveCopy(
+		document: FileDocumentState,
+		copyId: string,
+		choice: FileRecoveryChoice,
+	): Promise<boolean> {
+		const source = this.#recoveredCopies.get(copyId);
+		if (
+			!source ||
+			!document.recoveredCopies.some((copy) => copy.id === copyId) ||
+			document.resolvingRecovery ||
+			document.recoveryGuard ||
+			document.saveController ||
+			document.pendingMutationCount > 0
+		)
+			return false;
+		if (
+			document.pendingSubmission &&
+			source.unknownSubmission &&
+			document.pendingSubmission.submissionId !== source.unknownSubmission.submissionId
+		) {
+			document.recoveryResolutionError = m.file_recovery_multiple_submissions();
+			return false;
+		}
+		document.resolvingRecovery = true;
+		document.recoveryResolutionError = null;
+		try {
+			await this.options.resolveDraftConflict(document, source, choice);
+			this.#recoveredCopies.delete(copyId);
+			document.recoveredCopies = document.recoveredCopies.filter((copy) => copy.id !== copyId);
+			await this.options.reconcileDocument(document.id);
+			return true;
+		} catch (error) {
+			console.error('Failed to resolve recovered file copy', error);
+			document.recoveryResolutionError = m.file_recovery_resolution_failed();
+			return false;
+		} finally {
+			document.resolvingRecovery = false;
+			this.options.reconfigureDocument(document);
+		}
+	}
+
+	initialize(): Promise<void> {
+		return this.#operations.enqueue(() => this.#initialize());
+	}
+
+	async #initialize(): Promise<void> {
 		this.options.setDiscoveryGuard(true);
 		try {
 			const [drafts, views] = await Promise.all([
@@ -67,6 +133,15 @@ export class FileViewRecovery {
 				this.options.navigation.restore(),
 			]);
 			if (this.options.isDestroyed()) return;
+			const retainedIds = new Set(drafts.map((draft) => draft.documentId));
+			for (const [id, draft] of this.#recoveredCopies) {
+				if (retainedIds.has(id)) continue;
+				const owner = this.options.findDocument(
+					this.options.identityKey(draft.canonicalFileRootPath, draft.normalizedRelativePath),
+				);
+				if (owner) owner.recoveredCopies = owner.recoveredCopies.filter((copy) => copy.id !== id);
+				this.#recoveredCopies.delete(id);
+			}
 			await this.options.removeUnclaimedRestoredFileSurfaces(views.map((view) => view.viewId));
 			const recoveredDocuments = await this.#restoreDrafts(drafts);
 			await this.#restoreViews(views);
@@ -256,7 +331,11 @@ export class FileViewRecovery {
 		const errors: unknown[] = [];
 		for (const document of documents) {
 			if (this.options.isDestroyed()) break;
-			if (document.viewIds.size > 0 || (!document.dirty && !document.saveOutcomeUnknown)) continue;
+			if (
+				document.viewIds.size > 0 ||
+				(!document.dirty && !document.saveOutcomeUnknown && document.recoveredCopies.length === 0)
+			)
+				continue;
 			const storedView = storedViews.find(
 				(view) =>
 					view.canonicalFileRootPath === document.canonicalFileRootPath &&
@@ -287,7 +366,7 @@ export class FileViewRecovery {
 				if (
 					!this.options.isDestroyed() &&
 					document.viewIds.size === 0 &&
-					(document.dirty || document.saveOutcomeUnknown)
+					(document.dirty || document.saveOutcomeUnknown || document.recoveredCopies.length > 0)
 				) {
 					errors.push(new Error(m.file_recovery_open_failed()));
 				}
@@ -308,10 +387,28 @@ export class FileViewRecovery {
 			const existing = this.options.findDocument(key);
 			if (existing) {
 				await this.options.waitForDocumentLoad(existing.id);
-				if (existing.dirty && existing.currentContent() !== storedDraft.content) {
-					throw new Error(m.file_recovery_newer_buffer());
+				if (existing.recovered && storedDraft.localDocumentId === existing.id) {
+					this.options.adoptDocument(existing, storedDraft.generation);
+					recoveredDocuments.add(existing);
+					continue;
 				}
-				const draft = await this.options.repository.adoptDraft(storedDraft, existing.id);
+				if (
+					existing.recovered ||
+					(existing.dirty && existing.currentContent() !== storedDraft.content)
+				) {
+					await this.#retainCopy(existing, storedDraft);
+					recoveredDocuments.add(existing);
+					continue;
+				}
+				let draft: SpaFileDraftV1;
+				try {
+					draft = await this.options.repository.adoptDraft(storedDraft, existing.id);
+				} catch (error) {
+					if (!(error instanceof FileDraftOwnershipError)) throw error;
+					await this.#retainCopy(existing, storedDraft);
+					recoveredDocuments.add(existing);
+					continue;
+				}
 				this.#mergeDraft(existing, draft);
 				this.options.adoptDocument(existing, draft.generation);
 				await this.options.persistDocument(existing);
@@ -346,6 +443,21 @@ export class FileViewRecovery {
 			recoveredDocuments.add(document);
 		}
 		return recoveredDocuments;
+	}
+
+	async #retainCopy(document: FileDocumentState, draft: SpaFileDraftV1): Promise<void> {
+		this.#recoveredCopies.set(draft.documentId, draft);
+		document.recoveredCopies = [
+			...document.recoveredCopies.filter((copy) => copy.id !== draft.documentId),
+			{
+				id: draft.documentId,
+				content: draft.content,
+				savedAt: draft.savedAt,
+				hasUnknownSubmission: draft.unknownSubmission !== null,
+			},
+		];
+		document.recovered = true;
+		await this.options.persistDocument(document);
 	}
 
 	#setMutationReservation(documents: readonly FileDocumentState[], delta: 1 | -1): void {

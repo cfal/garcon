@@ -561,6 +561,7 @@ export class CodeEditorController {
 			this.session.readOnly ||
 			this.session.refreshing ||
 			this.session.document.recoveryGuard ||
+			this.session.document.recoveredCopies.length > 0 ||
 			this.session.document.mixedLineEndings
 		) {
 			extensions.push(EditorState.readOnly.of(true));
