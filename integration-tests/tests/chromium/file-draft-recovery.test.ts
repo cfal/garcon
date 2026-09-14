@@ -89,7 +89,7 @@ test.each([
   async ({ width, choice, expected }) => {
     await withChromiumFixture(
       `file-recovery-copies-${width}`,
-      async ({ page, integration, assertNoBrowserErrors }, markPhase) => {
+      async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
         const filename = 'recovery-copies.txt';
         const path = join(integration.dirs.project, filename);
         await writeFile(path, 'initial', 'utf8');
@@ -116,7 +116,17 @@ test.each([
         page.on('dialog', async (dialog) => {
           await dialog.accept();
         });
-        await page.goto(`${integration.garcon.baseUrl}/robots.txt`);
+        const pausedUrl = `${integration.garcon.baseUrl}/recovery-paused.html`;
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Network.enable');
+        await cdp.send('Network.setBypassServiceWorker', { bypass: true });
+        await page.route(pausedUrl, (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: '<title>Recovery paused</title><link rel="icon" href="data:,">',
+          }),
+        );
+        expect((await page.goto(pausedUrl))?.status()).toBe(200);
         markPhase('seeding a second durable lineage for the same resource');
         await page.evaluate(
           () =>
@@ -207,10 +217,17 @@ test.each([
         await browserExpect(source).toHaveText(expected);
         await browserExpect.poll(() => storedDraftContents(page)).toEqual([expected]);
         expect(await readFile(path, 'utf8')).toBe('initial');
+        assertNoBrowserErrors();
 
         markPhase('checking the separate disk conflict surface at the same viewport');
         await writeFile(path, 'external change', 'utf8');
+        const rejectedSave = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === '/api/v1/files/text' &&
+            response.request().method() === 'PUT',
+        );
         await source.press('Control+s');
+        expect((await rejectedSave).status()).toBe(409);
         const conflict = page.getByRole('dialog').filter({
           has: page.getByRole('button', {
             name: 'Save against displayed disk',
@@ -228,7 +245,9 @@ test.each([
         });
         await conflict.getByRole('button', { name: 'Cancel', exact: true }).click();
         expect(await readFile(path, 'utf8')).toBe('external change');
-        assertNoBrowserErrors();
+        expect(browserErrors).toEqual([
+          'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)',
+        ]);
       },
     );
   },
