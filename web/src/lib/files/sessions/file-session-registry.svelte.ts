@@ -411,7 +411,7 @@ export class FileSessionRegistry {
 			session.saveError = error instanceof Error ? error.message : String(error);
 			return false;
 		} finally {
-			if (!requestDetached) this.#finishSaveAttempt(session, controller);
+			if (!requestDetached) this.#saves.finishAttempt(session.document, controller);
 		}
 	}
 
@@ -682,7 +682,7 @@ export class FileSessionRegistry {
 		} catch (error) {
 			session.saveError = error instanceof Error ? error.message : String(error);
 		} finally {
-			if (!detached) this.#finishSaveAttempt(session, controller);
+			if (!detached) this.#saves.finishAttempt(session.document, controller);
 		}
 	}
 
@@ -738,13 +738,6 @@ export class FileSessionRegistry {
 			controller,
 			decision.snapshot.diskRevision ?? expectedRevision,
 		);
-	}
-
-	#finishSaveAttempt(session: FileViewSession, controller: AbortController): void {
-		if (session.saveController === controller) session.saveController = null;
-		if (!session.saveOutcomeUnknown) session.document.saveOutcome = 'idle';
-		session.pendingMutationCount = Math.max(0, session.pendingMutationCount - 1);
-		this.#reconfigureDocumentViews(session.document);
 	}
 
 	#confirmConflict(

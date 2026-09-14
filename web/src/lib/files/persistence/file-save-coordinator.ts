@@ -20,9 +20,18 @@ interface FileSaveCoordinatorOptions {
 export class FileSaveCoordinator {
 	constructor(private readonly options: FileSaveCoordinatorOptions) {}
 
+	finishAttempt(document: FileDocumentState, controller: AbortController): void {
+		if (document.saveController !== controller || document.saveOutcomeUnknown) return;
+		document.saveController = null;
+		document.saveOutcome = 'idle';
+		document.pendingMutationCount -= 1;
+		this.options.reconfigure(document);
+	}
+
 	async retrySettlement(document: FileDocumentState): Promise<boolean> {
 		const revision = document.settledSubmissionRevision;
 		const submission = document.pendingSubmission;
+		const controller = document.saveController;
 		if (!revision || !submission || document.saveOutcome !== 'unknown') return false;
 		document.saveOutcome = 'settling';
 		try {
@@ -33,7 +42,7 @@ export class FileSaveCoordinator {
 			document.saveOutcome = 'idle';
 			document.saveError = null;
 			document.recoveryError = null;
-			document.pendingMutationCount = Math.max(0, document.pendingMutationCount - 1);
+			if (controller) this.finishAttempt(document, controller);
 			this.options.reconfigure(document);
 			return true;
 		} catch (error) {
@@ -185,8 +194,7 @@ export class FileSaveCoordinator {
 			document.saveError = null;
 			document.recoveryError = null;
 			document.recovered = document.dirty;
-			if (document.saveController === controller) document.saveController = null;
-			document.pendingMutationCount = Math.max(0, document.pendingMutationCount - 1);
+			this.finishAttempt(document, controller);
 			this.options.reconfigure(document);
 			return 'saved';
 		} catch (error) {
@@ -216,8 +224,7 @@ export class FileSaveCoordinator {
 			await drafts.acknowledge(document);
 			document.saveOutcome = retainOwnership ? 'preparing' : 'idle';
 			if (!retainOwnership) {
-				if (document.saveController === controller) document.saveController = null;
-				document.pendingMutationCount = Math.max(0, document.pendingMutationCount - 1);
+				this.finishAttempt(document, controller);
 			}
 		} catch (settlementError) {
 			document.saveOutcome = 'unknown';

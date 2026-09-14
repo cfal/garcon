@@ -208,6 +208,37 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
+	it.each(['saved', 'rejected', 'detached'] as const)(
+		'releases only its own Save reservation after %s',
+		async (outcome) => {
+			const harness = createHarness({ saveSoftTimeoutMs: 5 });
+			const opened = await harness.registry.open(request('reservation.ts'));
+			if (!opened) throw new Error('Expected file');
+			await vi.waitFor(() => expect(opened.loading).toBe(false));
+			opened.content = 'local';
+			const pending = deferred<Awaited<ReturnType<typeof harness.saveText>>>();
+			harness.saveText.mockReturnValueOnce(pending.promise);
+			const save = harness.registry.save(opened.id);
+			await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
+			opened.pendingMutationCount += 1;
+			if (outcome === 'detached') await expect(save).resolves.toBe(false);
+			if (outcome === 'rejected') pending.reject(new ApiError(401, 'not authenticated'));
+			else
+				pending.resolve({
+					success: true,
+					path: '/workspace/reservation.ts',
+					message: 'saved',
+					revision: 'v1:saved',
+				});
+			await save;
+			await vi.waitFor(() => expect(opened.saveController).toBeNull());
+			expect(opened.pendingMutationCount).toBe(1);
+			expect(opened.document.mutationGuarded).toBe(true);
+			opened.pendingMutationCount -= 1;
+			await harness.registry.destroyAll();
+		},
+	);
+
 	it('admits application reload only when every document is clean and Saves have settled', async () => {
 		const reloadApplication = vi.fn();
 		const { registry } = createHarness({ reloadApplication });

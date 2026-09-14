@@ -103,11 +103,19 @@ describe('FileSaveCoordinator', () => {
 			coordinator.submit(value, 'changed', value.bufferVersion, 'reject', controller, 'v1:initial'),
 		).resolves.toBe('unknown');
 		expect(value.settledSubmissionRevision).toBe('v1:saved');
+		coordinator.finishAttempt(value, controller);
+		expect(value.saveController).toBe(controller);
+		expect(value.pendingMutationCount).toBe(1);
+		value.pendingMutationCount += 1;
 
 		await expect(coordinator.retrySettlement(value)).resolves.toBe(true);
 		expect(saveText).toHaveBeenCalledOnce();
 		expect(value.saveOutcome).toBe('idle');
 		expect(deleteDraft).toHaveBeenCalledTimes(2);
+		expect(value.saveController).toBeNull();
+		expect(value.pendingMutationCount).toBe(1);
+		coordinator.finishAttempt(value, controller);
+		expect(value.pendingMutationCount).toBe(1);
 	});
 
 	it.each([
