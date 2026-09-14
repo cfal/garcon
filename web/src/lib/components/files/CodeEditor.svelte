@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import { getLocalSettings, getOptionalWorkspaceShortcuts } from '$lib/context';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
@@ -17,21 +18,23 @@
 		const controller = session.editor;
 		const element = editorContainer;
 		if (!controller || !element) return;
-		const detach = () => {
-			unregisterScrollRegion?.();
-			unregisterScrollRegion = null;
-			if (lease !== null) controller.detach(lease);
-			lease = null;
-		};
+		const detach = () =>
+			untrack(() => {
+				unregisterScrollRegion?.();
+				unregisterScrollRegion = null;
+				if (lease !== null) controller.detach(lease);
+				lease = null;
+			});
 		return frame.provideRenderer({
-			attach: () => {
-				detach();
-				lease = controller.attach(element);
-				const scrollElement = controller.scrollElement;
-				if (scrollElement) {
-					unregisterScrollRegion = registerNativeWorkspaceScrollRegion(scrollElement, 'primary');
-				}
-			},
+			attach: () =>
+				untrack(() => {
+					detach();
+					lease = controller.attach(element);
+					const scrollElement = controller.scrollElement;
+					if (scrollElement) {
+						unregisterScrollRegion = registerNativeWorkspaceScrollRegion(scrollElement, 'primary');
+					}
+				}),
 			detach,
 			focusPrimary: () => controller.focus(),
 		});
@@ -71,6 +74,9 @@
 		localSettings.codeEditorFontSize;
 		localSettings.codeEditorVimMode;
 		session.readOnly;
+		session.refreshing;
+		session.document.recoveryGuard;
+		session.document.recoveredCopies.length;
 		session.document.mixedLineEndings;
 		session.editor?.reconfigure();
 	});
