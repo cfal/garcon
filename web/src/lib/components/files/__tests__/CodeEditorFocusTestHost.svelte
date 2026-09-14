@@ -3,7 +3,8 @@
 	import { setLocalSettings, setWorkspaceShortcuts } from '$lib/context';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import CodeEditor from '../CodeEditor.svelte';
-	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
+	import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts.js';
 
 	let {
 		focusRequestToken = 0,
@@ -35,14 +36,14 @@
 			closeSearch: () => closeSearch(),
 			reconfigure: () => undefined,
 		},
-	} as unknown as FileSession;
+	} as unknown as FileViewSession;
 
 	$effect(() => {
 		if (focusRequestToken > 0) frameBridge.focusPrimary();
 	});
 
 	setSurfaceFrameBridge(() => frameBridge);
-	setWorkspaceShortcuts({
+	const shortcuts: Pick<WorkspaceShortcutDispatcher, 'registerLocalShortcutOwner'> = {
 		registerLocalShortcutOwner: (
 			_element: HTMLElement,
 			handler: (event: KeyboardEvent) => boolean,
@@ -50,7 +51,8 @@
 			onRegisterShortcut(handler);
 			return () => undefined;
 		},
-	} as never);
+	};
+	setWorkspaceShortcuts(shortcuts as WorkspaceShortcutDispatcher);
 	setLocalSettings({
 		codeEditorWordWrap: false,
 		codeEditorLineNumbers: true,

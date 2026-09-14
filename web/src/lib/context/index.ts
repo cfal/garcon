@@ -112,17 +112,8 @@ export function getOptionalWorkspaceShortcuts(): WorkspaceShortcutDispatcher | n
 		return null;
 	}
 }
-const [getRequiredWorkbenchCommands, setWorkbenchCommandsContext] =
+export const [getWorkbenchCommands, setWorkbenchCommands] =
 	createContext<WorkbenchCommandRegistry>();
-export const getWorkbenchCommands = getRequiredWorkbenchCommands;
-export const setWorkbenchCommands = setWorkbenchCommandsContext;
-export function getOptionalWorkbenchCommands(): WorkbenchCommandRegistry | null {
-	try {
-		return getRequiredWorkbenchCommands();
-	} catch {
-		return null;
-	}
-}
 export const [getGitQuickSummary, setGitQuickSummary] = createContext<GitQuickSummaryStore>();
 export const [getGitBranchActions, setGitBranchActions] = createContext<GitBranchSelectorState>();
 export const [getGitMutations, setGitMutations] = createContext<GitMutationCoordinator>();

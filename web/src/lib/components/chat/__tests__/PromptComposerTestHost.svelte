@@ -432,7 +432,7 @@
 				requestNavigateChatAbove: () => undefined,
 				requestNavigateChatBelow: () => undefined,
 			},
-			files: { save: async () => true },
+			commands: { execute: async () => false, isEnabled: () => false },
 			localSettings: { globalShortcuts: {} },
 		}),
 	);

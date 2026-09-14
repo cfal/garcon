@@ -11,6 +11,7 @@
 	} from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import {
 		LocalSettingsStore,
 		type LocalSettingsSnapshot,
@@ -188,7 +189,8 @@
 	});
 
 	setAppShell(untrack(() => appShell));
-	setFileSessions({ clearRecovery: async () => true } as never);
+	const files: Pick<FileSessionRegistry, 'clearRecovery'> = { clearRecovery: async () => true };
+	setFileSessions(files as FileSessionRegistry);
 	setRemoteSettings(untrack(() => remoteSettings));
 	setLocalSettings(localSettings);
 	setThemeRuntime({

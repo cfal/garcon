@@ -1,6 +1,5 @@
-import { ApiError } from '$lib/api/client.js';
-import type { FileIdentityResponse } from '$shared/file-contracts';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+import * as m from '$lib/paraglide/messages.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import type {
 	FileDraftRepository,
@@ -11,6 +10,7 @@ import type { FileNavigationStore } from '$lib/files/navigation/file-navigation-
 import { fileContentKind, resolveFileRendererMode } from '$lib/files/sessions/file-open-mode.js';
 import { fileTextMetadata } from '$lib/files/documents/file-text-metadata.js';
 import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 
 interface FileViewRecoveryOptions {
 	repository: FileDraftRepository;
@@ -19,11 +19,8 @@ interface FileViewRecoveryOptions {
 	browserSessionId: string;
 	navigation: FileNavigationStore;
 	getPlacement(sessionId: string): PresentationHostId | null;
+	getRecoveryHost(): PresentationHostId;
 	getSession(sessionId: string): FileViewSession | null;
-	resolveIdentity(input: {
-		projectPath: string;
-		relativePath: string;
-	}): Promise<FileIdentityResponse>;
 	identityKey(root: string, relativePath: string): string;
 	findDocument(identityKey: string): FileDocumentState | null;
 	publishDocument(document: FileDocumentState, generation: number): void;
@@ -55,7 +52,6 @@ export class FileViewRecovery {
 
 	async initialize(): Promise<void> {
 		this.options.setDiscoveryGuard(true);
-		this.#restoredPlacements.clear();
 		try {
 			const [drafts, views] = await Promise.all([
 				this.options.repository.getDrafts(
@@ -72,11 +68,17 @@ export class FileViewRecovery {
 			]);
 			if (this.options.isDestroyed()) return;
 			await this.options.removeUnclaimedRestoredFileSurfaces(views.map((view) => view.viewId));
-			const recoveredDocumentIds = await this.#restoreDrafts(drafts);
+			const recoveredDocuments = await this.#restoreDrafts(drafts);
 			await this.#restoreViews(views);
+			const restorationErrors = await this.#restoreUnviewedDrafts(recoveredDocuments, views);
 			await Promise.all(
-				[...recoveredDocumentIds].map((documentId) => this.options.reconcileDocument(documentId)),
+				[...recoveredDocuments].map((document) => this.options.reconcileDocument(document.id)),
 			);
+			if (restorationErrors.length > 0) {
+				throw new AggregateError(restorationErrors, m.file_recovery_incomplete());
+			}
+			// Failed passes retain aliases because restored view records already contain their new host.
+			this.#restoredPlacements.clear();
 			this.options.setDiscoveryGuard(false);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -94,8 +96,7 @@ export class FileViewRecovery {
 					endColumn: session.requestedColumn ?? 1,
 				}
 			: null;
-		const selection =
-			session.editor?.selectionLocation() ??
+		const selection = session.editor?.selectionLocation() ??
 			requestedSelection ??
 			session.pendingSourcePresentation?.selection ?? {
 				line: 1,
@@ -192,6 +193,7 @@ export class FileViewRecovery {
 	async #restoreViews(views: readonly SpaFileViewV1[]): Promise<void> {
 		for (const record of [...views].sort((first, second) => first.updatedAt - second.updatedAt)) {
 			if (this.options.isDestroyed()) return;
+			if (this.options.getSession(record.viewId)) continue;
 			this.#restoringViewIds.add(record.viewId);
 			let restored: FileViewSession | null = null;
 			try {
@@ -200,7 +202,6 @@ export class FileViewRecovery {
 					record.normalizedRelativePath,
 				);
 				const recovered = this.options.findDocument(key);
-				if (recovered) await this.#probeRecoveredDocument(recovered);
 				const originalPlacement = record.placement;
 				const placement = this.#restoredPlacements.get(originalPlacement) ?? originalPlacement;
 				const restoredRecord = placement === originalPlacement ? record : { ...record, placement };
@@ -223,15 +224,7 @@ export class FileViewRecovery {
 					scrollLeft: record.imageScrollLeft ?? 0,
 					scrollTop: record.imageScrollTop ?? 0,
 				};
-				if (restored.loading) {
-					await new Promise<void>((resolve) => {
-						const check = () => {
-							if (!restored?.loading) resolve();
-							else setTimeout(check, 10);
-						};
-						check();
-					});
-				}
+				await this.options.waitForDocumentLoad(restored.documentId);
 				if (this.options.getSession(restored.id) !== restored) continue;
 				restored.pendingSourcePresentation = {
 					selection: {
@@ -256,8 +249,57 @@ export class FileViewRecovery {
 		}
 	}
 
-	async #restoreDrafts(drafts: readonly SpaFileDraftV1[]): Promise<Set<string>> {
-		const recoveredDocumentIds = new Set<string>();
+	async #restoreUnviewedDrafts(
+		documents: ReadonlySet<FileDocumentState>,
+		storedViews: readonly SpaFileViewV1[],
+	): Promise<unknown[]> {
+		const errors: unknown[] = [];
+		for (const document of documents) {
+			if (this.options.isDestroyed()) break;
+			if (document.viewIds.size > 0 || (!document.dirty && !document.saveOutcomeUnknown)) continue;
+			const storedView = storedViews.find(
+				(view) =>
+					view.canonicalFileRootPath === document.canonicalFileRootPath &&
+					view.normalizedRelativePath === document.relativePath,
+			);
+			const record: SpaFileViewV1 = storedView ?? {
+				schemaVersion: 1,
+				deploymentId: this.options.deploymentId,
+				userNamespace: this.options.userNamespace,
+				browserSessionId: this.options.browserSessionId,
+				viewId: createRandomId(),
+				documentId: document.id,
+				canonicalFileRootPath: document.canonicalFileRootPath,
+				normalizedRelativePath: document.relativePath,
+				rendererMode: resolveFileRendererMode(document.relativePath, 'auto'),
+				line: 1,
+				column: 1,
+				endLine: 1,
+				endColumn: 1,
+				scrollLeft: 0,
+				scrollTop: 0,
+				folds: [],
+				updatedAt: Date.now(),
+				placement: this.options.getRecoveryHost(),
+			};
+			try {
+				await this.#restoreViews([{ ...record, placement: this.options.getRecoveryHost() }]);
+				if (
+					!this.options.isDestroyed() &&
+					document.viewIds.size === 0 &&
+					(document.dirty || document.saveOutcomeUnknown)
+				) {
+					errors.push(new Error(m.file_recovery_open_failed()));
+				}
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+		return errors;
+	}
+
+	async #restoreDrafts(drafts: readonly SpaFileDraftV1[]): Promise<Set<FileDocumentState>> {
+		const recoveredDocuments = new Set<FileDocumentState>();
 		for (const storedDraft of drafts) {
 			const key = this.options.identityKey(
 				storedDraft.canonicalFileRootPath,
@@ -267,13 +309,13 @@ export class FileViewRecovery {
 			if (existing) {
 				await this.options.waitForDocumentLoad(existing.id);
 				if (existing.dirty && existing.currentContent() !== storedDraft.content) {
-					throw new Error('A newer unsaved buffer must be resolved before restoring its older draft');
+					throw new Error(m.file_recovery_newer_buffer());
 				}
 				const draft = await this.options.repository.adoptDraft(storedDraft, existing.id);
 				this.#mergeDraft(existing, draft);
 				this.options.adoptDocument(existing, draft.generation);
 				await this.options.persistDocument(existing);
-				recoveredDocumentIds.add(existing.id);
+				recoveredDocuments.add(existing);
 				continue;
 			}
 			const localDocumentId = storedDraft.localDocumentId ?? storedDraft.documentId;
@@ -301,9 +343,9 @@ export class FileViewRecovery {
 			if (draft.unknownSubmission) document.saveOutcome = 'unknown';
 			this.options.publishDocument(document, draft.generation);
 			this.options.pollDocument(document.id);
-			recoveredDocumentIds.add(document.id);
+			recoveredDocuments.add(document);
 		}
-		return recoveredDocumentIds;
+		return recoveredDocuments;
 	}
 
 	#setMutationReservation(documents: readonly FileDocumentState[], delta: 1 | -1): void {
@@ -335,18 +377,6 @@ export class FileViewRecovery {
 		if (draft.unknownSubmission) {
 			document.pendingSubmission = draft.unknownSubmission;
 			document.saveOutcome = 'unknown';
-		}
-	}
-
-	async #probeRecoveredDocument(document: FileDocumentState): Promise<void> {
-		try {
-			await this.options.resolveIdentity({
-				projectPath: document.canonicalFileRootPath,
-				relativePath: document.relativePath,
-			});
-		} catch (error) {
-			document.missing = error instanceof ApiError && error.status === 404;
-			document.loadError = error instanceof Error ? error.message : String(error);
 		}
 	}
 

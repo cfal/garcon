@@ -2,7 +2,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
-import type { FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
+import type { FileRendererMode } from '$lib/files/sessions/file-view-session.svelte.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
@@ -35,7 +35,6 @@ import {
 	LOCAL_STORAGE_KEYS,
 	SESSION_STORAGE_KEYS,
 } from '$lib/utils/local-persistence.js';
-import { createRandomId } from '$lib/utils/random-id.js';
 import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import {
 	parsePersistedFileWorkspaceLayout,
@@ -101,7 +100,6 @@ export function resolveConfiguredFilePlacement(
 export interface WorkspaceRootDependencies {
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
-	userNamespace?: string | null;
 	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	modelCatalog: ModelCatalogStore;
@@ -400,6 +398,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				restoreFileSession: (sessionId, target, publication) =>
 					placement!.restoreFileSession(sessionId, target, publication),
 				focusFileSession: (sessionId) => placement!.focusFileSession(sessionId),
+				recoveryHost: () => (deps.appShell.isMobile ? 'mobile' : placement!.defaultWindowId),
 				filePlacement: (sessionId) => {
 					const surfaceId = fileSurfaceId(sessionId);
 					if (placement!.layout.snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
@@ -427,7 +426,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			};
 		},
 		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
-		browserSessionId: deps.terminalIdentity.clientId ?? `pending-${createRandomId()}`,
 		onOpenError: (request, error) => {
 			console.error('Failed to resolve file identity', error);
 			deps.notifications.error(
@@ -438,7 +436,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			);
 		},
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-		userNamespace: deps.userNamespace || null,
 		isDocumentVisible: (documentId) =>
 			[...(files.documents[documentId]?.viewIds ?? [])].some((viewId) =>
 				placement?.isSurfacePresented(fileSurfaceId(viewId)),
@@ -462,7 +459,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			hostGeometry.layoutPublished();
 			persistence.schedule(snapshot);
 			for (const session of files.all) {
-				void files.persistView(session.id);
+				session.notePresentationChanged();
 				files.viewVisibilityChanged(session.id);
 			}
 		},
@@ -489,6 +486,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		appShell: deps.appShell,
 		ghCapability: deps.ghCapability,
 		filesSurface: () => singletonSurfaces.files(),
+		filesSurfaceIfPresent: () => singletonSurfaces.filesIfPresent(),
 		onError: (error) =>
 			deps.notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
 	});
@@ -497,7 +495,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		transients: transientLayers,
 		appShell: deps.appShell,
 		navigation: deps.navigation,
-		files,
 		commands,
 		localSettings: deps.localSettings,
 	});

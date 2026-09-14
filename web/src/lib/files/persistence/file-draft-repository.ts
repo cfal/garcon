@@ -1,4 +1,5 @@
-import type { FileRevision } from '$shared/file-contracts';
+import { MAX_FILE_VIEW_BYTES, type FileRevision } from '$shared/file-contracts';
+import * as m from '$lib/paraglide/messages.js';
 import type { LocalSaveSubmission } from '$lib/files/documents/file-document-state.svelte.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
 
@@ -8,8 +9,9 @@ export const FILE_VIEW_STORE_NAME = 'views';
 export const FILE_RECENT_STORE_NAME = 'recents';
 export const FILE_NAVIGATION_STORE_NAME = 'navigation';
 export const FILE_DRAFT_SCHEMA_VERSION = 2;
-export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 24 * 1024 * 1024;
-export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024;
+// Structured-clone strings are budgeted as UTF-16, with three snapshots per Save plus metadata.
+export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 3 * 2 * MAX_FILE_VIEW_BYTES + 64 * 1024;
+export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 2 * FILE_DRAFT_DOCUMENT_LIMIT_BYTES;
 export const FILE_CLOSED_DRAFT_LIMIT = 20;
 export const FILE_RECENT_LIMIT = 100;
 export const FILE_VIEW_LIMIT = 100;
@@ -151,11 +153,11 @@ export function createFileDraftRepository(
 				const retained = existing.filter((entry) => entry.documentId !== record.documentId);
 				const total = retained.reduce((sum, entry) => sum + draftBytes(entry), draftBytes(record));
 				if (total > FILE_DRAFT_TOTAL_LIMIT_BYTES) {
-					throw new Error('File recovery storage limit reached');
+					throw new Error(m.file_recovery_storage_limit());
 				}
 				const closed = retained.filter((entry) => entry.closed && entry.unknownSubmission === null);
 				if (record.closed && closed.length >= FILE_CLOSED_DRAFT_LIMIT) {
-					throw new Error('Closed file recovery limit reached');
+					throw new Error(m.file_recovery_closed_limit());
 				}
 				await indexedDbRequest(store.put(record));
 			});
@@ -166,7 +168,7 @@ export function createFileDraftRepository(
 				const stored = await indexedDbRequest<SpaFileDraftV1 | undefined>(
 					store.get(record.documentId),
 				);
-				if (!stored) throw new Error('The recovered file draft is no longer available');
+				if (!stored) throw new Error(m.file_recovery_draft_unavailable());
 				const targetId = scopedRecordKey(
 					stored.userNamespace,
 					stored.deploymentId,
@@ -175,7 +177,7 @@ export function createFileDraftRepository(
 				);
 				if (targetId !== stored.documentId) {
 					const target = await indexedDbRequest<SpaFileDraftV1 | undefined>(store.get(targetId));
-					if (target) throw new Error('The live file already owns a recovery draft');
+					if (target) throw new Error(m.file_recovery_draft_owned());
 				}
 				const adopted = { ...stored, documentId: targetId, localDocumentId };
 				await indexedDbRequest(store.put(adopted));
@@ -357,7 +359,7 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 		},
 		async adoptDraft(record, localDocumentId) {
 			const stored = drafts.get(record.documentId);
-			if (!stored) throw new Error('The recovered file draft is no longer available');
+			if (!stored) throw new Error(m.file_recovery_draft_unavailable());
 			const targetId = scopedRecordKey(
 				stored.userNamespace,
 				stored.deploymentId,
@@ -365,7 +367,7 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 				localDocumentId,
 			);
 			if (targetId !== stored.documentId && drafts.has(targetId)) {
-				throw new Error('The live file already owns a recovery draft');
+				throw new Error(m.file_recovery_draft_owned());
 			}
 			const adopted = { ...stored, documentId: targetId, localDocumentId };
 			drafts.set(targetId, structuredClone(adopted));
@@ -456,7 +458,9 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 				record.userNamespace === userNamespace && record.deploymentId === deploymentId;
 			const matchesSession = (record: { browserSessionId: string }) =>
 				browserSessionId === undefined || record.browserSessionId === browserSessionId;
-			if ([...drafts.values()].some((record) => isProtectedDraft(record, userNamespace, deploymentId))) {
+			if (
+				[...drafts.values()].some((record) => isProtectedDraft(record, userNamespace, deploymentId))
+			) {
 				return false;
 			}
 			for (const [key, record] of drafts) {
@@ -475,11 +479,11 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 	};
 }
 
-function scopedRecordKey(...parts: string[]): string {
+export function scopedRecordKey(...parts: string[]): string {
 	return JSON.stringify(parts);
 }
 
-function navigationKey(userNamespace: string, deploymentId: string): string {
+export function navigationKey(userNamespace: string, deploymentId: string): string {
 	return JSON.stringify([userNamespace, deploymentId]);
 }
 
@@ -507,7 +511,7 @@ function openDatabase(indexedDb: Pick<IDBFactory, 'open'>): Promise<IDBDatabase>
 		};
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () =>
-			reject(request.error ?? new Error('Could not open file recovery storage'));
+			reject(request.error ?? new Error(m.file_recovery_storage_open_failed()));
 	});
 }
 
@@ -565,10 +569,19 @@ function isProtectedDraft(
 
 function assertDraftSize(record: SpaFileDraftV1): void {
 	if (draftBytes(record) > FILE_DRAFT_DOCUMENT_LIMIT_BYTES) {
-		throw new Error('This file is too large for browser recovery');
+		throw new Error(m.file_recovery_document_limit());
 	}
 }
 
 function draftBytes(record: SpaFileDraftV1): number {
-	return new TextEncoder().encode(JSON.stringify(record)).byteLength;
+	const { baselineContent, content, unknownSubmission } = record;
+	const textLength =
+		(baselineContent?.length ?? 0) + content.length + (unknownSubmission?.content.length ?? 0);
+	const metadata = {
+		...record,
+		baselineContent: null,
+		content: '',
+		unknownSubmission: unknownSubmission ? { ...unknownSubmission, content: '' } : null,
+	};
+	return 2 * (textLength + JSON.stringify(metadata).length);
 }

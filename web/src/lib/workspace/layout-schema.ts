@@ -37,21 +37,7 @@ export interface WorkspaceLayoutParseResult {
 
 type PersistedFileSurfaceRef = { type: 'file'; viewId: string };
 type BrowserPersistedWorkspaceSurfaceRef = PersistedWorkspaceSurfaceRef | PersistedFileSurfaceRef;
-type BrowserPersistedWorkspaceLayoutNode =
-	| {
-			type: 'window';
-			id: string;
-			order: BrowserPersistedWorkspaceSurfaceRef[];
-			active: BrowserPersistedWorkspaceSurfaceRef | null;
-			mru: BrowserPersistedWorkspaceSurfaceRef[];
-	  }
-	| {
-			type: 'partition';
-			id: string;
-			direction: 'horizontal' | 'vertical';
-			ratio: number;
-			children: [BrowserPersistedWorkspaceLayoutNode, BrowserPersistedWorkspaceLayoutNode];
-	  };
+type BrowserPersistedWorkspaceLayoutNode = PersistedNode<BrowserPersistedWorkspaceSurfaceRef>;
 
 export interface BrowserPersistedFileWorkspaceLayoutV1 {
 	version: 1;
@@ -93,9 +79,7 @@ function parseV2Ref(
 	return null;
 }
 
-function globalRefKey(
-	ref: Exclude<BrowserPersistedWorkspaceSurfaceRef, { type: 'chat' }>,
-): string {
+function globalRefKey(ref: Exclude<BrowserPersistedWorkspaceSurfaceRef, { type: 'chat' }>): string {
 	if (ref.type === 'singleton') return `singleton:${ref.kind}`;
 	if (ref.type === 'terminal') return terminalSurfaceId(ref.terminalId);
 	return fileSurfaceId(ref.viewId);
@@ -357,12 +341,8 @@ export function parsePersistedFileWorkspaceLayout(
 	}
 	try {
 		const value: unknown = JSON.parse(raw);
-		if (
-			!isRecord(value) ||
-			value.version !== 1 ||
-			value.browserSessionId !== browserSessionId
-		) {
-			throw new Error('Unsupported file layout version or browser session');
+		if (!isRecord(value) || value.version !== 1 || value.browserSessionId !== browserSessionId) {
+			return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
 		}
 		return parseV2(value, true);
 	} catch {
@@ -377,7 +357,9 @@ function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef 
 	return null;
 }
 
-function browserPersistedRef(surface: SurfaceDescriptor): BrowserPersistedWorkspaceSurfaceRef | null {
+function browserPersistedRef(
+	surface: SurfaceDescriptor,
+): BrowserPersistedWorkspaceSurfaceRef | null {
 	if (surface.type === 'file') return { type: 'file', viewId: surface.fileSessionId };
 	return persistedRef(surface);
 }

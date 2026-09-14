@@ -1,9 +1,11 @@
 import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
+import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 
 interface FilesPanelTestContext {
 	fileSessions: FileSessionRegistry;
 	singletonSurfaces: SingletonSurfaceRegistry;
+	notifications?: NotificationsStore;
 }
 
 let current: FilesPanelTestContext | null = null;

@@ -22,7 +22,7 @@ import type { TerminalMetadata } from '$shared/terminal';
 import type { TerminalAttachmentState } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
-import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
+import { WorkspaceShortcutDispatcher, type WorkspaceShortcutDeps } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
 import type {
 	WorkspacePartitionRatioBoundsResolver,
@@ -242,6 +242,28 @@ function createHarness(
 		workspaceInteractionGate,
 		transientLayers,
 	};
+}
+
+function createShortcutDispatcher(
+	workspace: WorkspaceCoordinator,
+	transients: TransientLayerRegistry,
+	overrides: Partial<Omit<WorkspaceShortcutDeps, 'workspace' | 'transients'>> = {},
+): WorkspaceShortcutDispatcher {
+	return new WorkspaceShortcutDispatcher({
+		workspace,
+		transients,
+		appShell: {
+			openSettings: vi.fn(),
+			requestNewChat: vi.fn(),
+			openSidebarSearch: vi.fn(),
+			requestDeleteSelectedChat: vi.fn(),
+			requestRenameSelectedChat: vi.fn(),
+		},
+		navigation: { requestNavigateChatAbove: vi.fn(), requestNavigateChatBelow: vi.fn() },
+		commands: { execute: vi.fn(async () => true), isEnabled: () => true },
+		localSettings: { globalShortcuts: {} },
+		...overrides,
+	});
 }
 
 describe('WorkspaceCoordinator', () => {
@@ -491,6 +513,52 @@ describe('WorkspaceCoordinator', () => {
 		expect(focusPrimary).not.toHaveBeenCalled();
 		expect(coordinator.focusOwner).toEqual(focusOwner);
 		expect(windowTabs(layout.snapshot, 'window-main')).toEqual(retainedTabs);
+	});
+
+	it('registers recovered mobile files without changing presentation, focus, or active interactions', async () => {
+		const { coordinator, layout, workspaceInteractionGate } = createHarness();
+		await coordinator.enterMobilePresentation();
+		await coordinator.placeFileSession('active');
+		const presentation = {
+			activeId: layout.snapshot.mobileActiveSurfaceId,
+			returnStack: structuredClone(layout.snapshot.mobileReturnStack),
+			focusOwner: coordinator.focusOwner,
+			lastFocusedSurfaceId: coordinator.lastFocusedSurfaceId,
+		};
+		const cancelApplicationDrag = vi.fn();
+		const release = workspaceInteractionGate.register({ cancelApplicationDrag });
+		const present = vi.spyOn(WorkspacePresentationController.prototype, 'presentSurface');
+		const focus = vi.spyOn(WorkspacePresentationController.prototype, 'focusPresentedSurface');
+		try {
+			for (const id of ['first', 'second']) {
+				const publication = { publish: vi.fn(), rollback: vi.fn() };
+				await expect(coordinator.restoreFileSession(id, undefined, publication)).resolves.toBe(
+					'placed',
+				);
+				expect(publication.publish).toHaveBeenCalledOnce();
+				expect(publication.rollback).not.toHaveBeenCalled();
+				expect(layout.snapshot.mobileOnlySurfaceIds).toContain(fileSurfaceId(id));
+			}
+			await tick();
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe(presentation.activeId);
+			expect(layout.snapshot.mobileReturnStack).toEqual(presentation.returnStack);
+			expect(coordinator.focusOwner).toEqual(presentation.focusOwner);
+			expect(coordinator.lastFocusedSurfaceId).toBe(presentation.lastFocusedSurfaceId);
+			expect(cancelApplicationDrag).not.toHaveBeenCalled();
+			expect(present).not.toHaveBeenCalled();
+			expect(focus).not.toHaveBeenCalled();
+
+			await coordinator.focusFileSession('first');
+			await tick();
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe('file:first');
+			expect(present).toHaveBeenCalledExactlyOnceWith('file:first');
+			expect(focus).toHaveBeenCalledExactlyOnceWith('file:first');
+			expect(cancelApplicationDrag).toHaveBeenCalledOnce();
+		} finally {
+			present.mockRestore();
+			focus.mockRestore();
+			release();
+		}
 	});
 
 	it('rolls back the publication when file placement fails to publish', async () => {
@@ -1940,7 +2008,7 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('routes configurable file shortcuts through the command registry', async () => {
-		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const { coordinator, transientLayers } = createHarness();
 		await coordinator.placeFileSession('shortcut-file', {
 			type: 'window',
 			windowId: 'window-main',
@@ -1950,13 +2018,8 @@ describe('WorkspaceCoordinator', () => {
 			surfaceId: fileSurfaceId('shortcut-file'),
 		};
 		const execute = vi.fn(async () => true);
-		const dispatcher = new WorkspaceShortcutDispatcher({
-			workspace: coordinator,
-			transients: transientLayers,
-			appShell: appShell as never,
-			navigation: {} as never,
-			files: files as never,
-			commands: { execute },
+		const dispatcher = createShortcutDispatcher(coordinator, transientLayers, {
+			commands: { execute, isEnabled: () => true },
 			localSettings: { globalShortcuts: { 'file-save': { key: 'k', ctrl: true } } },
 		});
 		const event = new KeyboardEvent('keydown', {
@@ -1975,7 +2038,7 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('routes core editor shortcuts through the command registry', async () => {
-		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const { coordinator, transientLayers } = createHarness();
 		await coordinator.placeFileSession('shortcut-file', {
 			type: 'window',
 			windowId: 'window-main',
@@ -1985,14 +2048,8 @@ describe('WorkspaceCoordinator', () => {
 			surfaceId: fileSurfaceId('shortcut-file'),
 		};
 		const execute = vi.fn(async () => true);
-		const dispatcher = new WorkspaceShortcutDispatcher({
-			workspace: coordinator,
-			transients: transientLayers,
-			appShell: appShell as never,
-			navigation: {} as never,
-			files: files as never,
-			commands: { execute },
-			localSettings: { globalShortcuts: {} },
+		const dispatcher = createShortcutDispatcher(coordinator, transientLayers, {
+			commands: { execute, isEnabled: () => true },
 		});
 		const event = new KeyboardEvent('keydown', {
 			key: 'ArrowDown',
@@ -2010,7 +2067,7 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('leaves composing editor shortcuts to the input method', async () => {
-		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const { coordinator, transientLayers } = createHarness();
 		await coordinator.placeFileSession('shortcut-file', {
 			type: 'window',
 			windowId: 'window-main',
@@ -2020,14 +2077,8 @@ describe('WorkspaceCoordinator', () => {
 			surfaceId: fileSurfaceId('shortcut-file'),
 		};
 		const execute = vi.fn(async () => true);
-		const dispatcher = new WorkspaceShortcutDispatcher({
-			workspace: coordinator,
-			transients: transientLayers,
-			appShell: appShell as never,
-			navigation: {} as never,
-			files: files as never,
-			commands: { execute },
-			localSettings: { globalShortcuts: {} },
+		const dispatcher = createShortcutDispatcher(coordinator, transientLayers, {
+			commands: { execute, isEnabled: () => true },
 		});
 		const event = new KeyboardEvent('keydown', {
 			key: 'ArrowDown',
@@ -2043,16 +2094,9 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('does not route shortcuts through a stale hidden surface owner', () => {
-		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const { coordinator, transientLayers } = createHarness();
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:pull-requests' };
-		const dispatcher = new WorkspaceShortcutDispatcher({
-			workspace: coordinator,
-			transients: transientLayers,
-			appShell: appShell as never,
-			navigation: {} as never,
-			files: files as never,
-			localSettings: { globalShortcuts: {} },
-		});
+		const dispatcher = createShortcutDispatcher(coordinator, transientLayers);
 		const handler = vi.fn(() => true);
 		dispatcher.registerSurface('singleton:pull-requests', handler);
 
@@ -2062,18 +2106,13 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('routes chat navigation shortcuts within a main-inert chat list', () => {
-		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const { coordinator, transientLayers } = createHarness();
 		const requestNavigateChatBelow = vi.fn();
-		const dispatcher = new WorkspaceShortcutDispatcher({
-			workspace: coordinator,
-			transients: transientLayers,
-			appShell: appShell as never,
+		const dispatcher = createShortcutDispatcher(coordinator, transientLayers, {
 			navigation: {
 				requestNavigateChatAbove: vi.fn(),
 				requestNavigateChatBelow,
-			} as never,
-			files: files as never,
-			localSettings: { globalShortcuts: {} },
+			},
 		});
 		const chatList = document.createElement('div');
 		chatList.dataset.workspaceChatList = '';

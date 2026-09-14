@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout.js';

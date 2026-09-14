@@ -774,7 +774,20 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			else await this.#presentation.restoreSurfaceRenderer(surfaceId);
 			return 'placed';
 		}
-		if (this.isMobile) return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
+		if (this.isMobile) {
+			if (intent === 'interactive')
+				return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
+			await this.#presentation.commit(
+				[
+					{
+						type: 'register-surface',
+						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+					},
+				],
+				{ publication },
+			);
+			return 'placed';
+		}
 		const destination = target ?? { type: 'dialog' as const };
 		if (destination.type === 'dialog') return this.#fileDialog.placeNew(sessionId, publication);
 		if (intent === 'interactive') this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();

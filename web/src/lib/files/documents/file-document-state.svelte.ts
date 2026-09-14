@@ -64,7 +64,7 @@ export class FileDocumentState {
 	settledSubmissionRevision = $state<FileRevision | null>(null);
 	pendingMutationCount = $state(0);
 
-	loadedRevision: FileRevision | null = null;
+	loadedRevision = $state<FileRevision | null>(null);
 	imageObjectUrl = $state<string | null>(null);
 	loadController: AbortController | null = null;
 	saveController: AbortController | null = null;

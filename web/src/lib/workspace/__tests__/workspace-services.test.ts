@@ -18,6 +18,12 @@ import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
+import { FILE_SHORTCUT_COMMANDS } from '../workspace-shortcuts.js';
+import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
+import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+import { FileViewRecovery } from '$lib/files/persistence/file-view-recovery.js';
+import * as draftRepositories from '$lib/files/persistence/file-draft-repository.js';
+import { FILE_RECOVERY_DEPLOYMENT_ID } from '$lib/files/persistence/file-recovery-identity.js';
 import {
 	MIN_WINDOW_WIDTH_PX,
 	WORKSPACE_RESIZE_BOUND_SAFETY_PX,
@@ -114,29 +120,26 @@ function assembleWorkspaceServices(
 		addMessageConsumer: () => () => undefined,
 		onConnectionChange: () => () => undefined,
 	} satisfies PrimaryWsConnectionPort;
-	return {
-		services: createWorkspaceServices({
-			appShell: createAppShellStore(),
-			chatBoardInvalidations: createChatBoardInvalidationHub(),
-			ticketsInvalidations: new TicketsInvalidationHub(),
-			chatSessions,
-			userNamespace: 'test-user',
-			ghCapability,
-			localSettings,
-			modelCatalog: createModelCatalogStore(),
-			navigation: createNavigationStore(),
-			notifications: createNotificationsStore(),
-			terminalIdentity: { clientId },
-			ws,
-			getRouteIdentity: () => '/',
-			onTerminalLauncherDismissed: () => {},
-			isTerminalLauncherDismissed: () => false,
-			workspaceLayoutRaw: null,
-			fileWorkspaceLayoutRaw,
-		}),
-		ghCapability,
+	const services = createWorkspaceServices({
+		appShell: createAppShellStore(),
+		chatBoardInvalidations: createChatBoardInvalidationHub(),
+		ticketsInvalidations: new TicketsInvalidationHub(),
 		chatSessions,
-	};
+		ghCapability,
+		localSettings,
+		modelCatalog: createModelCatalogStore(),
+		navigation: createNavigationStore(),
+		notifications: createNotificationsStore(),
+		terminalIdentity: { clientId },
+		ws,
+		getRouteIdentity: () => '/',
+		onTerminalLauncherDismissed: () => {},
+		isTerminalLauncherDismissed: () => false,
+		workspaceLayoutRaw: null,
+		fileWorkspaceLayoutRaw,
+	});
+	if (clientId) void services.files.initializeRecovery('test-user', clientId);
+	return { services, ghCapability, chatSessions };
 }
 
 describe('createWorkspaceServices', () => {
@@ -149,6 +152,49 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings?.destroy();
 		rootLocalSettings = null;
 		projectResolutionApiMocks.resolveProject.mockReset();
+		vi.restoreAllMocks();
+		vi.useRealTimers();
+	});
+
+	it('uses the write-admission policy for palette and shortcut Save commands', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const session = new FileSession(
+			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			'command-save',
+		);
+		session.rendererMode = 'code';
+		session.loading = false;
+		session.dirty = true;
+		session.loadedRevision = 'v1:loaded';
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const save = vi.spyOn(services.files, 'save').mockResolvedValue(true);
+		const context = { viewId: session.id, surfaceId: `file:${session.id}` };
+		expect(services.commands.isEnabled('file.save', context)).toBe(true);
+		await expect(services.commands.execute('file.save', context)).resolves.toBe(true);
+		expect(save).toHaveBeenCalledOnce();
+
+		for (const guard of [
+			{ dirty: false },
+			{ loading: true },
+			{ refreshing: true },
+			{ readOnly: true },
+			{ mixedLineEndings: true },
+			{ loadedRevision: null },
+			{ recoveryGuard: true },
+			{ pendingMutationCount: 1 },
+			{ saveOutcome: 'saving' },
+			{ saveOutcome: 'unknown' },
+		] satisfies Partial<FileDocumentState>[]) {
+			const original = Object.fromEntries(
+				Object.keys(guard).map((key) => [key, Reflect.get(session.document, key)]),
+			);
+			Object.assign(session.document, guard);
+			expect(services.commands.isEnabled('file.save', context), JSON.stringify(guard)).toBe(false);
+			await expect(services.commands.execute('file.save', context)).resolves.toBe(false);
+			Object.assign(session.document, original);
+		}
+		expect(save).toHaveBeenCalledOnce();
 	});
 
 	it.each([
@@ -206,11 +252,14 @@ describe('createWorkspaceServices', () => {
 		localSettings.destroy();
 	});
 
-	it('routes new-window file opens through the assembled registry and coordinator', async () => {
+	it('routes new-window file opens even when background view persistence rejects', async () => {
 		localStorage.clear();
 		rootLocalSettings = createLocalSettingsStore();
 		rootLocalSettings.set('textEditorOpenPlacement', 'new-window');
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const persist = vi
+			.spyOn(FileViewRecovery.prototype, 'persistView')
+			.mockRejectedValue(new Error('View storage unavailable'));
 
 		const opening = services.files.open({
 			fileRootPath: '/workspace',
@@ -237,7 +286,10 @@ describe('createWorkspaceServices', () => {
 		});
 		const opened = await opening;
 		if (!opened) throw new Error('Expected file to open');
+		expect(persist).toHaveBeenCalledWith(opened, 'window-main');
 		const context = { viewId: opened.id, surfaceId: placedSurfaceId };
+		expect(services.commands.isEnabled('editor.find', context)).toBe(false);
+		expect(services.commands.isEnabled('unknown-command', context)).toBe(false);
 		const sideCommand = services.commands
 			.available(context)
 			.find((command) => command.id === 'file.open-to-side');
@@ -252,6 +304,59 @@ describe('createWorkspaceServices', () => {
 				placedSurfaceId,
 			);
 		});
+	});
+
+	it('coalesces published layout changes and persists the latest file placement', async () => {
+		localStorage.clear();
+		const repository = draftRepositories.createMemoryFileDraftRepository();
+		vi.spyOn(draftRepositories, 'createFileDraftRepository').mockReturnValue(repository);
+		const putView = vi.spyOn(repository, 'putView');
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const workspace = services;
+		workspace.hostGeometry.size = { width: 2000, height: 900 };
+		await workspace.files.ready();
+		const waitForFrame = workspace.surfaceFrames.waitFor.bind(workspace.surfaceFrames);
+		vi.spyOn(workspace.surfaceFrames, 'waitFor').mockImplementation((expectation) => {
+			const pending = waitForFrame(expectation);
+			workspace.surfaceFrames.register(expectation.surfaceId, expectation.host, {
+				element: document.createElement('div'),
+				attachRetainedRenderer: () => {},
+				focusPrimary: () => {},
+			});
+			return pending;
+		});
+		const opened = await workspace.files.open({
+			fileRootPath: '/workspace',
+			relativePath: 'layout.ts',
+			mode: 'code',
+			origin: 'window-main',
+			reason: 'user-open',
+		});
+		if (!opened) throw new Error('Expected file to open');
+		vi.useFakeTimers();
+		await vi.advanceTimersByTimeAsync(250);
+		putView.mockClear();
+
+		const surfaceId = `file:${opened.id}`;
+		await workspace.coordinator.moveTabToNewWindow(surfaceId, DEFAULT_WINDOW, 'right');
+		const destination = windowIdOfSurface(workspace.layout.snapshot.desktopRoot, surfaceId);
+		expect(destination).not.toBeNull();
+		expect(destination).not.toBe(DEFAULT_WINDOW);
+		await vi.advanceTimersByTimeAsync(100);
+		const partition = workspace.layout.snapshot.desktopRoot;
+		if (partition.type !== 'partition') throw new Error('Expected split workspace');
+		await workspace.coordinator.setPartitionRatio(partition.id, 0.6);
+		await vi.advanceTimersByTimeAsync(249);
+		expect(putView).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(putView).toHaveBeenCalledOnce();
+		expect(putView).toHaveBeenCalledWith(
+			expect.objectContaining({ viewId: opened.id, placement: destination }),
+		);
+		await expect(
+			repository.getViews('test-user', FILE_RECOVERY_DEPLOYMENT_ID, 'test-client'),
+		).resolves.toEqual([expect.objectContaining({ viewId: opened.id, placement: destination })]);
 	});
 
 	it('restores the browser-owned file window topology before file recovery', () => {
@@ -312,8 +417,14 @@ describe('createWorkspaceServices', () => {
 		expect(services.workspaceInteractionGate).toBeDefined();
 		expect(services.surfaceFrames).toBeDefined();
 		expect(services.shortcuts).toBeDefined();
-		expect(services.commands.commands.some((command) => command.id === 'file.save')).toBe(true);
-		expect(services.commands.commands.some((command) => command.id === 'editor.find')).toBe(true);
+		const commandIds = services.commands.commands.map((command) => command.id);
+		expect(new Set(commandIds).size).toBe(commandIds.length);
+		for (const [, commandId] of FILE_SHORTCUT_COMMANDS) {
+			expect(commandIds).toContain(commandId);
+		}
+		expect(services.singletonSurfaces.filesIfPresent()).toBeNull();
+		expect(services.commands.knownFileLocations).toEqual([]);
+		expect(services.singletonSurfaces.filesIfPresent()).toBeNull();
 		expect(services.gitQuickSummary.isEnabled).toBe(false);
 		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('available');
 

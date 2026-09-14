@@ -16,7 +16,7 @@
 	$effect(() => {
 		const flushRecovery = () => {
 			void files.flushRecovery();
-			for (const session of files.all) void files.persistView(session.id);
+			for (const session of files.all) void files.persistView(session.id).catch(() => undefined);
 		};
 		const handleVisibility = () => {
 			if (document.visibilityState === 'hidden') flushRecovery();

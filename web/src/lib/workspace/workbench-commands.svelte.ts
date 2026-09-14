@@ -1,19 +1,19 @@
 import * as m from '$lib/paraglide/messages.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
-import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+import {
+	fileIdentityKey,
+	type FileSessionRegistry,
+} from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { FileEditorCommand } from '$lib/files/editor/code-editor-controller.svelte.js';
+import { canSaveFileChanges } from '$lib/files/persistence/file-write-policy.js';
 import {
 	navigationViewPreference,
+	rendererModeForNavigation,
 	resolveFileRendererMode,
 } from '$lib/files/sessions/file-open-mode.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-import {
-	getDefaultGlobalShortcut,
-	type GlobalShortcutBinding,
-	type GlobalShortcutId,
-} from './global-shortcuts.js';
 import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import type { FilesSurfaceController } from './singleton-surfaces.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
@@ -32,7 +32,6 @@ export interface WorkbenchCommand<Context = WorkbenchCommandContext> {
 	label: string;
 	description?: string;
 	category: WorkbenchCommandCategory;
-	defaultBindings: readonly GlobalShortcutBinding[];
 	isEnabled(context: Context): boolean;
 	isVisible?(context: Context): boolean;
 	run(context: Context): unknown | Promise<unknown>;
@@ -42,22 +41,6 @@ export interface FileCommandSurfacePort {
 	appendToChatDraft(block: string): boolean;
 }
 
-function defaultBindingsFor(id: GlobalShortcutId): readonly GlobalShortcutBinding[] {
-	const binding = getDefaultGlobalShortcut(id);
-	return binding ? [binding] : [];
-}
-
-function openModeForLocation(location: FileLocation): 'code' | 'markdown' | 'image' {
-	switch (location.viewPreference) {
-		case 'image':
-			return 'image';
-		case 'preview':
-			return 'markdown';
-		case 'source':
-			return 'code';
-	}
-}
-
 export interface WorkbenchCommandRegistryDeps {
 	workspace: WorkspaceCoordinator;
 	files: FileSessionRegistry;
@@ -65,6 +48,7 @@ export interface WorkbenchCommandRegistryDeps {
 	appShell: AppShellStore;
 	ghCapability: GhCapabilityStore;
 	filesSurface(): FilesSurfaceController;
+	filesSurfaceIfPresent(): FilesSurfaceController | null;
 	onError(error: unknown): void;
 }
 
@@ -77,12 +61,17 @@ export class WorkbenchCommandRegistry {
 	}
 
 	get knownFileLocations(): readonly FileLocation[] {
-		const known = this.deps.filesSurface().tree.knownFiles.flatMap((entry) => {
-			const fileRootPath = this.deps.filesSurface().tree.fileRootPath;
-			if (!fileRootPath) return [];
-			return [
-				{
-					key: JSON.stringify([fileRootPath, entry.relativePath]),
+		const tree = this.deps.filesSurfaceIfPresent()?.tree;
+		const fileRootPath = tree?.fileRootPath;
+		const byKey = new Map(
+			(this.deps.files.navigation?.recents ?? []).map((location) => [location.key, location]),
+		);
+		if (tree && fileRootPath) {
+			for (const entry of tree.knownFiles) {
+				const key = fileIdentityKey(fileRootPath, entry.relativePath);
+				if (byKey.has(key)) continue;
+				byKey.set(key, {
+					key,
 					canonicalFileRootPath: fileRootPath,
 					normalizedRelativePath: entry.relativePath,
 					displayPath: entry.relativePath,
@@ -93,13 +82,9 @@ export class WorkbenchCommandRegistry {
 						resolveFileRendererMode(entry.relativePath, 'auto'),
 					),
 					timestamp: 0,
-				},
-			];
-		});
-		const byKey = new Map(
-			(this.deps.files.navigation?.recents ?? []).map((location) => [location.key, location]),
-		);
-		for (const location of known) if (!byKey.has(location.key)) byKey.set(location.key, location);
+				});
+			}
+		}
 		return [...byKey.values()];
 	}
 
@@ -120,7 +105,15 @@ export class WorkbenchCommandRegistry {
 
 	async execute(id: string, context = this.context()): Promise<boolean> {
 		const command = this.commands.find((candidate) => candidate.id === id);
-		if (!command || !command.isEnabled(context)) return false;
+		return command ? this.invoke(command, context) : false;
+	}
+
+	isEnabled(id: string, context = this.context()): boolean {
+		return this.commands.find((command) => command.id === id)?.isEnabled(context) ?? false;
+	}
+
+	async invoke(command: WorkbenchCommand, context = this.context()): Promise<boolean> {
+		if (!command.isEnabled(context)) return false;
 		try {
 			await command.run(context);
 			return true;
@@ -141,7 +134,7 @@ export class WorkbenchCommandRegistry {
 		const opened = await this.deps.files.open({
 			fileRootPath: location.canonicalFileRootPath,
 			relativePath: location.normalizedRelativePath,
-			mode: openModeForLocation(location),
+			mode: rendererModeForNavigation(location.viewPreference),
 			origin: 'window-main',
 			reason: 'user-open',
 			line: location.line,
@@ -169,16 +162,10 @@ export class WorkbenchCommandRegistry {
 				return null;
 			return windowIdOfSurface(this.deps.workspace.layout.snapshot.desktopRoot, surfaceId);
 		};
-		const editor = (
-			id: string,
-			label: string,
-			command: FileEditorCommand,
-			bindings: readonly GlobalShortcutBinding[] = [],
-		): WorkbenchCommand => ({
+		const editor = (id: string, label: string, command: FileEditorCommand): WorkbenchCommand => ({
 			id,
 			label,
 			category: 'Editor',
-			defaultBindings: bindings,
 			isVisible: ({ viewId }) => viewId !== null,
 			isEnabled: ({ viewId }) => {
 				const session = viewId ? this.deps.files.get(viewId) : null;
@@ -194,7 +181,6 @@ export class WorkbenchCommandRegistry {
 				label: m.command_new_chat(),
 				description: m.command_new_chat_desc(),
 				category: 'Chat',
-				defaultBindings: [],
 				isEnabled: always,
 				run: () => this.deps.appShell.openNewChatDialog(),
 			},
@@ -203,7 +189,6 @@ export class WorkbenchCommandRegistry {
 				label: m.command_open_settings(),
 				description: m.command_open_settings_desc(),
 				category: 'Navigation',
-				defaultBindings: [],
 				isEnabled: always,
 				run: () => this.deps.appShell.openSettings(),
 			},
@@ -212,22 +197,18 @@ export class WorkbenchCommandRegistry {
 				id: 'file.save',
 				label: m.editor_actions_save(),
 				category: 'File',
-				defaultBindings: defaultBindingsFor('file-save'),
 				isVisible: ({ viewId }) => viewId !== null,
 				isEnabled: ({ viewId }) => {
 					const session = viewId ? this.deps.files.get(viewId) : null;
-					return Boolean(
-						session?.dirty && !session.saving && !session.mutationGuarded && !session.readOnly,
-					);
+					return session !== null && canSaveFileChanges(session);
 				},
 				run: ({ viewId }) => (viewId ? this.deps.files.save(viewId) : undefined),
 			},
-			editor('editor.find', 'Find', 'find', defaultBindingsFor('editor-find')),
+			editor('editor.find', m.editor_command_find(), 'find'),
 			{
 				id: 'file.open-to-side',
-				label: 'Open to Side',
+				label: m.file_command_open_to_side(),
 				category: 'File',
-				defaultBindings: [],
 				isVisible: (context) => Boolean(fileWindowId(context)),
 				isEnabled: (context) => Boolean(fileWindowId(context)),
 				run: (context) => {
@@ -236,69 +217,40 @@ export class WorkbenchCommandRegistry {
 						return this.deps.files.openToSide(context.viewId, windowId);
 				},
 			},
-			editor('editor.replace', 'Replace', 'replace', defaultBindingsFor('editor-replace')),
-			editor(
-				'editor.go-to-line',
-				'Go to Line',
-				'go-to-line',
-				defaultBindingsFor('editor-go-to-line'),
-			),
+			editor('editor.replace', m.editor_command_replace(), 'replace'),
+			editor('editor.go-to-line', m.editor_command_go_to_line(), 'go-to-line'),
 			editor(
 				'editor.go-to-matching-bracket',
-				'Go to Matching Bracket',
+				m.editor_command_matching_bracket(),
 				'go-to-matching-bracket',
-				defaultBindingsFor('editor-go-to-matching-bracket'),
 			),
-			editor('editor.undo', 'Undo', 'undo'),
-			editor('editor.redo', 'Redo', 'redo'),
-			editor('editor.indent', 'Indent Line', 'indent', defaultBindingsFor('editor-indent')),
-			editor('editor.outdent', 'Outdent Line', 'outdent', defaultBindingsFor('editor-outdent')),
-			editor(
-				'editor.toggle-comment',
-				'Toggle Comment',
-				'toggle-comment',
-				defaultBindingsFor('editor-toggle-comment'),
-			),
-			editor('editor.fold', 'Fold', 'fold'),
-			editor('editor.unfold', 'Unfold', 'unfold'),
-			editor('editor.fold-all', 'Fold All', 'fold-all'),
-			editor('editor.unfold-all', 'Unfold All', 'unfold-all'),
-			editor(
-				'editor.duplicate-line-up',
-				'Duplicate Line Up',
-				'duplicate-line-up',
-				defaultBindingsFor('editor-duplicate-line-up'),
-			),
+			editor('editor.undo', m.editor_command_undo(), 'undo'),
+			editor('editor.redo', m.editor_command_redo(), 'redo'),
+			editor('editor.indent', m.editor_command_indent(), 'indent'),
+			editor('editor.outdent', m.editor_command_outdent(), 'outdent'),
+			editor('editor.toggle-comment', m.editor_command_toggle_comment(), 'toggle-comment'),
+			editor('editor.fold', m.editor_command_fold(), 'fold'),
+			editor('editor.unfold', m.editor_command_unfold(), 'unfold'),
+			editor('editor.fold-all', m.editor_command_fold_all(), 'fold-all'),
+			editor('editor.unfold-all', m.editor_command_unfold_all(), 'unfold-all'),
+			editor('editor.duplicate-line-up', m.editor_command_duplicate_line_up(), 'duplicate-line-up'),
 			editor(
 				'editor.duplicate-line-down',
-				'Duplicate Line Down',
+				m.editor_command_duplicate_line_down(),
 				'duplicate-line-down',
-				defaultBindingsFor('editor-duplicate-line-down'),
 			),
+			editor('editor.move-line-up', m.editor_command_move_line_up(), 'move-line-up'),
+			editor('editor.move-line-down', m.editor_command_move_line_down(), 'move-line-down'),
+			editor('editor.delete-line', m.editor_command_delete_line(), 'delete-line'),
 			editor(
-				'editor.move-line-up',
-				'Move Line Up',
-				'move-line-up',
-				defaultBindingsFor('editor-move-line-up'),
+				'editor.select-next-occurrence',
+				m.editor_command_select_next_occurrence(),
+				'select-next-occurrence',
 			),
-			editor(
-				'editor.move-line-down',
-				'Move Line Down',
-				'move-line-down',
-				defaultBindingsFor('editor-move-line-down'),
-			),
-			editor(
-				'editor.delete-line',
-				'Delete Line',
-				'delete-line',
-				defaultBindingsFor('editor-delete-line'),
-			),
-			editor('editor.select-next-occurrence', 'Select Next Occurrence', 'select-next-occurrence'),
 			{
 				id: 'file.open-known',
-				label: 'Open Known File',
+				label: m.file_command_open_known(),
 				category: 'File',
-				defaultBindings: [],
 				isVisible: () => (this.deps.files.navigation?.recents.length ?? 0) > 0,
 				isEnabled: () => (this.deps.files.navigation?.recents.length ?? 0) > 0,
 				run: () => {
@@ -308,29 +260,26 @@ export class WorkbenchCommandRegistry {
 			},
 			{
 				id: 'file.navigate-back',
-				label: 'Go Back in File History',
+				label: m.file_command_history_back(),
 				category: 'Navigation',
-				defaultBindings: defaultBindingsFor('file-navigate-back'),
-				isEnabled: () => true,
+				isEnabled: always,
 				run: async () => {
 					await this.#navigateHistory('back');
 				},
 			},
 			{
 				id: 'file.navigate-forward',
-				label: 'Go Forward in File History',
+				label: m.file_command_history_forward(),
 				category: 'Navigation',
-				defaultBindings: defaultBindingsFor('file-navigate-forward'),
-				isEnabled: () => true,
+				isEnabled: always,
 				run: async () => {
 					await this.#navigateHistory('forward');
 				},
 			},
 			{
 				id: 'file.reveal-active',
-				label: 'Reveal Active File in Explorer',
+				label: m.file_command_reveal(),
 				category: 'File',
-				defaultBindings: [],
 				isVisible: ({ viewId }) => viewId !== null,
 				isEnabled: ({ viewId }) => Boolean(viewId && this.deps.files.get(viewId)),
 				run: async ({ viewId }) => {
@@ -350,9 +299,8 @@ export class WorkbenchCommandRegistry {
 			},
 			{
 				id: 'file.copy-location',
-				label: 'Copy File Location',
+				label: m.file_command_copy_location(),
 				category: 'File',
-				defaultBindings: [],
 				isVisible: ({ viewId }) => viewId !== null,
 				isEnabled: ({ viewId }) => Boolean(viewId && this.deps.files.get(viewId)),
 				run: async ({ viewId }) => {
@@ -366,9 +314,8 @@ export class WorkbenchCommandRegistry {
 			},
 			{
 				id: 'file.send-to-chat',
-				label: 'Add Selection to Chat Draft',
+				label: m.file_command_add_selection(),
 				category: 'File',
-				defaultBindings: [],
 				isVisible: ({ viewId }) => viewId !== null,
 				isEnabled: ({ viewId }) => Boolean(viewId && this.#surfacePorts.has(viewId)),
 				run: ({ viewId }) => {
@@ -398,7 +345,6 @@ export class WorkbenchCommandRegistry {
 			id,
 			label,
 			category: 'Workspace' as const,
-			defaultBindings: [],
 			isEnabled: always,
 			run: () => this.deps.workspace.openSingleton(kind),
 		});
@@ -407,7 +353,6 @@ export class WorkbenchCommandRegistry {
 				id: 'workspace-chat',
 				label: m.command_switch_to_chat(),
 				category: 'Workspace',
-				defaultBindings: [],
 				isEnabled: always,
 				run: () => this.deps.workspace.focusChat(),
 			},
@@ -419,7 +364,6 @@ export class WorkbenchCommandRegistry {
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),
 				category: 'Workspace',
-				defaultBindings: [],
 				isEnabled: always,
 				run: () => this.deps.workspace.focusMostRecentTerminalOrCreate(),
 			},
@@ -427,7 +371,6 @@ export class WorkbenchCommandRegistry {
 				id: 'workspace-new-terminal',
 				label: m.workspace_new_terminal(),
 				category: 'Workspace',
-				defaultBindings: [],
 				isVisible: () =>
 					this.deps.terminals.listStatus === 'ready' &&
 					this.deps.terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT,

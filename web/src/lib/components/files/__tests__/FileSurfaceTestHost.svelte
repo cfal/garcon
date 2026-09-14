@@ -5,8 +5,9 @@
 		setLocalSettings,
 		setNotifications,
 		setWorkspaceLayout,
+		setWorkbenchCommands,
 	} from '$lib/context';
-	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 	import {
 		FileSessionRegistry,
 		type FileOpenRequest,
@@ -18,6 +19,7 @@
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 	import FileSurface from '../FileSurface.svelte';
+	import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 
 	let {
 		presentation,
@@ -29,7 +31,6 @@
 		refreshError = null,
 		content = '# Heading',
 		onRefresh = () => undefined,
-		onCheckFreshness = () => undefined,
 		onOpen = () => {},
 		onReady,
 		onClose,
@@ -44,7 +45,6 @@
 		refreshError?: string | null;
 		content?: string;
 		onRefresh?: (sessionId: string) => void;
-		onCheckFreshness?: (sessionId: string) => void;
 		onOpen?: (request: FileOpenRequest) => void;
 		onReady?: (session: FileSession, frame: SurfaceFrameBridge) => void;
 		onClose?: () => void;
@@ -96,7 +96,6 @@
 		readContent: async () => ({ blob: new Blob(), revision: 'v1:image' }),
 	});
 	fileSessions.refresh = async (sessionId: string) => onRefresh(sessionId);
-	fileSessions.checkFreshness = async (sessionId: string) => onCheckFreshness(sessionId);
 	fileSessions.open = async (request) => {
 		onOpen(request);
 		return null;
@@ -163,6 +162,12 @@
 	setLocalSettings(localSettings);
 	setNotifications(notifications);
 	setWorkspaceLayout(workspaceLayout);
+	const commands: Pick<WorkbenchCommandRegistry, 'execute' | 'registerFileSurface'> = {
+		execute: async (id, context) =>
+			id === 'file.save' && context?.viewId ? fileSessions.save(context.viewId) : false,
+		registerFileSurface: () => () => undefined,
+	};
+	setWorkbenchCommands(commands as WorkbenchCommandRegistry);
 	onMount(() => onReady?.(session, frameBridge));
 	onDestroy(() => {
 		frameBridge.deactivate();

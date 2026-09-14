@@ -18,7 +18,7 @@ export class DocumentPollingCoordinator {
 	readonly #visibility = () => {
 		if (this.#document?.visibilityState === 'visible') {
 			for (const documentId of this.#documentIds) {
-				void this.pollNow(documentId);
+				void this.#poll(documentId);
 			}
 		} else {
 			this.#clearTimers();
@@ -33,7 +33,7 @@ export class DocumentPollingCoordinator {
 	add(documentId: string): void {
 		if (this.#documentIds.has(documentId)) return;
 		this.#documentIds.add(documentId);
-		void this.pollNow(documentId);
+		void this.#poll(documentId);
 	}
 
 	remove(documentId: string): void {
@@ -43,17 +43,14 @@ export class DocumentPollingCoordinator {
 
 	visibilityChanged(documentId: string): void {
 		if (!this.#documentIds.has(documentId)) return;
-		void this.pollNow(documentId);
+		void this.#poll(documentId);
 	}
 
-	async pollNow(documentId?: string): Promise<void> {
-		if (this.#document?.visibilityState === 'hidden') return;
-		const ids = documentId ? [documentId] : [...this.#documentIds];
-		await Promise.all(ids.filter((id) => this.#documentIds.has(id)).map(async (id) => {
-			this.#clearTimer(id);
-			await this.options.poll(id);
-			this.#schedule(id);
-		}));
+	async #poll(documentId: string): Promise<void> {
+		if (this.#document?.visibilityState === 'hidden' || !this.#documentIds.has(documentId)) return;
+		this.#clearTimer(documentId);
+		await this.options.poll(documentId);
+		this.#schedule(documentId);
 	}
 
 	destroy(): void {
@@ -64,10 +61,7 @@ export class DocumentPollingCoordinator {
 
 	#schedule(documentId: string): void {
 		this.#clearTimer(documentId);
-		if (
-			!this.#documentIds.has(documentId) ||
-			this.#document?.visibilityState === 'hidden'
-		) {
+		if (!this.#documentIds.has(documentId) || this.#document?.visibilityState === 'hidden') {
 			return;
 		}
 		const delay = this.options.isVisible(documentId)
@@ -77,7 +71,7 @@ export class DocumentPollingCoordinator {
 			documentId,
 			setTimeout(() => {
 				this.#timers.delete(documentId);
-				void this.pollNow(documentId);
+				void this.#poll(documentId);
 			}, delay),
 		);
 	}

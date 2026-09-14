@@ -14,7 +14,7 @@
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
 	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
-	import { getFileSessions, getOptionalWorkbenchCommands } from '$lib/context';
+	import { getFileSessions, getWorkbenchCommands } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
 	import ResponsiveSurfaceActions, {
@@ -24,6 +24,7 @@
 	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
 	import FileEditorStatus from './FileEditorStatus.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import { canSaveFileChanges } from '$lib/files/persistence/file-write-policy.js';
 
 	interface Props {
 		session: FileViewSession;
@@ -41,7 +42,7 @@
 		onAppendToChatDraft,
 	}: Props = $props();
 	const files = getFileSessions();
-	const commands = getOptionalWorkbenchCommands();
+	const commands = getWorkbenchCommands();
 	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
@@ -56,31 +57,22 @@
 				showLabel: true,
 			});
 		}
-		if (session.rendererMode === 'code') {
-			if (!session.saveOutcomeUnknown)
-				actions.push({
-					id: 'save',
-					label: session.saving ? m.editor_actions_saving() : m.editor_actions_save(),
-					icon: session.saving ? LoaderCircle : Save,
-					iconClass: session.saving ? 'animate-spin' : undefined,
-					onclick: () =>
-						void (commands
-							? commands.execute('file.save', {
-									viewId: session.id,
-									surfaceId: fileSurfaceId(session.id),
-								})
-							: files.save(session.id)),
-					disabled:
-						session.loading ||
-						session.saving ||
-						session.refreshing ||
-						session.mutationGuarded ||
-						session.document.mixedLineEndings ||
-						!session.dirty,
-					priority: 0,
-					showLabel: true,
-					variant: 'primary',
-				});
+		if (session.rendererMode === 'code' && !session.saveOutcomeUnknown) {
+			actions.push({
+				id: 'save',
+				label: session.saving ? m.editor_actions_saving() : m.editor_actions_save(),
+				icon: session.saving ? LoaderCircle : Save,
+				iconClass: session.saving ? 'animate-spin' : undefined,
+				onclick: () =>
+					void commands.execute('file.save', {
+						viewId: session.id,
+						surfaceId: fileSurfaceId(session.id),
+					}),
+				disabled: !canSaveFileChanges(session),
+				priority: 0,
+				showLabel: true,
+				variant: 'primary',
+			});
 		}
 		actions.push({
 			id: 'refresh-file',
@@ -95,7 +87,7 @@
 		if (session.isExternallyStale && session.contentKind !== 'image' && !session.mutationGuarded) {
 			actions.push({
 				id: 'compare-file',
-				label: 'Compare',
+				label: m.file_session_compare(),
 				icon: Eye,
 				onclick: () => void files.showConflict(session.id),
 				priority: 1,
@@ -104,7 +96,7 @@
 		if (session.dirty || session.saveOutcomeUnknown) {
 			actions.push({
 				id: 'export-file',
-				label: 'Export local copy',
+				label: m.file_session_export_local_copy(),
 				icon: Save,
 				onclick: () => void files.exportContent(session.id),
 				priority: 3,
@@ -116,23 +108,25 @@
 	function showMarkdown(): void {
 		session.markdownMode = 'rendered';
 		session.rendererMode = 'markdown';
-		void files.persistView(session.id);
+		void files.persistView(session.id).catch(() => undefined);
 	}
 
 	function showSource(): void {
 		void files.showSource(session.id);
 	}
 
+	function retryRecovery(): void {
+		if (session.document.settledSubmissionRevision) {
+			void files.retrySaveSettlement(session.id);
+		} else {
+			void files.retryRecoveryDiscovery();
+		}
+	}
+
 	$effect(() => {
-		if (!commands) return;
 		return commands.registerFileSurface(session.id, {
 			appendToChatDraft: (block) => onAppendToChatDraft?.(block) === 'appended',
 		});
-	});
-
-	$effect(() => {
-		if (commands) return;
-		void files.checkFreshness(session.id);
 	});
 </script>
 
@@ -186,21 +180,14 @@
 		>
 			<TriangleAlert class="h-4 w-4 shrink-0" />
 			<span class="min-w-0 flex-1">
-				Browser recovery failed: {session.document.recoveryDiscoveryError ??
-					session.document.recoveryError}. Export a local copy.
+				{m.file_recovery_failed({
+					detail: session.document.recoveryDiscoveryError ?? session.document.recoveryError ?? '',
+				})}
 			</span>
-			{#if session.document.settledSubmissionRevision}
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={() => void files.retrySaveSettlement(session.id)}
+			{#if session.document.settledSubmissionRevision || session.document.recoveryDiscoveryError}
+				<Button variant="outline" size="sm" onclick={retryRecovery}
+					>{m.file_recovery_retry()}</Button
 				>
-					Retry recovery
-				</Button>
-			{:else if session.document.recoveryDiscoveryError}
-				<Button variant="outline" size="sm" onclick={() => void files.retryRecoveryDiscovery()}>
-					Retry recovery
-				</Button>
 			{/if}
 		</div>
 	{/if}
@@ -211,9 +198,7 @@
 			role="status"
 		>
 			<TriangleAlert class="h-4 w-4 shrink-0" />
-			<span
-				>Save outcome is unknown. This document is locked; copy or export your work before closing.</span
-			>
+			<span>{m.file_save_outcome_unknown_warning()}</span>
 		</div>
 	{/if}
 

@@ -130,18 +130,27 @@
 			</div>
 		{/if}
 	{:else if surface.type === 'singleton' && surface.kind === 'files'}
-		{@const controller = singletonSurfaces.files()}
-		<ProjectSurfaceGate
-			{projectState}
-			target={workspaceContext.currentTarget}
-			retainedProjectPath={controller.tree.projectPath}
-			retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
-			onChooseFolder={onChooseProjectFolder}
-		>
-			{#await filesRenderer() then FilesPanel}
-				<FilesPanel {presentation} />
-			{/await}
-		</ProjectSurfaceGate>
+		{#await filesRenderer()}
+			{@const controller = singletonSurfaces.files()}
+			<ProjectSurfaceGate
+				{projectState}
+				target={workspaceContext.currentTarget}
+				retainedProjectPath={controller.tree.projectPath}
+				retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
+				onChooseFolder={onChooseProjectFolder}
+			>
+				<div class="grid h-full place-items-center text-sm text-muted-foreground" role="status">
+					{m.filetree_loading()}
+				</div>
+			</ProjectSurfaceGate>
+		{:then FilesPanel}
+			<FilesPanel
+				{presentation}
+				{projectState}
+				target={workspaceContext.currentTarget}
+				{onChooseProjectFolder}
+			/>
+		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}
 		{@const controller = singletonSurfaces.gitWorkbench()}
 		<ProjectSurfaceGate

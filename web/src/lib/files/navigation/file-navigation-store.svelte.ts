@@ -1,6 +1,7 @@
 import type { FileRevision } from '$shared/file-contracts';
 import {
 	FILE_RECENT_LIMIT,
+	navigationKey,
 	type FileDraftRepository,
 	type FileRecentLocationV1,
 } from '$lib/files/persistence/file-draft-repository.js';
@@ -36,13 +37,13 @@ export class FileNavigationStore {
 			this.repository.getNavigation(this.scope.userNamespace, this.scope.deploymentId),
 		]);
 		this.recents = records
-			.filter(isRecentRecord)
+			.filter(isValidRecentRecord)
 			.sort((a, b) => b.timestamp - a.timestamp)
 			.slice(0, FILE_RECENT_LIMIT)
 			.map(toLocation);
 		if (history?.schemaVersion === 1) {
 			this.#history = pruneLocations(
-				history.entries.filter(isRecentRecord).map(toLocation),
+				history.entries.filter(isValidRecentRecord).map(toLocation),
 				FILE_NAVIGATION_LIMIT,
 				FILE_NAVIGATION_BYTE_LIMIT,
 			);
@@ -125,7 +126,7 @@ export class FileNavigationStore {
 			schemaVersion: 1,
 			deploymentId: this.scope.deploymentId,
 			userNamespace: this.scope.userNamespace,
-			key: JSON.stringify([this.scope.userNamespace, this.scope.deploymentId]),
+			key: navigationKey(this.scope.userNamespace, this.scope.deploymentId),
 			entries: this.#history.map((location) => this.#record(location)),
 			index: this.#index,
 			updatedAt: Date.now(),
@@ -163,7 +164,7 @@ function pruneNewestLocations(
 	return pruneLocations([...locations].reverse(), countLimit, byteLimit).reverse();
 }
 
-function isRecentRecord(record: FileRecentLocationV1): record is FileRecentLocationV1 {
+function isValidRecentRecord(record: FileRecentLocationV1): boolean {
 	return (
 		record.schemaVersion === 1 &&
 		typeof record.key === 'string' &&
@@ -173,6 +174,11 @@ function isRecentRecord(record: FileRecentLocationV1): record is FileRecentLocat
 }
 
 function toLocation(record: FileRecentLocationV1): FileLocation {
-	const { schemaVersion: _schemaVersion, deploymentId: _deploymentId, userNamespace: _userNamespace, ...location } = record;
+	const {
+		schemaVersion: _schemaVersion,
+		deploymentId: _deploymentId,
+		userNamespace: _userNamespace,
+		...location
+	} = record;
 	return location;
 }

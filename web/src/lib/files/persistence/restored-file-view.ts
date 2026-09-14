@@ -4,7 +4,7 @@ import { FileDocumentState } from '$lib/files/documents/file-document-state.svel
 import type { SpaFileViewV1 } from '$lib/files/persistence/file-draft-repository.js';
 import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { fileContentKind } from '$lib/files/sessions/file-open-mode.js';
-import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types.js';
+import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 
 export interface RestoredViewPreparation {
 	identity: FileIdentityResponse['identity'];
@@ -27,7 +27,7 @@ export async function prepareRestoredView(
 		relativePath: record.normalizedRelativePath,
 		mode: record.rendererMode,
 		origin: record.placement,
-		target: target ?? placementFor(record.placement),
+		target,
 		reason: 'restored-view',
 		openToSide: true,
 		line: record.line,
@@ -84,10 +84,4 @@ async function probeRecovered(
 		document.missing = error instanceof ApiError && error.status === 404;
 		document.loadError = error instanceof Error ? error.message : String(error);
 	}
-}
-
-function placementFor(host: PresentationHostId): DesktopPlacement | undefined {
-	if (host === 'dialog') return { type: 'dialog' };
-	if (host === 'mobile') return undefined;
-	return { type: 'window', windowId: host };
 }

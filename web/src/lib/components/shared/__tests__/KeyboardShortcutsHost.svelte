@@ -39,6 +39,7 @@
 		transientSurface?: boolean;
 		transientSurfaceId?: string;
 		onFileSave?: () => void;
+		commands?: WorkspaceShortcutDeps['commands'];
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
 		onCycleWindowFocus?: () => void;
@@ -61,6 +62,7 @@
 		transientSurface = false,
 		transientSurfaceId,
 		onFileSave = () => undefined,
+		commands,
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
 		onCycleWindowFocus = () => undefined,
@@ -170,7 +172,17 @@
 		transients,
 		appShell: appShellPort,
 		navigation: navigationPort,
-		files: { save: () => onFileSave() } as never,
+		get commands() {
+			return (
+				commands ?? {
+					isEnabled: () => true,
+					execute: async (id) => {
+						if (id === 'file.save') onFileSave();
+						return true;
+					},
+				}
+			);
+		},
 		localSettings: {
 			get globalShortcuts() {
 				return globalShortcuts;

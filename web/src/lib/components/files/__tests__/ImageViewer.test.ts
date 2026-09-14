@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ImageViewer from '../ImageViewer.svelte';
-import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 describe('ImageViewer', () => {

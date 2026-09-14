@@ -129,7 +129,6 @@
 	const workspaceServices = createWorkspaceServices({
 		appShell,
 		chatSessions,
-		userNamespace: null,
 		ghCapability,
 		localSettings,
 		modelCatalog,

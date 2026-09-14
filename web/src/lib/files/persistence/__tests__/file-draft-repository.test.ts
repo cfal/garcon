@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	createFileDraftRepository,
 	createMemoryFileDraftRepository,
+	FILE_DRAFT_DOCUMENT_LIMIT_BYTES,
 	type FileRecentLocationV1,
 	type SpaFileDraftV1,
 	type SpaFileViewV1,
@@ -141,7 +142,7 @@ describe('file draft repository', () => {
 				displayPath: 'large.txt',
 				diskRevision: null,
 				baselineContent: null,
-				content: 'x'.repeat(24 * 1024 * 1024),
+				content: 'x'.repeat(FILE_DRAFT_DOCUMENT_LIMIT_BYTES / 2),
 				bufferVersion: 1,
 				savedAt: 1,
 				generation: 1,

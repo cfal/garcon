@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages.js';
 import {
 	getFileRevision,
 	readContent,
@@ -11,8 +12,10 @@ import {
 	type RendererThemeId,
 	type ThemeRendererPresentation,
 } from '$lib/theme/themes.js';
-import type { FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
-import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
+import {
+	FileViewSession,
+	type FileRendererMode,
+} from '$lib/files/sessions/file-view-session.svelte.js';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import {
 	createFileDraftRepository,
@@ -32,7 +35,7 @@ import {
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { FileViewRecovery } from '$lib/files/persistence/file-view-recovery.js';
 import { prepareRestoredView } from '$lib/files/persistence/restored-file-view.js';
-import { canSubmitFileWrite } from '$lib/files/persistence/file-write-policy.js';
+import { canSaveFileChanges, canSubmitFileWrite } from '$lib/files/persistence/file-write-policy.js';
 import {
 	fileContentKind,
 	navigationViewPreference,
@@ -81,6 +84,7 @@ export interface FilePlacementPort {
 	): Promise<FilePlacementResult>;
 	focusFileSession(sessionId: string): Promise<void>;
 	filePlacement?(sessionId: string): PresentationHostId | null;
+	recoveryHost?(): PresentationHostId;
 	resolveRestoredPlacement?(host: PresentationHostId): DesktopPlacement | undefined;
 	removeUnclaimedRestoredFileSurfaces?(viewIds: readonly string[]): Promise<void>;
 }
@@ -133,8 +137,6 @@ export interface FileSessionsDeps {
 	openMainInert?<T>(commitOpen: () => T): T;
 	draftRepository?: FileDraftRepository;
 	deploymentId?: string;
-	userNamespace?: string | null;
-	browserSessionId?: string;
 	isDocumentVisible?(documentId: string): boolean;
 	saveSoftTimeoutMs?: number;
 }
@@ -177,7 +179,6 @@ export class FileSessionRegistry {
 	readonly #saves: FileSaveCoordinator;
 	readonly #deploymentId: string;
 	#userNamespace: string | null = null;
-	#browserSessionId: string;
 	#initialization: Promise<void> = Promise.resolve();
 	#recoveryDiscoveryGuarded = false;
 	#recoveryDiscoveryError: string | null = null;
@@ -188,8 +189,6 @@ export class FileSessionRegistry {
 		this.#draftRepository = deps.draftRepository ?? createFileDraftRepository();
 		this.#deploymentId =
 			deps.deploymentId ?? (typeof location === 'undefined' ? 'local' : location.origin);
-		this.#browserSessionId =
-			deps.browserSessionId ?? globalThis.crypto?.randomUUID?.() ?? 'local-session';
 		this.#io = new FileDocumentIoCoordinator({
 			getSession: (sessionId) => this.get(sessionId),
 			getDocument: (documentId) => this.documents[documentId] ?? null,
@@ -210,15 +209,10 @@ export class FileSessionRegistry {
 			getSoftTimeoutMs: () => deps.saveSoftTimeoutMs ?? FILE_SAVE_SOFT_TIMEOUT_MS,
 			reconfigure: (document) => this.#reconfigureDocumentViews(document),
 		});
-		if (deps.userNamespace) this.initializeRecovery(deps.userNamespace);
 	}
 
 	get all(): readonly FileViewSession[] {
 		return Object.values(this.sessions);
-	}
-
-	get hasDirtySessions(): boolean {
-		return this.all.some((session) => session.dirty);
 	}
 
 	get hasUnloadProtectedSessions(): boolean {
@@ -242,19 +236,15 @@ export class FileSessionRegistry {
 		return this.#initialization;
 	}
 
-	initializeRecovery(
-		userNamespace: string,
-		browserSessionId = this.#browserSessionId,
-	): Promise<void> {
+	initializeRecovery(userNamespace: string, browserSessionId: string): Promise<void> {
 		if (this.#userNamespace === userNamespace) return this.#initialization;
 		if (this.#userNamespace !== null) throw new Error('File recovery is already initialized');
 		this.#userNamespace = userNamespace;
-		this.#browserSessionId = browserSessionId;
 		this.#drafts = new FileDraftCoordinator({
 			repository: this.#draftRepository,
 			deploymentId: this.#deploymentId,
 			userNamespace,
-			browserSessionId: this.#browserSessionId,
+			browserSessionId,
 		});
 		this.navigation = new FileNavigationStore(this.#draftRepository, {
 			deploymentId: this.#deploymentId,
@@ -264,11 +254,13 @@ export class FileSessionRegistry {
 			repository: this.#draftRepository,
 			deploymentId: this.#deploymentId,
 			userNamespace,
-			browserSessionId: this.#browserSessionId,
+			browserSessionId,
 			navigation: this.navigation,
 			getPlacement: (sessionId) => this.deps.getPlacement().filePlacement?.(sessionId) ?? null,
+			getRecoveryHost: () =>
+				this.deps.getPlacement().recoveryHost?.() ??
+				(this.deps.getIsMobile() ? 'mobile' : 'window-main'),
 			getSession: (sessionId) => this.get(sessionId),
-			resolveIdentity: (input) => (this.deps.resolveFileIdentity ?? resolveFileIdentity)(input),
 			identityKey: fileIdentityKey,
 			findDocument: (key) => {
 				const documentId = this.#documentIdByIdentity.get(key);
@@ -377,7 +369,7 @@ export class FileSessionRegistry {
 		const session = this.get(sessionId);
 		if (!session) return false;
 		const expectedRevision = session.loadedRevision;
-		if (!expectedRevision || !canSubmitFileWrite(session) || !session.dirty) return false;
+		if (!expectedRevision || !canSaveFileChanges(session)) return false;
 		const submittedContent = session.document.currentContent();
 		const submittedBufferVersion = session.document.bufferVersion;
 		const controller = new AbortController();
@@ -390,21 +382,7 @@ export class FileSessionRegistry {
 		this.#reconfigureDocumentViews(session.document);
 		try {
 			if (session.isExternallyStale) {
-				await this.#io.loadConflictSnapshot(session);
-				const decision = await this.#confirmConflict(session, true);
-				if (decision.choice === 'cancel' || decision.choice === 'accept-disk') {
-					session.saveError = null;
-					return false;
-				}
-				const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
-				const outcome = await this.#saves.submit(
-					session.document,
-					decision.resolvedContent,
-					resolvedBufferVersion,
-					decision.choice === 'overwrite' ? 'overwrite' : 'reject',
-					controller,
-					decision.snapshot.diskRevision ?? expectedRevision,
-				);
+				const outcome = await this.#resolveConflictAndSubmit(session, controller, expectedRevision);
 				requestDetached = outcome === 'unknown';
 				return outcome === 'saved';
 			}
@@ -424,21 +402,7 @@ export class FileSessionRegistry {
 			} catch (error) {
 				if (!isFileRevisionConflict(error)) throw error;
 				session.isExternallyStale = true;
-				await this.#io.loadConflictSnapshot(session);
-				const decision = await this.#confirmConflict(session, true);
-				if (decision.choice === 'cancel' || decision.choice === 'accept-disk') {
-					session.saveError = null;
-					return false;
-				}
-				const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
-				const outcome = await this.#saves.submit(
-					session.document,
-					decision.resolvedContent,
-					resolvedBufferVersion,
-					decision.choice === 'overwrite' ? 'overwrite' : 'reject',
-					controller,
-					decision.snapshot.diskRevision ?? expectedRevision,
-				);
+				const outcome = await this.#resolveConflictAndSubmit(session, controller, expectedRevision);
 				requestDetached = outcome === 'unknown';
 				return outcome === 'saved';
 			}
@@ -447,12 +411,7 @@ export class FileSessionRegistry {
 			session.saveError = error instanceof Error ? error.message : String(error);
 			return false;
 		} finally {
-			if (!requestDetached) {
-				if (session.saveController === controller) session.saveController = null;
-				if (!session.saveOutcomeUnknown) session.document.saveOutcome = 'idle';
-				session.pendingMutationCount = Math.max(0, session.pendingMutationCount - 1);
-				this.#reconfigureDocumentViews(session.document);
-			}
+			if (!requestDetached) this.#finishSaveAttempt(session, controller);
 		}
 	}
 
@@ -688,8 +647,8 @@ export class FileSessionRegistry {
 			void this.#io.loadInitial(session);
 		}
 		this.#io.startPolling(document.id);
-		if (request.reason !== 'restored-view') this.#recordNavigation(session);
 		if (request.reason !== 'restored-view') {
+			this.#recordNavigation(session);
 			void this.#persistView(session, request.origin).catch(() => undefined);
 		}
 		return session;
@@ -723,12 +682,7 @@ export class FileSessionRegistry {
 		} catch (error) {
 			session.saveError = error instanceof Error ? error.message : String(error);
 		} finally {
-			if (!detached) {
-				if (session.saveController === controller) session.saveController = null;
-				if (!session.saveOutcomeUnknown) session.document.saveOutcome = 'idle';
-				session.pendingMutationCount = Math.max(0, session.pendingMutationCount - 1);
-				this.#reconfigureDocumentViews(session.document);
-			}
+			if (!detached) this.#finishSaveAttempt(session, controller);
 		}
 	}
 
@@ -762,6 +716,35 @@ export class FileSessionRegistry {
 		} finally {
 			URL.revokeObjectURL(url);
 		}
+	}
+
+	async #resolveConflictAndSubmit(
+		session: FileViewSession,
+		controller: AbortController,
+		expectedRevision: FileRevision,
+	): Promise<'saved' | 'unknown' | 'cancelled'> {
+		await this.#io.loadConflictSnapshot(session);
+		const decision = await this.#confirmConflict(session, true);
+		if (decision.choice === 'cancel' || decision.choice === 'accept-disk') {
+			session.saveError = null;
+			return 'cancelled';
+		}
+		const resolvedBufferVersion = this.#applyConflictResolution(session, decision);
+		return this.#saves.submit(
+			session.document,
+			decision.resolvedContent,
+			resolvedBufferVersion,
+			decision.choice === 'overwrite' ? 'overwrite' : 'reject',
+			controller,
+			decision.snapshot.diskRevision ?? expectedRevision,
+		);
+	}
+
+	#finishSaveAttempt(session: FileViewSession, controller: AbortController): void {
+		if (session.saveController === controller) session.saveController = null;
+		if (!session.saveOutcomeUnknown) session.document.saveOutcome = 'idle';
+		session.pendingMutationCount = Math.max(0, session.pendingMutationCount - 1);
+		this.#reconfigureDocumentViews(session.document);
 	}
 
 	#confirmConflict(
@@ -802,8 +785,7 @@ export class FileSessionRegistry {
 				decision.choice === 'accept-disk' &&
 				session.document.bufferVersion !== decision.snapshot.localBufferVersion
 			) {
-				session.saveError =
-					'The buffer changed while the comparison was open. Review it again before accepting disk.';
+				session.saveError = m.file_conflict_buffer_changed();
 				return cancelled();
 			}
 			if (

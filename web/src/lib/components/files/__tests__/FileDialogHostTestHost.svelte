@@ -7,16 +7,18 @@
 		setNotifications,
 		setSurfaceFrames,
 		setWorkspaceCoordinator,
+		setWorkbenchCommands,
 	} from '$lib/context';
 	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 	import { fileSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
-	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import {
 		createNotificationsStore,
 		type NotificationsStore,
 	} from '$lib/stores/notifications.svelte.js';
 	import FileDialogHost from '../FileDialogHost.svelte';
+	import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 
 	let {
 		request,
@@ -90,6 +92,11 @@
 	setLocalSettings(localSettings);
 	setNotifications(untrack(() => notifications));
 	setSurfaceFrames(new SurfaceFrameRegistry());
+	const commands: Pick<WorkbenchCommandRegistry, 'execute' | 'registerFileSurface'> = {
+		execute: async () => false,
+		registerFileSurface: () => () => undefined,
+	};
+	setWorkbenchCommands(commands as WorkbenchCommandRegistry);
 	setWorkspaceCoordinator({
 		layout: {
 			snapshot: { dialogFileSurfaceId: dialogSurfaceId },

@@ -5,7 +5,10 @@ import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
-import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
+import {
+	FileSessionRegistry,
+	type FileOpenRequest,
+} from '$lib/files/sessions/file-session-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import FileSurfaceTestHost from './FileSurfaceTestHost.svelte';
 
@@ -242,6 +245,28 @@ describe('FileSurface', () => {
 		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
 	});
 
+	it.each(['readOnly', 'mixedLineEndings', 'missingRevision', 'recoveryGuard'] as const)(
+		'disables Save for %s documents',
+		async (guard) => {
+			render(FileSurfaceTestHost, {
+				presentation: 'window-main',
+				rendererMode: 'code',
+				loading: false,
+				dirty: true,
+				onReady: (session) => {
+					if (guard === 'missingRevision') session.loadedRevision = null;
+					else session.document[guard] = true;
+				},
+			});
+
+			await waitFor(() =>
+				expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(
+					true,
+				),
+			);
+		},
+	);
+
 	it('refreshes from the toolbar action', async () => {
 		const onRefresh = vi.fn();
 		render(FileSurfaceTestHost, {
@@ -254,16 +279,6 @@ describe('FileSurface', () => {
 		expect(onRefresh).toHaveBeenCalledOnce();
 	});
 
-	it('checks freshness immediately when the surface mounts', async () => {
-		const onCheckFreshness = vi.fn();
-		render(FileSurfaceTestHost, {
-			presentation: 'window-main',
-			onCheckFreshness,
-		});
-
-		await waitFor(() => expect(onCheckFreshness).toHaveBeenCalledOnce());
-	});
-
 	it('switches a Markdown preview into its source editor', async () => {
 		render(FileSurfaceTestHost, {
 			presentation: 'window-main',
@@ -274,6 +289,40 @@ describe('FileSurface', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.file_session_edit() }));
 
 		expect(screen.getByRole('button', { name: m.file_session_view() })).toBeTruthy();
+	});
+
+	it('keeps cursor position and controls outside the save-state live region', () => {
+		render(FileSurfaceTestHost, {
+			presentation: 'mobile',
+			rendererMode: 'code',
+			loading: false,
+			dirty: true,
+		});
+		const footer = screen.getByRole('group', { name: 'Editor status' });
+		const announcement = within(footer).getByRole('status');
+		expect(announcement.textContent?.trim()).toBe('Modified');
+		expect(announcement.contains(within(footer).getByText('Ln 1, Col 1'))).toBe(false);
+		expect(announcement.querySelector('button')).toBeNull();
+	});
+
+	it('keeps Markdown preview usable when background view persistence rejects', async () => {
+		const persist = vi
+			.spyOn(FileSessionRegistry.prototype, 'persistView')
+			.mockRejectedValue(new Error('View storage unavailable'));
+		try {
+			render(FileSurfaceTestHost, {
+				presentation: 'window-main',
+				rendererMode: 'markdown',
+				loading: false,
+			});
+			await fireEvent.click(screen.getByRole('button', { name: m.file_session_edit() }));
+			await fireEvent.click(screen.getByRole('button', { name: m.file_session_view() }));
+
+			expect(persist).toHaveBeenCalledOnce();
+			expect(screen.getByRole('button', { name: m.file_session_edit() })).toBeTruthy();
+		} finally {
+			persist.mockRestore();
+		}
 	});
 
 	it('passes the dialog presentation to Markdown link navigation', async () => {

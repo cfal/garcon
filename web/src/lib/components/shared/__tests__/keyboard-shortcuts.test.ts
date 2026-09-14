@@ -885,6 +885,39 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
+	it.each(['f', '/', '[', ']'])(
+		'leaves disabled file shortcut Ctrl-%s to the browser or focused content',
+		(key) => {
+			const execute = vi.fn(async () => false);
+			render(KeyboardShortcutsHost, {
+				appShell: createMockAppShell(),
+				navigation: createMockNavigation(),
+				focusOwner: 'file',
+				commands: { execute, isEnabled: () => false },
+			});
+			const event = new KeyboardEvent('keydown', { key, ctrlKey: true, cancelable: true });
+
+			window.dispatchEvent(event);
+
+			expect(event.defaultPrevented).toBe(false);
+			expect(execute).not.toHaveBeenCalled();
+		},
+	);
+
+	it('still suppresses native Save when the file command is disabled', () => {
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			commands: { execute: vi.fn(async () => false), isEnabled: () => false },
+		});
+		const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true });
+
+		window.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+	});
+
 	it('does not route Ctrl-S to Chat while a confirmation owns focus', async () => {
 		const appShell = createMockAppShell();
 		render(KeyboardShortcutsHost, {

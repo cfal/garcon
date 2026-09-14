@@ -141,6 +141,12 @@ export class SingletonSurfaceRegistry {
 		return this.#controller('files');
 	}
 
+	filesIfPresent(): FilesSurfaceController | null {
+		return (
+			(this.#controllers.get('files')?.controller as FilesSurfaceController | undefined) ?? null
+		);
+	}
+
 	chatMap(): ChatMapController {
 		return this.#controller('chat-map');
 	}

@@ -1,5 +1,4 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
-import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
@@ -23,7 +22,7 @@ export type WorkspaceSurfaceShortcutHandler = (event: KeyboardEvent) => boolean;
 export type WorkspaceLocalShortcutOwner = (event: KeyboardEvent) => boolean;
 type WorkspaceScrollInteraction = 'focus' | 'pointer' | 'wheel';
 
-const FILE_SHORTCUT_COMMANDS: readonly (readonly [GlobalShortcutId, string])[] = [
+export const FILE_SHORTCUT_COMMANDS: readonly (readonly [GlobalShortcutId, string])[] = [
 	['file-save', 'file.save'],
 	['editor-find', 'editor.find'],
 	['editor-replace', 'editor.replace'],
@@ -63,9 +62,8 @@ export interface WorkspaceShortcutDeps {
 		| 'requestRenameSelectedChat'
 	>;
 	navigation: Pick<NavigationStore, 'requestNavigateChatAbove' | 'requestNavigateChatBelow'>;
-	files: Pick<FileSessionRegistry, 'save'>;
 	localSettings: Pick<LocalSettingsStore, 'globalShortcuts'>;
-	commands?: Pick<WorkbenchCommandRegistry, 'execute'>;
+	commands: Pick<WorkbenchCommandRegistry, 'execute' | 'isEnabled'>;
 }
 
 export class WorkspaceShortcutDispatcher {
@@ -237,9 +235,14 @@ export class WorkspaceShortcutDispatcher {
 				const commandContext = { viewId: descriptor.fileSessionId, surfaceId: descriptor.id };
 				const fileCommand = FILE_SHORTCUT_COMMANDS.find(([id]) => matches(id))?.[1] ?? null;
 				if (fileCommand) {
+					if (
+						fileCommand !== 'file.save' &&
+						!this.deps.commands.isEnabled(fileCommand, commandContext)
+					) {
+						return;
+					}
 					event.preventDefault();
-					if (this.deps.commands) void this.deps.commands.execute(fileCommand, commandContext);
-					else if (fileCommand === 'file.save') void this.deps.files.save(descriptor.fileSessionId);
+					void this.deps.commands.execute(fileCommand, commandContext);
 					return;
 				}
 			}

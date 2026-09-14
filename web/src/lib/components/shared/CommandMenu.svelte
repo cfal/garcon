@@ -3,33 +3,23 @@
 	import Search from '@lucide/svelte/icons/search';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Settings from '@lucide/svelte/icons/settings';
-	import FileCode from '@lucide/svelte/icons/file-code';
-	import {
-		getAppShell,
-		getGhCapability,
-		getNotifications,
-		getOptionalWorkbenchCommands,
-		getTerminalRegistry,
-		getTransientLayers,
-		getWorkspaceCoordinator,
-	} from '$lib/context';
+	import { getWorkbenchCommands, getTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { WorkbenchCommand } from '$lib/workspace/workbench-commands.svelte.js';
-
-	const categories = {
-		chat: m.command_category_chat(),
-		navigation: m.command_category_navigation(),
-		workspace: m.command_category_workspace(),
-	} as const;
+	import type {
+		WorkbenchCommand,
+		WorkbenchCommandCategory,
+	} from '$lib/workspace/workbench-commands.svelte.js';
 	const knownFilePrefix = 'file.open-known:';
+	const categoryLabels: Record<WorkbenchCommandCategory, () => string> = {
+		Chat: m.command_category_chat,
+		Navigation: m.command_category_navigation,
+		Workspace: m.command_category_workspace,
+		Editor: m.command_category_editor,
+		File: m.command_category_file,
+	};
 
-	const commandRegistry = getOptionalWorkbenchCommands();
-	const workspace = commandRegistry ? null : getWorkspaceCoordinator();
-	const terminals = commandRegistry ? null : getTerminalRegistry();
-	const appShell = commandRegistry ? null : getAppShell();
-	const ghCapability = commandRegistry ? null : getGhCapability();
-	const notifications = commandRegistry ? null : getNotifications();
+	const commandRegistry = getWorkbenchCommands();
 	const transientLayers = getTransientLayers();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
@@ -41,46 +31,16 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let paletteRef = $state<HTMLDivElement | null>(null);
 
-
-	function legacyCommands(): WorkbenchCommand[] {
-		if (!workspace || !terminals || !appShell || !ghCapability || !notifications) return [];
-		const report = (operation: Promise<unknown>) => void operation.catch((error) =>
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
-		);
-		const open = (id: string, label: string, kind: Parameters<typeof workspace.openSingleton>[0]): WorkbenchCommand => ({
-			id, label, category: 'Workspace', defaultBindings: [], isEnabled: () => true,
-			run: () => report(workspace.openSingleton(kind)),
-		});
-		return [
-			{ id: 'new-chat', label: m.command_new_chat(), description: m.command_new_chat_desc(), category: 'Chat', defaultBindings: [], isEnabled: () => true, run: () => appShell.openNewChatDialog() },
-			{ id: 'open-settings', label: m.command_open_settings(), description: m.command_open_settings_desc(), category: 'Navigation', defaultBindings: [], isEnabled: () => true, run: () => appShell.openSettings() },
-			{ id: 'workspace-chat', label: m.command_switch_to_chat(), category: 'Workspace', defaultBindings: [], isEnabled: () => true, run: () => void workspace.focusChat() },
-			open('workspace-files', m.command_switch_to_files(), 'files'),
-			open('workspace-chat-map', m.workspace_open_chat_map(), 'chat-map'),
-			open('workspace-chat-canvas', m.workspace_open_chat_canvas(), 'chat-canvas'),
-			open('workspace-chat-board', m.workspace_open_chat_board(), 'chat-board'),
-			{ id: 'workspace-terminal', label: m.command_switch_to_terminal(), category: 'Workspace', defaultBindings: [], isEnabled: () => true, run: () => report(workspace.focusMostRecentTerminalOrCreate()) },
-			...(terminals.listStatus === 'ready' && terminals.orderedSessions.length < 5 ? [{ id: 'workspace-new-terminal', label: m.workspace_new_terminal(), category: 'Workspace' as const, defaultBindings: [], isEnabled: () => true, run: () => report(workspace.createTerminalInAvailableSpace('command-menu:new-terminal')) }] : []),
-			open('workspace-git', m.command_switch_to_git(), 'git'),
-			open('workspace-git-history', m.workspace_surface_git_history(), 'git-history'),
-			open('workspace-git-compare', m.workspace_surface_git_compare(), 'git-compare'),
-			...(ghCapability.available || !ghCapability.hasChecked ? [open('workspace-pull-requests', m.workspace_surface_pull_requests(), 'pull-requests')] : []),
-			open('workspace-commit', m.workspace_surface_commit(), 'commit'),
-		];
-	}
-
-	let commandContext = $derived(commandRegistry?.context() ?? { viewId: null, surfaceId: null });
+	let commandContext = $derived(commandRegistry.context());
 	let commands = $derived.by<WorkbenchCommand[]>(() => {
-		const registered = commandRegistry?.available(commandContext) ?? legacyCommands();
-		if (!commandRegistry) return [...registered];
+		if (!isOpen) return [];
 		return [
-			...registered,
+			...commandRegistry.available(commandContext),
 			...commandRegistry.knownFileLocations.map((location) => ({
 				id: `${knownFilePrefix}${location.key}`,
-				label: `Open ${location.displayPath}`,
-				description: 'Known file',
+				label: m.command_open_known_file_named({ path: location.displayPath }),
+				description: m.command_known_file_description(),
 				category: 'File' as const,
-				defaultBindings: [],
 				isEnabled: () => true,
 				run: () => commandRegistry.openLocation(location),
 			})),
@@ -89,7 +49,11 @@
 
 	let fuse = $derived(
 		new Fuse(commands, {
-			keys: ['label', 'description', 'category'],
+			keys: [
+				'label',
+				'description',
+				{ name: 'category', getFn: (item) => categoryLabels[item.category]() },
+			],
 			threshold: 0.4,
 			includeScore: true,
 		}),
@@ -103,7 +67,7 @@
 	}
 
 	function optionIdFor(commandId: string): string {
-		return `${uid}-command-${commandId}`;
+		return `${uid}-command-${encodeURIComponent(commandId)}`;
 	}
 
 	function handleQueryInput(e: Event) {
@@ -134,11 +98,7 @@
 
 	function selectItem(item: WorkbenchCommand) {
 		if (!isEnabled(item)) return;
-		if (commandRegistry && !item.id.startsWith(knownFilePrefix)) {
-			void commandRegistry.execute(item.id, commandContext);
-		} else {
-			void item.run(commandContext);
-		}
+		void commandRegistry.invoke(item, commandContext);
 		close();
 	}
 
@@ -176,14 +136,12 @@
 		close();
 	}
 
-	function getCategoryIcon(category: string) {
+	function getCategoryIcon(category: WorkbenchCommandCategory) {
 		switch (category) {
-			case categories.chat:
+			case 'Chat':
 				return MessageSquarePlus;
-			case categories.navigation:
+			case 'Navigation':
 				return Settings;
-			case 'Tabs':
-				return FileCode;
 			default:
 				return Search;
 		}
@@ -279,7 +237,7 @@
 								{/if}
 							</div>
 							<span class="text-[10px] text-muted-foreground uppercase flex-shrink-0">
-								{item.category}
+								{categoryLabels[item.category]()}
 							</span>
 						</button>
 					{/each}

@@ -1,4 +1,5 @@
 import { ApiError } from '$lib/api/client.js';
+import * as m from '$lib/paraglide/messages.js';
 import { saveText } from '$lib/api/files.js';
 import type {
 	FileDocumentState,
@@ -25,8 +26,7 @@ export class FileSaveCoordinator {
 		if (!revision || !submission || document.saveOutcome !== 'unknown') return false;
 		document.saveOutcome = 'settling';
 		try {
-			const drafts = this.options.getDrafts();
-			if (!drafts) throw new Error('Browser recovery is not initialized');
+			const drafts = this.#requireDrafts();
 			document.pendingSubmission = null;
 			await drafts.acknowledge(document);
 			document.settledSubmissionRevision = null;
@@ -65,8 +65,7 @@ export class FileSaveCoordinator {
 		};
 		document.pendingSubmission = submission;
 		try {
-			const drafts = this.options.getDrafts();
-			if (!drafts) throw new Error('Browser recovery is not initialized');
+			const drafts = this.#requireDrafts();
 			await drafts.persistSubmission(document);
 		} catch (error) {
 			document.pendingSubmission = null;
@@ -98,9 +97,12 @@ export class FileSaveCoordinator {
 		}
 
 		document.saveOutcome = 'unknown';
-		document.saveError = 'Save outcome is unknown. Copy or export your work before continuing.';
+		document.saveError = m.file_save_outcome_unknown_error();
 		this.options.reconfigure(document);
-		await this.options.getDrafts()?.persistSubmission(document).catch(() => undefined);
+		await this.options
+			.getDrafts()
+			?.persistSubmission(document)
+			.catch(() => undefined);
 		if (outcome.type === 'timeout') {
 			void request.then(
 				(revision) => this.#finishDetached(document, submission, revision, controller),
@@ -176,8 +178,7 @@ export class FileSaveCoordinator {
 		document.saveOutcome = 'settling';
 		document.pendingSubmission = null;
 		try {
-			const drafts = this.options.getDrafts();
-			if (!drafts) throw new Error('Browser recovery is not initialized');
+			const drafts = this.#requireDrafts();
 			await drafts.acknowledge(document);
 			document.saveOutcome = 'idle';
 			document.settledSubmissionRevision = null;
@@ -192,7 +193,7 @@ export class FileSaveCoordinator {
 			document.saveOutcome = 'unknown';
 			document.pendingSubmission = submission;
 			document.settledSubmissionRevision = revision;
-			document.saveError = 'The Save succeeded, but browser recovery could not be settled. Export a local copy before continuing.';
+			document.saveError = m.file_save_recovery_unsettled();
 			document.recoveryError = error instanceof Error ? error.message : String(error);
 			this.options.reconfigure(document);
 			return 'unknown';
@@ -211,8 +212,7 @@ export class FileSaveCoordinator {
 		document.pendingSubmission = null;
 		document.saveError = error instanceof Error ? error.message : String(error);
 		try {
-			const drafts = this.options.getDrafts();
-			if (!drafts) throw new Error('Browser recovery is not initialized');
+			const drafts = this.#requireDrafts();
 			await drafts.acknowledge(document);
 			document.saveOutcome = retainOwnership ? 'preparing' : 'idle';
 			if (!retainOwnership) {
@@ -226,6 +226,12 @@ export class FileSaveCoordinator {
 				settlementError instanceof Error ? settlementError.message : String(settlementError);
 		}
 		this.options.reconfigure(document);
+	}
+
+	#requireDrafts(): FileDraftCoordinator {
+		const drafts = this.options.getDrafts();
+		if (!drafts) throw new Error(m.file_recovery_uninitialized());
+		return drafts;
 	}
 
 	async #write(

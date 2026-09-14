@@ -6,7 +6,7 @@
 		setNotifications,
 		setWorkspaceLayout,
 	} from '$lib/context';
-	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import {
 		FileSessionRegistry,
 		type FileOpenRequest,
@@ -27,9 +27,11 @@
 		notifications = createNotificationsStore(),
 		workspaceLayout = createWorkspaceLayoutStore(),
 	}: {
-		session: FileSession;
+		session: FileViewSession;
 		presentation?: PresentationHostId;
-		onOpen: (request: FileOpenRequest) => void | FileSession | null | Promise<FileSession | null>;
+		onOpen: (
+			request: FileOpenRequest,
+		) => void | FileViewSession | null | Promise<FileViewSession | null>;
 		notifications?: NotificationsStore;
 		workspaceLayout?: WorkspaceLayoutReader;
 	} = $props();

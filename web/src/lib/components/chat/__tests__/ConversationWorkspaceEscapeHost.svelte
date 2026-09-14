@@ -242,7 +242,7 @@
 		transients: transientLayers,
 		appShell: {} as never,
 		navigation: {} as never,
-		files: {} as never,
+		commands: { execute: async () => false, isEnabled: () => false },
 		localSettings: { globalShortcuts: {} } as never,
 	});
 	setWorkspaceCoordinator(workspace as WorkspaceCoordinator);

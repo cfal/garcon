@@ -230,14 +230,6 @@ export class FileViewSession {
 		this.document.loadedRevision = value;
 	}
 
-	get loadController() {
-		return this.document.loadController;
-	}
-
-	set loadController(value) {
-		this.document.loadController = value;
-	}
-
 	get saveController() {
 		return this.document.saveController;
 	}

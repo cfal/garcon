@@ -1,14 +1,16 @@
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
-import type {
-	FileDraftRepository,
-	SpaFileDraftV1,
+import * as m from '$lib/paraglide/messages.js';
+import {
+	scopedRecordKey,
+	type FileDraftRepository,
+	type SpaFileDraftV1,
 } from '$lib/files/persistence/file-draft-repository.js';
 
 export const FILE_DRAFT_IDLE_DELAY_MS = 750;
 export const FILE_DRAFT_MAX_INTERVAL_MS = 5_000;
 
-function scopedRecordKey(...parts: string[]): string {
-	return JSON.stringify(parts);
+function requiresDraftCheckpoint(document: FileDocumentState): boolean {
+	return document.dirty || document.saveOutcomeUnknown || document.pendingSubmission !== null;
 }
 
 interface FileDraftCoordinatorOptions {
@@ -69,7 +71,7 @@ export class FileDraftCoordinator {
 	}
 
 	async settle(document: FileDocumentState): Promise<void> {
-		if (!document.dirty && !document.saveOutcomeUnknown && !document.pendingSubmission) {
+		if (!requiresDraftCheckpoint(document)) {
 			await this.clear(document);
 			return;
 		}
@@ -79,7 +81,7 @@ export class FileDraftCoordinator {
 	}
 
 	async acknowledge(document: FileDocumentState): Promise<void> {
-		if (!this.options.repository.durable) throw new Error('Browser recovery storage is unavailable');
+		if (!this.options.repository.durable) throw new Error(m.file_recovery_storage_unavailable());
 		const pending = this.#entry(document);
 		pending.generation += 1;
 		this.#clearTimers(pending);
@@ -107,7 +109,7 @@ export class FileDraftCoordinator {
 		pending.generation += 1;
 		this.#clearTimers(pending);
 		try {
-			if (!document.dirty && !document.saveOutcomeUnknown && !document.pendingSubmission) {
+			if (!requiresDraftCheckpoint(document)) {
 				await this.#enqueue(pending, () =>
 					this.options.repository.deleteDraft(this.#recordId(document.id), pending.generation),
 				);
@@ -155,13 +157,13 @@ export class FileDraftCoordinator {
 		this.#clearTimers(pending);
 		const document = pending.document;
 		if (!this.options.repository.durable) {
-			const error = new Error('Browser recovery storage is unavailable');
+			const error = new Error(m.file_recovery_storage_unavailable());
 			document.recoveryError = error.message;
 			this.options.onError?.(document, error);
 			throw error;
 		}
 		const generation = pending.generation;
-		if (!document.dirty && !document.saveOutcomeUnknown && !document.pendingSubmission) {
+		if (!requiresDraftCheckpoint(document)) {
 			await this.#enqueue(pending, () =>
 				this.options.repository.deleteDraft(this.#recordId(document.id), generation),
 			);
@@ -203,12 +205,7 @@ export class FileDraftCoordinator {
 			deploymentId: this.options.deploymentId,
 			userNamespace: this.options.userNamespace,
 			browserSessionId: this.options.browserSessionId,
-			documentId: scopedRecordKey(
-				this.options.userNamespace,
-				this.options.deploymentId,
-				this.options.browserSessionId,
-				document.id,
-			),
+			documentId: this.#recordId(document.id),
 			localDocumentId: document.id,
 			canonicalFileRootPath: document.canonicalFileRootPath,
 			normalizedRelativePath: document.relativePath,
