@@ -105,13 +105,6 @@ export class FileNavigationStore {
 		void this.#persistHistory().catch(() => undefined);
 	}
 
-	clearLocalState(): void {
-		this.recents = [];
-		this.#history = [];
-		this.#index = -1;
-		this.#pendingNavigation = null;
-	}
-
 	#record(location: FileLocation): FileRecentLocationV1 {
 		return {
 			schemaVersion: 1,
