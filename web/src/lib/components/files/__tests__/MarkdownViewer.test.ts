@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
+import { FileDocumentIoCoordinator } from '$lib/files/persistence/file-document-io-coordinator.js';
 import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout.js';
@@ -65,6 +66,27 @@ function workspaceLayoutWithDialog(dialogSession: FileSession, backgroundSession
 }
 
 describe('MarkdownViewer', () => {
+	it('updates a runtime-less preview when new disk content is committed', async () => {
+		const session = markdownSession('# Initial');
+		const io = new FileDocumentIoCoordinator({
+			getSession: () => session,
+			getDocument: () => session.document,
+			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+			isDocumentVisible: () => true,
+		});
+		try {
+			render(MarkdownViewerTestHost, { session, onOpen: vi.fn() });
+			await tick();
+			expect(session.document.editorRuntime).toBeNull();
+			expect(screen.getByRole('heading', { name: 'Initial' })).toBeTruthy();
+			io.commitLoadedContent(session, { kind: 'text', content: '# Refreshed', revision: 'v1:new' });
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Refreshed' })).toBeTruthy());
+			expect(session.dirty).toBe(false);
+		} finally {
+			io.destroy();
+		}
+	});
+
 	it('coalesces preview updates without delaying reads of the canonical document', async () => {
 		const session = markdownSession('# Initial');
 		const rendered = render(MarkdownViewerTestHost, { session, onOpen: vi.fn() });

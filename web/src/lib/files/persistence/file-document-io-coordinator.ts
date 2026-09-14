@@ -362,6 +362,7 @@ export class FileDocumentIoCoordinator {
 			Object.assign(session.document, fileTextMetadata(loaded.content));
 			session.document.bufferVersion += 1;
 			session.dirty = false;
+			session.document.notifyChanged();
 		}
 		session.loadedRevision = loaded.revision;
 		if (!session.document.editorInitializationFailed) {

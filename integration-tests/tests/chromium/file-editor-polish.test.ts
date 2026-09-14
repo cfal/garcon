@@ -4,6 +4,39 @@ import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 describe('File editor controls', () => {
+  test('refreshes Markdown preview without mounting a source editor', async () => {
+    await withChromiumFixture('markdown-preview-disk-refresh', async (fixture) => {
+      const { page, integration } = fixture;
+      const filename = 'preview-refresh.md';
+      const path = join(integration.dirs.project, filename);
+      await writeFile(path, '# Initial preview\n', 'utf8');
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: 'Markdown refresh fixture',
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+      const surface = page.locator(
+        '[data-workspace-surface-id^="file:"][aria-hidden="false"]',
+      );
+      await surface.getByRole('heading', { name: 'Initial preview', exact: true }).waitFor();
+      expect(await surface.locator('.cm-editor').count()).toBe(0);
+      await writeFile(path, '# Updated preview\n', 'utf8');
+      await surface.getByRole('button', { name: 'View actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Refresh', exact: true }).click();
+      await surface.getByRole('heading', { name: 'Updated preview', exact: true }).waitFor();
+      expect(
+        await surface.getByRole('heading', { name: 'Initial preview', exact: true }).count(),
+      ).toBe(0);
+      expect(await surface.locator('.cm-editor').count()).toBe(0);
+      fixture.assertNoBrowserErrors();
+    });
+  }, 180_000);
+
   test('keeps search, settings, and Vim usable without randomUUID on desktop and mobile', async () => {
     await withChromiumFixture('file-editor-polish', async (fixture, markPhase) => {
       const { page, integration } = fixture;
