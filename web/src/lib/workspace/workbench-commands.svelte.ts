@@ -17,8 +17,9 @@ import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import type { FilesSurfaceController } from './singleton-surfaces.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
-import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
 import { windowIdOfSurface } from './window-tree.js';
+import { copyToClipboard } from '$lib/utils/clipboard.js';
+import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 export type WorkbenchCommandCategory = 'Chat' | 'Navigation' | 'Workspace' | 'Editor' | 'File';
 
@@ -38,7 +39,7 @@ export interface WorkbenchCommand {
 }
 
 export interface FileCommandSurfacePort {
-	appendToChatDraft(block: string): boolean;
+	appendToChatDraft: ChatDraftAppend;
 }
 
 export interface WorkbenchCommandRegistryDeps {
@@ -50,6 +51,7 @@ export interface WorkbenchCommandRegistryDeps {
 	filesSurface(): FilesSurfaceController;
 	filesSurfaceIfPresent(): FilesSurfaceController | null;
 	onError(error: unknown): void;
+	onInfo(message: string): void;
 }
 
 export class WorkbenchCommandRegistry {
@@ -257,7 +259,7 @@ export class WorkbenchCommandRegistry {
 				id: 'file.navigate-back',
 				label: m.file_command_history_back(),
 				category: 'Navigation',
-				isEnabled: always,
+				isEnabled: () => this.deps.files.navigation?.canGoBack ?? false,
 				run: async (context) => {
 					await this.#navigateHistory('back', context);
 				},
@@ -266,7 +268,7 @@ export class WorkbenchCommandRegistry {
 				id: 'file.navigate-forward',
 				label: m.file_command_history_forward(),
 				category: 'Navigation',
-				isEnabled: always,
+				isEnabled: () => this.deps.files.navigation?.canGoForward ?? false,
 				run: async (context) => {
 					await this.#navigateHistory('forward', context);
 				},
@@ -281,15 +283,7 @@ export class WorkbenchCommandRegistry {
 					const session = viewId ? this.deps.files.get(viewId) : null;
 					if (!session) return;
 					await this.deps.workspace.openSingleton('files');
-					const tree = this.deps.filesSurface().tree;
-					const relativePath = tree.fileRootPath
-						? filePathRelativeToTreeRoot(
-								tree.fileRootPath,
-								session.canonicalFileRootPath,
-								session.relativePath,
-							)
-						: null;
-					if (relativePath) await tree.revealFile(relativePath);
+					this.deps.filesSurface().revealFile(session.canonicalFileRootPath, session.relativePath);
 				},
 			},
 			{
@@ -302,9 +296,11 @@ export class WorkbenchCommandRegistry {
 					const session = viewId ? this.deps.files.get(viewId) : null;
 					if (!session) return;
 					const location = session.editor?.selectionLocation() ?? { line: 1, column: 1 };
-					await navigator.clipboard.writeText(
+					const copied = await copyToClipboard(
 						`${session.relativePath}:${location.line}:${location.column}`,
 					);
+					if (!copied) throw new Error(m.file_command_copy_failed());
+					this.deps.onInfo(m.shell_copied());
 				},
 			},
 			{
@@ -321,10 +317,16 @@ export class WorkbenchCommandRegistry {
 					const location = session.editor?.selectionLocation();
 					const text = session.editor?.selectedText();
 					const suffix = location ? `:${location.line}:${location.column}` : '';
-					port.appendToChatDraft(
+					const result = port.appendToChatDraft(
 						text
 							? `\`${session.relativePath}${suffix}\`\n\n\`\`\`\n${text}\n\`\`\``
 							: `\`${session.relativePath}${suffix}\``,
+					);
+					if (result === 'unavailable') throw new Error(m.file_command_chat_unavailable());
+					this.deps.onInfo(
+						result === 'appended'
+							? m.file_command_chat_appended()
+							: m.file_command_chat_duplicate(),
 					);
 				},
 			},

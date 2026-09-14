@@ -4,6 +4,8 @@
 
 	let { session, compact = false }: { session: FileViewSession; compact?: boolean } = $props();
 	let expanded = $state(false);
+	let trigger: HTMLButtonElement;
+	const detailsId = $props.id();
 	const status = $derived(session.editor?.status);
 	const saveLabel = $derived.by(() => {
 		if (session.document.mixedLineEndings) return m.editor_status_mixed_endings();
@@ -22,12 +24,14 @@
 	aria-label={m.editor_status_title()}
 	role="group"
 >
-	{#if compact}
+	{#if compact && status}
 		<button
+			bind:this={trigger}
 			type="button"
 			class="absolute inset-0 z-10 rounded-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-			aria-label={m.editor_status_show_full()}
+			aria-label={expanded ? m.editor_status_hide_full() : m.editor_status_show_full()}
 			aria-expanded={expanded}
+			aria-controls={detailsId}
 			onclick={() => (expanded = !expanded)}
 		></button>
 	{/if}
@@ -49,8 +53,9 @@
 	{/if}
 	{#if compact && expanded && status}
 		<div
+			id={detailsId}
 			class="fixed inset-x-3 bottom-3 z-50 grid gap-3 rounded-lg border border-border bg-popover p-4 text-base text-foreground shadow-2xl"
-			role="dialog"
+			role="group"
 			aria-label={m.editor_status_full()}
 		>
 			<div class="flex items-center justify-between gap-3">
@@ -58,7 +63,10 @@
 				<button
 					type="button"
 					class="rounded-md px-3 py-2 text-base hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-					onclick={() => (expanded = false)}>{m.editor_actions_close()}</button
+					onclick={() => {
+						expanded = false;
+						trigger.focus();
+					}}>{m.editor_actions_close()}</button
 				>
 			</div>
 			<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">

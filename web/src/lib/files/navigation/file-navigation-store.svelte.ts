@@ -22,14 +22,22 @@ export interface FileLocation {
 
 export class FileNavigationStore {
 	recents = $state.raw<readonly FileLocation[]>([]);
-	#history: FileLocation[] = [];
-	#index = -1;
-	#pendingNavigation: { previousIndex: number; targetKey: string } | null = null;
+	#history = $state.raw<FileLocation[]>([]);
+	#index = $state(-1);
+	#pendingNavigation = $state.raw<{ previousIndex: number; targetKey: string } | null>(null);
 
 	constructor(
 		private readonly repository: FileDraftRepository,
 		private readonly scope: { deploymentId: string; userNamespace: string },
 	) {}
+
+	get canGoBack(): boolean {
+		return !this.#pendingNavigation && this.#index > 0;
+	}
+
+	get canGoForward(): boolean {
+		return !this.#pendingNavigation && this.#index >= 0 && this.#index < this.#history.length - 1;
+	}
 
 	async restore(): Promise<void> {
 		const [records, history] = await Promise.all([
@@ -74,7 +82,7 @@ export class FileNavigationStore {
 	}
 
 	back(): FileLocation | null {
-		if (this.#pendingNavigation || this.#index <= 0) return null;
+		if (!this.canGoBack) return null;
 		const previousIndex = this.#index;
 		this.#index -= 1;
 		this.#pendingNavigation = {
@@ -86,8 +94,7 @@ export class FileNavigationStore {
 	}
 
 	forward(): FileLocation | null {
-		if (this.#pendingNavigation || this.#index < 0 || this.#index >= this.#history.length - 1)
-			return null;
+		if (!this.canGoForward) return null;
 		const previousIndex = this.#index;
 		this.#index += 1;
 		this.#pendingNavigation = {

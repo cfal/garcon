@@ -3,10 +3,7 @@ import type {
 	CompletionSoundVisibility,
 } from '$lib/stores/local-settings.svelte.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
-import {
-	indexedDbRequest,
-	indexedDbTransactionCompletion,
-} from '$lib/utils/indexed-db.js';
+import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
 
 const DATABASE_NAME = 'garcon-local-media';
 const DATABASE_VERSION = 1;

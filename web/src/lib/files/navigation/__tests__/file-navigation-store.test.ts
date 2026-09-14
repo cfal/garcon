@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { FileNavigationStore, type FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
+import {
+	FileNavigationStore,
+	type FileLocation,
+} from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
 
 const scope = { deploymentId: 'deployment', userNamespace: 'user' };
@@ -19,6 +22,30 @@ function location(index: number): FileLocation {
 }
 
 describe('FileNavigationStore', () => {
+	it('disables unavailable and pending history directions', () => {
+		const store = new FileNavigationStore(createMemoryFileDraftRepository(), scope);
+		expect(store.canGoBack).toBe(false);
+		expect(store.canGoForward).toBe(false);
+		store.record(location(0));
+		expect(store.canGoBack).toBe(false);
+		store.record(location(1));
+		expect(store.canGoBack).toBe(true);
+		store.back();
+		expect(store.canGoBack).toBe(false);
+		expect(store.canGoForward).toBe(false);
+		store.completeNavigation(false);
+		expect(store.canGoBack).toBe(true);
+		expect(store.canGoForward).toBe(false);
+		store.back();
+		store.record(location(0));
+		expect(store.canGoBack).toBe(false);
+		expect(store.canGoForward).toBe(true);
+		store.forward();
+		expect(store.canGoForward).toBe(false);
+		store.completeNavigation(true);
+		expect(store.canGoBack).toBe(true);
+	});
+
 	it('keeps the newest locations when count pruning applies', () => {
 		const store = new FileNavigationStore(createMemoryFileDraftRepository(), scope);
 		for (let index = 0; index <= 200; index += 1) store.record(location(index));

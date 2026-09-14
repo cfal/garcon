@@ -18,6 +18,8 @@ import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import { untrack } from 'svelte';
+import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
@@ -30,8 +32,38 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 export class FilesSurfaceController implements PortableSingletonController {
 	readonly tree = new FileTreeStore();
 	presentationVisible = $state(false);
+	#projectAvailable = $state(false);
+	#projectPath: string | null = null;
+	#pendingReveal = $state.raw<{ fileRootPath: string; relativePath: string } | null>(null);
+
+	constructor() {
+		$effect(() => {
+			const pending = this.#pendingReveal;
+			const response = this.tree.readyResponse;
+			if (!pending || !response || !this.presentationVisible || !this.#projectAvailable) return;
+			untrack(() => {
+				this.#pendingReveal = null;
+				const relativePath = filePathRelativeToTreeRoot(
+					response.fileRootPath,
+					pending.fileRootPath,
+					pending.relativePath,
+				);
+				if (relativePath) void this.tree.revealFile(relativePath);
+			});
+		});
+	}
+
+	revealFile(fileRootPath: string, relativePath: string): void {
+		this.#pendingReveal = { fileRootPath, relativePath };
+	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
+		let projectPath: string | null = null;
+		if (projectState.kind === 'available') projectPath = projectState.project.projectPath;
+		else if (projectState.kind !== 'absent') projectPath = projectState.context.projectPath;
+		if (projectPath !== this.#projectPath) this.#pendingReveal = null;
+		this.#projectPath = projectPath;
+		this.#projectAvailable = projectState.kind === 'available';
 		this.tree.setProjectState(projectState);
 	}
 
@@ -39,11 +71,15 @@ export class FilesSurfaceController implements PortableSingletonController {
 		if (this.presentationVisible === visible) return;
 		this.presentationVisible = visible;
 		if (visible) this.tree.activate();
-		else this.tree.deactivate();
+		else {
+			this.#pendingReveal = null;
+			this.tree.deactivate();
+		}
 	}
 
 	dispose(): void {
 		this.presentationVisible = false;
+		this.#pendingReveal = null;
 		this.tree.reset();
 	}
 }

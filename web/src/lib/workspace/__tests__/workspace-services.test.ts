@@ -107,7 +107,9 @@ function assembleWorkspaceServices(
 	services: WorkspaceServices;
 	ghCapability: ReturnType<typeof createGhCapabilityStore>;
 	chatSessions: ReturnType<typeof createChatSessionsStore>;
+	notifications: ReturnType<typeof createNotificationsStore>;
 } {
+	const notifications = createNotificationsStore();
 	const ghCapability = createGhCapabilityStore();
 	const chatSessions = createChatSessionsStore();
 	ghCapability.hasChecked = true;
@@ -127,7 +129,7 @@ function assembleWorkspaceServices(
 		localSettings,
 		modelCatalog: createModelCatalogStore(),
 		navigation: createNavigationStore(),
-		notifications: createNotificationsStore(),
+		notifications,
 		terminalIdentity: { clientId },
 		ws,
 		getRouteIdentity: () => '/',
@@ -136,7 +138,7 @@ function assembleWorkspaceServices(
 		workspaceLayoutRaw: null,
 	});
 	if (clientId) void services.files.initializeRecovery('test-user');
-	return { services, ghCapability, chatSessions };
+	return { services, ghCapability, chatSessions, notifications };
 }
 
 describe('createWorkspaceServices', () => {
@@ -193,6 +195,154 @@ describe('createWorkspaceServices', () => {
 			expect(open).toHaveBeenCalledWith(expect.objectContaining({ origin: 'window-files' }));
 		},
 	);
+
+	it.each([true, false])(
+		'copies file locations through the clipboard fallback: %s',
+		async (copied) => {
+			rootLocalSettings = createLocalSettingsStore();
+			const assembled = assembleWorkspaceServices(rootLocalSettings);
+			services = assembled.services;
+			const session = new FileSession(
+				{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+				'command-copy',
+			);
+			vi.spyOn(services.files, 'get').mockReturnValue(session);
+			vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue(undefined!);
+			const descriptor = Object.getOwnPropertyDescriptor(document, 'execCommand');
+			const copy = vi.fn(() => {
+				expect((document.activeElement as HTMLTextAreaElement).value).toBe('file.ts:1:1');
+				return copied;
+			});
+			Object.defineProperty(document, 'execCommand', { configurable: true, value: copy });
+			try {
+				await expect(
+					services.commands.execute('file.copy-location', {
+						viewId: session.id,
+						surfaceId: `file:${session.id}`,
+					}),
+				).resolves.toBe(copied);
+				expect(copy).toHaveBeenCalledWith('copy');
+				expect(assembled.notifications.items.at(-1)).toMatchObject({
+					tone: copied ? 'info' : 'error',
+					message: copied ? 'Copied to clipboard' : 'Could not copy file location.',
+				});
+			} finally {
+				if (descriptor) Object.defineProperty(document, 'execCommand', descriptor);
+				else Reflect.deleteProperty(document, 'execCommand');
+			}
+		},
+	);
+
+	it('keeps the current file command port and reports chat append outcomes', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		const session = new FileSession(
+			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			'command-chat',
+		);
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const context = { viewId: session.id, surfaceId: `file:${session.id}` };
+		const obsolete = vi.fn(() => 'unavailable' as const);
+		const removeObsolete = services.commands.registerFileSurface(session.id, {
+			appendToChatDraft: obsolete,
+		});
+		const append = vi.fn<import('$lib/chat/composer/chat-draft-append.js').ChatDraftAppend>(
+			() => 'appended',
+		);
+		const removeCurrent = services.commands.registerFileSurface(session.id, {
+			appendToChatDraft: append,
+		});
+		removeObsolete();
+		expect(services.commands.isEnabled('file.send-to-chat', context)).toBe(true);
+		await expect(services.commands.execute('file.send-to-chat', context)).resolves.toBe(true);
+		expect(obsolete).not.toHaveBeenCalled();
+		expect(append).toHaveBeenCalledWith('`file.ts`');
+		expect(assembled.notifications.items.at(-1)?.message).toBe('Added to chat draft.');
+		append.mockReturnValue('duplicate');
+		await expect(services.commands.execute('file.send-to-chat', context)).resolves.toBe(true);
+		expect(assembled.notifications.items.at(-1)?.message).toBe('Already in chat draft.');
+		append.mockReturnValue('unavailable');
+		await expect(services.commands.execute('file.send-to-chat', context)).resolves.toBe(false);
+		expect(assembled.notifications.items.at(-1)).toMatchObject({
+			tone: 'error',
+			message: 'Open a chat composer first.',
+		});
+		removeCurrent();
+		expect(services.commands.isEnabled('file.send-to-chat', context)).toBe(false);
+	});
+
+	it('disables history commands at boundaries and while opening a target', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		await services.files.initializeRecovery('test-user');
+		const navigation = services.files.navigation!;
+		expect(services.commands.isEnabled('file.navigate-back')).toBe(false);
+		expect(services.commands.isEnabled('file.navigate-forward')).toBe(false);
+		const location: FileLocation = {
+			key: 'first',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'first.ts',
+			displayPath: 'first.ts',
+			revision: null,
+			line: 1,
+			column: 1,
+			viewPreference: 'source',
+			timestamp: 0,
+		};
+		navigation.record(location);
+		navigation.record({ ...location, key: 'second', normalizedRelativePath: 'second.ts' });
+		const opened = Promise.withResolvers<null>();
+		vi.spyOn(services.files, 'open').mockReturnValue(opened.promise);
+		expect(services.commands.isEnabled('file.navigate-back')).toBe(true);
+		const pending = services.commands.execute('file.navigate-back');
+		expect(services.commands.isEnabled('file.navigate-back')).toBe(false);
+		expect(services.commands.isEnabled('file.navigate-forward')).toBe(false);
+		opened.resolve(null);
+		await pending;
+		expect(services.commands.isEnabled('file.navigate-back')).toBe(true);
+	});
+
+	it('queues Reveal after the Files surface opens even before its tree is ready', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const session = new FileSession(
+			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			'command-reveal',
+		);
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const attached = Promise.withResolvers<void>();
+		vi.spyOn(services.coordinator, 'openSingleton').mockReturnValue(attached.promise);
+		const controller = services.singletonSurfaces.files();
+		const reveal = vi.spyOn(controller, 'revealFile');
+		const pending = services.commands.execute('file.reveal-active', {
+			viewId: session.id,
+			surfaceId: `file:${session.id}`,
+		});
+		expect(reveal).not.toHaveBeenCalled();
+		attached.resolve();
+		await pending;
+		expect(controller.tree.readyResponse).toBeNull();
+		expect(reveal).toHaveBeenCalledWith('/workspace', 'file.ts');
+	});
+
+	it('opens a side view from the command context window', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const session = new FileSession(
+			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			'command-side',
+		);
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const open = vi.spyOn(services.files, 'openToSide').mockResolvedValue(null);
+		await expect(
+			services.commands.execute('file.open-to-side', {
+				viewId: session.id,
+				surfaceId: 'singleton:files',
+			}),
+		).resolves.toBe(true);
+		expect(open).toHaveBeenCalledWith(session.id, 'window-files');
+	});
 
 	it('uses the write-admission policy for palette and shortcut Save commands', async () => {
 		rootLocalSettings = createLocalSettingsStore();

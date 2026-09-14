@@ -89,6 +89,7 @@ const commandRegistry = new WorkbenchCommandRegistry({
 	filesSurface: () => filesSurface as FilesSurfaceController,
 	filesSurfaceIfPresent: () => filesSurface as FilesSurfaceController,
 	onError: mocks.notifications.error,
+	onInfo: vi.fn(),
 });
 
 afterEach(() => {

@@ -177,8 +177,44 @@ describe('FileSurface', () => {
 		const trigger = screen.getByRole('button', { name: 'Show full editor status' });
 		await fireEvent.click(trigger);
 
-		expect(screen.getByRole('dialog', { name: 'Full editor status' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Close' }).className).toContain('text-base');
+		const details = screen.getByRole('group', { name: 'Full editor status' });
+		expect(trigger.getAttribute('aria-controls')).toBe(details.id);
+		expect(trigger.getAttribute('aria-expanded')).toBe('true');
+		expect(trigger.getAttribute('aria-label')).toBe('Hide full editor status');
+		const close = within(details).getByRole('button', { name: 'Close' });
+		expect(close.className).toContain('text-base');
+		close.focus();
+		await fireEvent.click(close);
+		expect(screen.queryByRole('group', { name: 'Full editor status' })).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+		expect(trigger.getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it.each(['loading', 'failed'] as const)('omits editor status while %s', async (phase) => {
+		render(FileSurfaceTestHost, {
+			presentation: 'mobile',
+			rendererMode: 'code',
+			loading: phase === 'loading',
+			onReady: (session) => {
+				if (phase === 'failed') session.loadError = 'Read failed';
+			},
+		});
+		await tick();
+		expect(screen.queryByRole('group', { name: 'Editor status' })).toBeNull();
+	});
+
+	it('omits the status disclosure without an editor status', async () => {
+		render(FileSurfaceTestHost, {
+			presentation: 'mobile',
+			rendererMode: 'code',
+			loading: false,
+			onReady: (session) => {
+				session.editor?.dispose();
+				session.editor = null;
+			},
+		});
+		await tick();
+		expect(screen.queryByRole('button', { name: 'Show full editor status' })).toBeNull();
 	});
 
 	it.each(['window-main', 'mobile', 'dialog'] as const)(

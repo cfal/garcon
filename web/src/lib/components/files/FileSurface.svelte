@@ -116,7 +116,7 @@
 
 	$effect(() => {
 		return commands.registerFileSurface(session.id, {
-			appendToChatDraft: (block) => onAppendToChatDraft?.(block) === 'appended',
+			appendToChatDraft: (block) => onAppendToChatDraft?.(block) ?? 'unavailable',
 		});
 	});
 </script>
@@ -215,7 +215,7 @@
 			<CodeEditor {session} />
 		{/if}
 	</div>
-	{#if session.rendererMode === 'code'}
+	{#if session.rendererMode === 'code' && !session.loading && !session.loadError}
 		<FileEditorStatus {session} {compact} />
 	{/if}
 </div>
