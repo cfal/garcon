@@ -31,6 +31,9 @@ function adapter(id: string, doc = 'abc', anchor = doc.length, readOnly = false)
 		applyDocumentSpec(spec) {
 			current = current.update(spec).state;
 		},
+		replaceDocument(spec) {
+			current = current.update(spec).state;
+		},
 	};
 	return { value, state: () => current };
 }

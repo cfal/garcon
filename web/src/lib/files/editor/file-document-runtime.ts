@@ -23,6 +23,7 @@ export interface FileDocumentViewAdapter {
 	currentState(): EditorState;
 	applySourceTransactions(transactions: readonly Transaction[]): void;
 	applyDocumentSpec(spec: TransactionSpec): void;
+	replaceDocument(spec: TransactionSpec): void;
 }
 
 export class FileDocumentRuntime implements FileDocumentRuntimePort {
@@ -160,7 +161,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#lastOrigin = null;
 		for (const adapter of this.#views.values()) {
 			const current = adapter.currentState();
-			adapter.applyDocumentSpec({
+			adapter.replaceDocument({
 				changes,
 				selection: current.selection.map(changes, 1),
 				annotations: [Transaction.addToHistory.of(false), mirroredDocumentChange.of('disk')],

@@ -63,7 +63,7 @@ describe('CodeEditorController', () => {
 		'drops stale restored folds before shared edits (attached: %s)',
 		(attached) => {
 			const { session, controller } = createController();
-			controller.replaceContentFromDisk('short');
+			session.document.editorRuntime!.replaceFromDisk('short');
 			const host = parent();
 			if (attached) controller.attach(host);
 			controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, [
@@ -108,7 +108,7 @@ describe('CodeEditorController', () => {
 
 	it('caches bounded indentation sampling across cursor updates and invalidates it after edits', () => {
 		const { session, controller } = createController();
-		controller.replaceContentFromDisk('first\n    second\nthird');
+		session.document.editorRuntime!.replaceFromDisk('first\n    second\nthird');
 		const host = parent();
 		controller.attach(host);
 		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
@@ -122,7 +122,7 @@ describe('CodeEditorController', () => {
 		expect(controller.status.indentation).toBe('Tabs');
 		expect(controller.run('undo')).toBe(true);
 		expect(controller.status.indentation).toBe('Spaces: 4');
-		controller.replaceContentFromDisk('x'.repeat(12_000_000));
+		session.document.editorRuntime!.replaceFromDisk('x'.repeat(12_000_000));
 		const largeDocument = session.editorState!.doc;
 		const stringify = vi.spyOn(largeDocument, 'toString');
 		const largeSample = vi.spyOn(largeDocument, 'iterRange');
@@ -374,7 +374,7 @@ describe('CodeEditorController', () => {
 
 	it('normalizes CRLF for dirty comparison and preserves it when serializing', () => {
 		const { session, controller } = createController();
-		controller.replaceContentFromDisk('first\r\nsecond');
+		session.document.editorRuntime!.replaceFromDisk('first\r\nsecond');
 		const lease = controller.attach(parent());
 
 		expect(session.dirty).toBe(false);
@@ -391,7 +391,7 @@ describe('CodeEditorController', () => {
 
 	it('preserves lone carriage-return line endings when serializing', () => {
 		const { session, controller } = createController();
-		controller.replaceContentFromDisk('first\rsecond');
+		session.document.editorRuntime!.replaceFromDisk('first\rsecond');
 		const lease = controller.attach(parent());
 
 		expect(session.dirty).toBe(false);
@@ -414,7 +414,7 @@ describe('CodeEditorController', () => {
 		if (!scroller) throw new Error('Expected CodeMirror scroller');
 		scroller.scrollTop = 28;
 
-		controller.replaceContentFromDisk('new');
+		session.document.editorRuntime!.replaceFromDisk('new');
 		host
 			.querySelector<HTMLElement>('.cm-content')
 			?.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
@@ -432,7 +432,7 @@ describe('CodeEditorController', () => {
 		const { session, controller } = createController();
 		const lease = controller.attach(parent());
 
-		expect(() => controller.replaceContentFromDisk('a\r\nb\r\n')).not.toThrow();
+		expect(() => session.document.editorRuntime!.replaceFromDisk('a\r\nb\r\n')).not.toThrow();
 
 		expect(controller.currentContent()).toBe('a\r\nb\r\n');
 		expect(session.baseline).toBe('a\r\nb\r\n');

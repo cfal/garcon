@@ -205,6 +205,16 @@ export class CodeEditorController {
 				const current = this.session.editorState;
 				if (current) this.session.editorState = current.update(spec).state;
 			},
+			replaceDocument: (spec) => {
+				const view = this.#view;
+				const left = view?.scrollDOM.scrollLeft ?? session.textScrollLeft;
+				const top = view?.scrollDOM.scrollTop ?? session.textScrollTop;
+				session.editorScrollSnapshot = null;
+				this.#adapter.applyDocumentSpec(spec);
+				session.textScrollLeft = left;
+				session.textScrollTop = top;
+				this.#restoreScrollAfterFrame(view, left, top);
+			},
 		};
 		this.#unregisterRuntime = this.#runtime.register(this.#adapter);
 		this.restorePendingPresentation();
@@ -425,18 +435,6 @@ export class CodeEditorController {
 		if (!close) return false;
 		close.click();
 		return true;
-	}
-
-	replaceContentFromDisk(content: string): void {
-		const view = this.#view;
-		const scrollLeft = view?.scrollDOM.scrollLeft ?? this.session.textScrollLeft;
-		const scrollTop = view?.scrollDOM.scrollTop ?? this.session.textScrollTop;
-		this.session.editorScrollSnapshot = null;
-		this.#runtime.replaceFromDisk(content);
-		this.session.dirty = false;
-		this.session.textScrollLeft = scrollLeft;
-		this.session.textScrollTop = scrollTop;
-		this.#restoreScrollAfterFrame(view, scrollLeft, scrollTop);
 	}
 
 	#restoreScrollAfterFrame(view: EditorView | null, left: number, top: number): void {
