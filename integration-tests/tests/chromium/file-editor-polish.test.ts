@@ -86,7 +86,9 @@ describe('File editor controls', () => {
         return heading?.textContent === basename;
       }, filename);
       const titleBounds = await title.boundingBox();
-      const copyBounds = await surface.getByRole('button', { name: 'Copy file path', exact: true }).boundingBox();
+      const copyBounds = await surface
+        .getByRole('button', { name: 'Copy file path', exact: true })
+        .boundingBox();
       expect(titleBounds).not.toBeNull();
       expect(copyBounds).not.toBeNull();
       expect(titleBounds!.x + titleBounds!.width).toBeLessThanOrEqual(copyBounds!.x);
@@ -289,6 +291,11 @@ describe('File editor controls', () => {
       });
       const previousDocument = await page.evaluate(() => performance.timeOrigin);
       await reload.click();
+      await page.waitForFunction(
+        (previous) => performance.timeOrigin !== previous,
+        previousDocument,
+      );
+      await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
       await surface.locator('.cm-vim-panel').waitFor({ state: 'visible' });
       // Reload may use precached bytes, but must replace the failed JavaScript module map.
       expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(previousDocument);

@@ -45,9 +45,11 @@ describe('File draft storage failures', () => {
         const {
           createFileDraftRepository,
           createMemoryFileDraftRepository,
+          fileDraftKey,
+          navigationKey,
           FILE_DRAFT_DATABASE_NAME,
           FILE_DRAFT_SCHEMA_VERSION,
-          FILE_CLOSED_DRAFT_LIMIT,
+          FILE_DRAFT_LIMIT,
         } = (await import(
           url
         )) as typeof import('../../../web/src/lib/files/persistence/file-draft-repository.js');
@@ -58,6 +60,8 @@ describe('File draft storage failures', () => {
           event.preventDefault();
         });
         const repository = createFileDraftRepository();
+        const user = 'synthetic-user';
+        const deployment = 'synthetic-deployment';
         const blocker = await new Promise<IDBDatabase>((resolve, reject) => {
           const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, 1);
           request.onsuccess = () => resolve(request.result);
@@ -65,170 +69,79 @@ describe('File draft storage failures', () => {
         });
         let blockedMessage = '';
         try {
-          await repository.getViews('synthetic-user', 'synthetic-deployment', 'synthetic-session');
+          await repository.getDrafts(user, deployment);
         } catch (error) {
           blockedMessage = (error as Error).message;
         } finally {
           blocker.close();
         }
-        await repository.getViews('synthetic-user', 'synthetic-deployment', 'synthetic-session');
-        const record = {
+        await repository.getDrafts(user, deployment);
+        const draft = {
           schemaVersion: 1 as const,
-          userNamespace: 'synthetic-user',
-          deploymentId: 'synthetic-deployment',
-          browserSessionId: 'synthetic-session',
-          viewId: 'synthetic-view',
-          documentId: 'synthetic-document',
-          canonicalFileRootPath: '/synthetic-project',
+          userNamespace: user,
+          deploymentId: deployment,
+          documentId: fileDraftKey(user, deployment, '/project', 'file.txt'),
+          canonicalFileRootPath: '/project',
           normalizedRelativePath: 'file.txt',
-          rendererMode: 'code' as const,
-          line: 1,
-          column: 1,
-          endLine: 1,
-          endColumn: 1,
-          scrollLeft: 0,
-          scrollTop: 0,
-          folds: [],
-          updatedAt: 0,
-          placement: 'window-main' as const,
+          content: 'local edit',
+          savedAt: 1,
         };
         const failures: string[] = [];
         const originalPut = IDBObjectStore.prototype.put;
         IDBObjectStore.prototype.put = function (...args) {
           const request = originalPut.apply(this, args);
-          if (this.name === 'views') this.transaction.abort();
+          if (this.name === 'drafts') this.transaction.abort();
           return request;
         };
         try {
-          await repository.putView(record);
+          await repository.putDraft(draft);
         } catch (error) {
           failures.push((error as Error).name);
         } finally {
           IDBObjectStore.prototype.put = originalPut;
         }
+        const retained = await repository.getDrafts(user, deployment);
+        await repository.putDraft(draft);
 
-        // An application failure after a successful request must also roll back that write.
-        const originalGetAll = IDBObjectStore.prototype.getAll;
-        IDBObjectStore.prototype.getAll = function (...args) {
-          if (this.name === 'views') throw new Error('pruning failed');
-          return originalGetAll.apply(this, args);
+        // Deleting the previous backup and writing its replacement share a transaction.
+        IDBObjectStore.prototype.put = function (...args) {
+          if (this.name === 'drafts') throw new Error('write failed');
+          return originalPut.apply(this, args);
         };
         try {
-          await repository.putView(record);
+          await repository.putDraft({ ...draft, content: 'replacement' });
         } catch (error) {
           failures.push((error as Error).message);
         } finally {
-          IDBObjectStore.prototype.getAll = originalGetAll;
+          IDBObjectStore.prototype.put = originalPut;
         }
-        const retained = await repository.getViews(
-          'synthetic-user',
-          'synthetic-deployment',
-          'synthetic-session',
-        );
-
-        const currentDraft = {
-          schemaVersion: 1 as const,
-          userNamespace: record.userNamespace,
-          deploymentId: record.deploymentId,
-          browserSessionId: record.browserSessionId,
-          documentId: 'current',
-          localDocumentId: 'current',
-          canonicalFileRootPath: record.canonicalFileRootPath,
-          normalizedRelativePath: record.normalizedRelativePath,
-          displayPath: 'file.txt',
-          diskRevision: 'v1:initial',
-          baselineContent: 'initial',
-          content: 'current edit',
-          bufferVersion: 1,
-          generation: 1,
-          savedAt: 1,
-          unknownSubmission: null,
-          closed: false,
-        };
-        const alternate = {
-          ...currentDraft,
-          documentId: 'alternate',
-          localDocumentId: 'alternate',
-          content: 'alternate edit',
-        };
-        await repository.putDraft(currentDraft);
-        await repository.putDraft(alternate);
-        const replacement = { ...currentDraft, generation: 2, content: alternate.content };
-        const originalDelete = IDBObjectStore.prototype.delete;
-        IDBObjectStore.prototype.delete = function (...args) {
-          const request = originalDelete.apply(this, args);
-          if (this.name === 'drafts') this.transaction.abort();
-          return request;
-        };
-        try {
-          await repository.resolveDraftConflict(alternate, replacement);
-        } catch (error) {
-          failures.push((error as Error).name);
-        } finally {
-          IDBObjectStore.prototype.delete = originalDelete;
-        }
-        const afterAbortedChoice = (
-          await repository.getDrafts(
-            record.userNamespace,
-            record.deploymentId,
-            record.browserSessionId,
-          )
-        )
-          .map((draft) => draft.content)
-          .sort();
-        await repository.resolveDraftConflict(alternate, replacement);
-        const afterChoice = await repository.getDrafts(
-          record.userNamespace,
-          record.deploymentId,
-          record.browserSessionId,
-        );
+        const afterFailure = await repository.getDrafts(user, deployment);
+        await repository.clearDrafts(user, deployment);
 
         const conformance: unknown[] = [];
         for (const candidate of [repository, createMemoryFileDraftRepository()]) {
-          const user = 'conformance-user';
-          const deployment = 'conformance-deployment';
-          const session = 'conformance-session';
-          const draft = {
-            ...currentDraft,
-            documentId: 'conformance-current',
-            userNamespace: user,
-            deploymentId: deployment,
-            browserSessionId: session,
-          };
-          const other = {
-            ...draft,
-            documentId: 'other',
-            localDocumentId: 'other',
-            content: 'other edit',
-          };
           await candidate.putDraft(draft);
-          await candidate.putDraft({ ...draft, generation: 0, content: 'stale' });
-          await candidate.putDraft(other);
-          const adopted = await candidate.adoptDraft(other, 'adopted');
-          await candidate.resolveDraftConflict(adopted, {
-            ...draft,
-            generation: 2,
-            content: adopted.content,
-          });
-          await candidate.deleteDraft(draft.documentId, 1);
-          const protectedDrafts = await candidate.getDrafts(user, deployment, session);
-          const scopedView = {
-            ...record,
-            userNamespace: user,
-            deploymentId: deployment,
-            browserSessionId: session,
-          };
-          await candidate.putView(scopedView);
-          await candidate.putView({ ...scopedView, browserSessionId: 'other-session' });
-          const viewRead = await candidate.getViews(user, deployment, session);
-          viewRead[0]!.line = 99;
-          const reread = await candidate.getViews(user, deployment, session);
+          await candidate.putDraft({ ...draft, content: 'latest', savedAt: 2 });
+          const read = await candidate.getDrafts(user, deployment);
+          read[0]!.content = 'mutated read';
+          const reread = await candidate.getDrafts(user, deployment);
+          await candidate.deleteDraft(draft.documentId);
+          const empty = await candidate.getDrafts(user, deployment);
+          for (let i = 0; i <= FILE_DRAFT_LIMIT; i++) {
+            await candidate.putDraft({
+              ...draft,
+              documentId: fileDraftKey(user, deployment, '/project', i + '.txt'),
+              normalizedRelativePath: i + '.txt',
+              savedAt: i,
+            });
+          }
+          const bounded = await candidate.getDrafts(user, deployment);
           const recent = {
             schemaVersion: 1 as const,
             userNamespace: user,
             deploymentId: deployment,
             key: 'recent',
-            canonicalFileRootPath: '/synthetic-project',
+            canonicalFileRootPath: '/project',
             normalizedRelativePath: 'file.txt',
             displayPath: 'file.txt',
             revision: 'v1:initial',
@@ -238,61 +151,34 @@ describe('File draft storage failures', () => {
             timestamp: 1,
           };
           await candidate.putRecent(recent);
-          const recentRead = await candidate.getRecents(user, deployment);
-          recentRead[0]!.line = 99;
+          const recents = await candidate.getRecents(user, deployment);
+          recents[0]!.line = 99;
           await candidate.putNavigation({
             schemaVersion: 1,
             userNamespace: user,
             deploymentId: deployment,
-            key: JSON.stringify([user, deployment]),
+            key: navigationKey(user, deployment),
             entries: [recent],
             index: 0,
             updatedAt: 1,
           });
           const history = await candidate.getNavigation(user, deployment);
-          const blockedClear = await candidate.clearNamespaceIfUnprotected(
-            user,
-            deployment,
-            session,
-          );
-          await candidate.deleteDraft(draft.documentId, 2);
-          const cleared = await candidate.clearNamespaceIfUnprotected(user, deployment, session);
-          const otherViews = await candidate.getViews(user, deployment, 'other-session');
-          await candidate.deleteView(scopedView.viewId, user, deployment, 'other-session');
-          const emptyViews = await candidate.getViews(user, deployment, 'other-session');
-          for (let index = 0; index < FILE_CLOSED_DRAFT_LIMIT; index++) {
-            await candidate.putDraft({ ...draft, documentId: `closed-${index}`, closed: true });
-          }
-          let closedFailure = false;
-          try {
-            await candidate.putDraft({ ...draft, documentId: 'over-limit', closed: true });
-          } catch {
-            closedFailure = true;
-          }
           await candidate.putDraft({
             ...draft,
-            userNamespace: 'another-user',
-            documentId: 'separate-budget',
-            closed: true,
+            userNamespace: 'other',
+            documentId: fileDraftKey('other', deployment, '/project', 'file.txt'),
           });
-          await candidate.putDraft({
-            ...draft,
-            browserSessionId: 'another-session',
-            documentId: 'separate-session',
-            closed: true,
-          });
+          await candidate.clearDrafts(user, deployment);
           conformance.push({
-            protectedDrafts: protectedDrafts.map((entry) => entry.content),
-            line: reread[0]?.line,
+            reread,
+            empty,
+            bounded: bounded.map((entry) => entry.normalizedRelativePath),
+            recentLine: (await candidate.getRecents(user, deployment))[0]!.line,
             history,
-            blockedClear,
-            cleared,
-            otherViews: otherViews.length,
-            emptyViews: emptyViews.length,
-            closedFailure,
+            cleared: await candidate.getDrafts(user, deployment),
+            otherCount: (await candidate.getDrafts('other', deployment)).length,
           });
         }
-
         await new Promise<void>((resolve, reject) => {
           const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, FILE_DRAFT_SCHEMA_VERSION + 1);
           request.onerror = () => reject(request.error);
@@ -301,47 +187,34 @@ describe('File draft storage failures', () => {
             resolve();
           };
         });
-        const failedRepository = repository;
-        const failedRead = failedRepository
-          .getViews('synthetic-user', 'synthetic-deployment', 'synthetic-session')
-          .catch((error: Error) => {
-            failures.push(error.name);
-          });
-        failedRepository.close();
+        const failedRead = repository.getDrafts(user, deployment).catch((error: Error) => {
+          failures.push(error.name);
+        });
+        repository.close();
         await failedRead;
-        // Lets the browser report promise rejections after the transaction events have drained.
         await new Promise((resolve) => setTimeout(resolve, 100));
         return {
           failures,
           retained,
+          afterFailure,
           unhandled,
-          afterAbortedChoice,
-          afterChoice,
           blockedMessage,
           conformance,
         };
       }, source);
-      expect(result.failures).toEqual([
-        'AbortError',
-        'pruning failed',
-        'AbortError',
-        'VersionError',
-      ]);
+      expect(result.failures).toEqual(['AbortError', 'write failed', 'VersionError']);
       expect(result.retained).toEqual([]);
-      expect(result.afterAbortedChoice).toEqual(['alternate edit', 'current edit']);
-      expect(result.afterChoice).toHaveLength(1);
-      expect(result.afterChoice[0]?.content).toBe('alternate edit');
+      expect(result.afterFailure).toMatchObject([{ content: 'local edit' }]);
       expect(result.unhandled).toEqual([]);
       expect(result.blockedMessage).toContain('blocked by another tab');
       expect(result.conformance[0]).toEqual(result.conformance[1]);
       expect(result.conformance[0]).toMatchObject({
-        protectedDrafts: ['other edit'],
-        line: 1,
-        blockedClear: false,
-        cleared: true,
-        otherViews: 1,
-        emptyViews: 0,
-        closedFailure: true,
+        reread: [{ content: 'latest' }],
+        empty: [],
+        cleared: [],
+        otherCount: 1,
+        recentLine: 1,
+        bounded: Array.from({ length: 20 }, (_, i) => 20 - i + '.txt'),
       });
     } finally {
       await browser.close();
