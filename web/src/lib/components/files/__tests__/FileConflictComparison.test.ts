@@ -97,6 +97,12 @@ describe('FileConflictComparison', () => {
 		expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
 			'file-conflict-disk-tab',
 		);
+		tabs[1]!.focus();
+		await fireEvent.keyDown(tabs[1]!, { key: 'ArrowLeft' });
+		expect(document.activeElement).toBe(tabs[0]);
+		expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
+		await fireEvent.keyDown(tabs[0]!, { key: 'ArrowRight' });
+		expect(document.activeElement).toBe(tabs[1]);
 		await fireEvent.click(screen.getByRole('button', { name: 'Save against displayed disk' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Replace disk' }));
 		expect(onSaveChecked).toHaveBeenCalledWith('local');

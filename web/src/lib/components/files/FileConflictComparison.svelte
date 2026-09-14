@@ -38,6 +38,11 @@
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		event.preventDefault();
 		selected = selected === 'base' ? 'disk' : 'base';
+		if (event.currentTarget instanceof HTMLElement) {
+			event.currentTarget
+				.querySelector<HTMLButtonElement>(`#file-conflict-${selected}-tab`)
+				?.focus();
+		}
 	}
 </script>
 

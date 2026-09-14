@@ -1237,7 +1237,7 @@
 	"file_session_discard_refresh_description": "{fileName} has unsaved changes. Refreshing will replace them with the version on disk.",
 	"file_session_discard_and_refresh": "Discard and refresh",
 	"file_session_overwrite_title": "File changed on disk",
-	"file_session_overwrite_description": "{fileName} changed after it was opened. Saving now will overwrite the newer version on disk.",
+	"file_session_overwrite_description": "{fileName} changed on disk. Compare the copies before choosing which changes to keep.",
 	"file_session_many_open_title": "Many files are open",
 	"file_session_many_open_description": "Opening another file may use significant browser memory. Existing files will remain open.",
 	"file_session_open_anyway": "Open anyway",
