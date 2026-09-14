@@ -22,8 +22,9 @@ export class DocumentPollingCoordinator {
 	> | null;
 	readonly #visibility = () => {
 		if (this.#document?.visibilityState === 'visible') {
-			for (const documentId of this.#polls.keys()) {
-				void this.#poll(documentId);
+			for (const [documentId, poll] of this.#polls) {
+				if (poll.visible) void this.#poll(documentId);
+				else if (!poll.inFlight) this.#schedule(documentId);
 			}
 		} else {
 			this.#clearTimers();

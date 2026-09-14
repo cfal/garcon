@@ -25,6 +25,27 @@ function documentTarget() {
 }
 
 describe('DocumentPollingCoordinator', () => {
+	it('stages hidden-view polling instead of bursting every document on page focus', async () => {
+		vi.useFakeTimers();
+		const target = documentTarget();
+		target.setVisibility('hidden');
+		const poll = vi.fn(async (_id: string) => undefined);
+		const coordinator = new DocumentPollingCoordinator({
+			poll,
+			documentTarget: target,
+			isVisible: (id) => id === 'shown',
+		});
+		try {
+			coordinator.add('shown');
+			coordinator.add('background');
+			target.setVisibility('visible');
+			expect(poll.mock.calls).toEqual([['shown']]);
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(poll.mock.calls.filter(([id]) => id === 'background')).toHaveLength(1);
+		} finally {
+			coordinator.destroy();
+		}
+	});
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
