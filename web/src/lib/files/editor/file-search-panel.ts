@@ -28,6 +28,7 @@ import {
 import './file-search-panel.css';
 
 const MATCH_COUNT_LIMIT = 1000;
+const MATCH_COUNT_DOCUMENT_LIMIT = 1_000_000;
 const COUNT_DEBOUNCE_MS = 100;
 
 interface SearchScope {
@@ -84,6 +85,7 @@ class FileSearchPanel implements Panel {
 	readonly #disposeIcons: (() => void)[] = [];
 	#matches: SearchScope[] = [];
 	#truncated = false;
+	#countUnavailable = false;
 	#countTimer: ReturnType<typeof setTimeout> | undefined;
 	#query = new SearchQuery({ search: '' });
 
@@ -235,15 +237,18 @@ class FileSearchPanel implements Panel {
 
 	#scheduleCount(): void {
 		clearTimeout(this.#countTimer);
+		this.#countTimer = undefined;
 		this.#matches = [];
 		this.#truncated = false;
+		this.#countUnavailable = this.view.state.doc.length > MATCH_COUNT_DOCUMENT_LIMIT;
 		this.#result.textContent = '';
 		this.#searchField.setAttribute(
 			'aria-invalid',
 			String(Boolean(this.#query.search && !this.#query.valid)),
 		);
-		if (!this.#query.valid) {
-			this.#countTimer = undefined;
+		// Clipping regex cursors changes boundary semantics and cannot bound a no-match scan.
+		// Large documents retain full search commands without automatic whole-document counting.
+		if (!this.#query.valid || this.#countUnavailable) {
 			this.#announce();
 			return;
 		}
@@ -276,6 +281,8 @@ class FileSearchPanel implements Panel {
 			message = '';
 		} else if (!this.#query.valid) {
 			message = m.editor_search_invalid_regex();
+		} else if (this.#countUnavailable) {
+			message = m.editor_search_count_unavailable();
 		} else if (count === 0) {
 			message = m.editor_search_no_results();
 		} else if (index >= 0) {
@@ -284,12 +291,15 @@ class FileSearchPanel implements Panel {
 			message = m.editor_search_match_count({ count, total });
 		}
 		if (this.#result.textContent !== message) this.#result.textContent = message;
-		this.#result.dataset.empty = String(Boolean(this.#query.search && count === 0));
+		this.#result.dataset.empty = String(
+			Boolean(this.#query.search && !this.#countUnavailable && count === 0),
+		);
 	}
 
 	#updateControls(): void {
 		const noMatches =
-			!this.#query.valid || (this.#countTimer === undefined && this.#matches.length === 0);
+			!this.#query.valid ||
+			(!this.#countUnavailable && this.#countTimer === undefined && this.#matches.length === 0);
 		for (const button of this.#navigationButtons) button.disabled = noMatches;
 		this.#replaceField.disabled = this.view.state.readOnly;
 		for (const control of this.#replaceButtons)

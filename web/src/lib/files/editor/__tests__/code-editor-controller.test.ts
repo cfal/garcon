@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { history } from '@codemirror/commands';
+import { SearchQuery } from '@codemirror/search';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
@@ -286,6 +287,47 @@ describe('CodeEditorController', () => {
 		);
 		expect(host.querySelector('.cm-file-search')).toBeNull();
 	});
+
+	it.each([false, true])(
+		'skips background counting for large documents without restricting search (regex: %s)',
+		async (regexp) => {
+			const { session, controller } = createController();
+			session.content = `${'x'.repeat(1_000_001)}\nword`;
+			const host = parent();
+			controller.attach(host);
+			const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+			view.dispatch({ selection: { anchor: 0 } });
+			controller.run('replace');
+			const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+			const countCursor = vi.spyOn(SearchQuery.prototype, 'getCursor');
+			try {
+				search.value = regexp ? 'word$' : 'word';
+				search.dispatchEvent(new Event('input'));
+				if (regexp) host.querySelector<HTMLInputElement>('input[name="regexp"]')!.click();
+				const result = host.querySelector<HTMLElement>('[role="status"]')!;
+				expect(result.textContent).toBe('Match count unavailable');
+				expect(result.dataset.empty).toBe('false');
+				expect(countCursor).not.toHaveBeenCalled();
+				const next = host.querySelector<HTMLButtonElement>('[aria-label="Next match"]')!;
+				expect(next.disabled).toBe(false);
+				next.click();
+				expect(controller.selectedText()).toBe('word');
+				const replace = host.querySelector<HTMLInputElement>('input[name="replace"]')!;
+				replace.value = 'tail';
+				replace.dispatchEvent(new Event('input'));
+				const replaceAll = host.querySelector<HTMLButtonElement>('[aria-label="Replace all"]')!;
+				expect(replaceAll.disabled).toBe(false);
+				replaceAll.click();
+				expect(controller.currentContent().endsWith('\ntail')).toBe(true);
+				session.content = 'word word';
+				view.dispatch({ selection: { anchor: 0 } });
+				await vi.waitFor(() => expect(result.textContent).toBe(regexp ? '1 match' : '2 matches'));
+				expect(countCursor).toHaveBeenCalled();
+			} finally {
+				countCursor.mockRestore();
+			}
+		},
+	);
 	it.each([
 		['ab(?=c)', '1 of 1', false, 'Xc'],
 		['ab$', 'No results', true, 'abc'],
