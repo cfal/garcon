@@ -24,6 +24,7 @@
 		remoteSettings: RemoteSettingsStore;
 		onLocalSet?: (key: string, value: unknown) => void;
 		onLocalToggle?: (key: string) => void;
+		onClearRecovery?: FileSessionRegistry['clearRecovery'];
 	}
 
 	let {
@@ -31,6 +32,7 @@
 		remoteSettings,
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
+		onClearRecovery = async () => true,
 	}: SettingsTestHostProps = $props();
 	class SettingsLocalStore extends LocalSettingsStore {
 		#notifySet: (key: string, value: unknown) => void;
@@ -189,7 +191,9 @@
 	});
 
 	setAppShell(untrack(() => appShell));
-	const files: Pick<FileSessionRegistry, 'clearRecovery'> = { clearRecovery: async () => true };
+	const files: Pick<FileSessionRegistry, 'clearRecovery'> = {
+		clearRecovery: () => onClearRecovery(),
+	};
 	setFileSessions(files as FileSessionRegistry);
 	setRemoteSettings(untrack(() => remoteSettings));
 	setLocalSettings(localSettings);

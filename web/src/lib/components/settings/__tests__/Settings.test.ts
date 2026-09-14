@@ -36,6 +36,33 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('reports recovery cleanup failures and allows retry without concurrent cleanup', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('local');
+		const pending = Promise.withResolvers<boolean>();
+		const onClearRecovery = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(true);
+		const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+			onClearRecovery,
+		});
+		try {
+			const button = await screen.findByRole('button', { name: 'Clear recovery data' });
+			await fireEvent.click(button);
+			expect(button.hasAttribute('disabled')).toBe(true);
+			pending.reject(new Error('storage unavailable'));
+			await screen.findByText('Could not clear file recovery data. Try again.');
+			expect(button.hasAttribute('disabled')).toBe(false);
+			await fireEvent.click(button);
+			await screen.findByText('File recovery data cleared.');
+			expect(onClearRecovery).toHaveBeenCalledTimes(2);
+		} finally {
+			rendered.unmount();
+			report.mockRestore();
+		}
+	});
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => {}));

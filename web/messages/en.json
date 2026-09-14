@@ -2535,6 +2535,7 @@
 	],
 	"editor_status_modified": "Modified",
 	"settings_file_recovery_cleared": "File recovery data cleared.",
+	"settings_file_recovery_clear_failed": "Could not clear file recovery data. Try again.",
 	"settings_file_recovery_clear_blocked": "Close or save dirty files before clearing recovery data.",
 	"settings_file_recovery_description": "Remove browser-stored file drafts, restored views, recents, and navigation history.",
 	"file_recovery_storage_limit": "File recovery storage limit reached",

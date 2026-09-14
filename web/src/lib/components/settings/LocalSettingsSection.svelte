@@ -32,6 +32,7 @@
 	const appShell = getAppShell();
 	const files = getFileSessions();
 	let recoveryCleanupStatus = $state<string | null>(null);
+	let clearingRecovery = $state(false);
 	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
 		{ value: 'none', label: m.settings_chat_max_width_none },
 		{ value: 'large', label: m.settings_chat_max_width_large },
@@ -95,9 +96,19 @@
 	});
 
 	async function clearFileRecovery(): Promise<void> {
-		recoveryCleanupStatus = (await files.clearRecovery())
-			? m.settings_file_recovery_cleared()
-			: m.settings_file_recovery_clear_blocked();
+		if (clearingRecovery) return;
+		clearingRecovery = true;
+		recoveryCleanupStatus = null;
+		try {
+			recoveryCleanupStatus = (await files.clearRecovery())
+				? m.settings_file_recovery_cleared()
+				: m.settings_file_recovery_clear_blocked();
+		} catch (error) {
+			console.error('Failed to clear file recovery data', error);
+			recoveryCleanupStatus = m.settings_file_recovery_clear_failed();
+		} finally {
+			clearingRecovery = false;
+		}
 	}
 
 	function commitSnippetTrigger(): void {
@@ -314,7 +325,12 @@
 						</p>
 					{/if}
 				</div>
-				<Button variant="outline" size="sm" onclick={() => void clearFileRecovery()}>
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={clearingRecovery}
+					onclick={() => void clearFileRecovery()}
+				>
 					{m.settings_file_recovery_clear()}
 				</Button>
 			</div>
