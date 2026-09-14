@@ -29,14 +29,15 @@ function storedDraftContents(page: Page): Promise<string[]> {
 }
 
 test.each([
-  { width: 1440, choice: 'Resume draft', deleted: false },
-  { width: 390, choice: 'Discard', deleted: false },
-  { width: 390, choice: 'Export', deleted: true },
+  { width: 1440, choice: 'Resume draft', deleted: false, lateDiscovery: false },
+  { width: 1440, choice: 'Resume draft', deleted: false, lateDiscovery: true },
+  { width: 390, choice: 'Discard', deleted: false, lateDiscovery: false },
+  { width: 390, choice: 'Export', deleted: true, lateDiscovery: false },
 ] as const)(
-  'offers a backup list without restoring file views ($width px, $choice)',
-  async ({ width, choice, deleted }) => {
+  'offers a backup list without restoring file views ($width px, $choice, late discovery: $lateDiscovery)',
+  async ({ width, choice, deleted, lateDiscovery }) => {
     await withChromiumFixture(
-      `file-draft-list-${width}-${choice}`,
+      `file-draft-list-${width}-${choice}-${lateDiscovery}`,
       async ({ page, integration, browserErrors }, markPhase) => {
         const cdp = await page.context().newCDPSession(page);
         await cdp.send('Network.enable');
@@ -69,6 +70,32 @@ test.each([
 
         markPhase('reloading without restoring file tabs');
         if (deleted) await unlink(path);
+        if (lateDiscovery) {
+          await page.addInitScript(() => {
+            const getAll = IDBObjectStore.prototype.getAll;
+            let failDiscovery = true;
+            IDBObjectStore.prototype.getAll = function (...args) {
+              if (this.name === 'drafts' && failDiscovery) {
+                failDiscovery = false;
+                throw new Error('Storage unavailable');
+              }
+              return getAll.apply(this, args);
+            };
+          });
+        }
+        if (choice === 'Resume draft') {
+          let failNextRead = true;
+          await page.route('**/api/v1/files/text?**', async (route) => {
+            if (failNextRead && route.request().method() === 'GET') {
+              failNextRead = false;
+              await route.fulfill({
+                status: 503,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'Read unavailable' }),
+              });
+            } else await route.continue();
+          });
+        }
         await page.setViewportSize({ width, height: 1000 });
         await page.reload();
         if (width < 640) {
@@ -77,9 +104,22 @@ test.each([
             .getByRole('button', { name: 'Files', exact: true })
             .click();
         }
+        if (lateDiscovery) {
+          await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+          await surface.getByRole('button', { name: 'Retry', exact: true }).waitFor();
+          await page.getByRole('tab', { name: 'Files', exact: true }).click();
+          await page
+            .getByRole('status')
+            .filter({ hasText: 'Local recovery unavailable' })
+            .getByRole('button', { name: 'Retry', exact: true })
+            .click();
+        }
         const recovered = page.getByRole('region', { name: 'Recovered files' });
         await recovered.waitFor({ state: 'visible' });
         await browserExpect(surface).toHaveCount(0);
+        await browserExpect(page.getByRole('tab', { name: filename, exact: true })).toHaveCount(
+          lateDiscovery ? 1 : 0,
+        );
         const downloadPromise = page.waitForEvent('download');
         await recovered
           .getByRole('button', {
@@ -105,10 +145,16 @@ test.each([
           exact: true,
         });
         await prompt.waitFor();
-        await browserExpect(surface).toHaveCount(0);
+        await browserExpect(surface).toHaveCount(lateDiscovery ? 1 : 0);
         await prompt.getByRole('button', { name: 'Cancel', exact: true }).focus();
         await page.keyboard.press('Escape');
         await browserExpect(prompt).toHaveCount(0);
+        if (lateDiscovery) {
+          await browserExpect(
+            page.getByRole('tab', { name: filename, exact: true }),
+          ).toHaveAttribute('aria-selected', 'true');
+          await page.getByRole('tab', { name: 'Files', exact: true }).click();
+        }
         await browserExpect(recovered).toBeVisible();
         await recovered.getByRole('button', { name: filename, exact: true }).click();
         await prompt.waitFor();
@@ -119,22 +165,9 @@ test.each([
         await page.screenshot({
           path: join(integration.dirs.root, `draft-choice-${width}.png`),
         });
-        if (choice === 'Resume draft') {
-          let failNextRead = true;
-          await page.route('**/api/v1/files/text?**', async (route) => {
-            if (failNextRead && route.request().method() === 'GET') {
-              failNextRead = false;
-              await route.fulfill({
-                status: 503,
-                contentType: 'application/json',
-                body: JSON.stringify({ error: 'Read unavailable' }),
-              });
-            } else await route.continue();
-          });
-        }
         await prompt.getByRole('button', { name: choice, exact: true }).click();
         await browserExpect(prompt).toHaveCount(0);
-        if (choice === 'Resume draft') {
+        if (choice === 'Resume draft' && !lateDiscovery) {
           await surface.getByRole('button', { name: 'Retry', exact: true }).click();
         }
         await browserExpect(source).toHaveText(choice === 'Resume draft' ? content : 'initial');
