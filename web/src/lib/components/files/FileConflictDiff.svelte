@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
 	import { EditorState } from '@codemirror/state';
 	import { EditorView, lineNumbers } from '@codemirror/view';
@@ -53,5 +54,5 @@
 <div
 	bind:this={host}
 	class="h-[min(50dvh,36rem)] min-h-64 overflow-auto rounded-md border border-border bg-card [&_.cm-editor]:min-w-0 [&_.cm-mergeView]:h-full [&_.cm-scroller]:overflow-auto"
-	aria-label="File conflict comparison"
+	aria-label={m.file_conflict_comparison()}
 ></div>

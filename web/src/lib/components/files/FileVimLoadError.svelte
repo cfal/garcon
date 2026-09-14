@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import { Button } from '$lib/components/ui/button';
 	import { getFileSessions } from '$lib/context';
@@ -11,18 +12,18 @@
 	class="flex shrink-0 items-center gap-2 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
 >
 	<span class="min-w-0 flex-1">
-		Vim mode could not load.
+		{m.editor_vim_load_failed()}
 		{#if files.hasUnloadProtectedSessions}
-			Save unsaved files and wait for pending Saves before reloading.
+			{m.editor_vim_reload_blocked()}
 		{:else}
-			Reload to try again.
+			{m.editor_vim_reload_hint()}
 		{/if}
 	</span>
 	<Button
 		variant="ghost"
 		size="icon-sm"
-		aria-label="Reload application"
-		title="Reload application"
+		aria-label={m.common_reload_application()}
+		title={m.common_reload_application()}
 		disabled={files.hasUnloadProtectedSessions}
 		onclick={() => files.reloadApplication()}
 	>

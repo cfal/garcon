@@ -1,8 +1,82 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { EditorView } from '@codemirror/view';
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
+import * as m from '$lib/paraglide/messages.js';
+import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
+// Snapshot assertions do not depend on cold renderer transformation timing.
+import '../FileConflictDiff.svelte';
 import FileConflictComparison from '../FileConflictComparison.svelte';
 
+vi.mock('$lib/utils/lazy-renderer.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/utils/lazy-renderer.js')>();
+	return { ...actual, lazyRenderer: vi.fn(actual.lazyRenderer) };
+});
+
 describe('FileConflictComparison', () => {
+	it('shows a localized failure when the comparison renderer cannot load', async () => {
+		const failure = new Error('Failed to fetch dynamically imported module: /assets/diff.js');
+		vi.mocked(lazyRenderer).mockReturnValueOnce(() => Promise.reject(failure));
+		const onCancel = vi.fn();
+		render(FileConflictComparison, {
+			baseContent: 'base',
+			localContent: 'local',
+			diskContent: 'disk',
+			lineSeparator: '\n',
+			onCancel,
+			onAcceptDisk: vi.fn(),
+			onSaveChecked: vi.fn(),
+			onOverwrite: vi.fn(),
+		});
+
+		expect(await screen.findByText(m.file_conflict_failed())).toBeTruthy();
+		expect(screen.queryByText(failure.message)).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.common_cancel() }));
+		expect(onCancel).toHaveBeenCalledOnce();
+	});
+
+	it.each(['local', 'base'] as const)(
+		'resets the resolution editor when only the %s snapshot changes',
+		async (changedSnapshot) => {
+			const onSaveChecked = vi.fn();
+			const props = {
+				baseContent: 'base',
+				localContent: 'local',
+				diskContent: 'disk',
+				lineSeparator: '\n' as const,
+				onCancel: vi.fn(),
+				onAcceptDisk: vi.fn(),
+				onSaveChecked,
+				onOverwrite: vi.fn(),
+			};
+			const rendered = render(FileConflictComparison, props);
+			const resolutionEditor = () => {
+				const element = rendered.container.querySelectorAll<HTMLElement>('.cm-editor')[1];
+				const editor = element && EditorView.findFromDOM(element);
+				if (!editor) throw new Error('Expected resolution editor');
+				return editor;
+			};
+			await vi.waitFor(() => expect(resolutionEditor().state.doc.toString()).toBe('local'));
+			const original = resolutionEditor();
+			original.dispatch({ changes: { from: 0, to: 5, insert: 'previous edit' } });
+			await tick();
+			expect(resolutionEditor()).toBe(original);
+			await fireEvent.click(screen.getByRole('button', { name: 'Save against displayed disk' }));
+			expect(onSaveChecked).toHaveBeenLastCalledWith('previous edit');
+
+			const next = { ...props, [`${changedSnapshot}Content`]: `next ${changedSnapshot}` };
+			await rendered.rerender(next);
+			await vi.waitFor(() =>
+				expect(resolutionEditor().state.doc.toString()).toBe(next.localContent),
+			);
+			expect(screen.getByRole('tab', { name: 'Disk' }).getAttribute('aria-selected')).toBe('true');
+			const current = resolutionEditor();
+			current.dispatch({ changes: { from: current.state.doc.length, insert: ' resolved' } });
+			await fireEvent.click(screen.getByRole('button', { name: 'Save against displayed disk' }));
+			expect(onSaveChecked).toHaveBeenLastCalledWith(`${next.localContent} resolved`);
+		},
+	);
+
 	it('exposes complete tab semantics and explicit resolution actions', async () => {
 		const onSaveChecked = vi.fn();
 		const onOverwrite = vi.fn();

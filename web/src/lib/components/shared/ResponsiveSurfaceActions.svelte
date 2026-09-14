@@ -34,7 +34,6 @@
 		menuLeadingContent,
 		menuIcon: MenuIcon = Ellipsis,
 		menuButtonClass,
-		fixed,
 		class: className,
 	}: {
 		actions: readonly ResponsiveSurfaceAction[];
@@ -43,13 +42,11 @@
 		menuLeadingContent?: Snippet;
 		menuIcon?: Component<{ class?: string }>;
 		menuButtonClass?: string;
-		fixed?: Snippet;
 		class?: string;
 	} = $props();
 
 	const gap = 4;
 	let root = $state<HTMLDivElement | null>(null);
-	let fixedControl = $state<HTMLDivElement | null>(null);
 	let measurementRail = $state<HTMLDivElement | null>(null);
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let visibleActionIds = $state.raw<ReadonlySet<string> | null>(null);
@@ -100,11 +97,9 @@
 			rail
 				.querySelector<HTMLElement>('[data-surface-action-overflow-measure]')
 				?.getBoundingClientRect().width ?? 0;
-		const fixedWidth = fixedControl?.getBoundingClientRect().width ?? 0;
-		const fixedGap = fixedWidth > 0 && (actions.length > 0 || hasPersistentMenuContent) ? gap : 0;
 		visibleActionIds = selectVisibleSurfaceActionIds({
 			actions: actions.map(({ id, priority = 100 }) => ({ id, priority })),
-			availableWidth: Math.max(0, actionRoot.clientWidth - fixedWidth - fixedGap),
+			availableWidth: actionRoot.clientWidth,
 			widths,
 			menuButtonWidth,
 			menuVisibility: hasPersistentMenuContent ? 'persistent' : 'overflow',
@@ -119,7 +114,6 @@
 		const observer = new ResizeObserver(recompute);
 		observer.observe(actionRoot);
 		observer.observe(rail);
-		if (fixedControl) observer.observe(fixedControl);
 		for (const element of rail.querySelectorAll<HTMLElement>('[data-surface-action-measure]')) {
 			observer.observe(element);
 		}
@@ -178,11 +172,6 @@
 	)}
 	data-responsive-surface-actions
 >
-	{#if fixed}
-		<div bind:this={fixedControl} class="flex min-w-0 shrink items-center gap-1">
-			{@render fixed()}
-		</div>
-	{/if}
 	{#each visibleActions as action (action.renderKey ?? action.id)}
 		{@render actionButton(action)}
 	{/each}

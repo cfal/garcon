@@ -69,7 +69,8 @@
 		<DropdownMenuCheckboxItem
 			checked={localSettings.codeEditorVimMode}
 			onCheckedChange={(value) => localSettings.set('codeEditorVimMode', value)}
-			closeOnSelect={false}>Vim mode</DropdownMenuCheckboxItem
+			closeOnSelect={false}
+			>{m.settings_appearance_settings_code_editor_vim_mode_label()}</DropdownMenuCheckboxItem
 		>
 	</DropdownMenuContent>
 </DropdownMenu>

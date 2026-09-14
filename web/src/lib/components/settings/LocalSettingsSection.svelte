@@ -96,8 +96,8 @@
 
 	async function clearFileRecovery(): Promise<void> {
 		recoveryCleanupStatus = (await files.clearRecovery())
-			? 'File recovery data cleared.'
-			: 'Close or save dirty files before clearing recovery data.';
+			? m.settings_file_recovery_cleared()
+			: m.settings_file_recovery_clear_blocked();
 	}
 
 	function commitSnippetTrigger(): void {
@@ -304,9 +304,9 @@
 			</div>
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="min-w-0">
-					<div class="text-sm font-medium text-foreground">File recovery data</div>
+					<div class="text-sm font-medium text-foreground">{m.settings_file_recovery_title()}</div>
 					<p class="mt-0.5 text-xs text-muted-foreground">
-						Remove browser-stored file drafts, restored views, recents, and navigation history.
+						{m.settings_file_recovery_description()}
 					</p>
 					{#if recoveryCleanupStatus}
 						<p class="mt-0.5 text-xs text-muted-foreground" role="status">
@@ -315,7 +315,7 @@
 					{/if}
 				</div>
 				<Button variant="outline" size="sm" onclick={() => void clearFileRecovery()}>
-					Clear recovery data
+					{m.settings_file_recovery_clear()}
 				</Button>
 			</div>
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">

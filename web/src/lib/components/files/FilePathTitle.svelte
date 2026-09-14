@@ -4,10 +4,10 @@
 
 	let { path, fileName, dirty }: { path: string; fileName: string; dirty: boolean } = $props();
 	let availableSize = $state<DOMRectReadOnly>();
-	let fullSize = $state<DOMRectReadOnly>();
+	let requiredSize = $state<DOMRectReadOnly>();
 	let controlsSize = $state<DOMRectReadOnly>();
 	const title = $derived(
-		fullSize && availableSize && fullSize.width <= availableSize.width ? path : fileName,
+		requiredSize && availableSize && requiredSize.width <= availableSize.width ? path : fileName,
 	);
 </script>
 
@@ -19,7 +19,7 @@
 	<div class="pointer-events-none invisible absolute inset-0 overflow-hidden" aria-hidden="true">
 		<div
 			class="flex w-max items-center gap-1.5 whitespace-nowrap"
-			bind:contentRect={fullSize}
+			bind:contentRect={requiredSize}
 			data-file-path-title-measure
 		>
 			<span>{path}</span>
