@@ -30,7 +30,9 @@
 	<div class="flex shrink-0 items-center gap-1.5" bind:contentRect={controlsSize}>
 		<CopyFilePathButton {path} />
 		{#if dirty}
-			<span class="text-status-warning-foreground" aria-label={m.file_session_unsaved()}>*</span>
+			<span class="text-status-warning-foreground" role="img" aria-label={m.file_session_unsaved()}
+				>*</span
+			>
 		{/if}
 	</div>
 </div>

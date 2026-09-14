@@ -190,7 +190,7 @@
 	open={Boolean(files.overwriteRequest)}
 	requestClose={() => files.resolveOverwrite('cancel')}
 >
-	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
+	<Dialog.Content class="max-w-[calc(100vw-2rem)] sm:max-w-5xl" showCloseButton={false}>
 		<Dialog.Header>
 			<Dialog.Title>{m.file_session_overwrite_title()}</Dialog.Title>
 			<Dialog.Description>

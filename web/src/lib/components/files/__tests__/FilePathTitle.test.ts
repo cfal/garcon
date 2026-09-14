@@ -64,7 +64,7 @@ describe('FilePathTitle', () => {
 		await tick();
 		expect((measure.lastElementChild as HTMLElement).style.width).toBe('41.421875px');
 		expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('file.ts');
-		expect(screen.getByLabelText('Unsaved')).toBeTruthy();
+		expect(screen.getByRole('img', { name: 'Unsaved' })).toBeTruthy();
 		expect(root.classList).toContain('text-xs');
 		expect(container.querySelector('p')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy file path' }));
