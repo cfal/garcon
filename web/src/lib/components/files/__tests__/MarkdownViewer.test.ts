@@ -71,7 +71,12 @@ describe('MarkdownViewer', () => {
 		const io = new FileDocumentIoCoordinator({
 			getSession: () => session,
 			getDocument: () => session.document,
-			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+			getEditorSettings: () => ({
+				wordWrap: false,
+				showLineNumbers: true,
+				fontSize: 12,
+				editorThemeId: 'standard-light',
+			}),
 			isDocumentVisible: () => true,
 		});
 		try {

@@ -36,11 +36,11 @@
 		if (!isOpen) return [];
 		return [
 			...commandRegistry.available(commandContext),
-			...commandRegistry.knownFileLocations.map((location) => ({
+			...commandRegistry.knownFileLocations.map<WorkbenchCommand>((location) => ({
 				id: `${knownFilePrefix}${location.key}`,
 				label: m.command_open_known_file_named({ path: location.displayPath }),
 				description: m.command_known_file_description(),
-				category: 'File' as const,
+				category: 'File',
 				isEnabled: () => true,
 				run: (context) => commandRegistry.openLocation(location, context),
 			})),
