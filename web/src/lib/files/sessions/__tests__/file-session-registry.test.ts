@@ -112,6 +112,7 @@ function createHarness(
 		isMobile?: boolean;
 		placements?: Partial<Record<FileRendererMode, DesktopPlacement>>;
 		onOpenError?: (request: FileOpenRequest, error: unknown) => void;
+		onRecoveryError?: import('$lib/files/sessions/file-session-registry.svelte.js').FileSessionsDeps['onRecoveryError'];
 		onPublish?: (registry: FileSessionRegistry) => void | Promise<void>;
 		loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
 		reloadApplication?: () => void;
@@ -191,6 +192,7 @@ function createHarness(
 		reloadApplication: options.reloadApplication,
 		saveSoftTimeoutMs: options.saveSoftTimeoutMs,
 		onOpenError,
+		onRecoveryError: options.onRecoveryError,
 		isDocumentVisible: options.isDocumentVisible,
 	});
 	const userNamespace = options.userNamespace === undefined ? 'test-user' : options.userNamespace;
@@ -210,6 +212,60 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
+	it('checkpoints edits made before authenticated recovery initialization', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository, userNamespace: null });
+		const opened = (await harness.registry.open(request('early.txt')))!;
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'early edit';
+		await harness.registry.initializeRecovery('test-user', 'test-session');
+		await harness.registry.flushRecovery();
+		expect(
+			(await repository.getDrafts('test-user', 'test-deployment', 'test-session'))[0]?.content,
+		).toBe('early edit');
+		await harness.registry.destroyAll();
+	});
+
+	it('reports a failed teardown checkpoint outside the disposed file surface', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const onRecoveryError = vi.fn();
+		const harness = createHarness({ draftRepository: repository, onRecoveryError });
+		const opened = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'unsaved edit';
+		const error = new Error('quota exceeded');
+		vi.spyOn(repository, 'putDraft').mockRejectedValue(error);
+		await harness.registry.destroyAll();
+		expect(onRecoveryError).toHaveBeenCalledWith(opened.document, error);
+	});
+
+	it('provides an actionable message for an empty recovery failure', async () => {
+		const repository = createMemoryFileDraftRepository();
+		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error(''));
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		const opened = (await harness.registry.open(request('file.txt')))!;
+		expect(opened.document.recoveryGuard).toBe(true);
+		expect(opened.document.recoveryDiscoveryError).toBeTruthy();
+		await harness.registry.retryRecoveryDiscovery();
+		expect(opened.document.recoveryGuard).toBe(false);
+		await harness.registry.destroyAll();
+	});
+
+	it('refuses recovery cleanup while clean alternate copies need a decision', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const opened = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.document.recoveredCopies = [
+			{ id: 'clean-copy', content: 'initial', savedAt: 1, hasUnknownSubmission: false },
+		];
+		const clear = vi.spyOn(repository, 'clearNamespaceIfUnprotected');
+		await expect(harness.registry.clearRecovery()).resolves.toBe(false);
+		expect(clear).not.toHaveBeenCalled();
+		expect(opened.document.recoveredCopies).toHaveLength(1);
+		await harness.registry.destroyAll();
+	});
 	it('does not offer a previous disk snapshot after a comparison read fails', async () => {
 		const harness = createHarness();
 		const session = (await harness.registry.open(request('file.txt')))!;

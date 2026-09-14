@@ -28,6 +28,7 @@ interface FileViewRecoveryOptions {
 	getSession(sessionId: string): FileViewSession | null;
 	identityKey(root: string, relativePath: string): string;
 	findDocument(identityKey: string): FileDocumentState | null;
+	getDocuments(): readonly FileDocumentState[];
 	publishDocument(document: FileDocumentState, generation: number): void;
 	adoptDocument(document: FileDocumentState, generation: number): void;
 	persistDocument(document: FileDocumentState): Promise<void>;
@@ -155,9 +156,16 @@ export class FileViewRecovery {
 			// Failed passes retain aliases because restored view records already contain their new host.
 			this.#restoredPlacements.clear();
 			this.options.setDiscoveryGuard(false);
+			for (const document of this.options.getDocuments()) {
+				if (!document.dirty && !document.pendingSubmission) continue;
+				try {
+					await this.options.persistDocument(document);
+				} catch (error) {
+					document.recoveryError = recoveryFailureMessage(error);
+				}
+			}
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			this.options.setDiscoveryGuard(true, message);
+			this.options.setDiscoveryGuard(true, recoveryFailureMessage(error));
 		}
 	}
 
@@ -249,16 +257,27 @@ export class FileViewRecovery {
 		};
 	}
 
-	async clear(documents: readonly FileDocumentState[]): Promise<boolean> {
+	clear(documents: readonly FileDocumentState[]): Promise<boolean> {
+		return this.#operations.enqueue(() => this.#clear(documents));
+	}
+
+	async #clear(documents: readonly FileDocumentState[]): Promise<boolean> {
+		if (documents.some((document) => document.dirty || document.mutationGuarded)) return false;
 		this.#setMutationReservation(documents, 1);
 		try {
-			if (documents.some((document) => document.dirty || document.saveOutcomeUnknown)) return false;
 			const cleared = await this.options.repository.clearNamespaceIfUnprotected(
 				this.options.userNamespace,
 				this.options.deploymentId,
 				this.options.browserSessionId,
 			);
-			if (cleared) this.options.navigation.clearLocalState();
+			if (cleared) {
+				this.options.navigation.clearLocalState();
+				this.#recoveredCopies.clear();
+				for (const document of documents) {
+					document.recoveredCopies = [];
+					document.recovered = false;
+				}
+			}
 			return cleared;
 		} finally {
 			this.#setMutationReservation(documents, -1);
@@ -507,4 +526,10 @@ export class FileViewRecovery {
 			!this.#restoringViewIds.has(session.id)
 		);
 	}
+}
+
+function recoveryFailureMessage(error: unknown): string {
+	return (
+		(error instanceof Error ? error.message : String(error)).trim() || m.file_recovery_incomplete()
+	);
 }

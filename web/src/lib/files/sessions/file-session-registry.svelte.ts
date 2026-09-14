@@ -134,6 +134,7 @@ export interface FileSessionsDeps {
 	getDefaultPlacement(mode: FileRendererMode, origin: PresentationHostId): DesktopPlacement;
 	getPlacement(): FilePlacementPort;
 	onOpenError?(request: FileOpenRequest, error: unknown): void;
+	onRecoveryError?(document: FileDocumentState, error: Error): void;
 	resolveFileIdentity?: typeof resolveFileIdentity;
 	getFileRevision?: typeof getFileRevision;
 	readText?: typeof readText;
@@ -258,6 +259,7 @@ export class FileSessionRegistry {
 			deploymentId: this.#deploymentId,
 			userNamespace,
 			browserSessionId,
+			onError: this.deps.onRecoveryError,
 		});
 		this.navigation = new FileNavigationStore(this.#draftRepository, {
 			deploymentId: this.#deploymentId,
@@ -279,6 +281,7 @@ export class FileSessionRegistry {
 				const documentId = this.#documentIdByIdentity.get(key);
 				return documentId ? (this.documents[documentId] ?? null) : null;
 			},
+			getDocuments: () => Object.values(this.documents),
 			publishDocument: (document, generation) => {
 				this.#publishDocument(document);
 				this.#drafts?.adopt(document, generation);

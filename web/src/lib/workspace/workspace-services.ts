@@ -429,6 +429,12 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			};
 		},
 		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
+		onRecoveryError: (document, error) => {
+			deps.notifications.error(
+				m.file_recovery_checkpoint_failed({ fileName: document.fileName, detail: error.message }),
+				{ key: `file-recovery:${document.id}`, timeoutMs: null },
+			);
+		},
 		onOpenError: (request, error) => {
 			console.error('Failed to resolve file identity', error);
 			deps.notifications.error(
