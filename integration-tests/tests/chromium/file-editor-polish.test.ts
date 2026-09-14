@@ -10,7 +10,7 @@ describe('File editor controls', () => {
       await page.addInitScript(() => {
         Object.defineProperty(crypto, 'randomUUID', { value: undefined });
       });
-      const filename = 'editor-fixture.txt';
+      const filename = 'editor "fixture".md';
       const path = join(integration.dirs.project, filename);
       await writeFile(path, 'one one\ntwo\n', 'utf8');
       const chatId = integration.newChatId();
@@ -26,6 +26,7 @@ describe('File editor controls', () => {
       markPhase('opening a file from the explorer');
       await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
       const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
+      await surface.getByRole('button', { name: 'Edit', exact: true }).click();
       const source = surface.locator('.cm-content');
       await source.waitFor({ state: 'visible' });
       expect(await surface.getByRole('button', { name: 'Close file', exact: true }).count()).toBe(
@@ -36,6 +37,42 @@ describe('File editor controls', () => {
       );
       const title = surface.getByRole('heading', { level: 2 });
       expect(await title.getAttribute('title')).toBe(path);
+
+      markPhase('opening a known file with a valid palette focus reference');
+      await source.press('Control+p');
+      const palette = page.getByRole('dialog', { name: 'Command palette' });
+      const query = palette.getByRole('combobox');
+      await query.fill(filename);
+      const knownFile = palette.getByRole('option', { name: `Open ${filename} Known file File` });
+      await knownFile.waitFor({ state: 'visible' });
+      const optionId = await knownFile.getAttribute('id');
+      expect(optionId).not.toBeNull();
+      expect(optionId!).not.toMatch(/\s/);
+      expect(await query.getAttribute('aria-activedescendant')).toBe(optionId);
+      await query.press('Enter');
+      await palette.waitFor({ state: 'detached' });
+      expect(await source.innerText()).toContain('one one');
+
+      markPhase('leaving disabled editor shortcuts available in Markdown preview');
+      await surface.getByRole('button', { name: 'View actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'View', exact: true }).click();
+      await source.waitFor({ state: 'detached' });
+      for (const key of ['f', '/', '[', ']', 's']) {
+        const prevented = await surface.evaluate((element, key) => {
+          const event = new KeyboardEvent('keydown', {
+            key,
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          });
+          element.dispatchEvent(event);
+          return event.defaultPrevented;
+        }, key);
+        expect(prevented).toBe(key === 's');
+      }
+      await surface.getByRole('button', { name: 'Edit', exact: true }).click();
+      await source.waitFor({ state: 'visible' });
+
       markPhase('fitting the file title to the actual toolbar space');
       await page.setViewportSize({ width: 3200, height: 1000 });
       await page.waitForFunction((fullPath) => {

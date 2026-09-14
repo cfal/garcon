@@ -7,7 +7,8 @@ callbacks through its extension options. Garcon's documents own history rather
 than individual CodeMirror views; Vim normal and Ex commands must use the same
 canonical history and checked Save as the workbench. No global Vim mappings or
 commands are overwritten. Keep ESM, CJS, and both declaration files aligned on
-upgrade. Integration coverage lives in `file-vim-mode.test.ts`.
+upgrade. Unit coverage lives in `file-vim-mode.test.ts`; browser integration
+coverage lives in `integration-tests/tests/chromium/file-editor-polish.test.ts`.
 
 Reference: [Vim adapter](https://github.com/replit/codemirror-vim/blob/8640966b6977f84d2197e6adfd521fb737184587/packages/codemirror-vim/src/cm_adapter.ts#L112).
 
