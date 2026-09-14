@@ -9,28 +9,22 @@
 		comparison,
 		local = $bindable(),
 		lineSeparator,
-		readOnly = false,
-		comparisonLabel = m.file_conflict_snapshot_label(),
-		localLabel = m.file_conflict_resolution_label(),
 		onReady,
 	}: {
 		comparison: string;
 		local: string;
 		lineSeparator: '\n' | '\r' | '\r\n';
-		readOnly?: boolean;
-		comparisonLabel?: string;
-		localLabel?: string;
 		onReady?(ready: boolean): void;
 	} = $props();
 	let host = $state<HTMLDivElement | null>(null);
-	let merge: MergeView | null = null;
+	const comparisonLabel = m.file_conflict_snapshot_label();
+	const localLabel = m.file_conflict_resolution_label();
 
 	$effect(() => {
 		const element = host;
 		if (!element) return;
-		merge?.destroy();
 		const initialLocal = untrack(() => local);
-		merge = new MergeView({
+		const merge = new MergeView({
 			a: {
 				doc: comparison,
 				extensions: [
@@ -45,8 +39,8 @@
 				extensions: [
 					lineNumbers(),
 					EditorView.contentAttributes.of({ 'aria-label': localLabel }),
-					EditorState.readOnly.of(readOnly),
-					EditorView.editable.of(!readOnly),
+					EditorState.readOnly.of(false),
+					EditorView.editable.of(true),
 					EditorView.updateListener.of((update) => {
 						if (update.docChanged) {
 							const content = update.state.doc.toString();
@@ -63,8 +57,7 @@
 		untrack(() => onReady?.(true));
 		return () => {
 			onReady?.(false);
-			merge?.destroy();
-			merge = null;
+			merge.destroy();
 		};
 	});
 </script>

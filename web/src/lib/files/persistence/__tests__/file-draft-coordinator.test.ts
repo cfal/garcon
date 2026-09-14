@@ -54,7 +54,7 @@ describe('FileDraftCoordinator', () => {
 		const value = document();
 		await coordinator.settle(value);
 		expect(value.recoveryError).toBeTruthy();
-		expect(value.canDiscard).toBe(true);
+		expect(value.mutationGuarded).toBe(false);
 		coordinator.destroy();
 	});
 

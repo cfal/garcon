@@ -12,10 +12,6 @@ export interface ImageViewState {
 	scrollTop: number;
 }
 
-export function defaultImageViewState(): ImageViewState {
-	return { mode: 'fit', scale: 1, scrollLeft: 0, scrollTop: 0 };
-}
-
 export class FileViewSession {
 	readonly id: string;
 	readonly document: FileDocumentState;
@@ -25,7 +21,7 @@ export class FileViewSession {
 	markdownMode = $state<'rendered' | 'source'>('rendered');
 	requestedLine = $state<number | null>(null);
 	requestedColumn = $state<number | null>(null);
-	image = $state<ImageViewState>(defaultImageViewState());
+	image = $state<ImageViewState>({ mode: 'fit', scale: 1, scrollLeft: 0, scrollTop: 0 });
 	editor = $state.raw<CodeEditorController | null>(null);
 	editorState: EditorState | null = null;
 	editorScrollSnapshot: StateEffect<unknown> | null = null;
@@ -178,10 +174,6 @@ export class FileViewSession {
 		return this.document.readOnly;
 	}
 
-	set readOnly(value: boolean) {
-		this.document.readOnly = value;
-	}
-
 	get imageObjectUrl(): string | null {
 		return this.document.imageObjectUrl;
 	}
@@ -196,14 +188,6 @@ export class FileViewSession {
 
 	set loadedRevision(value) {
 		this.document.loadedRevision = value;
-	}
-
-	get saveController() {
-		return this.document.saveController;
-	}
-
-	set saveController(value) {
-		this.document.saveController = value;
 	}
 
 	get freshnessController() {

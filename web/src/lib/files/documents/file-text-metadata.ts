@@ -5,15 +5,15 @@ export interface FileTextMetadata {
 
 export function fileTextMetadata(content: string): FileTextMetadata {
 	const withoutCrLf = content.replaceAll('\r\n', '');
+	const hasCrLf = content.includes('\r\n');
+	const hasCr = withoutCrLf.includes('\r');
+	const hasLf = withoutCrLf.includes('\n');
 	let lineSeparator: FileTextMetadata['lineSeparator'] = '\n';
-	if (content.includes('\r\n')) {
+	if (hasCrLf) {
 		lineSeparator = '\r\n';
-	} else if (content.includes('\r')) {
+	} else if (hasCr) {
 		lineSeparator = '\r';
 	}
-	const kinds =
-		Number(content.includes('\r\n')) +
-		Number(withoutCrLf.includes('\r')) +
-		Number(withoutCrLf.includes('\n'));
+	const kinds = Number(hasCrLf) + Number(hasCr) + Number(hasLf);
 	return { lineSeparator, mixedLineEndings: kinds > 1 };
 }

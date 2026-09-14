@@ -11,8 +11,15 @@ describe('FileConflictDiff', () => {
 			expect(rendered.container.querySelectorAll('.cm-editor')).toHaveLength(2),
 		);
 		const editors = rendered.container.querySelectorAll<HTMLElement>('.cm-editor');
+		const snapshot = EditorView.findFromDOM(editors[0]!);
 		const resolution = EditorView.findFromDOM(editors[1]!);
-		if (!resolution) throw new Error('Expected resolution editor');
+		if (!snapshot || !resolution) throw new Error('Expected comparison editors');
+		expect(snapshot.state.readOnly).toBe(true);
+		expect(snapshot.contentDOM.contentEditable).toBe('false');
+		expect(snapshot.contentDOM.getAttribute('aria-label')).toBe('Comparison snapshot');
+		expect(resolution.state.readOnly).toBe(false);
+		expect(resolution.contentDOM.contentEditable).toBe('true');
+		expect(resolution.contentDOM.getAttribute('aria-label')).toBe('Resolution copy');
 
 		resolution.dispatch({
 			changes: { from: 0, to: resolution.state.doc.length, insert: 'merged' },

@@ -187,15 +187,7 @@ export class FileDocumentIoCoordinator {
 		confirmDestructive: (sessionId: string) => Promise<boolean>,
 	): Promise<void> {
 		const session = this.options.getSession(sessionId);
-		if (
-			!session ||
-			session.loading ||
-			session.refreshing ||
-			session.saving ||
-			session.mutationGuarded
-		) {
-			return;
-		}
+		if (!session || !this.#canRefresh(session)) return;
 		if (session.dirty && !(await confirmDestructive(sessionId))) return;
 		if (!this.#canRefresh(session)) return;
 		if (!session.loadedRevision) {
@@ -301,8 +293,6 @@ export class FileDocumentIoCoordinator {
 				const loaded = await this.#readLatest(session, controller.signal);
 				if (!this.#isCurrentFreshness(session, controller, generation, loadedRevision)) return;
 				if (session.document.bufferVersion !== bufferVersion || session.dirty) {
-					session.document.diskContent = loaded.kind === 'text' ? loaded.content : null;
-					session.document.diskRevision = loaded.revision;
 					session.isExternallyStale = true;
 					return;
 				}
@@ -332,8 +322,6 @@ export class FileDocumentIoCoordinator {
 		document.conflictController?.abort();
 		const controller = new AbortController();
 		document.conflictController = controller;
-		document.diskContent = null;
-		document.diskRevision = null;
 		document.refreshError = null;
 		const current = () =>
 			this.options.getDocument(document.id) === document &&
@@ -349,8 +337,6 @@ export class FileDocumentIoCoordinator {
 			);
 			if (!current()) return null;
 			document.missing = false;
-			document.diskContent = result.content;
-			document.diskRevision = result.revision;
 			return Object.freeze({ content: result.content, revision: result.revision });
 		} catch (error) {
 			if (current() && !isAbortError(error))
@@ -388,8 +374,6 @@ export class FileDocumentIoCoordinator {
 		session.freshnessError = null;
 		session.saveError = null;
 		session.document.recovered = false;
-		session.document.diskContent = null;
-		session.document.diskRevision = null;
 	}
 
 	invalidateFreshness(session: FileViewSession): void {
@@ -409,17 +393,16 @@ export class FileDocumentIoCoordinator {
 		if (view) await this.checkFreshness(view.id);
 	}
 
-	async #readLatest(session: FileViewSession, signal?: AbortSignal): Promise<LoadedFileContent> {
+	async #readLatest(session: FileViewSession, signal: AbortSignal): Promise<LoadedFileContent> {
 		const params = {
 			projectPath: session.canonicalFileRootPath,
 			filePath: session.relativePath,
 		};
-		const requestOptions = signal ? { signal } : undefined;
 		if (session.contentKind === 'image') {
-			const result = await (this.options.readContent ?? readContent)(params, requestOptions);
+			const result = await (this.options.readContent ?? readContent)(params, { signal });
 			return { kind: 'image', ...result };
 		}
-		const result = await (this.options.readText ?? readText)(params, requestOptions);
+		const result = await (this.options.readText ?? readText)(params, { signal });
 		return { kind: 'text', content: result.content, revision: result.revision };
 	}
 
@@ -450,7 +433,6 @@ export class FileDocumentIoCoordinator {
 			this.options.getSession(session.id) === session &&
 			!session.loading &&
 			!session.refreshing &&
-			!session.saving &&
 			!session.mutationGuarded
 		);
 	}

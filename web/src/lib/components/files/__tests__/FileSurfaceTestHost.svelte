@@ -112,24 +112,23 @@
 	localSettings.codeEditorFontSize = '12';
 	localSettings.markdownViewerFontSize = '14';
 
+	let relativePath = 'src/file.ts';
+	let contentKind: FileSession['contentKind'] = 'text';
+	if (initial.rendererMode === 'image') {
+		relativePath = 'assets/image.png';
+		contentKind = 'image';
+	} else if (initial.rendererMode === 'markdown') {
+		relativePath = 'docs/current.md';
+		contentKind = 'markdown';
+	}
 	const session = new FileSession(
 		{
 			canonicalFileRootPath: '/workspace',
-			normalizedRelativePath:
-				initial.rendererMode === 'image'
-					? 'assets/image.png'
-					: initial.rendererMode === 'markdown'
-						? 'docs/current.md'
-						: 'src/file.ts',
+			normalizedRelativePath: relativePath,
 		},
 		'file-surface-test',
 	);
-	session.contentKind =
-		initial.rendererMode === 'image'
-			? 'image'
-			: initial.rendererMode === 'markdown'
-				? 'markdown'
-				: 'text';
+	session.contentKind = contentKind;
 	session.rendererMode = initial.rendererMode;
 	session.loading = initial.loading;
 	session.loadedRevision = 'v1:loaded';

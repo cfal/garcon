@@ -39,8 +39,6 @@ export class FileDocumentState {
 	missing = $state(false);
 	recovered = $state(false);
 	recoveryError = $state<string | null>(null);
-	diskContent = $state<string | null>(null);
-	diskRevision = $state<FileRevision | null>(null);
 	pendingRecoveryContent: string | null = null;
 
 	loadedRevision = $state<FileRevision | null>(null);
@@ -86,10 +84,6 @@ export class FileDocumentState {
 
 	get mutationGuarded(): boolean {
 		return this.saving;
-	}
-
-	get canDiscard(): boolean {
-		return !this.mutationGuarded;
 	}
 
 	currentContent(): string {

@@ -224,8 +224,6 @@ describe('FileSessionRegistry', () => {
 		harness.readText.mockRejectedValueOnce(new Error('disk unavailable'));
 		await harness.registry.showConflict(session.id);
 		expect(harness.registry.overwriteRequest).toBeNull();
-		expect(session.document.diskRevision).toBeNull();
-		expect(session.document.diskContent).toBeNull();
 		expect(session.refreshError).toBe('disk unavailable');
 		expect(harness.saveText).not.toHaveBeenCalled();
 		await harness.registry.destroyAll();
@@ -253,7 +251,6 @@ describe('FileSessionRegistry', () => {
 		old.resolve({ content: 'disk two', revision: 'v1:two', path: '/workspace/file.txt' });
 		await first;
 		expect(harness.registry.overwriteRequest).toBeNull();
-		expect(session.document.diskRevision).toBe('v1:three');
 		await harness.registry.destroyAll();
 	});
 
@@ -304,7 +301,7 @@ describe('FileSessionRegistry', () => {
 					revision: 'v1:saved',
 				});
 			await save;
-			await vi.waitFor(() => expect(opened.saveController).toBeNull());
+			await vi.waitFor(() => expect(opened.document.saveController).toBeNull());
 			expect(opened.saving).toBe(false);
 			await harness.registry.destroyAll();
 		},
@@ -1196,7 +1193,6 @@ describe('FileSessionRegistry', () => {
 		expect(opened.content).toBe('local while polling');
 		expect(opened.dirty).toBe(true);
 		expect(opened.isExternallyStale).toBe(true);
-		expect(opened.document.diskContent).toBe('external');
 	});
 
 	it('keeps polling a missing document and reloads it when recreated', async () => {
@@ -1526,8 +1522,14 @@ describe('FileSessionRegistry', () => {
 
 		const compare = harness.registry.showConflict(opened.id);
 		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:r3'));
-		opened.document.diskRevision = 'v1:r4';
-		opened.document.diskContent = 'disk-r4';
+		harness.getFileRevision.mockResolvedValueOnce({ status: 'ready', revision: 'v1:r4' });
+		harness.readText.mockResolvedValueOnce({
+			content: 'disk-r4',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:r4',
+		});
+		await harness.registry.checkFreshness(opened.id);
+		expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:r3');
 		harness.registry.resolveOverwrite('save-checked', 'merged');
 		await compare;
 
@@ -1945,12 +1947,14 @@ describe('best-effort file recovery', () => {
 					'recovered edit',
 				);
 			} else {
-				const recovery =
-					action === 'reload'
-						? harness.registry.reload(session.id)
-						: action === 'refresh'
-							? harness.registry.refresh(session.id)
-							: harness.registry.open({ ...request('file.txt'), openToSide: action === 'side' });
+				let recovery: Promise<unknown>;
+				if (action === 'reload') recovery = harness.registry.reload(session.id);
+				else if (action === 'refresh') recovery = harness.registry.refresh(session.id);
+				else
+					recovery = harness.registry.open({
+						...request('file.txt'),
+						openToSide: action === 'side',
+					});
 				await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
 				harness.registry.resolveDraft('resume');
 				await recovery;
@@ -2230,7 +2234,7 @@ describe('best-effort file recovery', () => {
 		expect(harness.registry.recoveryError).toBeTruthy();
 		session.content = 'local';
 		await expect(harness.registry.save(session.id)).resolves.toBe(true);
-		expect(session.document.canDiscard).toBe(true);
+		expect(session.document.mutationGuarded).toBe(false);
 		await harness.registry.retryRecoveryDiscovery();
 		expect(harness.registry.recoveryError).toBeNull();
 		await harness.registry.destroyAll();
@@ -2254,7 +2258,7 @@ describe('best-effort file recovery', () => {
 			expect(session.saving).toBe(false);
 			expect(session.saveError).toBeNull();
 			expect(session.document.recoveryError).toBeTruthy();
-			expect(session.document.canDiscard).toBe(true);
+			expect(session.document.mutationGuarded).toBe(false);
 			await harness.registry.destroyAll();
 		},
 	);
@@ -2268,7 +2272,7 @@ describe('best-effort file recovery', () => {
 		await expect(harness.registry.save(session.id)).resolves.toBe(false);
 		expect(session.dirty).toBe(true);
 		expect(session.saving).toBe(false);
-		expect(session.document.canDiscard).toBe(true);
+		expect(session.document.mutationGuarded).toBe(false);
 		await expect(harness.registry.save(session.id)).resolves.toBe(true);
 		await harness.registry.destroyAll();
 	});
@@ -2282,7 +2286,7 @@ describe('best-effort file recovery', () => {
 		harness.saveText.mockReturnValueOnce(pending.promise);
 		await expect(harness.registry.save(session.id)).resolves.toBe(false);
 		expect(session.saving).toBe(false);
-		expect(session.document.canDiscard).toBe(true);
+		expect(session.document.mutationGuarded).toBe(false);
 		expect(session.saveError).toContain('not confirmed');
 		session.content = 'newer edit';
 		await expect(harness.registry.save(session.id)).resolves.toBe(true);

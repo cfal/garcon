@@ -11,7 +11,7 @@ import {
 	keymap,
 } from '@codemirror/view';
 import {
-	EditorSelection,
+	type EditorSelection,
 	EditorState,
 	Compartment,
 	Prec,
@@ -59,6 +59,7 @@ import {
 import { fileExtension } from '$lib/utils/file-kind.js';
 import {
 	FileDocumentRuntime,
+	clampSelection,
 	documentPosition,
 	type FileDocumentViewAdapter,
 } from '$lib/files/editor/file-document-runtime.js';
@@ -550,15 +551,7 @@ export class CodeEditorController {
 		if (current.doc.eq(canonical)) return current;
 		return current.update({
 			changes: { from: 0, to: current.doc.length, insert: canonical },
-			selection: EditorSelection.create(
-				current.selection.ranges.map((range) =>
-					EditorSelection.range(
-						Math.min(range.anchor, canonical.length),
-						Math.min(range.head, canonical.length),
-					),
-				),
-				current.selection.mainIndex,
-			),
+			selection: clampSelection(current.selection, canonical.length),
 			filter: false,
 		}).state;
 	}

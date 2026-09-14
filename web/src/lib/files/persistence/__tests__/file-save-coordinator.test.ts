@@ -56,7 +56,7 @@ describe('FileSaveCoordinator', () => {
 			expect(value.content).toBe('changed');
 			expect(value.baseline).toBe('initial');
 			expect(value.dirty).toBe(true);
-			expect(value.canDiscard).toBe(true);
+			expect(value.mutationGuarded).toBe(false);
 		},
 	);
 

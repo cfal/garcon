@@ -257,7 +257,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	}
 }
 
-function clampSelection(selection: EditorSelection, length: number): EditorSelection {
+export function clampSelection(selection: EditorSelection, length: number): EditorSelection {
 	return EditorSelection.create(
 		selection.ranges.map((range) =>
 			EditorSelection.range(Math.min(range.anchor, length), Math.min(range.head, length)),

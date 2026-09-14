@@ -93,8 +93,8 @@ export interface FileOverwriteRequest {
 	fileName: string;
 	baseContent: string;
 	localContent: string;
-	diskContent: string | null;
-	diskRevision: FileRevision | null;
+	diskContent: string;
+	diskRevision: FileRevision;
 	localBufferVersion: number;
 	lineSeparator: '\n' | '\r' | '\r\n';
 }
@@ -593,12 +593,7 @@ export class FileSessionRegistry {
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return;
 		const decision = await this.#confirmConflict(session, disk);
-		if (
-			decision.choice !== 'save-checked' ||
-			!decision.snapshot.diskRevision ||
-			!canSubmitFileWrite(session)
-		)
-			return;
+		if (decision.choice !== 'save-checked' || !canSubmitFileWrite(session)) return;
 		this.#applyConflictResolution(session, decision);
 		const controller = this.#beginSave(session.document);
 		try {
@@ -716,7 +711,7 @@ export class FileSessionRegistry {
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return false;
 		const decision = await this.#confirmConflict(session, disk, true);
-		if (decision.choice !== 'save-checked' || !decision.snapshot.diskRevision) return false;
+		if (decision.choice !== 'save-checked') return false;
 		this.#applyConflictResolution(session, decision);
 		await this.#saves.submit(
 			session.document,
@@ -748,38 +743,25 @@ export class FileSessionRegistry {
 				snapshot,
 				resolvedContent: snapshot.localContent,
 			});
-			if (
-				this.get(session.id) !== session ||
-				(!allowOwnedMutation && session.document.mutationGuarded)
-			) {
-				return cancelled();
-			}
+			const canResolve = () =>
+				this.get(session.id) === session &&
+				(allowOwnedMutation || !session.document.mutationGuarded);
+			if (!canResolve()) return cancelled();
 			const decision = await new Promise<FileConflictDecision>((resolve) => {
 				this.#openMainInert(() => {
 					this.#overwriteResolve = resolve;
 					this.overwriteRequest = snapshot;
 				});
 			});
-			if (
-				decision.choice !== 'cancel' &&
-				(this.get(session.id) !== session ||
-					(!allowOwnedMutation && session.document.mutationGuarded))
-			) {
+			if (decision.choice !== 'cancel' && !canResolve()) {
 				session.saveError = m.file_conflict_buffer_changed();
 				return cancelled();
 			}
-			if (
-				decision.choice === 'accept-disk' &&
-				session.document.bufferVersion !== decision.snapshot.localBufferVersion
-			) {
-				session.saveError = m.file_conflict_buffer_changed();
-				return cancelled();
-			}
-			if (
-				decision.choice === 'accept-disk' &&
-				decision.snapshot.diskContent !== null &&
-				decision.snapshot.diskRevision
-			) {
+			if (decision.choice === 'accept-disk') {
+				if (session.document.bufferVersion !== decision.snapshot.localBufferVersion) {
+					session.saveError = m.file_conflict_buffer_changed();
+					return cancelled();
+				}
 				this.#io.commitLoadedContent(session, {
 					kind: 'text',
 					content: decision.snapshot.diskContent,

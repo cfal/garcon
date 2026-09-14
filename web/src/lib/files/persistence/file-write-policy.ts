@@ -4,7 +4,6 @@ export function canSubmitFileWrite(session: FileViewSession): boolean {
 	return !(
 		session.rendererMode === 'image' ||
 		session.loading ||
-		session.saving ||
 		session.refreshing ||
 		session.document.mutationGuarded ||
 		!session.loadedRevision ||

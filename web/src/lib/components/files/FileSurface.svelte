@@ -79,7 +79,7 @@
 			label: m.file_session_refresh(),
 			icon: RefreshCw,
 			onclick: () => void files.refresh(session.id),
-			disabled: session.loading || session.saving || session.mutationGuarded,
+			disabled: session.loading || session.mutationGuarded,
 			busy: session.refreshing,
 			priority: 2,
 			iconClass: session.refreshing ? 'animate-spin' : undefined,

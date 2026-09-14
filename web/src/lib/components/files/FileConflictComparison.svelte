@@ -21,7 +21,7 @@
 	}: {
 		baseContent: string;
 		localContent: string;
-		diskContent: string | null;
+		diskContent: string;
 		lineSeparator: '\n' | '\r' | '\r\n';
 		onCancel(): void;
 		onAcceptDisk(): void;
@@ -31,7 +31,7 @@
 	let comparisonReady = $state(false);
 	const snapshot = $derived({ baseContent, localContent, diskContent });
 	let resolvedContent = $derived(snapshot.localContent);
-	const comparison = $derived(selected === 'base' ? baseContent : (diskContent ?? ''));
+	const comparison = $derived(selected === 'base' ? baseContent : diskContent);
 
 	function selectSnapshot(event: KeyboardEvent): void {
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -105,14 +105,11 @@
 	</div>
 	<div class="flex flex-wrap justify-end gap-2">
 		<Button variant="ghost" onclick={onCancel}>{m.common_cancel()}</Button>
-		<Button
-			variant="outline"
-			onclick={onAcceptDisk}
-			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_accept_disk()}</Button
+		<Button variant="outline" onclick={onAcceptDisk} disabled={!comparisonReady}
+			>{m.file_conflict_accept_disk()}</Button
 		>
-		<Button
-			onclick={() => onSaveChecked(resolvedContent)}
-			disabled={!comparisonReady || diskContent === null}>{m.file_conflict_save_checked()}</Button
+		<Button onclick={() => onSaveChecked(resolvedContent)} disabled={!comparisonReady}
+			>{m.file_conflict_save_checked()}</Button
 		>
 	</div>
 </div>

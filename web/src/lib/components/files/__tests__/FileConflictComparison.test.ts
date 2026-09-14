@@ -116,23 +116,30 @@ describe('FileConflictComparison', () => {
 		expect(onSaveChecked).toHaveBeenCalledWith('local');
 	});
 
-	it('disables every disk-mutating action when the disk snapshot is unavailable', () => {
+	it('allows resolution against an empty disk snapshot once the comparison is ready', async () => {
+		const onAcceptDisk = vi.fn();
+		const onSaveChecked = vi.fn();
 		render(FileConflictComparison, {
 			baseContent: 'base',
 			localContent: 'local',
-			diskContent: null,
+			diskContent: '',
 			lineSeparator: '\n',
 			onCancel: vi.fn(),
-			onAcceptDisk: vi.fn(),
-			onSaveChecked: vi.fn(),
+			onAcceptDisk,
+			onSaveChecked,
 		});
 
-		expect(
-			(screen.getByRole('button', { name: 'Accept disk' }) as HTMLButtonElement).disabled,
-		).toBe(true);
-		expect(
-			(screen.getByRole('button', { name: 'Save against displayed disk' }) as HTMLButtonElement)
-				.disabled,
-		).toBe(true);
+		const accept = screen.getByRole('button', { name: 'Accept disk' }) as HTMLButtonElement;
+		const save = screen.getByRole('button', {
+			name: 'Save against displayed disk',
+		}) as HTMLButtonElement;
+		await vi.waitFor(() => {
+			expect(accept.disabled).toBe(false);
+			expect(save.disabled).toBe(false);
+		});
+		await fireEvent.click(accept);
+		expect(onAcceptDisk).toHaveBeenCalledOnce();
+		await fireEvent.click(save);
+		expect(onSaveChecked).toHaveBeenCalledWith('local');
 	});
 });
