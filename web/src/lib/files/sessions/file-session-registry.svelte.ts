@@ -284,6 +284,9 @@ export class FileSessionRegistry {
 			existing.requestLocation(request.line, request.col);
 			await this.deps.getPlacement().focusFileSession(existing.id);
 			this.#recordNavigation(existing);
+			if (!existing.loading && !existing.loadedRevision && !existing.loadErrorRequiresPageReload) {
+				await this.reload(existing.id);
+			}
 			return existing;
 		}
 		const pending = request.openToSide ? null : this.#pendingByIdentity.get(key);
@@ -350,12 +353,18 @@ export class FileSessionRegistry {
 	}
 
 	async refresh(sessionId: string): Promise<void> {
+		const current = this.get(sessionId);
+		if (!current || current.loading || !(await this.#prepareDraftRecovery(current.document)))
+			return;
 		await this.#io.refresh(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
 		const session = this.get(sessionId);
 		if (session) this.#completeDraftRecovery(session);
 	}
 
 	async reload(sessionId: string): Promise<void> {
+		const current = this.get(sessionId);
+		if (!current || current.loading || !(await this.#prepareDraftRecovery(current.document)))
+			return;
 		await this.#io.reload(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
 		const session = this.get(sessionId);
 		if (session) this.#completeDraftRecovery(session);
@@ -417,7 +426,7 @@ export class FileSessionRegistry {
 				if (!session.document.editorRuntime) session.content = session.baseline;
 				session.dirty = false;
 				const discardedVersion = session.document.bufferVersion;
-				await this.#drafts?.settle(session.document);
+				void this.#drafts?.settle(session.document);
 				return (
 					this.get(session.id) === session &&
 					session.document.bufferVersion === discardedVersion &&
@@ -462,7 +471,7 @@ export class FileSessionRegistry {
 		delete next[sessionId];
 		this.sessions = next;
 		if (document.viewIds.size > 0) return;
-		await this.#drafts?.closeDocument(document).catch(() => undefined);
+		this.#drafts?.closeDocument(document);
 		this.#io.stopPolling(document.id);
 		this.#documentIdByIdentity.delete(document.identityKey);
 		const documents = { ...this.documents };
@@ -520,26 +529,8 @@ export class FileSessionRegistry {
 		if (this.#destroyed) return null;
 		const existingDocumentId = this.#documentIdByIdentity.get(key);
 		const existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
-		const draft = !existingDocument
-			? this.#drafts?.find(identity.canonicalFileRootPath, identity.normalizedRelativePath)
-			: undefined;
-		let recoveredContent: string | undefined;
-		if (draft) {
-			const choice = await this.#decisionQueue.enqueue(
-				() =>
-					new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
-						this.#openMainInert(() => {
-							this.#draftResolve = resolve;
-							this.draftRequest = { fileName: identity.normalizedRelativePath };
-						});
-					}),
-			);
-			if (choice === 'cancel' || this.#destroyed) return null;
-			if (choice === 'resume') recoveredContent = draft.content;
-			else await this.#drafts?.discard(draft);
-		}
 		const document = existingDocument ?? new FileDocumentState(identity, key);
-		if (recoveredContent !== undefined) document.pendingRecoveryContent = recoveredContent;
+		if (!(await this.#prepareDraftRecovery(document))) return null;
 		const session = new FileViewSession(document);
 		session.rendererMode = resolveFileRendererMode(identity.normalizedRelativePath, request.mode);
 		if (!existingDocument) {
@@ -553,7 +544,7 @@ export class FileSessionRegistry {
 			published = true;
 			this.sessions = { ...this.sessions, [session.id]: session };
 			if (!existingDocument) this.#publishDocument(document);
-			else void this.#io.ensureEditorForView(session);
+			else if (document.loadedRevision) void this.#io.ensureEditorForView(session);
 		};
 		const rollback = () => {
 			if (!published) return;
@@ -586,7 +577,7 @@ export class FileSessionRegistry {
 			session.dispose();
 			return null;
 		}
-		if (existingDocument) {
+		if (existingDocument && document.loadedRevision) {
 			void this.#io.joinDocument(session);
 		} else {
 			void this.#io.loadInitial(session).then(() => this.#completeDraftRecovery(session));
@@ -631,6 +622,34 @@ export class FileSessionRegistry {
 		resolve?.(choice);
 	}
 
+	#prepareDraftRecovery(document: FileDocumentState): Promise<boolean> {
+		if (
+			document.loading ||
+			document.loadedRevision ||
+			document.dirty ||
+			document.pendingRecoveryContent !== null ||
+			!this.#drafts?.find(document.canonicalFileRootPath, document.relativePath)
+		)
+			return Promise.resolve(true);
+		return this.#decisionQueue.enqueue(async () => {
+			if (this.#destroyed) return false;
+			if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
+				return true;
+			const draft = this.#drafts?.find(document.canonicalFileRootPath, document.relativePath);
+			if (!draft) return true;
+			const choice = await new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
+				this.#openMainInert(() => {
+					this.#draftResolve = resolve;
+					this.draftRequest = { fileName: document.relativePath };
+				});
+			});
+			if (choice === 'cancel' || this.#destroyed) return false;
+			if (choice === 'resume') document.pendingRecoveryContent = draft.content;
+			else this.#drafts?.discard(draft);
+			return true;
+		});
+	}
+
 	async retryRecoveryDiscovery(): Promise<void> {
 		await this.#drafts?.initialize();
 		this.#pruneOpenDrafts();
@@ -639,9 +658,10 @@ export class FileSessionRegistry {
 	#pruneOpenDrafts(): void {
 		// Live buffers take precedence over startup backups, except a Resume still awaiting disk.
 		for (const document of Object.values(this.documents)) {
-			if (document.pendingRecoveryContent !== null) continue;
+			if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
+				continue;
 			this.#drafts?.opened(document.canonicalFileRootPath, document.relativePath);
-			if (document.dirty) void this.#drafts?.settle(document);
+			void this.#drafts?.settle(document);
 		}
 	}
 
@@ -765,7 +785,7 @@ export class FileSessionRegistry {
 					content: decision.snapshot.diskContent,
 					revision: decision.snapshot.diskRevision,
 				});
-				await this.#drafts?.settle(session.document);
+				void this.#drafts?.settle(session.document);
 			}
 			return this.get(session.id) === session ? decision : cancelled();
 		});

@@ -203,6 +203,7 @@ describe('FileSessionRegistry', () => {
 		const error = new Error('quota exceeded');
 		vi.spyOn(repository, 'putDraft').mockRejectedValue(error);
 		await harness.registry.destroyAll();
+		await harness.registry.flushRecovery();
 		expect(onRecoveryError).toHaveBeenCalledWith(opened.document, error);
 	});
 
@@ -638,7 +639,7 @@ describe('FileSessionRegistry', () => {
 		expect(loadEditorRuntime).toHaveBeenCalledOnce();
 	});
 
-	it('reloads the page when a browser-cached editor module import fails', async () => {
+	it('reloads a failed editor module only on explicit Retry, not an existing-file open', async () => {
 		const reloadApplication = vi.fn();
 		const loadEditorRuntime = vi
 			.fn<() => Promise<FileEditorRuntimeModule>>()
@@ -649,6 +650,10 @@ describe('FileSessionRegistry', () => {
 		if (!opened) throw new Error('Expected file session');
 		await vi.waitFor(() => expect(opened.loadError).toBe('Editor chunk unavailable'));
 		expect(opened.loadErrorRequiresPageReload).toBe(true);
+
+		await expect(harness.registry.open(request('src/reload-required.ts'))).resolves.toBe(opened);
+		expect(harness.focusCalls).toEqual([opened.id]);
+		expect(reloadApplication).not.toHaveBeenCalled();
 
 		await harness.registry.reload(opened.id);
 
@@ -685,7 +690,7 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.get(opened.id)).toBeNull();
 	});
 
-	it('serializes reopening behind last-view recovery cleanup', async () => {
+	it('reopens without waiting for last-view backup cleanup and orders the next checkpoint', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const allowDelete = deferred<void>();
 		const deleteDraft = repository.deleteDraft.bind(repository);
@@ -698,22 +703,14 @@ describe('FileSessionRegistry', () => {
 		if (!opened) throw new Error('Expected file session');
 		await vi.waitFor(() => expect(opened.loading).toBe(false));
 
-		const destruction = harness.registry.destroy(opened.id);
-		await vi.waitFor(() => expect(harness.registry.get(opened.id)).toBeNull());
-		const reopening = harness.registry.open(request('src/reopen.ts'));
-		let reopenedEarly = false;
-		void reopening.then(() => (reopenedEarly = true));
-		await Promise.resolve();
-		expect(reopenedEarly).toBe(false);
-
-		allowDelete.resolve();
-		await destruction;
-		const reopened = await reopening;
+		await harness.registry.destroy(opened.id);
+		const reopened = await harness.registry.open(request('src/reopen.ts'));
 		if (!reopened) throw new Error('Expected reopened file session');
 		await vi.waitFor(() => expect(reopened.loading).toBe(false));
 		expect(harness.registry.documents[reopened.document.id]).toBe(reopened.document);
 		expect(reopened.document.editorRuntime).not.toBeNull();
 		reopened.content = 'reopened edit';
+		allowDelete.resolve();
 		await harness.registry.flushRecovery();
 		expect(await repository.getDrafts('test-user', 'test-deployment')).toHaveLength(1);
 	});
@@ -754,10 +751,6 @@ describe('FileSessionRegistry', () => {
 
 		allowPlacement.resolve();
 		await blocker;
-		await Promise.resolve();
-		expect(placementCount).toBe(2);
-
-		allowDelete.resolve();
 		await destruction;
 		const reopened = await reopening;
 		if (!reopened) throw new Error('Expected reopened file session');
@@ -766,6 +759,8 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.documents[reopened.document.id]).toBe(reopened.document);
 		expect(reopened.document).not.toBe(original.document);
 		expect(reopened.document.editorRuntime).not.toBeNull();
+		allowDelete.resolve();
+		await harness.registry.flushRecovery();
 	});
 
 	it('focuses an existing identity without moving or duplicating it', async () => {
@@ -865,7 +860,7 @@ describe('FileSessionRegistry', () => {
 		admissionAfterRelease?.();
 	});
 
-	it('rejects a discard close when the buffer changes during recovery deletion', async () => {
+	it('admits a discard close without waiting for backup deletion', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const harness = createHarness({ draftRepository: repository });
 		const opened = await harness.registry.open(request('src/discard-race.ts'));
@@ -883,12 +878,17 @@ describe('FileSessionRegistry', () => {
 		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(opened.id));
 		harness.registry.resolveGuard('discard');
 		await vi.waitFor(() => expect(repository.deleteDraft).toHaveBeenCalled());
+		const release = await closing;
+		expect(release).toBeTypeOf('function');
+		release?.();
 		opened.content = 'new edit after discard';
 		deletion.resolve();
-
-		await expect(closing).resolves.toBeNull();
+		await harness.registry.flushRecovery();
 		expect(opened.content).toBe('new edit after discard');
 		expect(opened.dirty).toBe(true);
+		expect((await repository.getDrafts('test-user', 'test-deployment'))[0].content).toBe(
+			'new edit after discard',
+		);
 	});
 
 	it('revalidates every discarded document after all bulk-close decisions settle', async () => {
@@ -900,23 +900,12 @@ describe('FileSessionRegistry', () => {
 		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
 		first.content = 'first edit';
 		second.content = 'second edit';
-		const secondDeletion = deferred<void>();
-		const deleteDraft = repository.deleteDraft.bind(repository);
-		let deletionCount = 0;
-		vi.spyOn(repository, 'deleteDraft').mockImplementation(async (...args) => {
-			deletionCount += 1;
-			if (deletionCount === 2) await secondDeletion.promise;
-			await deleteDraft(...args);
-		});
-
 		const closing = harness.registry.prepareDestructiveViews([first.id, second.id], 'close');
 		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(first.id));
 		harness.registry.resolveGuard('discard');
 		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(second.id));
-		harness.registry.resolveGuard('discard');
-		await vi.waitFor(() => expect(deletionCount).toBe(2));
 		first.content = 'new edit during the second decision';
-		secondDeletion.resolve();
+		harness.registry.resolveGuard('discard');
 
 		await expect(closing).resolves.toBeNull();
 		expect(first.content).toBe('new edit during the second decision');
@@ -1905,6 +1894,169 @@ describe('FileSessionRegistry', () => {
 });
 
 describe('best-effort file recovery', () => {
+	it.each(['cancel', 'resume'] as const)(
+		'focuses an existing failed view before the recovery prompt and disk read (%s)',
+		async (choice) => {
+			const repository = createMemoryFileDraftRepository();
+			await repository.putDraft(storedDraft());
+			vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
+			const harness = createHarness({ draftRepository: repository });
+			harness.readText.mockRejectedValueOnce(new Error('Read failed'));
+			const session = (await harness.registry.open(request('file.txt')))!;
+			await vi.waitFor(() => expect(session.loadError).toBe('Read failed'));
+			await harness.registry.retryRecoveryDiscovery();
+			const disk = deferred<Awaited<ReturnType<typeof harness.readText>>>();
+			harness.readText.mockReturnValueOnce(disk.promise);
+
+			const reopening = harness.registry.open(request('file.txt'));
+			await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+			expect(harness.focusCalls).toEqual([session.id]);
+			expect(harness.readText).toHaveBeenCalledOnce();
+			harness.registry.resolveDraft(choice);
+			if (choice === 'resume') {
+				await vi.waitFor(() => expect(harness.readText).toHaveBeenCalledTimes(2));
+				expect(harness.focusCalls).toEqual([session.id]);
+				disk.resolve({ content: 'initial', path: '/workspace/file.txt', revision: 'v1:initial' });
+			}
+			await expect(reopening).resolves.toBe(session);
+			expect(session.content).toBe(choice === 'resume' ? 'recovered edit' : '');
+			expect(harness.registry.recoveredDrafts).toHaveLength(choice === 'cancel' ? 1 : 0);
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it.each(['close', 'open', 'reload', 'refresh', 'side'] as const)(
+		'preserves late-discovered backups after a failed load (%s)',
+		async (action) => {
+			const repository = createMemoryFileDraftRepository();
+			await repository.putDraft(storedDraft());
+			vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
+			const harness = createHarness({ draftRepository: repository });
+			harness.readText.mockRejectedValueOnce(new Error('Read failed'));
+			const session = (await harness.registry.open(request('file.txt')))!;
+			await vi.waitFor(() => expect(session.loadError).toBe('Read failed'));
+			await harness.registry.retryRecoveryDiscovery();
+			expect(harness.registry.recoveredDrafts).toHaveLength(1);
+			await harness.registry.flushRecovery();
+			if (action === 'close') {
+				await harness.registry.destroy(session.id);
+				await harness.registry.flushRecovery();
+				expect((await repository.getDrafts('test-user', 'test-deployment'))[0].content).toBe(
+					'recovered edit',
+				);
+			} else {
+				const recovery =
+					action === 'reload'
+						? harness.registry.reload(session.id)
+						: action === 'refresh'
+							? harness.registry.refresh(session.id)
+							: harness.registry.open({ ...request('file.txt'), openToSide: action === 'side' });
+				await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+				harness.registry.resolveDraft('resume');
+				await recovery;
+				await vi.waitFor(() => expect(session.content).toBe('recovered edit'));
+				expect(session.dirty).toBe(true);
+				await vi.waitFor(() => expect(harness.registry.recoveredDrafts).toEqual([]));
+			}
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it.each(['cancel', 'discard'] as const)(
+		'allows %s of a late-discovered backup on Retry',
+		async (choice) => {
+			const repository = createMemoryFileDraftRepository();
+			await repository.putDraft(storedDraft());
+			vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
+			const harness = createHarness({ draftRepository: repository });
+			harness.readText.mockRejectedValueOnce(new Error('Read failed'));
+			const session = (await harness.registry.open(request('file.txt')))!;
+			await vi.waitFor(() => expect(session.loadError).toBe('Read failed'));
+			await harness.registry.retryRecoveryDiscovery();
+			const recovery = harness.registry.reload(session.id);
+			await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+			harness.registry.resolveDraft(choice);
+			await recovery;
+			await harness.registry.flushRecovery();
+			expect(harness.readText).toHaveBeenCalledTimes(choice === 'cancel' ? 1 : 2);
+			expect(harness.registry.recoveredDrafts).toHaveLength(choice === 'cancel' ? 1 : 0);
+			expect(await repository.getDrafts('test-user', 'test-deployment')).toHaveLength(
+				choice === 'cancel' ? 1 : 0,
+			);
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it('deletes a stale backup discovered after a clean buffer has loaded', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(storedDraft());
+		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
+		const harness = createHarness({ draftRepository: repository });
+		const session = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		await harness.registry.retryRecoveryDiscovery();
+		await harness.registry.flushRecovery();
+		expect(harness.registry.recoveredDrafts).toEqual([]);
+		expect(await repository.getDrafts('test-user', 'test-deployment')).toEqual([]);
+		await harness.registry.destroyAll();
+	});
+
+	it('opens a discarded backup without waiting for storage deletion', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(storedDraft());
+		const deletion = deferred<void>();
+		const remove = repository.deleteDraft.bind(repository);
+		vi.spyOn(repository, 'deleteDraft').mockImplementationOnce(async (id) => {
+			await deletion.promise;
+			await remove(id);
+		});
+		const harness = createHarness({ draftRepository: repository });
+		const opening = harness.registry.open(request('file.txt'));
+		await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+		harness.registry.resolveDraft('discard');
+		const session = (await opening)!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		expect(harness.registry.recoveredDrafts).toEqual([]);
+		session.content = 'new local edit';
+		deletion.resolve();
+		await harness.registry.flushRecovery();
+		expect((await repository.getDrafts('test-user', 'test-deployment'))[0].content).toBe(
+			'new local edit',
+		);
+		await harness.registry.destroyAll();
+	});
+
+	it('releases Save after Accept Disk without waiting for backup deletion', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const session = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		session.content = 'local edit';
+		session.isExternallyStale = true;
+		const deletion = deferred<void>();
+		vi.spyOn(repository, 'deleteDraft').mockReturnValueOnce(deletion.promise);
+		const save = harness.registry.save(session.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).not.toBeNull());
+		harness.registry.resolveOverwrite('accept-disk');
+		await expect(save).resolves.toBe(false);
+		expect(session.saving).toBe(false);
+		expect(session.content).toBe('initial');
+		await harness.registry.destroyAll();
+		deletion.resolve();
+		await harness.registry.flushRecovery();
+	});
+
+	it('reports a real cleanup storage failure separately from dirty-file blocking', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		vi.spyOn(repository, 'clearDrafts').mockRejectedValueOnce(new Error('Storage blocked'));
+		await expect(harness.registry.clearRecovery()).rejects.toThrow('Storage blocked');
+		expect(harness.registry.recoveryError).toBe('Storage blocked');
+		await expect(harness.registry.clearRecovery()).resolves.toBe(true);
+		await harness.registry.destroyAll();
+	});
+
 	it.each(['retry', 'refresh', 'close'] as const)(
 		'retains a selected draft after a read failure and %s',
 		async (action) => {

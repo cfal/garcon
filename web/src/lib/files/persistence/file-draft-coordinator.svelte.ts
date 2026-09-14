@@ -16,13 +16,13 @@ interface PendingCheckpoint {
 	document: FileDocumentState;
 	idleTimer: ReturnType<typeof setTimeout> | null;
 	maxTimer: ReturnType<typeof setTimeout> | null;
-	queue: Promise<void>;
 }
 
 export class FileDraftCoordinator {
 	available = $state.raw<readonly FileDraft[]>([]);
 	error = $state<string | null>(null);
 	readonly #pending = new Map<string, PendingCheckpoint>();
+	readonly #writes = new Map<string, Promise<void>>();
 
 	constructor(private readonly options: FileDraftCoordinatorOptions) {}
 
@@ -52,14 +52,16 @@ export class FileDraftCoordinator {
 		);
 	}
 
-	async discard(draft: FileDraft): Promise<void> {
-		try {
-			await this.options.repository.deleteDraft(draft.documentId);
-			this.error = null;
-		} catch (error) {
-			this.error = errorMessage(error);
-		}
+	discard(draft: FileDraft): void {
 		this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath);
+		void this.#enqueue(draft.documentId, async () => {
+			try {
+				await this.options.repository.deleteDraft(draft.documentId);
+				this.error = null;
+			} catch (error) {
+				this.error = errorMessage(error);
+			}
+		});
 	}
 
 	schedule(document: FileDocumentState): void {
@@ -76,13 +78,14 @@ export class FileDraftCoordinator {
 		return this.#checkpoint(this.#entry(document));
 	}
 
-	async closeDocument(document: FileDocumentState): Promise<void> {
-		await this.settle(document);
+	closeDocument(document: FileDocumentState): void {
+		void this.settle(document);
 		this.#pending.delete(document.id);
 	}
 
 	async flush(): Promise<void> {
-		await Promise.all([...this.#pending.values()].map((pending) => this.#checkpoint(pending)));
+		for (const pending of this.#pending.values()) void this.#checkpoint(pending);
+		await Promise.all(this.#writes.values());
 	}
 
 	async clear(): Promise<boolean> {
@@ -97,20 +100,20 @@ export class FileDraftCoordinator {
 			return true;
 		} catch (error) {
 			this.error = errorMessage(error);
-			return false;
+			throw error;
 		}
 	}
 
 	destroy(): void {
 		for (const pending of this.#pending.values()) this.#clearTimers(pending);
 		this.#pending.clear();
-		this.options.repository.close();
+		void Promise.all(this.#writes.values()).then(() => this.options.repository.close());
 	}
 
 	#entry(document: FileDocumentState): PendingCheckpoint {
 		let pending = this.#pending.get(document.id);
 		if (!pending) {
-			pending = { document, idleTimer: null, maxTimer: null, queue: Promise.resolve() };
+			pending = { document, idleTimer: null, maxTimer: null };
 			this.#pending.set(document.id, pending);
 		}
 		return pending;
@@ -119,7 +122,8 @@ export class FileDraftCoordinator {
 	#checkpoint(pending: PendingCheckpoint): Promise<void> {
 		this.#clearTimers(pending);
 		const document = pending.document;
-		if (document.pendingRecoveryContent !== null) return pending.queue;
+		if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
+			return Promise.resolve();
 		const documentId = fileDraftKey(
 			this.options.userNamespace,
 			this.options.deploymentId,
@@ -138,7 +142,7 @@ export class FileDraftCoordinator {
 					savedAt: Date.now(),
 				}
 			: null;
-		pending.queue = pending.queue.then(async () => {
+		return this.#enqueue(documentId, async () => {
 			try {
 				if (record && !this.options.repository.durable)
 					throw new Error(m.file_recovery_storage_unavailable());
@@ -151,7 +155,17 @@ export class FileDraftCoordinator {
 				this.options.onError?.(document, cause);
 			}
 		});
-		return pending.queue;
+	}
+
+	#enqueue(documentId: string, operation: () => Promise<void>): Promise<void> {
+		// Orders backup writes across close/reopen without holding the editor lifecycle open.
+		const write = (this.#writes.get(documentId) ?? Promise.resolve())
+			.then(operation)
+			.finally(() => {
+				if (this.#writes.get(documentId) === write) this.#writes.delete(documentId);
+			});
+		this.#writes.set(documentId, write);
+		return write;
 	}
 
 	#clearTimers(pending: PendingCheckpoint): void {

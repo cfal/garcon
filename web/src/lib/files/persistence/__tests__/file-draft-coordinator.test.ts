@@ -12,6 +12,7 @@ function document() {
 		'file',
 	);
 	value.baseline = 'initial';
+	value.loadedRevision = 'v1:initial';
 	value.content = 'changed';
 	return value;
 }
@@ -30,7 +31,8 @@ describe('FileDraftCoordinator', () => {
 		const { coordinator } = harness(false);
 		const value = document();
 		value.dirty = false;
-		await coordinator.closeDocument(value);
+		coordinator.closeDocument(value);
+		await coordinator.flush();
 		expect(value.recoveryError).toBeNull();
 		coordinator.destroy();
 	});
@@ -58,7 +60,7 @@ describe('FileDraftCoordinator', () => {
 
 	it('uses one draft slot across close and reopen', async () => {
 		const { repository, coordinator } = harness();
-		await coordinator.closeDocument(document());
+		coordinator.closeDocument(document());
 		const reopened = document();
 		reopened.content = 'newer edit';
 		await coordinator.settle(reopened);
@@ -109,13 +111,50 @@ describe('FileDraftCoordinator', () => {
 
 	it('discovers drafts without publishing live documents and forgets an explicit discard', async () => {
 		const { repository, coordinator } = harness();
-		await coordinator.closeDocument(document());
+		coordinator.closeDocument(document());
+		await coordinator.flush();
 		await coordinator.initialize();
 		const draft = coordinator.available[0];
 		expect(draft.content).toBe('changed');
-		await coordinator.discard(draft);
+		coordinator.discard(draft);
 		expect(coordinator.available).toEqual([]);
+		await coordinator.flush();
 		expect(await repository.getDrafts('user', 'deployment')).toEqual([]);
+		coordinator.destroy();
+	});
+
+	it('propagates explicit cleanup failures and allows retry', async () => {
+		const { repository, coordinator } = harness();
+		const error = new Error('Storage blocked');
+		vi.spyOn(repository, 'clearDrafts').mockRejectedValueOnce(error);
+		await expect(coordinator.clear()).rejects.toBe(error);
+		expect(coordinator.error).toBe('Storage blocked');
+		await expect(coordinator.clear()).resolves.toBe(true);
+		expect(coordinator.error).toBeNull();
+		coordinator.destroy();
+	});
+
+	it('orders writes across close and reopen while the old checkpoint is pending', async () => {
+		const { repository, coordinator } = harness();
+		const put = repository.putDraft.bind(repository);
+		let release!: () => void;
+		vi.spyOn(repository, 'putDraft').mockImplementationOnce(async (record) => {
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await put(record);
+		});
+		const closed = document();
+		coordinator.closeDocument(closed);
+		closed.dispose();
+		await vi.waitFor(() => expect(repository.putDraft).toHaveBeenCalledOnce());
+		const reopened = document();
+		reopened.content = 'reopened edit';
+		const checkpoint = coordinator.settle(reopened);
+		expect(repository.putDraft).toHaveBeenCalledOnce();
+		release();
+		await checkpoint;
+		expect((await repository.getDrafts('user', 'deployment'))[0].content).toBe('reopened edit');
 		coordinator.destroy();
 	});
 });
