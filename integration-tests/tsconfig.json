@@ -6,6 +6,7 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "allowJs": true,
     "rewriteRelativeImportExtensions": true,
     "types": ["@types/bun", "../web/node_modules/svelte"],
     "paths": { "$shared/*": ["../common/*"], "$lib/*": ["../web/src/lib/*"] }
