@@ -72,16 +72,22 @@ describe('FileDocumentRuntime', () => {
 		expect(view.state().selection.main.head).toBe(7);
 	});
 
-	it('serializes each canonical change only once', () => {
+	it('serializes canonical changes only on demand and caches the result', () => {
 		const value = document();
 		const runtime = new FileDocumentRuntime(value, 'abc');
 		const content = vi.spyOn(runtime, 'content');
 
 		runtime.applyUserEdit('abcd');
 
-		expect(content).toHaveBeenCalledOnce();
+		expect(content).not.toHaveBeenCalled();
 		expect(value.dirty).toBe(true);
+		const serialize = vi.spyOn(runtime.canonicalState.doc, 'toString');
 		expect(value.currentContent()).toBe('abcd');
+		expect(value.content).toBe('abcd');
+		expect(serialize).toHaveBeenCalledOnce();
+		value.content = 'abc';
+		expect(value.currentContent()).toBe('abc');
+		expect(value.dirty).toBe(false);
 		content.mockRestore();
 	});
 

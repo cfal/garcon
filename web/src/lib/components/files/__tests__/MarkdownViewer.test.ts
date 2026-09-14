@@ -65,6 +65,24 @@ function workspaceLayoutWithDialog(dialogSession: FileSession, backgroundSession
 }
 
 describe('MarkdownViewer', () => {
+	it('coalesces preview updates without delaying reads of the canonical document', async () => {
+		const session = markdownSession('# Initial');
+		const rendered = render(MarkdownViewerTestHost, { session, onOpen: vi.fn() });
+		await tick();
+		const content = vi.spyOn(session.document, 'currentContent');
+		session.content = '# First edit';
+		session.content = '# Latest edit';
+		await tick();
+		expect(content).not.toHaveBeenCalled();
+		expect(screen.getByRole('heading', { name: 'Initial' })).toBeTruthy();
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Latest edit' })).toBeTruthy());
+		expect(content).toHaveBeenCalledOnce();
+		session.content = '# Unmounted edit';
+		rendered.unmount();
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		expect(content).toHaveBeenCalledOnce();
+	});
+
 	it('restores scroll offsets across main, sidebar, and dialog remounts', async () => {
 		const session = markdownSession('# Read me');
 		const main = render(MarkdownViewerTestHost, {

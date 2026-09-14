@@ -100,17 +100,17 @@ export class FileDocumentState {
 	}
 
 	get content(): string {
-		return this.#content;
+		this.bufferVersion;
+		return this.editorRuntime?.content() ?? this.#content;
 	}
 
 	set content(content: string) {
-		const current = this.#content;
-		if (current === content) return;
-		this.#content = content;
 		if (this.editorRuntime) {
 			this.editorRuntime.synchronizeDocument(content);
 			return;
 		}
+		if (this.#content === content) return;
+		this.#content = content;
 		this.bufferVersion += 1;
 		this.dirty = content !== this.baseline;
 		this.notifyChanged();
@@ -139,7 +139,7 @@ export class FileDocumentState {
 	}
 
 	currentContent(): string {
-		return this.editorRuntime?.content() ?? this.#content;
+		return this.content;
 	}
 
 	applyUserEdit(content: string): void {

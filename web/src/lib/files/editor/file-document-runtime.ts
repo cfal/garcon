@@ -15,7 +15,10 @@ import type {
 	FileDocumentRuntimePort,
 	FileDocumentState,
 } from '$lib/files/documents/file-document-state.svelte.js';
-import { fileTextMetadata } from '$lib/files/documents/file-text-metadata.js';
+import {
+	fileTextMetadata,
+	type FileTextMetadata,
+} from '$lib/files/documents/file-text-metadata.js';
 
 const mirroredDocumentChange = Annotation.define<string>();
 
@@ -31,14 +34,17 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	#canonical: EditorState;
 	readonly #views = new Map<string, FileDocumentViewAdapter>();
 	#lastOrigin: string | null = null;
+	#serialized: { doc: Text; separator: string; content: string } | null = null;
+	#baseline: { content: string; doc: Text; metadata: FileTextMetadata };
 
 	constructor(
 		readonly document: FileDocumentState,
 		content: string,
 	) {
 		this.#canonical = this.#createCanonicalState(normalizeDocument(content));
+		this.#baseline = this.#normalizeBaseline();
 		Object.assign(document, fileTextMetadata(content));
-		document.setStoredContent(this.#serializeDocument());
+		document.setStoredContent(this.content());
 		document.editorRuntime = this;
 	}
 
@@ -47,7 +53,17 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	}
 
 	content(): string {
-		return this.#serializeDocument();
+		const doc = this.#canonical.doc;
+		const separator = this.document.lineSeparator;
+		if (this.#serialized?.doc !== doc || this.#serialized.separator !== separator) {
+			const normalized = doc.toString();
+			this.#serialized = {
+				doc,
+				separator,
+				content: separator === '\n' ? normalized : normalized.replaceAll('\n', separator),
+			};
+		}
+		return this.#serialized.content;
 	}
 
 	register(adapter: FileDocumentViewAdapter): () => void {
@@ -146,7 +162,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 
 	acceptBaseline(content: string): void {
 		this.document.baseline = content;
-		this.document.dirty = this.content() !== content;
+		this.document.dirty = !this.#matchesBaseline();
 	}
 
 	replaceFromDisk(content: string): void {
@@ -155,7 +171,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		const positionMap = this.#replaceDocument(normalizeDocument(content));
 		this.document.dirty = false;
 		this.document.bufferVersion += 1;
-		this.document.setStoredContent(this.content());
+		this.#baseline = this.#normalizeBaseline();
 		this.document.notifyChanged(positionMap);
 	}
 
@@ -215,16 +231,24 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 
 	#documentChanged(positionMap: FileDocumentPositionMap): void {
 		this.document.bufferVersion += 1;
-		const content = this.content();
-		this.document.dirty = content !== this.document.baseline;
-		this.document.setStoredContent(content);
+		this.document.dirty = !this.#matchesBaseline();
 		this.document.notifyChanged(positionMap);
 	}
 
-	#serializeDocument(): string {
-		const content = this.#canonical.doc.toString();
-		const separator = this.document.lineSeparator;
-		return separator === '\n' ? content : content.replaceAll('\n', separator);
+	#matchesBaseline(): boolean {
+		if (this.#baseline.content !== this.document.baseline)
+			this.#baseline = this.#normalizeBaseline();
+		const doc = this.#canonical.doc;
+		return (
+			doc.eq(this.#baseline.doc) &&
+			!this.#baseline.metadata.mixedLineEndings &&
+			(doc.lines === 1 || this.document.lineSeparator === this.#baseline.metadata.lineSeparator)
+		);
+	}
+
+	#normalizeBaseline(): { content: string; doc: Text; metadata: FileTextMetadata } {
+		const content = this.document.baseline;
+		return { content, doc: normalizeDocument(content), metadata: fileTextMetadata(content) };
 	}
 
 	#createCanonicalState(content: Text): EditorState {
