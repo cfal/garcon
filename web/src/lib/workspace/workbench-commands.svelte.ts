@@ -248,17 +248,6 @@ export class WorkbenchCommandRegistry {
 				'select-next-occurrence',
 			),
 			{
-				id: 'file.open-known',
-				label: m.file_command_open_known(),
-				category: 'File',
-				isVisible: () => (this.deps.files.navigation?.recents.length ?? 0) > 0,
-				isEnabled: () => (this.deps.files.navigation?.recents.length ?? 0) > 0,
-				run: () => {
-					const location = this.deps.files.navigation?.recents[0];
-					return location ? this.openLocation(location) : undefined;
-				},
-			},
-			{
 				id: 'file.navigate-back',
 				label: m.file_command_history_back(),
 				category: 'Navigation',

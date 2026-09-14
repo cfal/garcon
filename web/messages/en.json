@@ -2460,7 +2460,6 @@
 	"editor_command_delete_line": "Delete Line",
 	"editor_command_select_next_occurrence": "Select Next Occurrence",
 	"file_command_open_to_side": "Open to Side",
-	"file_command_open_known": "Open Known File",
 	"file_command_history_back": "Go Back in File History",
 	"file_command_history_forward": "Go Forward in File History",
 	"file_command_reveal": "Reveal Active File in Explorer",
