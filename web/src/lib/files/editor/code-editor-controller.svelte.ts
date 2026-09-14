@@ -9,7 +9,6 @@ import {
 	highlightActiveLine,
 	getDialog,
 	keymap,
-	panels,
 } from '@codemirror/view';
 import {
 	EditorSelection,
@@ -50,6 +49,7 @@ import {
 	gotoLine,
 	openSearchPanel,
 	search,
+	searchKeymap,
 	selectNextOccurrence,
 } from '@codemirror/search';
 import { loadCodeMirrorLanguageForFile } from '$lib/files/editor/language-loader.js';
@@ -98,10 +98,8 @@ export type FileEditorCommand =
 	| 'select-next-occurrence';
 
 export interface EditorStatusSnapshot {
-	version: number;
 	line: number;
 	column: number;
-	selectionCount: number;
 	selectedCharacters: number;
 	indentation: string;
 	eol: 'LF' | 'CRLF' | 'CR';
@@ -123,6 +121,9 @@ const CONFIGURABLE_EDITOR_BINDINGS = new Set([
 ]);
 const retainedDefaultKeymap = defaultKeymap.filter(
 	(binding) => !binding.key || !CONFIGURABLE_EDITOR_BINDINGS.has(binding.key),
+);
+const retainedSearchKeymap = searchKeymap.filter(
+	(binding) => binding.run !== openSearchPanel && binding.run !== gotoLine,
 );
 const EDITOR_COMMANDS: Record<
 	Exclude<FileEditorCommand, 'undo' | 'redo' | 'replace'>,
@@ -203,7 +204,10 @@ export class CodeEditorController {
 					return;
 				}
 				const current = this.session.editorState;
-				if (current) this.session.editorState = current.update(spec).state;
+				if (current) {
+					this.session.editorState = current.update(spec).state;
+					this.#statusVersion += 1;
+				}
 			},
 			replaceDocument: (spec) => {
 				const view = this.#view;
@@ -229,7 +233,7 @@ export class CodeEditorController {
 	}
 
 	get status(): EditorStatusSnapshot {
-		const statusVersion = this.#statusVersion;
+		this.#statusVersion;
 		const current = this.#view?.state ?? this.session.editorState;
 		const selection = current?.selection.main;
 		const line = current && selection ? current.doc.lineAt(selection.head) : null;
@@ -237,10 +241,8 @@ export class CodeEditorController {
 			? current.selection.ranges.reduce((sum, range) => sum + range.to - range.from, 0)
 			: 0;
 		return {
-			version: statusVersion,
 			line: line?.number ?? 1,
 			column: line && selection ? selection.head - line.from + 1 : 1,
-			selectionCount: current?.selection.ranges.length ?? 1,
 			selectedCharacters,
 			indentation: this.#indentationLabel(current?.doc ?? this.#runtime.canonicalState.doc),
 			eol: lineSeparatorLabel(this.session.document.lineSeparator),
@@ -399,6 +401,7 @@ export class CodeEditorController {
 		const view = this.#view;
 		if (view) view.update([transaction]);
 		this.session.editorState = transaction.state;
+		if (!view) this.#statusVersion += 1;
 		this.session.pendingSourcePresentation = null;
 		const scrollLeft = this.session.textScrollLeft;
 		const scrollTop = this.session.textScrollTop;
@@ -500,7 +503,6 @@ export class CodeEditorController {
 				bracketMatching(),
 				highlightActiveLine(),
 				foldGutter(),
-				panels(),
 				fileSearchScope,
 				search({ top: true, createPanel: createFileSearchPanel }),
 				Prec.high(
@@ -521,6 +523,7 @@ export class CodeEditorController {
 				),
 				keymap.of([
 					...retainedDefaultKeymap,
+					...retainedSearchKeymap,
 					...foldKeymap,
 					{ key: 'Tab', run: indentMore, shift: indentLess },
 				]),
@@ -561,6 +564,7 @@ export class CodeEditorController {
 			this.session.readOnly ||
 			this.session.refreshing ||
 			this.session.document.recoveryGuard ||
+			this.session.document.resolvingRecovery ||
 			this.session.document.recoveredCopies.length > 0 ||
 			this.session.document.mixedLineEndings
 		) {

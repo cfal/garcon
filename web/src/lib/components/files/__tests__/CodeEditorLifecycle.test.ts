@@ -1,5 +1,6 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
@@ -43,6 +44,9 @@ describe('CodeEditor lifecycle', () => {
 				search.focus();
 				const guards = [
 					(value: boolean) => {
+						documentState.resolvingRecovery = value;
+					},
+					(value: boolean) => {
 						documentState.recoveryGuard = value;
 					},
 					(value: boolean) => {
@@ -61,6 +65,32 @@ describe('CodeEditor lifecycle', () => {
 					expect(document.activeElement).toBe(search);
 					guard(false);
 					await waitFor(() => expect(session.editorState?.facet(EditorState.readOnly)).toBe(false));
+				}
+				bridge.deactivate();
+				controller.restorePresentation({ line: 1, column: 6, endLine: 1, endColumn: 6 }, []);
+				await waitFor(() => expect(rendered.getByText('Ln 1, Col 6')).toBeTruthy());
+				const sibling = new FileViewSession(documentState);
+				const siblingController = new CodeEditorController(sibling, {
+					editorThemeId: 'standard-light',
+					wordWrap: false,
+					showLineNumbers: true,
+					fontSize: 14,
+				});
+				const siblingHost = document.createElement('div');
+				document.body.append(siblingHost);
+				try {
+					siblingController.attach(siblingHost);
+					const view = EditorView.findFromDOM(
+						siblingHost.querySelector<HTMLElement>('.cm-editor')!,
+					)!;
+					view.dispatch({ changes: { from: 0, insert: 'new\n' }, userEvent: 'input.type' });
+					await waitFor(() => expect(rendered.getByText('Ln 2, Col 6')).toBeTruthy());
+					await bridge.activate(true);
+					expect(rendered.getByText('Ln 2, Col 6')).toBeTruthy();
+				} finally {
+					siblingController.dispose();
+					sibling.dispose();
+					siblingHost.remove();
 				}
 			} finally {
 				rendered.unmount();

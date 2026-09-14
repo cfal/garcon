@@ -102,6 +102,18 @@ describe('File editor controls', () => {
       });
       await search.fill('one');
       await surface.locator('.cm-search-results').filter({ hasText: '2 matches' }).waitFor();
+      await source.focus();
+      await source.press('Control+Home');
+      await source.press('F3');
+      await surface.locator('.cm-search-results').filter({ hasText: '1 of 2' }).waitFor();
+      await source.press('F3');
+      await surface.locator('.cm-search-results').filter({ hasText: '2 of 2' }).waitFor();
+      await source.press('Shift+F3');
+      await surface.locator('.cm-search-results').filter({ hasText: '1 of 2' }).waitFor();
+      await source.press('Control+g');
+      await surface.locator('.cm-search-results').filter({ hasText: '2 of 2' }).waitFor();
+      await source.press('Control+Shift+g');
+      await surface.locator('.cm-search-results').filter({ hasText: '1 of 2' }).waitFor();
       expect(await surface.getByRole('textbox', { name: 'Replace', exact: true }).isVisible()).toBe(
         false,
       );

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { history } from '@codemirror/commands';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
@@ -196,6 +196,42 @@ describe('CodeEditorController', () => {
 		expect(search.getAttribute('aria-invalid')).toBe('false');
 	});
 
+	it('keeps standard search navigation and selection bindings in the editor scope', () => {
+		const { session, controller } = createController();
+		session.content = 'word word word';
+		const host = parent();
+		controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		view.dispatch({ selection: { anchor: 0, head: 4 } });
+		controller.run('find');
+		const search = host.querySelector<HTMLInputElement>('input[name="search"]')!;
+		search.value = 'word';
+		search.dispatchEvent(new Event('input'));
+		for (const [key, ctrlKey, shiftKey, expected] of [
+			['F3', false, false, 5],
+			['F3', false, true, 0],
+			['g', true, false, 5],
+			['G', true, true, 0],
+		] as const) {
+			const event = new KeyboardEvent('keydown', {
+				key,
+				keyCode: key === 'F3' ? 114 : 71,
+				ctrlKey,
+				shiftKey,
+				bubbles: true,
+				cancelable: true,
+			});
+			expect(runScopeHandlers(view, event, 'editor')).toBe(true);
+			expect(view.state.selection.main.from).toBe(expected);
+		}
+		runScopeHandlers(
+			view,
+			new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true, cancelable: true }),
+			'editor',
+		);
+		expect(view.state.selection.ranges).toHaveLength(2);
+	});
+
 	it('counts only the captured selection and reports invalid regex without native controls', async () => {
 		const { session, controller } = createController();
 		session.content = 'word word word';
@@ -368,6 +404,7 @@ describe('CodeEditorController', () => {
 				bubbles: true,
 				cancelable: true,
 			}),
+			'editor',
 		);
 
 		// Direct dispatch behavior is covered by CodeMirror; the controller keeps

@@ -76,6 +76,7 @@
 		session.readOnly;
 		session.refreshing;
 		session.document.recoveryGuard;
+		session.document.resolvingRecovery;
 		session.document.recoveredCopies.length;
 		session.document.mixedLineEndings;
 		session.editor?.reconfigure();

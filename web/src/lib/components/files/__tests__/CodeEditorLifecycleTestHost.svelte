@@ -8,6 +8,7 @@
 		type SurfaceFrameBridge,
 	} from '$lib/workspace/surface-frame-context.js';
 	import CodeEditor from '../CodeEditor.svelte';
+	import FileEditorStatus from '../FileEditorStatus.svelte';
 
 	let {
 		session,
@@ -23,3 +24,4 @@
 </script>
 
 <CodeEditor {session} />
+<FileEditorStatus {session} />
