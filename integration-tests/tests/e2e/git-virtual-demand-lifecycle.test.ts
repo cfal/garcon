@@ -26,7 +26,10 @@ async function switchWorkspaceSurface(
   readySelector: string,
 ): Promise<void> {
   await page.evaluate(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
+    // Keeps Lightpanda's CDP acknowledgement outside the palette's DOM update.
+    setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
+    }, 0);
   });
   await page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
   await page.evaluate((label) => {
