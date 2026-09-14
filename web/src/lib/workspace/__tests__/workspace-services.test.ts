@@ -22,6 +22,7 @@ import { FILE_SHORTCUT_COMMANDS } from '../workspace-shortcuts.js';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { FileViewRecovery } from '$lib/files/persistence/file-view-recovery.js';
+import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import * as draftRepositories from '$lib/files/persistence/file-draft-repository.js';
 import { FILE_RECOVERY_DEPLOYMENT_ID } from '$lib/files/persistence/file-recovery-identity.js';
 import {
@@ -195,6 +196,75 @@ describe('createWorkspaceServices', () => {
 			Object.assign(session.document, original);
 		}
 		expect(save).toHaveBeenCalledOnce();
+	});
+
+	it('uses editor admission for every palette and shortcut editor command', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const session = new FileSession(
+			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.txt' },
+			'command-editor',
+		);
+		session.content = 'local text';
+		const controller = new CodeEditorController(session, {
+			editorThemeId: 'standard-light',
+			wordWrap: false,
+			showLineNumbers: true,
+			fontSize: 14,
+		});
+		session.editor = controller;
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const host = document.createElement('div');
+		document.body.append(host);
+		const context = { viewId: session.id, surfaceId: `file:${session.id}` };
+		const commands = services.commands.commands.filter((command) => command.category === 'Editor');
+		try {
+			for (const command of commands) expect(command.isEnabled(context)).toBe(false);
+			controller.attach(host);
+			const run = vi.spyOn(controller, 'run');
+			for (const guard of [
+				{ readOnly: true },
+				{ refreshing: true },
+				{ mixedLineEndings: true },
+				{ recoveryGuard: true },
+				{ resolvingRecovery: true },
+				{
+					recoveredCopies: [
+						{ id: 'copy', content: 'recovered', savedAt: 1, hasUnknownSubmission: false },
+					],
+				},
+			] satisfies Partial<FileDocumentState>[]) {
+				const original = Object.fromEntries(
+					Object.keys(guard).map((key) => [key, Reflect.get(session.document, key)]),
+				);
+				Object.assign(session.document, guard);
+				for (const command of commands) {
+					const permitted = [
+						'editor.find',
+						'editor.go-to-line',
+						'editor.go-to-matching-bracket',
+						'editor.fold',
+						'editor.unfold',
+						'editor.fold-all',
+						'editor.unfold-all',
+						'editor.select-next-occurrence',
+					].includes(command.id);
+					expect(command.isEnabled(context), command.id).toBe(permitted);
+					if (!permitted)
+						await expect(services.commands.execute(command.id, context)).resolves.toBe(false);
+				}
+				Object.assign(session.document, original);
+			}
+			expect(run).not.toHaveBeenCalled();
+			for (const saveOutcome of ['idle', 'saving', 'unknown'] as const) {
+				session.document.saveOutcome = saveOutcome;
+				for (const command of commands) expect(command.isEnabled(context), command.id).toBe(true);
+			}
+		} finally {
+			controller.dispose();
+			session.dispose();
+			host.remove();
+		}
 	});
 
 	it.each([

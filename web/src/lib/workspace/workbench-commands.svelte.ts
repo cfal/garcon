@@ -169,7 +169,7 @@ export class WorkbenchCommandRegistry {
 			isVisible: ({ viewId }) => viewId !== null,
 			isEnabled: ({ viewId }) => {
 				const session = viewId ? this.deps.files.get(viewId) : null;
-				return Boolean(session?.editor?.isAttached);
+				return session?.editor?.canRun(command) ?? false;
 			},
 			run: ({ viewId }) => {
 				if (viewId) this.deps.files.get(viewId)?.editor?.run(command);

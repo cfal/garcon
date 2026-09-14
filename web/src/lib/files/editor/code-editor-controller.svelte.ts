@@ -125,6 +125,16 @@ const retainedDefaultKeymap = defaultKeymap.filter(
 const retainedSearchKeymap = searchKeymap.filter(
 	(binding) => binding.run !== openSearchPanel && binding.run !== gotoLine,
 );
+const NON_MUTATING_COMMANDS = new Set<FileEditorCommand>([
+	'find',
+	'go-to-line',
+	'go-to-matching-bracket',
+	'fold',
+	'unfold',
+	'fold-all',
+	'unfold-all',
+	'select-next-occurrence',
+]);
 const EDITOR_COMMANDS: Record<
 	Exclude<FileEditorCommand, 'undo' | 'redo' | 'replace'>,
 	(view: EditorView) => boolean
@@ -417,7 +427,7 @@ export class CodeEditorController {
 
 	run(command: FileEditorCommand): boolean {
 		const view = this.#view;
-		if (!view) return false;
+		if (!view || !this.canRun(command)) return false;
 		if (command === 'undo') return this.#runtime.undo(this.session.id);
 		if (command === 'redo') return this.#runtime.redo(this.session.id);
 		if (command === 'find' || command === 'replace' || command === 'go-to-line')
@@ -426,6 +436,21 @@ export class CodeEditorController {
 			return openFileReplacePanel(view);
 		}
 		return EDITOR_COMMANDS[command](view);
+	}
+
+	canRun(command: FileEditorCommand): boolean {
+		return this.isAttached && (NON_MUTATING_COMMANDS.has(command) || !this.#readOnly);
+	}
+
+	get #readOnly(): boolean {
+		return (
+			this.session.readOnly ||
+			this.session.refreshing ||
+			this.session.document.recoveryGuard ||
+			this.session.document.resolvingRecovery ||
+			this.session.document.recoveredCopies.length > 0 ||
+			this.session.document.mixedLineEndings
+		);
 	}
 
 	closeSearch(): boolean {
@@ -560,14 +585,7 @@ export class CodeEditorController {
 		extensions.push(editorThemeExtension(this.settings.editorThemeId));
 		if (this.settings.showLineNumbers) extensions.push(lineNumbers());
 		if (this.settings.wordWrap) extensions.push(EditorView.lineWrapping);
-		if (
-			this.session.readOnly ||
-			this.session.refreshing ||
-			this.session.document.recoveryGuard ||
-			this.session.document.resolvingRecovery ||
-			this.session.document.recoveredCopies.length > 0 ||
-			this.session.document.mixedLineEndings
-		) {
+		if (this.#readOnly) {
 			extensions.push(EditorState.readOnly.of(true));
 		}
 		return extensions;
