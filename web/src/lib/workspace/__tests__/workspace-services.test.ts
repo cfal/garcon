@@ -18,6 +18,7 @@ import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 import { windowNodeById } from '../window-tree.js';
+import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { FILE_SHORTCUT_COMMANDS } from '../workspace-shortcuts.js';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
@@ -151,6 +152,47 @@ describe('createWorkspaceServices', () => {
 		vi.restoreAllMocks();
 		vi.useRealTimers();
 	});
+
+	it.each(['known', 'back', 'forward'] as const)(
+		'opens %s file locations in the command context window',
+		async (action) => {
+			rootLocalSettings = createLocalSettingsStore();
+			({ services } = assembleWorkspaceServices(rootLocalSettings));
+			await services.files.initializeRecovery('test-user');
+			const location: FileLocation = {
+				key: '["/workspace","first.md"]',
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'first.md',
+				displayPath: 'first.md',
+				revision: null,
+				line: 1,
+				column: 1,
+				viewPreference: 'preview',
+				timestamp: 1,
+			};
+			const context = { viewId: null, surfaceId: 'singleton:files' };
+			const open = vi.spyOn(services.files, 'open').mockResolvedValue(null);
+			if (action === 'known') {
+				vi.spyOn(services.commands, 'context').mockReturnValue(context);
+				await services.commands.openLocation(location);
+			} else {
+				const navigation = services.files.navigation!;
+				navigation.record(location);
+				navigation.record({
+					...location,
+					key: '["/workspace","second.md"]',
+					normalizedRelativePath: 'second.md',
+					displayPath: 'second.md',
+				});
+				if (action === 'forward') {
+					navigation.back();
+					navigation.completeNavigation(true);
+				}
+				await services.commands.execute(`file.navigate-${action}`, context);
+			}
+			expect(open).toHaveBeenCalledWith(expect.objectContaining({ origin: 'window-files' }));
+		},
+	);
 
 	it('uses the write-admission policy for palette and shortcut Save commands', async () => {
 		rootLocalSettings = createLocalSettingsStore();

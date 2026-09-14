@@ -42,7 +42,7 @@
 				description: m.command_known_file_description(),
 				category: 'File' as const,
 				isEnabled: () => true,
-				run: () => commandRegistry.openLocation(location),
+				run: (context) => commandRegistry.openLocation(location, context),
 			})),
 		];
 	});

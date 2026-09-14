@@ -130,12 +130,15 @@ export class WorkbenchCommandRegistry {
 		};
 	}
 
-	async openLocation(location: FileLocation): Promise<boolean> {
+	async openLocation(location: FileLocation, context = this.context()): Promise<boolean> {
+		const origin = context.surfaceId
+			? windowIdOfSurface(this.deps.workspace.layout.snapshot.desktopRoot, context.surfaceId)
+			: null;
 		const opened = await this.deps.files.open({
 			fileRootPath: location.canonicalFileRootPath,
 			relativePath: location.normalizedRelativePath,
 			mode: rendererModeForNavigation(location.viewPreference),
-			origin: 'window-main',
+			origin: origin ?? 'window-main',
 			reason: 'user-open',
 			line: location.line,
 			col: location.column,
@@ -143,12 +146,15 @@ export class WorkbenchCommandRegistry {
 		return opened !== null;
 	}
 
-	async #navigateHistory(direction: 'back' | 'forward'): Promise<void> {
+	async #navigateHistory(
+		direction: 'back' | 'forward',
+		context: WorkbenchCommandContext,
+	): Promise<void> {
 		const navigation = this.deps.files.navigation;
 		const location = navigation?.[direction]();
 		if (!navigation || !location) return;
 		try {
-			navigation.completeNavigation(await this.openLocation(location));
+			navigation.completeNavigation(await this.openLocation(location, context));
 		} catch (error) {
 			navigation.completeNavigation(false);
 			throw error;
@@ -252,8 +258,8 @@ export class WorkbenchCommandRegistry {
 				label: m.file_command_history_back(),
 				category: 'Navigation',
 				isEnabled: always,
-				run: async () => {
-					await this.#navigateHistory('back');
+				run: async (context) => {
+					await this.#navigateHistory('back', context);
 				},
 			},
 			{
@@ -261,8 +267,8 @@ export class WorkbenchCommandRegistry {
 				label: m.file_command_history_forward(),
 				category: 'Navigation',
 				isEnabled: always,
-				run: async () => {
-					await this.#navigateHistory('forward');
+				run: async (context) => {
+					await this.#navigateHistory('forward', context);
 				},
 			},
 			{
