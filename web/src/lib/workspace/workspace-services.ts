@@ -201,6 +201,14 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		projectResolution,
 	);
 	let placement: WorkspaceCoordinator | null = null;
+	let filePresentations = new Map<string, { host: PresentationHostId | null; visible: boolean }>();
+	const filePlacement = (sessionId: string): PresentationHostId | null => {
+		if (!placement) return null;
+		const surfaceId = fileSurfaceId(sessionId);
+		if (placement.layout.snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
+		if (placement.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId)) return 'mobile';
+		return placement.windowOf(surfaceId);
+	};
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
 		connection: deps.ws,
@@ -399,12 +407,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 					placement!.restoreFileSession(sessionId, target, publication),
 				focusFileSession: (sessionId) => placement!.focusFileSession(sessionId),
 				recoveryHost: () => (deps.appShell.isMobile ? 'mobile' : placement!.defaultWindowId),
-				filePlacement: (sessionId) => {
-					const surfaceId = fileSurfaceId(sessionId);
-					if (placement!.layout.snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
-					if (placement!.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId)) return 'mobile';
-					return placement!.windowOf(surfaceId);
-				},
+				filePlacement,
 				resolveRestoredPlacement: (host) => {
 					if (host === 'mobile') return undefined;
 					if (host === 'dialog') return { type: 'dialog' };
@@ -458,10 +461,16 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished();
 			persistence.schedule(snapshot);
+			const next = new Map<string, { host: PresentationHostId | null; visible: boolean }>();
 			for (const session of files.all) {
-				session.notePresentationChanged();
-				files.viewVisibilityChanged(session.id);
+				const host = filePlacement(session.id);
+				const visible = placement?.isSurfacePresented(fileSurfaceId(session.id)) ?? false;
+				const previous = filePresentations.get(session.id);
+				if (previous?.host !== host) session.notePresentationChanged();
+				if (previous?.visible !== visible) files.viewVisibilityChanged(session.id);
+				next.set(session.id, { host, visible });
 			}
+			filePresentations = next;
 		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,

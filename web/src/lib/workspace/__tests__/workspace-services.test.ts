@@ -306,7 +306,7 @@ describe('createWorkspaceServices', () => {
 		});
 	});
 
-	it('coalesces published layout changes and persists the latest file placement', async () => {
+	it('persists changed file placement without polling or writing for unrelated layout changes', async () => {
 		localStorage.clear();
 		const repository = draftRepositories.createMemoryFileDraftRepository();
 		vi.spyOn(draftRepositories, 'createFileDraftRepository').mockReturnValue(repository);
@@ -337,6 +337,7 @@ describe('createWorkspaceServices', () => {
 		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(250);
 		putView.mockClear();
+		const visibilityChanged = vi.spyOn(workspace.files, 'viewVisibilityChanged');
 
 		const surfaceId = `file:${opened.id}`;
 		await workspace.coordinator.moveTabToNewWindow(surfaceId, DEFAULT_WINDOW, 'right');
@@ -347,7 +348,7 @@ describe('createWorkspaceServices', () => {
 		const partition = workspace.layout.snapshot.desktopRoot;
 		if (partition.type !== 'partition') throw new Error('Expected split workspace');
 		await workspace.coordinator.setPartitionRatio(partition.id, 0.6);
-		await vi.advanceTimersByTimeAsync(249);
+		await vi.advanceTimersByTimeAsync(149);
 		expect(putView).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(1);
 		expect(putView).toHaveBeenCalledOnce();
@@ -357,6 +358,12 @@ describe('createWorkspaceServices', () => {
 		await expect(
 			repository.getViews('test-user', FILE_RECOVERY_DEPLOYMENT_ID, 'test-client'),
 		).resolves.toEqual([expect.objectContaining({ viewId: opened.id, placement: destination })]);
+		putView.mockClear();
+		visibilityChanged.mockClear();
+		await workspace.coordinator.setPartitionRatio(partition.id, 0.7);
+		await vi.advanceTimersByTimeAsync(250);
+		expect(putView).not.toHaveBeenCalled();
+		expect(visibilityChanged).not.toHaveBeenCalled();
 	});
 
 	it('restores the browser-owned file window topology before file recovery', () => {

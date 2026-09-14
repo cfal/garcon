@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DocumentPollingCoordinator } from '$lib/files/persistence/document-polling-coordinator.js';
 
 function documentTarget() {
@@ -25,6 +25,80 @@ function documentTarget() {
 }
 
 describe('DocumentPollingCoordinator', () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it('keeps polling cadence through unchanged visibility and does not poll hidden views immediately', async () => {
+		vi.useFakeTimers();
+		let visible = true;
+		const poll = vi.fn(async () => undefined);
+		const coordinator = new DocumentPollingCoordinator({
+			poll,
+			isVisible: () => visible,
+			documentTarget: documentTarget(),
+		});
+		coordinator.add('document');
+		await vi.advanceTimersByTimeAsync(10_000);
+		coordinator.visibilityChanged('document');
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(poll).toHaveBeenCalledTimes(2);
+		visible = false;
+		coordinator.visibilityChanged('document');
+		expect(poll).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(poll).toHaveBeenCalledTimes(3);
+		visible = true;
+		coordinator.visibilityChanged('document');
+		expect(poll).toHaveBeenCalledTimes(4);
+		coordinator.destroy();
+	});
+
+	it('deduplicates in-flight checks and retries after a rejected poll', async () => {
+		vi.useFakeTimers();
+		const pending = Promise.withResolvers<void>();
+		const poll = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined);
+		const error = new Error('revision unavailable');
+		const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const target = documentTarget();
+		const coordinator = new DocumentPollingCoordinator({
+			poll,
+			isVisible: () => true,
+			documentTarget: target,
+		});
+		coordinator.add('document');
+		target.setVisibility('hidden');
+		target.setVisibility('visible');
+		expect(poll).toHaveBeenCalledOnce();
+		pending.reject(error);
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(report).toHaveBeenCalledWith('File revision polling failed', error);
+		expect(poll).toHaveBeenCalledTimes(2);
+		coordinator.destroy();
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(poll).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not let a removed in-flight poll replace a new registration timer', async () => {
+		vi.useFakeTimers();
+		const pending = Promise.withResolvers<void>();
+		const poll = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined);
+		const coordinator = new DocumentPollingCoordinator({
+			poll,
+			isVisible: () => true,
+			documentTarget: documentTarget(),
+		});
+		coordinator.add('document');
+		coordinator.remove('document');
+		coordinator.add('document');
+		await vi.advanceTimersByTimeAsync(10_000);
+		pending.resolve();
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(poll).toHaveBeenCalledTimes(3);
+		coordinator.destroy();
+	});
+
 	it('polls one document regardless of how many views reference it', async () => {
 		const poll = vi.fn(async () => undefined);
 		const target = documentTarget();
