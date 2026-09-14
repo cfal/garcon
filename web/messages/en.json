@@ -2528,6 +2528,7 @@
 	"file_recovery_compare_named": "Compare recovered copy {number}, {savedAt}",
 	"file_recovery_export_named": "Export recovered copy {number}, {savedAt}",
 	"file_recovery_checkpoint_failed": "Could not preserve browser recovery for {fileName}: {detail}",
+	"file_recovery_storage_blocked": "Browser recovery storage is blocked by another tab. Close older tabs and retry recovery.",
 	"editor_search_result_position": "{current} of {total}",
 	"editor_search_match_count": [
 		{

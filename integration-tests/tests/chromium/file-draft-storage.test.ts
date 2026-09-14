@@ -42,10 +42,15 @@ describe('File draft storage failures', () => {
       await page.goto(`http://127.0.0.1:${server.port}`);
       const result = await page.evaluate(async (source) => {
         const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-        const { createFileDraftRepository, FILE_DRAFT_DATABASE_NAME, FILE_DRAFT_SCHEMA_VERSION } =
-          (await import(
-            url
-          )) as typeof import('../../../web/src/lib/files/persistence/file-draft-repository.js');
+        const {
+          createFileDraftRepository,
+          createMemoryFileDraftRepository,
+          FILE_DRAFT_DATABASE_NAME,
+          FILE_DRAFT_SCHEMA_VERSION,
+          FILE_CLOSED_DRAFT_LIMIT,
+        } = (await import(
+          url
+        )) as typeof import('../../../web/src/lib/files/persistence/file-draft-repository.js');
         URL.revokeObjectURL(url);
         const unhandled: string[] = [];
         window.addEventListener('unhandledrejection', (event) => {
@@ -53,6 +58,20 @@ describe('File draft storage failures', () => {
           event.preventDefault();
         });
         const repository = createFileDraftRepository();
+        const blocker = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, 1);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        let blockedMessage = '';
+        try {
+          await repository.getViews('synthetic-user', 'synthetic-deployment', 'synthetic-session');
+        } catch (error) {
+          blockedMessage = (error as Error).message;
+        } finally {
+          blocker.close();
+        }
+        await repository.getViews('synthetic-user', 'synthetic-deployment', 'synthetic-session');
         const record = {
           schemaVersion: 1 as const,
           userNamespace: 'synthetic-user',
@@ -163,7 +182,116 @@ describe('File draft storage failures', () => {
           record.deploymentId,
           record.browserSessionId,
         );
-        repository.close();
+
+        const conformance: unknown[] = [];
+        for (const candidate of [repository, createMemoryFileDraftRepository()]) {
+          const user = 'conformance-user';
+          const deployment = 'conformance-deployment';
+          const session = 'conformance-session';
+          const draft = {
+            ...currentDraft,
+            documentId: 'conformance-current',
+            userNamespace: user,
+            deploymentId: deployment,
+            browserSessionId: session,
+          };
+          const other = {
+            ...draft,
+            documentId: 'other',
+            localDocumentId: 'other',
+            content: 'other edit',
+          };
+          await candidate.putDraft(draft);
+          await candidate.putDraft({ ...draft, generation: 0, content: 'stale' });
+          await candidate.putDraft(other);
+          const adopted = await candidate.adoptDraft(other, 'adopted');
+          await candidate.resolveDraftConflict(adopted, {
+            ...draft,
+            generation: 2,
+            content: adopted.content,
+          });
+          await candidate.deleteDraft(draft.documentId, 1);
+          const protectedDrafts = await candidate.getDrafts(user, deployment, session);
+          const scopedView = {
+            ...record,
+            userNamespace: user,
+            deploymentId: deployment,
+            browserSessionId: session,
+          };
+          await candidate.putView(scopedView);
+          await candidate.putView({ ...scopedView, browserSessionId: 'other-session' });
+          const viewRead = await candidate.getViews(user, deployment, session);
+          viewRead[0]!.line = 99;
+          const reread = await candidate.getViews(user, deployment, session);
+          const recent = {
+            schemaVersion: 1 as const,
+            userNamespace: user,
+            deploymentId: deployment,
+            key: 'recent',
+            canonicalFileRootPath: '/synthetic-project',
+            normalizedRelativePath: 'file.txt',
+            displayPath: 'file.txt',
+            revision: 'v1:initial',
+            line: 1,
+            column: 1,
+            viewPreference: 'source' as const,
+            timestamp: 1,
+          };
+          await candidate.putRecent(recent);
+          const recentRead = await candidate.getRecents(user, deployment);
+          recentRead[0]!.line = 99;
+          await candidate.putNavigation({
+            schemaVersion: 1,
+            userNamespace: user,
+            deploymentId: deployment,
+            key: JSON.stringify([user, deployment]),
+            entries: [recent],
+            index: 0,
+            updatedAt: 1,
+          });
+          const history = await candidate.getNavigation(user, deployment);
+          const blockedClear = await candidate.clearNamespaceIfUnprotected(
+            user,
+            deployment,
+            session,
+          );
+          await candidate.deleteDraft(draft.documentId, 2);
+          const cleared = await candidate.clearNamespaceIfUnprotected(user, deployment, session);
+          const otherViews = await candidate.getViews(user, deployment, 'other-session');
+          await candidate.deleteView(scopedView.viewId, user, deployment, 'other-session');
+          const emptyViews = await candidate.getViews(user, deployment, 'other-session');
+          for (let index = 0; index < FILE_CLOSED_DRAFT_LIMIT; index++) {
+            await candidate.putDraft({ ...draft, documentId: `closed-${index}`, closed: true });
+          }
+          let closedFailure = false;
+          try {
+            await candidate.putDraft({ ...draft, documentId: 'over-limit', closed: true });
+          } catch {
+            closedFailure = true;
+          }
+          await candidate.putDraft({
+            ...draft,
+            userNamespace: 'another-user',
+            documentId: 'separate-budget',
+            closed: true,
+          });
+          await candidate.putDraft({
+            ...draft,
+            browserSessionId: 'another-session',
+            documentId: 'separate-session',
+            closed: true,
+          });
+          conformance.push({
+            protectedDrafts: protectedDrafts.map((entry) => entry.content),
+            line: reread[0]?.line,
+            history,
+            blockedClear,
+            cleared,
+            otherViews: otherViews.length,
+            emptyViews: emptyViews.length,
+            closedFailure,
+          });
+        }
 
         await new Promise<void>((resolve, reject) => {
           const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, FILE_DRAFT_SCHEMA_VERSION + 1);
@@ -173,7 +301,7 @@ describe('File draft storage failures', () => {
             resolve();
           };
         });
-        const failedRepository = createFileDraftRepository();
+        const failedRepository = repository;
         const failedRead = failedRepository
           .getViews('synthetic-user', 'synthetic-deployment', 'synthetic-session')
           .catch((error: Error) => {
@@ -183,7 +311,15 @@ describe('File draft storage failures', () => {
         await failedRead;
         // Lets the browser report promise rejections after the transaction events have drained.
         await new Promise((resolve) => setTimeout(resolve, 100));
-        return { failures, retained, unhandled, afterAbortedChoice, afterChoice };
+        return {
+          failures,
+          retained,
+          unhandled,
+          afterAbortedChoice,
+          afterChoice,
+          blockedMessage,
+          conformance,
+        };
       }, source);
       expect(result.failures).toEqual([
         'AbortError',
@@ -196,6 +332,17 @@ describe('File draft storage failures', () => {
       expect(result.afterChoice).toHaveLength(1);
       expect(result.afterChoice[0]?.content).toBe('alternate edit');
       expect(result.unhandled).toEqual([]);
+      expect(result.blockedMessage).toContain('blocked by another tab');
+      expect(result.conformance[0]).toEqual(result.conformance[1]);
+      expect(result.conformance[0]).toMatchObject({
+        protectedDrafts: ['other edit'],
+        line: 1,
+        blockedClear: false,
+        cleared: true,
+        otherViews: 1,
+        emptyViews: 0,
+        closedFailure: true,
+      });
     } finally {
       await browser.close();
       server.stop(true);

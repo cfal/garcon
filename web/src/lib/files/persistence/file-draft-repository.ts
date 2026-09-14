@@ -141,10 +141,13 @@ export function createFileDraftRepository(
 	let databasePromise: Promise<IDBDatabase> | null = null;
 	const open = () => {
 		if (!databasePromise) {
-			databasePromise = openDatabase(indexedDb).catch((error) => {
-				databasePromise = null;
+			const opening = openDatabase(indexedDb, () => {
+				if (databasePromise === opening) databasePromise = null;
+			}).catch((error) => {
+				if (databasePromise === opening) databasePromise = null;
 				throw error;
 			});
+			databasePromise = opening;
 		}
 		return databasePromise;
 	};
@@ -158,14 +161,7 @@ export function createFileDraftRepository(
 				const current = existing.find((entry) => entry.documentId === record.documentId);
 				if (current && current.generation > record.generation) return;
 				const retained = existing.filter((entry) => entry.documentId !== record.documentId);
-				const total = retained.reduce((sum, entry) => sum + draftBytes(entry), draftBytes(record));
-				if (total > FILE_DRAFT_TOTAL_LIMIT_BYTES) {
-					throw new Error(m.file_recovery_storage_limit());
-				}
-				const closed = retained.filter((entry) => entry.closed && entry.unknownSubmission === null);
-				if (record.closed && closed.length >= FILE_CLOSED_DRAFT_LIMIT) {
-					throw new Error(m.file_recovery_closed_limit());
-				}
+				assertDraftCapacity(record, retained);
 				await indexedDbRequest(store.put(record));
 			});
 		},
@@ -375,6 +371,10 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 			assertDraftSize(record);
 			const current = drafts.get(record.documentId);
 			if (current && current.generation > record.generation) return;
+			assertDraftCapacity(
+				record,
+				[...drafts.values()].filter((entry) => entry.documentId !== record.documentId),
+			);
 			drafts.set(record.documentId, structuredClone(record));
 		},
 		async adoptDraft(record, localDocumentId) {
@@ -407,6 +407,7 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 			return [...drafts.values()]
 				.filter(
 					(record) =>
+						record.schemaVersion === 1 &&
 						record.userNamespace === userNamespace &&
 						record.deploymentId === deploymentId &&
 						record.browserSessionId === browserSessionId,
@@ -446,12 +447,14 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 			}
 		},
 		async getViews(userNamespace, deploymentId, browserSessionId) {
-			return [...views.values()].filter(
-				(record) =>
-					record.userNamespace === userNamespace &&
-					record.deploymentId === deploymentId &&
-					record.browserSessionId === browserSessionId,
-			);
+			return [...views.values()]
+				.filter(
+					(record) =>
+						record.userNamespace === userNamespace &&
+						record.deploymentId === deploymentId &&
+						record.browserSessionId === browserSessionId,
+				)
+				.map((record) => structuredClone(record));
 		},
 		async putRecent(record) {
 			recents.set(
@@ -468,9 +471,12 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 			for (const [key] of scoped.slice(FILE_RECENT_LIMIT)) recents.delete(key);
 		},
 		async getRecents(userNamespace, deploymentId) {
-			return [...recents.values()].filter(
-				(record) => record.userNamespace === userNamespace && record.deploymentId === deploymentId,
-			);
+			return [...recents.values()]
+				.filter(
+					(record) =>
+						record.userNamespace === userNamespace && record.deploymentId === deploymentId,
+				)
+				.map((record) => structuredClone(record));
 		},
 		async putNavigation(record) {
 			navigation.set(record.key, structuredClone(record));
@@ -518,10 +524,22 @@ function keyPathForStore(storeName: string): string {
 	return 'key';
 }
 
-function openDatabase(indexedDb: Pick<IDBFactory, 'open'>): Promise<IDBDatabase> {
+function openDatabase(
+	indexedDb: Pick<IDBFactory, 'open'>,
+	onVersionChange: () => void,
+): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
 		const request = indexedDb.open(FILE_DRAFT_DATABASE_NAME, FILE_DRAFT_SCHEMA_VERSION);
+		let abandoned = false;
+		request.onblocked = () => {
+			abandoned = true;
+			reject(new Error(m.file_recovery_storage_blocked()));
+		};
 		request.onupgradeneeded = () => {
+			if (abandoned) {
+				request.transaction?.abort();
+				return;
+			}
 			for (const storeName of [
 				FILE_DRAFT_STORE_NAME,
 				FILE_VIEW_STORE_NAME,
@@ -534,7 +552,18 @@ function openDatabase(indexedDb: Pick<IDBFactory, 'open'>): Promise<IDBDatabase>
 				});
 			}
 		};
-		request.onsuccess = () => resolve(request.result);
+		request.onsuccess = () => {
+			const database = request.result;
+			if (abandoned) {
+				database.close();
+				return;
+			}
+			database.onversionchange = () => {
+				database.close();
+				onVersionChange();
+			};
+			resolve(database);
+		};
 		request.onerror = () =>
 			reject(request.error ?? new Error(m.file_recovery_storage_open_failed()));
 	});
@@ -641,11 +670,32 @@ function assertRecoveryReplacement(
 		(record) =>
 			record.documentId !== source.documentId && record.documentId !== replacement.documentId,
 	);
+	assertDraftCapacity(replacement, retained);
+}
+
+function assertDraftCapacity(record: SpaFileDraftV1, retained: readonly SpaFileDraftV1[]): void {
+	const scoped = retained.filter(
+		(entry) =>
+			entry.userNamespace === record.userNamespace && entry.deploymentId === record.deploymentId,
+	);
 	if (
-		retained.reduce((sum, record) => sum + draftBytes(record), draftBytes(replacement)) >
+		scoped.reduce((sum, entry) => sum + draftBytes(entry), draftBytes(record)) >
 		FILE_DRAFT_TOTAL_LIMIT_BYTES
 	) {
 		throw new Error(m.file_recovery_storage_limit());
+	}
+	const closed = scoped.filter(
+		(entry) =>
+			entry.browserSessionId === record.browserSessionId &&
+			entry.closed &&
+			entry.unknownSubmission === null,
+	);
+	if (
+		record.closed &&
+		record.unknownSubmission === null &&
+		closed.length >= FILE_CLOSED_DRAFT_LIMIT
+	) {
+		throw new Error(m.file_recovery_closed_limit());
 	}
 }
 
