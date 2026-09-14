@@ -160,10 +160,14 @@ export class FileDocumentIoCoordinator {
 	}
 
 	async ensureEditorForView(session: FileViewSession): Promise<void> {
-		if (session.rendererMode !== 'code' || session.editor) return;
+		const needsEditor = () =>
+			this.options.getSession(session.id) === session &&
+			session.rendererMode === 'code' &&
+			!session.editor;
+		if (!needsEditor()) return;
 		try {
 			const runtime = await this.#loadEditorRuntime();
-			if (this.options.getSession(session.id) !== session || session.editor) return;
+			if (!needsEditor()) return;
 			const recovered = session.document.editorInitializationFailed;
 			session.editor = new runtime.CodeEditorController(
 				session,
@@ -176,6 +180,7 @@ export class FileDocumentIoCoordinator {
 				session.loadErrorRequiresPageReload = false;
 			}
 		} catch (error) {
+			if (!needsEditor()) return;
 			session.loadError = error instanceof Error ? error.message : String(error);
 			session.loadErrorRequiresPageReload = error instanceof ModuleImportError;
 			session.document.editorInitializationFailed = true;
@@ -301,7 +306,6 @@ export class FileDocumentIoCoordinator {
 			}
 			session.document.missing = false;
 			session.isExternallyStale = true;
-			if (session.contentKind !== 'image') await this.loadConflictSnapshot(session);
 		} catch (error) {
 			if (
 				isAbortError(error) ||

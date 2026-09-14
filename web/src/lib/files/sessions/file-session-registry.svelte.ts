@@ -460,7 +460,7 @@ export class FileSessionRegistry {
 		await this.#teardowns.run(session.identityKey, () => this.#destroySession(session));
 	}
 
-	async #destroySession(session: FileViewSession): Promise<void> {
+	#destroySession(session: FileViewSession): void {
 		const sessionId = session.id;
 		if (this.get(sessionId) !== session) return;
 		if (this.guardRequest?.sessionId === sessionId) this.resolveGuard('cancel');
@@ -471,19 +471,29 @@ export class FileSessionRegistry {
 		delete next[sessionId];
 		this.sessions = next;
 		if (document.viewIds.size > 0) return;
-		this.#drafts?.closeDocument(document);
-		this.#io.stopPolling(document.id);
-		this.#documentIdByIdentity.delete(document.identityKey);
-		const documents = { ...this.documents };
-		delete documents[document.id];
-		this.documents = documents;
+		this.#disposeDocument(document);
+	}
+
+	#disposeDocument(document: FileDocumentState): void {
+		if (this.documents[document.id] === document) {
+			this.#drafts?.closeDocument(document);
+			this.#io.stopPolling(document.id);
+			if (this.#documentIdByIdentity.get(document.identityKey) === document.id) {
+				this.#documentIdByIdentity.delete(document.identityKey);
+			}
+			const documents = { ...this.documents };
+			delete documents[document.id];
+			this.documents = documents;
+		}
 		document.dispose();
 	}
 
 	async destroyAll(): Promise<void> {
 		this.#destroyed = true;
 		this.resolveDraft('cancel');
+		this.resolveThreshold('cancel');
 		for (const session of [...this.all]) await this.destroy(session.id);
+		for (const document of Object.values(this.documents)) this.#disposeDocument(document);
 		this.#io.destroy();
 		this.#drafts?.destroy();
 	}
@@ -517,6 +527,7 @@ export class FileSessionRegistry {
 		key: string,
 		request: FileOpenRequest,
 	): Promise<FileViewSession | null> {
+		if (this.#destroyed) return null;
 		if (this.sessionCount >= FILE_SESSION_SOFT_LIMIT && request.reason === 'user-open') {
 			const choice = await new Promise<FileThresholdChoice>((resolve) => {
 				this.#openMainInert(() => {
@@ -528,9 +539,15 @@ export class FileSessionRegistry {
 		await this.#teardowns.drain(key);
 		if (this.#destroyed) return null;
 		const existingDocumentId = this.#documentIdByIdentity.get(key);
-		const existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
-		const document = existingDocument ?? new FileDocumentState(identity, key);
-		if (!(await this.#prepareDraftRecovery(document))) return null;
+		let existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
+		let document = existingDocument ?? new FileDocumentState(identity, key);
+		if (!(await this.#prepareDraftRecovery(document)) || this.#destroyed) return null;
+		if (existingDocument && this.documents[document.id] !== document) {
+			const pendingRecoveryContent = document.pendingRecoveryContent;
+			document = new FileDocumentState(identity, key);
+			document.pendingRecoveryContent = pendingRecoveryContent;
+			existingDocument = null;
+		}
 		const session = new FileViewSession(document);
 		session.rendererMode = resolveFileRendererMode(identity.normalizedRelativePath, request.mode);
 		if (!existingDocument) {
@@ -539,25 +556,21 @@ export class FileSessionRegistry {
 		}
 		session.requestLocation(request.line, request.col);
 		let published = false;
+		let rolledBack = false;
 		const publish = () => {
-			if (published) return;
+			if (published || rolledBack || this.#destroyed) return;
 			published = true;
 			this.sessions = { ...this.sessions, [session.id]: session };
 			if (!existingDocument) this.#publishDocument(document);
 			else if (document.loadedRevision) void this.#io.ensureEditorForView(session);
 		};
 		const rollback = () => {
-			if (!published) return;
-			published = false;
-			session.dispose();
-			const next = { ...this.sessions };
-			delete next[session.id];
-			this.sessions = next;
-			if (!existingDocument) {
-				this.#documentIdByIdentity.delete(key);
-				const documents = { ...this.documents };
-				delete documents[document.id];
-				this.documents = documents;
+			if (rolledBack) return;
+			rolledBack = true;
+			if (published) this.#destroySession(session);
+			else {
+				session.dispose();
+				if (document.viewIds.size === 0) this.#disposeDocument(document);
 			}
 		};
 		let placementResult: FilePlacementResult;
@@ -569,12 +582,11 @@ export class FileSessionRegistry {
 			placementResult = await placement.placeFileSession(session.id, target, { publish, rollback });
 		} catch (error) {
 			rollback();
-			session.dispose();
+			if (this.#destroyed) return null;
 			throw error;
 		}
-		if (placementResult === 'cancelled') {
+		if (placementResult === 'cancelled' || this.#destroyed || this.get(session.id) !== session) {
 			rollback();
-			session.dispose();
 			return null;
 		}
 		if (existingDocument && document.loadedRevision) {

@@ -179,6 +179,168 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
+	it('keeps background polling out of an interactive conflict read', async () => {
+		const harness = createHarness();
+		const session = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		session.content = 'local';
+		session.isExternallyStale = true;
+		const revision = deferred<FileRevisionResponse>();
+		const disk = deferred<Awaited<ReturnType<typeof harness.readText>>>();
+		harness.getFileRevision.mockReturnValueOnce(revision.promise);
+		const polling = harness.registry.checkFreshness(session.id);
+		harness.readText.mockReturnValueOnce(disk.promise);
+		const saving = harness.registry.save(session.id);
+		const conflictController = session.document.conflictController!;
+		revision.resolve({ status: 'ready', revision: 'v1:changed' });
+		await polling;
+		expect(conflictController.signal.aborted).toBe(false);
+		expect(harness.readText).toHaveBeenCalledTimes(2);
+		disk.resolve({ content: 'disk', path: '/workspace/file.txt', revision: 'v1:changed' });
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskContent).toBe('disk'));
+		harness.registry.resolveOverwrite('save-checked');
+		await expect(saving).resolves.toBe(true);
+		await harness.registry.destroyAll();
+	});
+
+	it.each(['close', 'preview'] as const)(
+		'ignores editor-loader completion after source view %s',
+		async (action) => {
+			for (const fails of [false, true]) {
+				const runtime = deferred<FileEditorRuntimeModule>();
+				const harness = createHarness({ loadEditorRuntime: () => runtime.promise });
+				const first = (await harness.registry.open(request('README.md')))!;
+				await vi.waitFor(() => expect(first.loading).toBe(false));
+				const second = (await harness.registry.openToSide(first.id, 'window-main'))!;
+				const source = harness.registry.showSource(second.id);
+				if (action === 'close') await harness.registry.destroy(second.id);
+				else second.rendererMode = 'markdown';
+				if (fails) runtime.reject(new ModuleImportError(new Error('Unavailable chunk')));
+				else runtime.resolve(testEditorRuntime);
+				await expect(source).resolves.toBe(false);
+				expect(second.editor).toBeNull();
+				expect(first.loadError).toBeNull();
+				expect(first.document.editorInitializationFailed).toBe(false);
+				await harness.registry.destroyAll();
+			}
+		},
+	);
+
+	it.each([false, true])(
+		'rejects placement completing after teardown (published: %s)',
+		async (published) => {
+			const started = deferred<void>();
+			const placed = deferred<void>();
+			const harness = createHarness({
+				placement: {
+					async placeFileSession(_id, _target, publication) {
+						if (published) publication.publish();
+						started.resolve();
+						await placed.promise;
+						publication.publish();
+						return 'placed';
+					},
+					async focusFileSession() {},
+				},
+			});
+			const opening = harness.registry.open(request('file.txt'));
+			await started.promise;
+			await harness.registry.destroyAll();
+			placed.resolve();
+			await expect(opening).resolves.toBeNull();
+			expect(harness.registry.all).toEqual([]);
+			expect(harness.registry.documents).toEqual({});
+			expect(harness.readText).not.toHaveBeenCalled();
+			expect(harness.getFileRevision).not.toHaveBeenCalled();
+		},
+	);
+
+	it('cancels threshold and queued opens during teardown', async () => {
+		const harness = createHarness();
+		for (let index = 0; index < FILE_SESSION_SOFT_LIMIT; index++) {
+			await harness.registry.open(request(`file-${index}.md`));
+		}
+		const first = harness.registry.open(request('over-limit.md'));
+		await vi.waitFor(() => expect(harness.registry.thresholdRequest).not.toBeNull());
+		const second = harness.registry.open(request('queued.md'));
+		await harness.registry.destroyAll();
+		expect(harness.registry.thresholdRequest).toBeNull();
+		await expect(first).resolves.toBeNull();
+		await expect(second).resolves.toBeNull();
+	});
+
+	it.each([
+		{ outcome: 'cancelled', published: false },
+		{ outcome: 'cancelled', published: true },
+		{ outcome: 'throw', published: false },
+		{ outcome: 'throw', published: true },
+	] as const)(
+		'tears down the last pending placement on $outcome (published: $published)',
+		async ({ outcome, published }) => {
+			const started = deferred<void>();
+			const finish = deferred<void>();
+			let placements = 0;
+			const repository = createMemoryFileDraftRepository();
+			const harness = createHarness({
+				draftRepository: repository,
+				placement: {
+					async placeFileSession(_id, _target, publication) {
+						if (++placements === 1) {
+							publication.publish();
+							return 'placed';
+						}
+						if (published) publication.publish();
+						started.resolve();
+						await finish.promise;
+						if (outcome === 'throw') throw new Error('Placement failed');
+						return outcome;
+					},
+					async focusFileSession() {},
+				},
+			});
+			const first = (await harness.registry.open(request('file.txt')))!;
+			await vi.waitFor(() => expect(first.loading).toBe(false));
+			first.content = 'unsaved';
+			const disposed = vi.spyOn(first.document, 'dispose');
+			const side = harness.registry.openToSide(first.id, 'window-main');
+			await started.promise;
+			await harness.registry.destroy(first.id);
+			finish.resolve();
+			if (outcome === 'throw') await expect(side).rejects.toThrow('Placement failed');
+			else await expect(side).resolves.toBeNull();
+			expect(first.document.viewIds.size).toBe(0);
+			expect(harness.registry.documents).toEqual({});
+			expect(harness.registry.hasUnloadProtectedSessions).toBe(false);
+			expect(disposed).toHaveBeenCalledOnce();
+			await harness.registry.flushRecovery();
+			expect((await repository.getDrafts('test-user', 'test-deployment'))[0]?.content).toBe(
+				'unsaved',
+			);
+			await harness.registry.destroyAll();
+		},
+	);
+
+	it('replaces a document closed while its side-open recovery prompt is pending', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(storedDraft());
+		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
+		const harness = createHarness({ draftRepository: repository });
+		harness.readText.mockRejectedValueOnce(new Error('Read failed'));
+		const first = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(first.loadError).toBe('Read failed'));
+		await harness.registry.retryRecoveryDiscovery();
+		const side = harness.registry.openToSide(first.id, 'window-main');
+		await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+		await harness.registry.destroy(first.id);
+		harness.registry.resolveDraft('resume');
+		const second = (await side)!;
+		expect(harness.registry.documents[second.documentId]).toBe(second.document);
+		await vi.waitFor(() => expect(second.content).toBe('recovered edit'));
+		expect(harness.registry.hasUnloadProtectedSessions).toBe(true);
+		await expect(harness.registry.open(request('file.txt'))).resolves.toBe(second);
+		await harness.registry.destroyAll();
+	});
+
 	it('checkpoints edits made before authenticated recovery initialization', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const harness = createHarness({ draftRepository: repository, userNamespace: null });
@@ -1523,12 +1685,8 @@ describe('FileSessionRegistry', () => {
 		const compare = harness.registry.showConflict(opened.id);
 		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:r3'));
 		harness.getFileRevision.mockResolvedValueOnce({ status: 'ready', revision: 'v1:r4' });
-		harness.readText.mockResolvedValueOnce({
-			content: 'disk-r4',
-			path: '/workspace/src/file.ts',
-			revision: 'v1:r4',
-		});
 		await harness.registry.checkFreshness(opened.id);
+		expect(harness.readText).toHaveBeenCalledTimes(2);
 		expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:r3');
 		harness.registry.resolveOverwrite('save-checked', 'merged');
 		await compare;
