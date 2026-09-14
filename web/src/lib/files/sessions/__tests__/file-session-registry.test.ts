@@ -119,6 +119,7 @@ function createHarness(
 		saveSoftTimeoutMs?: number;
 		placement?: FilePlacementPort;
 		userNamespace?: string | null;
+		isDocumentVisible?: (documentId: string) => boolean;
 	} = {},
 ) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
@@ -190,6 +191,7 @@ function createHarness(
 		reloadApplication: options.reloadApplication,
 		saveSoftTimeoutMs: options.saveSoftTimeoutMs,
 		onOpenError,
+		isDocumentVisible: options.isDocumentVisible,
 	});
 	const userNamespace = options.userNamespace === undefined ? 'test-user' : options.userNamespace;
 	if (userNamespace) void registry.initializeRecovery(userNamespace, 'test-session');
@@ -2546,7 +2548,11 @@ describe('FileSessionRegistry', () => {
 			normalizedRelativePath: 'missing.ts',
 		});
 		await repository.putView(view);
-		const harness = createHarness({ draftRepository: repository });
+		let visible = false;
+		const harness = createHarness({
+			draftRepository: repository,
+			isDocumentVisible: () => visible,
+		});
 		harness.getFileRevision.mockResolvedValue({ status: 'missing' });
 		harness.resolveFileIdentity.mockRejectedValueOnce(
 			new ApiError(404, 'File not found', 'FILE_NOT_FOUND'),
@@ -2567,6 +2573,7 @@ describe('FileSessionRegistry', () => {
 		expect(restored.loadedRevision).toBe('v1:recreated');
 		harness.getFileRevision.mockResolvedValue({ status: 'ready', revision: 'v1:recreated' });
 		harness.getFileRevision.mockClear();
+		visible = true;
 		harness.registry.viewVisibilityChanged(view.viewId);
 		await vi.waitFor(() => expect(harness.getFileRevision).toHaveBeenCalledOnce());
 	});
