@@ -39,6 +39,39 @@ function adapter(id: string, doc = 'abc', anchor = doc.length, readOnly = false)
 }
 
 describe('FileDocumentRuntime', () => {
+	it('rejects a stale transaction anywhere in a batch before mutating any owner', () => {
+		const value = document();
+		const runtime = new FileDocumentRuntime(value, 'abc');
+		const first = adapter('first');
+		const second = adapter('second');
+		runtime.register(first.value);
+		runtime.register(second.value);
+		const changed = vi.fn();
+		value.onChange(changed);
+		const version = value.bufferVersion;
+		const initial = first.state();
+		const valid = initial.update({ changes: { from: 3, insert: 'valid' } });
+		const stale = initial.update({ changes: { from: 0, insert: 'stale' } });
+
+		runtime.dispatchSource(first.value, [valid, stale]);
+
+		expect(runtime.content()).toBe('abc');
+		expect(first.state()).toBe(initial);
+		expect(second.state().doc.toString()).toBe('abc');
+		expect(value.bufferVersion).toBe(version);
+		expect(value.dirty).toBe(false);
+		expect(changed).not.toHaveBeenCalled();
+	});
+
+	it('keeps unchanged cursor positions between separated disk edits', () => {
+		const value = document();
+		const runtime = new FileDocumentRuntime(value, 'aX-middle-Yz');
+		const view = adapter('view', 'aX-middle-Yz', 6);
+		runtime.register(view.value);
+		runtime.replaceFromDisk('aXX-middle-YYz');
+		expect(view.state().selection.main.head).toBe(7);
+	});
+
 	it('serializes each canonical change only once', () => {
 		const value = document();
 		const runtime = new FileDocumentRuntime(value, 'abc');

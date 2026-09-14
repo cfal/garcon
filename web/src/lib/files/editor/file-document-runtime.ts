@@ -1,4 +1,5 @@
 import { history, isolateHistory, redo, undo } from '@codemirror/commands';
+import { diff } from '@codemirror/merge';
 import {
 	Annotation,
 	ChangeSet,
@@ -58,9 +59,13 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 
 	dispatchSource(adapter: FileDocumentViewAdapter, transactions: readonly Transaction[]): void {
 		if (this.#views.get(adapter.id) !== adapter) return;
+		let expected = adapter.currentState();
+		if (!expected.doc.eq(this.#canonical.doc)) return;
 		for (const transaction of transactions) {
-			if (transaction.startState !== adapter.currentState()) return;
-			if (!transaction.startState.doc.eq(this.#canonical.doc)) return;
+			if (transaction.startState !== expected) return;
+			expected = transaction.state;
+		}
+		for (const transaction of transactions) {
 			if (!transaction.docChanged) {
 				adapter.applySourceTransactions([transaction]);
 				continue;
@@ -244,22 +249,12 @@ function normalizeDocument(content: string): Text {
 }
 
 function documentChanges(previous: string, next: string): ChangeSet {
-	let prefix = 0;
-	const sharedLength = Math.min(previous.length, next.length);
-	while (prefix < sharedLength && previous.charCodeAt(prefix) === next.charCodeAt(prefix))
-		prefix += 1;
-	let previousEnd = previous.length;
-	let nextEnd = next.length;
-	while (
-		previousEnd > prefix &&
-		nextEnd > prefix &&
-		previous.charCodeAt(previousEnd - 1) === next.charCodeAt(nextEnd - 1)
-	) {
-		previousEnd -= 1;
-		nextEnd -= 1;
-	}
 	return ChangeSet.of(
-		{ from: prefix, to: previousEnd, insert: next.slice(prefix, nextEnd) },
+		diff(previous, next, { scanLimit: 500, timeout: 20 }).map((change) => ({
+			from: change.fromA,
+			to: change.toA,
+			insert: next.slice(change.fromB, change.toB),
+		})),
 		previous.length,
 	);
 }

@@ -60,6 +60,25 @@ function createController() {
 
 describe('CodeEditorController', () => {
 	it.each([false, true])(
+		'preserves unaffected folds between disk edits (attached: %s)',
+		(attached) => {
+			const { session, controller } = createController();
+			const initial = 'aX-middle-Yz';
+			session.document.editorRuntime!.replaceFromDisk(initial);
+			if (attached) controller.attach(parent());
+			controller.restorePresentation({ line: 1, column: 1, endLine: 1, endColumn: 1 }, [
+				{ from: 3, to: 9 },
+			]);
+			expect(controller.folds()).toEqual([{ from: 3, to: 9 }]);
+			session.document.editorRuntime!.replaceFromDisk('aXX-middle-YYz');
+			expect(controller.folds()).toEqual([{ from: 4, to: 10 }]);
+			expect(session.editorState?.selection.main.head).toBe(0);
+			if (!attached) controller.attach(parent());
+			expect(session.editorState?.selection.main.head).toBe(0);
+		},
+	);
+
+	it.each([false, true])(
 		'drops stale restored folds before shared edits (attached: %s)',
 		(attached) => {
 			const { session, controller } = createController();
@@ -406,7 +425,7 @@ describe('CodeEditorController', () => {
 		controller.detach(editedLease);
 	});
 
-	it('replaces an attached disk document with fresh history and clamped selection', async () => {
+	it('replaces an attached disk document with fresh history and mapped selection', async () => {
 		const { session, controller } = createController();
 		const host = parent();
 		const lease = controller.attach(host);
@@ -423,12 +442,12 @@ describe('CodeEditorController', () => {
 		expect(controller.currentContent()).toBe('new');
 		expect(session.baseline).toBe('new');
 		expect(session.dirty).toBe(false);
-		expect(session.editorState?.selection.main.anchor).toBe(3);
+		expect(session.editorState?.selection.main.anchor).toBe(2);
 		expect(scroller.scrollTop).toBe(28);
 		controller.detach(lease);
 	});
 
-	it('clamps replacement selection against the normalized CRLF document', () => {
+	it('maps replacement selection against the normalized CRLF document', () => {
 		const { session, controller } = createController();
 		const lease = controller.attach(parent());
 
@@ -437,7 +456,7 @@ describe('CodeEditorController', () => {
 		expect(controller.currentContent()).toBe('a\r\nb\r\n');
 		expect(session.baseline).toBe('a\r\nb\r\n');
 		expect(session.dirty).toBe(false);
-		expect(session.editorState?.selection.main.anchor).toBe(4);
+		expect(session.editorState?.selection.main.anchor).toBe(3);
 		controller.detach(lease);
 	});
 
