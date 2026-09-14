@@ -230,11 +230,6 @@ export function navigationKey(userNamespace: string, deploymentId: string): stri
 	return JSON.stringify([userNamespace, deploymentId]);
 }
 
-function keyPathForStore(storeName: string): string {
-	if (storeName === FILE_DRAFT_STORE_NAME) return 'documentId';
-	return 'key';
-}
-
 function openDatabase(
 	indexedDb: Pick<IDBFactory, 'open'>,
 	onVersionChange: () => void,
@@ -251,15 +246,13 @@ function openDatabase(
 				request.transaction?.abort();
 				return;
 			}
-			for (const storeName of [
-				FILE_DRAFT_STORE_NAME,
-				FILE_RECENT_STORE_NAME,
-				FILE_NAVIGATION_STORE_NAME,
-			]) {
+			for (const [storeName, keyPath] of [
+				[FILE_DRAFT_STORE_NAME, 'documentId'],
+				[FILE_RECENT_STORE_NAME, 'key'],
+				[FILE_NAVIGATION_STORE_NAME, 'key'],
+			] as const) {
 				if (request.result.objectStoreNames.contains(storeName)) continue;
-				request.result.createObjectStore(storeName, {
-					keyPath: keyPathForStore(storeName),
-				});
+				request.result.createObjectStore(storeName, { keyPath });
 			}
 		};
 		request.onsuccess = () => {
@@ -301,23 +294,12 @@ async function runTransaction<T>(
 	mode: IDBTransactionMode,
 	operation: (store: IDBObjectStore) => Promise<T>,
 ): Promise<T> {
-	return runDatabaseTransaction(database, [storeName], mode, (transaction) =>
-		operation(transaction.objectStore(storeName)),
-	);
-}
-
-async function runDatabaseTransaction<T>(
-	database: IDBDatabase,
-	storeNames: readonly string[],
-	mode: IDBTransactionMode,
-	operation: (transaction: IDBTransaction) => Promise<T>,
-): Promise<T> {
-	const transaction = database.transaction(storeNames, mode);
+	const transaction = database.transaction([storeName], mode);
 	const completion = indexedDbTransactionCompletion(transaction);
 	// A request failure also aborts the transaction; both promises must be observed.
 	void completion.catch(() => undefined);
 	try {
-		const result = await operation(transaction);
+		const result = await operation(transaction.objectStore(storeName));
 		await completion;
 		return result;
 	} catch (error) {
