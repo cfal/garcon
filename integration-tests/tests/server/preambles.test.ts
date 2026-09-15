@@ -20,12 +20,22 @@ import {
 async function createPreamble(
   fixture: IntegrationFixture,
   preamble: PreambleDefinitionInput,
-): Promise<PreamblesMutationResponse> {
+): Promise<PreamblesSnapshot> {
   const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
-  return fixture.client.post('/api/v1/preambles', {
-    expectedRevision: catalog.revision,
-    preamble,
-  });
+  const response = await fixture.client.post<PreamblesMutationResponse>(
+    '/api/v1/preambles',
+    {
+      expectedRevision: catalog.revision,
+      preamble,
+    },
+  );
+  return response.snapshot;
+}
+
+function preambleByTitle(catalog: PreamblesSnapshot, title: string): Preamble {
+  const preamble = catalog.preambles.find((entry) => entry.title === title);
+  if (!preamble) throw new Error(`Preamble not found: ${title}`);
+  return preamble;
 }
 
 function applicationTitles(snapshot: ChatMessagesPage): string[][] {
@@ -103,10 +113,7 @@ describe('preambles', () => {
       await fixture.client.waitForTurnTerminal(automaticChatId, automatic.turnId);
       expect(applicationTitles(await fixture.client.getMessages(automaticChatId))).toEqual([]);
 
-      const identity = catalog.preambles.find(
-        (preamble) => preamble.title === 'Garcon: Chat identity',
-      );
-      if (!identity) throw new Error('Bundled chat identity preamble was not installed.');
+      const identity = preambleByTitle(catalog, 'Garcon: Chat identity');
       await fixture.client.put<PreamblesMutationResponse>('/api/v1/preambles', {
         expectedRevision: catalog.revision,
         id: identity.id,
@@ -234,7 +241,7 @@ describe('preambles', () => {
 
       let catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       for (const definition of definitions) {
-        catalog = (await createPreamble(fixture, definition)).snapshot;
+        catalog = await createPreamble(fixture, definition);
       }
       expect(catalog.preambles.slice(-definitions.length).map((preamble) => preamble.title)).toEqual([
         'Global opening',
@@ -369,7 +376,7 @@ describe('preambles', () => {
         ['Global opening', 'Nested project', 'Global closing'],
       );
 
-      const opening = catalog.preambles.find((preamble) => preamble.title === 'Global opening') as Preamble;
+      const opening = preambleByTitle(catalog, 'Global opening');
       const updated = await fixture.client.put<PreamblesMutationResponse>('/api/v1/preambles', {
         expectedRevision: catalog.revision,
         id: opening.id,
@@ -617,13 +624,8 @@ describe('preambles', () => {
         content: secondBody,
         scope: { type: 'global' },
       });
-      const firstId = catalog.snapshot.preambles.find(
-        (preamble) => preamble.title === 'Scheduled first',
-      )?.id;
-      const secondId = catalog.snapshot.preambles.find(
-        (preamble) => preamble.title === 'Scheduled second',
-      )?.id;
-      if (!firstId || !secondId) throw new Error('Scheduled preambles were not created.');
+      const firstId = preambleByTitle(catalog, 'Scheduled first').id;
+      const secondId = preambleByTitle(catalog, 'Scheduled second').id;
 
       const agent = fixture.directAgents.openAi;
       const initial = await fixture.client.getScheduledPrompts();

@@ -194,12 +194,12 @@ export class PreambleStore {
     installedAt: Date,
   ): Promise<BundledPreambleInstallResult> {
     const timestamp = installedAt.toISOString();
-    const bundledIds = new Set<string>();
-    const bundled = definitions.map((definition) => {
-      if (bundledIds.has(definition.id)) {
+    const definitionIds = new Set<string>();
+    const normalizedDefinitions = definitions.map((definition) => {
+      if (definitionIds.has(definition.id)) {
         throw new Error('Bundled preambles contain duplicate IDs');
       }
-      bundledIds.add(definition.id);
+      definitionIds.add(definition.id);
       if (definition.enabled) {
         throw new PreambleDomainError(
           'PREAMBLE_VALIDATION_FAILED',
@@ -213,26 +213,28 @@ export class PreambleStore {
         updatedAt: timestamp,
       });
     });
-    const existingIds = new Set([
+    const knownIds = new Set([
       ...this.#file.preambles.map((preamble) => preamble.id),
       ...this.#file.retiredPreambleIds,
     ]);
-    const missing = bundled.filter((preamble) => !existingIds.has(preamble.id));
-    const capacity = Math.min(
+    const missingPreambles = normalizedDefinitions.filter(
+      (preamble) => !knownIds.has(preamble.id),
+    );
+    const availableSlots = Math.min(
       PREAMBLE_MAX_COUNT - this.#file.preambles.length,
       PREAMBLE_ID_LIFETIME_MAX_COUNT - this.lifetimeIdCount(),
     );
-    const additions = missing.slice(0, capacity);
-    if (additions.length === 0) {
-      return { installed: 0, deferred: missing.length };
+    const preamblesToInstall = missingPreambles.slice(0, availableSlots);
+    if (preamblesToInstall.length === 0) {
+      return { installed: 0, deferred: missingPreambles.length };
     }
 
     await this.#mutate(this.#file.revision, (draft) => {
-      draft.preambles.push(...additions);
+      draft.preambles.push(...preamblesToInstall);
     });
     return {
-      installed: additions.length,
-      deferred: missing.length - additions.length,
+      installed: preamblesToInstall.length,
+      deferred: missingPreambles.length - preamblesToInstall.length,
     };
   }
 
