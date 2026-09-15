@@ -495,10 +495,11 @@ describe('garcon-cli', () => {
 
   test('suppresses preambles explicitly and does not inherit a parent automation tag or selection', async () => {
     await withIntegrationFixture('garcon-cli-preamble-controls', async (fixture) => {
+      const initialCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       let catalog = (await fixture.client.post<{ snapshot: PreamblesSnapshot }>(
         '/api/v1/preambles',
         {
-          expectedRevision: 0,
+          expectedRevision: initialCatalog.revision,
           preamble: {
             enabled: true,
             title: 'Global default',

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatRegistrySnapshot } from '../../../server/chats/store.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import type { PreamblesMutationResponse } from '../../../common/preambles.js';
+import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
@@ -220,8 +220,9 @@ describe('assistant start and schedule commands', () => {
       const cursor = fixture.client.markEvents();
       await fixture.client.startDirectChat({ chatId: source, content: 'Request a child.', projectPath: fixture.dirs.project, agent });
       await held.received;
+      const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       await fixture.client.post<PreamblesMutationResponse>('/api/v1/preambles', {
-        expectedRevision: 0,
+        expectedRevision: catalog.revision,
         preamble: { enabled: true, title: 'Synthetic default', content: 'Synthetic boundary instructions.', scope: { type: 'global' } },
       });
       held.releaseText(`<garcon-start-agent ref="task" async="true" agent="${agent.agentId}" provider="${agent.provider.providerId}" model="${agent.provider.model}">/synthetic-command</garcon-start-agent>`);

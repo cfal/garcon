@@ -43,8 +43,11 @@ describe('Lightpanda per-chat preambles', () => {
       await fixture.waitForSpaWebSocket();
 
       // Seed the catalog with two enabled global preambles through the API.
+      const initialCatalog = await fixture.integration.client.get<PreamblesSnapshot>(
+        '/api/v1/preambles',
+      );
       let catalog: PreamblesSnapshot = await fixture.integration.client.post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
-        expectedRevision: 0,
+        expectedRevision: initialCatalog.revision,
         preamble: {
           enabled: true,
           title: 'Alpha rules',
@@ -198,8 +201,11 @@ describe('Lightpanda per-chat preambles', () => {
       expect(firstHeld.releaseText('existing first response')).toBeTrue();
 
       // The chat predates the catalog entry, so its saved selection is empty.
+      const initialCatalog = await fixture.integration.client.get<PreamblesSnapshot>(
+        '/api/v1/preambles',
+      );
       const catalog: PreamblesSnapshot = await fixture.integration.client.post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
-        expectedRevision: 0,
+        expectedRevision: initialCatalog.revision,
         preamble: {
           enabled: true,
           title: 'Existing rules',
@@ -262,7 +268,11 @@ describe('Lightpanda per-chat preambles', () => {
         `/api/v1/chats/preambles?chatId=${chatIdForSave}`,
       );
       expect(savedTarget.selection.revision).toBe(1);
-      expect(savedTarget.selection.orderedPreambleIds).toEqual([catalog.preambles[0]!.id]);
+      const existingRulesId = catalog.preambles.find(
+        (preamble) => preamble.title === 'Existing rules',
+      )?.id;
+      if (!existingRulesId) throw new Error('Existing rules preamble was not created.');
+      expect(savedTarget.selection.orderedPreambleIds).toEqual([existingRulesId]);
       const savedHistory = await fixture.integration.client.getMessages(chatIdForSave);
       const savedNotice = savedHistory.messages
         .map((entry) => entry.message)
@@ -271,7 +281,7 @@ describe('Lightpanda per-chat preambles', () => {
       expect(savedNotice?.content).toBe('Preambles updated');
       expect(savedNotice?.detail?.type === 'preamble-selection-changed'
         ? savedNotice.detail.preambles
-        : []).toEqual([{ id: catalog.preambles[0]!.id, title: 'Existing rules' }]);
+        : []).toEqual([{ id: existingRulesId, title: 'Existing rules' }]);
       expect(fixture.integration.fakeProviders.openAi.requests()).toHaveLength(
         providerRequestCountBeforeSave,
       );
