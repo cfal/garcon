@@ -3,6 +3,7 @@ import { AssistantMessage, UserMessage } from '../chat-types.js';
 import { extractGarconCommands } from '../garcon-commands.js';
 import { parseGarconTicketCommand } from '../garcon-ticket-command.js';
 import { TICKET_ACTIONS } from '../ticket-commands.js';
+import { escapeGarconXmlText } from '../garcon-command-envelope.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const commentId = '11111111-1111-4111-8111-111111111111';
@@ -24,6 +25,16 @@ const commands = {
 };
 
 describe('ticket command grammar', () => {
+  test.each(['<T>', '<Event>', 'Record<string, unknown>', '&&'])('requires XML escaping after JSON serialization for %s', (description) => {
+    const input = { title: 'Synthetic ticket', description };
+    const body = JSON.stringify(input);
+    const markup = (value) => `<garcon-ticket-create ref="synthetic">${value}</garcon-ticket-create>`;
+    expect(parseGarconTicketCommand(markup(body))).toBeNull();
+    expect(extractGarconCommands(new AssistantMessage(at, markup(body))).issues)
+      .toEqual([{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }]);
+    expect(parseGarconTicketCommand(markup(escapeGarconXmlText(body))).payload.input).toMatchObject(input);
+  });
+
   test('rejects the retired command names and target attribute', () => {
     for (const xml of Object.values(commands)) {
       const retired = xml.replaceAll('garcon-ticket-', 'garcon-issue-').replaceAll('ticket-id', 'issue-id');

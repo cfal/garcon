@@ -16,6 +16,9 @@ export interface GarconCommandEnvelope {
 export type GarconEnvelopeCommand = 'send-message' | 'start-agent' | 'resume-agent' | 'stop-agent' | 'schedule'
   | `ticket-${TicketAction}`;
 const TICKET_ENVELOPES = TICKET_ACTIONS.map((action): GarconEnvelopeCommand => `ticket-${action}`);
+export const GARCON_ENVELOPE_COMMANDS: readonly GarconEnvelopeCommand[] = [
+  'send-message', 'start-agent', 'resume-agent', 'stop-agent', 'schedule', ...TICKET_ENVELOPES,
+];
 
 export interface GarconEnvelopeSpan {
   readonly command: GarconEnvelopeCommand;
@@ -24,7 +27,7 @@ export interface GarconEnvelopeSpan {
 }
 
 export function garconEnvelopeCommandAt(content: string, start: number): GarconEnvelopeCommand | null {
-  for (const command of ['send-message', 'start-agent', 'resume-agent', 'stop-agent', 'schedule', ...TICKET_ENVELOPES] as const) {
+  for (const command of GARCON_ENVELOPE_COMMANDS) {
     const prefix = `<garcon-${command}`;
     if (content.startsWith(prefix, start) && /[\s/>]|^$/.test(content[start + prefix.length] ?? '')) return command;
   }
