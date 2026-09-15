@@ -53,6 +53,8 @@ Read the current revision before a field or workflow mutation. Comment append do
 
 Agent ticket commands produce one concise transcript notice per command, with clickable ticket IDs in the workspace. Relationship notices name both tickets and the link kind; list notices include supplied filters as literal values. Each notice keeps its own source address, including when an assistant message contains multiple commands. Native `garcon-ticket-*-result` envelopes carry JSON `{data, context?}` on success or `{errorCode, message, context?}` on failure. Optional context contains only list filters or relationship kind/target, so native history reload can reconstruct the same notices without copying ticket descriptions or comment bodies.
 
+Malformed ticket commands remain visible and are not executed. When agent ticket commands are enabled, Garcon also sends one best-effort `<garcon-command-rejected>` reply per affected assistant message, containing the detected edge failures and correction guidance. For JSON bodies, serialize JSON first, then XML-escape `&`, `<`, and `>` once, leaving the outer tags unchanged. Retry only rejected candidates: other valid commands in the same message may already have executed. Rejection feedback is server control, not a user message; native reload reconstructs notices without replaying commands or feedback.
+
 Additional mutations:
 
 ```bash

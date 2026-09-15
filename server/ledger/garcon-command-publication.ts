@@ -5,6 +5,7 @@ import {
   INTER_AGENT_MESSAGE_NOTICE_TITLE,
   MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
   type GarconEdgeCommand,
+  type GarconCommandIssue,
 } from '../../common/garcon-commands.js';
 import type { LedgerRow, LedgerRowDraft, TranscriptViewId } from './contracts.js';
 import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js';
@@ -56,6 +57,16 @@ export interface TicketCommandRequestSink {
   request(source: AgentCommandSource, command: GarconTicketCommand): void;
 }
 
+export interface GarconCommandRejectionSource {
+  readonly chatId: string;
+  readonly viewId: TranscriptViewId;
+  readonly noticeOrdinal: number;
+}
+
+export interface GarconCommandRejectionSink {
+  reject(source: GarconCommandRejectionSource, issues: readonly GarconCommandIssue[]): void;
+}
+
 export interface InterAgentMessageRequestSink {
   request(input: {
     readonly sourceChatId: string;
@@ -75,18 +86,36 @@ export const DISABLED_INTER_AGENT_MESSAGE_SINK: InterAgentMessageRequestSink = O
   request: () => undefined,
 });
 
+export interface GarconCommandSinks {
+  readonly chatIdRequests: ChatIdRequestSink;
+  readonly interAgentMessages: InterAgentMessageRequestSink;
+  readonly agentStarts: AgentStartRequestSink;
+  readonly agentResumes: AgentResumeRequestSink;
+  readonly agentStops: AgentStopRequestSink;
+  readonly agentSchedules: AgentScheduleRequestSink;
+  readonly ticketCommands: TicketCommandRequestSink;
+  readonly commandRejections: GarconCommandRejectionSink;
+}
+
 interface PendingGarconCommand {
   readonly command: GarconEdgeCommand;
   readonly at: string;
   readonly requestDraftIndex: number;
 }
 
+interface PendingGarconCommandRejection {
+  readonly issues: readonly GarconCommandIssue[];
+  readonly noticeDraftIndex: number;
+}
+
 export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]): {
   readonly drafts: readonly LedgerRowDraft[];
   readonly commands: readonly PendingGarconCommand[];
+  readonly rejections: readonly PendingGarconCommandRejection[];
 } {
   const drafts: LedgerRowDraft[] = [];
   const commands: PendingGarconCommand[] = [];
+  const rejections: PendingGarconCommandRejection[] = [];
   for (const row of rows) {
     const transformed = extractGarconCommands(row.message);
     const message = transformed ? transformed.message : row.message;
@@ -123,6 +152,11 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
           break;
       }
     }
+    const ticketIssues = transformed.issues.filter((issue) => issue.command.startsWith('ticket-'));
+    if (ticketIssues.length > 0) {
+      rejections.push({ issues: ticketIssues,
+        noticeDraftIndex: drafts.length + transformed.issues.indexOf(ticketIssues[0]) });
+    }
     for (const issue of transformed.issues) {
       drafts.push({
         kind: 'notice',
@@ -134,26 +168,19 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
       });
     }
   }
-  return { drafts, commands };
+  return { drafts, commands, rejections };
 }
 
 export function dispatchGarconCommands(
-  commands: readonly PendingGarconCommand[],
-  options: {
+  publication: ReturnType<typeof canonicalizeGarconProducerRows>,
+  options: GarconCommandSinks & {
     readonly chatId: string;
     readonly viewId: TranscriptViewId;
     readonly runId: string | null;
-    readonly chatIdRequests: ChatIdRequestSink;
-    readonly interAgentMessages: InterAgentMessageRequestSink;
-    readonly agentStarts: AgentStartRequestSink;
-    readonly agentResumes: AgentResumeRequestSink;
-    readonly agentStops: AgentStopRequestSink;
-    readonly agentSchedules: AgentScheduleRequestSink;
-    readonly ticketCommands: TicketCommandRequestSink;
     readonly committedRows: readonly LedgerRow[];
   },
 ): void {
-  for (const { command, at, requestDraftIndex } of commands) {
+  for (const { command, at, requestDraftIndex } of publication.commands) {
     switch (command.type) {
       case 'start-agent':
       case 'resume-agent':
@@ -190,5 +217,10 @@ export function dispatchGarconCommands(
         });
         break;
     }
+  }
+  for (const rejection of publication.rejections) {
+    const notice = options.committedRows[rejection.noticeDraftIndex];
+    if (!notice || notice.kind !== 'notice') throw new Error('Committed Garcon rejection notice is missing');
+    options.commandRejections.reject({ chatId: options.chatId, viewId: options.viewId, noticeOrdinal: notice.ordinal }, rejection.issues);
   }
 }

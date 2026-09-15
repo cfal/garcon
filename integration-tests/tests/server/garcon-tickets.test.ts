@@ -8,6 +8,8 @@ import { parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { parseTicketBootstrap, parseTicketCommentsPage, parseTicketDetail, parseTicketHistoryPage,
   parseTicketPage, parseTicketProjectDefault } from '../../../common/ticket-responses.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
+import { parseGarconCommandRejection, garconCommandRejectionContent } from '../../../common/garcon-command-rejection.js';
+import { withTimeout } from '../../support/deferred.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 
 function ticketCommands(fixture: IntegrationFixture, chatId: string) {
@@ -47,6 +49,56 @@ function mutation(result: GarconTicketResult) {
 }
 
 describe('Garcon ticket commands', () => {
+  test('returns actionable parse feedback, accepts an explicit repair, and never replays it on reload or restart', async () => {
+    await withIntegrationFixture('garcon-ticket-parse-feedback', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const prompt = 'Create the synthetic parser ticket.';
+      const description = 'Synthetic <T>, <Event>, Record<string, unknown> && values.';
+      const body = JSON.stringify({ title: 'Synthetic parser ticket', description, project: 'Synthetic project' });
+      const markup = (value: string) => `<garcon-ticket-create ref="parse-repair">${value}</garcon-ticket-create>`;
+      const malformed = markup(body);
+      const initial = fixture.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+      const feedback = fixture.fakeProviders.openAi.holdNext({});
+      const acknowledgment = fixture.fakeProviders.openAi.holdNext({});
+      await fixture.client.startDirectChat({ chatId, content: prompt, projectPath: fixture.dirs.project, agent: fixture.directAgents.openAi });
+      await initial.received;
+      initial.releaseText(malformed);
+      const feedbackRequest = await withTimeout(feedback.received, 10_000, () => 'Malformed ticket command received no agent feedback');
+      const rejection = parseGarconCommandRejection(feedbackRequest.lastUserText);
+      if (!rejection) throw new Error('Expected exact command rejection envelope');
+      expect(feedbackRequest.lastUserText).toBe(garconCommandRejectionContent(rejection));
+      expect(rejection.issues).toEqual([{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }]);
+      expect(rejection.message).toContain('serialize the JSON first');
+      expect(rejection.message).toContain('&& becomes &amp;&amp;');
+      expect(parseTicketPage(await fixture.client.get('/api/v1/tickets')).items).toEqual([]);
+      feedback.releaseText(markup(escapeGarconXmlText(body)));
+      const resultRequest = await acknowledgment.received;
+      const result = parseGarconTicketResult(resultRequest.lastUserText);
+      if (!result) throw new Error('Expected normal ticket result after explicit repair');
+      const created = mutation(result);
+      const cursor = fixture.client.markEvents();
+      acknowledgment.releaseText('Synthetic ticket repair acknowledged.');
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
+      const assertTranscript = async () => {
+        const transcript = await fixture.client.getMessages(chatId);
+        expect(messagesOfType(transcript.messages, 'user-message').map((message) => message.content)).toEqual([prompt]);
+        expect(messagesOfType(transcript.messages, 'assistant-message').map((message) => message.content)).toContain(malformed);
+        const notices = messagesOfType(transcript.messages, 'transcript-notice');
+        expect(notices.filter((message) => message.content === 'Garcon could not parse a ticket-create command.')).toHaveLength(1);
+        expect(notices.filter((message) => message.detail?.type === 'ticket-command-outcome')).toHaveLength(1);
+        expect(JSON.stringify(transcript.messages)).not.toContain('garcon-command-rejection-input');
+        expect(parseTicketPage(await fixture.client.get('/api/v1/tickets')).items).toHaveLength(1);
+        expect(parseTicketDetail(await fixture.client.get(`/api/v1/tickets/detail?ticketId=${created.ticketId}`)).ticket.description).toBe(description);
+        expect(parseTicketHistoryPage(await fixture.client.get(`/api/v1/tickets/history?ticketId=${created.ticketId}`)).items).toHaveLength(1);
+      };
+      await assertTranscript();
+      await fixture.client.reloadChat(chatId);
+      await assertTranscript();
+      await fixture.restartGarcon();
+      await assertTranscript();
+    });
+  }, 60_000);
+
   test('retains descriptive relationship and filter notices through native reload', async () => {
     await withIntegrationFixture('garcon-ticket-notices', async (fixture) => {
       const chatId = fixture.newChatId();

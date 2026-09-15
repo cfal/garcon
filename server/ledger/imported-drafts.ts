@@ -22,7 +22,8 @@ import {
   interAgentSendRequestNoticeDraft,
   ticketCommandRequestNoticeDraft,
 } from './garcon-command-request.js';
-import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail, LedgerTicketCommandOutcomeDetail } from './contracts.js';
+import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail, LedgerTicketCommandOutcomeDetail, LedgerCommandRejectionInputDetail } from './contracts.js';
+import { parseGarconCommandRejection } from '../../common/garcon-command-rejection.js';
 import { ticketCommandOutcome, parseGarconTicketResult } from '../../common/garcon-ticket-result.js';
 import { ticketCommandNoticeText } from '../../common/ticket-command-notice.js';
 import { agentCommandOutcomeContent, agentCommandOutcomeTitle, parseGarconCommandResult } from '../../common/garcon-command-results.js';
@@ -93,6 +94,13 @@ function importedDraftFor(
     ];
   }
   if (original.type === 'user-message') {
+    const rejection = parseGarconCommandRejection(original.content);
+    if (rejection) {
+      return rejection.issues.map((issue) => ({ kind: 'notice', at,
+        message: `Garcon could not parse a ${issue.command} command.`,
+        detail: { type: 'garcon-command-rejection-input', title: 'Agent command' } satisfies LedgerCommandRejectionInputDetail,
+        providerMeta: null }));
+    }
     const ticketResult = parseGarconTicketResult(original.content);
     if (ticketResult) {
       const outcome = ticketCommandOutcome(ticketResult);

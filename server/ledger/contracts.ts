@@ -108,6 +108,11 @@ export interface LedgerNoticeRow extends LedgerRowBase {
   readonly detail: JsonObject;
 }
 
+export interface LedgerCommandRejectionInputDetail extends JsonObject {
+  readonly type: 'garcon-command-rejection-input';
+  readonly title: string;
+}
+
 export interface LedgerCliRowNoticeDetail extends JsonObject {
   readonly type: 'cli-row';
   readonly clientMessageId: string;

@@ -5,7 +5,9 @@ import {
   type AgentCommandOutcomeNoticeDetail,
 } from '../../common/garcon-command-results.js';
 import type { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
-import type { AgentCommandSource } from '../ledger/garcon-command-publication.js';
+import type { AgentCommandSource, GarconCommandRejectionSource } from '../ledger/garcon-command-publication.js';
+import type { GarconCommandIssue } from '../../common/garcon-commands.js';
+import { garconCommandRejectionContent, TICKET_COMMAND_REJECTION_GUIDANCE } from '../../common/garcon-command-rejection.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import { diagnosticErrorCode } from '../lib/errors.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -13,6 +15,12 @@ import { createLogger } from '../lib/log.js';
 import type { IChatRegistry } from './store.js';
 
 const logger = createLogger('agent-commands');
+type ReplySource = AgentCommandSource | GarconCommandRejectionSource;
+
+function sourceAddress(source: ReplySource) {
+  return { chatId: source.chatId, viewId: source.viewId,
+    ...('requestOrdinal' in source ? { requestOrdinal: source.requestOrdinal } : { noticeOrdinal: source.noticeOrdinal }) };
+}
 
 export interface AgentCommandContext {
   readonly registry: Pick<IChatRegistry, 'getChat'>;
@@ -29,7 +37,7 @@ export class AgentCommandReplies {
   constructor(private readonly context: AgentCommandContext) {}
 
   launch(
-    source: AgentCommandSource,
+    source: ReplySource,
     operation: (signal: AbortSignal) => Promise<void>,
   ): void {
     if (this.#stopped) return;
@@ -48,23 +56,35 @@ export class AgentCommandReplies {
   }
 
   async deliver(source: AgentCommandSource, detail: AgentCommandOutcomeNoticeDetail, signal: AbortSignal): Promise<void> {
+    return this.#deliverContent(source, () => garconCommandResultContent(detail), signal, detail);
+  }
+
+  reject(source: GarconCommandRejectionSource, issues: readonly GarconCommandIssue[]): void {
+    this.launch(source, async (signal) => {
+      if (!this.context.isEnabled() || !this.current(source, signal)) return;
+      await this.#deliverContent(source,
+        () => garconCommandRejectionContent({ issues, message: TICKET_COMMAND_REJECTION_GUIDANCE }), signal);
+    });
+  }
+
+  async #deliverContent(source: ReplySource, formatContent: () => string, signal: AbortSignal, detail?: AgentCommandOutcomeNoticeDetail): Promise<void> {
     if (signal.aborted) return;
     try {
       const disposition = await this.context.execution.deliverServerControlInput(source.chatId, {
-        content: garconCommandResultContent(detail),
+        content: formatContent(),
         transcriptViewId: source.viewId,
         createdAt: new Date().toISOString(),
         receipt: null,
       }, signal);
       logger.debug('Agent command result disposition', {
-        chatId: source.chatId, viewId: source.viewId, requestOrdinal: source.requestOrdinal, disposition,
+        ...sourceAddress(source), disposition,
       });
     } catch (error) {
       if (!signal.aborted) this.report(source, 'result-delivery', error, detail);
     }
   }
 
-  current(source: AgentCommandSource, signal: AbortSignal): boolean {
+  current(source: ReplySource, signal: AbortSignal): boolean {
     return !signal.aborted && this.context.registry.getChat(source.chatId) !== null
       && this.context.notices.existingCurrentView(source.chatId)?.viewId === source.viewId;
   }
@@ -84,9 +104,9 @@ export class AgentCommandReplies {
     }
   }
 
-  report(source: AgentCommandSource, phase: string, error: unknown, detail?: AgentCommandOutcomeNoticeDetail): void {
+  report(source: ReplySource, phase: string, error: unknown, detail?: AgentCommandOutcomeNoticeDetail): void {
     logger.warn('Agent command operation failed', {
-      chatId: source.chatId, viewId: source.viewId, requestOrdinal: source.requestOrdinal,
+      ...sourceAddress(source),
       phase, errorCode: diagnosticErrorCode(error),
       ...detail && 'chatId' in detail ? { childChatId: detail.chatId } : {},
       ...detail && 'scheduleId' in detail ? { scheduleId: detail.scheduleId } : {},

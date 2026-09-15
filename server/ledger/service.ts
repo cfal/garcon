@@ -46,13 +46,7 @@ import {
   DISABLED_CHAT_ID_REQUEST_SINK,
   DISABLED_INTER_AGENT_MESSAGE_SINK,
   dispatchGarconCommands,
-  type ChatIdRequestSink,
-  type AgentStartRequestSink,
-  type AgentScheduleRequestSink,
-  type TicketCommandRequestSink,
-  type AgentResumeRequestSink,
-  type AgentStopRequestSink,
-  type InterAgentMessageRequestSink,
+  type GarconCommandSinks,
 } from './garcon-command-publication.js';
 import { PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
 import { ProducerLease } from './producer-lease.js';
@@ -102,18 +96,11 @@ export type TranscriptCommitEvent =
 
 export type TranscriptSessionCommitEvent = Extract<TranscriptCommitEvent, { readonly type: 'session' }>;
 
-export interface TranscriptLedgerServiceOptions {
+export interface TranscriptLedgerServiceOptions extends Partial<GarconCommandSinks> {
   readonly now?: () => string;
   readonly createRunId?: () => string;
   readonly serverInstanceId?: string;
   readonly onListenerError?: (error: unknown) => void;
-  readonly chatIdRequests?: ChatIdRequestSink;
-  readonly interAgentMessages?: InterAgentMessageRequestSink;
-  readonly agentStarts?: AgentStartRequestSink;
-  readonly agentResumes?: AgentResumeRequestSink;
-  readonly agentStops?: AgentStopRequestSink;
-  readonly agentSchedules?: AgentScheduleRequestSink;
-  readonly ticketCommands?: TicketCommandRequestSink;
 }
 
 export interface PermissionResolutionClaim {
@@ -151,13 +138,7 @@ export class TranscriptLedgerService {
   readonly #createRunId: () => string;
   readonly #serverInstanceId: string;
   readonly #onListenerError: (error: unknown) => void;
-  readonly #chatIdRequests: ChatIdRequestSink;
-  readonly #interAgentMessages: InterAgentMessageRequestSink;
-  readonly #agentStarts: AgentStartRequestSink;
-  readonly #agentResumes: AgentResumeRequestSink;
-  readonly #agentStops: AgentStopRequestSink;
-  readonly #agentSchedules: AgentScheduleRequestSink;
-  readonly #ticketCommands: TicketCommandRequestSink;
+  readonly #commandSinks: GarconCommandSinks;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -172,13 +153,16 @@ export class TranscriptLedgerService {
     this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
     this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
-    this.#chatIdRequests = options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK;
-    this.#interAgentMessages = options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK;
-    this.#agentStarts = options.agentStarts ?? { request: () => undefined };
-    this.#agentResumes = options.agentResumes ?? { request: () => undefined };
-    this.#agentStops = options.agentStops ?? { request: () => undefined };
-    this.#agentSchedules = options.agentSchedules ?? { request: () => undefined };
-    this.#ticketCommands = options.ticketCommands ?? { request: () => undefined };
+    this.#commandSinks = {
+      chatIdRequests: options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK,
+      interAgentMessages: options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK,
+      agentStarts: options.agentStarts ?? { request: () => undefined },
+      agentResumes: options.agentResumes ?? { request: () => undefined },
+      agentStops: options.agentStops ?? { request: () => undefined },
+      agentSchedules: options.agentSchedules ?? { request: () => undefined },
+      ticketCommands: options.ticketCommands ?? { request: () => undefined },
+      commandRejections: options.commandRejections ?? { reject: () => undefined },
+    };
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -732,17 +716,11 @@ export class TranscriptLedgerService {
         if (publication.drafts.length > 0) {
           committed = this.#store.append(chatId, viewId, publication.drafts);
         }
-        dispatchGarconCommands(publication.commands, {
+        dispatchGarconCommands(publication, {
+          ...this.#commandSinks,
           chatId,
           viewId,
           runId: this.#activeRuns.get(chatId) ?? null,
-          chatIdRequests: this.#chatIdRequests,
-          interAgentMessages: this.#interAgentMessages,
-          agentStarts: this.#agentStarts,
-          agentResumes: this.#agentResumes,
-          agentStops: this.#agentStops,
-          agentSchedules: this.#agentSchedules,
-          ticketCommands: this.#ticketCommands,
           committedRows: committed,
         });
         if (committed.length > 0) {

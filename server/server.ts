@@ -310,6 +310,7 @@ export async function startServer(): Promise<void> {
       agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
       ticketCommands: agentCommands.ticketCommands,
+      commandRejections: agentCommands.commandRejections,
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {

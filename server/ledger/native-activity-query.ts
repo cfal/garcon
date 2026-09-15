@@ -40,6 +40,7 @@ export function readProviderActivityWatermark(
             'agent-stop-request',
             'agent-schedule-request',
             'ticket-command-request',
+            'garcon-command-rejection-input',
             'inter-agent-message-received'
           )
           OR (

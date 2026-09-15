@@ -3,7 +3,8 @@ import type { StoredControlInputEntry } from '../chat-execution/control-state.js
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { errorMessage } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
-import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink, TicketCommandRequestSink } from '../ledger/garcon-command-publication.js';
+import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink, TicketCommandRequestSink, GarconCommandRejectionSink } from '../ledger/garcon-command-publication.js';
+import { AgentCommandReplies } from './agent-command-replies.js';
 import { TicketCommandController } from '../tickets/command-controller.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import { transcriptViewId } from '../ledger/contracts.js';
@@ -50,6 +51,14 @@ export class AgentCommandComposition {
   #stops: AgentStopController | null = null;
   #schedules: AgentScheduleController | null = null;
   #tickets: TicketCommandController | null = null;
+  #rejections: AgentCommandReplies | null = null;
+
+  readonly commandRejections: GarconCommandRejectionSink = {
+    reject: (source, issues) => {
+      if (!this.#rejections) throw new Error('Agent command replies are not initialized');
+      this.#rejections.reject(source, issues);
+    },
+  };
 
   readonly ticketCommands: TicketCommandRequestSink = {
     request: (source, command) => {
@@ -107,6 +116,10 @@ export class AgentCommandComposition {
   initialize(options: AgentCommandCompositionOptions): void {
     if (this.#chatIdDiscovery) throw new Error('Agent command controllers are already initialized');
     this.#notices = options.notices;
+    this.#rejections = new AgentCommandReplies({
+      ...options,
+      isEnabled: () => commandEnabled(options.settings, 'tickets'),
+    });
     this.#tickets = new TicketCommandController({
       ...options,
       isEnabled: () => commandEnabled(options.settings, 'tickets'),
@@ -151,6 +164,7 @@ export class AgentCommandComposition {
     this.#stops?.discardSource(chatId);
     this.#schedules?.discardSource(chatId);
     this.#tickets?.discardSource(chatId);
+    this.#rejections?.discardSource(chatId);
     this.#chatIdDiscovery?.discard(chatId);
     this.interAgentMessages.discardSource(chatId);
   }
@@ -161,6 +175,7 @@ export class AgentCommandComposition {
     this.#stops?.shutdown();
     this.#schedules?.shutdown();
     this.#tickets?.shutdown();
+    this.#rejections?.shutdown();
   }
 }
 

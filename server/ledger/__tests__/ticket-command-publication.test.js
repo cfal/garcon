@@ -11,6 +11,7 @@ import { ledgerRowsToTranscriptMessages } from '../presentation.js';
 import { importedDrafts, frozenDrafts } from '../imported-drafts.js';
 import { projectFinalResponse } from '../final-response.js';
 import { isLedgerPrivateGarconCommandRow } from '../garcon-command-request.js';
+import { garconCommandRejectionContent, TICKET_COMMAND_REJECTION_GUIDANCE } from '../../../common/garcon-command-rejection.js';
 
 const CHAT = '1000000000000001';
 const AT = '2026-01-01T00:00:00.000Z';
@@ -20,15 +21,37 @@ const READ = '<garcon-ticket-read ticket-id="G-1" />';
 const cleanups = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
-function fixture(request = () => {}) {
+function fixture(request = () => {}, reject = () => {}) {
   const directory = mkdtempSync(join(homedir(), 'garcon-ticket-ledger-'));
   const store = new TranscriptLedgerStore(directory);
-  const ledger = new TranscriptLedgerService(store, { ticketCommands: { request } });
+  const ledger = new TranscriptLedgerService(store, { ticketCommands: { request }, commandRejections: { reject } });
   cleanups.push(() => { ledger.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, ledger };
 }
 
 describe('ticket command ledger evidence', () => {
+  test('commits malformed text and notices before one grouped rejection per assistant message', () => {
+    const calls = [];
+    const { ledger, store } = fixture(() => { throw new Error('Rejected command executed'); }, (source, issues) => {
+      const rows = ledger.currentRows(CHAT);
+      expect(rows[source.noticeOrdinal - 1].kind).toBe('notice');
+      expect(rows[0].message.content).toBe(malformed);
+      expect(rows.filter((row) => row.kind === 'notice')).toHaveLength(2);
+      calls.push({ source, issues });
+    });
+    const malformed = '<garcon-ticket-create>{}</garcon-ticket-create>\nSummary.\n<garcon-ticket-read />';
+    const view = ledger.initializeChat(CHAT);
+    const lease = ledger.openProducer(CHAT, 'synthetic');
+    lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, malformed) }] });
+    expect(calls).toEqual([{ source: { chatId: CHAT, viewId: view.viewId, noticeOrdinal: 2 }, issues: [
+      { command: 'ticket-create', reason: 'malformed', edge: 'leading' },
+      { command: 'ticket-read', reason: 'malformed', edge: 'trailing' },
+    ] }]);
+    store.closeChat(CHAT);
+    expect(ledger.currentRows(CHAT)).toHaveLength(3);
+    expect(calls).toHaveLength(1);
+  });
+
   test('commits exact private source evidence before dispatch and hides it through shared folds', () => {
     const calls = [];
     const { ledger, store } = fixture((source, command) => {
@@ -58,14 +81,68 @@ describe('ticket command ledger evidence', () => {
 
   test('failed atomic append never dispatches a ticket request', () => {
     const calls = [];
-    const { ledger, store } = fixture((...args) => calls.push(args));
+    const { ledger, store } = fixture((...args) => calls.push(args), (...args) => calls.push(args));
     ledger.initializeChat(CHAT);
     const lease = ledger.openProducer(CHAT, 'synthetic');
     const append = spyOn(store, 'append').mockImplementation(() => { throw new Error('Synthetic commit failure'); });
     try {
-      expect(() => lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, CREATE) }] })).toThrow();
+      expect(() => lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, `${CREATE}\n<garcon-ticket-read />`) }] })).toThrow();
       expect(calls).toEqual([]);
     } finally { append.mockRestore(); }
+  });
+
+  test('keeps valid dispatch independent of rejection and excludes other command families and examples', () => {
+    const calls = [];
+    const { ledger } = fixture((source) => calls.push(['request', source.requestOrdinal]),
+      (source, issues) => calls.push(['rejection', source.noticeOrdinal, issues]));
+    ledger.initializeChat(CHAT);
+    const lease = ledger.openProducer(CHAT, 'synthetic');
+    const malformed = '<garcon-ticket-read />';
+    lease.sink.publish({ type: 'rows', rows: [
+      { message: new AssistantMessage(AT, `${CREATE}\n${malformed}`) },
+      { message: new AssistantMessage(AT, '<garcon-start-agent />') },
+      { message: new AssistantMessage(AT, `\`\`\`xml\n${malformed}\n\`\`\``) },
+      { message: new UserMessage(AT, malformed) },
+      { message: new AssistantMessage(AT, malformed) },
+    ] });
+    expect(calls).toEqual([
+      ['request', 2],
+      ['rejection', 3, [{ command: 'ticket-read', reason: 'malformed', edge: 'leading' }]],
+      ['rejection', 9, [{ command: 'ticket-read', reason: 'malformed', edge: 'leading' }]],
+    ]);
+  });
+
+  test('imports exact rejection feedback as private native evidence, never user conversation or new work', () => {
+    const calls = [];
+    const { ledger, store } = fixture((...args) => calls.push(args), (...args) => calls.push(args));
+    const view = ledger.initializeChat(CHAT);
+    const malformed = '<garcon-ticket-create>{}</garcon-ticket-create>';
+    const feedback = garconCommandRejectionContent({
+      issues: [{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }],
+      message: TICKET_COMMAND_REJECTION_GUIDANCE,
+    });
+    const drafts = importedDrafts([
+      { message: new AssistantMessage(AT, malformed), providerMeta: null },
+      { message: new UserMessage(LATER, feedback), providerMeta: null },
+    ], () => AT);
+    expect(drafts.map((draft) => draft.kind)).toEqual(['provider-row', 'notice']);
+    expect(drafts[0].message.content).toBe(malformed);
+    expect(drafts[1].detail.type).toBe('garcon-command-rejection-input');
+    const staged = ledger.stageView(CHAT, drafts, 1);
+    ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
+    store.closeChat(CHAT);
+    const rows = ledger.currentRows(CHAT);
+    const rendered = ledgerRowsToTranscriptMessages(rows);
+    expect(rendered[1].message.content).toBe('Garcon could not parse a ticket-create command.');
+    expect(rendered[1].message.detail).toBeUndefined();
+    expect(JSON.stringify(rendered)).not.toContain('garcon-command-rejection-input');
+    expect(ledger.conversationMessages(CHAT)).toEqual([new AssistantMessage(AT, malformed)]);
+    expect(frozenDrafts(rendered.map(({ message }) => message)).map((draft) => draft.kind)).toEqual(['provider-row']);
+    expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
+    expect(calls).toEqual([]);
+    for (const content of [`Prose.\n${feedback}`, `${feedback}\nProse.`, '<garcon-command-rejected>invalid</garcon-command-rejected>']) {
+      expect(importedDrafts([{ message: new UserMessage(AT, content), providerMeta: null }], () => AT)[0].kind).toBe('user-input');
+    }
   });
 
   test('imports requests and compact results without execution, preserving native evidence only on imports', () => {
