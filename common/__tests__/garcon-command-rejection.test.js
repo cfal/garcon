@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { AssistantMessage } from '../chat-types.js';
 import { extractGarconCommands } from '../garcon-commands.js';
-import { escapeGarconXmlText } from '../garcon-command-envelope.js';
+import { escapeGarconXmlText, GARCON_ENVELOPE_COMMANDS } from '../garcon-command-envelope.js';
 import { garconCommandRejectionContent, parseGarconCommandRejection, TICKET_COMMAND_REJECTION_GUIDANCE } from '../garcon-command-rejection.js';
 
 const issue = { command: 'ticket-create', reason: 'malformed', edge: 'leading' };
 const rejection = { issues: [issue], message: TICKET_COMMAND_REJECTION_GUIDANCE };
 const envelope = (body) => `<garcon-command-rejected>${escapeGarconXmlText(JSON.stringify(body))}</garcon-command-rejected>`;
+const validEnvelope = garconCommandRejectionContent(rejection);
 
 describe('Garcon command rejection feedback', () => {
   test('round trips actionable guidance without inventing a mutation identity or command', () => {
@@ -25,22 +26,59 @@ describe('Garcon command rejection feedback', () => {
     expect(parseGarconCommandRejection(garconCommandRejectionContent(grouped))).toEqual(grouped);
   });
 
-  test('only recognizes a complete, bounded, strictly typed envelope', () => {
-    for (const invalid of [
-      null, [], {}, { ...rejection, extra: true }, { ...rejection, issues: [] },
-      { ...rejection, issues: [issue, issue, issue] },
-      { ...rejection, issues: [{ ...issue, ref: 'not-a-request' }] },
-      { ...rejection, issues: [{ ...issue, command: 'ticket-unknown' }] },
-      { ...rejection, issues: [{ ...issue, edge: 'middle' }] },
-      { ...rejection, issues: [{ ...issue, reason: 'failed' }] },
-      { ...rejection, message: '' }, { ...rejection, message: 'x'.repeat(2049) },
-      { ...rejection, message: '\ud800' },
-    ]) expect(parseGarconCommandRejection(envelope(invalid))).toBeNull();
-    const valid = garconCommandRejectionContent(rejection);
-    for (const invalid of [`Prose.\n${valid}`, `${valid}\nProse.`, `\`\`\`xml\n${valid}\n\`\`\``,
-      valid + valid, valid.replace('<garcon-command-rejected>', '<garcon-command-rejected ref="x">'),
-      '<garcon-command-rejected />', '<garcon-command-rejected>{}</garcon-command-rejected>',
-      `<garcon-command-rejected>${JSON.stringify(rejection)}</garcon-command-rejected>`,
-    ]) expect(parseGarconCommandRejection(invalid)).toBeNull();
+  test.each(GARCON_ENVELOPE_COMMANDS)('recognizes the %s command without changing issue fields', (command) => {
+    const expected = { ...rejection, issues: [{ ...issue, command }] };
+    expect(parseGarconCommandRejection(envelope(expected))).toEqual(expected);
+  });
+
+  test.each([
+    ['ASCII byte limit', 'x'.repeat(2048)],
+    ['multibyte byte limit', '\u00e9'.repeat(1024)],
+    ['surrounding whitespace', ' Guidance. '],
+  ])('preserves a valid message at %s', (_name, message) => {
+    const expected = { ...rejection, message };
+    expect(parseGarconCommandRejection(envelope(expected))).toEqual(expected);
+  });
+
+  test.each([
+    ['null payload', null],
+    ['array payload', []],
+    ['missing fields', {}],
+    ['unknown payload field', { ...rejection, extra: true }],
+    ['missing issues', { message: rejection.message }],
+    ['non-array issues', { ...rejection, issues: issue }],
+    ['empty issues', { ...rejection, issues: [] }],
+    ['too many issues', { ...rejection, issues: [issue, issue, issue] }],
+    ['null issue', { ...rejection, issues: [null] }],
+    ['array issue', { ...rejection, issues: [[]] }],
+    ['missing issue fields', { ...rejection, issues: [{}] }],
+    ['unknown issue field', { ...rejection, issues: [{ ...issue, ref: 'not-a-request' }] }],
+    ['unknown command', { ...rejection, issues: [{ ...issue, command: 'ticket-unknown' }] }],
+    ['non-string command', { ...rejection, issues: [{ ...issue, command: ['ticket-create'] }] }],
+    ['invalid edge', { ...rejection, issues: [{ ...issue, edge: 'middle' }] }],
+    ['invalid reason', { ...rejection, issues: [{ ...issue, reason: 'failed' }] }],
+    ['missing message', { issues: rejection.issues }],
+    ['non-string message', { ...rejection, message: 1 }],
+    ['empty message', { ...rejection, message: '' }],
+    ['whitespace-only message', { ...rejection, message: ' \n\t' }],
+    ['oversized ASCII message', { ...rejection, message: 'x'.repeat(2049) }],
+    ['oversized multibyte message', { ...rejection, message: '\u00e9'.repeat(1025) }],
+    ['malformed Unicode message', { ...rejection, message: '\ud800' }],
+  ])('rejects %s', (_name, invalid) => {
+    expect(parseGarconCommandRejection(envelope(invalid))).toBeNull();
+  });
+
+  test.each([
+    ['leading prose', `Prose.\n${validEnvelope}`],
+    ['trailing prose', `${validEnvelope}\nProse.`],
+    ['fenced example', `\`\`\`xml\n${validEnvelope}\n\`\`\``],
+    ['adjacent envelopes', validEnvelope + validEnvelope],
+    ['unknown attribute', validEnvelope.replace('<garcon-command-rejected>', '<garcon-command-rejected ref="x">')],
+    ['self-closing envelope', '<garcon-command-rejected />'],
+    ['empty payload', '<garcon-command-rejected>{}</garcon-command-rejected>'],
+    ['invalid JSON', '<garcon-command-rejected>{</garcon-command-rejected>'],
+    ['unescaped body', `<garcon-command-rejected>${JSON.stringify(rejection)}</garcon-command-rejected>`],
+  ])('rejects %s', (_name, invalid) => {
+    expect(parseGarconCommandRejection(invalid)).toBeNull();
   });
 });

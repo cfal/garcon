@@ -23,18 +23,20 @@ export function parseGarconCommandRejection(content: string): GarconCommandRejec
   try {
     const raw: unknown = JSON.parse(envelope.body);
     if (!isRecord(raw) || Object.keys(raw).some((key) => key !== 'issues' && key !== 'message')) return null;
-    if (typeof raw.message !== 'string' || !raw.message.trim() || !raw.message.isWellFormed()
-      || new TextEncoder().encode(raw.message).byteLength > 2048) return null;
+    const { message, issues: rawIssues } = raw;
+    if (typeof message !== 'string' || !message.trim() || !message.isWellFormed()) return null;
+    if (new TextEncoder().encode(message).byteLength > 2048) return null;
     // Edge extraction reports at most one rejected candidate at each end.
-    if (!Array.isArray(raw.issues) || raw.issues.length < 1 || raw.issues.length > 2) return null;
+    if (!Array.isArray(rawIssues) || rawIssues.length < 1 || rawIssues.length > 2) return null;
     const issues: GarconCommandIssue[] = [];
-    for (const issue of raw.issues) {
-      if (!isRecord(issue) || Object.keys(issue).some((key) => !['command', 'reason', 'edge'].includes(key))
-        || !GARCON_ENVELOPE_COMMANDS.includes(issue.command as GarconCommandIssue['command'])
-        || issue.reason !== 'malformed' || (issue.edge !== 'leading' && issue.edge !== 'trailing')) return null;
-      issues.push({ command: issue.command as GarconCommandIssue['command'], reason: issue.reason, edge: issue.edge });
+    for (const issue of rawIssues) {
+      if (!isRecord(issue) || Object.keys(issue).some((key) => !['command', 'reason', 'edge'].includes(key))) return null;
+      const command = GARCON_ENVELOPE_COMMANDS.find((candidate) => candidate === issue.command);
+      if (!command || issue.reason !== 'malformed') return null;
+      if (issue.edge !== 'leading' && issue.edge !== 'trailing') return null;
+      issues.push({ command, reason: issue.reason, edge: issue.edge });
     }
-    return { issues, message: raw.message };
+    return { issues, message };
   } catch {
     return null;
   }
