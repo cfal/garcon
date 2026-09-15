@@ -16,6 +16,7 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { assertRealWithinProjectBase } from '../lib/path-boundary.js';
 import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
 import { preambleCatalogCompositionViolation } from './catalog-budget.js';
+import type { BundledPreambleDefinition } from './bundled.js';
 
 const PREAMBLES_FILE_VERSION = 2;
 
@@ -24,6 +25,11 @@ interface PreamblesFile {
   revision: number;
   preambles: Preamble[];
   retiredPreambleIds: string[];
+}
+
+export interface BundledPreambleInstallResult {
+  readonly installed: number;
+  readonly deferred: number;
 }
 
 function emptyFile(): PreamblesFile {
@@ -181,6 +187,53 @@ export class PreambleStore {
 
   lifetimeIdCount(): number {
     return this.#file.preambles.length + this.#file.retiredPreambleIds.length;
+  }
+
+  async installBundledPreambles(
+    definitions: readonly BundledPreambleDefinition[],
+    installedAt: Date,
+  ): Promise<BundledPreambleInstallResult> {
+    const timestamp = installedAt.toISOString();
+    const bundledIds = new Set<string>();
+    const bundled = definitions.map((definition) => {
+      if (bundledIds.has(definition.id)) {
+        throw new Error('Bundled preambles contain duplicate IDs');
+      }
+      bundledIds.add(definition.id);
+      if (definition.enabled) {
+        throw new PreambleDomainError(
+          'PREAMBLE_VALIDATION_FAILED',
+          'Bundled preambles must be disabled by default',
+          500,
+        );
+      }
+      return normalizeCreatedPreamble({
+        ...definition,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    });
+    const existingIds = new Set([
+      ...this.#file.preambles.map((preamble) => preamble.id),
+      ...this.#file.retiredPreambleIds,
+    ]);
+    const missing = bundled.filter((preamble) => !existingIds.has(preamble.id));
+    const capacity = Math.min(
+      PREAMBLE_MAX_COUNT - this.#file.preambles.length,
+      PREAMBLE_ID_LIFETIME_MAX_COUNT - this.lifetimeIdCount(),
+    );
+    const additions = missing.slice(0, capacity);
+    if (additions.length === 0) {
+      return { installed: 0, deferred: missing.length };
+    }
+
+    await this.#mutate(this.#file.revision, (draft) => {
+      draft.preambles.push(...additions);
+    });
+    return {
+      installed: additions.length,
+      deferred: missing.length - additions.length,
+    };
   }
 
   // Generates exactly one canonical ID under the mutation lock after the
