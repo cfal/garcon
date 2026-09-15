@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   PREAMBLE_ID_LIFETIME_MAX_COUNT,
+  PREAMBLE_MAX_COUNT,
   PREAMBLES_FILE_MAX_BYTES,
 } from '../../../common/preambles.js';
 import { PreambleCatalogCommittedUnknownError, PreambleStore } from '../store.ts';
@@ -14,6 +15,7 @@ const AT = '2026-09-03T10:00:00.000Z';
 const ID_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const ID_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 const ID_C = '936903ad-8b98-43eb-a7d4-c17ce0dc18d8';
+const ID_D = 'c338bd5c-95ea-4bb9-97cb-f0122042497e';
 
 async function temporaryDirectory() {
   const directory = path.join(os.tmpdir(), `garcon-preambles-${randomUUID()}`);
@@ -37,6 +39,14 @@ function preamble(id, overrides = {}) {
   };
 }
 
+function bundledPreamble(id, overrides = {}) {
+  const { createdAt: _createdAt, updatedAt: _updatedAt, ...definition } = preamble(id, {
+    enabled: false,
+    ...overrides,
+  });
+  return definition;
+}
+
 afterEach(async () => {
   for (const directory of createdDirectories.splice(0)) {
     await fs.rm(directory, { recursive: true, force: true });
@@ -52,6 +62,99 @@ async function readCatalog(directory) {
 }
 
 describe('PreambleStore version two', () => {
+  it('installs missing bundled preambles in one revision and makes restart reconciliation a no-op', async () => {
+    const directory = await temporaryDirectory();
+    const bundled = [bundledPreamble(ID_A), bundledPreamble(ID_B)];
+    const store = new PreambleStore(directory);
+    await store.init();
+
+    expect(await store.installBundledPreambles(bundled, new Date(AT))).toEqual({
+      installed: 2,
+      deferred: 0,
+    });
+    expect(store.snapshot()).toEqual({
+      revision: 1,
+      preambles: [preamble(ID_A, { enabled: false }), preamble(ID_B, { enabled: false })],
+    });
+    const firstFile = await fs.readFile(path.join(directory, 'preambles.json'), 'utf8');
+
+    const reopened = new PreambleStore(directory);
+    await reopened.init();
+    expect(await reopened.installBundledPreambles(bundled, new Date('2026-09-16T00:00:00.000Z')))
+      .toEqual({ installed: 0, deferred: 0 });
+    expect(await fs.readFile(path.join(directory, 'preambles.json'), 'utf8')).toBe(firstFile);
+    expect(reopened.snapshot()).toEqual(store.snapshot());
+  });
+
+  it('preserves active bundled edits and retired bundled IDs while appending new entries', async () => {
+    const directory = await temporaryDirectory();
+    const edited = preamble(ID_A, { enabled: true, title: 'Customized instructions' });
+    await writeCatalog(directory, {
+      version: 2,
+      revision: 7,
+      preambles: [edited],
+      retiredPreambleIds: [ID_B],
+    });
+    const store = new PreambleStore(directory);
+    await store.init();
+
+    expect(await store.installBundledPreambles([
+      bundledPreamble(ID_A),
+      bundledPreamble(ID_B),
+      bundledPreamble(ID_C),
+    ], new Date(AT))).toEqual({ installed: 1, deferred: 0 });
+    expect(store.snapshot()).toEqual({
+      revision: 8,
+      preambles: [edited, preamble(ID_C, { enabled: false })],
+    });
+    expect(await readCatalog(directory)).toMatchObject({
+      revision: 8,
+      retiredPreambleIds: [ID_B],
+    });
+  });
+
+  it('defers bundled entries in source order when the active catalog is full', async () => {
+    const directory = await temporaryDirectory();
+    const active = Array.from({ length: PREAMBLE_MAX_COUNT - 1 }, (_, index) => preamble(
+      `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    ));
+    await writeCatalog(directory, {
+      version: 2,
+      revision: 4,
+      preambles: active,
+      retiredPreambleIds: [],
+    });
+    const store = new PreambleStore(directory);
+    await store.init();
+
+    expect(await store.installBundledPreambles([
+      bundledPreamble(ID_C),
+      bundledPreamble(ID_D),
+    ], new Date(AT))).toEqual({ installed: 1, deferred: 1 });
+    expect(store.snapshot()).toMatchObject({
+      revision: 5,
+      preambles: [...active, preamble(ID_C, { enabled: false })],
+    });
+  });
+
+  it('rejects duplicate or malformed bundled definitions before writing', async () => {
+    const directory = await temporaryDirectory();
+    const store = new PreambleStore(directory);
+    await store.init();
+
+    await expect(store.installBundledPreambles([
+      bundledPreamble(ID_A),
+      bundledPreamble(ID_A),
+    ], new Date(AT))).rejects.toThrow('duplicate IDs');
+    await expect(store.installBundledPreambles([
+      bundledPreamble('not-a-uuid'),
+    ], new Date(AT))).rejects.toMatchObject({ code: 'PREAMBLE_VALIDATION_FAILED' });
+    expect(store.snapshot()).toEqual({ revision: 0, preambles: [] });
+    await expect(fs.access(path.join(directory, 'preambles.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('migrates a valid version-one catalog at initialization', async () => {
     const directory = await temporaryDirectory();
     const { agentIds: _agentIds, tagFilter: _tagFilter, ...legacyPreamble } = preamble(ID_A);

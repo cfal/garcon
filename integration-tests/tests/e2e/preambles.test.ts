@@ -107,6 +107,10 @@ describe('Lightpanda preambles', () => {
       await fixture.page.setViewport({ width: 1_280, height: 2_000 });
       await app.open();
       await fixture.waitForSpaWebSocket();
+      const bundledPreambleIds = new Set(
+        (await fixture.integration.client.get<PreamblesSnapshot>('/api/v1/preambles'))
+          .preambles.map((preamble) => preamble.id),
+      );
 
       await app.clickButton('More actions');
       await app.waitForMenuItemEnabled('Preambles');
@@ -124,11 +128,17 @@ describe('Lightpanda preambles', () => {
       await app.waitForText('Global UI rules');
 
       await clickPreambleRowAction(fixture, 'Global UI rules', 'Disable Global UI rules');
-      await app.waitForText('Disabled');
+      await fixture.page.waitForFunction(
+        () => [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
+          .some((element) => element.querySelector('[data-slot="preamble-row-title"]')
+            ?.textContent?.trim() === 'Global UI rules' && element.textContent?.includes('Disabled')),
+        { timeout: 20_000 },
+      );
       await clickPreambleRowAction(fixture, 'Global UI rules', 'Enable Global UI rules');
       await fixture.page.waitForFunction(
-        () => ![...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
-          .some((element) => element.textContent?.includes('Disabled')),
+        () => [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
+          .some((element) => element.querySelector('[data-slot="preamble-row-title"]')
+            ?.textContent?.trim() === 'Global UI rules' && !element.textContent?.includes('Disabled')),
         { timeout: 20_000 },
       );
 
@@ -187,6 +197,7 @@ describe('Lightpanda preambles', () => {
       await fixture.page.waitForFunction(
         () => [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row-title"]')]
           .map((element) => element.textContent?.trim())
+          .filter((title) => title === 'Project UI rules' || title === 'Global UI rules')
           .join('|') === 'Project UI rules|Global UI rules',
         { timeout: 20_000 },
       );
@@ -250,10 +261,13 @@ describe('Lightpanda preambles', () => {
       );
 
       const catalog = await fixture.integration.client.get<PreamblesSnapshot>('/api/v1/preambles');
-      expect(catalog.preambles.map((preamble) => preamble.title)).toEqual([
+      const customPreambles = catalog.preambles.filter(
+        (preamble) => !bundledPreambleIds.has(preamble.id),
+      );
+      expect(customPreambles.map((preamble) => preamble.title)).toEqual([
         'Global UI rules renamed',
       ]);
-      expect(catalog.preambles[0]?.enabled).toBe(true);
+      expect(customPreambles[0]?.enabled).toBe(true);
       await app.clickButton('Close');
 
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();

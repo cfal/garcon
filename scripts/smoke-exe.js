@@ -8,6 +8,13 @@ const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
 const SHUTDOWN_TIMEOUT_MS = 15000;
 const SMOKE_CHAT_ID = '1767225600000000';
+const EXPECTED_BUNDLED_PREAMBLES = [
+  ['5c3a9b1c-f675-4bca-9a8f-239cd4c38b87', 'Garcon: Chat identity'],
+  ['36edcbed-0d64-4d8e-b3df-3f1b1f8602b9', 'Garcon: Inter-chat messages'],
+  ['3462ad70-c497-4009-b11a-79474dfb292a', 'Garcon: Delegated agents'],
+  ['d5597052-6f66-4564-b9fa-bd8660725c47', 'Garcon: Scheduled prompts'],
+  ['9b0a6bc3-92fc-4472-9cb9-8481590111f3', 'Garcon: Tickets'],
+];
 const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_CONFIG_DIR',
   'GARCON_WORKSPACE_DIR',
@@ -99,6 +106,19 @@ async function stopProcess(processHandle) {
       return processHandle.exited;
     }),
   ]);
+}
+
+async function assertBundledPreambles(url) {
+  const response = await fetch(`${url}/api/v1/preambles`);
+  if (!response.ok) {
+    throw new Error(`Expected GET /api/v1/preambles to succeed, received ${response.status}`);
+  }
+  const snapshot = await response.json();
+  const installed = snapshot.preambles?.map(({ id, title, enabled }) => [id, title, enabled]);
+  const expected = EXPECTED_BUNDLED_PREAMBLES.map(([id, title]) => [id, title, false]);
+  if (snapshot.revision !== 1 || JSON.stringify(installed) !== JSON.stringify(expected)) {
+    throw new Error(`Executable did not install the bundled preamble catalog: ${JSON.stringify(snapshot)}`);
+  }
 }
 
 async function waitForTranscriptResult(url, token, chatId, getServerOutput) {
@@ -216,6 +236,7 @@ async function run() {
     if (await Bun.file(searchDatabase).exists()) {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
+    await assertBundledPreambles(started.url);
     await stopProcess(child);
 
     await writeFile(

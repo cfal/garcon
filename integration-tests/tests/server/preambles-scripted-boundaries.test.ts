@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type {
   PreambleDefinitionInput,
   PreamblesMutationResponse,
+  PreamblesSnapshot,
 } from '../../../common/preambles.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
@@ -263,8 +264,9 @@ async function createGlobalPreamble(fixture: IntegrationFixture): Promise<void> 
     content: PREAMBLE_BODY_TEMPLATE,
     scope: { type: 'global' },
   };
+  const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
   await fixture.client.post<PreamblesMutationResponse>('/api/v1/preambles', {
-    expectedRevision: 0,
+    expectedRevision: catalog.revision,
     preamble,
   });
 }

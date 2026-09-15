@@ -18,13 +18,19 @@ const MISSING_ID = '936903ad-8b98-43eb-a7d4-c17ce0dc18d8';
 
 async function createPreamble(
   fixture: IntegrationFixture,
-  revision: number,
   preamble: PreambleDefinitionInput,
 ): Promise<PreamblesSnapshot> {
+  const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
   return (await fixture.client.post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
-    expectedRevision: revision,
+    expectedRevision: catalog.revision,
     preamble,
   })).snapshot;
+}
+
+function preambleId(catalog: PreamblesSnapshot, title: string): string {
+  const id = catalog.preambles.find((preamble) => preamble.title === title)?.id;
+  if (!id) throw new Error(`Preamble was not created: ${title}`);
+  return id;
 }
 
 function globalDefinition(
@@ -63,10 +69,10 @@ function applicationNotices(page: ChatMessagesPage) {
 describe('per-chat preambles', () => {
   test('[PREAMBLE-SELECTION.02-SERVER-01] saves a changed selection, notices it, and applies it in chat order on the next ordinary input', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
-      let catalog = await createPreamble(fixture, 0, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
-      catalog = await createPreamble(fixture, catalog.revision, globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'));
-      const [idFirst, idSecond] = catalog.preambles.map((preamble) => preamble.id);
-      expect(typeof idFirst).toBe('string');
+      let catalog = await createPreamble(fixture, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
+      catalog = await createPreamble(fixture, globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'));
+      const idFirst = preambleId(catalog, 'First');
+      const idSecond = preambleId(catalog, 'Second');
       expect(idFirst).not.toEqual(idSecond);
 
       const chatId = fixture.newChatId();
@@ -168,7 +174,7 @@ describe('per-chat preambles', () => {
 
   test('[PREAMBLE-SELECTION.02-SERVER-02] saving an empty selection notices None enabled and consumes the boundary without an application', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
-      const defaultsCatalog = await createPreamble(fixture, 0, globalDefinition('Global only', 'SYNTHETIC_GLOBAL_BODY'));
+      const defaultsCatalog = await createPreamble(fixture, globalDefinition('Global only', 'SYNTHETIC_GLOBAL_BODY'));
 
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({
@@ -185,7 +191,9 @@ describe('per-chat preambles', () => {
       await fixture.client.waitForTurnTerminal(chatId, started.turnId);
 
       const target = await selectionTarget(fixture, chatId);
-      expect(target.selection.orderedPreambleIds).toEqual([defaultsCatalog.preambles[0]!.id]);
+      expect(target.selection.orderedPreambleIds).toEqual([
+        preambleId(defaultsCatalog, 'Global only'),
+      ]);
 
       const saved = await saveSelection(fixture, {
         chatId,
@@ -225,7 +233,7 @@ describe('per-chat preambles', () => {
 
   test('[PREAMBLE-SELECTION.02-SERVER-03] conflicts by revision, replays duplicates, and rejects unsafe compositions', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
-      await createPreamble(fixture, 0, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
+      await createPreamble(fixture, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
 
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({
@@ -264,7 +272,7 @@ describe('per-chat preambles', () => {
       });
 
       const conflictCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
-      const conflictFirstId = conflictCatalog.preambles[0]!.id;
+      const conflictFirstId = preambleId(conflictCatalog, 'First');
       const saved = await saveSelection(fixture, {
         ...request,
         expectedRevision: 0,
@@ -304,10 +312,10 @@ describe('per-chat preambles', () => {
 
   test('[PREAMBLE-SELECTION.02-SERVER-04] forks copy the source selection and deleted IDs stay saved as missing', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
-      await createPreamble(fixture, 0, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
-      const forkCatalog = await createPreamble(fixture, 1, globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'));
-      const forkFirstId = forkCatalog.preambles[0]!.id;
-      const forkSecondId = forkCatalog.preambles[1]!.id;
+      await createPreamble(fixture, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
+      const forkCatalog = await createPreamble(fixture, globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'));
+      const forkFirstId = preambleId(forkCatalog, 'First');
+      const forkSecondId = preambleId(forkCatalog, 'Second');
 
       const sourceChatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({
@@ -362,8 +370,7 @@ describe('per-chat preambles', () => {
       });
 
       // A newly created catalog entry can never acquire the retired identity.
-      const currentCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
-      await createPreamble(fixture, currentCatalog.revision, globalDefinition('Resurrected', 'SYNTHETIC_RESURRECTED_BODY'));
+      await createPreamble(fixture, globalDefinition('Resurrected', 'SYNTHETIC_RESURRECTED_BODY'));
       const snapshot = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       expect(snapshot.preambles.map((preamble) => preamble.id)).not.toContain(forkSecondId);
     });
@@ -371,31 +378,34 @@ describe('per-chat preambles', () => {
 
   test('[PREAMBLE-SELECTION.02-SERVER-05] previews and creation share automatic filters while explicit drafts bypass them', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
-      const previewCatalog = await createPreamble(fixture, 0, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
+      await createPreamble(fixture, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
       const agentId = fixture.directAgents.openAi.agentId;
-      let catalog = await createPreamble(fixture, previewCatalog.revision, globalDefinition(
+      await createPreamble(fixture, globalDefinition(
         'Matching agent',
         'SYNTHETIC_MATCHING_AGENT_BODY',
         { agentIds: [agentId] },
       ));
-      catalog = await createPreamble(fixture, catalog.revision, globalDefinition(
+      await createPreamble(fixture, globalDefinition(
         'Other agent',
         'SYNTHETIC_OTHER_AGENT_BODY',
         { agentIds: ['codex'] },
       ));
-      catalog = await createPreamble(fixture, catalog.revision, globalDefinition(
+      await createPreamble(fixture, globalDefinition(
         'Any tag',
         'SYNTHETIC_ANY_TAG_BODY',
         { tagFilter: { mode: 'any', tags: ['backend', 'frontend'] } },
       ));
-      await createPreamble(fixture, catalog.revision, globalDefinition(
+      await createPreamble(fixture, globalDefinition(
         'All tags',
         'SYNTHETIC_ALL_TAGS_BODY',
         { tagFilter: { mode: 'all', tags: ['backend', 'reviewed'] } },
       ));
       const currentPreviewCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
-      const [firstId, matchingAgentId, otherAgentId, anyTagId, allTagsId] =
-        currentPreviewCatalog.preambles.map((preamble) => preamble.id);
+      const firstId = preambleId(currentPreviewCatalog, 'First');
+      const matchingAgentId = preambleId(currentPreviewCatalog, 'Matching agent');
+      const otherAgentId = preambleId(currentPreviewCatalog, 'Other agent');
+      const anyTagId = preambleId(currentPreviewCatalog, 'Any tag');
+      const allTagsId = preambleId(currentPreviewCatalog, 'All tags');
 
       const untagged = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',

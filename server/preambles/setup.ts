@@ -3,6 +3,8 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
+import { createLogger } from '../lib/log.js';
+import { BUNDLED_PREAMBLES } from './bundled.js';
 import { ChatPreambleSelectionService } from './chat-selection-service.js';
 import { PreambleProjectPathService } from './project-path-service.js';
 import { PreambleService } from './service.js';
@@ -11,6 +13,12 @@ import { PreambleStore } from './store.js';
 export async function initializePreambleService(workspaceDir: string): Promise<PreambleService> {
   const store = new PreambleStore(workspaceDir);
   await store.init();
+  const installation = await store.installBundledPreambles(BUNDLED_PREAMBLES, new Date());
+  if (installation.deferred > 0) {
+    createLogger('preambles').warn(
+      `${installation.deferred} bundled preamble(s) could not be installed because the catalog is full`,
+    );
+  }
   return new PreambleService({ store, projectPaths: new PreambleProjectPathService() });
 }
 

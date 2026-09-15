@@ -111,9 +111,12 @@ describe('Lightpanda minute scheduling', () => {
 
   test('configures and restores an ordered preamble selection for scheduled new chats', async () => {
     await withE2eFixture('scheduled-preamble-selection', async (fixture) => {
+      const initialCatalog = await fixture.integration.client.get<PreamblesSnapshot>(
+        '/api/v1/preambles',
+      );
       let catalog = await fixture.integration.client
         .post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
-          expectedRevision: 0,
+          expectedRevision: initialCatalog.revision,
           preamble: {
             enabled: true,
             title: 'Scheduled alpha rules',
@@ -171,6 +174,7 @@ describe('Lightpanda minute scheduling', () => {
         (element as HTMLButtonElement).click(),
       );
       await waitForTextSequence(fixture.page, '[data-slot="chat-preamble-selection-row-title"]', [
+        ...initialCatalog.preambles.map((preamble) => preamble.title),
         'Scheduled alpha rules',
         'Scheduled beta rules',
       ]);

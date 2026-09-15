@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   Preamble,
@@ -8,6 +8,7 @@ import type {
   PreamblesSnapshot,
 } from '../../../common/preambles.js';
 import type { AgentRunFailedMessage } from '../../../common/ws-events.js';
+import { BUNDLED_PREAMBLES } from '../../../server/preambles/bundled.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import type { ChatMessagesPage } from '../../support/garcon-client.js';
 import { GarconApiError } from '../../support/garcon-client.js';
@@ -18,13 +19,23 @@ import {
 
 async function createPreamble(
   fixture: IntegrationFixture,
-  revision: number,
   preamble: PreambleDefinitionInput,
-): Promise<PreamblesMutationResponse> {
-  return fixture.client.post('/api/v1/preambles', {
-    expectedRevision: revision,
-    preamble,
-  });
+): Promise<PreamblesSnapshot> {
+  const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
+  const response = await fixture.client.post<PreamblesMutationResponse>(
+    '/api/v1/preambles',
+    {
+      expectedRevision: catalog.revision,
+      preamble,
+    },
+  );
+  return response.snapshot;
+}
+
+function preambleByTitle(catalog: PreamblesSnapshot, title: string): Preamble {
+  const preamble = catalog.preambles.find((entry) => entry.title === title);
+  if (!preamble) throw new Error(`Preamble not found: ${title}`);
+  return preamble;
 }
 
 function applicationTitles(snapshot: ChatMessagesPage): string[][] {
@@ -79,6 +90,120 @@ function nextScheduledRun(now = Date.now()): string {
 }
 
 describe('preambles', () => {
+  test('ships disabled command preambles and applies one only after explicit enablement and selection', async () => {
+    await withIntegrationFixture('bundled-preambles', async (fixture) => {
+      const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
+      expect(catalog.revision).toBe(1);
+      expect(catalog.preambles.map(({ id, title, enabled }) => ({ id, title, enabled })))
+        .toEqual(BUNDLED_PREAMBLES.map(({ id, title }) => ({ id, title, enabled: false })));
+
+      const automaticChatId = fixture.newChatId();
+      const automaticHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const automatic = await fixture.client.startDirectChat({
+        chatId: automaticChatId,
+        content: 'ordinary prompt without command instructions',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      const automaticRequest = await automaticHeld.received;
+      expect(automaticRequest.lastUserText).toBe('ordinary prompt without command instructions');
+      expect(automaticHeld.releaseText('ordinary response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(automaticChatId, automatic.turnId);
+      expect(applicationTitles(await fixture.client.getMessages(automaticChatId))).toEqual([]);
+
+      const identity = preambleByTitle(catalog, 'Garcon: Chat identity');
+      await fixture.client.put<PreamblesMutationResponse>('/api/v1/preambles', {
+        expectedRevision: catalog.revision,
+        id: identity.id,
+        preamble: {
+          enabled: true,
+          title: identity.title,
+          content: identity.content,
+          scope: identity.scope,
+          agentIds: identity.agentIds,
+          tagFilter: identity.tagFilter,
+        },
+      });
+
+      const explicitChatId = fixture.newChatId();
+      const explicitHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const explicit = await fixture.client.startDirectChat({
+        chatId: explicitChatId,
+        content: 'ordinary prompt with identity instructions',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+        orderedPreambleIds: [identity.id],
+      });
+      const explicitRequest = await explicitHeld.received;
+      expect(explicitRequest.lastUserText).toContain(identity.content);
+      expect(explicitRequest.lastUserText).toEndWith('ordinary prompt with identity instructions');
+      expect(explicitHeld.releaseText('instructed response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(explicitChatId, explicit.turnId);
+      expect(applicationTitles(await fixture.client.getMessages(explicitChatId)))
+        .toEqual([['Garcon: Chat identity']]);
+    });
+  });
+
+  test('backfills partial workspaces without restoring deletions or replacing edits', async () => {
+    const custom: Preamble = {
+      id: 'd68a2ba6-b137-439e-a73e-4e3029079a36',
+      enabled: true,
+      title: 'Existing workspace instructions',
+      content: 'SYNTHETIC_EXISTING_BODY',
+      scope: { type: 'global' },
+      agentIds: [],
+      tagFilter: { mode: 'any', tags: [] },
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-02T00:00:00.000Z',
+    };
+    const editedBundle: Preamble = {
+      ...BUNDLED_PREAMBLES[0]!,
+      enabled: true,
+      title: 'Customized chat identity instructions',
+      content: 'SYNTHETIC_CUSTOMIZED_BUNDLE_BODY',
+      createdAt: '2026-09-03T00:00:00.000Z',
+      updatedAt: '2026-09-04T00:00:00.000Z',
+    };
+    const retiredBundleId = BUNDLED_PREAMBLES[1]!.id;
+
+    await withIntegrationFixture('bundled-preamble-backfill', async (fixture) => {
+      const snapshot = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
+      expect(snapshot.revision).toBe(8);
+      expect(snapshot.preambles.map((preamble) => preamble.id)).toEqual([
+        custom.id,
+        editedBundle.id,
+        ...BUNDLED_PREAMBLES.slice(2).map((preamble) => preamble.id),
+      ]);
+      expect(snapshot.preambles[0]).toEqual(custom);
+      expect(snapshot.preambles[1]).toEqual(editedBundle);
+      expect(snapshot.preambles.slice(2).every((preamble) => !preamble.enabled)).toBeTrue();
+
+      const path = join(fixture.dirs.workspace, 'preambles.json');
+      const installedFile = await readFile(path, 'utf8');
+      expect(JSON.parse(installedFile)).toMatchObject({
+        revision: 8,
+        retiredPreambleIds: [retiredBundleId],
+      });
+
+      await fixture.restartGarcon();
+      expect(await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles')).toEqual(snapshot);
+      expect(await readFile(path, 'utf8')).toBe(installedFile);
+    }, {
+      prepareWorkspace: async (directories) => {
+        await writeFile(join(directories.workspace, 'preambles.json'), `${JSON.stringify({
+          version: 2,
+          revision: 7,
+          preambles: [custom, editedBundle],
+          retiredPreambleIds: [retiredBundleId],
+        }, null, 2)}\n`);
+      },
+    });
+  });
+
   test('[TLV5-PREAMBLE.03-SERVER-01] applies ordered current preambles once at every boundary', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
       const nestedProject = join(fixture.dirs.project, 'nested');
@@ -114,11 +239,11 @@ describe('preambles', () => {
         },
       ];
 
-      let catalog: PreamblesSnapshot = { revision: 0, preambles: [] };
+      let catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       for (const definition of definitions) {
-        catalog = (await createPreamble(fixture, catalog.revision, definition)).snapshot;
+        catalog = await createPreamble(fixture, definition);
       }
-      expect(catalog.preambles.map((preamble) => preamble.title)).toEqual([
+      expect(catalog.preambles.slice(-definitions.length).map((preamble) => preamble.title)).toEqual([
         'Global opening',
         'Nested project',
         'Global closing',
@@ -251,7 +376,7 @@ describe('preambles', () => {
         ['Global opening', 'Nested project', 'Global closing'],
       );
 
-      const opening = catalog.preambles[0] as Preamble;
+      const opening = preambleByTitle(catalog, 'Global opening');
       const updated = await fixture.client.put<PreamblesMutationResponse>('/api/v1/preambles', {
         expectedRevision: catalog.revision,
         id: opening.id,
@@ -389,7 +514,7 @@ describe('preambles', () => {
   test('retains newly prepared boundary chats after blocking an opening slash command', async () => {
     await withIntegrationFixture('preamble-slash-boundaries', async (fixture) => {
       const body = 'SYNTHETIC_RETAINED_BOUNDARY_BODY';
-      await createPreamble(fixture, 0, {
+      await createPreamble(fixture, {
         enabled: true,
         title: 'Retained boundary instructions',
         content: body,
@@ -487,19 +612,20 @@ describe('preambles', () => {
     await withIntegrationFixture('scheduled-preambles', async (fixture) => {
       const firstBody = 'SYNTHETIC_SCHEDULED_FIRST_BODY';
       const secondBody = 'SYNTHETIC_SCHEDULED_SECOND_BODY';
-      let catalog = await createPreamble(fixture, 0, {
+      let catalog = await createPreamble(fixture, {
         enabled: true,
         title: 'Scheduled first',
         content: firstBody,
         scope: { type: 'global' },
       });
-      catalog = await createPreamble(fixture, catalog.snapshot.revision, {
+      catalog = await createPreamble(fixture, {
         enabled: true,
         title: 'Scheduled second',
         content: secondBody,
         scope: { type: 'global' },
       });
-      const [firstId, secondId] = catalog.snapshot.preambles.map((preamble) => preamble.id);
+      const firstId = preambleByTitle(catalog, 'Scheduled first').id;
+      const secondId = preambleByTitle(catalog, 'Scheduled second').id;
 
       const agent = fixture.directAgents.openAi;
       const initial = await fixture.client.getScheduledPrompts();
