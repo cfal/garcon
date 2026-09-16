@@ -43,7 +43,13 @@ Requirements:
 - At least one working coding agent or API provider.
 - Optional pull request support: an authenticated GitHub CLI on the Garcon host.
 
-For a containerized install, use the `ghcr.io/cfal/garcon:main` image or build the current checkout. The [Docker guide](docs/docker.md) covers image tags, volumes, agent login, Git, SSH, and toolchains.
+Garcon publishes an official multi-platform container image for every commit on `main`:
+
+```bash
+docker pull ghcr.io/cfal/garcon:main
+```
+
+The [Docker guide](docs/docker.md) covers running the published image, building the current checkout, image tags, volumes, agent login, Git, SSH, and toolchains.
 
 ## Why Garcon
 

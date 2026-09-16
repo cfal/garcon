@@ -1,6 +1,6 @@
 # Docker
 
-The image includes Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
+Garcon's official container image is `ghcr.io/cfal/garcon:main`. It includes Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
 
 ## Start From GHCR
 
