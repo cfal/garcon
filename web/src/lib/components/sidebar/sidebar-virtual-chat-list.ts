@@ -22,10 +22,10 @@ export interface SidebarVirtualProjectHeaderRow {
 	isCollapsed: boolean;
 }
 
-export type SidebarChatSection = 'active' | 'inactive' | 'archived';
+export type SidebarChatSection =
+	'active' | 'inactive' | 'archived' | 'in-progress' | 'ready-for-review' | 'caught-up';
 
-// Activity sections group chats across projects; their collapse keys share
-// the project collapse store's key space.
+// Cross-project sections share the project collapse store's key space.
 export function sidebarSectionKey(section: SidebarChatSection): string {
 	return `section:${section}`;
 }
@@ -38,6 +38,9 @@ export const SIDEBAR_SECTION_COLLAPSE_KEYS: readonly string[] = [
 	sidebarSectionKey('active'),
 	sidebarSectionKey('inactive'),
 	sidebarSectionKey('archived'),
+	sidebarSectionKey('in-progress'),
+	sidebarSectionKey('ready-for-review'),
+	sidebarSectionKey('caught-up'),
 ];
 
 export interface SidebarVirtualSectionHeaderRow {

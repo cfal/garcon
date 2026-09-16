@@ -677,6 +677,16 @@ describe('LocalSettingsStore', () => {
 		oldToken.destroy();
 	});
 
+	it('persists status grouping', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarGrouping', 'status');
+
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarGrouping).toBe('status');
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('persists max chat width', () => {
 		const store = createLocalSettingsStore();
 

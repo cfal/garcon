@@ -22,14 +22,12 @@
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import History from '@lucide/svelte/icons/history';
 	import Activity from '@lucide/svelte/icons/activity';
+	import CircleDot from '@lucide/svelte/icons/circle-dot';
 	import List from '@lucide/svelte/icons/list';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
-	import type {
-		SidebarChatGrouping,
-		SidebarSortMode,
-	} from '$lib/stores/local-settings.svelte';
+	import type { SidebarChatGrouping, SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import { sidebarGroupingUsesProjects } from './sidebar-display-options';
@@ -208,6 +206,10 @@
 						<DropdownMenuRadioItem value="activity">
 							<Activity class="h-3.5 w-3.5" />
 							{m.settings_sidebar_group_by_activity()}
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="status">
+							<CircleDot class="h-3.5 w-3.5" />
+							{m.settings_sidebar_group_by_status()}
 						</DropdownMenuRadioItem>
 					</DropdownMenuRadioGroup>
 				</DropdownMenuGroup>

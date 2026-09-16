@@ -51,6 +51,7 @@ export const SIDEBAR_CHAT_GROUPING_VALUES = [
 	'project',
 	'project-and-activity',
 	'activity',
+	'status',
 ] as const;
 export type SidebarChatGrouping = (typeof SIDEBAR_CHAT_GROUPING_VALUES)[number];
 

@@ -735,7 +735,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		]);
 	});
 
-	it.each(['project-and-activity', 'activity'] as const)(
+	it.each(['project-and-activity', 'activity', 'status'] as const)(
 		'preserves the metadata-free single-line layout for %s grouping',
 		(grouping) => {
 			const projectPath = '/tmp/inactive-project';

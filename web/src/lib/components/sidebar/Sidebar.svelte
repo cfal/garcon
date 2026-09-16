@@ -34,10 +34,7 @@
 		sidebarGroupingUsesProjects,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
-	import type {
-		SidebarChatGrouping,
-		SidebarSortMode,
-	} from '$lib/stores/local-settings.svelte';
+	import type { SidebarChatGrouping, SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -182,7 +179,7 @@
 		projectKeys.push(
 			...projectKeys.map((projectKey) => sidebarSectionProjectKey('inactive', projectKey)),
 		);
-		// Activity sections collapse through the same store; their keys stay in
+		// Cross-project sections collapse through the same store; their keys stay in
 		// the pruning allowlist regardless of mode so section collapse
 		// preferences survive grouping-mode switches, like project keys do.
 		projectKeys.push(...SIDEBAR_SECTION_COLLAPSE_KEYS);
