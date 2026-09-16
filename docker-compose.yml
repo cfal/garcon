@@ -1,6 +1,6 @@
 services:
   garcon:
-    image: garcon:local
+    image: "${GARCON_IMAGE:-garcon:local}"
     build:
       context: .
       args:

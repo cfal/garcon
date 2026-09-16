@@ -1,10 +1,30 @@
 # Docker
 
-The Compose setup builds the current checkout and includes Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI.
+The image includes Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
 
-## Start
+## Start From GHCR
 
-Create `.env` next to `docker-compose.yml` with the project directory and the non-root UID and GID that own those files. Use `id -u` and `id -g` to find the values:
+Published images use UID and GID `1000`. Create `.env` next to `docker-compose.yml` with the image and a project directory owned by those IDs:
+
+```dotenv
+GARCON_IMAGE=ghcr.io/cfal/garcon:main
+GARCON_PROJECT_DIR=/home/you/repos
+```
+
+Pull and start the image without building the checkout:
+
+```bash
+docker compose pull garcon
+docker compose up --no-build -d
+```
+
+The `main` tag advances after a successful build of the current `main` branch head. Every published commit also has an immutable `sha-<full commit SHA>` tag for pinned deployments. Run the same pull and up commands to update a moving-tag installation.
+
+The GHCR package must be public for anonymous pulls. The first publication creates the package; verify its visibility in the repository package settings.
+
+## Build From Source
+
+Build locally when using a different UID or GID, testing checkout changes, or customizing the runtime. Create `.env` with the project directory and the non-root UID and GID that own those files. Use `id -u` and `id -g` to find the values:
 
 ```dotenv
 GARCON_PROJECT_DIR=/home/you/repos
@@ -12,7 +32,7 @@ GARCON_UID=1000
 GARCON_GID=1000
 ```
 
-The UID and GID must not be `0`. `GARCON_PROJECT_DIR` must be an absolute path to an existing directory owned by those IDs. Keep the values stable because existing named volumes retain their numeric ownership.
+Leave `GARCON_IMAGE` unset so Compose tags the build as `garcon:local`. The UID and GID must not be `0`. `GARCON_PROJECT_DIR` must be an absolute path to an existing directory owned by those IDs. Keep the values stable because existing named volumes retain their numeric ownership.
 
 The host directory selected by `GARCON_PROJECT_DIR` appears inside the container as `/projects`; choose project paths below `/projects` when creating chats.
 

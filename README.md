@@ -43,7 +43,7 @@ Requirements:
 - At least one working coding agent or API provider.
 - Optional pull request support: an authenticated GitHub CLI on the Garcon host.
 
-For a containerized install, set `GARCON_PROJECT_DIR`, `GARCON_UID`, and `GARCON_GID` in `.env`, then run `docker compose up --build -d`. The [Docker guide](docs/docker.md) covers volumes, agent login, Git, SSH, and toolchains.
+For a containerized install, use the `ghcr.io/cfal/garcon:main` image or build the current checkout. The [Docker guide](docs/docker.md) covers image tags, volumes, agent login, Git, SSH, and toolchains.
 
 ## Why Garcon
 

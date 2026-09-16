@@ -31,23 +31,34 @@ let dockerfile;
 let composeFile;
 let dockerGuide;
 let dockerignore;
+let dockerPublishWorkflow;
 let rootPackage;
 let integrationPackage;
 let opencodeAgentPackage;
 let opencodeSupervisor;
 
 beforeAll(async () => {
-  [dockerfile, composeFile, dockerGuide, dockerignore, rootPackage, integrationPackage, opencodeAgentPackage, opencodeSupervisor] =
-    await Promise.all([
-      readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
-      readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
-      readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
-      readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
-      readFile(path.join(repositoryRoot, 'package.json'), 'utf8').then(JSON.parse),
-      readFile(path.join(repositoryRoot, 'integration-tests/package.json'), 'utf8').then(JSON.parse),
-      readFile(path.join(repositoryRoot, 'server-agents/opencode/package.json'), 'utf8').then(JSON.parse),
-      readFile(path.join(repositoryRoot, 'integration-tests/support/opencode-process-supervisor.ts'), 'utf8'),
-    ]);
+  [
+    dockerfile,
+    composeFile,
+    dockerGuide,
+    dockerignore,
+    dockerPublishWorkflow,
+    rootPackage,
+    integrationPackage,
+    opencodeAgentPackage,
+    opencodeSupervisor,
+  ] = await Promise.all([
+    readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
+    readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
+    readFile(path.join(repositoryRoot, '.github/workflows/docker-publish.yml'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'package.json'), 'utf8').then(JSON.parse),
+    readFile(path.join(repositoryRoot, 'integration-tests/package.json'), 'utf8').then(JSON.parse),
+    readFile(path.join(repositoryRoot, 'server-agents/opencode/package.json'), 'utf8').then(JSON.parse),
+    readFile(path.join(repositoryRoot, 'integration-tests/support/opencode-process-supervisor.ts'), 'utf8'),
+  ]);
 });
 
 describe('Docker contract', () => {
@@ -137,6 +148,32 @@ describe('Docker contract', () => {
     for (const target of persistedPaths) {
       expect(dockerGuide).toContain(`\`${target}\``);
     }
+  });
+
+  test('publishes main commits for both Linux architectures', () => {
+    expect(dockerPublishWorkflow).toContain('branches:\n      - main');
+    expect(dockerPublishWorkflow).not.toContain('pull_request:');
+    expect(dockerPublishWorkflow).not.toContain('release:');
+    expect(dockerPublishWorkflow).toContain('packages: write');
+    expect(dockerPublishWorkflow).toContain('tags: type=sha,format=long,prefix=sha-');
+    expect(dockerPublishWorkflow).toContain('platforms: linux/amd64,linux/arm64');
+  });
+
+  test('preserves commit images and serializes main promotion', () => {
+    expect(dockerPublishWorkflow).toContain('group: docker-publish-sha-${{ github.sha }}');
+    expect(dockerPublishWorkflow).toContain('docker buildx imagetools inspect --raw "${commit_image}"');
+    expect(dockerPublishWorkflow).toContain("grep -Eiq 'manifest unknown|not found'");
+    expect(dockerPublishWorkflow).toMatch(
+      /group: docker-publish-main-tag\n\s+cancel-in-progress: false\n\s+queue: max/,
+    );
+    expect(dockerPublishWorkflow).toContain('needs: publish_sha');
+    expect(dockerPublishWorkflow).toContain('"${IMAGE}:main"');
+  });
+
+  test('supports published images without changing the local Compose default', () => {
+    expect(composeFile).toContain('image: "${GARCON_IMAGE:-garcon:local}"');
+    expect(dockerGuide).toContain('`ghcr.io/cfal/garcon`');
+    expect(dockerGuide).toContain('`sha-<full commit SHA>`');
   });
 
   test('excludes local state and dependency trees from the build context', () => {
