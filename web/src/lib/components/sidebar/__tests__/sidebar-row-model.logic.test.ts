@@ -6,9 +6,13 @@ import {
 	buildSidebarRowModel as buildSidebarRowModelBase,
 	sidebarActivitySection,
 	sidebarProjectKey,
+	sidebarStatusSection,
 } from '../sidebar-row-model';
 import { SIDEBAR_INACTIVITY_DURATION_MS } from '../chat-inactivity';
-import { sidebarSectionProjectKey } from '../sidebar-virtual-chat-list';
+import {
+	SIDEBAR_SECTION_COLLAPSE_KEYS,
+	sidebarSectionProjectKey,
+} from '../sidebar-virtual-chat-list';
 import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -888,5 +892,98 @@ describe('sidebar row model with project activity grouping', () => {
 				collapsedProjectKeys: new Set(['section:archived']),
 			}),
 		).toEqual(['pinned-old-p1', 'active-p1', 'active-p2', 'inactive-p1', 'inactive-p2']);
+	});
+});
+
+describe('sidebar row model with status grouping', () => {
+	it('classifies processing before unread and otherwise reports caught up', () => {
+		expect(sidebarStatusSection({ isProcessing: true, isUnread: true })).toBe('in-progress');
+		expect(sidebarStatusSection({ isProcessing: true, isUnread: false })).toBe('in-progress');
+		expect(sidebarStatusSection({ isProcessing: false, isUnread: true })).toBe('ready-for-review');
+		expect(sidebarStatusSection({ isProcessing: false, isUnread: false })).toBe('caught-up');
+	});
+
+	it('partitions pinned, normal, and archived chats into status sections', () => {
+		const chats = [
+			chat('processing-unread', '/normal', { isProcessing: true, isUnread: true }),
+			chat('processing-pinned', '/pinned', { isPinned: true, isProcessing: true }),
+			chat('ready-normal', '/normal', { isUnread: true }),
+			chat('ready-archived', '/archived', { isArchived: true, isUnread: true }),
+			chat('caught-normal', '/normal'),
+			chat('caught-pinned', '/pinned', { isPinned: true }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'status',
+			currentTime: TEST_NOW,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'section:in-progress',
+			'processing-pinned',
+			'processing-unread',
+			'section:ready-for-review',
+			'ready-normal',
+			'ready-archived',
+			'section:caught-up',
+			'caught-pinned',
+			'caught-normal',
+		]);
+		expect(model.projectKeys).toEqual([]);
+		expect(model.visibleChatIds).toEqual([
+			'processing-pinned',
+			'processing-unread',
+			'ready-normal',
+			'ready-archived',
+			'caught-pinned',
+			'caught-normal',
+		]);
+		expect(model.visibleOrders).toEqual({
+			pinned: ['processing-pinned', 'caught-pinned'],
+			normal: ['processing-unread', 'ready-normal', 'caught-normal'],
+			archived: ['ready-archived'],
+		});
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'ready-archived'),
+		).toMatchObject({
+			list: 'archived',
+			reorderScopeKey: 'archived:section:ready-for-review',
+			reorderScopeIds: ['ready-archived'],
+			showProjectPathInGroup: true,
+		});
+		expect(model.rows[0]).toMatchObject({
+			type: 'section-header',
+			section: 'in-progress',
+			count: 2,
+			chatIds: ['processing-pinned', 'processing-unread'],
+		});
+	});
+
+	it('omits empty sections and retains collapsed status section keys', () => {
+		const chats = [chat('ready', '/p1', { isUnread: true }), chat('caught', '/p2')];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'status',
+			currentTime: TEST_NOW,
+			collapsedProjectKeys: new Set(['section:ready-for-review']),
+		});
+
+		expect(rowLabels(model)).toEqual(['section:ready-for-review', 'section:caught-up', 'caught']);
+		expect(model.visibleChatIds).toEqual(['caught']);
+		expect(model.rows[0]).toMatchObject({
+			type: 'section-header',
+			section: 'ready-for-review',
+			chatIds: ['ready'],
+			isCollapsed: true,
+		});
+		expect(SIDEBAR_SECTION_COLLAPSE_KEYS).toEqual(
+			expect.arrayContaining([
+				'section:in-progress',
+				'section:ready-for-review',
+				'section:caught-up',
+			]),
+		);
 	});
 });

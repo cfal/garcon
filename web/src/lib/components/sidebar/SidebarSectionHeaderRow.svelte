@@ -1,8 +1,21 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { sidebarSectionKey, type SidebarVirtualSectionHeaderRow } from './sidebar-virtual-chat-list';
+	import {
+		sidebarSectionKey,
+		type SidebarChatSection,
+		type SidebarVirtualSectionHeaderRow,
+	} from './sidebar-virtual-chat-list';
 	import SidebarGroupHeaderContent from './SidebarGroupHeaderContent.svelte';
+
+	const sectionLabels: Record<SidebarChatSection, () => string> = {
+		active: m.sidebar_section_active,
+		inactive: m.sidebar_section_inactive,
+		archived: m.sidebar_section_archived,
+		'in-progress': m.sidebar_section_in_progress,
+		'ready-for-review': m.sidebar_section_ready_for_review,
+		'caught-up': m.sidebar_section_caught_up,
+	};
 
 	interface SidebarSectionHeaderRowProps {
 		row: SidebarVirtualSectionHeaderRow;
@@ -13,16 +26,7 @@
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
 	let sectionKey = $derived(sidebarSectionKey(row.section));
-	let label = $derived.by(() => {
-		switch (row.section) {
-			case 'active':
-				return m.sidebar_section_active();
-			case 'inactive':
-				return m.sidebar_section_inactive();
-			case 'archived':
-				return m.sidebar_section_archived();
-		}
-	});
+	let label = $derived(sectionLabels[row.section]());
 
 	function handleToggle(): void {
 		onToggle?.(sectionKey);

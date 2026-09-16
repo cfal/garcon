@@ -242,6 +242,40 @@ describe('sidebar search dialog flow', () => {
 		expect(screen.getByText('Active')).toBeTruthy();
 	});
 
+	it('groups chats by processing and unread status from the sidebar actions menu', async () => {
+		render(SidebarHost, {
+			chats: [
+				createChat('chat-processing', 'Processing chat', {
+					status: 'running',
+					isProcessing: true,
+					processingPhase: 'running',
+					isUnread: true,
+				}),
+				createChat('chat-unread', 'Unread chat', { isUnread: true }),
+				createChat('chat-caught-up', 'Caught up chat'),
+			],
+			autoLoadSavedSearches: false,
+		});
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+		const status = await screen.findByRole('menuitemradio', { name: 'Status' });
+		await fireEvent.click(status);
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-sidebar-section-header="in-progress"]')).toBeTruthy();
+		});
+		expect(
+			Array.from(document.querySelectorAll('[data-sidebar-section-header]')).map((header) =>
+				header.getAttribute('data-sidebar-section-header'),
+			),
+		).toEqual(['in-progress', 'ready-for-review', 'caught-up']);
+		expect(screen.getByText('In Progress')).toBeTruthy();
+		expect(screen.getByText('Ready for Review')).toBeTruthy();
+		expect(screen.getByText('Caught Up')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-project-header]')).toBeNull();
+	});
+
 	it('uses the configured inactivity duration for project activity grouping', async () => {
 		const chats = [
 			createChat('chat-recent', 'Recently active chat', {
