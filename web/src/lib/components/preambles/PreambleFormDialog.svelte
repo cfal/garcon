@@ -147,7 +147,7 @@
 
 		<div
 			data-slot="preambles-scroll-body"
-			class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6"
+			class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6"
 			inert={form.saving}
 			aria-busy={form.saving}
 		>
