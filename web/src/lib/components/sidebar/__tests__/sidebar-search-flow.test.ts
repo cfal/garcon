@@ -443,3 +443,48 @@ describe('sidebar search dialog flow', () => {
 		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
 	});
 });
+
+describe('sidebar back-to-top control', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(getSavedSearches).mockResolvedValue({ savedSearches: [] });
+	});
+
+	afterEach(() => {
+		cleanup();
+	});
+
+	it('returns the scroll viewport to the top without losing keyboard focus', async () => {
+		const chats = Array.from({ length: 20 }, (_, index) =>
+			createChat(`chat-${index}`, `Chat ${index}`),
+		);
+		const { container } = render(SidebarHost, {
+			chats,
+			isMobile: true,
+			autoLoadSavedSearches: false,
+		});
+		const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+		if (!viewport) throw new Error('Expected the sidebar scroll viewport');
+
+		Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 400 });
+		const scrollTo = vi.fn((options: ScrollToOptions) => {
+			viewport.scrollTop = options.top ?? viewport.scrollTop;
+			viewport.dispatchEvent(new Event('scroll'));
+		});
+		Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: scrollTo });
+
+		viewport.scrollTop = 401;
+		await fireEvent.scroll(viewport);
+		const button = await screen.findByRole('button', { name: 'Back to top' });
+		expect(button.className).toContain('min-h-11');
+		expect(viewport.getAttribute('role')).toBe('region');
+		expect(viewport.getAttribute('aria-label')).toBe('Chat list');
+		expect(viewport.tabIndex).toBe(-1);
+
+		await fireEvent.click(button);
+
+		expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' });
+		expect(document.activeElement).toBe(viewport);
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Back to top' })).toBeNull());
+	});
+});

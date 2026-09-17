@@ -1,0 +1,31 @@
+<script lang="ts">
+	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import { Button } from '$lib/components/ui/button';
+	import * as m from '$lib/paraglide/messages.js';
+
+	let {
+		isMobile = false,
+		onActivate,
+	}: {
+		isMobile?: boolean;
+		onActivate: () => void;
+	} = $props();
+</script>
+
+<div class="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center">
+	<Button
+		variant="outline"
+		size="sm"
+		class={[
+			'pointer-events-auto rounded-full bg-card/95 px-3 text-xs shadow-md hover:shadow-lg',
+			isMobile && 'min-h-11 px-4 text-sm',
+		]}
+		onclick={onActivate}
+		aria-label={m.sidebar_chats_back_to_top()}
+		title={m.sidebar_chats_back_to_top()}
+		data-sidebar-back-to-top
+	>
+		<ArrowUp class="size-4" aria-hidden="true" />
+		<span>{m.sidebar_chats_back_to_top()}</span>
+	</Button>
+</div>

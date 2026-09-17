@@ -1,6 +1,10 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
+	import SidebarBackToTop from './SidebarBackToTop.svelte';
+	import { shouldShowSidebarBackToTop } from './sidebar-back-to-top';
+	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		PersistedChatOrderGroup,
@@ -90,18 +94,64 @@
 	}: SidebarContentProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let showBackToTop = $state(false);
 
 	$effect(() => {
 		const region = viewportRef;
 		if (!region) return;
 		return registerNativeWorkspaceScrollRegion(region, 'primary');
 	});
+
+	$effect(() => {
+		const region = viewportRef;
+		if (!region) {
+			showBackToTop = false;
+			return;
+		}
+		const scrollViewport: HTMLElement = region;
+
+		function updateVisibility(): void {
+			const visible = shouldShowSidebarBackToTop({
+				scrollTop: scrollViewport.scrollTop,
+				viewportHeight: scrollViewport.clientHeight,
+				currentlyVisible: showBackToTop,
+			});
+			if (visible !== showBackToTop) showBackToTop = visible;
+		}
+
+		untrack(updateVisibility);
+		scrollViewport.addEventListener('scroll', updateVisibility, { passive: true });
+		window.addEventListener('resize', updateVisibility);
+		return () => {
+			scrollViewport.removeEventListener('scroll', updateVisibility);
+			window.removeEventListener('resize', updateVisibility);
+		};
+	});
+
+	function scrollBackToTop(): void {
+		const region = viewportRef;
+		if (!region) return;
+		region.scrollTo({ top: 0, behavior: 'auto' });
+		region.focus({ preventScroll: true });
+	}
 </script>
+
+{#snippet backToTopOverlay()}
+	{#if showBackToTop}
+		<SidebarBackToTop {isMobile} onActivate={scrollBackToTop} />
+	{/if}
+{/snippet}
 
 <ScrollArea
 	bind:viewportRef
 	class="flex-1 overflow-y-auto overscroll-contain"
 	scrollbarYClasses="w-1.5"
+	viewportAttributes={{
+		tabindex: -1,
+		role: 'region',
+		'aria-label': m.sidebar_chats_region(),
+	}}
+	overlay={backToTopOverlay}
 >
 	<SidebarChatList
 		{viewportRef}
