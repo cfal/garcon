@@ -20,6 +20,7 @@
 	interface Props {
 		count?: number;
 		failLoads?: boolean;
+		deferSnippetLoad?: boolean;
 		firstTemplate?: string;
 		firstDefaultArguments?: string;
 		refreshedDefaultArguments?: string;
@@ -35,6 +36,7 @@
 	let {
 		count = 12,
 		failLoads = false,
+		deferSnippetLoad = false,
 		firstTemplate,
 		firstDefaultArguments = '',
 		refreshedDefaultArguments,
@@ -55,6 +57,7 @@
 	let editCount = $state(0);
 	let loadCount = $state(0);
 	let composerInput = $state<HTMLInputElement>();
+	let resolveSnippetLoad = $state<(() => void) | null>(null);
 
 	const entries: Snippet[] = Array.from({ length: untrack(() => count) }, (_, index) => ({
 		id: `snippet-${index}`,
@@ -84,6 +87,11 @@
 		get: async () => {
 			loadCount += 1;
 			if (failLoads) throw new Error('offline');
+			if (deferSnippetLoad) {
+				await new Promise<void>((resolve) => {
+					resolveSnippetLoad = resolve;
+				});
+			}
 			return { revision: 1, snippets: entries };
 		},
 	});
@@ -137,6 +145,11 @@
 	/>
 </div>
 
+<button
+	type="button"
+	data-testid="resolve-snippet-load"
+	onclick={() => resolveSnippetLoad?.()}>Resolve snippet load</button
+>
 <button
 	type="button"
 	data-testid="change-interaction-key"

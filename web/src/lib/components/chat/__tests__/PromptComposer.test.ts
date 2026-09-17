@@ -1729,18 +1729,20 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole('button', { name: 'Send message' })).toBeTruthy();
 	});
 
-	it('rejects a menu expansion when the selected snippet identity changed', async () => {
+	it.each([
+		['source', { source: 'preamble' as const, sourceId: 'snippet-review' }],
+		['ID', { source: 'snippet' as const, sourceId: 'replacement-review' }],
+	])('rejects a menu expansion when the selected snippet %s changed', async (change, identity) => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			source: 'snippet',
-			sourceId: 'replacement-review',
+			...identity,
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-snippet-replaced',
+			selectedChatId: `chat-snippet-changed-${change}`,
 			selectedStatus: 'running',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;

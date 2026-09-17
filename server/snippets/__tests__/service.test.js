@@ -49,7 +49,7 @@ async function serviceFixture() {
     now: () => new Date('2026-01-01T00:00:00.000Z'),
   });
   service.onInvalidated((reason) => events.push(reason));
-  return { service, store, preambleStore, snippetShortNames, events, chatLookups };
+  return { dir, service, store, preambleStore, snippetShortNames, events, chatLookups };
 }
 
 describe('snippet service', () => {
@@ -215,6 +215,51 @@ describe('snippet service', () => {
         snippet: { shortName: 'shared', template: 'Snippet', defaultArguments: '' },
       })).resolves.toMatchObject({ snippets: [{ shortName: 'shared' }] });
     }
+  });
+
+  it('keeps a post-rename snippet name reserved across catalogs', async () => {
+    const { dir, service, store, preambleStore, snippetShortNames, events } = await serviceFixture();
+    const preambles = new PreambleService({
+      store: preambleStore,
+      snippetShortNames,
+      projectPaths: { resolve: async (projectPath) => projectPath },
+      newId: () => '00000000-0000-4000-8000-000000000001',
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await service.create({
+      expectedRevision: 0,
+      snippet: { shortName: 'before', template: 'Snippet', defaultArguments: '' },
+    });
+
+    const originalOpen = fs.open;
+    fs.open = async (target, flags, ...rest) => {
+      if (flags === 'r' && typeof target === 'string' && target === dir) {
+        throw new Error('injected directory sync failure');
+      }
+      return originalOpen(target, flags, ...rest);
+    };
+    try {
+      await expect(service.update({
+        expectedRevision: 1,
+        id: 'snippet-a',
+        snippet: { shortName: 'shared', template: 'Updated', defaultArguments: '' },
+      })).rejects.toMatchObject({ code: 'SNIPPET_CATALOG_SAVE_UNKNOWN' });
+    } finally {
+      fs.open = originalOpen;
+    }
+
+    expect(store.snapshot().snippets[0].shortName).toBe('shared');
+    expect(events).toEqual(['created', 'updated']);
+    await expect(preambles.create({
+      expectedRevision: 0,
+      preamble: {
+        enabled: true,
+        title: 'Context',
+        snippetShortName: 'shared',
+        content: 'Context',
+        scope: { type: 'global' },
+      },
+    })).rejects.toMatchObject({ code: 'PREAMBLE_SNIPPET_NAME_CONFLICT' });
   });
 
   it('uses the saved default only for omitted arguments', async () => {

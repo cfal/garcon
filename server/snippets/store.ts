@@ -9,7 +9,7 @@ import {
   type SnippetsSnapshot,
 } from '../../common/snippets.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
-import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { AtomicJsonWriteError, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { SnippetDomainError } from './errors.js';
 
@@ -92,10 +92,20 @@ function cloneSnippet(snippet: Snippet): Snippet {
   return structuredClone(snippet);
 }
 
+export class SnippetCatalogCommittedUnknownError extends Error {
+  constructor(cause: unknown) {
+    super('The snippets catalog was committed, but its durability could not be confirmed.', {
+      cause,
+    });
+    this.name = 'SnippetCatalogCommittedUnknownError';
+  }
+}
+
 export class SnippetStore {
   readonly #filePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file = emptyFile();
+  #mutationFence: 'clear' | 'unknown-durability' = 'clear';
 
   constructor(workspaceDir: string) {
     this.#filePath = path.join(workspaceDir, 'snippets.json');
@@ -105,6 +115,7 @@ export class SnippetStore {
     const loaded = await readFile(this.#filePath);
     if (loaded.migrated) await this.#write(loaded.file);
     this.#file = loaded.file;
+    this.#mutationFence = 'clear';
   }
 
   snapshot(): SnippetsSnapshot {
@@ -185,6 +196,13 @@ export class SnippetStore {
 
   async #mutate(expectedRevision: number, change: (draft: SnippetsFile) => void): Promise<void> {
     await this.#lock.runExclusive('snippets', async () => {
+      if (this.#mutationFence === 'unknown-durability') {
+        throw new SnippetDomainError(
+          'SNIPPET_CATALOG_SAVE_UNKNOWN',
+          'The snippets catalog has an unconfirmed save; restart the server before further catalog changes.',
+          503,
+        );
+      }
       if (expectedRevision !== this.#file.revision) {
         throw new SnippetDomainError(
           'SNIPPET_REVISION_CONFLICT',
@@ -204,13 +222,28 @@ export class SnippetStore {
       change(draft);
       draft.snippets = sortSnippetsByShortName(draft.snippets);
       draft.revision += 1;
-      await this.#write(draft);
+      try {
+        await this.#write(draft);
+      } catch (error) {
+        if (error instanceof SnippetCatalogCommittedUnknownError) {
+          this.#file = draft;
+          this.#mutationFence = 'unknown-durability';
+        }
+        throw error;
+      }
       this.#file = draft;
     });
   }
 
   async #write(file: SnippetsFile): Promise<void> {
-    await writeJsonFileAtomic(this.#filePath, file, { mode: 0o600 });
+    try {
+      await writeJsonFileAtomic(this.#filePath, file, { mode: 0o600 });
+    } catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        throw new SnippetCatalogCommittedUnknownError(error);
+      }
+      throw error;
+    }
   }
 
   #notFound(): SnippetDomainError {

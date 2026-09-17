@@ -69,6 +69,7 @@ export const SNIPPET_ERROR_CODES = {
   nameConflict: 'SNIPPET_NAME_CONFLICT',
   revisionConflict: 'SNIPPET_REVISION_CONFLICT',
   revisionExhausted: 'SNIPPET_REVISION_EXHAUSTED',
+  catalogSaveUnknown: 'SNIPPET_CATALOG_SAVE_UNKNOWN',
   limitReached: 'SNIPPET_LIMIT_REACHED',
   expansionTooLong: 'SNIPPET_EXPANSION_TOO_LONG',
   chatNotFound: 'SNIPPET_CHAT_NOT_FOUND',

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import crypto, { randomUUID } from 'crypto';
-import { SnippetStore } from '../store.ts';
+import { SnippetCatalogCommittedUnknownError, SnippetStore } from '../store.ts';
 
 const createdDirs = [];
 
@@ -283,5 +283,42 @@ describe('snippet persistence', () => {
 
     await expect(store.create(snippet('a'), 0)).rejects.toBeTruthy();
     expect(store.snapshot()).toEqual({ revision: 0, snippets: [] });
+  });
+
+  it('installs the candidate and fences mutations after a post-rename failure', async () => {
+    const dir = await tempDir();
+    const store = new SnippetStore(dir);
+    await store.init();
+    await store.create(snippet('a', 'before'), 0);
+
+    const originalOpen = fs.open;
+    fs.open = async (target, flags, ...rest) => {
+      if (flags === 'r' && typeof target === 'string' && target === dir) {
+        throw new Error('injected directory sync failure');
+      }
+      return originalOpen(target, flags, ...rest);
+    };
+    try {
+      await expect(store.update(
+        'a',
+        { shortName: 'after', template: 'Updated', defaultArguments: '' },
+        '2026-01-02T00:00:00.000Z',
+        1,
+      )).rejects.toBeInstanceOf(SnippetCatalogCommittedUnknownError);
+    } finally {
+      fs.open = originalOpen;
+    }
+
+    expect(store.snapshot()).toMatchObject({
+      revision: 2,
+      snippets: [{ id: 'a', shortName: 'after' }],
+    });
+    await expect(store.create(snippet('b'), 2)).rejects.toMatchObject({
+      code: 'SNIPPET_CATALOG_SAVE_UNKNOWN',
+    });
+    const reopened = new SnippetStore(dir);
+    await reopened.init();
+    expect(reopened.snapshot().snippets[0].shortName).toBe('after');
+    await reopened.create(snippet('b'), 2);
   });
 });

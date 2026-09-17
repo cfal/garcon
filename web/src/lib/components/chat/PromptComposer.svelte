@@ -81,7 +81,7 @@
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
-	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+	import { matchesSelectableSnippetExpansion, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -444,11 +444,7 @@
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			const operation = result.prepared;
-			if (
-				result.response.source !== snippet.source ||
-				result.response.sourceId !== snippet.id ||
-				result.response.sourceUpdatedAt !== snippet.updatedAt
-			) {
+			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
 				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
 				else void preambles.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());

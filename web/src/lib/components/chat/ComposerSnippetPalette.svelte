@@ -55,7 +55,21 @@
 	const uid = $props.id();
 	const listId = `${uid}-list`;
 	const searchId = `${uid}-search`;
-	const paletteItems = $derived.by(() => selectableSnippets(snippets.snippets, preambles.preambles));
+	const triggerHint = $derived(normalizeSnippetTrigger(localSettings.snippetTrigger));
+	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
+	const catalogsLoading = $derived(
+		(snippets.status === 'loading' && !snippets.hasLoaded) ||
+			(preambles.status === 'loading' && !preambles.hasLoaded),
+	);
+	const catalogsFailed = $derived(
+		(snippets.status === 'error' && !snippets.hasLoaded) ||
+			(preambles.status === 'error' && !preambles.hasLoaded),
+	);
+	const paletteItems = $derived.by(() =>
+		catalogsLoading || catalogsFailed
+			? []
+			: selectableSnippets(snippets.snippets, preambles.preambles),
+	);
 	const palette = new ComposerSnippetPaletteState(uid, {
 		get snippets() {
 			return paletteItems;
@@ -72,16 +86,6 @@
 		onReturnFocus: () => onReturnFocus(),
 		onEditSnippets: () => onEditSnippets(),
 	});
-	const triggerHint = $derived(normalizeSnippetTrigger(localSettings.snippetTrigger));
-	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
-	const catalogsLoading = $derived(
-		(snippets.status === 'loading' && !snippets.hasLoaded) ||
-			(preambles.status === 'loading' && !preambles.hasLoaded),
-	);
-	const catalogsFailed = $derived(
-		(snippets.status === 'error' && !snippets.hasLoaded) ||
-			(preambles.status === 'error' && !preambles.hasLoaded),
-	);
 
 	$effect(() => {
 		palette.syncOpen(open, initialQuery);

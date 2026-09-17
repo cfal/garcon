@@ -18,7 +18,7 @@ import { renderPreambleContent } from '../../common/preambles.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { SnippetDomainError } from './errors.js';
-import { SnippetStore } from './store.js';
+import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
 import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
 import type { PreambleStore } from '../preambles/store.js';
 import type {
@@ -130,40 +130,44 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       createdAt: now,
       updatedAt: now,
     };
-    await this.#runShortNameMutation((assertAvailable) =>
-      this.deps.store.create(
-        snippet,
-        request.expectedRevision,
-        () => this.#assertShortNameAvailable(assertAvailable, snippet.shortName),
+    return this.#mutate(
+      'created',
+      () => this.#runShortNameMutation((assertAvailable) =>
+        this.deps.store.create(
+          snippet,
+          request.expectedRevision,
+          () => this.#assertShortNameAvailable(assertAvailable, snippet.shortName),
+        ),
       ),
     );
-    this.#emitInvalidated('created');
-    return this.snapshot();
   }
 
   async update(request: UpdateSnippetRequest): Promise<SnippetsSnapshot> {
     const id = request.id.trim();
     if (!id) throw this.#validationError();
     const definition = this.#definition(request.snippet);
-    await this.#runShortNameMutation((assertAvailable) =>
-      this.deps.store.update(
-        id,
-        definition,
-        this.#now().toISOString(),
-        request.expectedRevision,
-        () => this.#assertShortNameAvailable(assertAvailable, definition.shortName, id),
+    return this.#mutate(
+      'updated',
+      () => this.#runShortNameMutation((assertAvailable) =>
+        this.deps.store.update(
+          id,
+          definition,
+          this.#now().toISOString(),
+          request.expectedRevision,
+          () => this.#assertShortNameAvailable(assertAvailable, definition.shortName, id),
+        ),
       ),
     );
-    this.#emitInvalidated('updated');
-    return this.snapshot();
   }
 
   async remove(request: RemoveSnippetRequest): Promise<SnippetsSnapshot> {
     const id = request.id.trim();
     if (!id) throw this.#validationError();
-    await this.#runShortNameMutation(() => this.deps.store.remove(id, request.expectedRevision));
-    this.#emitInvalidated('removed');
-    return this.snapshot();
+    return this.#mutate(
+      'removed',
+      () => this.#runShortNameMutation(() =>
+        this.deps.store.remove(id, request.expectedRevision)),
+    );
   }
 
   async expand(request: ExpandSnippetRequest): Promise<ExpandSnippetResponse> {
@@ -219,6 +223,27 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     const coordinator = this.deps.snippetShortNames;
     if (coordinator) return coordinator.runMutation(mutate);
     return mutate(() => {});
+  }
+
+  async #mutate(
+    reason: SnippetsInvalidationReason,
+    run: () => Promise<void>,
+  ): Promise<SnippetsSnapshot> {
+    try {
+      await run();
+    } catch (error) {
+      if (error instanceof SnippetCatalogCommittedUnknownError) {
+        this.#emitInvalidated(reason);
+        throw new SnippetDomainError(
+          'SNIPPET_CATALOG_SAVE_UNKNOWN',
+          'The snippets catalog was saved, but its durability could not be confirmed. Restart the server before further catalog changes.',
+          503,
+        );
+      }
+      throw error;
+    }
+    this.#emitInvalidated(reason);
+    return this.snapshot();
   }
 
   #assertShortNameAvailable(

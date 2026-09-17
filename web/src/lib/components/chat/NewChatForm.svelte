@@ -72,7 +72,7 @@
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
-	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+	import { matchesSelectableSnippetExpansion, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { createClientChatId } from '$shared/client-chat-id';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
@@ -411,11 +411,7 @@
 				context,
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
-			if (
-				result.response.source !== snippet.source ||
-				result.response.sourceId !== snippet.id ||
-				result.response.sourceUpdatedAt !== snippet.updatedAt
-			) {
+			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
 				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
 				else void preambles.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());

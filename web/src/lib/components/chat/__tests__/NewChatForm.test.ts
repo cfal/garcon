@@ -1270,12 +1270,14 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
-	it('rejects a menu expansion when the selected snippet identity changed', async () => {
+	it.each([
+		['source', { source: 'preamble' as const, sourceId: 'snippet-review' }],
+		['ID', { source: 'snippet' as const, sourceId: 'replacement-review' }],
+	])('rejects a menu expansion when the selected snippet %s changed', async (_change, identity) => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			source: 'snippet',
-			sourceId: 'replacement-review',
+			...identity,
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',

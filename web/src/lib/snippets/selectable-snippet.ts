@@ -1,5 +1,9 @@
 import type { Preamble } from '$shared/preambles';
-import { compareSnippetShortNames, type Snippet } from '$shared/snippets';
+import {
+	compareSnippetShortNames,
+	type ExpandSnippetResponse,
+	type Snippet,
+} from '$shared/snippets';
 
 export type SelectableSnippet =
 	| {
@@ -59,5 +63,16 @@ export function selectableSnippetPreview(item: SelectableSnippet): string {
 			.split(/\r?\n/)
 			.map((line) => line.trim())
 			.find(Boolean) ?? ''
+	);
+}
+
+export function matchesSelectableSnippetExpansion(
+	item: SelectableSnippet,
+	response: Pick<ExpandSnippetResponse, 'source' | 'sourceId' | 'sourceUpdatedAt'>,
+): boolean {
+	return (
+		response.source === item.source &&
+		response.sourceId === item.id &&
+		response.sourceUpdatedAt === item.updatedAt
 	);
 }
