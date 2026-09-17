@@ -5,6 +5,20 @@ describe('sidebar back-to-top visibility', () => {
 	it('appears after one viewport and stays visible until half a viewport', () => {
 		expect(
 			shouldShowSidebarBackToTop({
+				scrollTop: 400,
+				viewportHeight: 640,
+				currentlyVisible: false,
+			}),
+		).toBe(false);
+		expect(
+			shouldShowSidebarBackToTop({
+				scrollTop: 640,
+				viewportHeight: 640,
+				currentlyVisible: false,
+			}),
+		).toBe(false);
+		expect(
+			shouldShowSidebarBackToTop({
 				scrollTop: 641,
 				viewportHeight: 640,
 				currentlyVisible: false,
