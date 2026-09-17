@@ -4,6 +4,7 @@ import {
 	type ExpandSnippetResponse,
 	type Snippet,
 } from '$shared/snippets';
+import { snippetPreview } from '$lib/snippets/snippet-presentation.js';
 
 export type SelectableSnippet =
 	| {
@@ -58,12 +59,7 @@ export function selectableSnippets(
 }
 
 export function selectableSnippetPreview(item: SelectableSnippet): string {
-	return (
-		item.body
-			.split(/\r?\n/)
-			.map((line) => line.trim())
-			.find(Boolean) ?? ''
-	);
+	return snippetPreview({ template: item.body });
 }
 
 export function matchesSelectableSnippetExpansion(

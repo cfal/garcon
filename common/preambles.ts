@@ -470,18 +470,14 @@ export function normalizePreambleDefinitionInput(value: unknown): PreambleDefini
     'tagFilter',
   ])) return null;
   const title = normalizePreambleTitle(raw.title);
-  const snippetShortName = raw.snippetShortName === undefined
-    ? undefined
-    : isSnippetShortName(raw.snippetShortName)
-      ? raw.snippetShortName
-      : null;
+  const snippetShortName = raw.snippetShortName;
   const scope = normalizePreambleScope(raw.scope);
   const agentIds = normalizePreambleAgentIds(raw.agentIds);
   const tagFilter = normalizePreambleTagFilter(raw.tagFilter);
   if (
     typeof raw.enabled !== 'boolean'
     || !title
-    || snippetShortName === null
+    || (snippetShortName !== undefined && !isSnippetShortName(snippetShortName))
     || typeof raw.content !== 'string'
     || raw.content.trim().length === 0
     || raw.content.length > PREAMBLE_CONTENT_MAX_LENGTH
