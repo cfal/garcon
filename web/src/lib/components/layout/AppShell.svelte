@@ -715,6 +715,7 @@
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
+		onShowSnippets={() => appShell.openSnippets()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>

@@ -67,6 +67,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -555,6 +556,7 @@ describe('sidebar search interactions', () => {
 
 	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
 		const onShowScheduledPrompts = vi.fn();
+		const onShowSnippets = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 0,
@@ -567,6 +569,7 @@ describe('sidebar search interactions', () => {
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts,
 			onShowPreambles: vi.fn(),
+			onShowSnippets,
 			onShowSettings: vi.fn(),
 		});
 
@@ -611,11 +614,16 @@ describe('sidebar search interactions', () => {
 		expect(items[15]?.textContent).toContain('Dock sidebar on the right');
 		expect(items[16]?.textContent).toContain('Scheduled prompts');
 		expect(items[17]?.textContent).toContain('Preambles');
-		expect(items[18]?.textContent).toContain('Settings');
+		expect(items[18]?.textContent).toContain('Snippets');
+		expect(items[19]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
 		expect(onShowScheduledPrompts).toHaveBeenCalledOnce();
+
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Snippets' }));
+		expect(onShowSnippets).toHaveBeenCalledOnce();
 	});
 
 	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
@@ -643,6 +651,7 @@ describe('sidebar search interactions', () => {
 			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -712,7 +721,8 @@ describe('sidebar search interactions', () => {
 		expect(items[13]?.textContent).toContain('Dock sidebar on the right');
 		expect(items[14]?.textContent).toContain('Scheduled prompts');
 		expect(items[15]?.textContent).toContain('Preambles');
-		expect(items[16]?.textContent).toContain('Settings');
+		expect(items[16]?.textContent).toContain('Snippets');
+		expect(items[17]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(projectGrouping.className).toContain('pe-8');
@@ -761,6 +771,7 @@ describe('sidebar search interactions', () => {
 			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -793,6 +804,7 @@ describe('sidebar search interactions', () => {
 				onToggleGroupNestedProjectPaths,
 				onShowScheduledPrompts: vi.fn(),
 				onShowPreambles: vi.fn(),
+				onShowSnippets: vi.fn(),
 				onShowSettings: vi.fn(),
 			});
 
@@ -820,6 +832,7 @@ describe('sidebar search interactions', () => {
 			onToggleChatListAutohide,
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -848,6 +861,7 @@ describe('sidebar search interactions', () => {
 			onSetDockOnRight,
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -885,6 +899,7 @@ describe('sidebar search interactions', () => {
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -903,6 +918,7 @@ describe('sidebar search interactions', () => {
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -1018,6 +1034,7 @@ describe('sidebar search interactions', () => {
 			onClearActiveQuery: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
+			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 

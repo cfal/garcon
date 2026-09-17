@@ -35,6 +35,7 @@
 		onClearActiveQuery: () => void;
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
+		onShowSnippets: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -65,6 +66,7 @@
 		onClearActiveQuery,
 		onShowScheduledPrompts,
 		onShowPreambles,
+		onShowSnippets,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -99,6 +101,7 @@
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
 		{onShowPreambles}
+		{onShowSnippets}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext

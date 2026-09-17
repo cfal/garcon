@@ -80,6 +80,7 @@
 		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
+		onShowSnippets: () => void;
 		onShowSettings: () => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 	}
@@ -110,6 +111,7 @@
 		onChatListAutohideChange,
 		onShowScheduledPrompts,
 		onShowPreambles,
+		onShowSnippets,
 		onShowSettings,
 		newWindowEdges,
 	}: SidebarProps = $props();
@@ -458,6 +460,7 @@
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
 			{onShowPreambles}
+			{onShowSnippets}
 			{onShowSettings}
 		/>
 	</div>

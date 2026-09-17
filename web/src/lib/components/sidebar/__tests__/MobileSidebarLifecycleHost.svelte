@@ -225,6 +225,7 @@
 		onManageTags={() => {}}
 		onShowScheduledPrompts={() => {}}
 		onShowPreambles={() => {}}
+		onShowSnippets={() => {}}
 		onShowSettings={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>

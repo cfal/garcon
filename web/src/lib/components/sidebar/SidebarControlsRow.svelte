@@ -17,6 +17,7 @@
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
+	import Braces from '@lucide/svelte/icons/braces';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
@@ -56,6 +57,7 @@
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
+		onShowSnippets: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -83,6 +85,7 @@
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
 		onShowPreambles,
+		onShowSnippets,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -265,6 +268,10 @@
 				<DropdownMenuItem onclick={onShowPreambles}>
 					<FileText class="h-3.5 w-3.5" />
 					{m.sidebar_actions_preambles()}
+				</DropdownMenuItem>
+				<DropdownMenuItem onclick={onShowSnippets}>
+					<Braces class="h-3.5 w-3.5" />
+					{m.snippets_title()}
 				</DropdownMenuItem>
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />

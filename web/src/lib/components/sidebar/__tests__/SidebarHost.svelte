@@ -288,6 +288,7 @@
 	{chatListAutohideAvailable}
 	onShowScheduledPrompts={() => {}}
 	onShowPreambles={() => {}}
+	onShowSnippets={() => {}}
 	onShowSettings={() => {}}
 	newWindowEdges={workspaceSplitAdmissions()}
 />
