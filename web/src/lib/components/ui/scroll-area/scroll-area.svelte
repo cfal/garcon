@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
 	import { Scrollbar } from './index.js';
 	import { cn, type WithoutChild } from '$lib/utils/cn.js';
@@ -10,13 +11,20 @@
 		orientation = 'vertical',
 		scrollbarXClasses = '',
 		scrollbarYClasses = '',
+		viewportAttributes = {},
+		overlay,
 		children,
 		...restProps
 	}: WithoutChild<ScrollAreaPrimitive.RootProps> & {
 		orientation?: 'vertical' | 'horizontal' | 'both' | undefined;
 		scrollbarXClasses?: string | undefined;
 		scrollbarYClasses?: string | undefined;
+		viewportAttributes?: Omit<
+			ScrollAreaPrimitive.ViewportProps,
+			'child' | 'children' | 'class' | 'ref'
+		>;
 		viewportRef?: HTMLElement | null;
+		overlay?: Snippet;
 	} = $props();
 </script>
 
@@ -27,12 +35,14 @@
 	{...restProps}
 >
 	<ScrollAreaPrimitive.Viewport
+		{...viewportAttributes}
 		bind:ref={viewportRef}
 		data-slot="scroll-area-viewport"
 		class="ring-ring/10 dark:ring-ring/20 dark:outline-ring/40 outline-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] focus-visible:ring-4 focus-visible:outline-1"
 	>
 		{@render children?.()}
 	</ScrollAreaPrimitive.Viewport>
+	{@render overlay?.()}
 	{#if orientation === 'vertical' || orientation === 'both'}
 		<Scrollbar orientation="vertical" class={scrollbarYClasses} />
 	{/if}
