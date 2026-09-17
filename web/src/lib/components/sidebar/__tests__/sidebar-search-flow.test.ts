@@ -485,6 +485,7 @@ describe('sidebar back-to-top control', () => {
 		await fireEvent.scroll(viewport);
 		const button = await screen.findByRole('button', { name: 'Back to top' });
 		expect(button.className).toContain('min-h-11');
+		expect(button.className).toContain('dark:bg-card');
 		expect(viewport.getAttribute('role')).toBe('region');
 		expect(viewport.getAttribute('aria-label')).toBe('Chat list');
 		expect(viewport.tabIndex).toBe(-1);

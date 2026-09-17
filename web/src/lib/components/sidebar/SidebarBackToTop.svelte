@@ -17,7 +17,7 @@
 		variant="outline"
 		size="sm"
 		class={[
-			'pointer-events-auto rounded-full bg-card/95 text-xs shadow-md has-[>svg]:px-3 hover:shadow-lg',
+			'pointer-events-auto rounded-full bg-card text-xs shadow-md has-[>svg]:px-3 hover:bg-accent hover:shadow-lg dark:bg-card dark:hover:bg-accent',
 			isMobile && 'min-h-11 text-sm has-[>svg]:px-4',
 		]}
 		onclick={onActivate}
