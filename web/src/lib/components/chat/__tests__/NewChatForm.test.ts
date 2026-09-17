@@ -143,6 +143,7 @@ async function renderSubmittableForm(
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
+		preambleSnapshot?: PreamblesSnapshot;
 	} = {},
 ): Promise<HTMLTextAreaElement> {
 	const chatsApi = await import('$lib/api/chats');
@@ -957,8 +958,9 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
@@ -994,6 +996,45 @@ describe('NewChatForm', () => {
 		);
 	});
 
+	it('inserts a named preamble into a new-chat draft', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'preamble',
+			sourceId: '00000000-0000-4000-8000-000000000001',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'manual',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'PREAMBLE',
+		});
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat, {
+			preambleSnapshot: {
+				revision: 1,
+				preambles: [
+					{
+						id: '00000000-0000-4000-8000-000000000001',
+						enabled: false,
+						title: 'Manual',
+						snippetShortName: 'manual',
+						content: 'Literal {{arguments}} for {{chat_id}}',
+						scope: { type: 'global' },
+						agentIds: [],
+						tagFilter: { mode: 'any', tags: [] },
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			},
+		});
+		await inputAtCaret(messageInput, 'Before ;;manual after', 'Before ;;manual'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^manual\b/ }));
+
+		await waitFor(() => expect(messageInput.value).toBe('Before PREAMBLE after'));
+		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
 	it('mints the prospective ID lazily and clears it on reseed', async () => {
 		stubMatchMedia(false);
 		vi.mocked(clientChatId.createClientChatId)
@@ -1002,8 +1043,9 @@ describe('NewChatForm', () => {
 			.mockReturnValueOnce(RESEEDED_CHAT_ID);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded prompt',
@@ -1054,8 +1096,9 @@ describe('NewChatForm', () => {
 		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1087,8 +1130,9 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded',
@@ -1134,8 +1178,9 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
@@ -1174,8 +1219,9 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
@@ -1228,8 +1274,9 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'replacement-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'replacement-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1254,8 +1301,9 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-02T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1337,8 +1385,9 @@ describe('NewChatForm', () => {
 		await fireEvent.input(pathInput, { target: { value: '/workspace/other' } });
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1380,8 +1429,9 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1419,8 +1469,9 @@ describe('NewChatForm', () => {
 		expect(expansionOptions?.signal?.aborted).toBe(true);
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1459,8 +1510,9 @@ describe('NewChatForm', () => {
 		expect(expansionOptions?.signal?.aborted).toBe(false);
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expansion still applies',
@@ -1492,8 +1544,9 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',

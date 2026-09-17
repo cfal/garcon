@@ -16,6 +16,7 @@
 		getAgentState,
 		getRemoteSettings,
 		getNotifications,
+		getPreambles,
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceShortcuts,
@@ -79,7 +80,8 @@
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
-	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
+	import { snippetTemplateUsesArguments } from '$shared/snippets';
+	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -116,6 +118,7 @@
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
+	const preambles = getPreambles();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceShortcuts = getWorkspaceShortcuts();
@@ -416,7 +419,7 @@
 	}
 
 	async function insertSnippet(
-		snippet: Snippet,
+		snippet: SelectableSnippet,
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
@@ -442,10 +445,12 @@
 			if (result.kind !== 'expanded') return 'cancelled';
 			const operation = result.prepared;
 			if (
-				result.response.snippetId !== snippet.id ||
-				result.response.snippetUpdatedAt !== snippet.updatedAt
+				result.response.source !== snippet.source ||
+				result.response.sourceId !== snippet.id ||
+				result.response.sourceUpdatedAt !== snippet.updatedAt
 			) {
-				void snippets.refreshIfLoaded();
+				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
+				else void preambles.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
 				await settleComposerAfterSnippet();
 				return 'cancelled';
@@ -468,7 +473,10 @@
 			await settleComposerAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			if (error instanceof ApiError && error.status === 404) {
+				void snippets.refreshIfLoaded();
+				void preambles.refreshIfLoaded();
+			}
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 			await settleComposerAfterSnippet();
 			return 'failed';
@@ -508,7 +516,10 @@
 			ui.closeSlashMenu();
 			await settleComposerAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			if (error instanceof ApiError && error.status === 404) {
+				void snippets.refreshIfLoaded();
+				void preambles.refreshIfLoaded();
+			}
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 			await settleComposerAfterSnippet();
 		}
@@ -719,7 +730,11 @@
 				const trigger = ui.snippetPalette.trigger;
 				const result = await insertSnippet(snippet, argumentsText, trigger);
 				if (result === 'inserted') ui.snippetPalette.complete();
-				else if (result !== 'failed' || !snippetTemplateUsesArguments(snippet.template)) {
+				else if (
+					result !== 'failed' ||
+					snippet.source !== 'snippet' ||
+					!snippetTemplateUsesArguments(snippet.body)
+				) {
 					ui.snippetPalette.dismiss();
 				}
 				return result;

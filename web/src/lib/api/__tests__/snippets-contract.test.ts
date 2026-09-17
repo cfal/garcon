@@ -57,8 +57,9 @@ describe('snippets API contract', () => {
 	it('sends default omission and explicit empty as distinct expansion requests', async () => {
 		const response = {
 			success: true,
-			snippetId: snippet.id,
-			snippetUpdatedAt: snippet.updatedAt,
+			source: 'snippet',
+			sourceId: snippet.id,
+			sourceUpdatedAt: snippet.updatedAt,
 			shortName: snippet.shortName,
 			contextProjectPath: '/repo',
 			expandedText: 'Review',
@@ -126,8 +127,9 @@ describe('snippets API contract', () => {
 		fetchMock.mockResolvedValueOnce(
 			Response.json({
 				success: true,
-				snippetId: snippet.id,
-				snippetUpdatedAt: snippet.updatedAt,
+				source: 'snippet',
+				sourceId: snippet.id,
+				sourceUpdatedAt: snippet.updatedAt,
 				shortName: snippet.shortName,
 				contextProjectPath: '/repo',
 				expandedText: 42,
@@ -161,8 +163,9 @@ describe('snippets API contract', () => {
 		release(
 			Response.json({
 				success: true,
-				snippetId: snippet.id,
-				snippetUpdatedAt: snippet.updatedAt,
+				source: 'snippet',
+				sourceId: snippet.id,
+				sourceUpdatedAt: snippet.updatedAt,
 				shortName: snippet.shortName,
 				contextProjectPath: '/repo',
 				expandedText: 'Review the API in /repo',

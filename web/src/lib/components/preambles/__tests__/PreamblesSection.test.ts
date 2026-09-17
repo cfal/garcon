@@ -172,7 +172,10 @@ describe('PreamblesSection', () => {
 	});
 
 	it('disables a preamble directly from its catalog row', async () => {
-		const enabled = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const enabled = {
+			...globalPreamble('global', 'Global conventions', 'Use the shared defaults.'),
+			snippetShortName: 'global_context',
+		};
 		const disabled = { ...enabled, enabled: false };
 		const update = vi.fn().mockResolvedValue({
 			success: true,
@@ -191,6 +194,7 @@ describe('PreamblesSection', () => {
 			preamble: {
 				enabled: false,
 				title: 'Global conventions',
+				snippetShortName: 'global_context',
 				content: 'Use the shared defaults.',
 				scope: { type: 'global' },
 				agentIds: [],
@@ -199,6 +203,29 @@ describe('PreamblesSection', () => {
 		});
 		expect(await screen.findByText('Disabled')).toBeTruthy();
 		expect(screen.getByRole('switch', { name: 'Enable Global conventions' })).toBeTruthy();
+	});
+
+	it('keeps a short-name conflict editable', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const conflict = new ApiError(409, 'name conflict', 'PREAMBLE_SNIPPET_NAME_CONFLICT');
+		const update = vi.fn().mockRejectedValue(conflict);
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { update },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		const shortName = await screen.findByRole('textbox', {
+			name: 'Snippet short name (optional)',
+		});
+		await fireEvent.input(shortName, { target: { value: 'existing' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save Preamble' }));
+
+		expect(await screen.findByText(/name conflict/i)).toBeTruthy();
+		expect(screen.queryByText(/changed while the editor was open/i)).toBeNull();
+		expect((screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement).disabled).toBe(
+			false,
+		);
 	});
 
 	it('marks an open edit stale when the catalog revision changes', async () => {

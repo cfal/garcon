@@ -54,7 +54,7 @@ function parseActivePreambles(raw: unknown): Preamble[] {
     throw new Error('preambles.json is invalid');
   }
   const ids = new Set<string>();
-  return raw.map((valuePreamble) => {
+  const preambles = raw.map((valuePreamble) => {
     const preamble = normalizePreamble(valuePreamble);
     if (!preamble || ids.has(preamble.id)) throw new Error('preambles.json contains an invalid preamble');
     const rawRules = preamble.scope.type === 'project-paths'
@@ -71,6 +71,21 @@ function parseActivePreambles(raw: unknown): Preamble[] {
     ids.add(preamble.id);
     return preamble;
   });
+  if (duplicateSnippetShortName(preambles)) {
+    throw new Error('preambles.json contains duplicate snippet short names');
+  }
+  return preambles;
+}
+
+function duplicateSnippetShortName(preambles: readonly Preamble[]): string | null {
+  const names = new Set<string>();
+  for (const preamble of preambles) {
+    const shortName = preamble.snippetShortName;
+    if (shortName === undefined) continue;
+    if (names.has(shortName)) return shortName;
+    names.add(shortName);
+  }
+  return null;
 }
 
 function parseRetiredIds(raw: unknown): string[] {
@@ -185,6 +200,13 @@ export class PreambleStore {
     return { revision: this.#file.revision, preambles: structuredClone(this.#file.preambles) };
   }
 
+  getBySnippetShortName(shortName: string): Preamble | null {
+    const preamble = this.#file.preambles.find(
+      (entry) => entry.snippetShortName === shortName,
+    );
+    return preamble ? structuredClone(preamble) : null;
+  }
+
   lifetimeIdCount(): number {
     return this.#file.preambles.length + this.#file.retiredPreambleIds.length;
   }
@@ -245,6 +267,7 @@ export class PreambleStore {
     expectedRevision: number,
     generate: () => string,
     build: (id: string) => Preamble,
+    validateSnippetShortName?: () => void,
   ): Promise<void> {
     await this.#mutate(expectedRevision, (draft) => {
       this.#assertCreateBounds(draft);
@@ -268,6 +291,7 @@ export class PreambleStore {
           500,
         );
       }
+      validateSnippetShortName?.();
       draft.preambles.push(preamble);
     });
   }
@@ -314,13 +338,16 @@ export class PreambleStore {
     definition: PreambleDefinition,
     updatedAt: string,
     expectedRevision: number,
+    validateSnippetShortName?: () => void,
   ): Promise<void> {
     await this.#mutate(expectedRevision, (draft) => {
       const index = draft.preambles.findIndex((entry) => entry.id === id);
       if (index < 0) throw this.#notFound();
       const current = draft.preambles[index]!;
+      const { snippetShortName: _snippetShortName, ...currentWithoutSnippetShortName } = current;
+      validateSnippetShortName?.();
       draft.preambles[index] = {
-        ...current,
+        ...currentWithoutSnippetShortName,
         ...structuredClone(definition),
         updatedAt: nextUpdatedAt(current.updatedAt, updatedAt),
       };
@@ -373,6 +400,14 @@ export class PreambleStore {
       }
       const draft = structuredClone(this.#file);
       change(draft);
+      const duplicateName = duplicateSnippetShortName(draft.preambles);
+      if (duplicateName) {
+        throw new PreambleDomainError(
+          'PREAMBLE_SNIPPET_NAME_CONFLICT',
+          `A snippet named ${duplicateName} already exists`,
+          409,
+        );
+      }
       if (draft.preambles.length + draft.retiredPreambleIds.length > PREAMBLE_ID_LIFETIME_MAX_COUNT) {
         throw new PreambleDomainError(
           'PREAMBLE_ID_LIFETIME_LIMIT_REACHED',

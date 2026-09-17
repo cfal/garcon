@@ -40,6 +40,29 @@ describe('PreambleFormState', () => {
 		expect(form.enabled).toBe(false);
 	});
 
+	it('round-trips optional snippet short names and validates their syntax', () => {
+		const form = new PreambleFormState();
+		form.reset({
+			id: 'named',
+			enabled: false,
+			title: 'Named preamble',
+			snippetShortName: 'manual_context',
+			content: 'Manual context',
+			scope: { type: 'global' },
+			agentIds: [],
+			tagFilter: { mode: 'any', tags: [] },
+			createdAt: '2029-01-01T00:00:00.000Z',
+			updatedAt: '2029-01-01T00:00:00.000Z',
+		});
+
+		expect(form.buildDefinition()).toMatchObject({ snippetShortName: 'manual_context' });
+		form.snippetShortName = 'Invalid name';
+		expect(form.snippetShortNameError).toContain('lowercase');
+		expect(form.buildDefinition()).toBeNull();
+		form.snippetShortName = '';
+		expect(form.buildDefinition()).not.toHaveProperty('snippetShortName');
+	});
+
 	it('round-trips agent and tag filters and normalizes newly entered tags', () => {
 		const form = new PreambleFormState();
 		form.reset({

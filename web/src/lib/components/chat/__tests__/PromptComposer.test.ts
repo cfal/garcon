@@ -1143,8 +1143,9 @@ describe('PromptComposer focus', () => {
 	it('expands /s for review and sends only on a second explicit submit', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
@@ -1184,8 +1185,9 @@ describe('PromptComposer focus', () => {
 	it('uses a new-chat expansion context for a local draft', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'draft expansion',
@@ -1217,8 +1219,9 @@ describe('PromptComposer focus', () => {
 	it('distinguishes omitted slash arguments from an explicit empty value', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded',
@@ -1293,8 +1296,9 @@ describe('PromptComposer focus', () => {
 
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1364,8 +1368,9 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).not.toHaveBeenCalled();
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1379,8 +1384,9 @@ describe('PromptComposer focus', () => {
 	it('inserts a menu-selected snippet at the current selection without sending', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
@@ -1440,8 +1446,9 @@ describe('PromptComposer focus', () => {
 		await fireEvent.input(textarea, { target: { value: 'User edit wins' } });
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1478,8 +1485,9 @@ describe('PromptComposer focus', () => {
 		expect(expansionOptions?.signal?.aborted).toBe(true);
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1493,8 +1501,9 @@ describe('PromptComposer focus', () => {
 	it('opens from an inline trigger and replaces only the captured span', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
@@ -1522,6 +1531,55 @@ describe('PromptComposer focus', () => {
 				shortName: 'review',
 				arguments: { type: 'value', value: '' },
 				context: { type: 'chat', chatId: 'chat-inline-snippet' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+	});
+
+	it('inserts a named preamble from the palette without collecting snippet arguments', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'preamble',
+			sourceId: '00000000-0000-4000-8000-000000000001',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'manual',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'PREAMBLE',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-preamble-snippet',
+			selectedStatus: 'running',
+			preambleSnapshot: {
+				revision: 1,
+				preambles: [
+					{
+						id: '00000000-0000-4000-8000-000000000001',
+						enabled: false,
+						title: 'Manual',
+						snippetShortName: 'manual',
+						content: 'Literal {{arguments}} for {{chat_id}}',
+						scope: { type: 'global' },
+						agentIds: [],
+						tagFilter: { mode: 'any', tags: [] },
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			},
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, 'Before ;;manual after', 'Before ;;manual'.length);
+		const option = await screen.findByRole('option', { name: /^manual\b/ });
+		expect(option.textContent).toContain('preamble');
+		await fireEvent.click(option);
+
+		await waitFor(() => expect(textarea.value).toBe('Before PREAMBLE after'));
+		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'manual',
+				arguments: { type: 'value', value: '' },
+				context: { type: 'chat', chatId: 'chat-preamble-snippet' },
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
@@ -1624,8 +1682,9 @@ describe('PromptComposer focus', () => {
 			.mockRejectedValueOnce(new Error('server unavailable'))
 			.mockResolvedValueOnce({
 				success: true,
-				snippetId: 'snippet-review',
-				snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+				source: 'snippet',
+				sourceId: 'snippet-review',
+				sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 				shortName: 'review',
 				contextProjectPath: '/workspace/project',
 				expandedText: 'EXPANDED',
@@ -1673,8 +1732,9 @@ describe('PromptComposer focus', () => {
 	it('rejects a menu expansion when the selected snippet identity changed', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'replacement-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'replacement-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1700,8 +1760,9 @@ describe('PromptComposer focus', () => {
 	it('rejects a menu expansion when the selected snippet was edited in place', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-02T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
@@ -1792,8 +1853,9 @@ describe('PromptComposer focus', () => {
 	it('rejects a response expanded for an intervening server project path', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/two',
 			expandedText: 'must not apply',
@@ -1819,8 +1881,9 @@ describe('PromptComposer focus', () => {
 	it('rejects a slash expansion resolved for another project path', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/two',
 			expandedText: 'must not apply',
@@ -1905,8 +1968,9 @@ describe('PromptComposer focus', () => {
 		});
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not cross chats',
@@ -1938,8 +2002,9 @@ describe('PromptComposer focus', () => {
 		await waitFor(() => expect(textarea.readOnly).toBe(false));
 		pending.resolve({
 			success: true,
-			snippetId: 'snippet-review',
-			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
 			contextProjectPath: '/workspace/one',
 			expandedText: 'must not cross project paths',

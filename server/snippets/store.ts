@@ -119,7 +119,11 @@ export class SnippetStore {
     return snippet ? cloneSnippet(snippet) : null;
   }
 
-  async create(snippet: Snippet, expectedRevision: number): Promise<void> {
+  async create(
+    snippet: Snippet,
+    expectedRevision: number,
+    validateShortName?: () => void,
+  ): Promise<void> {
     await this.#mutate(expectedRevision, (draft) => {
       if (draft.snippets.length >= SNIPPET_MAX_COUNT) {
         throw new SnippetDomainError(
@@ -138,6 +142,7 @@ export class SnippetStore {
       if (draft.snippets.some((entry) => entry.id === snippet.id)) {
         throw new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet ID already exists', 409);
       }
+      validateShortName?.();
       draft.snippets.push(cloneSnippet(snippet));
     });
   }
@@ -147,6 +152,7 @@ export class SnippetStore {
     definition: SnippetDefinitionInput,
     updatedAt: string,
     expectedRevision: number,
+    validateShortName?: () => void,
   ): Promise<void> {
     await this.#mutate(expectedRevision, (draft) => {
       const index = draft.snippets.findIndex((entry) => entry.id === id);
@@ -160,6 +166,7 @@ export class SnippetStore {
           409,
         );
       }
+      validateShortName?.();
       draft.snippets[index] = {
         ...draft.snippets[index],
         ...structuredClone(definition),

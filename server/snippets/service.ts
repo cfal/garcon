@@ -14,11 +14,17 @@ import {
   type SnippetsSnapshot,
   type UpdateSnippetRequest,
 } from '../../common/snippets.js';
+import { renderPreambleContent } from '../../common/preambles.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { SnippetDomainError } from './errors.js';
 import { SnippetStore } from './store.js';
 import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
+import type { PreambleStore } from '../preambles/store.js';
+import type {
+  AssertSnippetShortNameAvailable,
+  SnippetShortNameCoordinator,
+} from './short-name-coordinator.js';
 
 function projectPathAccessError(error: unknown, projectPath: string): SnippetDomainError | null {
   const code =
@@ -90,6 +96,8 @@ export class SnippetProjectPathService {
 
 interface SnippetServiceDeps {
   store: SnippetStore;
+  preambles?: Pick<PreambleStore, 'getBySnippetShortName'>;
+  snippetShortNames?: Pick<SnippetShortNameCoordinator, 'runMutation'>;
   chats: Pick<IChatRegistry, 'getChat'>;
   projectPaths: Pick<SnippetProjectPathService, 'resolve'>;
   newId?: () => string;
@@ -122,7 +130,13 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.store.create(snippet, request.expectedRevision);
+    await this.#runShortNameMutation((assertAvailable) =>
+      this.deps.store.create(
+        snippet,
+        request.expectedRevision,
+        () => this.#assertShortNameAvailable(assertAvailable, snippet.shortName),
+      ),
+    );
     this.#emitInvalidated('created');
     return this.snapshot();
   }
@@ -131,11 +145,14 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     const id = request.id.trim();
     if (!id) throw this.#validationError();
     const definition = this.#definition(request.snippet);
-    await this.deps.store.update(
-      id,
-      definition,
-      this.#now().toISOString(),
-      request.expectedRevision,
+    await this.#runShortNameMutation((assertAvailable) =>
+      this.deps.store.update(
+        id,
+        definition,
+        this.#now().toISOString(),
+        request.expectedRevision,
+        () => this.#assertShortNameAvailable(assertAvailable, definition.shortName, id),
+      ),
     );
     this.#emitInvalidated('updated');
     return this.snapshot();
@@ -144,7 +161,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
   async remove(request: RemoveSnippetRequest): Promise<SnippetsSnapshot> {
     const id = request.id.trim();
     if (!id) throw this.#validationError();
-    await this.deps.store.remove(id, request.expectedRevision);
+    await this.#runShortNameMutation(() => this.deps.store.remove(id, request.expectedRevision));
     this.#emitInvalidated('removed');
     return this.snapshot();
   }
@@ -153,39 +170,71 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     const input = normalizeExpandSnippetRequest(request);
     if (!input) throw this.#validationError();
     const snippet = this.deps.store.getByShortName(input.shortName);
-    if (!snippet) {
+    const preamble = snippet
+      ? null
+      : this.deps.preambles?.getBySnippetShortName(input.shortName) ?? null;
+    if (!snippet && !preamble) {
       throw new SnippetDomainError(
         'SNIPPET_NOT_FOUND',
         `Snippet not found: ${input.shortName}`,
         404,
       );
     }
-    const argumentsText =
-      input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
     const { contextProjectPath, resolvedProjectPath } = await this.#resolveProjectPath(
       input.context,
     );
     let expandedText: string;
-    try {
-      expandedText = expandSnippetTemplate(snippet.template, {
-        arguments: argumentsText,
-        projectPath: resolvedProjectPath,
-        chatId: input.context.chatId,
-      });
-    } catch (error) {
-      if (error instanceof SnippetExpansionError) {
-        throw new SnippetDomainError(error.code, error.message, 422);
+    if (snippet) {
+      const argumentsText =
+        input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
+      try {
+        expandedText = expandSnippetTemplate(snippet.template, {
+          arguments: argumentsText,
+          projectPath: resolvedProjectPath,
+          chatId: input.context.chatId,
+        });
+      } catch (error) {
+        if (error instanceof SnippetExpansionError) {
+          throw new SnippetDomainError(error.code, error.message, 422);
+        }
+        throw error;
       }
-      throw error;
+    } else {
+      expandedText = renderPreambleContent(preamble!.content, input.context.chatId);
     }
     return {
       success: true,
-      snippetId: snippet.id,
-      snippetUpdatedAt: snippet.updatedAt,
-      shortName: snippet.shortName,
+      source: snippet ? 'snippet' : 'preamble',
+      sourceId: (snippet ?? preamble)!.id,
+      sourceUpdatedAt: (snippet ?? preamble)!.updatedAt,
+      shortName: snippet?.shortName ?? preamble!.snippetShortName!,
       contextProjectPath,
       expandedText,
     };
+  }
+
+  #runShortNameMutation<T>(
+    mutate: (assertAvailable: AssertSnippetShortNameAvailable) => Promise<T>,
+  ): Promise<T> {
+    const coordinator = this.deps.snippetShortNames;
+    if (coordinator) return coordinator.runMutation(mutate);
+    return mutate(() => {});
+  }
+
+  #assertShortNameAvailable(
+    assertAvailable: AssertSnippetShortNameAvailable,
+    shortName: string,
+    id?: string,
+  ): void {
+    assertAvailable(
+      shortName,
+      id ? { type: 'snippet', id } : undefined,
+      (conflictingName) => new SnippetDomainError(
+        'SNIPPET_NAME_CONFLICT',
+        `A snippet named ${conflictingName} already exists`,
+        409,
+      ),
+    );
   }
 
   #definition(value: unknown) {

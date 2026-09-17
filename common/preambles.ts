@@ -1,5 +1,6 @@
 import { CHAT_ID_TEMPLATE_TOKEN, CHAT_ID_TEMPLATE_VARIABLE, expandTemplate } from './template-tokens.js';
 import { isAgentId, type AgentId } from './agents.js';
+import { isSnippetShortName } from './snippets.js';
 import { normalizeTagSlug } from './tags.js';
 
 export const PREAMBLE_MAX_COUNT = 100;
@@ -154,6 +155,7 @@ export interface PreambleTagFilter {
 export interface PreambleDefinition {
   readonly enabled: boolean;
   readonly title: string;
+  readonly snippetShortName?: string;
   readonly content: string;
   readonly scope: PreambleScope;
   readonly agentIds: readonly AgentId[];
@@ -169,6 +171,7 @@ export interface Preamble extends PreambleDefinition {
 export interface PreambleDefinitionInput {
   readonly enabled: boolean;
   readonly title: string;
+  readonly snippetShortName?: string;
   readonly content: string;
   readonly scope: PreambleScope;
   readonly agentIds?: readonly AgentId[];
@@ -242,6 +245,7 @@ export const PREAMBLE_ERROR_CODES = {
   selectionCompositionInvalid: 'PREAMBLE_SELECTION_COMPOSITION_INVALID',
   selectionNoticeFailed: 'PREAMBLE_SELECTION_NOTICE_FAILED',
   selectionSaveUnknown: 'PREAMBLE_SELECTION_SAVE_UNKNOWN',
+  snippetNameConflict: 'PREAMBLE_SNIPPET_NAME_CONFLICT',
 } as const;
 
 export type PreambleErrorCode = (typeof PREAMBLE_ERROR_CODES)[keyof typeof PREAMBLE_ERROR_CODES];
@@ -459,18 +463,25 @@ export function normalizePreambleDefinitionInput(value: unknown): PreambleDefini
   if (!raw || !hasOnlyKeys(raw, [
     'enabled',
     'title',
+    'snippetShortName',
     'content',
     'scope',
     'agentIds',
     'tagFilter',
   ])) return null;
   const title = normalizePreambleTitle(raw.title);
+  const snippetShortName = raw.snippetShortName === undefined
+    ? undefined
+    : isSnippetShortName(raw.snippetShortName)
+      ? raw.snippetShortName
+      : null;
   const scope = normalizePreambleScope(raw.scope);
   const agentIds = normalizePreambleAgentIds(raw.agentIds);
   const tagFilter = normalizePreambleTagFilter(raw.tagFilter);
   if (
     typeof raw.enabled !== 'boolean'
     || !title
+    || snippetShortName === null
     || typeof raw.content !== 'string'
     || raw.content.trim().length === 0
     || raw.content.length > PREAMBLE_CONTENT_MAX_LENGTH
@@ -482,6 +493,7 @@ export function normalizePreambleDefinitionInput(value: unknown): PreambleDefini
   return {
     enabled: raw.enabled,
     title,
+    ...(snippetShortName === undefined ? {} : { snippetShortName }),
     content: raw.content,
     scope,
     agentIds,
@@ -495,6 +507,7 @@ export function normalizePreamble(value: unknown): Preamble | null {
     'id',
     'enabled',
     'title',
+    'snippetShortName',
     'content',
     'scope',
     'agentIds',
@@ -508,6 +521,7 @@ export function normalizePreamble(value: unknown): Preamble | null {
   const definition = normalizePreambleDefinitionInput({
     enabled: raw.enabled,
     title: raw.title,
+    snippetShortName: raw.snippetShortName,
     content: raw.content,
     scope: raw.scope,
     agentIds: raw.agentIds,
@@ -532,10 +546,19 @@ export function normalizePreamblesSnapshot(value: unknown): PreamblesSnapshot | 
   ) return null;
   const preambles: Preamble[] = [];
   const ids = new Set<string>();
+  const snippetShortNames = new Set<string>();
   for (const item of raw.preambles) {
     const preamble = normalizePreamble(item);
-    if (!preamble || ids.has(preamble.id)) return null;
+    if (
+      !preamble
+      || ids.has(preamble.id)
+      || (preamble.snippetShortName !== undefined
+        && snippetShortNames.has(preamble.snippetShortName))
+    ) return null;
     ids.add(preamble.id);
+    if (preamble.snippetShortName !== undefined) {
+      snippetShortNames.add(preamble.snippetShortName);
+    }
     preambles.push(preamble);
   }
   return { revision: raw.revision as number, preambles };

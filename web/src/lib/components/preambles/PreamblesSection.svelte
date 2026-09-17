@@ -3,7 +3,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import { getPreambles } from '$lib/context';
 	import { filterPreambles } from '$lib/preambles/preamble-filter.js';
-	import type { Preamble, PreambleDefinitionInput } from '$shared/preambles';
+	import {
+		PREAMBLE_ERROR_CODES,
+		type Preamble,
+		type PreambleDefinitionInput,
+	} from '$shared/preambles';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -72,7 +76,11 @@
 				await preambles.update(editingPreamble.id, definition, editingRevision);
 			} else await preambles.create(definition);
 		} catch (error) {
-			if (editingPreamble && error instanceof ApiError && error.status === 409) {
+			if (
+				editingPreamble &&
+				error instanceof ApiError &&
+				error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict
+			) {
 				editConflict = true;
 			}
 			throw error;
@@ -122,6 +130,9 @@
 				{
 					enabled,
 					title: preamble.title,
+					...(preamble.snippetShortName
+						? { snippetShortName: preamble.snippetShortName }
+						: {}),
 					content: preamble.content,
 					scope: preamble.scope,
 					agentIds: preamble.agentIds,

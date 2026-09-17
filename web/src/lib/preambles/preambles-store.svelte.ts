@@ -7,7 +7,11 @@ import {
 	reorderPreambles,
 	updatePreamble,
 } from '$lib/api/preambles.js';
-import type { PreambleDefinitionInput, PreamblesSnapshot } from '$shared/preambles';
+import {
+	PREAMBLE_ERROR_CODES,
+	type PreambleDefinitionInput,
+	type PreamblesSnapshot,
+} from '$shared/preambles';
 
 export type PreamblesStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -171,7 +175,11 @@ export class PreamblesStore {
 	}
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {
-		if (!(error instanceof ApiError) || error.status !== 409) return;
+		if (
+			!(error instanceof ApiError) ||
+			error.errorCode !== PREAMBLE_ERROR_CODES.revisionConflict
+		)
+			return;
 		await this.refreshIfLoaded();
 	}
 }

@@ -12,6 +12,7 @@ import {
 	type PreambleTagMatchMode,
 } from '$shared/preambles';
 import type { AgentId } from '$shared/agents';
+import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -25,6 +26,7 @@ export interface PreamblePathRuleDraft {
 export class PreambleFormState {
 	enabled = $state(true);
 	title = $state('');
+	snippetShortName = $state('');
 	content = $state('');
 	scopeType = $state<'global' | 'project-paths'>('global');
 	pathRules = $state<PreamblePathRuleDraft[]>([]);
@@ -55,6 +57,14 @@ export class PreambleFormState {
 		return null;
 	}
 
+	get snippetShortNameError(): string | null {
+		if (!this.snippetShortName) return null;
+		if (!SNIPPET_SHORT_NAME_PATTERN.test(this.snippetShortName)) {
+			return m.preambles_snippet_short_name_invalid();
+		}
+		return null;
+	}
+
 	get scopeError(): string | null {
 		return (
 			this.scopeGroupError ??
@@ -73,7 +83,13 @@ export class PreambleFormState {
 	}
 
 	get canSave(): boolean {
-		return !this.saving && !this.titleError && !this.contentError && !this.scopeError;
+		return (
+			!this.saving &&
+			!this.titleError &&
+			!this.snippetShortNameError &&
+			!this.contentError &&
+			!this.scopeError
+		);
 	}
 
 	get canAddPath(): boolean {
@@ -95,6 +111,7 @@ export class PreambleFormState {
 	reset(preamble: Preamble | null): void {
 		this.enabled = preamble?.enabled ?? true;
 		this.title = preamble?.title ?? '';
+		this.snippetShortName = preamble?.snippetShortName ?? '';
 		this.content = preamble?.content ?? '';
 		this.scopeType = preamble?.scope.type ?? 'global';
 		this.pathRules =
@@ -155,6 +172,7 @@ export class PreambleFormState {
 		return {
 			enabled: this.enabled,
 			title: this.title.trim(),
+			...(this.snippetShortName ? { snippetShortName: this.snippetShortName } : {}),
 			content: this.content,
 			agentIds: [...this.agentIds],
 			tagFilter: { mode: this.tagFilterMode, tags: [...this.tagFilterTags] },

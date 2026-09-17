@@ -1,9 +1,16 @@
 <script lang="ts">
 	import ComposerSnippetPalette from '../ComposerSnippetPalette.svelte';
 	import { onDestroy, untrack } from 'svelte';
-	import { setAppShell, setLocalSettings, setSnippets, setTransientLayers } from '$lib/context';
+	import {
+		setAppShell,
+		setLocalSettings,
+		setPreambles,
+		setSnippets,
+		setTransientLayers,
+	} from '$lib/context';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import type { Snippet } from '$shared/snippets';
@@ -21,6 +28,8 @@
 		insertionResult?: SnippetInsertionResult;
 		mobile?: boolean;
 		keyboardHeight?: number;
+		preambleShortName?: string;
+		preambleContent?: string;
 	}
 
 	let {
@@ -34,6 +43,8 @@
 		insertionResult = 'inserted',
 		mobile = false,
 		keyboardHeight = 0,
+		preambleShortName,
+		preambleContent = 'Preamble {{arguments}} for {{chat_id}}',
 	}: Props = $props();
 
 	let open = $state(true);
@@ -77,6 +88,29 @@
 		},
 	});
 	setSnippets(snippetStore);
+	setPreambles(
+		createPreamblesStore({
+			get: async () => ({
+				revision: preambleShortName ? 1 : 0,
+				preambles: preambleShortName
+					? [
+							{
+								id: '00000000-0000-4000-8000-000000000001',
+								enabled: false,
+								title: 'Manual preamble',
+								snippetShortName: preambleShortName,
+								content: preambleContent,
+								scope: { type: 'global' },
+								agentIds: [],
+								tagFilter: { mode: 'any', tags: [] },
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+							},
+						]
+					: [],
+			}),
+		}),
+	);
 	const mainInert = $derived(transientLayers.makesMainInert);
 </script>
 

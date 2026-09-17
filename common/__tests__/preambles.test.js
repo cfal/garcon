@@ -131,6 +131,15 @@ describe('preamble contracts', () => {
     expect(normalizePreambleDefinitionInput(definition({ title: 'two\nlines' }))).toBeNull();
   });
 
+  it('accepts optional snippet short names without widening snippet syntax', () => {
+    expect(normalizePreambleDefinitionInput(definition({
+      snippetShortName: 'repo_rules-2',
+    }))).toEqual(definition({ snippetShortName: 'repo_rules-2' }));
+    expect(normalizePreambleDefinitionInput(definition({ snippetShortName: 'Repo Rules' })))
+      .toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({ snippetShortName: '' }))).toBeNull();
+  });
+
   it('rejects blank, oversized, file-context-colliding, and unknown fields', () => {
 
     expect(normalizePreambleDefinitionInput({ ...definition(), enabled: undefined })).toBeNull();
@@ -179,6 +188,16 @@ describe('preamble contracts', () => {
     expect(normalizePreamblesSnapshot({ revision: 2, preambles: [], extra: true })).toBeNull();
     expect(normalizePreamblesSnapshot({ revision: 2, preambles: [preamble('not-a-uuid')] })).toBeNull();
     expect(normalizePreamblesSnapshot({ revision: 2, preambles: [preamble(TEST_ID_ONE.toUpperCase())] })).toBeNull();
+  });
+
+  it('rejects duplicate preamble snippet short names in snapshots', () => {
+    expect(normalizePreamblesSnapshot({
+      revision: 2,
+      preambles: [
+        preamble(TEST_ID_ONE, { snippetShortName: 'review' }),
+        preamble(TEST_ID_TWO, { snippetShortName: 'review' }),
+      ],
+    })).toBeNull();
   });
 
   it('parses only complete mutation responses and pending boundaries', () => {

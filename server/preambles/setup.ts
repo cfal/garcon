@@ -9,8 +9,9 @@ import { ChatPreambleSelectionService } from './chat-selection-service.js';
 import { PreambleProjectPathService } from './project-path-service.js';
 import { PreambleService } from './service.js';
 import { PreambleStore } from './store.js';
+import type { SnippetShortNameCoordinator } from '../snippets/short-name-coordinator.js';
 
-export async function initializePreambleService(workspaceDir: string): Promise<PreambleService> {
+export async function initializePreambleStore(workspaceDir: string): Promise<PreambleStore> {
   const store = new PreambleStore(workspaceDir);
   await store.init();
   const installation = await store.installBundledPreambles(BUNDLED_PREAMBLES, new Date());
@@ -19,7 +20,22 @@ export async function initializePreambleService(workspaceDir: string): Promise<P
       `${installation.deferred} bundled preamble(s) could not be installed because the catalog is full`,
     );
   }
-  return new PreambleService({ store, projectPaths: new PreambleProjectPathService() });
+  return store;
+}
+
+export function createPreambleService(
+  store: PreambleStore,
+  snippetShortNames?: Pick<SnippetShortNameCoordinator, 'runMutation'>,
+): PreambleService {
+  return new PreambleService({
+    store,
+    projectPaths: new PreambleProjectPathService(),
+    snippetShortNames,
+  });
+}
+
+export async function initializePreambleService(workspaceDir: string): Promise<PreambleService> {
+  return createPreambleService(await initializePreambleStore(workspaceDir));
 }
 
 // Builds the existing-chat selection service. Kept beside catalog setup so

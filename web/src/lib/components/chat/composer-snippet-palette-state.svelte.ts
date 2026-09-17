@@ -3,10 +3,11 @@ import type {
 	SnippetInsertionHandler,
 	SnippetInsertionResult,
 } from '$lib/chat/composer/snippet-insertion.js';
+import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
 
 interface ComposerSnippetPaletteStateOptions {
-	get snippets(): readonly Snippet[];
+	get snippets(): readonly SelectableSnippet[];
 	get interactionKey(): string;
 	get contextAvailable(): boolean;
 	onOpenChange(open: boolean): void;
@@ -24,8 +25,8 @@ export class ComposerSnippetPaletteState {
 	#suppressCancelOnClose = false;
 
 	query = $state('');
-	highlightedSnippetId = $state<string | null>(null);
-	argumentsSnippet = $state<Snippet | null>(null);
+	highlightedSnippetKey = $state<string | null>(null);
+	argumentsItem = $state<SelectableSnippet | null>(null);
 	argumentsDraft = $state('');
 	argumentsDraftIsFreshDefault = $state(false);
 	argumentsDialogOpen = $state(false);
@@ -33,16 +34,16 @@ export class ComposerSnippetPaletteState {
 	#filteredSnippets = $derived.by(() => {
 		const normalized = this.query.trim().toLowerCase();
 		if (!normalized) return [...this.#options.snippets];
-		const exact: Snippet[] = [];
-		const prefix: Snippet[] = [];
-		const contains: Snippet[] = [];
-		const templateMatches: Snippet[] = [];
+		const exact: SelectableSnippet[] = [];
+		const prefix: SelectableSnippet[] = [];
+		const contains: SelectableSnippet[] = [];
+		const templateMatches: SelectableSnippet[] = [];
 		for (const snippet of this.#options.snippets) {
 			const name = snippet.shortName.toLowerCase();
 			if (name === normalized) exact.push(snippet);
 			else if (name.startsWith(normalized)) prefix.push(snippet);
 			else if (name.includes(normalized)) contains.push(snippet);
-			else if (snippet.template.toLowerCase().includes(normalized)) {
+			else if (snippet.body.toLowerCase().includes(normalized)) {
 				templateMatches.push(snippet);
 			}
 		}
@@ -51,7 +52,7 @@ export class ComposerSnippetPaletteState {
 
 	#highlightedIndex = $derived.by(() => {
 		const selectedIndex = this.#filteredSnippets.findIndex(
-			(snippet) => snippet.id === this.highlightedSnippetId,
+			(snippet) => snippet.key === this.highlightedSnippetKey,
 		);
 		return selectedIndex >= 0 ? selectedIndex : this.#filteredSnippets.length > 0 ? 0 : -1;
 	});
@@ -65,12 +66,16 @@ export class ComposerSnippetPaletteState {
 		this.#options = options;
 	}
 
-	get filteredSnippets(): readonly Snippet[] {
+	get filteredSnippets(): readonly SelectableSnippet[] {
 		return this.#filteredSnippets;
 	}
 
-	get highlightedSnippet(): Snippet | null {
+	get highlightedSnippet(): SelectableSnippet | null {
 		return this.#highlightedSnippet;
+	}
+
+	get argumentsSnippet(): Snippet | null {
+		return this.argumentsItem?.source === 'snippet' ? this.argumentsItem.snippet : null;
 	}
 
 	get contextAvailable(): boolean {
@@ -80,7 +85,7 @@ export class ComposerSnippetPaletteState {
 	syncOpen(open: boolean, initialQuery: string): void {
 		if (open && !this.#wasOpen) {
 			this.query = initialQuery;
-			this.highlightedSnippetId = null;
+			this.highlightedSnippetKey = null;
 			this.#suppressCancelOnClose = false;
 		} else if (!open && this.#wasOpen) {
 			this.query = '';
@@ -96,22 +101,22 @@ export class ComposerSnippetPaletteState {
 		if (interactionKey === this.#previousInteractionKey) return;
 		this.#previousInteractionKey = interactionKey;
 		this.argumentsDialogOpen = false;
-		this.argumentsSnippet = null;
+		this.argumentsItem = null;
 		this.argumentsDraft = '';
 		this.argumentsDraftIsFreshDefault = false;
 		if (open) this.#options.onOpenChange(false);
 	}
 
 	resetHighlight(): void {
-		this.highlightedSnippetId = null;
+		this.highlightedSnippetKey = null;
 	}
 
-	highlight(snippetId: string): void {
-		this.highlightedSnippetId = snippetId;
+	highlight(snippetKey: string): void {
+		this.highlightedSnippetKey = snippetKey;
 	}
 
-	optionIdFor(snippetId: string): string {
-		return `${this.#uid}-option-${encodeURIComponent(snippetId)}`;
+	optionIdFor(snippetKey: string): string {
+		return `${this.#uid}-option-${encodeURIComponent(snippetKey)}`;
 	}
 
 	handleSearchKeyDown(event: KeyboardEvent): void {
@@ -134,14 +139,14 @@ export class ComposerSnippetPaletteState {
 		}
 	}
 
-	selectSnippet(snippet: Snippet): void {
+	selectSnippet(snippet: SelectableSnippet): void {
 		if (!this.contextAvailable) return;
 		this.#suppressCancelOnClose = true;
 		flushSync(() => this.#options.onOpenChange(false));
-		if (snippetTemplateUsesArguments(snippet.template)) {
+		if (snippet.source === 'snippet' && snippetTemplateUsesArguments(snippet.snippet.template)) {
 			queueMicrotask(() => {
-				this.argumentsSnippet = snippet;
-				this.argumentsDraft = snippet.defaultArguments;
+				this.argumentsItem = snippet;
+				this.argumentsDraft = snippet.snippet.defaultArguments;
 				this.argumentsDraftIsFreshDefault = true;
 				this.argumentsDialogOpen = true;
 			});
@@ -154,13 +159,13 @@ export class ComposerSnippetPaletteState {
 		this.argumentsDialogOpen = false;
 	}
 
-	submitArguments(snippet: Snippet, argumentsText: string): void {
-		void this.#settleInsertion(snippet, argumentsText);
+	submitArguments(_snippet: Snippet, argumentsText: string): void {
+		if (this.argumentsItem) void this.#settleInsertion(this.argumentsItem, argumentsText);
 	}
 
 	settleArgumentsCancel(): void {
 		this.argumentsDialogOpen = false;
-		this.argumentsSnippet = null;
+		this.argumentsItem = null;
 		this.argumentsDraft = '';
 		this.argumentsDraftIsFreshDefault = false;
 		this.#options.onCancelled?.();
@@ -187,25 +192,29 @@ export class ComposerSnippetPaletteState {
 		const bounded = Math.max(0, Math.min(nextIndex, this.#filteredSnippets.length - 1));
 		const snippet = this.#filteredSnippets[bounded];
 		if (!snippet) return;
-		this.highlightedSnippetId = snippet.id;
-		const optionId = this.optionIdFor(snippet.id);
+		this.highlightedSnippetKey = snippet.key;
+		const optionId = this.optionIdFor(snippet.key);
 		void tick().then(() => {
 			document.getElementById(optionId)?.scrollIntoView({ block: 'nearest' });
 		});
 	}
 
-	async #settleInsertion(snippet: Snippet, argumentsText: string): Promise<void> {
+	async #settleInsertion(snippet: SelectableSnippet, argumentsText: string): Promise<void> {
 		const interactionAtInsert = this.#options.interactionKey;
 		const result: SnippetInsertionResult = await this.#options.onInsert(snippet, argumentsText);
 		if (this.#options.interactionKey !== interactionAtInsert) return;
-		if (result === 'failed' && snippetTemplateUsesArguments(snippet.template)) {
-			this.argumentsSnippet = snippet;
+		if (
+			result === 'failed' &&
+			snippet.source === 'snippet' &&
+			snippetTemplateUsesArguments(snippet.snippet.template)
+		) {
+			this.argumentsItem = snippet;
 			this.argumentsDraft = argumentsText;
 			this.argumentsDraftIsFreshDefault = false;
 			this.argumentsDialogOpen = true;
 			return;
 		}
-		this.argumentsSnippet = null;
+		this.argumentsItem = null;
 		this.argumentsDraft = '';
 		this.argumentsDraftIsFreshDefault = false;
 	}

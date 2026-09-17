@@ -43,6 +43,7 @@
 		getRemoteSettings,
 		getChatSessions,
 		getNotifications,
+		getPreambles,
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceLayout,
@@ -70,7 +71,8 @@
 	} from '$lib/chat/composer/slash-commands.js';
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
-	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
+	import { snippetTemplateUsesArguments } from '$shared/snippets';
+	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { createClientChatId } from '$shared/client-chat-id';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
@@ -93,6 +95,7 @@
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
+	const preambles = getPreambles();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
@@ -387,7 +390,7 @@
 	}
 
 	async function insertSnippet(
-		snippet: Snippet,
+		snippet: SelectableSnippet,
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
@@ -409,10 +412,12 @@
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (
-				result.response.snippetId !== snippet.id ||
-				result.response.snippetUpdatedAt !== snippet.updatedAt
+				result.response.source !== snippet.source ||
+				result.response.sourceId !== snippet.id ||
+				result.response.sourceUpdatedAt !== snippet.updatedAt
 			) {
-				void snippets.refreshIfLoaded();
+				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
+				else void preambles.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
 				await settleTextareaAfterSnippet();
 				return 'cancelled';
@@ -433,7 +438,10 @@
 			await settleTextareaAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			if (error instanceof ApiError && error.status === 404) {
+				void snippets.refreshIfLoaded();
+				void preambles.refreshIfLoaded();
+			}
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 			await settleTextareaAfterSnippet();
 			return 'failed';
@@ -464,7 +472,10 @@
 			form.firstMessage = result.response.expandedText;
 			await settleTextareaAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			if (error instanceof ApiError && error.status === 404) {
+				void snippets.refreshIfLoaded();
+				void preambles.refreshIfLoaded();
+			}
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 			await settleTextareaAfterSnippet();
 		}
@@ -803,7 +814,11 @@
 						const trigger = snippetPalette.trigger;
 						const result = await insertSnippet(snippet, argumentsText, trigger);
 						if (result === 'inserted') snippetPalette.complete();
-						else if (result !== 'failed' || !snippetTemplateUsesArguments(snippet.template)) {
+						else if (
+							result !== 'failed' ||
+							snippet.source !== 'snippet' ||
+							!snippetTemplateUsesArguments(snippet.body)
+						) {
 							snippetPalette.dismiss();
 						}
 						return result;

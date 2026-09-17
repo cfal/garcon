@@ -141,8 +141,9 @@ describe('NewChatDialog', () => {
 			if (request.context.type !== 'new-chat') throw new Error('Expected new-chat context');
 			return {
 				success: true,
-				snippetId: 'snippet-handoff',
-				snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+				source: 'snippet',
+				sourceId: 'snippet-handoff',
+				sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 				shortName: 'handoff',
 				contextProjectPath: request.context.projectPath,
 				expandedText: `Continue chat ${request.context.chatId}`,

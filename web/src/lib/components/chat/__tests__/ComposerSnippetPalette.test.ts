@@ -170,6 +170,22 @@ describe('ComposerSnippetPalette', () => {
 		);
 	});
 
+	it('selects named preambles without exposing snippet-only token behavior', async () => {
+		render(ComposerSnippetPaletteTestHost, {
+			count: 0,
+			preambleShortName: 'manual_context',
+		});
+
+		const option = await screen.findByRole('option', { name: /manual_context/ });
+		expect(option.textContent).toContain('preamble');
+		expect(screen.queryByLabelText('Uses the {{arguments}} placeholder')).toBeNull();
+		expect(screen.queryByLabelText('Uses the {{chat_id}} placeholder')).toBeNull();
+		await fireEvent.click(option);
+
+		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('manual_context'));
+		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
+	});
+
 	it('collects arguments before inserting a snippet that uses them', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 1,

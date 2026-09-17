@@ -10,8 +10,9 @@ const request: ExpandSnippetRequest = {
 
 const response: ExpandSnippetResponse = {
 	success: true,
-	snippetId: 'snippet-1',
-	snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+	source: 'snippet',
+	sourceId: 'snippet-1',
+	sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 	shortName: 'review',
 	contextProjectPath: '/repo',
 	expandedText: 'Review the API in /repo',

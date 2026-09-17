@@ -1,7 +1,7 @@
 <script lang="ts">
 	import PromptComposer from '../PromptComposer.svelte';
 	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import {
 		setAgentState,
 		setAppShell,
@@ -10,6 +10,7 @@
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
+		setPreambles,
 		setProjectResolution,
 		setRemoteSettings,
 		setSnippets,
@@ -33,6 +34,8 @@
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+	import type { PreamblesSnapshot } from '$shared/preambles';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
@@ -70,6 +73,7 @@
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
+		preambleSnapshot?: PreamblesSnapshot;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -104,6 +108,7 @@
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
+		preambleSnapshot = { revision: 0, preambles: [] },
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
@@ -401,6 +406,9 @@
 			},
 		}),
 	);
+	const preambles = createPreamblesStore();
+	preambles.applySnapshot(untrack(() => preambleSnapshot));
+	setPreambles(preambles);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 	setCanonicalWorkspaceLayout();

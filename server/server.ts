@@ -101,12 +101,8 @@ import {
   rollbackLegacyCarryOverMigration,
 } from './chats/chat-carryover-rollback.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
-import { SnippetStore } from './snippets/store.js';
-import {
-  SnippetProjectPathService,
-  SnippetService,
-} from './snippets/service.js';
-import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
+import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
+import { initializeChatPreambleSelectionService } from './preambles/setup.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import {
@@ -400,7 +396,10 @@ export async function startServer(): Promise<void> {
       transcriptLedger,
       transcriptAdoption,
     );
-    const preambles = await initializePreambleService(workspaceDir);
+    const { snippets, preambles } = await initializeSnippetAndPreambleServices({
+      workspaceDir,
+      chats: chatRegistry,
+    });
     const chatBoardRuntime = await initializeChatBoardRuntime({ workspaceDir, registry: chatRegistry, chatMutationLock, archiveState: settings });
     const tickets = initializeTickets(workspaceDir, {
       chatExists: (chatId) => chatRegistry.hasChat(chatId),
@@ -655,14 +654,6 @@ export async function startServer(): Promise<void> {
       chatIds,
       scheduler: scheduledPrompts,
       tickets,
-    });
-
-    const snippetStore = new SnippetStore(workspaceDir);
-    await snippetStore.init();
-    const snippets = new SnippetService({
-      store: snippetStore,
-      chats: chatRegistry,
-      projectPaths: new SnippetProjectPathService(),
     });
 
     // Telegram notifications wire themselves to agent and queue events.

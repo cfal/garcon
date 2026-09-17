@@ -6,6 +6,9 @@ import { randomUUID } from 'crypto';
 import { resetServerConfigForTests } from '../../config.ts';
 import { SnippetProjectPathService, SnippetService } from '../service.ts';
 import { SnippetStore } from '../store.ts';
+import { PreambleStore } from '../../preambles/store.ts';
+import { SnippetShortNameCoordinator } from '../short-name-coordinator.ts';
+import { PreambleService } from '../../preambles/service.ts';
 
 const createdDirs = [];
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
@@ -19,10 +22,18 @@ async function serviceFixture() {
   createdDirs.push(dir);
   const store = new SnippetStore(dir);
   await store.init();
+  const preambleStore = new PreambleStore(dir);
+  await preambleStore.init();
+  const snippetShortNames = new SnippetShortNameCoordinator({
+    snippets: () => store.snapshot().snippets,
+    preambles: () => preambleStore.snapshot().preambles,
+  });
   const events = [];
   const chatLookups = [];
   const service = new SnippetService({
     store,
+    preambles: preambleStore,
+    snippetShortNames,
     chats: {
       getChat(id) {
         chatLookups.push(id);
@@ -38,7 +49,7 @@ async function serviceFixture() {
     now: () => new Date('2026-01-01T00:00:00.000Z'),
   });
   service.onInvalidated((reason) => events.push(reason));
-  return { service, events, chatLookups };
+  return { service, store, preambleStore, snippetShortNames, events, chatLookups };
 }
 
 describe('snippet service', () => {
@@ -99,7 +110,9 @@ describe('snippet service', () => {
         },
       }),
     ).toMatchObject({
-      snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+      source: 'snippet',
+      sourceId: 'snippet-a',
+      sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
       contextProjectPath: '/registered/repo',
       expandedText: 'Review contracts in /canonical/registered/repo',
     });
@@ -119,6 +132,89 @@ describe('snippet service', () => {
     });
     expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
     expect(events).toEqual([]);
+  });
+
+  it('expands named preambles with preamble token semantics regardless of automatic eligibility', async () => {
+    const { service, preambleStore } = await serviceFixture();
+    await preambleStore.create({
+      id: '00000000-0000-4000-8000-000000000001',
+      enabled: false,
+      title: 'Manual context',
+      snippetShortName: 'context',
+      content: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{chat_id}}',
+      scope: {
+        type: 'project-paths',
+        rules: [{ projectPath: '/different/project', includeNested: false }],
+      },
+      agentIds: ['codex'],
+      tagFilter: { mode: 'all', tags: ['manual'] },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }, 0);
+
+    await expect(service.expand({
+      shortName: 'context',
+      arguments: { type: 'value', value: 'ignored' },
+      context: {
+        type: 'new-chat',
+        chatId: PROSPECTIVE_CHAT_ID,
+        projectPath: '/draft/repo',
+      },
+    })).resolves.toEqual({
+      success: true,
+      source: 'preamble',
+      sourceId: '00000000-0000-4000-8000-000000000001',
+      sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+      shortName: 'context',
+      contextProjectPath: '/draft/repo',
+      expandedText: `Chat ${PROSPECTIVE_CHAT_ID} / {{arguments}} / {{project_path}} / {{chat_id}}`,
+    });
+  });
+
+  it('serializes cross-catalog names and releases them on clear or remove', async () => {
+    const { service, preambleStore, snippetShortNames } = await serviceFixture();
+    const preambles = new PreambleService({
+      store: preambleStore,
+      snippetShortNames,
+      projectPaths: { resolve: async (projectPath) => projectPath },
+      newId: () => '00000000-0000-4000-8000-000000000001',
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const preambleDefinition = {
+      enabled: true,
+      title: 'Context',
+      snippetShortName: 'shared',
+      content: 'Context',
+      scope: { type: 'global' },
+    };
+
+    const results = await Promise.allSettled([
+      service.create({
+        expectedRevision: 0,
+        snippet: { shortName: 'shared', template: 'Snippet', defaultArguments: '' },
+      }),
+      preambles.create({ expectedRevision: 0, preamble: preambleDefinition }),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    if (service.snapshot().snippets.length > 0) {
+      await service.remove({ expectedRevision: 1, id: 'snippet-a' });
+      await expect(preambles.create({
+        expectedRevision: 0,
+        preamble: preambleDefinition,
+      })).resolves.toMatchObject({ preambles: [{ snippetShortName: 'shared' }] });
+    } else {
+      await preambles.update({
+        expectedRevision: 1,
+        id: '00000000-0000-4000-8000-000000000001',
+        preamble: { ...preambleDefinition, snippetShortName: undefined },
+      });
+      await expect(service.create({
+        expectedRevision: 0,
+        snippet: { shortName: 'shared', template: 'Snippet', defaultArguments: '' },
+      })).resolves.toMatchObject({ snippets: [{ shortName: 'shared' }] });
+    }
   });
 
   it('uses the saved default only for omitted arguments', async () => {

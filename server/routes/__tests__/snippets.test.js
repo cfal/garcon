@@ -28,8 +28,9 @@ function service() {
     expand: mock(() =>
       Promise.resolve({
         success: true,
-        snippetId: 'snippet-a',
-        snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+        source: 'snippet',
+        sourceId: 'snippet-a',
+        sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
         shortName: 'review',
         contextProjectPath: '/repo',
         expandedText: 'Review',
@@ -83,8 +84,9 @@ describe('snippet routes', () => {
     expect(snippets.expand).toHaveBeenCalledWith(omittedRequest);
     expect(result.body).toEqual({
       success: true,
-      snippetId: 'snippet-a',
-      snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+      source: 'snippet',
+      sourceId: 'snippet-a',
+      sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
       shortName: 'review',
       contextProjectPath: '/repo',
       expandedText: 'Review',

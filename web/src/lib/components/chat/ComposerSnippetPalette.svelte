@@ -4,10 +4,13 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { getAppShell, getLocalSettings, getSnippets } from '$lib/context';
+	import { getAppShell, getLocalSettings, getPreambles, getSnippets } from '$lib/context';
 	import type { SnippetInsertionHandler } from '$lib/chat/composer/snippet-insertion.js';
 	import { normalizeSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
-	import { snippetPreview } from '$lib/snippets/snippet-presentation.js';
+	import {
+		selectableSnippetPreview,
+		selectableSnippets,
+	} from '$lib/snippets/selectable-snippet.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		SNIPPET_ARGUMENTS_TOKEN,
@@ -46,14 +49,16 @@
 	}: Props = $props();
 
 	const snippets = getSnippets();
+	const preambles = getPreambles();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
 	const searchId = `${uid}-search`;
+	const paletteItems = $derived.by(() => selectableSnippets(snippets.snippets, preambles.preambles));
 	const palette = new ComposerSnippetPaletteState(uid, {
 		get snippets() {
-			return snippets.snippets;
+			return paletteItems;
 		},
 		get interactionKey() {
 			return interactionKey;
@@ -69,13 +74,23 @@
 	});
 	const triggerHint = $derived(normalizeSnippetTrigger(localSettings.snippetTrigger));
 	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
+	const catalogsLoading = $derived(
+		(snippets.status === 'loading' && !snippets.hasLoaded) ||
+			(preambles.status === 'loading' && !preambles.hasLoaded),
+	);
+	const catalogsFailed = $derived(
+		(snippets.status === 'error' && !snippets.hasLoaded) ||
+			(preambles.status === 'error' && !preambles.hasLoaded),
+	);
 
 	$effect(() => {
 		palette.syncOpen(open, initialQuery);
 	});
 
 	$effect(() => {
-		if (open) void snippets.ensureLoaded().catch(() => undefined);
+		if (open) {
+			void Promise.all([snippets.ensureLoaded(), preambles.ensureLoaded()]).catch(() => undefined);
+		}
 	});
 
 	$effect(() => {
@@ -83,7 +98,10 @@
 	});
 
 	function retryLoad(): void {
-		void snippets.refresh({ initial: true }).catch(() => undefined);
+		void Promise.all([
+			snippets.refresh({ initial: true }),
+			preambles.refresh({ initial: true }),
+		]).catch(() => undefined);
 	}
 
 	function handleOpenChange(nextOpen: boolean): void {
@@ -118,7 +136,7 @@
 					aria-controls={listId}
 					aria-autocomplete="list"
 					aria-activedescendant={palette.highlightedSnippet
-						? palette.optionIdFor(palette.highlightedSnippet.id)
+						? palette.optionIdFor(palette.highlightedSnippet.key)
 						: undefined}
 					oninput={() => palette.resetHighlight()}
 					onkeydown={(event) => palette.handleSearchKeyDown(event)}
@@ -129,11 +147,11 @@
 		</div>
 
 		<div id={listId} role="listbox" class="min-h-0 flex-1 overflow-y-auto p-2">
-			{#if snippets.status === 'loading' && !snippets.hasLoaded}
+			{#if catalogsLoading}
 				<p class="px-3 py-8 text-center text-sm text-muted-foreground">{m.snippets_loading()}</p>
-			{:else if snippets.status === 'error' && !snippets.hasLoaded}
+			{:else if catalogsFailed}
 				<div class="flex flex-col items-center gap-3 px-3 py-8 text-center">
-					<p class="text-sm text-destructive">{m.snippets_load_error()}</p>
+					<p class="text-sm text-destructive">{m.snippets_catalog_load_error()}</p>
 					<button
 						type="button"
 						onclick={retryLoad}
@@ -149,20 +167,20 @@
 				</p>
 			{:else}
 				<div class="space-y-1">
-					{#each palette.filteredSnippets as snippet (snippet.id)}
+					{#each palette.filteredSnippets as snippet (snippet.key)}
 						<svelte:boundary>
 							<!-- The combobox keeps focus in the search input, tracks this option with aria-activedescendant, and handles keyboard selection through the input. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
 							<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The ESLint rule misses the compiler warnings reported by svelte-check for this option. -->
 							<!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_interactive_supports_focus, a11y_click_events_have_key_events -->
 							<div
-								id={palette.optionIdFor(snippet.id)}
+								id={palette.optionIdFor(snippet.key)}
 								role="option"
-								aria-selected={snippet.id === palette.highlightedSnippet?.id}
+								aria-selected={snippet.key === palette.highlightedSnippet?.key}
 								aria-disabled={!palette.contextAvailable}
 								onclick={() => palette.selectSnippet(snippet)}
-								onmouseenter={() => palette.highlight(snippet.id)}
-								class="flex min-h-14 w-full items-start gap-3 rounded-md px-3 py-2 {snippet.id ===
-								palette.highlightedSnippet?.id
+								onmouseenter={() => palette.highlight(snippet.key)}
+								class="flex min-h-14 w-full items-start gap-3 rounded-md px-3 py-2 {snippet.key ===
+								palette.highlightedSnippet?.key
 									? 'bg-muted'
 									: ''} {palette.contextAvailable ? 'cursor-pointer' : 'cursor-not-allowed'}"
 							>
@@ -170,7 +188,14 @@
 								<span class="min-w-0 flex-1">
 									<span class="flex flex-wrap items-center gap-2">
 										<span class="truncate text-sm font-medium">{snippet.shortName}</span>
-										{#if snippetTemplateUsesArguments(snippet.template)}
+										{#if snippet.source === 'preamble'}
+											<span
+												class="shrink-0 rounded border border-border bg-background px-1.5 text-[10px] text-muted-foreground"
+											>
+												{m.snippets_preamble_badge()}
+											</span>
+										{/if}
+										{#if snippet.source === 'snippet' && snippetTemplateUsesArguments(snippet.body)}
 											<span
 												class="shrink-0 rounded border border-border bg-background px-1 font-mono text-[10px] text-muted-foreground"
 												aria-label={m.snippets_token_arguments_label({
@@ -180,7 +205,7 @@
 												{SNIPPET_ARGUMENTS_TOKEN}
 											</span>
 										{/if}
-										{#if snippetTemplateUsesProjectPath(snippet.template)}
+										{#if snippet.source === 'snippet' && snippetTemplateUsesProjectPath(snippet.body)}
 											<span
 												class="shrink-0 rounded border border-border bg-background px-1 font-mono text-[10px] text-muted-foreground"
 												aria-label={m.snippets_token_project_path_label({
@@ -190,7 +215,7 @@
 												{SNIPPET_PROJECT_PATH_TOKEN}
 											</span>
 										{/if}
-										{#if snippetTemplateUsesChatId(snippet.template)}
+										{#if snippet.source === 'snippet' && snippetTemplateUsesChatId(snippet.body)}
 											<span
 												class="shrink-0 rounded border border-border bg-background px-1 font-mono text-[10px] text-muted-foreground"
 												aria-label={m.snippets_token_chat_id_label({
@@ -202,7 +227,7 @@
 										{/if}
 									</span>
 									<span class="block truncate text-xs text-muted-foreground">
-										{snippetPreview(snippet)}
+										{selectableSnippetPreview(snippet)}
 									</span>
 								</span>
 							</div>
@@ -224,7 +249,7 @@
 					tabindex="0"
 					aria-label={m.snippets_template_preview_label()}
 					class="h-28 overflow-y-auto font-mono text-xs leading-4 whitespace-pre-wrap text-muted-foreground sm:h-40">{palette
-						.highlightedSnippet.template}</pre>
+						.highlightedSnippet.body}</pre>
 			</div>
 		{/if}
 

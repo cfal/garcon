@@ -247,6 +247,26 @@ describe('PreambleStore version two', () => {
     });
   });
 
+  it('persists unique snippet aliases and removes an alias on update', async () => {
+    const directory = await temporaryDirectory();
+    const store = new PreambleStore(directory);
+    await store.init();
+    await store.create(preamble(ID_A, { snippetShortName: 'review' }), 0);
+
+    await expect(store.create(
+      preamble(ID_B, { snippetShortName: 'review' }),
+      1,
+    )).rejects.toMatchObject({ code: 'PREAMBLE_SNIPPET_NAME_CONFLICT' });
+    expect(store.snapshot().revision).toBe(1);
+
+    const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...definition } = preamble(ID_A);
+    await store.update(ID_A, definition, '2026-09-04T10:00:00.000Z', 1);
+    expect(store.snapshot().preambles[0]).not.toHaveProperty('snippetShortName');
+
+    await store.create(preamble(ID_B, { snippetShortName: 'review' }), 2);
+    expect((await readCatalog(directory)).preambles[1].snippetShortName).toBe('review');
+  });
+
   it('rejects persisted duplicate, malformed, or overlapping tombstones', async () => {
     const cases = [
       { preambles: [], retiredPreambleIds: [ID_A, ID_A] },
@@ -258,6 +278,23 @@ describe('PreambleStore version two', () => {
       await writeCatalog(directory, { version: 2, revision: 1, ...file });
       await expect(new PreambleStore(directory).init()).rejects.toThrow();
     }
+  });
+
+  it('rejects persisted duplicate snippet aliases', async () => {
+    const directory = await temporaryDirectory();
+    await writeCatalog(directory, {
+      version: 2,
+      revision: 1,
+      preambles: [
+        preamble(ID_A, { snippetShortName: 'review' }),
+        preamble(ID_B, { snippetShortName: 'review' }),
+      ],
+      retiredPreambleIds: [],
+    });
+
+    await expect(new PreambleStore(directory).init()).rejects.toThrow(
+      'duplicate snippet short names',
+    );
   });
 
   it('rejects generated collisions against active and retired IDs without looping', async () => {

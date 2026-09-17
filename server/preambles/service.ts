@@ -18,6 +18,11 @@ import { PreambleCatalogCommittedUnknownError, PreambleStore } from './store.js'
 import { PreambleDomainError } from './errors.js';
 import { applicablePreambles } from './matching.js';
 import { PreambleProjectPathService } from './project-path-service.js';
+import type {
+  AssertSnippetShortNameAvailable,
+  SnippetShortNameCoordinator,
+  SnippetShortNameOwner,
+} from '../snippets/short-name-coordinator.js';
 
 interface PreambleServiceEvents {
   invalidated: [reason: PreamblesInvalidationReason];
@@ -27,6 +32,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
   constructor(private readonly deps: {
     readonly store: PreambleStore;
     readonly projectPaths: Pick<PreambleProjectPathService, 'resolve'>;
+    readonly snippetShortNames?: Pick<SnippetShortNameCoordinator, 'runMutation'>;
     readonly newId?: () => string;
     readonly now?: () => Date;
   }) {
@@ -48,12 +54,18 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
   async create(request: CreatePreambleRequest): Promise<PreamblesSnapshot> {
     const definition = await this.#definition(request.preamble);
     const now = this.#now().toISOString();
-    return this.#mutate(
-      'created',
-      () => this.deps.store.createWithGeneratedId(
-        request.expectedRevision,
-        this.deps.newId ?? (() => crypto.randomUUID()),
-        (id) => ({ id, ...definition, createdAt: now, updatedAt: now }),
+    return this.#runSnippetNameMutation((assertAvailable) =>
+      this.#mutate(
+        'created',
+        () => this.deps.store.createWithGeneratedId(
+          request.expectedRevision,
+          this.deps.newId ?? (() => crypto.randomUUID()),
+          (id) => ({ id, ...definition, createdAt: now, updatedAt: now }),
+          () => this.#assertSnippetShortNameAvailable(
+            assertAvailable,
+            definition.snippetShortName,
+          ),
+        ),
       ),
     );
   }
@@ -63,16 +75,30 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     const id = request.id;
     if (!isPreambleId(id)) throw this.#validationError();
     const definition = await this.#definition(request.preamble);
-    return this.#mutate(
-      'updated',
-      () => this.deps.store.update(id, definition, this.#now().toISOString(), request.expectedRevision),
+    return this.#runSnippetNameMutation((assertAvailable) =>
+      this.#mutate(
+        'updated',
+        () => this.deps.store.update(
+          id,
+          definition,
+          this.#now().toISOString(),
+          request.expectedRevision,
+          () => this.#assertSnippetShortNameAvailable(
+            assertAvailable,
+            definition.snippetShortName,
+            { type: 'preamble', id },
+          ),
+        ),
+      ),
     );
   }
 
   async remove(request: RemovePreambleRequest): Promise<PreamblesSnapshot> {
     const id = request.id;
     if (!isPreambleId(id)) throw this.#validationError();
-    return this.#mutate('removed', () => this.deps.store.remove(id, request.expectedRevision));
+    return this.#runSnippetNameMutation(() =>
+      this.#mutate('removed', () => this.deps.store.remove(id, request.expectedRevision)),
+    );
   }
 
   async reorder(request: ReorderPreamblesRequest): Promise<PreamblesSnapshot> {
@@ -125,6 +151,31 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
       );
     }
     return { ...definition, scope: { type: 'project-paths', rules: canonical } };
+  }
+
+  #runSnippetNameMutation<T>(
+    mutate: (assertAvailable: AssertSnippetShortNameAvailable) => Promise<T>,
+  ): Promise<T> {
+    const coordinator = this.deps.snippetShortNames;
+    if (coordinator) return coordinator.runMutation(mutate);
+    return mutate(() => {});
+  }
+
+  #assertSnippetShortNameAvailable(
+    assertAvailable: AssertSnippetShortNameAvailable,
+    shortName: string | undefined,
+    owner?: SnippetShortNameOwner,
+  ): void {
+    if (shortName === undefined) return;
+    assertAvailable(
+      shortName,
+      owner,
+      (conflictingName) => new PreambleDomainError(
+        'PREAMBLE_SNIPPET_NAME_CONFLICT',
+        `A snippet named ${conflictingName} already exists`,
+        409,
+      ),
+    );
   }
 
   #changed(reason: PreamblesInvalidationReason): PreamblesSnapshot {
