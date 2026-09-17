@@ -5,6 +5,10 @@ import SidebarHost from './SidebarHost.svelte';
 import { getSavedSearches } from '$lib/api/settings';
 import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
 
 vi.mock('$lib/api/settings', async () => {
 	const actual = await vi.importActual<typeof import('$lib/api/settings')>('$lib/api/settings');
@@ -445,13 +449,17 @@ describe('sidebar search dialog flow', () => {
 });
 
 describe('sidebar back-to-top control', () => {
+	let restoreResizeObserver: () => void;
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(getSavedSearches).mockResolvedValue({ savedSearches: [] });
+		restoreResizeObserver = installResizeObserverHarness();
 	});
 
 	afterEach(() => {
 		cleanup();
+		restoreResizeObserver();
 	});
 
 	it('returns the scroll viewport to the top without losing keyboard focus', async () => {
@@ -486,5 +494,33 @@ describe('sidebar back-to-top control', () => {
 		expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' });
 		expect(document.activeElement).toBe(viewport);
 		await waitFor(() => expect(screen.queryByRole('button', { name: 'Back to top' })).toBeNull());
+	});
+
+	it('updates for pane resizes and preserves focus when a resize hides the control', async () => {
+		const chats = Array.from({ length: 20 }, (_, index) =>
+			createChat(`chat-${index}`, `Chat ${index}`),
+		);
+		const { container } = render(SidebarHost, {
+			chats,
+			autoLoadSavedSearches: false,
+		});
+		const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+		if (!viewport) throw new Error('Expected the sidebar scroll viewport');
+
+		Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 400 });
+		viewport.scrollTop = 401;
+		await fireEvent.scroll(viewport);
+		const button = await screen.findByRole('button', { name: 'Back to top' });
+		button.focus();
+
+		Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 1_000 });
+		for (const observer of ResizeObserverHarness.instances) {
+			if (observer.observed.has(viewport)) {
+				ResizeObserverHarness.emitFrom(observer, viewport, 300, 1_000);
+			}
+		}
+
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Back to top' })).toBeNull());
+		expect(document.activeElement).toBe(viewport);
 	});
 });

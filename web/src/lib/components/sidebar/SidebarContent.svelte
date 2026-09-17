@@ -116,15 +116,26 @@
 				viewportHeight: scrollViewport.clientHeight,
 				currentlyVisible: showBackToTop,
 			});
-			if (visible !== showBackToTop) showBackToTop = visible;
+			if (visible === showBackToTop) return;
+			const activeElement = scrollViewport.ownerDocument.activeElement;
+			if (
+				!visible &&
+				activeElement instanceof Element &&
+				activeElement.closest('[data-sidebar-back-to-top]')
+			) {
+				scrollViewport.focus({ preventScroll: true });
+			}
+			showBackToTop = visible;
 		}
 
 		untrack(updateVisibility);
 		scrollViewport.addEventListener('scroll', updateVisibility, { passive: true });
-		window.addEventListener('resize', updateVisibility);
+		const resizeObserver =
+			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateVisibility);
+		resizeObserver?.observe(scrollViewport);
 		return () => {
 			scrollViewport.removeEventListener('scroll', updateVisibility);
-			window.removeEventListener('resize', updateVisibility);
+			resizeObserver?.disconnect();
 		};
 	});
 

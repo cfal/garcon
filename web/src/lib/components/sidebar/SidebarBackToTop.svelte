@@ -17,8 +17,8 @@
 		variant="outline"
 		size="sm"
 		class={[
-			'pointer-events-auto rounded-full bg-card/95 px-3 text-xs shadow-md hover:shadow-lg',
-			isMobile && 'min-h-11 px-4 text-sm',
+			'pointer-events-auto rounded-full bg-card/95 text-xs shadow-md has-[>svg]:px-3 hover:shadow-lg',
+			isMobile && 'min-h-11 text-sm has-[>svg]:px-4',
 		]}
 		onclick={onActivate}
 		aria-label={m.sidebar_chats_back_to_top()}
