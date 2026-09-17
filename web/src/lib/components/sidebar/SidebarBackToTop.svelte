@@ -21,7 +21,6 @@
 			isMobile && 'min-h-11 text-sm has-[>svg]:px-4',
 		]}
 		onclick={onActivate}
-		aria-label={m.sidebar_chats_back_to_top()}
 		title={m.sidebar_chats_back_to_top()}
 		data-sidebar-back-to-top
 	>

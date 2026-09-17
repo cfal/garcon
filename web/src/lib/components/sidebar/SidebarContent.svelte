@@ -97,37 +97,36 @@
 	let showBackToTop = $state(false);
 
 	$effect(() => {
-		const region = viewportRef;
-		if (!region) return;
-		return registerNativeWorkspaceScrollRegion(region, 'primary');
+		const viewport = viewportRef;
+		if (!viewport) return;
+		return registerNativeWorkspaceScrollRegion(viewport, 'primary');
 	});
 
 	$effect(() => {
-		const region = viewportRef;
-		if (!region) {
+		const viewport = viewportRef;
+		if (!viewport) {
 			showBackToTop = false;
 			return;
 		}
-		const scrollViewport: HTMLElement = region;
+		const scrollViewport: HTMLElement = viewport;
 
 		function updateVisibility(): void {
-			const visible = shouldShowSidebarBackToTop({
+			const nextVisible = shouldShowSidebarBackToTop({
 				scrollTop: scrollViewport.scrollTop,
 				viewportHeight: scrollViewport.clientHeight,
 				currentlyVisible: showBackToTop,
 			});
-			if (visible === showBackToTop) return;
-			const activeElement = scrollViewport.ownerDocument.activeElement;
+			if (nextVisible === showBackToTop) return;
 			if (
-				!visible &&
-				activeElement instanceof Element &&
-				activeElement.closest('[data-sidebar-back-to-top]')
+				!nextVisible &&
+				scrollViewport.ownerDocument.activeElement?.closest('[data-sidebar-back-to-top]')
 			) {
 				scrollViewport.focus({ preventScroll: true });
 			}
-			showBackToTop = visible;
+			showBackToTop = nextVisible;
 		}
 
+		// Keeps visibility state reads from re-subscribing the DOM lifecycle effect.
 		untrack(updateVisibility);
 		scrollViewport.addEventListener('scroll', updateVisibility, { passive: true });
 		const resizeObserver =
@@ -140,10 +139,10 @@
 	});
 
 	function scrollBackToTop(): void {
-		const region = viewportRef;
-		if (!region) return;
-		region.scrollTo({ top: 0, behavior: 'auto' });
-		region.focus({ preventScroll: true });
+		const viewport = viewportRef;
+		if (!viewport) return;
+		viewport.scrollTo({ top: 0, behavior: 'auto' });
+		viewport.focus({ preventScroll: true });
 	}
 </script>
 
