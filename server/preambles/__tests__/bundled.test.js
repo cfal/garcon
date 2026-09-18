@@ -34,13 +34,14 @@ function exampleCommands(title) {
 }
 
 describe('bundled preambles', () => {
-  it('defines five valid, unique, disabled global entries within the shared budget', () => {
+  it('defines six valid, unique, disabled global entries within the shared budget', () => {
     expect(BUNDLED_PREAMBLES.map((entry) => entry.title)).toEqual([
       'Garcon: Chat identity',
       'Garcon: Inter-chat messages',
       'Garcon: Delegated agents',
       'Garcon: Scheduled prompts',
       'Garcon: Tickets',
+      'Garcon: Captain',
     ]);
     expect(new Set(BUNDLED_PREAMBLES.map((entry) => entry.id)).size).toBe(
       BUNDLED_PREAMBLES.length,
