@@ -1,5 +1,6 @@
 import { parseChatId } from './chat-id.js';
 import { isRecord } from './json.js';
+import type { NodePath } from './node-path.js';
 
 export type ProjectTarget =
   | { readonly kind: 'chat'; readonly chatId: string; readonly projectPath: string }
@@ -15,8 +16,10 @@ export const PROJECT_UNAVAILABLE_REASONS = [
 export type ProjectUnavailableReason = (typeof PROJECT_UNAVAILABLE_REASONS)[number];
 
 export type ProjectResolution =
-  | { readonly kind: 'available'; readonly effectiveProjectKey: string }
+  | { readonly kind: 'available'; readonly effectiveProjectKey: NodePath }
   | { readonly kind: 'unavailable'; readonly reason: ProjectUnavailableReason };
+
+export type ProjectInspector = (projectPath: NodePath) => Promise<ProjectResolution>;
 
 export interface ProjectResolutionResponse {
   readonly target: ProjectTarget;

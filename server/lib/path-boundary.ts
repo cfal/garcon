@@ -115,7 +115,11 @@ export async function resolveRealWithinCanonicalBase(
 }
 
 export async function assertRealWithinProjectBase(targetPath: string): Promise<string> {
-  const resolvedRoot = normalizedProjectBase();
+  return assertRealWithinBase(normalizedProjectBase(), targetPath);
+}
+
+export async function assertRealWithinBase(rootPath: string, targetPath: string): Promise<string> {
+  const resolvedRoot = path.resolve(rootPath);
   const resolvedTarget = path.isAbsolute(targetPath)
     ? path.resolve(targetPath)
     : path.resolve(resolvedRoot, targetPath);
