@@ -441,7 +441,6 @@ export async function startServer(): Promise<void> {
           operation: 'fresh-start',
           onCompactionStarted: input.onCompactionStarted,
           chatId: input.chatId,
-          projectPath: input.entry.projectPath,
           messages: input.messages,
           destination: {
             agentId: input.entry.agentId,

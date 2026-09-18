@@ -122,7 +122,6 @@ function run(instance, {
   return instance.planFor({
     operation,
     chatId: 'chat-1',
-    projectPath: '/workspace',
     messages,
     destination,
     onCompactionStarted,
@@ -226,6 +225,8 @@ describe('carryover compaction', () => {
       timeoutMs: CARRYOVER_COMPACTION_TIMEOUT_MS,
       signal: expect.any(AbortSignal),
     });
+    expect(runSingleQuery.mock.calls[0][1]).not.toHaveProperty('projectPath');
+    expect(runSingleQuery.mock.calls[0][1]).not.toHaveProperty('cwd');
   });
 
   it('requires enabled compaction for long histories with operation-aware copy', async () => {

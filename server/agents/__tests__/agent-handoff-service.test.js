@@ -170,7 +170,6 @@ describe('AgentHandoffService', () => {
     expect(planFor).toHaveBeenCalledWith(expect.objectContaining({
       operation: 'agent-switch',
       chatId: 'chat',
-      projectPath: '/workspace/project',
       destination: {
         agentId: 'target-agent',
         model: 'target-model',

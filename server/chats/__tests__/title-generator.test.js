@@ -63,7 +63,6 @@ describe('maybeGenerateChatTitle', () => {
   it('generates and persists a title when enabled', async () => {
     await maybeGenerateChatTitle({
       chatId: '100',
-      projectPath: '/proj',
       firstPrompt: 'Help me fix a bug',
       agents: mockAgents,
       settings: mockSettings,
@@ -77,6 +76,8 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.model).toBe('opus');
     expect(opts.thinkingMode).toBe('none');
     expect(opts.timeoutMs).toBe(110_000);
+    expect(opts).not.toHaveProperty('projectPath');
+    expect(opts).not.toHaveProperty('cwd');
 
     expect(setSessionNameIfAbsentMock).toHaveBeenCalledWith('100', 'Test Chat Title');
   });
@@ -84,7 +85,6 @@ describe('maybeGenerateChatTitle', () => {
   it('asks automatic generation to avoid recent icons and keep the icon first', async () => {
     await maybeGenerateChatTitle({
       chatId: '101',
-      projectPath: '/proj',
       firstPrompt: 'Explain {RECENT_TITLE_ICONS}',
       agents: mockAgents,
       settings: mockSettings,
@@ -109,7 +109,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '102',
-      projectPath: '/proj',
       firstPrompt: source,
       agents: mockAgents,
       settings: mockSettings,
@@ -126,7 +125,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '103',
-      projectPath: '/proj',
       firstPrompt: source,
       agents: mockAgents,
       settings: mockSettings,
@@ -145,7 +143,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '200',
-      projectPath: '/proj',
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
@@ -161,7 +158,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '300',
-      projectPath: '/proj',
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
@@ -185,7 +181,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '301',
-      projectPath: '/proj',
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
@@ -220,7 +215,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '302',
-      projectPath: '/proj',
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
@@ -246,7 +240,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '303',
-      projectPath: '/proj',
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
@@ -259,7 +252,6 @@ describe('maybeGenerateChatTitle', () => {
   it('does nothing when firstPrompt is empty', async () => {
     await maybeGenerateChatTitle({
       chatId: '400',
-      projectPath: '/proj',
       firstPrompt: '',
       agents: mockAgents,
       settings: mockSettings,
@@ -274,7 +266,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '500',
-      projectPath: '/proj',
       firstPrompt: 'Some prompt',
       agents: mockAgents,
       settings: mockSettings,
@@ -301,7 +292,6 @@ describe('maybeGenerateChatTitle', () => {
 
     const generation = maybeGenerateChatTitle({
       chatId: '501',
-      projectPath: '/proj',
       firstPrompt: 'Some prompt',
       agents: mockAgents,
       settings: mockSettings,
@@ -320,7 +310,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '600',
-      projectPath: '/proj',
       firstPrompt: 'A prompt',
       agents: mockAgents,
       settings: mockSettings,
@@ -335,7 +324,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '700',
-      projectPath: '/proj',
       firstPrompt: 'A prompt',
       agents: mockAgents,
       settings: mockSettings,
@@ -351,7 +339,6 @@ describe('maybeGenerateChatTitle', () => {
     // Should not throw.
     await maybeGenerateChatTitle({
       chatId: '800',
-      projectPath: '/proj',
       firstPrompt: 'A prompt',
       agents: mockAgents,
       settings: mockSettings,
@@ -368,7 +355,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '900',
-      projectPath: '/proj',
       firstPrompt: 'Do something',
       agents: mockAgents,
       settings: mockSettings,
@@ -392,7 +378,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: 'effort-title',
-      projectPath: '/proj',
       firstPrompt: 'Explain this change',
       agents: mockAgents,
       settings: mockSettings,
@@ -421,7 +406,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await maybeGenerateChatTitle({
       chatId: '901',
-      projectPath: '/proj',
       firstPrompt: 'Do something',
       agents: mockAgents,
       settings: mockSettings,
@@ -443,7 +427,6 @@ describe('maybeGenerateChatTitle', () => {
 
     const result = await generateChatTitleFromMessage({
       chatId: '1000',
-      projectPath: '/proj',
       message: 'Debug composer layout jumps',
       agents: mockAgents,
       settings: mockSettings,
@@ -462,7 +445,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await generateChatTitleFromMessage({
       chatId: '1000',
-      projectPath: '/proj',
       message: 'Debug composer layout jumps',
       agents: mockAgents,
       settings: mockSettings,
@@ -482,7 +464,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await generateChatTitleFromMessage({
       chatId: '1001',
-      projectPath: '/proj',
       message: 'New source message',
       agents: mockAgents,
       settings: mockSettings,
@@ -508,7 +489,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await generateChatTitleFromMessage({
       chatId: '1002',
-      projectPath: '/proj',
       message: 'Generate this one-off title',
       agents: mockAgents,
       settings: mockSettings,
@@ -527,7 +507,6 @@ describe('maybeGenerateChatTitle', () => {
 
     await expect(generateChatTitleFromMessage({
       chatId: '1003',
-      projectPath: '/proj',
       message: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
@@ -556,7 +535,6 @@ describe('maybeGenerateChatTitle', () => {
 
     const generation = generateChatTitleFromMessage({
       chatId: 'cancelled-title',
-      projectPath: '/proj',
       message: 'Generate a title',
       agents: mockAgents,
       settings: mockSettings,

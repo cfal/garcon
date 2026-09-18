@@ -123,7 +123,6 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
         }
         try {
           return await runtime.runSingleQuery(request.prompt, endpoint, {
-            projectPath: request.projectPath,
             model: request.model,
             ...singleQueryRuntimeOptions(request),
           });

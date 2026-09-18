@@ -175,7 +175,6 @@ export interface AgentSingleQuery {
 
 export interface AgentSingleQueryRequest {
   readonly prompt: string;
-  readonly projectPath: string;
   readonly model: string;
   readonly thinkingMode: ThinkingMode;
   readonly timeoutMs?: number;

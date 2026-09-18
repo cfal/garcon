@@ -27,8 +27,6 @@ interface TitleGenerationAgents {
   runSingleQuery(prompt: string, options: {
     agentId: string;
     model: string;
-    cwd: string;
-    projectPath: string;
     permissionMode: 'default';
     thinkingMode: ThinkingMode;
     apiProviderId?: string | null;
@@ -48,7 +46,6 @@ interface TitleGenerationSettings {
 
 interface MaybeGenerateChatTitleInput {
   chatId: string;
-  projectPath: string;
   firstPrompt: string;
   agents: TitleGenerationAgents;
   settings: TitleGenerationSettings;
@@ -58,7 +55,6 @@ interface MaybeGenerateChatTitleInput {
 
 interface GenerateChatTitleFromMessageInput {
   chatId: string;
-  projectPath: string;
   message: string;
   messageSeq?: number;
   agents: TitleGenerationAgents;
@@ -69,7 +65,6 @@ interface GenerateChatTitleFromMessageInput {
 
 interface RunTitleGenerationInput {
   chatId: string;
-  projectPath: string;
   sourceText: string;
   agents: TitleGenerationAgents;
   settings: TitleGenerationSettings;
@@ -166,7 +161,6 @@ function titleGenerationUnavailable(): TitleGenerationError {
 
 async function runTitleGeneration({
   chatId,
-  projectPath,
   sourceText,
   agents,
   settings,
@@ -204,8 +198,6 @@ async function runTitleGeneration({
     const titleRaw = await agents.runSingleQuery(prompt, {
       agentId: cfg.agentId,
       model: cfg.model,
-      cwd: projectPath,
-      projectPath,
       permissionMode: 'default',
       thinkingMode: cfg.thinkingMode,
       apiProviderId: cfg.apiProviderId,
@@ -254,7 +246,6 @@ async function runTitleGeneration({
 export async function maybeGenerateChatTitle(input: MaybeGenerateChatTitleInput): Promise<void> {
   await runTitleGeneration({
     chatId: input.chatId,
-    projectPath: input.projectPath,
     sourceText: input.firstPrompt,
     agents: input.agents,
     settings: input.settings,
@@ -268,7 +259,6 @@ export async function maybeGenerateChatTitle(input: MaybeGenerateChatTitleInput)
 
 export async function generateChatTitleFromMessage({
   chatId,
-  projectPath,
   message,
   agents,
   settings,
@@ -277,7 +267,6 @@ export async function generateChatTitleFromMessage({
 }: GenerateChatTitleFromMessageInput): Promise<GenerateChatTitleResult> {
   const result = await runTitleGeneration({
     chatId,
-    projectPath,
     sourceText: message,
     agents,
     settings,

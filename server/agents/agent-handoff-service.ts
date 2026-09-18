@@ -275,7 +275,6 @@ export class AgentHandoffService {
             planned = await this.deps.carryover.planFor({
               operation: 'agent-switch',
               chatId: input.chatId,
-              projectPath: sourceSnapshot.projectPath,
               messages: this.deps.ledger.conversationMessages(input.chatId),
               destination: {
                 agentId: input.target.agentId,

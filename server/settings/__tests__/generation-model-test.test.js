@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import { promises as fs } from 'node:fs';
 import {
   AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
   AgentIntegrationError,
@@ -97,8 +96,6 @@ describe('testGenerationModel', () => {
     expect(harness.runSingleQuery).toHaveBeenCalledWith('Reply with exactly OK. Do not use tools.', {
       agentId: 'direct-openai-compatible',
       model: 'glm-5.2',
-      cwd: expect.stringContaining('garcon-generation-model-test-'),
-      projectPath: expect.stringContaining('garcon-generation-model-test-'),
       permissionMode: 'plan',
       thinkingMode: 'max',
       apiProviderId: 'alibaba',
@@ -108,9 +105,8 @@ describe('testGenerationModel', () => {
       signal: expect.any(AbortSignal),
     });
     const [, options] = harness.runSingleQuery.mock.calls[0];
-    expect(options.cwd).toBe(options.projectPath);
-    expect(options.cwd).not.toBe('/workspace');
-    await expect(fs.access(options.cwd)).rejects.toBeDefined();
+    expect(options).not.toHaveProperty('cwd');
+    expect(options).not.toHaveProperty('projectPath');
     expect(harness.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
     expect(harness.agents.getAgentReadinessMap).not.toHaveBeenCalled();
     expect(harness.agents.getAgentCatalogEntries).not.toHaveBeenCalled();

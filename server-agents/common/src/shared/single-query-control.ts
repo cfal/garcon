@@ -2,6 +2,23 @@ import {
   AgentIntegrationError,
   type AgentSingleQueryRequest,
 } from '@garcon/server-agent-interface';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+export async function withSingleQueryDirectory<T>(
+  signal: AbortSignal,
+  operation: (directory: string) => Promise<T>,
+): Promise<T> {
+  signal.throwIfAborted();
+  const directory = await mkdtemp(join(tmpdir(), 'garcon-single-query-'));
+  try {
+    signal.throwIfAborted();
+    return await operation(directory);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
 export interface SingleQueryControlOptions {
   readonly signal?: AbortSignal;

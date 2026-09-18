@@ -52,8 +52,6 @@ export interface CarryOverCompactionAgents {
   runSingleQuery(prompt: string, options: {
     agentId: string;
     model: string;
-    cwd: string;
-    projectPath: string;
     thinkingMode: ThinkingMode;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
@@ -79,7 +77,6 @@ export interface CarryOverCompactionInput {
   readonly onCompactionStarted?: () => void;
   readonly operation: 'agent-switch' | 'fresh-start';
   readonly chatId: string;
-  readonly projectPath: string;
   readonly messages: readonly ChatMessage[];
   readonly destination: CarryOverCompactionDestination;
   readonly signal?: AbortSignal;
@@ -189,8 +186,6 @@ export class CarryOverCompactionService {
         const raw = await this.deps.agents.runSingleQuery(fitted.value.prompt, {
           agentId: selection.agentId,
           model: selection.model,
-          cwd: input.projectPath,
-          projectPath: input.projectPath,
           thinkingMode: selection.thinkingMode,
           apiProviderId: selection.apiProviderId,
           modelEndpointId: selection.modelEndpointId,

@@ -22,6 +22,7 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import {
   singleQueryRuntimeOptions,
   withSingleQueryControl,
+  withSingleQueryDirectory,
 } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import {
@@ -305,8 +306,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
                 false,
               );
             }
-            return runSingleQuery(request.prompt, {
-              projectPath: request.projectPath,
+            return withSingleQueryDirectory(signal, async (directory) => runSingleQuery(request.prompt, {
+              projectPath: directory,
               model: request.model,
               ...runtimeOptions,
               timeoutMs: undefined,
@@ -317,7 +318,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
                 ?? buildCodexHostProviderConfig(
                   await resolveCodexExecAuthStatus(config, authStatus.current, signal),
                 ),
-            });
+            }));
           });
         } catch (error) {
           throw classifyCodexError(error);

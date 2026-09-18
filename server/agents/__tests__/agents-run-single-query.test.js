@@ -59,13 +59,12 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
   it('routes through the selected integration with parsed defaults', async () => {
     const { router, integration, run } = makeRouter();
 
-    await expect(router.runSingleQuery('prompt', { agentId: 'test', model: 'model-a', projectPath: '/repo' }))
+    await expect(router.runSingleQuery('prompt', { agentId: 'test', model: 'model-a' }))
       .resolves.toBe('response');
 
     expect(integration.settings.parse).toHaveBeenCalledWith(envelope('test', { defaulted: true }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'prompt',
-      projectPath: '/repo',
       model: 'model-a',
       settings: envelope('test', { defaulted: true }),
       endpoint: null,
@@ -117,25 +116,25 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
     }));
   });
 
-  it('preserves one-shot thinking, timeout, cancellation, and cwd fallback', async () => {
+  it('preserves one-shot controls without passing filesystem context', async () => {
     const { router, run } = makeRouter();
     const controller = new AbortController();
 
     await router.runSingleQuery('prompt', {
       agentId: 'test',
       model: 'model-a',
-      cwd: '/repo-from-cwd',
       thinkingMode: 'xhigh',
       timeoutMs: 110_000,
       signal: controller.signal,
     });
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      projectPath: '/repo-from-cwd',
       thinkingMode: 'xhigh',
       timeoutMs: 110_000,
       signal: controller.signal,
     }));
+    expect(run.mock.calls[0][0]).not.toHaveProperty('projectPath');
+    expect(run.mock.calls[0][0]).not.toHaveProperty('cwd');
   });
 
   it('normalizes unsupported one-shot thinking through the integration descriptor', async () => {

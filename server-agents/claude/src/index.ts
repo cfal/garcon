@@ -18,7 +18,7 @@ import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import {
   createHistoryImport,
@@ -246,15 +246,15 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
           );
         }
         try {
-          return await runSingleQuery(request.prompt, {
-            cwd: request.projectPath,
+          return await withSingleQueryDirectory(request.signal, (directory) => runSingleQuery(request.prompt, {
             model: request.model,
             ...singleQueryRuntimeOptions(request),
+            cwd: directory,
             envOverrides: {
               ...buildClaudeHostEnvironment(config),
               ...endpointRuntime?.envOverrides,
             },
-          }, { binary: config.binary, logger, versionProbe });
+          }, { binary: config.binary, logger, versionProbe }));
         } catch (error) {
           throw classifyClaudeError(error);
         }

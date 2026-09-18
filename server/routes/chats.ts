@@ -899,7 +899,6 @@ export default function createChatRoutes({
 
       const result = await generateChatTitleFromMessage({
         chatId,
-        projectPath: session.projectPath,
         message,
         ...(messageSeq === undefined ? {} : { messageSeq }),
         agents,

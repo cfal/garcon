@@ -593,7 +593,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
       files,
       diffContext,
       agentId,
-      projectPath,
       (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
         {
           model,

@@ -1,7 +1,4 @@
 import { performance } from 'node:perf_hooks';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import {
   generationModelTestConfigurationKey,
   type GenerationModelTestResponse,
@@ -135,25 +132,17 @@ export async function testGenerationModel(input: {
     }
 
     generationSignal.throwIfAborted();
-    const testDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-generation-model-test-'));
-    let output: string;
-    try {
-      output = await input.agents.runSingleQuery(GENERATION_TEST_PROMPT, {
-        agentId: config.agentId,
-        model: config.model,
-        cwd: testDirectory,
-        projectPath: testDirectory,
-        permissionMode: 'plan',
-        thinkingMode: config.thinkingMode,
-        apiProviderId: config.apiProviderId,
-        modelEndpointId: config.modelEndpointId,
-        modelProtocol: config.modelProtocol,
-        timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
-        signal: generationSignal,
-      });
-    } finally {
-      await fs.rm(testDirectory, { recursive: true, force: true });
-    }
+    const output = await input.agents.runSingleQuery(GENERATION_TEST_PROMPT, {
+      agentId: config.agentId,
+      model: config.model,
+      permissionMode: 'plan',
+      thinkingMode: config.thinkingMode,
+      apiProviderId: config.apiProviderId,
+      modelEndpointId: config.modelEndpointId,
+      modelProtocol: config.modelProtocol,
+      timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
+      signal: generationSignal,
+    });
 
     if (!output.trim()) {
       throw new GenerationModelTestError(

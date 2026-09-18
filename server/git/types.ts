@@ -204,7 +204,6 @@ export interface CommitMessageOptions {
 export interface RunSingleQueryOptions extends CommitMessageOptions {
   [key: string]: unknown;
   agentId: AgentId;
-  cwd: string;
 }
 
 export interface GitAgentRunner {

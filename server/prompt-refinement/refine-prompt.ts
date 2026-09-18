@@ -1,6 +1,3 @@
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   AgentIntegrationError,
@@ -271,27 +268,17 @@ export async function refinePrompt(
       templateForTarget(configuredTemplate(persisted), input.target),
       input.draft,
     );
-    const temporaryDirectory = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'garcon-prompt-refinement-'),
-    );
-    let output: string;
-    try {
-      output = await dependencies.agents.runSingleQuery(prompt, {
-        agentId: selection.agentId,
-        model: selection.model,
-        cwd: temporaryDirectory,
-        projectPath: temporaryDirectory,
-        permissionMode: 'plan',
-        thinkingMode: selection.thinkingMode,
-        apiProviderId: selection.apiProviderId,
-        modelEndpointId: selection.modelEndpointId,
-        modelProtocol: selection.modelProtocol,
-        timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
-        signal: generationSignal,
-      });
-    } finally {
-      await fs.rm(temporaryDirectory, { recursive: true, force: true });
-    }
+    const output = await dependencies.agents.runSingleQuery(prompt, {
+      agentId: selection.agentId,
+      model: selection.model,
+      permissionMode: 'plan',
+      thinkingMode: selection.thinkingMode,
+      apiProviderId: selection.apiProviderId,
+      modelEndpointId: selection.modelEndpointId,
+      modelProtocol: selection.modelProtocol,
+      timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
+      signal: generationSignal,
+    });
 
     const response = normalizeRefinePromptResponse(
       { success: true, refinedPrompt: output },

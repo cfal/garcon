@@ -85,8 +85,6 @@ export interface CreateCarriedContextInput {
 export interface RunSingleQueryOptions {
   readonly agentId: string;
   readonly model?: string;
-  readonly projectPath?: string;
-  readonly cwd?: string;
   readonly thinkingMode?: ThinkingMode;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -636,11 +634,6 @@ export class AgentRuntimeRouter {
       : undefined;
     return integration.singleQuery.run({
       prompt,
-      projectPath: typeof options.projectPath === 'string'
-        ? options.projectPath
-        : typeof options.cwd === 'string'
-          ? options.cwd
-          : process.cwd(),
       model: selection?.model ?? model,
       thinkingMode: normalizeSupportedThinkingMode(
         options.thinkingMode,

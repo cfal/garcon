@@ -385,7 +385,6 @@ export class StartCommands {
   private generateTitle(input: NormalizedChatStart): void {
     void maybeGenerateChatTitle({
       chatId: input.chatId,
-      projectPath: input.projectPath,
       firstPrompt: input.command,
       agents: this.deps.agents,
       settings: this.deps.settings,

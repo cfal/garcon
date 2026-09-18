@@ -368,7 +368,6 @@ describe('POST /api/v1/chats/title/generate', () => {
     expect(body).toEqual({ success: true, chatId: CHAT_ID_5, title: 'Generated Title' });
     expect(generateChatTitleFromMessage).toHaveBeenCalledWith({
       chatId: CHAT_ID_5,
-      projectPath: '/proj',
       message: 'Help debug composer movement',
       messageSeq: 9,
       agents,

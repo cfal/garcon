@@ -1930,7 +1930,6 @@ describe("commit message generation", () => {
       ["a.txt"],
       diffContext,
       "claude",
-      "/tmp",
       (prompt) => {
         capturedPrompt = prompt;
         return Promise.resolve("chore: stub");
@@ -1956,7 +1955,6 @@ describe("commit message generation", () => {
       ["src/$&-$1.ts"],
       "diff with $& and $1 and $$",
       "claude",
-      "/tmp",
       (prompt) => {
         capturedPrompt = prompt;
         return Promise.resolve("chore: stub");
@@ -2076,10 +2074,11 @@ describe("commit message generation", () => {
       expect(capturedPrompt).not.toContain("+skip");
       expect(capturedOptions).toMatchObject({
         agentId: "claude",
-        cwd: projectPath,
         thinkingMode: "max",
         timeoutMs: 110_000,
       });
+      expect(capturedOptions).not.toHaveProperty("cwd");
+      expect(capturedOptions).not.toHaveProperty("projectPath");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

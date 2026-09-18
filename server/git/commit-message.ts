@@ -49,7 +49,6 @@ export async function generateCommitMessage(
   files: string[],
   diffContext: string,
   agentId: AgentId,
-  projectPath: string,
   runSingleQueryFn: (prompt: string, options: RunSingleQueryOptions) => Promise<string>,
   options: CommitMessageOptions = {},
 ): Promise<string> {
@@ -72,7 +71,6 @@ export async function generateCommitMessage(
   try {
     const opts: RunSingleQueryOptions = {
       agentId,
-      cwd: projectPath,
       thinkingMode: thinkingMode ?? 'none',
       timeoutMs: options.timeoutMs ?? GENERATION_PROVIDER_TIMEOUT_MS,
     };

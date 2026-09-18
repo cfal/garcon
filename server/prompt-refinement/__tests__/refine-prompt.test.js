@@ -1,4 +1,3 @@
-import { access, readdir } from 'node:fs/promises';
 import { describe, expect, it, mock } from 'bun:test';
 import {
   AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
@@ -42,20 +41,18 @@ function harness(overrides = {}) {
 }
 
 describe('refinePrompt', () => {
-  it('renders the default template exactly and uses a cleaned empty directory', async () => {
+  it('renders the default template without supplying filesystem context', async () => {
     const test = harness();
     const draft = 'Keep $& and $1 exactly.';
-    let temporaryDirectory;
     test.agents.runSingleQuery.mockImplementationOnce(async (prompt, options) => {
-      temporaryDirectory = options.cwd;
       expect(prompt).toBe(
         DEFAULT_PROMPT_REFINEMENT_PROMPT.replaceAll(
           PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
           () => draft,
         ),
       );
-      expect(await readdir(options.cwd)).toEqual([]);
-      expect(options.projectPath).toBe(options.cwd);
+      expect(options).not.toHaveProperty('cwd');
+      expect(options).not.toHaveProperty('projectPath');
       expect(options).toMatchObject({
         agentId: 'claude',
         model: 'opus',
@@ -71,7 +68,6 @@ describe('refinePrompt', () => {
       success: true,
       refinedPrompt: 'Refined prompt.',
     });
-    await expect(access(temporaryDirectory)).rejects.toThrow();
     expect(test.log.info).toHaveBeenCalledWith(
       'prompt refinement completed',
       expect.objectContaining({ outcome: 'success', agentId: 'claude', model: 'opus' }),
@@ -304,15 +300,15 @@ describe('refinePrompt', () => {
     }
   });
 
-  it('propagates caller cancellation, cleans up, and logs metadata only', async () => {
+  it('propagates caller cancellation and logs metadata only', async () => {
     const test = harness({
       config: { customPrompt: 'private template {{USER_PROMPT}}' },
     });
     const controller = new AbortController();
     const reason = new DOMException('private cancellation detail', 'AbortError');
-    let temporaryDirectory;
+    const entered = Promise.withResolvers();
     test.agents.runSingleQuery.mockImplementationOnce((_prompt, options) => {
-      temporaryDirectory = options.cwd;
+      entered.resolve();
       return new Promise((_resolve, reject) => {
         options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
       });
@@ -323,10 +319,9 @@ describe('refinePrompt', () => {
       test,
       controller.signal,
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await entered.promise;
     controller.abort(reason);
     await expect(running).rejects.toBe(reason);
-    await expect(access(temporaryDirectory)).rejects.toThrow();
     expect(test.log.info).not.toHaveBeenCalled();
     expect(test.log.warn).not.toHaveBeenCalled();
 

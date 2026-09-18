@@ -12,7 +12,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import {
   createHistoryImport,
@@ -152,11 +152,11 @@ export default class CursorAgentIntegration implements AgentIntegration {
       async run(request) {
         request.signal.throwIfAborted();
         try {
-          return await runSingleQuery(request.prompt, {
-            projectPath: request.projectPath,
+          return await withSingleQueryDirectory(request.signal, (directory) => runSingleQuery(request.prompt, {
             model: request.model,
             ...singleQueryRuntimeOptions(request),
-          }, config);
+            projectPath: directory,
+          }, config));
         } catch (error) {
           if (error instanceof AgentIntegrationError) throw error;
           throw new AgentIntegrationError(
