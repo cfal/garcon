@@ -224,6 +224,16 @@ export async function settleConsultation(
   dependencies: ConsultationDependencies = {},
 ): Promise<ConsultationResult> {
   const accepted = await acceptConsultation(invocation, prompt, client, signal, dependencies);
+  return settleAcceptedConsultation(invocation, accepted, client, signal, dependencies);
+}
+
+async function settleAcceptedConsultation(
+  invocation: CliInvocation,
+  accepted: AgentTurnCommandResponse | StartChatCommandResponse,
+  client: ConsultationClient,
+  signal: AbortSignal | undefined,
+  dependencies: ConsultationDependencies,
+): Promise<ConsultationResult> {
   const titleUpdate = await settleRequestedTitle(invocation, accepted.chatId, client, signal);
   const turnReceipt = await pollTurnReceipt(
     client,
@@ -318,17 +328,15 @@ export async function runConsultation(
   const accepted = await acceptConsultation(invocation, prompt, client, signal, dependencies);
   output.accepted(accepted);
   reportTagMutationOutcome(accepted.tagMutation, output);
-  const titleUpdate = await settleRequestedTitle(invocation, accepted.chatId, client, signal);
-  const receipt = await pollTurnReceipt(
+  const result = await settleAcceptedConsultation(
+    invocation,
+    accepted,
     client,
-    accepted.chatId,
-    accepted.turnId,
-    accepted.clientRequestId,
     signal,
-    dependencies.poller,
+    dependencies,
   );
-  writeTerminalResult(receipt, output);
-  const titleError = titleUpdateFailure({ titleUpdate });
+  writeTerminalResult(result.turnReceipt, output);
+  const titleError = titleUpdateFailure(result);
   if (titleError !== undefined) throw titleError;
 }
 

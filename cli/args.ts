@@ -760,16 +760,19 @@ function parseFork(
   }
   const sourceChatId = parseControlChatId(parsed.positionals[1]!, kind);
   const messageArguments = parsed.positionals.slice(2);
+  const command = {
+    ...connection,
+    sourceChatId,
+    allowHandoffFork: values['allow-handoff-fork'] === true,
+    json: values.json === true,
+  };
   if (kind === 'fork-async' && messageArguments.length === 0) {
     throw argumentError('fork-async requires a source chat ID and a message');
   }
   if (messageArguments.length === 0) {
     return {
       kind: 'fork',
-      ...connection,
-      sourceChatId,
-      allowHandoffFork: values['allow-handoff-fork'] === true,
-      json: values.json === true,
+      ...command,
       readsMessageFromStdin: false,
     };
   }
@@ -783,10 +786,7 @@ function parseFork(
   }
   return {
     kind,
-    ...connection,
-    sourceChatId,
-    allowHandoffFork: values['allow-handoff-fork'] === true,
-    json: values.json === true,
+    ...command,
     message,
     readsMessageFromStdin,
   };

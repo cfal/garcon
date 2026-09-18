@@ -149,6 +149,15 @@ async function connectedClient(
   return new GarconClient({ ...connection, fetch: options.fetch });
 }
 
+function validateForkMessage(message: string | null | undefined): string | undefined {
+  if (message === undefined) return undefined;
+  const value = message ?? '';
+  if (value.trim().length === 0) {
+    throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
+  }
+  return value;
+}
+
 function interruptDiagnostic(
   command: ParsedCliCommand | undefined,
   forkTargetChatId?: string,
@@ -352,12 +361,9 @@ export async function main(
       return 0;
     }
     if (command.kind === 'fork' || command.kind === 'fork-async') {
-      const message = command.readsMessageFromStdin
+      const message = validateForkMessage(command.readsMessageFromStdin
         ? await readConfiguredStdin(options)
-        : command.message;
-      if (message !== undefined && (message ?? '').trim().length === 0) {
-        throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
-      }
+        : command.message);
       const client = await connectedClient(command, options);
       const automationContext = {
         workspace: command.workspace,
@@ -386,7 +392,7 @@ export async function main(
       }
       const accepted = await submitForkRun(
         command,
-        message ?? '',
+        message,
         client,
         options.signal,
         forkDependencies,

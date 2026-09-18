@@ -160,6 +160,31 @@ function titleUpdate(result: ConsultationTitleUpdate): CliTitleUpdate {
   };
 }
 
+function startEnvelopeFields(
+  context: CliAutomationContext,
+  result: ConsultationResult | StartConsultationAsyncResult,
+): Omit<StartJsonEnvelopeBase, 'schemaVersion'> {
+  return {
+    ...context,
+    receipt: turnReceipt(result.accepted),
+    parentChat: result.accepted.parentChat ?? result.accepted.chat?.parentChat ?? null,
+    titleUpdate: titleUpdate(result.titleUpdate),
+  };
+}
+
+function resumeEnvelopeFields(
+  context: CliAutomationContext,
+  response: AgentTurnCommandResponse,
+  delivery: ResumeChatAsyncResult['delivery'],
+): Omit<ResumeJsonEnvelopeBase, 'schemaVersion'> {
+  return {
+    ...context,
+    receipt: turnReceipt(response),
+    parentChat: response.parentChat ?? null,
+    delivery,
+  };
+}
+
 export function startJsonEnvelope(
   context: CliAutomationContext,
   result: ConsultationResult,
@@ -167,10 +192,7 @@ export function startJsonEnvelope(
   return {
     schemaVersion: CLI_AUTOMATION_SCHEMA_VERSION,
     command: 'start',
-    ...context,
-    receipt: turnReceipt(result.accepted),
-    parentChat: result.accepted.parentChat ?? result.accepted.chat?.parentChat ?? null,
-    titleUpdate: titleUpdate(result.titleUpdate),
+    ...startEnvelopeFields(context, result),
     turnReceipt: result.turnReceipt,
   };
 }
@@ -182,10 +204,7 @@ export function startAsyncJsonEnvelope(
   return {
     schemaVersion: CLI_AUTOMATION_SCHEMA_VERSION,
     command: 'start-async',
-    ...context,
-    receipt: turnReceipt(result.accepted),
-    parentChat: result.accepted.parentChat ?? result.accepted.chat?.parentChat ?? null,
-    titleUpdate: titleUpdate(result.titleUpdate),
+    ...startEnvelopeFields(context, result),
   };
 }
 
@@ -196,10 +215,7 @@ export function resumeAsyncJsonEnvelope(
   return {
     schemaVersion: CLI_AUTOMATION_SCHEMA_VERSION,
     command: 'resume-async',
-    ...context,
-    receipt: turnReceipt(result.response),
-    parentChat: result.response.parentChat ?? null,
-    delivery: result.delivery,
+    ...resumeEnvelopeFields(context, result.response, result.delivery),
   };
 }
 
@@ -210,10 +226,7 @@ export function resumeJsonEnvelope(
   return {
     schemaVersion: CLI_AUTOMATION_SCHEMA_VERSION,
     command: 'resume',
-    ...context,
-    receipt: turnReceipt(result.accepted),
-    parentChat: result.accepted.parentChat ?? null,
-    delivery: 'new-turn',
+    ...resumeEnvelopeFields(context, result.accepted, 'new-turn'),
     titleUpdate: titleUpdate(result.titleUpdate),
     turnReceipt: result.turnReceipt,
   };
