@@ -5,6 +5,7 @@
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import FileVimLoadError from './FileVimLoadError.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	let { session }: { session: FileViewSession } = $props();
 	const localSettings = getLocalSettings();
@@ -83,6 +84,14 @@
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
 	{#if session.editor?.vim.error}
 		<FileVimLoadError />
+	{/if}
+	{#if session.editor?.vim.clipboardFailed}
+		<div
+			role="alert"
+			class="shrink-0 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
+		>
+			{m.editor_vim_copy_failed()}
+		</div>
 	{/if}
 	<div
 		bind:this={editorContainer}

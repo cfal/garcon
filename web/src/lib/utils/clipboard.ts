@@ -27,8 +27,13 @@ function copyWithLegacyExecCommand(text: string, container: Element = document.b
 
 /** Copies text with the async Clipboard API, falling back to execCommand.
  *  Callers inside focus-trapped contexts (e.g. dialogs) should pass their
- *  container so the legacy fallback textarea can receive focus. */
-export async function copyToClipboard(text: string, container?: Element): Promise<boolean> {
+ *  container so the legacy fallback textarea can receive focus. The optional
+ *  freshness check prevents a delayed fallback from copying a superseded request. */
+export async function copyToClipboard(
+	text: string,
+	container?: Element,
+	isCurrent?: () => boolean,
+): Promise<boolean> {
 	if (!text) return false;
 
 	// Prefer the modern async Clipboard API.
@@ -42,5 +47,6 @@ export async function copyToClipboard(text: string, container?: Element): Promis
 	}
 
 	// Legacy fallback for runtimes without the async API.
+	if (isCurrent && !isCurrent()) return false;
 	return copyWithLegacyExecCommand(text, container);
 }

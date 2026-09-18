@@ -1,5 +1,5 @@
 diff --git a/dist/index.cjs b/dist/index.cjs
-index 88ec9b9b61047c079bb8dd8b8261d4548c0725dc..963a2f9b91fd0dcbfa9381377d4e6fbdecbd84d9 100644
+index 88ec9b9b61047c079bb8dd8b8261d4548c0725dc..15075f498ee4eae3f72fdbaf166db8ef35d4db02 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
 @@ -122,12 +122,15 @@ function dispatchChange(cm, transaction) {
@@ -28,7 +28,20 @@ index 88ec9b9b61047c079bb8dd8b8261d4548c0725dc..963a2f9b91fd0dcbfa9381377d4e6fbd
  };
  CodeMirror.isWordChar = function (ch) {
      return wordChar.test(ch);
-@@ -1699,6 +1702,7 @@ function statusPanel(view) {
+@@ -1352,6 +1355,12 @@ const vimPlugin = View.ViewPlugin.fromClass(class {
+         Vim.enterVimMode(this.cm);
+         this.view.cm = this.cm;
+         this.cm.state.vimPlugin = this;
++        this.cm.on("vim-clipboard-write", (request) => {
++            const write = view.state.facet(vimHostCommands).writeClipboard;
++            if (!write) return;
++            request.handled = true;
++            write(view, request.text);
++        });
+         this.blockCursor = new BlockCursorPlugin(view, cm);
+         this.updateClass();
+         this.cm.on("vim-command-done", () => {
+@@ -1699,6 +1708,7 @@ function statusPanel(view) {
  }
  function vim(options = {}) {
      return [
@@ -37,35 +50,109 @@ index 88ec9b9b61047c079bb8dd8b8261d4548c0725dc..963a2f9b91fd0dcbfa9381377d4e6fbd
          vimPlugin,
          hideNativeSelection,
 diff --git a/dist/index.d.cts b/dist/index.d.cts
-index 9fdbcaec78784ecafa963535b25c9241e3b9eab3..aff4fa1e48518dff58f2229520a2bca25a6972f8 100644
+index 9fdbcaec78784ecafa963535b25c9241e3b9eab3..5a3544672c566f801b62c4f371f67fb2a7924a76 100644
 --- a/dist/index.d.cts
 +++ b/dist/index.d.cts
-@@ -1253,6 +1253,9 @@ declare const Vim$1: {
+@@ -551,7 +551,7 @@ declare function initVim(CM: CodeMirrorConstructor): {
+ 		 * @param {boolean} [linewise]
+ 		 * @param {boolean} [blockwise]
+ 		 */
+-		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 		/**
+ 		 * Gets the register named @name.  If one of @name doesn't already exist,
+ 		 * create it.  If @name is invalid, return the unnamedRegister.
+@@ -644,7 +644,7 @@ declare function initVim(CM: CodeMirrorConstructor): {
+ 			 * @param {boolean} [linewise]
+ 			 * @param {boolean} [blockwise]
+ 			 */
+-			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 			/**
+ 			 * Gets the register named @name.  If one of @name doesn't already exist,
+ 			 * create it.  If @name is invalid, return the unnamedRegister.
+@@ -1086,7 +1086,7 @@ declare const Vim$1: {
+ 			clear(): void;
+ 			toString(): string;
+ 		};
+-		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 		getRegister(name?: string): {
+ 			keyBuffer: string[];
+ 			insertModeChanges: InsertModeChanges[];
+@@ -1144,7 +1144,7 @@ declare const Vim$1: {
+ 				clear(): void;
+ 				toString(): string;
+ 			};
+-			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 			getRegister(name?: string): {
+ 				keyBuffer: string[];
+ 				insertModeChanges: InsertModeChanges[];
+@@ -1253,6 +1253,10 @@ declare const Vim$1: {
  };
  export declare function vim(options?: {
  	status?: boolean;
 +	undo?: (view: EditorView) => boolean;
 +	redo?: (view: EditorView) => boolean;
 +	save?: (view: EditorView) => void;
++	writeClipboard?: (view: EditorView, text: string) => void;
  }): Extension;
  export declare function getCM(view: EditorView): CodeMirror | null;
  
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 9fdbcaec78784ecafa963535b25c9241e3b9eab3..aff4fa1e48518dff58f2229520a2bca25a6972f8 100644
+index 9fdbcaec78784ecafa963535b25c9241e3b9eab3..5a3544672c566f801b62c4f371f67fb2a7924a76 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
-@@ -1253,6 +1253,9 @@ declare const Vim$1: {
+@@ -551,7 +551,7 @@ declare function initVim(CM: CodeMirrorConstructor): {
+ 		 * @param {boolean} [linewise]
+ 		 * @param {boolean} [blockwise]
+ 		 */
+-		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 		/**
+ 		 * Gets the register named @name.  If one of @name doesn't already exist,
+ 		 * create it.  If @name is invalid, return the unnamedRegister.
+@@ -644,7 +644,7 @@ declare function initVim(CM: CodeMirrorConstructor): {
+ 			 * @param {boolean} [linewise]
+ 			 * @param {boolean} [blockwise]
+ 			 */
+-			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 			/**
+ 			 * Gets the register named @name.  If one of @name doesn't already exist,
+ 			 * create it.  If @name is invalid, return the unnamedRegister.
+@@ -1086,7 +1086,7 @@ declare const Vim$1: {
+ 			clear(): void;
+ 			toString(): string;
+ 		};
+-		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++		pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 		getRegister(name?: string): {
+ 			keyBuffer: string[];
+ 			insertModeChanges: InsertModeChanges[];
+@@ -1144,7 +1144,7 @@ declare const Vim$1: {
+ 				clear(): void;
+ 				toString(): string;
+ 			};
+-			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++			pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: CodeMirrorV): void;
+ 			getRegister(name?: string): {
+ 				keyBuffer: string[];
+ 				insertModeChanges: InsertModeChanges[];
+@@ -1253,6 +1253,10 @@ declare const Vim$1: {
  };
  export declare function vim(options?: {
  	status?: boolean;
 +	undo?: (view: EditorView) => boolean;
 +	redo?: (view: EditorView) => boolean;
 +	save?: (view: EditorView) => void;
++	writeClipboard?: (view: EditorView, text: string) => void;
  }): Extension;
  export declare function getCM(view: EditorView): CodeMirror | null;
  
 diff --git a/dist/index.js b/dist/index.js
-index f0b243a40e4c4605811a774078a5a25d1fa5ae54..e3a759ae731b5def142e5a1a4086e9e2fd193f87 100644
+index f0b243a40e4c4605811a774078a5a25d1fa5ae54..f50644d3db13c912237d5445098420a39ba2bfc4 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -1,5 +1,5 @@
@@ -101,7 +188,20 @@ index f0b243a40e4c4605811a774078a5a25d1fa5ae54..e3a759ae731b5def142e5a1a4086e9e2
  };
  CodeMirror.isWordChar = function (ch) {
      return wordChar.test(ch);
-@@ -1679,6 +1682,7 @@ function statusPanel(view) {
+@@ -1332,6 +1335,12 @@ const vimPlugin = /*@__PURE__*/ViewPlugin.fromClass(class {
+         Vim.enterVimMode(this.cm);
+         this.view.cm = this.cm;
+         this.cm.state.vimPlugin = this;
++        this.cm.on("vim-clipboard-write", (request) => {
++            const write = view.state.facet(vimHostCommands).writeClipboard;
++            if (!write) return;
++            request.handled = true;
++            write(view, request.text);
++        });
+         this.blockCursor = new BlockCursorPlugin(view, cm);
+         this.updateClass();
+         this.cm.on("vim-command-done", () => {
+@@ -1679,6 +1688,7 @@ function statusPanel(view) {
  }
  function vim(options = {}) {
      return [
