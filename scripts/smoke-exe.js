@@ -14,6 +14,7 @@ const EXPECTED_BUNDLED_PREAMBLES = [
   ['3462ad70-c497-4009-b11a-79474dfb292a', 'Garcon: Delegated agents'],
   ['d5597052-6f66-4564-b9fa-bd8660725c47', 'Garcon: Scheduled prompts'],
   ['9b0a6bc3-92fc-4472-9cb9-8481590111f3', 'Garcon: Tickets'],
+  ['5eb1abe3-188b-407f-aa9d-4ca4ed065c66', 'Garcon: Captain'],
 ];
 const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_CONFIG_DIR',
