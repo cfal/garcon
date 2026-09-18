@@ -433,6 +433,67 @@ describe('garcon-cli', () => {
     }, { namedWorkspace: WORKSPACE });
   });
 
+  test('emits settled JSON envelopes for synchronous lifecycle commands', async () => {
+    await withIntegrationFixture('garcon-cli-synchronous-json', async (fixture) => {
+      const startArgs = startArguments(fixture, 'json-synchronous-start');
+      startArgs.splice(-1, 0, '--json');
+      const started = await runCli(startArgs);
+
+      expect(started).toMatchObject({ exitCode: 0, stderr: '' });
+      const startJson = JSON.parse(started.stdout);
+      expect(startJson).toMatchObject({
+        schemaVersion: 1,
+        command: 'start',
+        workspace: WORKSPACE,
+        receipt: {
+          commandType: 'chat-start',
+          chatId: startJson.turnReceipt.chatId,
+          turnId: startJson.turnReceipt.turnId,
+          status: 'accepted',
+        },
+        parentChat: null,
+        titleUpdate: { status: 'not-requested' },
+        turnReceipt: {
+          state: 'completed',
+          output: {
+            availability: 'available',
+            completeness: 'complete',
+            text: expect.stringContaining('json-synchronous-start'),
+          },
+        },
+      });
+
+      const resumed = await runCli(controlArguments(fixture, [
+        'resume', startJson.receipt.chatId, '--json', 'json-synchronous-resume',
+      ]));
+      expect(resumed).toMatchObject({ exitCode: 0, stderr: '' });
+      const resumeJson = JSON.parse(resumed.stdout);
+      expect(resumeJson).toMatchObject({
+        schemaVersion: 1,
+        command: 'resume',
+        workspace: WORKSPACE,
+        serverInstanceId: startJson.serverInstanceId,
+        receipt: {
+          commandType: 'agent-run',
+          chatId: startJson.receipt.chatId,
+          turnId: resumeJson.turnReceipt.turnId,
+          status: 'accepted',
+        },
+        parentChat: null,
+        delivery: 'new-turn',
+        titleUpdate: { status: 'not-requested' },
+        turnReceipt: {
+          state: 'completed',
+          output: {
+            availability: 'available',
+            completeness: 'complete',
+            text: expect.stringContaining('json-synchronous-resume'),
+          },
+        },
+      });
+    }, { namedWorkspace: WORKSPACE });
+  }, 60_000);
+
   test('repeated metadata commands converge without toggling or reordering state', async () => {
     await withIntegrationFixture('garcon-cli-metadata-state', async (fixture) => {
       const started = await runCli(startArguments(fixture, 'metadata-start'));

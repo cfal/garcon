@@ -27,7 +27,12 @@ async function runAddRow(
   type: CliPresentationStyle,
   title: string,
   content: string,
-  options: { readonly color?: string; readonly markdown?: boolean; readonly collapsible?: boolean } = {},
+  options: {
+    readonly color?: string;
+    readonly markdown?: boolean;
+    readonly collapsible?: boolean;
+    readonly json?: boolean;
+  } = {},
 ): Promise<AddRowCliResult> {
   const child = Bun.spawn({
     cmd: [
@@ -42,6 +47,7 @@ async function runAddRow(
       ...(options.color ? ['--color', options.color] : []),
       ...(options.markdown ? ['--markdown'] : []),
       ...(options.collapsible ? ['--collapsible'] : []),
+      ...(options.json ? ['--json'] : []),
       content,
     ],
     cwd: REPO_ROOT,
@@ -61,6 +67,29 @@ async function runAddRow(
   expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
   expect(stdout).not.toContain(content);
   expect(stdout).not.toContain(title);
+  if (options.json) {
+    const envelope = JSON.parse(stdout);
+    const result: AddRowCliResult = {
+      chatId: envelope.response.chatId,
+      transcriptViewId: envelope.response.transcriptViewId,
+      ordinal: envelope.response.ordinal,
+      type: envelope.response.presentation.style,
+      format: envelope.response.format,
+      disclosure: envelope.response.disclosure,
+      status: envelope.response.status,
+    };
+    expect(envelope).toMatchObject({
+      schemaVersion: 1,
+      command: 'add-row',
+      workspace: WORKSPACE,
+      response: {
+        chatId,
+      },
+    });
+    expect(Number.isSafeInteger(result.ordinal)).toBeTrue();
+    expect(['appended', 'duplicate']).toContain(result.status);
+    return result;
+  }
   const match = stdout.match(
     /^chat id: (\d{16})\ntranscript view id: ([^\n]+)\nordinal: (\d+)\ntype: (info|notice|error|custom)\nformat: (plain|markdown)\ndisclosure: (expanded|collapsed)\nstatus: (appended|duplicate)\n$/,
   );
@@ -176,7 +205,14 @@ describe('garcon-cli add-row', () => {
       const errorTitle = 'chatrowerrortitlevisible Release validation';
       const customContent = '**chatrowcustomvisible deployment complete**';
       const customTitle = 'chatrowcustomtitlevisible Custom deployment';
-      const info = await runAddRow(fixture, chatId, 'info', infoTitle, infoContent);
+      const info = await runAddRow(
+        fixture,
+        chatId,
+        'info',
+        infoTitle,
+        infoContent,
+        { json: true },
+      );
       const notice = await runAddRow(fixture, chatId, 'notice', noticeTitle, noticeContent);
       const error = await runAddRow(fixture, chatId, 'error', errorTitle, errorContent);
       const custom = await runAddRow(
