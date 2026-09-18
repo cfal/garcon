@@ -14,10 +14,9 @@ import {
   type AgentSessionConfiguration,
   type AgentGoalControlHandoff,
   type AgentLogger,
-  type AgentSteerRequest,
   type AgentSteerResult,
-  type AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import { CodexHistoryService } from '../history-source.js';
 import {
   assertCodexExecutionOpen,

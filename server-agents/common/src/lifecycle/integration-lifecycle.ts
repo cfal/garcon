@@ -1,14 +1,11 @@
 import type {
   AgentLifecycle,
-  AgentMigrationStore,
 } from '@garcon/server-agent-interface';
 
 export interface IntegrationLifecycleOptions {
   readonly start?: () => void | Promise<void>;
   readonly stop?: () => void | Promise<void>;
-  readonly migrateOwnedStorage?: (
-    store: AgentMigrationStore,
-  ) => void | Promise<void>;
+  readonly migrateOwnedStorage?: () => void | Promise<void>;
 }
 
 export function createIntegrationLifecycle(
@@ -40,8 +37,8 @@ export function createIntegrationLifecycle(
       startAttempted = false;
       await options.stop?.();
     },
-    async migrateOwnedStorage(store) {
-      await options.migrateOwnedStorage?.(store);
+    async migrateOwnedStorage() {
+      await options.migrateOwnedStorage?.();
     },
   };
 }

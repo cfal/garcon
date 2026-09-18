@@ -21,6 +21,7 @@ import type {
   AgentSessionConfigurationUpdates,
 } from './execution.js';
 import type { AgentExecutionV5 } from './execution-v5.js';
+import type { AgentPermissions, AgentProducers } from './producer.js';
 import type {
   AgentHistoryImport,
   AgentNativeActivityProbe,
@@ -31,6 +32,8 @@ export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
   readonly attachments: AgentAttachments | null;
   readonly execution: AgentExecutionV5;
+  readonly producers: AgentProducers;
+  readonly permissions: AgentPermissions;
   readonly catalog: AgentCatalog;
   readonly settings: AgentSettings;
   readonly lifecycle: AgentLifecycle;

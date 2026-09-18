@@ -19,8 +19,8 @@ import type {
   AgentExecutionHandle,
   AgentResumeRequestV5,
 } from './execution-v5.js';
-import type { AgentMigrationStore } from './host.js';
 import type { AgentNativeSessionRef } from './transcript.js';
+import type { AgentGoalPreparation, AgentProducerBinding, AgentResourceRef, NodeCallOptions } from './resources.js';
 
 export interface AgentCatalog {
   snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
@@ -52,7 +52,7 @@ export interface AgentAuth {
   status(signal: AbortSignal): Promise<AgentAuthStatus>;
   launchLogin?(): Promise<AgentAuthLoginLaunchResult>;
   completeLogin?(sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
-  loginStatus?(expectedSessionId?: string): AgentAuthLoginStatus;
+  loginStatus?(expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
 }
 
 export interface AgentCommands {
@@ -60,16 +60,18 @@ export interface AgentCommands {
 }
 
 export interface AgentSteering {
-  captureTarget(request: AgentSteerTargetRequest): AgentSteerTarget | null;
-  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
+  captureTarget(request: AgentSteerTargetRequest, options?: NodeCallOptions): Promise<AgentSteerTarget | null>;
+  steer(request: AgentSteerRequest, options?: NodeCallOptions): Promise<AgentSteerResult>;
 }
 
-export type AgentSteerTarget = object;
+export type AgentSteerTarget = AgentResourceRef<'steer-target'>;
 
 export interface AgentSteerTargetRequest {
   readonly chatId: string;
   readonly agentSessionId: string;
   readonly nativeSession: AgentNativeSessionRef | null;
+  readonly producerBinding: AgentProducerBinding;
+  readonly expectedRunId: string;
 }
 
 export interface AgentSteerRequest {
@@ -80,7 +82,6 @@ export interface AgentSteerRequest {
   readonly target: AgentSteerTarget | null;
   readonly input: string;
   readonly clientMessageId: string;
-  readonly prepareDelivery: () => Promise<void>;
 }
 
 export type AgentSteerRejectionReason =
@@ -104,11 +105,18 @@ export type AgentSteerResult =
     };
 
 export interface AgentGoals {
-  submitControl(request: AgentGoalControlRequest): Promise<boolean>;
+  prepareControl(request: AgentGoalControlRequest, options?: NodeCallOptions): Promise<AgentGoalControlPreparation | null>;
+  deliverControl(preparation: AgentGoalPreparation, options?: NodeCallOptions): Promise<void>;
+  cancelControl(preparation: AgentGoalPreparation, options?: NodeCallOptions): Promise<void>;
 }
 
 export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
-  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
+  readonly expectedRunId: string;
+}
+
+export interface AgentGoalControlPreparation {
+  readonly preparation: AgentGoalPreparation;
+  readonly handle: AgentExecutionHandle;
 }
 
 export interface AgentGoalControlHandoff {
@@ -122,13 +130,13 @@ export interface AgentGoalControlHandoff {
 // this facet the chat can still shed context through `/handoff`, which starts a
 // fresh session from a projected transcript instead.
 export interface AgentCompaction {
-  compact(request: AgentResumeRequestV5): Promise<AgentExecutionHandle>;
+  compact(request: AgentResumeRequestV5, options?: NodeCallOptions): Promise<AgentExecutionHandle>;
 }
 
 export interface AgentLifecycle {
   start(): Promise<void>;
   stop(): Promise<void>;
-  migrateOwnedStorage(store: AgentMigrationStore): Promise<void>;
+  migrateOwnedStorage(): Promise<void>;
 }
 
 export interface AgentMigration {

@@ -56,10 +56,7 @@ function forkRequest(overrides = {}) {
     thinkingMode: 'none',
     settings: { ownerId: 'opencode', schemaVersion: 1, values: {} },
     endpoint: null,
-    admission: {
-      signal: new AbortController().signal,
-      markStarted: () => Promise.resolve(),
-    },
+    signal: new AbortController().signal,
     source: {
       chatId: 'source-chat',
       agentId: 'opencode',
@@ -122,7 +119,7 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     });
     const { forking } = createForking({ fork, delete: remove });
     const outcome = forking.fork(forkRequest({
-      admission: { signal: controller.signal, markStarted: () => Promise.resolve() },
+      signal: controller.signal,
     })).then(
       (value) => ({ status: 'fulfilled', value }),
       (error) => ({ status: 'rejected', error }),
@@ -180,7 +177,7 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     }));
     const { forking } = createForking({ fork, messages });
     const outcome = forking.fork(forkRequest({
-      admission: { signal: controller.signal, markStarted: () => Promise.resolve() },
+      signal: controller.signal,
       providerMeta: { entryId: 'prt_b1' },
     }));
 
@@ -206,7 +203,7 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     });
     const { forking, runtime } = createForking({ fork, messages }, { createInstance });
     const outcome = forking.fork(forkRequest({
-      admission: { signal: controller.signal, markStarted: () => Promise.resolve() },
+      signal: controller.signal,
       providerMeta: { entryId: 'prt_b1' },
     }));
 
@@ -243,7 +240,7 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     const { forking } = createForking({ fork, messages });
 
     await expect(forking.fork(forkRequest({
-      admission: { signal: controller.signal, markStarted: () => Promise.resolve() },
+      signal: controller.signal,
       providerMeta: { entryId: 'prt_b1' },
     }))).rejects.toBe(reason);
     expect(fork).not.toHaveBeenCalled();
@@ -437,7 +434,7 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     const { forking } = createForking({ fork, delete: sessionDelete, get, messages });
 
     await expect(forking.fork(forkRequest({
-      admission: { signal: controller.signal, markStarted: () => Promise.resolve() },
+      signal: controller.signal,
       source: {
         chatId: 'source-chat',
         agentId: 'opencode',

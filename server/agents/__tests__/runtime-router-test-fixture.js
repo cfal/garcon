@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { permissionResponse } from './producer-fixture.ts';
 
 export function createRuntimeTranscriptFixture(options = {}) {
   const view = {
@@ -21,6 +22,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
   };
   const createLease = () => {
     let closed = false;
+    const closeListeners = new Set();
     const sink = {
       publish(event) {
         if (closed) throw new Error('sink closed');
@@ -42,7 +44,15 @@ export function createRuntimeTranscriptFixture(options = {}) {
     return {
       sink,
       get closed() { return closed; },
-      close() { closed = true; activeRunId = null; },
+      onClosed(listener) {
+        closeListeners.add(listener);
+        return () => closeListeners.delete(listener);
+      },
+      close() {
+        closed = true;
+        activeRunId = null;
+        for (const listener of closeListeners) listener();
+      },
     };
   };
   const appendNotice = (chatId, viewId, input) => {
@@ -79,6 +89,10 @@ export function createRuntimeTranscriptFixture(options = {}) {
       activeChatId = chatId;
       activeRunId = runId;
       return runId;
+    },
+    handoffRun(_chatId, expectedRunId, nextRunId) {
+      if (activeRunId !== expectedRunId) throw new Error('active run changed');
+      activeRunId = nextRunId;
     },
     activeRunId: () => activeRunId,
     isRunActive: (_chatId, runId) => activeRunId !== null && (!runId || activeRunId === runId),
@@ -137,7 +151,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
         claimId: 'claim-1',
         decision: options.permissionDecision ?? {
           permissionOccurrenceId: control.permissionOccurrenceId,
-          respond: async () => undefined,
+          response: permissionResponse(control.permissionOccurrenceId),
         },
       };
       options.onPermissionClaim?.(permissionClaim);
@@ -149,6 +163,10 @@ export function createRuntimeTranscriptFixture(options = {}) {
     },
     abandonPermissionResolution: (claim) => {
       options.onPermissionAbandoned?.(claim);
+      permissionClaim = null;
+    },
+    retirePermissionResolution: (claim) => {
+      options.onPermissionRetired?.(claim);
       permissionClaim = null;
     },
   };

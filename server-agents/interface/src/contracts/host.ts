@@ -1,8 +1,11 @@
 import type { AgentCredentialReference } from '@garcon/common/agent-execution';
 import type { JsonObject, JsonValue } from '@garcon/common/json';
+import type { AgentResourceScope } from './resources.js';
 
 export interface AgentHost {
   readonly agentId: string;
+  readonly scope: AgentResourceScope;
+  readonly migrations: AgentMigrationStore;
   readonly logger: AgentLogger;
   readonly storage: AgentScopedStorage;
   readonly environment: AgentEnvironmentReader;

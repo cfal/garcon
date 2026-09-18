@@ -41,7 +41,7 @@ export interface JsonlNativeForkingOptions {
 export function createJsonlNativeForking(options: JsonlNativeForkingOptions): AgentNativeFork {
   return {
     async fork(request) {
-      request.admission.signal.throwIfAborted();
+      request.signal.throwIfAborted();
       if (!request.providerMeta && options.forkWholeSession) {
         const result = await options.forkWholeSession(request);
         if (result) return { kind: 'materialized', session: result };
@@ -116,7 +116,7 @@ async function forkJsonlAtProviderPoint(
           nativeSeedReceipt: null,
           settings: request.settings,
         },
-        signal: request.admission.signal,
+        signal: request.signal,
       });
       forkedMessages = forked.messages;
       if (
@@ -152,7 +152,7 @@ async function resolveProviderPoint(
   if (!expected) throw missingNativePoint();
   const native = await options.nativeEvidence.load({
     chat: request.source,
-    signal: request.admission.signal,
+    signal: request.signal,
   }).catch((error) => {
     // A source file the provider has not written yet holds no native
     // positions; the typed source-level refusal keeps the retry and
@@ -195,7 +195,7 @@ async function resolveSourceReference(
   if (current.path) return request.source.nativeSession;
   return options.nativeEvidence.resolveNativeSession({
     chat: request.source,
-    signal: request.admission.signal,
+    signal: request.signal,
   });
 }
 

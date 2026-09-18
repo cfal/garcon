@@ -1,8 +1,10 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { resetServerConfigForTests } from '../../config.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createProducerFixture } from './producer-fixture.ts';
 
 function deferred() {
   let resolve;
@@ -11,6 +13,7 @@ function deferred() {
 }
 
 function makeRouter(execution) {
+  const producer = createProducerFixture();
   const transcript = createRuntimeTranscriptFixture();
   const entry = {
     id: 'chat-1',
@@ -37,8 +40,10 @@ function makeRouter(execution) {
       parse: (value) => value,
     },
     execution,
+    producers: producer.producers,
   };
   const router = new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: {
       getChat: mock(() => entry),
       updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),

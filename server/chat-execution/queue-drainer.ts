@@ -22,6 +22,7 @@ import {
 const logger = createLogger('queue-dispatch');
 
 export interface QueueDispatchCallbacks {
+  canDispatch?(): boolean;
   isShuttingDown(): boolean;
   registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
   appendControlReceipt(chatId: string, entry: StoredControlInputEntry): void;
@@ -73,6 +74,7 @@ export class QueueDrainer {
   #shouldHalt(chatId: string): boolean {
     const { ownership, turnRunner, callbacks } = this.deps;
     return callbacks.isShuttingDown()
+      || callbacks.canDispatch?.() === false
       || ownership.hasSuppression(chatId, 'abort')
       || ownership.hasSuppression(chatId, 'deletion')
       || ownership.hasSuppression(chatId, 'manual-stop')
@@ -82,6 +84,7 @@ export class QueueDrainer {
 
   async run(chatId: string): Promise<void> {
     const { ownership, controls, callbacks } = this.deps;
+    const halted = new Error('Queue dispatch halted before admission');
     while (!this.#shouldHalt(chatId)) {
       const lingering = ownership.attempt(chatId);
       if (lingering) {
@@ -126,6 +129,7 @@ export class QueueDrainer {
         result = await this.deps.runSelectionAdmissionExclusive(
           chatId,
           () => controls.dequeueNextTurn(chatId, (input) => {
+            if (this.#shouldHalt(chatId)) throw halted;
             options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
             if (input.kind === 'control') {
               if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
@@ -151,6 +155,7 @@ export class QueueDrainer {
           }),
         );
       } catch (error) {
+        if (error === halted) return;
         if (inputInserted) callbacks.discardPreparedInput(chatId, options?.clientMessageId);
         throw error;
       }
@@ -220,7 +225,7 @@ export class QueueDrainer {
     });
     if (input.kind === 'user') await this.deps.controls.pauseAfterDispatchFailure(chatId, input.entry.id);
     this.deps.callbacks.publishTurnFailed(chatId, message, options);
-    if (!attempt.isSettled) this.deps.callbacks.retireAttempt(chatId, attempt);
+    if (!attempt.isSettled && !this.deps.turnRunner.isChatRunning(chatId)) this.deps.callbacks.retireAttempt(chatId, attempt);
     return input.kind === 'control';
   }
 

@@ -16,12 +16,14 @@ import {
   type AgentRuntimePublisher,
 } from '../runtime-events.js';
 import { createAgentProducerAdapter } from '../producer-adapter.js';
+import { createAgentResourceRef } from '@garcon/server-agent-interface';
 
 const TS = '2026-08-12T00:00:00.000Z';
+const scope = { nodeId: 'test-node', instanceId: 'test-runtime', integrationId: 'test' };
 
 describe('createAgentProducerAdapter', () => {
   it('publishes sessions, normalized rows, and terminal events through the supplied sink', async () => {
-    const fixture = createFixture();
+    const fixture = await createFixture();
     const handle = await fixture.adapter.execution.start(fixture.request);
 
     expect(fixture.events.map((event) => event.type)).toEqual([
@@ -40,12 +42,12 @@ describe('createAgentProducerAdapter', () => {
       runId: 'run-1',
       outcome: 'finished',
     });
-    await expect(fixture.adapter.execution.abort(handle)).resolves.toBe(true);
+    await expect(fixture.adapter.execution.abort(handle)).rejects.toThrow('retired');
   });
 
   it('forwards typed permission lifecycle events without interpreting chat rows', async () => {
     const decision = permissionDecision('occurrence-1');
-    const fixture = createFixture(({ publish, runId }) => {
+    const fixture = await createFixture(({ publish, runId }) => {
       const tool = new BashToolUseMessage(TS, 'tool-1', 'pwd');
       publish({
         type: 'rows',
@@ -86,7 +88,7 @@ describe('createAgentProducerAdapter', () => {
         kind: 'requested',
         permissionOccurrenceId: 'occurrence-1',
       },
-      decision,
+      decision: { permissionOccurrenceId: 'occurrence-1', response: expect.objectContaining({ kind: 'permission-response' }) },
     });
     expect(cancelled).toMatchObject({
       type: 'permission',
@@ -102,7 +104,7 @@ describe('createAgentProducerAdapter', () => {
   it('[TLV5-PERM.02-ADAPTER-UNIT-01] preserves each exact permission occurrence', async () => {
     const firstDecision = permissionDecision('first-occurrence');
     const secondDecision = permissionDecision('second-occurrence');
-    const fixture = createFixture(({ publish, runId }) => {
+    const fixture = await createFixture(({ publish, runId }) => {
       publish({
         type: 'permission',
         runId,
@@ -137,13 +139,14 @@ describe('createAgentProducerAdapter', () => {
       'second-occurrence',
       'first-occurrence',
     ]);
-    expect(fixture.events[1]).toMatchObject({ decision: firstDecision });
-    expect(fixture.events[2]).toMatchObject({ decision: secondDecision });
+    expect(fixture.events[1]).toMatchObject({ decision: { permissionOccurrenceId: firstDecision.permissionOccurrenceId } });
+    expect(fixture.events[2]).toMatchObject({ decision: { permissionOccurrenceId: secondDecision.permissionOccurrenceId } });
+    expect(fixture.events[1].decision.response.id).not.toBe(fixture.events[2].decision.response.id);
   });
 
   it('[TLV5-PERM.09-ADAPTER-UNIT-01] drops an unnamed permission event with one content-free warning', async () => {
     const decision = permissionDecision('occurrence-1');
-    const fixture = createFixture(({ publish }) => {
+    const fixture = await createFixture(({ publish }) => {
       publish({
         type: 'permission',
         runId: null,
@@ -173,7 +176,7 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('[TLV5-L07.08-ADAPTER-UNIT-01] drops provider events for an unavailable sink without failing its event stream', async () => {
-    const fixture = createFixture(({ publish }) => {
+    const fixture = await createFixture(({ publish }) => {
       fixture.closeSink();
       publish({
         type: 'rows',
@@ -193,14 +196,32 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('leaves dispatch failures for core to record', async () => {
-    const fixture = createFixture(undefined, new Error('launch failed'));
+    const fixture = await createFixture(undefined, new Error('launch failed'));
 
     await expect(fixture.adapter.execution.start(fixture.request)).rejects.toThrow('launch failed');
     expect(fixture.events).toEqual([]);
   });
 
+  it('preserves a late permission fact without restoring its response authority', async () => {
+    const fixture = await createFixture(({ publish, runId }) => {
+      publish({ type: 'run-ended', runId, outcome: 'finished' });
+      publish({
+        type: 'permission', runId,
+        lifecycle: permissionRequest('late', new BashToolUseMessage(TS, 'late-tool', 'pwd')),
+        decision: { permissionOccurrenceId: 'late', async respond() { throw new Error('Stale response executed'); } },
+      });
+    });
+    await fixture.adapter.execution.start(fixture.request);
+    const event = fixture.events.at(-1);
+    expect(event).toMatchObject({ type: 'permission', lifecycle: { kind: 'requested', permissionOccurrenceId: 'late' } });
+    if (event?.type !== 'permission' || !event.decision) throw new Error('Expected requested permission');
+    await expect(fixture.adapter.permissions.respond({ response: event.decision.response, decision: { allow: true } }))
+      .rejects.toThrow('retired');
+    expect(fixture.warnings).toEqual([]);
+  });
+
   it('returns a resume handle before a blocking provider turn settles', async () => {
-    const fixture = createFixture();
+    const fixture = await createFixture();
     let resolveResume!: () => void;
     const resumed = new Promise<void>((resolve) => { resolveResume = resolve; });
     fixture.runtime.resume = () => resumed;
@@ -217,7 +238,7 @@ describe('createAgentProducerAdapter', () => {
   });
 
   it('publishes an asynchronous resume launch failure', async () => {
-    const fixture = createFixture();
+    const fixture = await createFixture();
     fixture.runtime.resume = async () => {
       throw new Error('resume failed');
     };
@@ -241,11 +262,11 @@ describe('createAgentProducerAdapter', () => {
 // Compaction and goal control reach the transcript through runExisting, which must hand the
 // operation the same capability start and resume get rather than a path of its own.
 it('publishes a runExisting operation through the same capability as a run', async () => {
-  const fixture = createFixture();
+  const fixture = await createFixture();
   let published = false;
 
   const outcome = await fixture.adapter.runExisting(
-    { chatId: 'chat-1', agentSessionId: 'session-1', sink: fixture.request.sink },
+    { ...fixture.request, agentSessionId: 'session-1', nativeSession: null },
     async (request, publish) => {
       expect(request).not.toHaveProperty('sink');
       publish({
@@ -293,10 +314,18 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
     async abort() { return true; },
     runningSessions() { return []; },
   };
-  const adapter = createAgentProducerAdapter(runtime, {
+  const adapter = createAgentProducerAdapter(runtime, { scope, logger: {
     debug() {}, info() {}, error() {},
     warn: (message: string) => { warnings.push(message); },
-  } satisfies AgentLogger);
+  } satisfies AgentLogger });
+  const bindingA = createAgentResourceRef(scope, 'producer');
+  const bindingB = createAgentResourceRef(scope, 'producer');
+  adapter.producers.subscribe(({ binding, event }) => {
+    if (event.type === 'started') return;
+    (binding.id === bindingA.id ? sinkA : sinkB).publish(event);
+  });
+  await adapter.producers.bind({ binding: bindingA, chatId: 'chat-1' });
+  await adapter.producers.bind({ binding: bindingB, chatId: 'chat-1' });
   const baseRequest = {
     chatId: 'chat-1',
     projectPath: '/tmp/project',
@@ -311,9 +340,9 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
     carriedContext: null,
   };
 
-  await adapter.execution.start({ ...baseRequest, runId: 'run-a', sink: sinkA } satisfies AgentStartRequestV5);
+  await adapter.execution.start({ ...baseRequest, runId: 'run-a', producerBinding: bindingA } satisfies AgentStartRequestV5);
   closedA = true;
-  await adapter.execution.start({ ...baseRequest, runId: 'run-b', sink: sinkB } satisfies AgentStartRequestV5);
+  await adapter.execution.start({ ...baseRequest, runId: 'run-b', producerBinding: bindingB } satisfies AgentStartRequestV5);
   delivered.length = 0;
 
   delayed?.();
@@ -322,7 +351,7 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
   expect(warnings.some((warning) => warning.includes('unavailable transcript sink'))).toBeTrue();
 });
 
-function createFixture(
+async function createFixture(
   afterSession?: (input: {
     readonly publish: AgentRuntimePublisher;
     readonly runId: string;
@@ -374,7 +403,10 @@ function createFixture(
     warn: (message: string, fields?: unknown) => { warnings.push({ message, fields }); },
     error() {},
   } satisfies AgentLogger;
-  const adapter = createAgentProducerAdapter(runtime, logger);
+  const adapter = createAgentProducerAdapter(runtime, { logger, scope });
+  const producerBinding = createAgentResourceRef(scope, 'producer');
+  adapter.producers.subscribe(({ event }) => { if (event.type !== 'started') sink.publish(event); });
+  await adapter.producers.bind({ binding: producerBinding, chatId: 'chat-1' });
   const request = {
     chatId: 'chat-1',
     projectPath: '/tmp/project',
@@ -384,11 +416,7 @@ function createFixture(
     settings: { ownerId: 'test', schemaVersion: 1, values: {} },
     endpoint: null,
     runId: 'run-1',
-    sink,
-    admission: {
-      signal: new AbortController().signal,
-      async markStarted() {},
-    },
+    producerBinding,
     prompt: 'hello',
     attachments: [],
     carriedContext: null,

@@ -87,7 +87,7 @@ export class CursorExecution implements AgentRuntimeExecution {
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
+    request: import('@garcon/server-agent-interface').AgentProjectPathUpdateRequest,
   ): Promise<void> {
     await this.runtime.prepareProjectPathUpdate({
       chatId: request.chat.chatId,

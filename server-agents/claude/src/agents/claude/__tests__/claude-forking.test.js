@@ -124,10 +124,7 @@ describe('Claude JSONL forking', () => {
       thinkingMode: 'none',
       settings,
       endpoint: null,
-      admission: {
-        signal: new AbortController().signal,
-        markStarted() {},
-      },
+      signal: new AbortController().signal,
       source: {
         chatId: 'source-chat',
         agentId: 'claude',
@@ -229,10 +226,7 @@ describe('Claude JSONL forking', () => {
       thinkingMode: 'none',
       settings,
       endpoint: null,
-      admission: {
-        signal: new AbortController().signal,
-        markStarted() {},
-      },
+      signal: new AbortController().signal,
       source: {
         chatId: 'source-chat',
         agentId: 'claude',

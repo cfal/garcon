@@ -3,6 +3,12 @@ import type { ChatMessage, ToolUseChatMessage } from '@garcon/common/chat-types'
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentNativeSessionRef } from './transcript.js';
+import type {
+  AgentPermissionResponseRef,
+  AgentProducerBinding,
+  AgentResourceScope,
+  NodeCallOptions,
+} from './resources.js';
 
 export interface AgentProducedRow {
   readonly message: ChatMessage;
@@ -49,7 +55,7 @@ export type AgentProviderPermissionLifecycle = Exclude<
 
 export interface AgentPermissionResponseCapability {
   readonly permissionOccurrenceId: string;
-  respond(decision: PermissionDecisionPayload): Promise<void>;
+  readonly response: AgentPermissionResponseRef;
 }
 
 type AgentPermissionRequestedEvent = {
@@ -117,4 +123,27 @@ export type AgentProducerEvent =
 
 export interface AgentProducerSink {
   publish(event: AgentProducerEvent): void;
+}
+
+export interface AgentProducerNotification {
+  readonly binding: AgentProducerBinding;
+  readonly event: AgentProducerEvent | { readonly type: 'started'; readonly runId: string };
+}
+
+export interface AgentProducers {
+  readonly scope: AgentResourceScope;
+  bind(request: {
+    readonly binding: AgentProducerBinding;
+    readonly chatId: string;
+  }, options?: NodeCallOptions): Promise<void>;
+  close(binding: AgentProducerBinding, options?: NodeCallOptions): Promise<void>;
+  // Listeners are process-local; remote adapters dispatch the fixed event channel here.
+  subscribe(listener: (notification: AgentProducerNotification) => void): () => void;
+}
+
+export interface AgentPermissions {
+  respond(request: {
+    readonly response: AgentPermissionResponseRef;
+    readonly decision: PermissionDecisionPayload;
+  }, options?: NodeCallOptions): Promise<void>;
 }

@@ -33,7 +33,7 @@ describe('delegated startup admission interleavings', () => {
     transcripts.initializeChat(CHILD);
     execution = new ChatExecutionCoordinator(directory, {
       runAgentTurn: async (chatId, _command, options) => { transcripts.beginRun(chatId, options.turnId); },
-      captureSteerTarget: () => null,
+      captureSteerTarget: async () => null,
       steerInput: async () => { throw new Error('Unexpected steer'); },
       submitGoalControl: async () => false,
       abortSession: async (chatId) => transcripts.interruptRun(chatId) !== null,

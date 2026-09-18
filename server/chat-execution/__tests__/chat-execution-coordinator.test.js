@@ -403,7 +403,12 @@ describe('ChatExecutionCoordinator', () => {
     await waitFor(() => fixture.turnRunner.steerInput.mock.calls.length === 1);
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
 
+    await coordinator.createChatQueueEntry('chat-1', 'later input');
+    await coordinator.pauseChatQueue('chat-1');
     await coordinator.releaseDirectTurn(reservation);
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    providerRunning = false;
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'turn-1' });
     await expect(delivery).resolves.toBe('queued');
 
     expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
@@ -647,7 +652,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.projection.admitInput).not.toHaveBeenCalled();
     expect(coordinator.ownsExecution('chat-1')).toBe(true);
 
-    const activeTarget = coordinator.captureSteerTarget('chat-1');
+    const activeTarget = await coordinator.captureSteerTarget('chat-1');
     await coordinator.onAgentTurnTerminal('chat-1', activeTarget.identity);
     provider.resolve();
     await coordinator.waitForDispatches();
@@ -809,7 +814,7 @@ describe('ChatExecutionCoordinator', () => {
     coordinator = fixture.coordinator;
     const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
     const queued = await coordinator.createChatQueueEntry('chat-1', 'queued steer');
-    const target = coordinator.captureSteerTarget('chat-1');
+    const target = await coordinator.captureSteerTarget('chat-1');
     const settlement = {
       markScheduled: mock(async () => undefined),
       settleSteerFailure: mock(async () => undefined),

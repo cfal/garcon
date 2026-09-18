@@ -391,7 +391,10 @@ function permissionRequest(permissionOccurrenceId) {
 function permissionDecision(permissionOccurrenceId) {
   return {
     permissionOccurrenceId,
-    respond: async () => undefined,
+    response: {
+      kind: 'permission-response', nodeId: 'node', instanceId: 'instance',
+      integrationId: 'test', id: permissionOccurrenceId,
+    },
   };
 }
 

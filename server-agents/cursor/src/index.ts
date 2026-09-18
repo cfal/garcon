@@ -14,6 +14,7 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
 import {
   createHistoryImport,
   createNativeHistoryImport,
@@ -72,6 +73,8 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producers;
+  readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
@@ -116,12 +119,14 @@ export default class CursorAgentIntegration implements AgentIntegration {
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
       ),
     };
-    this.projectPathUpdates = {
-      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
-    };
+    this.projectPathUpdates = createAgentProjectPathUpdates(host.scope,
+      (request) => providerExecution.prepareProjectPathUpdate(request));
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions, runtime);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host);
+    this.execution = producer.execution;
+    this.producers = producer.producers;
+    this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({
       async load(request) {
         try {

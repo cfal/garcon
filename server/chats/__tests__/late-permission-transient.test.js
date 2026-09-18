@@ -1,4 +1,4 @@
-import { expect, it, mock } from 'bun:test';
+import { expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { transcriptViewId } from '../../ledger/contracts.ts';
 import { PermissionNotActionableError } from '../../ledger/errors.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
+import { permissionResponse } from '../../agents/__tests__/producer-fixture.ts';
 import {
   ChatTransientFeedStore,
   TransientControlActionError,
@@ -34,7 +35,6 @@ it('[TLV5-PERM.11-CORE-TRANSIENT-01] keeps a late permission fact durable but in
     commitEvents.push(event);
     transientFeed.apply(event);
   });
-  const respond = mock(async () => undefined);
   const control = {
     serverInstanceId: 'server-1',
     chatId: CHAT_ID,
@@ -56,7 +56,7 @@ it('[TLV5-PERM.11-CORE-TRANSIENT-01] keeps a late permission fact durable but in
         requestedTool: new BashToolUseMessage(AT, 'tool-1', 'pwd'),
         options: [],
       },
-      decision: { permissionOccurrenceId: OCCURRENCE_ID, respond },
+      decision: { permissionOccurrenceId: OCCURRENCE_ID, response: permissionResponse(OCCURRENCE_ID) },
     });
     await flushCommitEvents();
 
@@ -79,7 +79,6 @@ it('[TLV5-PERM.11-CORE-TRANSIENT-01] keeps a late permission fact durable but in
     expect(() => ledger.claimPermissionResolution(control)).toThrow(PermissionNotActionableError);
     expect(transientFeed.currentSnapshot(CHAT_ID)?.rows).toEqual([]);
     expect(() => transientFeed.validateAction(control)).toThrow(TransientControlActionError);
-    expect(respond).not.toHaveBeenCalled();
   } finally {
     unsubscribe();
     ledger.close();

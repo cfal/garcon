@@ -1,7 +1,5 @@
 import crypto from 'node:crypto';
-import type {
-  AgentSteerRejectionReason,
-} from '@garcon/server-agent-interface';
+import { AgentCallError, type AgentSteerRejectionReason } from '@garcon/server-agent-interface';
 import type { AgentSteerOptions } from '../agents/session-types.ts';
 import { DomainError, SteerDeliveryError } from '../lib/domain-error.ts';
 import type { ExecutionOwnership } from './execution-ownership.ts';
@@ -27,18 +25,17 @@ interface SteerInputDeliveryOptions {
 export class SteerInputDelivery {
   constructor(private readonly options: SteerInputDeliveryOptions) {}
 
-  captureTarget(chatId: string): CapturedSteerTarget | null {
+  async captureTarget(chatId: string): Promise<CapturedSteerTarget | null> {
     const attempt = this.options.ownership.attempt(chatId);
     const identity = attempt?.identity();
     if (!attempt || attempt.isSettled || !identity?.turnId) return null;
-    return Object.freeze({
+    const target = Object.freeze({
       attempt,
-      identity: Object.freeze({
-        turnId: identity.turnId,
-        ...(identity.clientRequestId ? { clientRequestId: identity.clientRequestId } : {}),
-      }),
-      providerTarget: this.options.turnRunner.captureSteerTarget(chatId),
+      identity: Object.freeze({ ...identity, turnId: identity.turnId }),
+      providerTarget: await this.options.turnRunner.captureSteerTarget(chatId),
     });
+    this.#assertTarget(chatId, target);
+    return target;
   }
 
   async deliver(
@@ -113,7 +110,9 @@ export class SteerInputDelivery {
       throw new SteerDeliveryError(new Error(result.message), result.outcome);
     } catch (error) {
       if (error instanceof DomainError) throw error;
-      throw new SteerDeliveryError(error, deliveryPrepared ? 'unknown' : 'not-sent');
+      throw new SteerDeliveryError(error, error instanceof AgentCallError
+        ? error.outcome === 'unknown' ? 'unknown' : 'not-sent'
+        : deliveryPrepared ? 'unknown' : 'not-sent');
     }
   }
 

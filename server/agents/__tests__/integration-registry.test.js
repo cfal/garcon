@@ -5,10 +5,13 @@ import path from 'node:path';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { IntegrationHostFactory } from '../integration-host.ts';
 import { IntegrationRegistry } from '../integration-registry.ts';
+import { createProducerFixture } from './producer-fixture.ts';
 
 function createFacetIntegration(host, id, lifecycle = {}) {
   const settings = { ownerId: id, schemaVersion: 1, values: {} };
   return {
+    producers: createProducerFixture().producers,
+    permissions: { respond: async () => undefined },
     descriptor: {
       id,
       label: id,
@@ -25,7 +28,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       start: async () => ({ id: 'execution' }),
       resume: async () => ({ id: 'execution' }),
       abort: async () => false,
-      runningSessions: () => [],
+      runningSessions: async () => [],
     },
     attachments: null,
     legacyHistoryImport: null,

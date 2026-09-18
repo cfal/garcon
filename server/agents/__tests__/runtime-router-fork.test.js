@@ -1,8 +1,11 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createProducerFixture } from './producer-fixture.ts';
+import { ProducerBindings } from '../producer-bindings.ts';
 
 function makeRouter(fork) {
   const transcript = createRuntimeTranscriptFixture();
@@ -38,6 +41,7 @@ function makeRouter(fork) {
     runningSessions: mock(() => []),
   };
   const integration = {
+    producers: createProducerFixture().producers,
     descriptor: {
       id: 'test',
       supportedEndpointProtocols: [],
@@ -63,6 +67,7 @@ function makeRouter(fork) {
     }),
   };
   const router = new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry,
     directory: {
       require: mock(() => integration),
@@ -89,6 +94,25 @@ function makeRouter(fork) {
 }
 
 describe('AgentRuntimeRouter forks', () => {
+  it('does not register execution progress for a fork', async () => {
+    const progress = spyOn(ProducerBindings.prototype, 'onStarted');
+    try {
+      const fork = mock(async () => ({ kind: 'unmaterialized' }));
+      const { router, entry } = makeRouter(fork);
+      const signal = new AbortController().signal;
+      await router.forkAgentSession({
+        sourceSession: entry,
+        sourceChatId: 'source-chat',
+        targetChatId: 'target-chat',
+        signal,
+      });
+      expect(fork).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+      expect(progress).not.toHaveBeenCalled();
+    } finally {
+      progress.mockRestore();
+    }
+  });
+
   it('binds a point fork to the selected native prefix', async () => {
     const controller = new AbortController();
     const fork = mock(async () => ({
@@ -111,7 +135,7 @@ describe('AgentRuntimeRouter forks', () => {
 
     expect(fork).toHaveBeenCalledWith(expect.objectContaining({
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
-      admission: expect.objectContaining({ signal: controller.signal }),
+      signal: controller.signal,
       source: expect.objectContaining({ chatId: 'source-chat' }),
     }));
     expect(integration.forking).not.toHaveProperty('resolvePoint');
@@ -141,6 +165,7 @@ describe('AgentRuntimeRouter forks', () => {
     expect(execution.start).toHaveBeenCalledOnce();
     expect(execution.start).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 'target-chat', prompt: 'child prompt' }),
+      expect.anything(),
     );
     expect(execution.resume).not.toHaveBeenCalled();
   });

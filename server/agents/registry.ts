@@ -92,7 +92,7 @@ export interface AgentRegistryServiceContract {
   ): boolean;
   publishSessionFact(chatId: string, session: StartedAgentSession): void;
   resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
-  captureSteerTarget(chatId: string): AgentSteerTarget | null;
+  captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null>;
   steerInput(
     chatId: string,
     input: string,
@@ -214,6 +214,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     hasPendingOwnershipTransfer(chatId: string): boolean;
     preambles: Pick<PreambleService, 'snapshot'>;
     selectionAdmissionLock: KeyedPromiseLock;
+    resolveFileMentions(command: string, projectPath: string): Promise<string>;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
@@ -235,6 +236,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       ledger: this.#ledger,
       adoption: this.#adoption,
       hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
+      resolveFileMentions: args.resolveFileMentions,
     });
     this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;
     this.#preambles = args.preambles;
@@ -316,7 +318,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
   }
-  captureSteerTarget(chatId: string): AgentSteerTarget | null {
+  captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null> {
     return this.#runtime.captureSteerTarget(chatId);
   }
   steerInput(
@@ -337,6 +339,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.submitGoalControl(chatId, command, opts, beforeDelivery);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
+
+  executionSessionLost(): void { this.#runtime.executionSessionLost(); }
   compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
   isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {

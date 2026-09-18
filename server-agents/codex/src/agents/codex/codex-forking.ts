@@ -32,11 +32,11 @@ export interface CodexForkingOptions {
 export function createCodexForking(options: CodexForkingOptions): AgentNativeFork {
   return {
     async fork(request) {
-      request.admission.signal.throwIfAborted();
+      request.signal.throwIfAborted();
       const profile = await options.resolveProfile({
         source: request.source,
         point: request.providerMeta,
-        signal: request.admission.signal,
+        signal: request.signal,
       });
       if (!profile) return options.journal.fork(request);
       if (profile.mode === 'legacy') return options.journal.fork(request);

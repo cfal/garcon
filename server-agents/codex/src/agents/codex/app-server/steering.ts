@@ -1,4 +1,7 @@
-import type { AgentSteerRequest, AgentSteerResult } from '@garcon/server-agent-interface';
+import type {
+  AgentSteerResult,
+} from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   CodexAppServerDeliveryError,
   CodexAppServerRpcError,

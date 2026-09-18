@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -7,11 +8,13 @@ import { BashToolUseMessage } from '../../../common/chat-types.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { AgentCallError } from '@garcon/server-agent-interface';
+import { permissionResponse, permissionFixture } from './producer-fixture.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
 const OCCURRENCE_ID = '11111111-1111-4111-8111-111111111111';
 
-it('[TLV5-PERM.10-CORE-UNIT-01] retries the exact live capability after a provider response failure', async () => {
+it('[TLV5-PERM.10-CORE-UNIT-01] retries the exact live capability only after definite non-dispatch', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-retry-'));
   const store = new TranscriptLedgerStore(root, {
     createViewId: () => 'view-1',
@@ -24,7 +27,7 @@ it('[TLV5-PERM.10-CORE-UNIT-01] retries the exact live capability after a provid
   let responseAttempts = 0;
   const respond = mock(async () => {
     responseAttempts += 1;
-    if (responseAttempts === 1) throw new Error('provider response failed');
+    if (responseAttempts === 1) throw new AgentCallError('not-dispatched', 'provider response failed');
   });
 
   try {
@@ -40,9 +43,9 @@ it('[TLV5-PERM.10-CORE-UNIT-01] retries the exact live capability after a provid
         requestedTool: new BashToolUseMessage(AT, 'tool-1', 'pwd'),
         options: [],
       },
-      decision: { permissionOccurrenceId: OCCURRENCE_ID, respond },
+      decision: { permissionOccurrenceId: OCCURRENCE_ID, response: permissionResponse(OCCURRENCE_ID) },
     });
-    const router = makeRouter(ledger, view);
+    const router = makeRouter(ledger, view, respond);
     const decision = { allow: true };
 
     await expect(router.resolvePermission(
@@ -83,11 +86,13 @@ it('[TLV5-PERM.10-CORE-UNIT-01] retries the exact live capability after a provid
   }
 });
 
-function makeRouter(ledger, view) {
+function makeRouter(ledger, view, respond) {
   return new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: mock(() => ({ agentId: 'test' })) },
     directory: {
       get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
+      require: () => ({ permissions: permissionFixture(new Map([[OCCURRENCE_ID, respond]])) }),
     },
     endpointResolver: {},
     events: {},

@@ -99,10 +99,7 @@ async function createFixture() {
     thinkingMode: 'none',
     settings,
     endpoint: null,
-    admission: {
-      signal: new AbortController().signal,
-      async markStarted() {},
-    },
+    signal: new AbortController().signal,
     source: {
       chatId: 'source-chat',
       agentId: 'test',
@@ -329,10 +326,7 @@ describe('createJsonlNativeForking prefix protection', () => {
     await expect(forking.fork({
       ...fixture.request,
       providerMeta: null,
-      admission: {
-        ...fixture.request.admission,
-        signal: controller.signal,
-      },
+      signal: controller.signal,
       source: {
         ...fixture.request.source,
         nativeSeedReceipt: receipt,

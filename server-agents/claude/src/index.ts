@@ -20,6 +20,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
+import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
 import {
   createHistoryImport,
   createNativeHistoryImport,
@@ -76,6 +78,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly producers;
+  readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
@@ -168,9 +172,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
       ),
     };
-    this.projectPathUpdates = {
-      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
-    };
+    this.projectPathUpdates = createAgentProjectPathUpdates(host.scope,
+      (request) => providerExecution.prepareProjectPathUpdate(request));
     const nativeEvidence = createClaudeNativeEvidence({
       runtime,
       nativeSessions,
@@ -178,7 +181,10 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       logger,
     });
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host);
+    this.execution = producer.execution;
+    this.producers = producer.producers;
+    this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
@@ -203,7 +209,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       },
       launchLogin: () => login.launch(),
       completeLogin: (sessionId, code) => login.complete(sessionId, code),
-      loginStatus: (expectedSessionId) => login.status(expectedSessionId),
+      loginStatus: async (expectedSessionId) => login.status(expectedSessionId),
     };
     this.commands = {
       discover: (projectPath, signal) => {
@@ -219,10 +225,10 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       semanticDigest: claudeForkSemanticDigest,
       allowUnmaterializedWholeSession: true,
     });
-    this.steering = {
-      captureTarget: request => runtime.captureSteerTarget(request.agentSessionId),
-      steer: request => runtime.steer(request),
-    };
+    this.steering = createAgentSteering(producer, {
+      captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
+      steer: (request) => runtime.steer(request),
+    });
     this.endpoints = {
       async validate(selection) {
         if (selection.protocol !== 'anthropic-messages') {

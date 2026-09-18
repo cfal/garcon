@@ -32,10 +32,9 @@ import { buildAmpUserInput } from './amp-stream-input.js';
 import {
   type AgentLogger,
   type AgentFinalResponse,
-  type AgentSteerRequest,
   type AgentSteerResult,
-  type AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 
 const DEFAULT_CONFIG: AmpConfig = { binary: () => 'amp' };
 const SILENT_LOGGER: AgentLogger = {

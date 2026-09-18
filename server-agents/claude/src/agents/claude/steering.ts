@@ -1,10 +1,9 @@
 import crypto from 'node:crypto';
 import type {
   AgentLogger,
-  AgentSteerRequest,
   AgentSteerResult,
-  AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { ClaudeProcessTransport } from './cli-process-transport.js';
 import type { ClaudeCLIMessage, ClaudeTurnState } from './cli-protocol.js';

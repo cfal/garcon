@@ -141,7 +141,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
+    request: import('@garcon/server-agent-interface').AgentProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void> {
     request.signal.throwIfAborted();
     const agentSessionId = request.chat.agentSessionId;

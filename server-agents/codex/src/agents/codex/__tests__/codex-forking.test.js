@@ -22,7 +22,7 @@ function request(providerMeta = null) {
     thinkingMode: 'none',
     settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
     endpoint: null,
-    admission: { signal: new AbortController().signal, markStarted() {} },
+    signal: new AbortController().signal,
     source: {
       chatId: 'source-chat', agentId: 'codex', agentSessionId: 'source',
       projectPath: '/repo', model: 'gpt', nativeSession: null,

@@ -20,6 +20,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
+import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
 import {
   createHistoryImport,
   createNativeHistoryImport,
@@ -61,6 +63,8 @@ export default class PiAgentIntegration implements AgentIntegration {
   readonly descriptor = PI_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producers;
+  readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
@@ -97,12 +101,14 @@ export default class PiAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new PiExecution(runtime, nativeSessions);
-    this.projectPathUpdates = {
-      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
-    };
+    this.projectPathUpdates = createAgentProjectPathUpdates(host.scope,
+      (request) => providerExecution.prepareProjectPathUpdate(request));
     const nativeEvidence = createPiNativeEvidence(config, nativeSessions, runtime);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host);
+    this.execution = producer.execution;
+    this.producers = producer.producers;
+    this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createPiNativeActivityProbe(nativeSessions);
@@ -145,10 +151,10 @@ export default class PiAgentIntegration implements AgentIntegration {
         }
       },
     };
-    this.steering = {
-      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+    this.steering = createAgentSteering(producer, {
+      captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
       steer: (request) => runtime.steer(request),
-    };
+    });
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {

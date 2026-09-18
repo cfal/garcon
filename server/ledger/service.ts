@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isAgentResourceRef } from '@garcon/server-agent-interface';
 import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentFinalResponse,
@@ -57,6 +58,7 @@ export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
   close(): void;
   readonly closed: boolean;
+  onClosed(listener: () => void): () => void;
 }
 
 export type TranscriptCommitEvent =
@@ -418,6 +420,16 @@ export class TranscriptLedgerService {
       && this.#activeRuns.get(claim.chatId) === claim.runId
     ) {
       permissions!.set(claim.permissionOccurrenceId, { ...active, claimId: null });
+    }
+  }
+
+  retirePermissionResolution(claim: PermissionResolutionClaim): void {
+    if (this.#permissionClaims.get(claim.claimId) !== claim) return;
+    this.#permissionClaims.delete(claim.claimId);
+    const permissions = this.#activePermissions.get(claim.chatId);
+    if (permissions?.get(claim.permissionOccurrenceId)?.claimId === claim.claimId) {
+      permissions.delete(claim.permissionOccurrenceId);
+      this.#deleteEmptyPermissionMap(claim.chatId);
     }
   }
 
@@ -956,7 +968,7 @@ function validatePermissionDecision(
   if (
     !capability
     || capability.permissionOccurrenceId !== lifecycle.permissionOccurrenceId
-    || typeof capability.respond !== 'function'
+    || !isAgentResourceRef(capability.response, 'permission-response')
   ) {
     throw new TypeError('Permission response capability does not match its request occurrence');
   }

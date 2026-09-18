@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
@@ -34,6 +35,7 @@ function makeRouter(overrides = {}) {
     }) : null),
   };
   const router = new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: mock(() => null) },
     directory: {
       require: mock((id) => {

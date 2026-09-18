@@ -1,31 +1,40 @@
 import type {
   AgentIntegrationClass,
   AgentIntegration,
-  AgentMigrationStore,
 } from '@garcon/server-agent-interface';
 import { validateAgentIntegration } from '@garcon/server-agent-interface/testing';
 import { IntegrationHostFactory } from './integration-host.js';
 
-export interface IntegrationRegistryOptions {
+export interface LocalIntegrationRegistryOptions {
   readonly integrations: readonly AgentIntegrationClass[];
   readonly hostFactory: IntegrationHostFactory;
-  readonly migrationStoreFor: (agentId: string) => AgentMigrationStore;
 }
 
+export type IntegrationRegistryOptions = LocalIntegrationRegistryOptions | {
+  readonly instances: readonly AgentIntegration[];
+};
+
 interface IntegrationRecord {
-  readonly integrationClass: AgentIntegrationClass;
   readonly integration: AgentIntegration;
 }
 
 export class IntegrationRegistry {
   readonly #records = new Map<string, IntegrationRecord>();
-  readonly #migrationStoreFor: (agentId: string) => AgentMigrationStore;
   #startPromise: Promise<void> | null = null;
   #stopPromise: Promise<void> | null = null;
   #started = false;
 
   constructor(options: IntegrationRegistryOptions) {
-    this.#migrationStoreFor = options.migrationStoreFor;
+    if ('instances' in options) {
+      for (const integration of options.instances) {
+        const integrationId = integration.descriptor.id;
+        if (this.#records.has(integrationId)) throw new Error(`Duplicate agent integration ID: ${integrationId}`);
+        validateAgentIntegration({ integrationClass: { integrationId, apiVersion: 5 }, integration });
+        validateDescriptor(integration);
+        this.#records.set(integrationId, { integration });
+      }
+      return;
+    }
     for (const integrationClass of options.integrations) {
       validateClass(integrationClass, this.#records);
       const host = options.hostFactory.forAgent(integrationClass.integrationId);
@@ -36,7 +45,7 @@ export class IntegrationRegistry {
         integration.descriptor.id,
         integration.descriptor.configuration.map((entry) => entry.key),
       );
-      this.#records.set(integration.descriptor.id, { integrationClass, integration });
+      this.#records.set(integration.descriptor.id, { integration });
     }
   }
 
@@ -56,10 +65,6 @@ export class IntegrationRegistry {
 
   list(): readonly AgentIntegration[] {
     return [...this.#records.values()].map((record) => record.integration);
-  }
-
-  classes(): readonly AgentIntegrationClass[] {
-    return [...this.#records.values()].map((record) => record.integrationClass);
   }
 
   start(): Promise<void> {
@@ -84,9 +89,7 @@ export class IntegrationRegistry {
     const started: AgentIntegration[] = [];
     try {
       for (const integration of this.list()) {
-        await integration.lifecycle.migrateOwnedStorage(
-          this.#migrationStoreFor(integration.descriptor.id),
-        );
+        await integration.lifecycle.migrateOwnedStorage();
         await integration.lifecycle.start();
         started.push(integration);
       }

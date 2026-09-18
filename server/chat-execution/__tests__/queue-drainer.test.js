@@ -63,6 +63,37 @@ function queueCallbacks(overrides = {}) {
 }
 
 describe('QueueDrainer', () => {
+  it('leaves queued inputs untouched when the node goes offline while waiting for admission', async () => {
+    const repository = new InMemoryChatExecutionControlRepository('server-1');
+    const controls = new ChatExecutionControlOperations(repository, {
+      runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
+      unsettledQueueReceiptKeys: () => new Set(), publish() {},
+    }, availableProjectAdmission());
+    await controls.create('chat-1', 'queued input');
+    let available = true;
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const callbacks = queueCallbacks({ canDispatch: () => available });
+    const runAgentTurn = mock(async () => undefined);
+    const drainer = new QueueDrainer({
+      ownership: idleOwnership(), controls,
+      turnRunner: { isChatRunning: () => false, runAgentTurn },
+      getDrainOptions: () => ({}), projectAdmission: availableProjectAdmission(),
+      runSelectionAdmissionExclusive: async (_chatId, operation) => {
+        entered.resolve(); await release.promise; return operation();
+      },
+      callbacks,
+    });
+    const drain = drainer.run('chat-1');
+    await entered.promise;
+    available = false;
+    release.resolve();
+    await drain;
+    expect((await controls.read('chat-1')).entries).toHaveLength(1);
+    expect(callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
+  });
+
   it('discards a prepared input when queue removal fails after transcript admission', async () => {
     const failure = new Error('queue removal failed');
     const discardPreparedInput = mock(() => undefined);
@@ -130,7 +161,7 @@ describe('QueueDrainer', () => {
     const settle = mock(() => undefined);
     const runAgentTurn = mock(async () => undefined);
     const retireAttempt = mock(() => undefined);
-    let shutdownChecks = 0;
+    let shuttingDown = false;
     const drainer = new QueueDrainer({
       ownership: {
         hasSuppression: () => false,
@@ -145,7 +176,9 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
-          return { input, control: {}, inserted: admit(input) };
+          const inserted = admit(input);
+          shuttingDown = true;
+          return { input, control: {}, inserted };
         }),
       },
       projectAdmission: availableProjectAdmission(),
@@ -156,10 +189,7 @@ describe('QueueDrainer', () => {
       getDrainOptions: () => ({}),
       runSelectionAdmissionExclusive: (chatId, operation) => operation(),
       callbacks: {
-        isShuttingDown: () => {
-          shutdownChecks += 1;
-          return shutdownChecks > 3;
-        },
+        isShuttingDown: () => shuttingDown,
         registerQueued: mock(() => true),
         appendControlReceipt: mock(() => undefined),
         isControlInputViewCurrent: () => true,

@@ -24,12 +24,15 @@ import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { AgentCredentialReference } from '@garcon/common/agent-execution';
 import type { JsonObject } from '@garcon/common/json';
 import { createLogger } from '../lib/log.js';
+import { FileAgentMigrationStore } from './integration-migration-store.js';
 
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 export interface IntegrationHostFactoryOptions {
   readonly workspaceDir: string;
+  readonly nodeId?: string;
+  readonly instanceId?: string;
   readonly resolveCredential: (request: {
     readonly agentId: string;
     readonly reference: AgentCredentialReference;
@@ -250,9 +253,11 @@ interface HostRecord {
 export class IntegrationHostFactory implements AgentHostFactory {
   readonly #options: IntegrationHostFactoryOptions;
   readonly #hosts = new Map<string, HostRecord>();
+  readonly #instanceId: string;
 
   constructor(options: IntegrationHostFactoryOptions) {
     this.#options = options;
+    this.#instanceId = options.instanceId ?? crypto.randomUUID();
   }
 
   forAgent(agentId: string): AgentHost {
@@ -272,6 +277,12 @@ export class IntegrationHostFactory implements AgentHostFactory {
     };
     const host: AgentHost = Object.freeze({
       agentId,
+      migrations: new FileAgentMigrationStore(this.#options.workspaceDir, agentId),
+      scope: Object.freeze({
+        nodeId: this.#options.nodeId ?? 'local',
+        instanceId: this.#instanceId,
+        integrationId: agentId,
+      }),
       logger: this.#options.loggerFactory?.(agentId) ?? defaultLogger(agentId),
       storage: new ScopedStorage(this.#options.workspaceDir, agentId),
       environment,

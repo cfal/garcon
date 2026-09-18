@@ -19,7 +19,8 @@ const MAX_LINES = 1000;
 // stays in chats; control view fencing remains independent of receipt creation.
 // Delegated starts add an admission gate and noncompensating startup settlement;
 // progress observation and rendering remain outside command/execution ownership.
-const EXECUTION_FOOTPRINT_BUDGET = 8715;
+// Remote execution adds an availability gate and retains uncertain dispatch attempts.
+const EXECUTION_FOOTPRINT_BUDGET = 8719;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

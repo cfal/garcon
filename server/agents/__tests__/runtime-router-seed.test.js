@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -8,10 +9,12 @@ import { renderCarriedContext } from '../../../common/transcript-seed.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { DomainError } from '../../lib/domain-error.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createProducerFixture } from './producer-fixture.ts';
 
 let projectDir;
 
 function makeRouter(overrides = {}) {
+  const producer = overrides.producer ?? createProducerFixture();
   const settings = { ownerId: 'test', schemaVersion: 1, values: {} };
   const entry = {
     id: 'chat-1',
@@ -42,7 +45,7 @@ function makeRouter(overrides = {}) {
     currentView: overrides.currentView,
   });
   const start = overrides.start ?? mock(async (request) => {
-    request.sink.publish({
+    producer.emit(request.producerBinding, {
       type: 'session',
       session: {
         agentSessionId: 'native-1',
@@ -50,18 +53,22 @@ function makeRouter(overrides = {}) {
         nativeSeedReceipt: null,
       },
     });
-    request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
     return { id: 'start-handle' };
   });
   const resume = overrides.resume ?? mock(async (request) => {
-    request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
     return { id: 'resume-handle' };
   });
-  const submitGoalControl = overrides.submitGoalControl ?? mock(async () => true);
+  const submitGoalControl = overrides.submitGoalControl ?? mock(async () => ({
+    preparation: producer.reference('goal-preparation'),
+    handle: producer.reference('execution'),
+  }));
   const steer = overrides.steer ?? mock(async () => ({ kind: 'accepted' }));
   const providerTarget = overrides.providerTarget ?? {};
-  const captureTarget = overrides.captureTarget ?? mock(() => providerTarget);
+  const captureTarget = overrides.captureTarget ?? mock(async () => providerTarget);
   const integration = {
+    producers: producer.producers,
     descriptor: {
       id: 'test',
       supportedPermissionModes: ['default'],
@@ -70,10 +77,10 @@ function makeRouter(overrides = {}) {
     execution: {
       start,
       resume,
-      abort: mock(async () => undefined),
+      abort: overrides.abort ?? mock(async () => undefined),
     },
     steering: { captureTarget, steer },
-    goals: { submitControl: submitGoalControl },
+    goals: { prepareControl: submitGoalControl, deliverControl: async () => {}, cancelControl: async () => {} },
     settings: { defaults: () => settings, parse: (input) => input },
   };
   const registry = {
@@ -108,6 +115,7 @@ function makeRouter(overrides = {}) {
     resolveEndpointReference: mock(() => null),
   };
   const router = new AgentRuntimeRouter({
+    resolveFileMentions: overrides.resolveFileMentions ?? resolveFileMentionsInCommand,
     registry,
     directory: {
       require: mock(() => integration),
@@ -138,6 +146,7 @@ function makeRouter(overrides = {}) {
     conversation,
     endpointResolver,
     transcript,
+    producer,
   };
 }
 
@@ -180,8 +189,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
         prefix: expect.stringContaining('prior context'),
       }),
       runId: 'turn-1',
-      sink: expect.objectContaining({ publish: expect.any(Function) }),
-    }));
+      producerBinding: expect.objectContaining({ kind: 'producer' }),
+    }), expect.anything());
     expect(start.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
@@ -210,7 +219,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringMatching(/^<garcon-preambles>PRIVATE<\/garcon-preambles>\n\nreview @notes\.txt/),
       carriedContext: { prefix: 'carried context' },
-    }));
+    }), expect.anything());
     expect(start.mock.calls[0][0].prompt).toContain('USER FILE BODY');
     expect(start.mock.calls[0][0]).not.toHaveProperty('providerPrefix');
   });
@@ -239,7 +248,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
       carriedContext: expect.objectContaining({
         prefix: expect.stringContaining('earlier answer'),
       }),
-    }));
+    }), expect.anything());
   });
 
   it('derives a new session seed from the authoritative ledger context', async () => {
@@ -268,7 +277,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     });
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'compacted:prior context' },
-    }));
+    }), expect.anything());
     expect(transcript.notices).toEqual([expect.objectContaining({
       kind: 'notice',
       message: 'compacted prior context',
@@ -277,14 +286,16 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   it('appends the accepted handoff summary immediately before provider start', async () => {
+    const producer = createProducerFixture();
     const order = [];
     const summary = 'Objective\n\n  Preserve this indentation.';
     const start = mock(async (request) => {
       order.push('provider-start');
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'start-handle' };
     });
     const { router, transcript } = makeRouter({
+      producer,
       start,
       appendNotice: (_chatId, _viewId, notice) => order.push(`notice:${notice.content}`),
       createCarriedContext: async () => ({
@@ -307,17 +318,19 @@ describe('AgentRuntimeRouter producer boundary', () => {
     })]);
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'compacted seed' },
-    }));
+    }), expect.anything());
   });
 
   it('appends a compact durable notice for a complete projection', async () => {
+    const producer = createProducerFixture();
     const order = [];
     const start = mock(async (request) => {
       order.push('provider-start');
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'start-handle' };
     });
     const { router, transcript } = makeRouter({
+      producer,
       start,
       appendNotice: (_chatId, _viewId, notice) => order.push(`notice:${notice.title}`),
       createCarriedContext: async () => ({
@@ -338,7 +351,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     })]);
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'deterministic seed' },
-    }));
+    }), expect.anything());
   });
 
   it('appends no carryover notice when there is no projectable history', async () => {
@@ -379,11 +392,12 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   it('does not repeat an unchanged carryover notice after provider start fails', async () => {
+    const producer = createProducerFixture();
     let attempt = 0;
     const start = mock(async (request) => {
       attempt += 1;
       if (attempt === 1) throw new Error('provider start failed');
-      request.sink.publish({
+      producer.emit(request.producerBinding, {
         type: 'session',
         session: {
           agentSessionId: 'native-1',
@@ -391,10 +405,11 @@ describe('AgentRuntimeRouter producer boundary', () => {
           nativeSeedReceipt: null,
         },
       });
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'start-handle' };
     });
     const { router, transcript } = makeRouter({
+      producer,
       start,
       createCarriedContext: async () => ({
         kind: 'complete',
@@ -548,7 +563,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     expect(resume).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'private-prefix\n\nvisible',
-    }));
+    }), expect.anything());
     expect(resume.mock.calls[0][0]).not.toHaveProperty('providerPrefix');
   });
 
@@ -578,6 +593,60 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(submitGoalControl.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
+  it('finishes node-owned file expansion before reserving goal delivery', async () => {
+    const reading = Promise.withResolvers();
+    const expanded = Promise.withResolvers();
+    const f = makeRouter({
+      entry: { agentSessionId: 'native-1' },
+      resume: mock(async () => ({ id: 'active-handle' })),
+      resolveFileMentions: mock(async (prompt) => {
+        if (prompt !== 'goal @notes.txt') return prompt;
+        reading.resolve();
+        return expanded.promise;
+      }),
+    });
+    await f.router.runAgentTurn('chat-1', 'active', { turnId: 'turn-1' });
+    const goal = f.router.submitGoalControl('chat-1', 'goal @notes.txt', { turnId: 'turn-2' }, async (handoff) => {
+      handoff.validate(); handoff.commit();
+    });
+    await reading.promise;
+    expect(f.submitGoalControl).not.toHaveBeenCalled();
+    expanded.resolve('worker-expanded goal');
+    await expect(goal).resolves.toBe(true);
+    expect(f.submitGoalControl).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'worker-expanded goal', expectedRunId: 'turn-1', runId: 'turn-2',
+    }), expect.anything());
+  });
+
+  it('retains goal abort authority before the predecessor launch reply arrives', async () => {
+    const producer = createProducerFixture();
+    const handle = producer.reference('execution');
+    const entered = Promise.withResolvers();
+    const reply = Promise.withResolvers();
+    const abort = mock(async () => true);
+    const { router, transcript } = makeRouter({
+      producer,
+      entry: { agentSessionId: 'native-1' },
+      resume: mock(async () => { entered.resolve(); return reply.promise; }),
+      abort,
+      submitGoalControl: mock(async () => ({ preparation: producer.reference('goal-preparation'), handle })),
+    });
+    const predecessor = router.runAgentTurn('chat-1', 'first', { turnId: 'turn-1' });
+    try {
+      await entered.promise;
+      await router.submitGoalControl('chat-1', 'goal', { turnId: 'turn-2' }, async (handoff) => {
+        handoff.validate();
+        handoff.commit();
+      });
+      expect(transcript.activeRunId()).toBe('turn-2');
+      reply.resolve(handle);
+      await predecessor;
+      await router.abortSession('chat-1');
+      expect(abort.mock.calls).toEqual([[handle]]);
+      expect(transcript.activeRunId()).toBeNull();
+    } finally { reply.resolve(handle); await predecessor; }
+  });
+
   it('persists one coherent endpoint selection after a lazy start', async () => {
     const { router, registry } = makeRouter({
       entry: {
@@ -603,13 +672,15 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   it('[TLV5-L09.03-RUNTIME-UNIT-01] resumes without a native-activity scheduling dependency', async () => {
+    const producer = createProducerFixture();
     const order = [];
     const resume = mock(async (request) => {
       order.push('resume');
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'resume-handle' };
     });
     const { router, transcript } = makeRouter({
+      producer,
       entry: {
         agentSessionId: 'native-1',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
@@ -699,12 +770,14 @@ describe('AgentRuntimeRouter producer boundary', () => {
         turnId: 'turn-active',
       },
     };
-    const { router, events, captureTarget, providerTarget, steer } = makeRouter({
+    const { router, events, captureTarget, providerTarget, steer, transcript } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn,
     });
+    transcript.ledger.openProducer('chat-1');
+    transcript.ledger.beginRun('chat-1', 'turn-active');
     const prepareDelivery = mock(async () => undefined);
-    const target = router.captureSteerTarget('chat-1');
+    const target = await router.captureSteerTarget('chat-1');
 
     await expect(router.steerInput('chat-1', 'guidance', {
       clientRequestId: 'request-steer',
@@ -718,27 +791,31 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(steer).toHaveBeenCalledWith(expect.objectContaining({
       target: providerTarget,
       input: 'guidance',
-      prepareDelivery: expect.any(Function),
     }));
+    expect(prepareDelivery).toHaveBeenCalledTimes(1);
     expect(events.handoffTurn).not.toHaveBeenCalled();
     expect(events.getActiveTurn()).toEqual(activeTurn);
   });
 
   it('replaces the producer capability before the next run', async () => {
-    const sinks = [];
+    const producer = createProducerFixture();
+    const bindings = [];
     const start = mock(async (request) => {
-      sinks.push(request.sink);
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
-      return { id: `handle-${sinks.length}` };
+      bindings.push(request.producerBinding);
+      producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      return { id: `handle-${bindings.length}` };
     });
-    const { router } = makeRouter({ start });
+    const { router, transcript } = makeRouter({ start, producer });
 
     await router.runAgentTurn('chat-1', 'first', { turnId: 'turn-1' });
     router.reopenProducer('chat-1');
 
-    expect(() => sinks[0].publish({ type: 'rows', rows: [] })).toThrow('sink closed');
     await router.runAgentTurn('chat-1', 'second', { turnId: 'turn-2' });
-    expect(sinks[1]).not.toBe(sinks[0]);
+    const publish = mock(transcript.sink.publish);
+    transcript.sink.publish = publish;
+    producer.emit(bindings[0], { type: 'rows', rows: [] });
+    expect(publish).not.toHaveBeenCalled();
+    expect(bindings[1]).not.toEqual(bindings[0]);
   });
 });
 

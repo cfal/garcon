@@ -2,7 +2,8 @@ import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import {
   AgentIntegrationError,
   type AgentChatReference,
-  type AgentProjectPathUpdates,
+  type AgentProjectPathUpdateRequest,
+  type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
 import { OpenCodeTimeoutError } from './request-control.js';
 import { OpenCodeSdkResultError } from './sdk-result.js';
@@ -20,7 +21,7 @@ interface OpenCodeProjectPathRuntime {
 export function createOpenCodeProjectPathUpdates(input: {
   readonly runtime: OpenCodeProjectPathRuntime;
   readonly sessionId: (chat: AgentChatReference) => string | null;
-}): AgentProjectPathUpdates {
+}): { prepare(request: AgentProjectPathUpdateRequest): Promise<AgentProjectPathUpdatePreparation | void> } {
   return {
     async prepare(request) {
       request.signal.throwIfAborted();

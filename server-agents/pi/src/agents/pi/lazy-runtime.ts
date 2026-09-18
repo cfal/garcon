@@ -1,8 +1,7 @@
 import type {
-  AgentSteerRequest,
   AgentSteerResult,
-  AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
   PiResumeRequest,
   PiStartedSession,

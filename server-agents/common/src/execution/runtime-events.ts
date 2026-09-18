@@ -7,12 +7,37 @@ import type {
   AgentRunningSession,
   AgentEstablishedSession,
   AgentStartRequestV5,
+  AgentExecutionAdmission,
+  AgentSteerRequest,
+  AgentGoalControlHandoff,
 } from '@garcon/server-agent-interface';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { providerMetadata } from '../native-session/provider-metadata.js';
 
-export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'sink'>;
-export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'sink'>;
-export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'sink'>;
+export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'producerBinding'> & {
+  readonly admission: AgentExecutionAdmission;
+};
+export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'producerBinding'> & {
+  readonly admission: AgentExecutionAdmission;
+};
+export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'producerBinding'> & {
+  readonly admission: AgentExecutionAdmission;
+};
+
+export interface RuntimePermissionResponse {
+  readonly permissionOccurrenceId: string;
+  respond(decision: PermissionDecisionPayload): Promise<void>;
+}
+
+export type RuntimeSteerTarget = object;
+export type RuntimeSteerRequest = Omit<AgentSteerRequest, 'target'> & {
+  readonly target: RuntimeSteerTarget | null;
+  readonly prepareDelivery: () => Promise<void>;
+};
+
+export type RuntimeGoalControlRequest = AgentRuntimeResumeRequest & {
+  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
+};
 
 type ProviderRunEndedEvent = Exclude<
   Extract<AgentProducerEvent, { readonly type: 'run-ended' }>,
@@ -22,7 +47,10 @@ type ProviderRunEndedEvent = Exclude<
 // Runtime publication is the provider event contract itself. The publisher a runtime was handed
 // is the route, so events carry no chat identity and require no adapter-specific dialect.
 export type AgentRuntimeEvent =
-  | Exclude<AgentProducerEvent, { readonly type: 'run-ended' }>
+  | Exclude<AgentProducerEvent, { readonly type: 'run-ended' | 'permission' }>
+  | (Omit<Extract<AgentProducerEvent, { readonly type: 'permission' }>, 'decision'> & {
+      readonly decision?: RuntimePermissionResponse;
+    })
   | ProviderRunEndedEvent;
 
 // Captured on the concrete turn, request, or callback object that produces events, never looked

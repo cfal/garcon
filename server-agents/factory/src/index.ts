@@ -52,6 +52,8 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly descriptor = FACTORY_DESCRIPTOR;
   readonly attachments = null;
   readonly execution;
+  readonly producers;
+  readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
@@ -90,7 +92,10 @@ export default class FactoryAgentIntegration implements AgentIntegration {
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
     const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions, runtime);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host);
+    this.execution = producer.execution;
+    this.producers = producer.producers;
+    this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({
       async load({ chat, signal }) {
         signal.throwIfAborted();

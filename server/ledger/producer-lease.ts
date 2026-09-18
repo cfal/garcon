@@ -4,6 +4,7 @@ import type { TranscriptProducerLease } from './service.js';
 
 export class ProducerLease implements TranscriptProducerLease {
   #closed = false;
+  readonly #closeListeners = new Set<() => void>();
 
   readonly sink: AgentProducerSink;
 
@@ -23,9 +24,17 @@ export class ProducerLease implements TranscriptProducerLease {
     return this.#closed;
   }
 
+  onClosed(listener: () => void): () => void {
+    if (this.#closed) listener();
+    else this.#closeListeners.add(listener);
+    return () => { this.#closeListeners.delete(listener); };
+  }
+
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
     this.onClose();
+    for (const listener of this.#closeListeners) listener();
+    this.#closeListeners.clear();
   }
 }

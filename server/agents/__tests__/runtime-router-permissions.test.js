@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -9,6 +10,8 @@ import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { AgentCallError } from '@garcon/server-agent-interface';
+import { permissionResponse, permissionFixture } from './producer-fixture.ts';
 
 const AT = '2026-08-15T00:00:00.000Z';
 
@@ -20,13 +23,15 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
         permissionOccurrenceId: 'incarnation-1',
       },
     }],
-  })) {
+  }), permissions = permissionFixture(new Map())) {
   return new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: {
       getChat: mock(() => ({ agentId: 'test' })),
     },
     directory: {
       get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
+      require: () => ({ permissions }),
     },
     endpointResolver: {},
     events: {},
@@ -41,19 +46,22 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
 }
 
 describe('AgentRuntimeRouter permission replies', () => {
-  it('invokes the exact permission capability with its receiver', async () => {
+  it('invokes the exact scoped permission operation with its receiver', async () => {
     const resolvePermission = mock(async () => undefined);
     const decisionCapability = {
       permissionOccurrenceId: 'incarnation-1',
-      runtime: { resolvePermission },
-      async respond(decision) {
-        await this.runtime.resolvePermission(decision);
-      },
+      response: permissionResponse('incarnation-1'),
     };
     const transcript = createRuntimeTranscriptFixture({
       permissionDecision: decisionCapability,
     });
-    const router = makeRouter(transcript);
+    const router = makeRouter(transcript, {
+      runtime: { resolvePermission },
+      async respond({ response, decision }) {
+        expect(response).toEqual(decisionCapability.response);
+        await this.runtime.resolvePermission(decision);
+      },
+    });
     const decision = { allow: true };
 
     await router.resolvePermission('chat-1', 'incarnation-1', decision, permissionControl());
@@ -61,19 +69,19 @@ describe('AgentRuntimeRouter permission replies', () => {
     expect(resolvePermission).toHaveBeenCalledWith(decision);
   });
 
-  it('releases the actionability claim when the provider rejects the decision', async () => {
+  it('releases the actionability claim only after definite non-dispatch', async () => {
     const respondToPermission = mock(async () => {
-      throw new Error('provider rejected permission');
+      throw new AgentCallError('not-dispatched', 'provider rejected permission');
     });
     const abandoned = mock(() => undefined);
     const transcript = createRuntimeTranscriptFixture({
       onPermissionAbandoned: abandoned,
       permissionDecision: {
         permissionOccurrenceId: 'incarnation-1',
-        respond: respondToPermission,
+        response: permissionResponse('incarnation-1'),
       },
     });
-    const router = makeRouter(transcript);
+    const router = makeRouter(transcript, permissionFixture(new Map([['incarnation-1', respondToPermission]])));
 
     await expect(router.resolvePermission(
       'chat-1',
@@ -97,7 +105,9 @@ describe('AgentRuntimeRouter permission replies', () => {
       if (!claim) throw new Error('Permission occurrence is not actionable');
       return claim;
     });
-    const router = makeRouter(transcript);
+    const router = makeRouter(transcript, permissionFixture(new Map([
+      ['incarnation-1', firstRespond], ['incarnation-2', secondRespond],
+    ])));
     const firstDecision = { allow: true };
     const secondDecision = { allow: false };
 
@@ -126,7 +136,7 @@ describe('AgentRuntimeRouter permission replies', () => {
       if (control.permissionOccurrenceId === activeClaim.permissionOccurrenceId) return activeClaim;
       throw new Error('Permission occurrence is not actionable');
     });
-    const router = makeRouter(transcript);
+    const router = makeRouter(transcript, permissionFixture(new Map([['incarnation-1', exactRespond]])));
 
     await expect(router.resolvePermission(
       'chat-1',
@@ -169,7 +179,7 @@ describe('AgentRuntimeRouter permission replies', () => {
             requestedTool: new BashToolUseMessage(AT, `tool-${command}`, command),
             options: [],
           },
-          decision: { permissionOccurrenceId, respond },
+          decision: { permissionOccurrenceId, response: permissionResponse(permissionOccurrenceId) },
         });
       }
       producer.sink.publish({
@@ -181,7 +191,9 @@ describe('AgentRuntimeRouter permission replies', () => {
           reason: 'delayed terminal',
         },
       });
-      const router = makeRouter({ ledger, adoption: { ensure: async () => view } });
+      const router = makeRouter({ ledger, adoption: { ensure: async () => view } }, permissionFixture(new Map([
+        [firstOccurrence, firstRespond], [secondOccurrence, secondRespond],
+      ])));
       const decision = { allow: true };
 
       await router.resolvePermission(
@@ -237,13 +249,13 @@ describe('AgentRuntimeRouter permission replies', () => {
         },
         decision: {
           permissionOccurrenceId: 'incarnation-1',
-          respond,
+          response: permissionResponse('incarnation-1'),
         },
       });
       const router = makeRouter({
         ledger,
         adoption: { ensure: async () => view },
-      });
+      }, permissionFixture(new Map([['incarnation-1', respond]])));
 
       const resolution = router.resolvePermission(
         'chat-1',
@@ -278,7 +290,7 @@ function permissionControl(overrides = {}) {
   };
 }
 
-function permissionClaim(permissionOccurrenceId, respond) {
+function permissionClaim(permissionOccurrenceId) {
   return {
     chatId: 'chat-1',
     viewId: 'view-1',
@@ -287,7 +299,7 @@ function permissionClaim(permissionOccurrenceId, respond) {
     claimId: `claim-${permissionOccurrenceId}`,
     decision: {
       permissionOccurrenceId,
-      respond,
+      response: permissionResponse(permissionOccurrenceId),
     },
   };
 }

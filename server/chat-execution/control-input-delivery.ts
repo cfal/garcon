@@ -2,7 +2,7 @@ import type { CapturedSteerTarget } from './types.ts';
 import { ControlSteerDelivery } from './control-steer-delivery.ts';
 
 interface ControlInputDeliveryOptions {
-  captureTarget(chatId: string): CapturedSteerTarget | null;
+  captureTarget(chatId: string): Promise<CapturedSteerTarget | null>;
   deliverSteer(
     chatId: string,
     content: string,
@@ -33,7 +33,7 @@ export class ControlInputDelivery {
     onControlRun: (turnId: string) => void,
   ): Promise<void> {
     signal.throwIfAborted();
-    const captured = emittingRunId === null ? null : this.options.captureTarget(chatId);
+    const captured = emittingRunId === null ? null : await this.options.captureTarget(chatId);
     const target = captured?.identity.turnId === emittingRunId ? captured : null;
 
     if (target) {

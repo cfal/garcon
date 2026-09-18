@@ -16,10 +16,9 @@ import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type {
   AgentLogger,
-  AgentSteerRequest,
   AgentSteerResult,
-  AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { PiConfig } from '../../config.js';
 import {

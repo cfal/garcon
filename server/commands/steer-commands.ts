@@ -55,7 +55,7 @@ export class SteerCommands {
     );
     const initialChat = this.deps.chats.getChat(input.chatId);
     const integrationId = initialChat?.agentId;
-    const target = initialChat ? this.deps.queue.captureSteerTarget(input.chatId) : null;
+    const target = initialChat ? await this.deps.queue.captureSteerTarget(input.chatId) : null;
     const ledgerInput = {
       commandType: 'steer',
       chatId: input.chatId,
@@ -213,7 +213,7 @@ export class SteerCommands {
     const clientMessageId = priorClientMessageId
       ?? observedEntry?.submission?.clientMessageId
       ?? entryId;
-    const target = initialChat ? this.deps.queue.captureSteerTarget(input.chatId) : null;
+    const target = initialChat ? await this.deps.queue.captureSteerTarget(input.chatId) : null;
     const ledgerInput = {
       commandType: 'steer',
       chatId: input.chatId,

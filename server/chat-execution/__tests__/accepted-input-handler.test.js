@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { AgentCallError } from '@garcon/server-agent-interface';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
 import { DuplicateGoalControlInputError } from '../goal-control-delivery.ts';
 import {
@@ -440,9 +441,12 @@ describe('AcceptedInputHandler', () => {
     });
   });
 
-  test('finishes initial-input compensation before execution admission is released', async () => {
+  test.each([
+    ['ordinary failure', new Error('provider failed'), ['compensated', 'settled', 'released']],
+    ['setup failure', new AgentCallError('not-dispatched', 'setup reply lost'), ['compensated', 'settled', 'released']],
+    ['uncertain launch', new AgentCallError('unknown', 'execution reply lost'), ['settled', 'released']],
+  ])('finishes initial-input settlement before release after %s', async (_name, providerError, expected) => {
     const events = [];
-    const providerError = new Error('provider failed');
     const settle = settlement({
       settleOperationFailure: mock(async () => { events.push('settled'); }),
     });
@@ -469,7 +473,7 @@ describe('AcceptedInputHandler', () => {
       },
     })).rejects.toBe(providerError);
 
-    expect(events).toEqual(['compensated', 'settled', 'released']);
+    expect(events).toEqual(expected);
   });
 
   test('settles an accepted goal-control delivery failure without queueing a fallback', async () => {

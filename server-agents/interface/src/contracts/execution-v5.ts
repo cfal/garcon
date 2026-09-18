@@ -1,13 +1,13 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
-import type { AgentExecutionAdmission, AgentRunningSession } from './execution.js';
-import type { AgentProducerSink } from './producer.js';
+import type { AgentRunningSession } from './execution.js';
+import type { AgentProducerBinding, AgentResourceRef, NodeCallOptions } from './resources.js';
 import type { AgentNativeSessionRef } from './transcript.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 
-export type AgentExecutionHandle = object;
+export type AgentExecutionHandle = AgentResourceRef<'execution'>;
 
 export interface AgentExecutionContextV5 {
   readonly chatId: string;
@@ -18,8 +18,7 @@ export interface AgentExecutionContextV5 {
   readonly settings: AgentSettingsEnvelope;
   readonly endpoint: AgentEndpointSelection | null;
   readonly runId: string;
-  readonly sink: AgentProducerSink;
-  readonly admission: AgentExecutionAdmission;
+  readonly producerBinding: AgentProducerBinding;
 }
 
 export interface AgentStartRequestV5 extends AgentExecutionContextV5 {
@@ -36,8 +35,8 @@ export interface AgentResumeRequestV5 extends AgentExecutionContextV5 {
 }
 
 export interface AgentExecutionV5 {
-  start(request: AgentStartRequestV5): Promise<AgentExecutionHandle>;
-  resume(request: AgentResumeRequestV5): Promise<AgentExecutionHandle>;
-  abort(handle: AgentExecutionHandle): Promise<boolean>;
-  runningSessions(): readonly AgentRunningSession[];
+  start(request: AgentStartRequestV5, options?: NodeCallOptions): Promise<AgentExecutionHandle>;
+  resume(request: AgentResumeRequestV5, options?: NodeCallOptions): Promise<AgentExecutionHandle>;
+  abort(handle: AgentExecutionHandle, options?: NodeCallOptions): Promise<boolean>;
+  runningSessions(options?: NodeCallOptions): Promise<readonly AgentRunningSession[]>;
 }

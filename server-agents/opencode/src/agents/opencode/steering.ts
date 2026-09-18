@@ -1,8 +1,7 @@
 import type {
-  AgentSteerRequest,
   AgentSteerResult,
-  AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import { buildPromptBody } from './prompt.js';
 import { withAbortableTimeout } from './request-control.js';
 import type { SSEEvent } from './sse-events.js';

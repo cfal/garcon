@@ -5,6 +5,8 @@ import type {
 } from '../index.js';
 
 const REQUIRED_FACET_METHODS = {
+  producers: ['bind', 'close', 'subscribe'],
+  permissions: ['respond'],
   execution: ['start', 'resume', 'abort', 'runningSessions'],
   catalog: ['snapshot'],
   settings: ['describe', 'defaults', 'parse', 'migrate', 'applyPatch'],
@@ -18,7 +20,7 @@ const NULLABLE_FACET_METHODS = {
   compaction: ['compact'],
   forking: ['fork', 'discard'],
   steering: ['captureTarget', 'steer'],
-  goals: ['submitControl'],
+  goals: ['prepareControl', 'deliverControl', 'cancelControl'],
   endpoints: ['validate'],
   singleQuery: ['run'],
   legacyHistoryImport: ['load'],
@@ -27,7 +29,7 @@ const NULLABLE_FACET_METHODS = {
   nativeSessions: ['resolveNativeSession', 'describeSource', 'release'],
   configurationValidation: ['validate'],
   sessionConfiguration: ['apply'],
-  projectPathUpdates: ['prepare'],
+  projectPathUpdates: ['prepare', 'commit', 'rollback'],
 } as const;
 
 export interface AgentIntegrationConformanceOptions {
@@ -204,7 +206,7 @@ export async function runAgentIntegrationConformance(
     await integration.lifecycle.start();
     started = true;
     await integration.lifecycle.start();
-    assertRunningSessions(agentId, integration.execution.runningSessions());
+    assertRunningSessions(agentId, await integration.execution.runningSessions());
   } finally {
     if (started) {
       await integration.lifecycle.stop();

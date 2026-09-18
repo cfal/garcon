@@ -9,10 +9,9 @@ import { resolveClaudeModel } from './model-context.js';
 import { configureClaudeSessionModel } from './session-model.js';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
-  AgentSteerRequest,
   AgentSteerResult,
-  AgentSteerTarget,
 } from '@garcon/server-agent-interface';
+import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertClaudeExecutionOpen,

@@ -59,7 +59,6 @@ import { AgentStartSelectionService } from './agents/agent-start-selection-servi
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
-import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
 import {
   migrateAgentIntegrationCoreRecords,
   refreshAgentExecutionModeCoreRecords,
@@ -254,7 +253,6 @@ export async function startServer(): Promise<void> {
     const integrationRegistry = new IntegrationRegistry({
       integrations: defaultAgentIntegrations,
       hostFactory: integrationHostFactory,
-      migrationStoreFor: (agentId) => new FileAgentMigrationStore(workspaceDir, agentId),
     });
     const endpointResolver = new ApiProviderEndpointResolver(
       () => apiProviderStore.list(),
@@ -421,6 +419,7 @@ export async function startServer(): Promise<void> {
     });
 
     agentRegistry = new AgentRegistry({
+      resolveFileMentions: resolveFileMentionsInCommand,
       registry: chatRegistry,
       integrations: integrationRegistry,
       endpointResolver,

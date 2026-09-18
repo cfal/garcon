@@ -15,6 +15,7 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
 import {
   createHistoryImport,
   createNativeHistoryImport,
@@ -47,6 +48,8 @@ export default class AmpAgentIntegration implements AgentIntegration {
     fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
   } as const;
   readonly execution;
+  readonly producers;
+  readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity = null;
@@ -82,7 +85,10 @@ export default class AmpAgentIntegration implements AgentIntegration {
     const providerExecution = new AmpExecution(runtime, nativeSessions);
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    const producer = createAgentProducerAdapter(providerExecution, host);
+    this.execution = producer.execution;
+    this.producers = producer.producers;
+    this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({
       async load({ chat, signal }) {
         signal.throwIfAborted();
@@ -146,10 +152,10 @@ export default class AmpAgentIntegration implements AgentIntegration {
         }
       },
     };
-    this.steering = {
-      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+    this.steering = createAgentSteering(producer, {
+      captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
       steer: (request) => runtime.steer(request),
-    };
+    });
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {

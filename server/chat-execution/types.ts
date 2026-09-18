@@ -250,7 +250,7 @@ export interface TranscriptSnapshotReservation {
 
 export interface AgentTurnRunnerPort {
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  captureSteerTarget(chatId: string): AgentSteerTarget | null;
+  captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null>;
   steerInput(
     chatId: string,
     input: string,
@@ -319,7 +319,7 @@ export interface ChatExecutionCommands {
   replaceAccepted(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult>;
   deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
   moveAccepted(input: AcceptedQueueMove): Promise<QueueCommandMutationResult>;
-  captureSteerTarget(chatId: string): CapturedSteerTarget | null;
+  captureSteerTarget(chatId: string): Promise<CapturedSteerTarget | null>;
   deliverAcceptedSteer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome>;
   deliverAcceptedQueueEntrySteer(
     input: AcceptedQueueEntrySteer,

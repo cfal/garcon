@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { AgentCallError } from '@garcon/server-agent-interface';
 import type { CommandErrorCode } from '../../common/chat-command-contracts.ts';
 import type {
   AgentExecutionAdmission,
@@ -670,7 +671,7 @@ export class AcceptedInputHandler {
 
   async #settleInitialFailure(input: AcceptedDirectInput, error: unknown): Promise<void> {
     let failure = error;
-    if (input.preparation) {
+    if (input.preparation && !(error instanceof AgentCallError && error.outcome === 'unknown')) {
       try {
         await input.preparation.compensate();
       } catch (compensationError) {

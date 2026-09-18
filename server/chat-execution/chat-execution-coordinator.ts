@@ -93,6 +93,7 @@ const logger = createLogger('queue');
 
 interface ChatExecutionCoordinatorOptions {
   projectAdmission: ProjectAdmissionPort;
+  canDispatch?: () => boolean;
   isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
@@ -228,6 +229,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         selectionAdmissionLock.runExclusive(`chat:${chatId}`, operation),
       projectAdmission: options.projectAdmission,
       callbacks: {
+        canDispatch: options.canDispatch ?? (() => true),
         isShuttingDown: () => this.#shuttingDown,
         registerQueued: (chatId, content, options) => (
           this.#acceptedInputTranscript.registerQueued(chatId, content, options)
@@ -435,7 +437,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     await this.#acceptedInputHandler.scheduleOperation(input);
   }
 
-  captureSteerTarget(chatId: string): CapturedSteerTarget | null {
+  captureSteerTarget(chatId: string): Promise<CapturedSteerTarget | null> {
     return this.#steerInputDelivery.captureTarget(chatId);
   }
 
@@ -467,7 +469,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       return this.#enqueueServerControlInput(chatId, input, signal);
     }
 
-    const target = this.#steerInputDelivery.captureTarget(chatId);
+    const target = await this.#steerInputDelivery.captureTarget(chatId);
     if (target) {
       const outcome = await this.#controlSteerDelivery.toCapturedTarget(
         chatId,
@@ -861,7 +863,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
     this.#ownership.releaseDirect(reservation);
     const attempt = this.#ownership.attempt(reservation.chatId);
-    if (attempt && outcome !== 'completed') this.#retireAttempt(reservation.chatId, attempt);
+    if (attempt && outcome !== 'completed' && !this.#turnRunner.isChatRunning(reservation.chatId)) {
+      this.#retireAttempt(reservation.chatId, attempt);
+    }
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
     this.#ownership.notifyOwnersChanged();
     this.#invalidateProcessing(reservation.chatId);

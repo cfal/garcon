@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentIntegration } from '../../index.js';
+import { createAgentResourceRef, type AgentIntegration } from '../../index.js';
 import {
   runAgentIntegrationConformance,
   validateAgentIntegration,
 } from '../conformance.js';
 
 const settings = { ownerId: 'other', schemaVersion: 1, values: {} } as const;
+const scope = { nodeId: 'test', instanceId: 'test-instance', integrationId: 'other' };
 const integration = {
   descriptor: {
     id: 'other',
@@ -21,11 +22,13 @@ const integration = {
   },
   attachments: null,
   execution: {
-    start: async () => ({ id: 'execution' }),
-    resume: async () => ({ id: 'execution' }),
+    start: async () => createAgentResourceRef(scope, 'execution'),
+    resume: async () => createAgentResourceRef(scope, 'execution'),
     abort: async () => false,
-    runningSessions: () => [],
+    runningSessions: async () => [],
   },
+  producers: { scope, bind: async () => {}, close: async () => {}, subscribe: () => () => {} },
+  permissions: { respond: async () => {} },
   legacyHistoryImport: null,
   nativeHistoryImport: null,
   nativeActivity: null,
@@ -181,6 +184,53 @@ describe('validateAgentIntegration', () => {
 });
 
 describe('runAgentIntegrationConformance', () => {
+  test('awaits a remote snapshot before stopping the integration', async () => {
+    const snapshot = Promise.withResolvers<readonly never[]>();
+    const requested = Promise.withResolvers<void>();
+    let stopped = false;
+    const checking = runAgentIntegrationConformance({
+      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integration: {
+        ...integration,
+        execution: {
+          ...integration.execution,
+          runningSessions: () => {
+            requested.resolve();
+            return snapshot.promise;
+          },
+        },
+        lifecycle: {
+          ...integration.lifecycle,
+          stop: async () => { stopped = true; },
+        },
+      },
+    });
+    await requested.promise;
+    expect(stopped).toBe(false);
+    snapshot.resolve([]);
+    await checking;
+    expect(stopped).toBe(true);
+  });
+
+  test('stops the integration when a remote snapshot fails', async () => {
+    let stops = 0;
+    await expect(runAgentIntegrationConformance({
+      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integration: {
+        ...integration,
+        execution: {
+          ...integration.execution,
+          runningSessions: async () => { throw new Error('connection lost'); },
+        },
+        lifecycle: {
+          ...integration.lifecycle,
+          stop: async () => { stops += 1; },
+        },
+      },
+    })).rejects.toThrow('connection lost');
+    expect(stops).toBe(2);
+  });
+
   test('accepts an empty settings patch and a well-formed running-session snapshot', async () => {
     await expect(runAgentIntegrationConformance({
       integrationClass: { integrationId: 'other', apiVersion: 5 },
@@ -188,7 +238,7 @@ describe('runAgentIntegrationConformance', () => {
         ...integration,
         execution: {
           ...integration.execution,
-          runningSessions: () => [{
+          runningSessions: async () => [{
             agentSessionId: 'session-1',
             status: null,
             startedAt: null,
@@ -251,8 +301,8 @@ describe('runAgentIntegrationConformance', () => {
 
   test('rejects malformed or duplicate running-session snapshots', async () => {
     for (const runningSessions of [
-      () => [{ agentSessionId: '', status: null, startedAt: null }],
-      () => [
+      async () => [{ agentSessionId: '', status: null, startedAt: null }],
+      async () => [
         { agentSessionId: 'duplicate', status: null, startedAt: null },
         { agentSessionId: 'duplicate', status: 'running', startedAt: null },
       ],

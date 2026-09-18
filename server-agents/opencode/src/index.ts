@@ -19,6 +19,8 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
+import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
 import {
   createHistoryImport,
   createNativeHistoryImport,
@@ -63,6 +65,8 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;
   readonly execution;
+  readonly producers;
+  readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   readonly nativeActivity;
@@ -96,12 +100,13 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new OpenCodeExecution(runtime, nativeSessions);
-    const producer = createAgentProducerAdapter(providerExecution, logger);
+    const producer = createAgentProducerAdapter(providerExecution, host);
     this.compaction = {
-      compact: async (request) => (
+      compact: async (request, options) => (
         await producer.runExisting(
           request,
           (runtimeRequest, publish) => providerExecution.compact(runtimeRequest, publish),
+          options,
         )
       ).handle,
     };
@@ -112,8 +117,11 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     };
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId);
     this.nativeSessions = nativeEvidence;
-    this.projectPathUpdates = createOpenCodeProjectPathUpdates({ runtime, sessionId });
+    this.projectPathUpdates = createAgentProjectPathUpdates(host.scope,
+      createOpenCodeProjectPathUpdates({ runtime, sessionId }).prepare);
     this.execution = producer.execution;
+    this.producers = producer.producers;
+    this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createOpenCodeNativeActivityProbe({
@@ -122,10 +130,10 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       withClient: (operation) => runtime.withClientLease((client) => operation(async () => client)),
     });
     this.forking = createOpenCodeNativeForking({ runtime, nativeSessions, sessionId });
-    this.steering = {
-      captureTarget: (request) => runtime.steering.captureTarget(request.agentSessionId),
+    this.steering = createAgentSteering(producer, {
+      captureTarget: (agentSessionId) => runtime.steering.captureTarget(agentSessionId),
       steer: (request) => runtime.steering.steer(request),
-    };
+    });
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',

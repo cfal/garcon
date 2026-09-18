@@ -1,8 +1,11 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
+import { createProducerFixture } from './producer-fixture.ts';
 
 function makeRouter(compaction, options = {}) {
+  const producer = createProducerFixture();
   const transcript = createRuntimeTranscriptFixture({
     conversationMessages: options.conversationMessages,
   });
@@ -28,11 +31,13 @@ function makeRouter(compaction, options = {}) {
     },
     settings: { parse: (value) => value ?? {}, defaults: () => ({}) },
     execution,
+    producers: producer.producers,
     transcript: { load: mock(async () => ({ messages: [], revision: 'r' })) },
     compaction,
     forking: null,
   };
   const router = new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: {
       getChat: mock(() => entry),
       updateChat: mock(async () => entry),

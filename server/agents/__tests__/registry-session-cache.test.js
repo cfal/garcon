@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -65,6 +66,7 @@ describe('AgentRegistry session cache', () => {
     },
   ) {
     return new AgentRegistry({
+    resolveFileMentions: resolveFileMentionsInCommand,
       registry: chats,
       integrations,
       endpointResolver: {},

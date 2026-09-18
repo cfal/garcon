@@ -12,8 +12,8 @@ import {
 import type {
   AgentFinalResponse,
   AgentLogger,
-  AgentPermissionResponseCapability,
 } from '@garcon/server-agent-interface';
+import type { RuntimePermissionResponse as AgentPermissionResponseCapability } from '@garcon/server-agent-common/execution/runtime-events';
 import type { CodexRuntimeOperation } from '../runtime-types.js';
 
 // A Codex call together with the capability core handed it. Each operation captures its own

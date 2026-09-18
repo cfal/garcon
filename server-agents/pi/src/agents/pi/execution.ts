@@ -76,7 +76,7 @@ export class PiExecution implements AgentRuntimeExecution {
   }
 
   async prepareProjectPathUpdate(
-    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
+    request: import('@garcon/server-agent-interface').AgentProjectPathUpdateRequest,
   ): Promise<void> {
     request.signal.throwIfAborted();
   }

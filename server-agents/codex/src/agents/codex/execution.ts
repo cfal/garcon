@@ -2,9 +2,9 @@ import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   type AgentEstablishedSession,
-  type AgentGoalControlRequest,
   type AgentHost,
 } from '@garcon/server-agent-interface';
+import type { RuntimeGoalControlRequest as AgentGoalControlRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   type AgentRuntimeExecution,
   type AgentRuntimePublisher,

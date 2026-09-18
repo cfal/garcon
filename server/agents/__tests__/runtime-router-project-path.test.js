@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../../chats/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
@@ -18,9 +19,13 @@ function makeRouter(overrides = {}) {
   const transcript = createRuntimeTranscriptFixture();
   const preparation = {
     nativeSession: resolvedNativeSession,
-    commit: mock(() => Promise.resolve()),
-    rollback: mock(() => Promise.resolve()),
+    preparation: {
+      kind: 'project-path-preparation', nodeId: 'node-1', instanceId: 'instance-1',
+      integrationId: 'claude', id: 'preparation-1',
+    },
   };
+  const commit = mock(async () => undefined);
+  const rollback = mock(async () => undefined);
   const prepareProjectPathUpdate = mock(() => Promise.resolve(preparation));
   const entry = {
     agentId: 'claude',
@@ -42,9 +47,10 @@ function makeRouter(overrides = {}) {
       })),
       parse: mock((settings) => settings),
     },
-    projectPathUpdates: { prepare: prepareProjectPathUpdate },
+    projectPathUpdates: { prepare: prepareProjectPathUpdate, commit, rollback },
   };
   const router = new AgentRuntimeRouter({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: {
       getChat: mock(() => entry),
     },
@@ -62,7 +68,7 @@ function makeRouter(overrides = {}) {
     adoption: transcript.adoption,
   });
 
-  return { entry, preparation, prepareProjectPathUpdate, router };
+  return { entry, preparation, prepareProjectPathUpdate, commit, rollback, router };
 }
 
 describe('AgentRuntimeRouter project-path preparation', () => {
@@ -77,7 +83,11 @@ describe('AgentRuntimeRouter project-path preparation', () => {
       nativeSession: resolvedNativeSession,
     });
 
-    expect(result).toBe(fixture.preparation);
+    expect(result.nativeSession).toEqual(resolvedNativeSession);
+    await result.commit();
+    await result.rollback();
+    expect(fixture.commit).toHaveBeenCalledWith(fixture.preparation.preparation);
+    expect(fixture.rollback).toHaveBeenCalledWith(fixture.preparation.preparation);
     expect(fixture.prepareProjectPathUpdate).toHaveBeenCalledWith({
       chat: expect.objectContaining({
         chatId: 'chat-1',
@@ -86,7 +96,6 @@ describe('AgentRuntimeRouter project-path preparation', () => {
         nativeSession: resolvedNativeSession,
       }),
       nextProjectPath: '/next',
-      signal: expect.any(AbortSignal),
     });
     expect(fixture.entry.nativeSession).toBe(storedNativeSession);
   });

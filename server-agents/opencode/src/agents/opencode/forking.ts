@@ -47,7 +47,7 @@ async function forkOpenCodeSession(
   options: OpenCodeForkingOptions,
   request: AgentNativeForkRequest,
 ): Promise<AgentNativeForkOutcome> {
-  request.admission.signal.throwIfAborted();
+  request.signal.throwIfAborted();
   const sourceSessionId = options.sessionId(request.source);
   if (!sourceSessionId) {
     if (request.providerMeta) throw notSettled();
@@ -61,7 +61,7 @@ async function forkOpenCodeSession(
     // The forked native session must carry the chat's ruleset; OpenCode's fork
     // does not inherit it from the source session.
     permissionMode: request.permissionMode,
-    signal: request.admission.signal,
+    signal: request.signal,
     // OpenCode resolves the boundary by exact identity and clones its
     // chronological prefix.
     // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/session.ts#L704-L706
@@ -73,7 +73,7 @@ async function forkOpenCodeSession(
       request,
       forkedSessionId,
     );
-    request.admission.signal.throwIfAborted();
+    request.signal.throwIfAborted();
     return {
       kind: 'materialized',
       session: {
@@ -106,11 +106,11 @@ async function resolveExclusiveBoundaryMessageId(
   const messages = await runtime.withClientLease((client) => (
     fetchOpenCodeStoredMessages(sourceSessionId, async () => client, {
       directory: request.projectPath,
-      signal: request.admission.signal,
+      signal: request.signal,
       throwOnError: true,
     })
-  ), request.admission.signal).catch((error) => {
-    request.admission.signal.throwIfAborted();
+  ), request.signal).catch((error) => {
+    request.signal.throwIfAborted();
     if (error instanceof AgentIntegrationError) throw error;
     throw new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
@@ -118,7 +118,7 @@ async function resolveExclusiveBoundaryMessageId(
       true,
     );
   });
-  request.admission.signal.throwIfAborted();
+  request.signal.throwIfAborted();
   if (messages.length === 0) throw missingSource();
   const anchorIndex = messages.findIndex((message) => ownsEntry(message, entryId));
   if (anchorIndex < 0) throw notSettled();
@@ -139,10 +139,10 @@ async function retargetForkedSeedReceipt(
   const forkedMessages = await runtime.withClientLease((client) => (
     loadRequiredOpenCodeChatMessages(forkedSessionId, async () => client, {
       directory: request.projectPath,
-      signal: request.admission.signal,
+      signal: request.signal,
     })
-  ), request.admission.signal);
-  request.admission.signal.throwIfAborted();
+  ), request.signal);
+  request.signal.throwIfAborted();
   return retargetNativeSeedReceiptIfPreserved(receipt, forkedSessionId, forkedMessages);
 }
 
