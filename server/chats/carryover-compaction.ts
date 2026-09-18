@@ -86,7 +86,7 @@ export interface CarryOverCompactionInput {
 }
 
 interface FittedCompactionPrompt {
-  readonly assembled: CostedCarriedContext;
+  readonly olderHistory: CostedCarriedContext;
   readonly prompt: string;
 }
 
@@ -151,8 +151,13 @@ export class CarryOverCompactionService {
           : 'Start a new chat to continue.',
       );
     }
+    const recentContext = createCarryoverTranscript(spine, 0);
+    if (!recentContext) {
+      throw compactionUnavailable(input, 'the protected recent history could not be projected');
+    }
     const first = fitCompactionPrompt(
       older,
+      recentContext,
       input.destination,
       selection.contextWindowTokens,
     );
@@ -167,6 +172,7 @@ export class CarryOverCompactionService {
         ? first
         : fitCompactionPrompt(
           older,
+          recentContext,
           input.destination,
           selection.contextWindowTokens,
           reducedCompactionEntryBudget(first.entryBudgetTokens),
@@ -232,6 +238,7 @@ export class CarryOverCompactionService {
 
 function fitCompactionPrompt(
   older: readonly ChatMessage[],
+  recentContext: CarriedContext,
   destination: CarryOverCompactionDestination,
   contextWindowTokens: number,
   maximumEntryBudgetTokens?: number,
@@ -239,20 +246,29 @@ function fitCompactionPrompt(
   const usableTokens = usableHandoffTokenBudget(contextWindowTokens);
   return fitEstimatedTokenDocument<FittedCompactionPrompt>({
     usableTokens,
-    fixedFrameTokens: estimateHandoffTokens(buildCompactionPrompt('', destination)),
+    fixedFrameTokens: estimateHandoffTokens(
+      buildCompactionPrompt('', recentContext.prefix, destination),
+    ),
     maximumEntryBudgetTokens,
     minimumEntryBudgetTokens: 1,
     render(entryBudgetTokens) {
-      const assembled = createCarryoverTranscriptWithinCost(older, {
+      const olderHistory = createCarryoverTranscriptWithinCost(older, {
         maximumCost: entryBudgetTokens,
         cost: estimateHandoffTokens,
       });
-      return assembled === null
+      return olderHistory === null
         ? null
-        : { assembled, prompt: buildCompactionPrompt(assembled.prefix, destination) };
+        : {
+            olderHistory,
+            prompt: buildCompactionPrompt(
+              olderHistory.prefix,
+              recentContext.prefix,
+              destination,
+            ),
+          };
     },
     document: ({ prompt }) => prompt,
-    admittedEntryCost: ({ assembled }) => assembled.admissionCost,
+    admittedEntryCost: ({ olderHistory }) => olderHistory.admissionCost,
   });
 }
 
@@ -329,8 +345,8 @@ function compactionFailed(input: CarryOverCompactionInput, failure: unknown): Do
   );
 }
 
-// Splits on the assembler's pinned-turn boundary so the summary and spine
-// describe disjoint history.
+// Splits on the assembler's pinned-turn boundary so recent work remains a
+// protected output spine while also informing the summary's current state.
 function spineStart(messages: readonly ChatMessage[]): number {
   let userTurns = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -342,7 +358,8 @@ function spineStart(messages: readonly ChatMessage[]): number {
 }
 
 function buildCompactionPrompt(
-  transcript: string,
+  olderHistory: string,
+  recentContext: string,
   destination: CarryOverCompactionDestination,
 ): string {
   return [
@@ -350,12 +367,22 @@ function buildCompactionPrompt(
     `It will be continued by ${destination.agentId} using ${destination.model}.`,
     ...(destination.prompt ? [`Their next instruction is: ${destination.prompt}`] : []),
     'Bias the summary toward what that instruction needs.',
+    'The conversation is split into older history and protected recent context.',
+    'Use both sections to determine the current state and immediate next step.',
+    'Recent completions, reversals, and blockers supersede older plans.',
+    'The recent context will also accompany the summary, so account for it without repeating it in detail.',
     '',
     'Reply with a single <summary> element containing these sections in order:',
     'the original objective, decisions and constraints already established, files changed,',
     'the current state of the work, and the immediate next step.',
     'Do not include a <carried-context> element and do not repeat the transcript verbatim.',
     '',
-    transcript,
+    '<older-history>',
+    olderHistory,
+    '</older-history>',
+    '',
+    '<recent-context>',
+    recentContext,
+    '</recent-context>',
   ].join('\n');
 }
