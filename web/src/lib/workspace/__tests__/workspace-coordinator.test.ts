@@ -266,6 +266,24 @@ function createShortcutDispatcher(
 	});
 }
 
+function openMenuLayer(transientLayers: TransientLayerRegistry): () => void {
+	const element = document.createElement('div');
+	document.body.append(element);
+	const unregister = transientLayers.register({
+		id: 'synthetic-menu-layer',
+		kind: 'menu',
+		modality: 'nonmodal',
+		isOpen: () => true,
+		element: () => element,
+		onEscape: () => true,
+		restoreFocus: () => {},
+	});
+	return () => {
+		unregister();
+		element.remove();
+	};
+}
+
 describe('WorkspaceCoordinator', () => {
 	it.each([false, true])('opens ticket references repeatedly with mobile=%s', async (isMobile) => {
 		const { controller } = ticketTestHarness();
@@ -1761,6 +1779,75 @@ describe('WorkspaceCoordinator', () => {
 			surfaceId: CANONICAL_CHAT_SURFACE_ID,
 		});
 	});
+
+	it('focuses the presented surface when a responsive handoff settles', async () => {
+		const { coordinator, appShell } = createHarness();
+		appShell.requestComposerFocus.mockClear();
+
+		await coordinator.enterMobilePresentation();
+
+		await vi.waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
+	});
+
+	it.each(['enter', 'exit'] as const)(
+		'leaves an open menu focused when a responsive %s handoff settles',
+		async (direction) => {
+			const { coordinator, appShell, transientLayers } = createHarness();
+			if (direction === 'exit') await coordinator.enterMobilePresentation();
+			const closeMenuLayer = openMenuLayer(transientLayers);
+			appShell.requestComposerFocus.mockClear();
+
+			try {
+				if (direction === 'enter') await coordinator.enterMobilePresentation();
+				else await coordinator.exitMobilePresentation();
+				await tick();
+				await tick();
+
+				expect(coordinator.isMobile).toBe(direction === 'enter');
+				expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
+			} finally {
+				closeMenuLayer();
+			}
+		},
+	);
+
+	it.each([false, true])(
+		'settles a responsive handoff without stealing focus from a menu opened while it runs (layered=%s)',
+		async (layered) => {
+			const frames = new SurfaceFrameRegistry();
+			const { coordinator, layout, transientLayers } = createHarness({ surfaceFrames: frames });
+			const focusingDesktop = coordinator.focusSurface('singleton:git');
+			await vi.waitFor(() => expect(coordinator.frameVersion('singleton:git')).toBe(1));
+			frames.register('singleton:git', 'window-main', {
+				element: document.createElement('div'),
+				attachRetainedRenderer: vi.fn(),
+				focusPrimary: vi.fn(),
+			});
+			await focusingDesktop;
+
+			const entering = coordinator.enterMobilePresentation();
+			await vi.waitFor(() => expect(coordinator.frameVersion('singleton:git')).toBe(2));
+			// The mobile frame is still unregistered, so the handoff waits here with its layout
+			// already published: the window where a user can open a menu the deferred focus would steal.
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:git');
+			const closeMenuLayer = layered ? openMenuLayer(transientLayers) : null;
+			try {
+				const focusPrimary = vi.fn();
+				frames.register('singleton:git', 'mobile', {
+					element: document.createElement('div'),
+					attachRetainedRenderer: vi.fn(),
+					focusPrimary,
+				});
+				await entering;
+				await tick();
+				await tick();
+
+				expect(focusPrimary).toHaveBeenCalledTimes(layered ? 0 : 1);
+			} finally {
+				closeMenuLayer?.();
+			}
+		},
+	);
 
 	it('honors the newest responsive request when breakpoint changes overlap', async () => {
 		const { coordinator, appShell } = createHarness();

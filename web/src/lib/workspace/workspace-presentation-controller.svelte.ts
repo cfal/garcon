@@ -455,7 +455,7 @@ export class WorkspacePresentationController {
 			throw error;
 		}
 		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
-		this.presentSurface(activeId);
+		this.#presentSurfaceAfterResponsiveHandoff(activeId);
 	}
 
 	async exitMobilePresentation(): Promise<void> {
@@ -490,7 +490,7 @@ export class WorkspacePresentationController {
 		}
 		await this.#reconcileTransientMobileGitViews(plannedTransientKinds, responsiveGeneration);
 		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
-		this.focusPresentedSurface(this.lastFocusedSurfaceId);
+		this.#focusPresentedSurfaceUnlessLayered(this.lastFocusedSurfaceId);
 	}
 
 	async focusMobileSingleton(kind: PortableSingletonKind): Promise<void> {
@@ -539,6 +539,14 @@ export class WorkspacePresentationController {
 	}
 
 	presentSurface(surfaceId: string): void {
+		this.#presentSurface(surfaceId, () => this.focusPresentedSurface(surfaceId));
+	}
+
+	#presentSurfaceAfterResponsiveHandoff(surfaceId: string): void {
+		this.#presentSurface(surfaceId, () => this.#focusPresentedSurfaceUnlessLayered(surfaceId));
+	}
+
+	#presentSurface(surfaceId: string, focusPresented: () => void): void {
 		const generation = ++this.#focusIntentGeneration;
 		this.lastFocusedSurfaceId = surfaceId;
 		const windowId = this.windowOf(surfaceId);
@@ -549,8 +557,18 @@ export class WorkspacePresentationController {
 			if (generation !== this.#focusIntentGeneration || this.lastFocusedSurfaceId !== surfaceId) {
 				return;
 			}
-			this.focusPresentedSurface(surfaceId);
+			focusPresented();
 		});
+	}
+
+	/**
+	 * Responsive handoffs are viewport-driven rather than user-driven and settle asynchronously, so
+	 * they must leave focus alone while a menu, popover, or dialog is on screen. Pulling focus into
+	 * the presented surface closes whichever layer the user is working in.
+	 */
+	#focusPresentedSurfaceUnlessLayered(surfaceId: string): void {
+		if (this.deps.transientLayers.hasVisibleLayer) return;
+		this.focusPresentedSurface(surfaceId);
 	}
 
 	focusPresentedSurface(surfaceId: string): void {
