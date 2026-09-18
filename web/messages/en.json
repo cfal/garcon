@@ -2521,6 +2521,7 @@
 	"file_conflict_save_checked": "Save against displayed disk",
 	"file_conflict_comparison": "File conflict comparison",
 	"editor_vim_load_failed": "Vim mode could not load.",
+	"editor_vim_copy_failed": "Could not copy to clipboard. The yank is still available in Vim.",
 	"editor_vim_reload_blocked": "Save unsaved files and wait for pending Saves before reloading.",
 	"editor_vim_reload_hint": "Reload to try again.",
 	"common_reload_application": "Reload application",

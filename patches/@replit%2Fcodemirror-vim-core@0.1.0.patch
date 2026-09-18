@@ -1,0 +1,114 @@
+diff --git a/dist/vim.d.ts b/dist/vim.d.ts
+index 22feedf9ac355c2c334522e5fd60b8e7e31e650f..624945c008fa952637b7d08d48abbdcd61484971 100644
+--- a/dist/vim.d.ts
++++ b/dist/vim.d.ts
+@@ -83,7 +83,7 @@ export function initVim(CM: import("./types").CodeMirrorConstructor): {
+          * @param {boolean} [linewise]
+          * @param {boolean} [blockwise]
+          */
+-        pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++        pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: import("./types").CodeMirrorV): void;
+         /**
+          * Gets the register named @name.  If one of @name doesn't already exist,
+          * create it.  If @name is invalid, return the unnamedRegister.
+@@ -176,7 +176,7 @@ export function initVim(CM: import("./types").CodeMirrorConstructor): {
+              * @param {boolean} [linewise]
+              * @param {boolean} [blockwise]
+              */
+-            pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean): void;
++            pushText(registerName: string | null | undefined, operator: string, text: string, linewise?: boolean, blockwise?: boolean, cm?: import("./types").CodeMirrorV): void;
+             /**
+              * Gets the register named @name.  If one of @name doesn't already exist,
+              * create it.  If @name is invalid, return the unnamedRegister.
+diff --git a/vim.js b/vim.js
+index 3cafa6bcf0c99f2ae25a5da8936d3f29445f2d6d..db7740042211999dd4e5b86f988fd19916464e82 100644
+--- a/vim.js
++++ b/vim.js
+@@ -1468,8 +1468,9 @@ export function initVim(CM) {
+      * @param {string} text
+      * @param {boolean} [linewise]
+      * @param {boolean} [blockwise]
++     * @param {CodeMirrorV} [cm]
+      */
+-    pushText(registerName, operator, text, linewise, blockwise) {
++    pushText(registerName, operator, text, linewise, blockwise, cm) {
+       // The black hole register, "_, means delete/yank to nowhere.
+       if (registerName === '_') return;
+       if (linewise && text.charAt(text.length - 1) !== '\n') {
+@@ -1502,22 +1503,27 @@ export function initVim(CM) {
+         }
+         // Make sure the unnamed register is set to what just happened
+         this.unnamedRegister.setText(text, linewise, blockwise);
+-        return;
+-      }
+-
+-      // If we've gotten to this point, we've actually specified a register
+-      var append = isUpperCase(registerName);
+-      if (append) {
+-        register.pushText(text, linewise);
+       } else {
+-        register.setText(text, linewise, blockwise);
++        // If we've gotten to this point, we've actually specified a register
++        var append = isUpperCase(registerName);
++        if (append) {
++          register.pushText(text, linewise);
++        } else {
++          register.setText(text, linewise, blockwise);
++        }
++        // The unnamed register always has the same value as the last used
++        // register.
++        this.unnamedRegister.setText(register.toString(), linewise);
+       }
+-      if (registerName === '+') {
+-        navigator.clipboard.writeText(text);
++      if (operator === 'yank' || registerName === '+') {
++        var request = { text: this.unnamedRegister.toString(), handled: false };
++        if (cm) CM.signal(cm, 'vim-clipboard-write', request);
++        if (registerName === '+' && !request.handled) {
++          try {
++            navigator.clipboard?.writeText(request.text)?.catch(() => {});
++          } catch {}
++        }
+       }
+-      // The unnamed register always has the same value as the last used
+-      // register.
+-      this.unnamedRegister.setText(register.toString(), linewise);
+     }
+     /**
+      * Gets the register named @name.  If one of @name doesn't already exist,
+@@ -2752,7 +2758,7 @@ export function initVim(CM) {
+       }
+       vimGlobalState.registerController.pushText(
+           args.registerName, 'change', text,
+-          args.linewise, ranges.length > 1);
++          args.linewise, ranges.length > 1, cm);
+       actions.enterInsertMode(cm, {head: finalHead}, cm.state.vim);
+     },
+     delete: function(cm, args, ranges) {
+@@ -2786,7 +2792,7 @@ export function initVim(CM) {
+       }
+       vimGlobalState.registerController.pushText(
+           args.registerName, 'delete', text,
+-          args.linewise, vim.visualBlock);
++          args.linewise, vim.visualBlock, cm);
+       return clipCursorToContent(cm, finalHead);
+     },
+     indent: function(cm, args, ranges) {
+@@ -2904,7 +2910,7 @@ export function initVim(CM) {
+         : oldAnchor;
+       vimGlobalState.registerController.pushText(
+           args.registerName, 'yank',
+-          text, args.linewise, vim.visualBlock);
++          text, args.linewise, vim.visualBlock, cm);
+       
+       var lineCount = Math.abs(cm.getCursor("end").line - cm.getCursor("start").line) || 1;      
+       showConfirm(cm, lineCount + ' lines yanked' + (args.registerName ? ' into "' + args.registerName : ''), false, 1500);
+@@ -6420,7 +6426,7 @@ export function initVim(CM) {
+       var text = cm.getRange(new Pos(line, 0), new Pos(lineEnd + 1, 0));
+       var registerName = params.args && params.args[0] ? params.args[0] : '0';
+       vimGlobalState.registerController.pushText(
+-        registerName, 'yank', text, true, false);
++        registerName, 'yank', text, true, false, cm);
+       showConfirm(cm, (lineEnd + 1 - line) + ' lines yanked' + (registerName ? ' into "' + registerName : ''), false, 1500);
+     },
+     /** @arg {CodeMirrorV} cm @arg {ExParams} params @arg {boolean} [matchIndent]*/

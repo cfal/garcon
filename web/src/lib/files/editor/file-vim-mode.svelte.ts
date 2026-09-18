@@ -1,5 +1,6 @@
 import { Compartment } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import { copyToClipboard } from '$lib/utils/clipboard.js';
 import './file-vim-mode.css';
 
 type VimModule = typeof import('@replit/codemirror-vim');
@@ -11,10 +12,14 @@ function loadVim(): Promise<VimModule> {
 }
 
 export class FileVimMode {
+	// Vim views share one system clipboard, even when their documents differ.
+	static #latestClipboardRequestId = 0;
 	readonly compartment = new Compartment();
 	error = $state<string | null>(null);
+	clipboardFailed = $state(false);
 	#module: VimModule | null = null;
 	#generation = 0;
+	#clipboardRequestId = 0;
 
 	constructor(
 		private readonly host: {
@@ -31,6 +36,8 @@ export class FileVimMode {
 		if (!view) return;
 		if (!enabled) {
 			this.error = null;
+			this.clipboardFailed = false;
+			this.#clipboardRequestId = 0;
 			if (this.#module?.getCM(view)) view.dispatch({ effects: this.compartment.reconfigure([]) });
 			return;
 		}
@@ -46,6 +53,7 @@ export class FileVimMode {
 							undo: () => this.host.undo(),
 							redo: () => this.host.redo(),
 							save: () => this.host.save(),
+							writeClipboard: (view, text) => this.#copyYank(view, text),
 						}),
 					),
 				});
@@ -53,6 +61,24 @@ export class FileVimMode {
 			.catch((error: unknown) => {
 				if (generation === this.#generation && view === this.host.getView()) {
 					this.error = `Vim mode could not load: ${error instanceof Error ? error.message : String(error)}`;
+				}
+			});
+	}
+
+	#copyYank(view: EditorView, text: string): void {
+		if (!text) return;
+		const requestId = ++FileVimMode.#latestClipboardRequestId;
+		this.#clipboardRequestId = requestId;
+		this.clipboardFailed = false;
+		const isCurrent = () =>
+			requestId === this.#clipboardRequestId &&
+			requestId === FileVimMode.#latestClipboardRequestId &&
+			view === this.host.getView();
+		void copyToClipboard(text, view.dom, isCurrent)
+			.catch(() => false)
+			.then((copied) => {
+				if (isCurrent()) {
+					this.clipboardFailed = !copied;
 				}
 			});
 	}
