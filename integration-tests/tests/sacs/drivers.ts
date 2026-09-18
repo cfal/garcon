@@ -167,7 +167,7 @@ const openCodeForkingFacet: SacsNativeForkingFacet = {
     });
     const sessionId = binding.agentSessionId;
     if (!sessionId) throw new Error(`SACS OpenCode chat ${chatId} has no persisted session.`);
-    const database = new Database(openCodePaths(fixture.dirs).database, { strict: true });
+    const database = new Database(openCodePaths(fixture.executionDirs).database, { strict: true });
     try {
       const markerPattern = `%${marker}%`;
       const messageIds = new Set<string>([
@@ -239,7 +239,7 @@ async function prepareOpenCodeHistorySource(
   fixture: IntegrationFixture,
   chatId: string,
 ): Promise<SacsPreparedHistorySource> {
-  const path = openCodePaths(fixture.dirs).database;
+  const path = openCodePaths(fixture.executionDirs).database;
   if (!await fileExists(path)) throw new Error('SACS OpenCode database was not created.');
   const binding = await waitForPersistedChat({
     directories: fixture.dirs,
@@ -387,7 +387,7 @@ function directHistorySource(agentId: string): SacsHistorySourcePreparer {
       throw new Error(`SACS Direct chat ${chatId} has no persisted session.`);
     }
     const path = join(
-      fixture.dirs.workspace,
+      fixture.executionDirs.workspace,
       'agent-data',
       agentId,
       'direct-sessions-v1',

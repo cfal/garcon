@@ -18,6 +18,8 @@ export interface GarconProcessOptions {
   redactEnvironmentValues?: boolean;
   disableAuth?: boolean;
   port?: number;
+  onExecutionNodeListening?: (url: string) => void;
+  onExecutionNodeReady?: () => void;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -38,7 +40,7 @@ export function redactSensitiveEnvironmentText(
   );
 }
 
-function isolatedEnvironment(
+export function isolatedEnvironment(
   homeDir: string,
   overrides: Record<string, string> = {},
 ): Record<string, string> {
@@ -56,7 +58,7 @@ function isolatedEnvironment(
   };
 }
 
-async function pumpLines(
+export async function pumpLines(
   stream: ReadableStream<Uint8Array>,
   channel: 'stdout' | 'stderr',
   onText: (text: string) => void,
@@ -101,16 +103,29 @@ export class GarconProcess {
     child: GarconChild,
     ready: Deferred<string>,
     redactedEnvironment: Record<string, string>,
+    onExecutionNodeListening?: (url: string) => void,
+    onExecutionNodeReady?: () => void,
   ) {
     this.#child = child;
     let readinessText = '';
+    let executionNodeDiscovered = false;
     const inspectText = (text: string) => {
       readinessText = `${readinessText}${text}`.slice(-2_000);
       const match = SERVER_READY_PATTERN.exec(readinessText);
-      if (match) ready.resolve(match[1]);
+      if (match) {
+        const clientUrl = new URL(match[1]);
+        clientUrl.hostname = '127.0.0.1';
+        ready.resolve(clientUrl.origin);
+      }
+      const executionNode = /Execution node listening at (ws:\/\/[^\s]+)/.exec(readinessText);
+      if (executionNode && !executionNodeDiscovered) {
+        executionNodeDiscovered = true;
+        onExecutionNodeListening?.(executionNode[1]);
+      }
     };
     const captureLine = (line: string) => {
       this.#logs.push(redactSensitiveEnvironmentText(line, redactedEnvironment));
+      if (line.includes('[server-events] Execution node ready')) onExecutionNodeReady?.();
     };
     this.#stdoutPump = pumpLines(child.stdout, 'stdout', inspectText, captureLine);
     this.#stderrPump = pumpLines(child.stderr, 'stderr', inspectText, captureLine);
@@ -137,7 +152,7 @@ export class GarconProcess {
         '--port',
         String(options.port ?? 0),
         '--bind-address',
-        '127.0.0.1',
+        '0.0.0.0',
         ...(options.disableAuth === false ? [] : ['--disable-auth']),
         '--config-dir',
         options.configDir,
@@ -155,6 +170,8 @@ export class GarconProcess {
       child,
       ready,
       options.redactEnvironmentValues ? options.environment ?? {} : {},
+      options.onExecutionNodeListening,
+      options.onExecutionNodeReady,
     );
 
     try {

@@ -43,11 +43,24 @@ jobs:
             shard: "4/4"
             test_timeout: 30000
             artifact_suffix: server-4-of-4
-          - lane: SACS
+          - lane: SACS in-process
             path: tests/sacs
             shard: "1/1"
             test_timeout: 120000
-            artifact_suffix: sacs
+            artifact_suffix: sacs-in-process
+            execution_backend: in-process
+          - lane: SACS remote controller dials
+            path: tests/sacs
+            shard: "1/1"
+            test_timeout: 120000
+            artifact_suffix: sacs-remote-controller-dials
+            execution_backend: remote-controller-dials
+          - lane: SACS remote node dials
+            path: tests/sacs
+            shard: "1/1"
+            test_timeout: 120000
+            artifact_suffix: sacs-remote-node-dials
+            execution_backend: remote-node-dials
 
     steps:
       - name: Check out repository
@@ -76,6 +89,7 @@ jobs:
           TEST_PATH: ${{ matrix.path }}
           TEST_SHARD: ${{ matrix.shard }}
           TEST_TIMEOUT: ${{ matrix.test_timeout }}
+          GARCON_TEST_EXECUTION_BACKEND: ${{ matrix.execution_backend || 'in-process' }}
         run: bun test --max-concurrency=1 --timeout="$TEST_TIMEOUT" --shard="$TEST_SHARD" "$TEST_PATH"
 
       - name: Upload server integration diagnostics
