@@ -119,6 +119,10 @@ export class TransientLayerRegistry {
 		return this.#topVisibleLayer()?.kind ?? null;
 	}
 
+	get hasVisibleLayer(): boolean {
+		return this.#topVisibleLayer() !== null;
+	}
+
 	#topVisibleLayer(modality?: TransientLayerModality): RegisteredLayer | null {
 		return (
 			this.#layers

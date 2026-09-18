@@ -36,6 +36,30 @@ describe('TransientLayerRegistry', () => {
 		expect(onRun).toHaveBeenCalledOnce();
 	});
 
+	it('reports a visible layer only while one is on screen', () => {
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+		const menu = document.createElement('div');
+		document.body.append(menu);
+		let open = true;
+		const unregister = layers.register({
+			id: 'menu',
+			kind: 'menu',
+			modality: 'nonmodal',
+			isOpen: () => open,
+			element: () => menu,
+			onEscape: () => true,
+			restoreFocus: () => undefined,
+		});
+
+		expect(layers.hasVisibleLayer).toBe(true);
+		open = false;
+		expect(layers.hasVisibleLayer).toBe(false);
+		open = true;
+		menu.remove();
+		expect(layers.hasVisibleLayer).toBe(false);
+		unregister();
+	});
+
 	it('cancels application drag before the workspace becomes inert', () => {
 		vi.useFakeTimers();
 		const gate = new WorkspaceInteractionGate();
