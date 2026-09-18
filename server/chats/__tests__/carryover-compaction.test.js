@@ -318,6 +318,34 @@ describe('carryover compaction', () => {
     expect(runSingleQuery).not.toHaveBeenCalled();
   });
 
+  it('rejects when the protected recent context cannot fit the compactor window', async () => {
+    const messages = turns(1, () => 'older projectable history');
+    for (let turn = 0; turn < 3; turn += 1) {
+      messages.push(new UserMessage(TIME, `recent request ${turn}`));
+      for (let reply = 0; reply < 10; reply += 1) {
+        messages.push(new AssistantMessage(TIME, '界'.repeat(8_000)));
+      }
+    }
+    const recentContext = createCarryoverTranscript(messages.slice(2), 0);
+    expect(estimateHandoffTokens(recentContext.prefix))
+      .toBeGreaterThan(usableHandoffTokenBudget(200_000));
+    expect(createCarryoverTranscript(
+      messages.slice(2),
+      CARRYOVER_INJECTION_MAX_CHARS,
+      { summary: '.' },
+    ).summaryTruncated).toBeUndefined();
+    const { instance, onCompactionStarted, runSingleQuery } = service({
+      contextWindowTokens: 200_000,
+    });
+
+    await expect(run(instance, { messages })).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
+      message: expect.stringContaining('does not fit the configured window'),
+    });
+    expect(onCompactionStarted).not.toHaveBeenCalled();
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
   it.each([200_000, 500_000, 1_000_000])(
     'fits the complete authored prompt within 75%% of a %d-token window',
     async (contextWindowTokens) => {
@@ -346,7 +374,7 @@ describe('carryover compaction', () => {
       .toBeLessThanOrEqual(usableHandoffTokenBudget(500_000));
   });
 
-  it('keeps the newest three turns out of the compaction prompt and beside the summary', async () => {
+  it('uses the newest three turns to refresh the summary and carries them beside it', async () => {
     let prompt = '';
     const { instance } = service({
       respond: async (value) => {
@@ -358,10 +386,42 @@ describe('carryover compaction', () => {
     const result = await run(instance, { messages: longHistory(20) });
 
     expect(prompt).toContain('token_0_0');
-    expect(prompt).not.toContain('token_19_0');
+    expect(prompt).toContain('<recent-context>');
+    expect(prompt).toContain('token_19_0');
     expect(result.context.prefix).toContain('<summary>objective: ship it</summary>');
     expect(result.context.prefix).toContain('token_19_0');
     expect(result.context.prefix).not.toContain('token_16_0');
+  });
+
+  it('reconciles stale older plans with completion evidence in recent context', async () => {
+    const messages = [
+      ...longHistory(20),
+      new UserMessage(TIME, 'Run verification.'),
+      new AssistantMessage(TIME, 'STALE_PLAN: verification pending; run verification next.'),
+      new UserMessage(TIME, 'Check the verification output.'),
+      new AssistantMessage(TIME, 'Verification is still running.'),
+      new UserMessage(TIME, 'Use the final verification result.'),
+      new AssistantMessage(TIME, 'RECENT_COMPLETION: verification passed; merge is next.'),
+      new UserMessage(TIME, 'Report the current verification state.'),
+    ];
+    let prompt = '';
+    const { instance } = service({
+      respond: async (value) => {
+        prompt = value;
+        return value.includes('RECENT_COMPLETION: verification passed; merge is next.')
+          ? '<summary>Current state: verification passed. Immediate next step: merge.</summary>'
+          : '<summary>Current state: verification pending. Immediate next step: run verification.</summary>';
+      },
+    });
+
+    const result = await run(instance, { messages });
+
+    expect(prompt).toContain('STALE_PLAN: verification pending; run verification next.');
+    expect(prompt).toContain('RECENT_COMPLETION: verification passed; merge is next.');
+    expect(result.summary).toBe('Current state: verification passed. Immediate next step: merge.');
+    expect(result.context.prefix).toContain(
+      '<summary>Current state: verification passed. Immediate next step: merge.</summary>',
+    );
   });
 
   it('retries once from the original history at 70% of the first entry budget', async () => {
@@ -384,6 +444,10 @@ describe('carryover compaction', () => {
     expect(estimateHandoffTokens(secondPrompt)).toBeLessThan(estimateHandoffTokens(firstPrompt));
     expect(firstPrompt).toContain('token_0_0');
     expect(secondPrompt).toContain('token_0_0');
+    expect(firstPrompt).toContain('token_39_0');
+    expect(secondPrompt).toContain('token_39_0');
+    expect(secondPrompt.match(/<recent-context>[\s\S]*<\/recent-context>/u)?.[0])
+      .toBe(firstPrompt.match(/<recent-context>[\s\S]*<\/recent-context>/u)?.[0]);
     expect(runSingleQuery.mock.calls[0][1].signal)
       .not.toBe(runSingleQuery.mock.calls[1][1].signal);
     expect(runSingleQuery.mock.calls.map(([, options]) => options.timeoutMs)).toEqual([

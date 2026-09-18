@@ -82,13 +82,15 @@ describe('agent switch compaction', () => {
 
       const firstPrompt = (await firstCall.received).lastUserText;
       expect(firstPrompt).toContain(largeTurnMarker(0));
-      expect(firstPrompt).not.toContain(largeTurnMarker(turns.length - 1));
+      expect(firstPrompt).toContain(largeTurnMarker(turns.length - 1));
+      expect(firstPrompt).toContain('<recent-context>');
       expect(firstCall.releaseText('malformed summary')).toBeTrue();
 
       const secondPrompt = (await secondCall.received).lastUserText;
       expect(secondPrompt.length).toBeLessThan(firstPrompt.length);
       expect(secondPrompt).toContain(largeTurnMarker(0));
-      expect(secondPrompt).not.toContain(largeTurnMarker(turns.length - 1));
+      expect(secondPrompt).toContain(largeTurnMarker(turns.length - 1));
+      expect(secondPrompt).toContain('<recent-context>');
       expect(secondCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
 
       const targetRequest = await targetCall.received;
@@ -143,7 +145,8 @@ describe('agent switch compaction', () => {
         content: 'compaction required',
         agent: target,
       });
-      await compactionCall.received;
+      const compactionRequest = await compactionCall.received;
+      expect(compactionRequest.lastUserText).toContain(largeTurnMarker(turns.length - 1));
       expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
       await targetCall.received;
       expect(targetCall.releaseText('target answer')).toBeTrue();
@@ -258,7 +261,8 @@ describe('agent switch compaction', () => {
         agent: target,
       });
 
-      await compactionCall.received;
+      const compactionRequest = await compactionCall.received;
+      expect(compactionRequest.lastUserText).toContain(largeTurnMarker(turns.length - 1));
       expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
       const targetRequest = await targetCall.received;
       expect(targetRequest.lastUserText).toBe(
@@ -304,7 +308,8 @@ describe('agent switch compaction', () => {
         },
       });
 
-      await compactionCall.received;
+      const compactionRequest = await compactionCall.received;
+      expect(compactionRequest.lastUserText).toContain(largeTurnMarker(turns.length - 1));
       expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
       const accepted = await handoff;
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
