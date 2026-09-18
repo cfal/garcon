@@ -13,7 +13,7 @@ import {
   submitForkRun,
   type ChatForkClient,
 } from '../chat-fork.js';
-import { GarconHttpError } from '../garcon-client.js';
+import { GarconClient } from '../garcon-client.js';
 
 const SOURCE_CHAT_ID = '1785337200123456';
 const TARGET_CHAT_ID = '1785337200123457';
@@ -64,18 +64,38 @@ const command: ForkCliCommand = {
   readsMessageFromStdin: false,
 };
 
-function accepted(id = TARGET_CHAT_ID): ForkRunCommandResponse {
+function accepted(
+  id = TARGET_CHAT_ID,
+  clientRequestId = 'request-1',
+): ForkRunCommandResponse {
   const forked = chat(id);
   return {
     success: true,
     commandType: 'fork-run',
-    clientRequestId: 'request-1',
+    clientRequestId,
     chatId: id,
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: TIMESTAMP,
     parentChat: forked.parentChat,
     chat: forked,
+  };
+}
+
+function targetExistsResponse(chatId: string): Response {
+  return Response.json({
+    error: `Session already exists: ${chatId}`,
+    errorCode: 'IDEMPOTENCY_CONFLICT',
+    retryable: false,
+  }, { status: 409 });
+}
+
+function clientOptions(fetch: typeof globalThis.fetch) {
+  return {
+    baseUrl: 'http://garcon.test',
+    instanceId: 'instance-1',
+    capability: 'capability-1',
+    fetch,
   };
 }
 
@@ -96,18 +116,14 @@ describe('chat fork commands', () => {
   test('creates a bare fork with explicit fallback consent and retries only a definitive ID collision', async () => {
     const requests: ForkChatCommandRequest[] = [];
     const targets: string[] = [];
-    const client = {
-      async forkChat(request: ForkChatCommandRequest) {
-        requests.push(request);
-        if (requests.length === 1) {
-          throw new GarconHttpError('submission', 'collision', 409, 'CHAT_ID_COLLISION', false);
-        }
-        return { success: true as const, chat: chat(request.chatId) };
-      },
-      async forkRun() { throw new Error('not used'); },
-      async getTurnReceipt() { throw new Error('not used'); },
-      async verifyRuntime() { return true; },
-    } satisfies ChatForkClient;
+    const client = new GarconClient(clientOptions(async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as ForkChatCommandRequest;
+      requests.push(request);
+      if (requests.length === 1) {
+        return targetExistsResponse(request.chatId);
+      }
+      return Response.json({ success: true, chat: chat(request.chatId) });
+    }));
     const chatIds = [TARGET_CHAT_ID, SECOND_TARGET_CHAT_ID];
 
     const result = await createFork(command, client, undefined, {
@@ -125,18 +141,14 @@ describe('chat fork commands', () => {
 
   test('submits prompted forks atomically with fresh identities after a definitive collision', async () => {
     const requests: ForkRunCommandRequest[] = [];
-    const client = {
-      async forkChat() { throw new Error('not used'); },
-      async forkRun(request: ForkRunCommandRequest) {
-        requests.push(request);
-        if (requests.length === 1) {
-          throw new GarconHttpError('submission', 'collision', 409, 'CHAT_ID_COLLISION', false);
-        }
-        return accepted(request.chatId);
-      },
-      async getTurnReceipt() { throw new Error('not used'); },
-      async verifyRuntime() { return true; },
-    } satisfies ChatForkClient;
+    const client = new GarconClient(clientOptions(async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as ForkRunCommandRequest;
+      requests.push(request);
+      if (requests.length === 1) {
+        return targetExistsResponse(request.chatId);
+      }
+      return Response.json(accepted(request.chatId, request.clientRequestId));
+    }));
     const ids = ['request-1', 'message-1', 'request-2', 'message-2'];
     const chatIds = [TARGET_CHAT_ID, SECOND_TARGET_CHAT_ID];
 
@@ -164,6 +176,23 @@ describe('chat fork commands', () => {
       },
     ]);
     expect(result.chatId).toBe(SECOND_TARGET_CHAT_ID);
+  });
+
+  test('does not allocate a new target for an unrelated idempotency conflict', async () => {
+    let requests = 0;
+    const client = new GarconClient(clientOptions(async () => {
+      requests += 1;
+      return Response.json({
+        error: 'clientRequestId was reused with different payload',
+        errorCode: 'IDEMPOTENCY_CONFLICT',
+        retryable: false,
+      }, { status: 409 });
+    }));
+
+    await expect(createFork(command, client, undefined, {
+      createChatId: () => TARGET_CHAT_ID,
+    })).rejects.toMatchObject({ errorCode: 'IDEMPOTENCY_CONFLICT' });
+    expect(requests).toBe(1);
   });
 
   test('waits for the exact accepted fork turn', async () => {

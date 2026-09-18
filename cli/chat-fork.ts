@@ -38,25 +38,19 @@ export interface ForkRunResult {
 
 type ForkCommand = ForkCliCommand | ForkAsyncCliCommand;
 
-export async function createFork(
-  command: ForkCliCommand,
-  client: ChatForkClient,
-  signal?: AbortSignal,
-  dependencies: Pick<ChatForkDependencies, 'createChatId' | 'onTargetChatId'> = {},
-): Promise<ForkChatResponse> {
-  const createChatId = dependencies.createChatId ?? createClientChatId;
+async function submitWithUniqueTargetChatId<T>(
+  createChatId: () => string,
+  onTargetChatId: ((chatId: string) => void) | undefined,
+  submit: (chatId: string) => Promise<T>,
+): Promise<T> {
   let lastCollision: GarconHttpError | undefined;
   for (let attempt = 0; attempt < FORK_CHAT_ID_ATTEMPTS; attempt += 1) {
-    const request: ForkChatCommandRequest = {
-      sourceChatId: command.sourceChatId,
-      chatId: createChatId(),
-      ...(command.allowHandoffFork ? { allowHandoffFork: true } : {}),
-    };
-    dependencies.onTargetChatId?.(request.chatId);
+    const chatId = createChatId();
+    onTargetChatId?.(chatId);
     try {
-      return await client.forkChat(request, signal);
+      return await submit(chatId);
     } catch (error) {
-      if (!(error instanceof GarconHttpError) || error.errorCode !== 'CHAT_ID_COLLISION') {
+      if (!isTargetChatIdCollision(error, chatId)) {
         throw error;
       }
       lastCollision = error;
@@ -67,6 +61,31 @@ export async function createFork(
     `could not allocate a unique fork chat ID after ${FORK_CHAT_ID_ATTEMPTS} attempts`,
     3,
     { cause: lastCollision },
+  );
+}
+
+function isTargetChatIdCollision(error: unknown, chatId: string): error is GarconHttpError {
+  return error instanceof GarconHttpError
+    && error.status === 409
+    && error.errorCode === 'IDEMPOTENCY_CONFLICT'
+    && error.responseError === `Session already exists: ${chatId}`;
+}
+
+export async function createFork(
+  command: ForkCliCommand,
+  client: ChatForkClient,
+  signal?: AbortSignal,
+  dependencies: Pick<ChatForkDependencies, 'createChatId' | 'onTargetChatId'> = {},
+): Promise<ForkChatResponse> {
+  const createChatId = dependencies.createChatId ?? createClientChatId;
+  return submitWithUniqueTargetChatId(
+    createChatId,
+    dependencies.onTargetChatId,
+    (chatId) => client.forkChat({
+      sourceChatId: command.sourceChatId,
+      chatId,
+      ...(command.allowHandoffFork ? { allowHandoffFork: true } : {}),
+    }, signal),
   );
 }
 
@@ -85,31 +104,17 @@ export async function submitForkRun(
   }
   const createId = dependencies.createId ?? crypto.randomUUID;
   const createChatId = dependencies.createChatId ?? createClientChatId;
-  let lastCollision: GarconHttpError | undefined;
-  for (let attempt = 0; attempt < FORK_CHAT_ID_ATTEMPTS; attempt += 1) {
-    const request: ForkRunCommandRequest = {
+  return submitWithUniqueTargetChatId(
+    createChatId,
+    dependencies.onTargetChatId,
+    (chatId) => client.forkRun({
       clientRequestId: createId(),
       clientMessageId: createId(),
       sourceChatId: command.sourceChatId,
-      chatId: createChatId(),
+      chatId,
       command: content,
       ...(command.allowHandoffFork ? { allowHandoffFork: true } : {}),
-    };
-    dependencies.onTargetChatId?.(request.chatId);
-    try {
-      return await client.forkRun(request, signal);
-    } catch (error) {
-      if (!(error instanceof GarconHttpError) || error.errorCode !== 'CHAT_ID_COLLISION') {
-        throw error;
-      }
-      lastCollision = error;
-    }
-  }
-  throw new CliError(
-    'submission',
-    `could not allocate a unique fork chat ID after ${FORK_CHAT_ID_ATTEMPTS} attempts`,
-    3,
-    { cause: lastCollision },
+    }, signal),
   );
 }
 

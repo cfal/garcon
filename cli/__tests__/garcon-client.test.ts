@@ -1648,7 +1648,7 @@ describe('GarconClient fork', () => {
     expect(bodies).toEqual([JSON.stringify(forkRunRequest), JSON.stringify(forkRunRequest)]);
   });
 
-  test('rejects fork responses for another target or source', async () => {
+  test('reports the generated target when a bare-fork success cannot be correlated', async () => {
     const bareClient = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
@@ -1656,14 +1656,18 @@ describe('GarconClient fork', () => {
         chat: forkedChat({ id: '1785337200123458' }),
       }),
     });
-    await expect(bareClient.forkChat(forkRequest)).rejects.toThrow('uncorrelated forked chat');
+    await expect(bareClient.forkChat(forkRequest)).rejects.toThrow(
+      `fork into chat ${targetChatId} may have reached Garcon`,
+    );
 
+    let attempts = 0;
     const runClient = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
-      fetch: async (input) => String(input).includes('/api/v1/runtime?')
-        ? runtimeResponse(input)
-        : Response.json({
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime?')) return runtimeResponse(input);
+        attempts += 1;
+        return Response.json({
           success: true,
           commandType: 'fork-run',
           clientRequestId: forkRunRequest.clientRequestId,
@@ -1673,11 +1677,46 @@ describe('GarconClient fork', () => {
           acceptedAt: '2026-09-18T12:00:00.000Z',
           parentChat,
           chat: forkedChat({ parentChat: { ...parentChat, chatId: '1785337200123455' } }),
-        }),
+        });
+      },
     });
     await expect(runClient.forkRun(forkRunRequest)).rejects.toThrow(
-      'uncorrelated fork-run response',
+      `command for chat ${targetChatId} may still be running in Garcon`,
     );
+    expect(attempts).toBe(3);
+  });
+
+  test('recovers an uncorrelated fork-run success with the exact command identity', async () => {
+    const bodies: string[] = [];
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime?')) return runtimeResponse(input);
+        bodies.push(String(init?.body));
+        const responseChat = bodies.length === 1
+          ? forkedChat({ parentChat: { ...parentChat, chatId: '1785337200123455' } })
+          : forkedChat();
+        return Response.json({
+          success: true,
+          commandType: 'fork-run',
+          clientRequestId: forkRunRequest.clientRequestId,
+          chatId: targetChatId,
+          turnId: 'turn-fork',
+          status: bodies.length === 1 ? 'accepted' : 'duplicate',
+          acceptedAt: '2026-09-18T12:00:00.000Z',
+          parentChat,
+          chat: responseChat,
+        });
+      },
+    });
+
+    await expect(client.forkRun(forkRunRequest)).resolves.toMatchObject({
+      chatId: targetChatId,
+      parentChat,
+      chat: { id: targetChatId, parentChat },
+    });
+    expect(bodies).toEqual([JSON.stringify(forkRunRequest), JSON.stringify(forkRunRequest)]);
   });
 
   test('rejects fork-run responses whose duplicate parent references disagree', async () => {
@@ -1702,7 +1741,7 @@ describe('GarconClient fork', () => {
     });
 
     await expect(client.forkRun(forkRunRequest)).rejects.toThrow(
-      'uncorrelated fork-run response',
+      `command for chat ${targetChatId} may still be running in Garcon`,
     );
   });
 });
