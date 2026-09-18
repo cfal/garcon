@@ -7,9 +7,12 @@ import type {
 } from '@garcon/common/chat-command-contracts';
 import {
   resumeAsyncJsonEnvelope,
+  resumeJsonEnvelope,
   startAsyncJsonEnvelope,
+  startJsonEnvelope,
   stopJsonEnvelope,
 } from '../automation-output.js';
+import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 
 const CHAT_ID = '1785337200123456';
 const PARENT_ID = '1785337200123455';
@@ -22,6 +25,16 @@ const receipt = {
   status: 'accepted' as const,
   acceptedAt: '2026-09-08T00:00:00.000Z',
   parentChat: { chatId: PARENT_ID, relation: 'delegation' as const },
+};
+const terminalReceipt: AgentTurnReceipt = {
+  state: 'completed',
+  chatId: CHAT_ID,
+  turnId: 'turn-1',
+  clientRequestId: 'request-1',
+  acceptedAt: receipt.acceptedAt,
+  updatedAt: receipt.acceptedAt,
+  settledAt: receipt.acceptedAt,
+  output: { availability: 'available', completeness: 'complete', text: 'Done' },
 };
 
 describe('automation JSON output', () => {
@@ -86,5 +99,45 @@ describe('automation JSON output', () => {
       control: { serverInstanceId: 'instance-1', version: 0 },
     });
     expect(stopJsonEnvelope(context, { response: stopped }).receipt).not.toHaveProperty('turnId');
+  });
+
+  test('extends the matching async lifecycle envelope for synchronous settlement', () => {
+    const started: StartChatCommandResponse = {
+      ...receipt,
+      commandType: 'chat-start',
+      chat: null,
+    };
+    const startTitleUpdate = { status: 'not-requested' as const };
+    const asyncStart = startAsyncJsonEnvelope(context, {
+      accepted: started,
+      titleUpdate: startTitleUpdate,
+    });
+    const synchronousStart = startJsonEnvelope(context, {
+      accepted: started,
+      titleUpdate: startTitleUpdate,
+      turnReceipt: terminalReceipt,
+    });
+    expect(synchronousStart).toEqual({
+      ...asyncStart,
+      command: 'start',
+      turnReceipt: terminalReceipt,
+    });
+
+    const resumed: AgentTurnCommandResponse = { ...receipt, commandType: 'agent-run' };
+    const asyncResume = resumeAsyncJsonEnvelope(context, {
+      delivery: 'new-turn',
+      response: resumed,
+    });
+    const synchronousResume = resumeJsonEnvelope(context, {
+      accepted: resumed,
+      titleUpdate: { status: 'not-requested' },
+      turnReceipt: terminalReceipt,
+    });
+    expect(synchronousResume).toEqual({
+      ...asyncResume,
+      command: 'resume',
+      titleUpdate: { status: 'not-requested' },
+      turnReceipt: terminalReceipt,
+    });
   });
 });

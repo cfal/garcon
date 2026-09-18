@@ -40,6 +40,7 @@ describe('parseCliArgs', () => {
       title: 'Implement auth validation',
       prompt: 'Implement the change',
       readsPromptFromStdin: false,
+      json: false,
     });
   });
 
@@ -51,7 +52,17 @@ describe('parseCliArgs', () => {
       chatId: CHAT_ID,
       prompt: null,
       readsPromptFromStdin: true,
+      json: false,
     });
+  });
+
+  test('parses JSON output for synchronous lifecycle commands', () => {
+    expect(parseCliArgs([
+      'start', '--agent', 'codex', '--model', 'gpt', '--json', 'Review',
+    ], ENV)).toMatchObject({ kind: 'start', json: true });
+    expect(parseCliArgs([
+      'resume', CHAT_ID, '--json', 'Continue',
+    ], ENV)).toMatchObject({ kind: 'resume', json: true });
   });
 
   test('canonicalizes conversational message presentation independently of chat title', () => {
@@ -224,7 +235,6 @@ describe('parseCliArgs', () => {
     { args: ['list', 'models', '--agent', 'codex', '--endpoint', 'east'], message: 'requires --provider' },
     { args: ['list', 'agents', '--agent', 'codex'], message: '--agent cannot be used' },
     { args: ['list', 'preambles', '--provider', 'acme'], message: '--provider cannot be used' },
-    { args: ['start', '--json', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--json cannot be used with start' },
     { args: ['list', 'agents', '--title', 'Review'], message: '--title cannot be used' },
     { args: ['start', '--title', '  ', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--title must not be empty' },
     { args: ['start', '--tag', '!!!', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'letters or numbers' },
@@ -308,10 +318,10 @@ describe('parseCliArgs', () => {
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+      'garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      'resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+      'resume <chat-id> [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
       'resume-async <chat-id> [--allow-steer] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>',
@@ -893,6 +903,7 @@ describe('add-row arguments', () => {
       title: 'Deployment',
       content: '  exact content\n',
       readsContentFromStdin: false,
+      json: false,
     });
     expect(parseCliArgs([
       'add-row', CHAT_ID, '-', '--type', 'error', '--title', 'Release validation',
@@ -917,6 +928,7 @@ describe('add-row arguments', () => {
       'add-row', CHAT_ID,
       '--color', '7C3AED,c4b5fd',
       '--markdown',
+      '--json',
       '## Complete',
     ], ENV)).toMatchObject({
       presentation: {
@@ -925,6 +937,7 @@ describe('add-row arguments', () => {
       },
       format: 'markdown',
       content: '## Complete',
+      json: true,
     });
   });
 
@@ -943,7 +956,6 @@ describe('add-row arguments', () => {
     [['add-row', CHAT_ID, '--type', 'notice', '--title', 'first\nsecond', 'content'], 'title must be a single line'],
     [['add-row', CHAT_ID, '--type', 'notice', '--title', 'x'.repeat(121), 'content'], 'title must be at most 120 characters'],
     [['add-row', CHAT_ID, '--type', 'notice', '--title', 'one', '--title', 'two', 'content'], 'only once'],
-    [['add-row', CHAT_ID, '--type', 'notice', '--json', 'content'], '--json cannot be used with add-row'],
     [['resume-async', CHAT_ID, '--type', 'notice', 'content'], '--type cannot be used with resume-async'],
     [['stop', CHAT_ID, '--type', 'notice'], '--type cannot be used with stop'],
     [['status', CHAT_ID, '--type', 'notice'], '--type cannot be used with status'],
@@ -958,6 +970,61 @@ describe('add-row arguments', () => {
       'start',
       '--agent', 'codex', '--model', 'gpt', '--', 'add-row', 'is', 'documented',
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'add-row is documented' });
+  });
+});
+
+describe('fork arguments', () => {
+  test('parses bare, synchronous, asynchronous, and stdin forks', () => {
+    expect(parseCliArgs(['fork', CHAT_ID], ENV)).toEqual({
+      kind: 'fork',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      sourceChatId: CHAT_ID,
+      allowHandoffFork: false,
+      json: false,
+      readsMessageFromStdin: false,
+    });
+    expect(parseCliArgs([
+      '--workspace', 'review',
+      'fork', CHAT_ID, '--allow-handoff-fork', '--json', 'Review', 'the', 'change',
+    ], ENV)).toEqual({
+      kind: 'fork',
+      workspace: 'review',
+      configDir: '/home/test/.garcon',
+      sourceChatId: CHAT_ID,
+      allowHandoffFork: true,
+      json: true,
+      message: 'Review the change',
+      readsMessageFromStdin: false,
+    });
+    expect(parseCliArgs(['fork-async', CHAT_ID, '-'], ENV)).toMatchObject({
+      kind: 'fork-async',
+      sourceChatId: CHAT_ID,
+      message: null,
+      readsMessageFromStdin: true,
+    });
+  });
+
+  test.each([
+    [['fork'], 'requires a source chat ID'],
+    [['fork-async', CHAT_ID], 'requires a source chat ID and a message'],
+    [['fork', 'bad'], 'requires a valid Garcon chat ID'],
+    [['fork', CHAT_ID, 'one', '-'], 'stdin marker - must be the only message argument'],
+    [['fork', CHAT_ID, '   '], 'message must not be empty'],
+    [['fork', CHAT_ID, '--allow-steer'], '--allow-steer cannot be used with fork'],
+    [['fork-async', CHAT_ID, '--title', 'Title', 'message'], '--title cannot be used with fork-async'],
+  ])('rejects invalid fork arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('documents whole-chat fork semantics', () => {
+    expect(CLI_HELP).toContain(
+      'fork <source-chat-id> [--allow-handoff-fork] [--json] [<message>|-]',
+    );
+    expect(CLI_HELP).toContain(
+      'fork-async <source-chat-id> [--allow-handoff-fork] [--json] <message|->',
+    );
+    expect(CLI_HELP).toContain('atomically creates the fork');
   });
 });
 

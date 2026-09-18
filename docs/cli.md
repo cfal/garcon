@@ -129,6 +129,14 @@ one versioned envelope containing the exact receipt, parent relationship, server
 instance, workspace, and title-update outcome. Use the turn ID with `wait` when
 exact completion identity matters.
 
+Synchronous `start --json` and `resume --json` buffer one versioned document
+until the turn settles. They reuse the matching async acceptance fields and add
+`turnReceipt`; `resume` also reports its title-update outcome. Failed,
+interrupted, and output-unavailable receipts are still printed before the CLI
+returns the same nonzero exit status as plain output. Automation that needs the
+handle immediately should use `start-async --json` or `resume-async --json`,
+then pass the returned chat and turn IDs to `wait --json`.
+
 New chats created through the CLI receive the `cli` tag. Add repeatable tags with `--tag review --tag delegated`. `--title` sets the chat title.
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
@@ -160,6 +168,40 @@ bun cli/main.ts \
 The CLI supports write-capable delegation and does not force plan mode. Permission and reasoning values use the selected agent's live catalog. A single `-` prompt reads UTF-8 stdin. Use `--` before prompt text that begins with an option-like token. Prompts beginning with command words are unambiguous after `start`, `start-async`, or `resume`.
 
 Interrupting the terminal detaches the CLI without stopping work in Garcon.
+
+## Fork Chats
+
+Create a whole-chat fork at the source chat's current transcript watermark:
+
+```bash
+bun cli/main.ts --workspace default fork 1785337200123456
+```
+
+Add a prompt to atomically create the fork and start its first turn. This is one
+server operation, not a fork followed by a separately admitted resume:
+
+```bash
+bun cli/main.ts --workspace default fork 1785337200123456 \
+  "Continue the investigation in a separate chat."
+
+bun cli/main.ts --workspace default fork-async 1785337200123456 \
+  --json "Run the independent review."
+```
+
+Bare `fork` returns after creation. Prompted `fork` waits for the new turn, while
+`fork-async` returns its accepted fork and turn identities immediately. A single
+`-` message reads stdin. Every form accepts `--json`; synchronous prompted JSON
+adds `turnReceipt` to the same acceptance fields emitted by `fork-async`.
+
+Forks fail closed when the provider cannot produce a settled native fork. Pass
+`--allow-handoff-fork` only when a frozen Garcon-ledger fork is an acceptable
+fallback. The fallback preserves the provider-neutral transcript but starts a
+new native session. Fork-at-message is not exposed by this CLI command.
+
+Prompted forks use the command ledger and safely retry an identical correlated
+request after ambiguous transport failure. Bare forks are not automatically
+retried because the fork-only server operation has no command-ledger identity;
+an ambiguous failure names the generated target chat ID to inspect first.
 
 ## Discover Exact Selections
 
@@ -331,7 +373,7 @@ bun cli/main.ts --workspace default wait 1785337200123456 \
   --turn 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
 ```
 
-`wait --json` prints one terminal turn receipt. Available output contains one `text` value: the complete final assistant response selected by the integration, including all its text parts, without earlier commentary. Synchronous `start`, `resume`, and plain-text `wait` use that same result. An explicitly empty final succeeds without answer text; a successful turn without an identifiable final reports `no-final-response` and exits nonzero. Failed and interrupted turns never return partial commentary as an answer. Receipts belong to the running server process and may expire after restart or retention eviction even though the durable transcript remains available.
+`wait --json` prints one terminal turn receipt. Available output contains one `text` value: the complete final assistant response selected by the integration, including all its text parts, without earlier commentary. Synchronous `start`, `resume`, prompted `fork`, and plain-text `wait` use that same result. An explicitly empty final succeeds without answer text; a successful turn without an identifiable final reports `no-final-response` and exits nonzero. Failed and interrupted turns never return partial commentary as an answer. Receipts belong to the running server process and may expire after restart or retention eviction even though the durable transcript remains available.
 
 Inspect current chat-level progress when no retained turn handle is available:
 
@@ -499,6 +541,11 @@ bun cli/main.ts --workspace default add-row 1785337200123456 \
   --title "Consultation status" \
   "**The architecture review is complete.**"
 ```
+
+`add-row --json` emits one versioned envelope containing the complete correlated
+server response, including the durable ordinal, transcript view, presentation,
+format, disclosure, timestamp, and whether the row was appended or replayed as
+a duplicate.
 
 `stop` interrupts the active turn through the same command as the SPA Stop button:
 

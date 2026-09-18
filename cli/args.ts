@@ -84,10 +84,12 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 
 export const CLI_HELP = `Usage:
   garcon-cli [connection options] ticket <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [ticket-id] [options]
-  garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] start-async [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
-  garcon-cli [options] resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] resume <chat-id> [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] resume-async <chat-id> [--allow-steer] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
+  garcon-cli [connection options] fork <source-chat-id> [--allow-handoff-fork] [--json] [<message>|-]
+  garcon-cli [connection options] fork-async <source-chat-id> [--allow-handoff-fork] [--json] <message|->
   garcon-cli [options] list <resource>
   garcon-cli [options] stop <chat-id> [--json]
   garcon-cli [connection options] permission-decision <chat-id> <occurrence-id> <allow|deny> --run <run-id> --server-instance <instance-id> [--json]
@@ -95,7 +97,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] archive|unarchive|pin|unpin <chat-id> [--json]
   garcon-cli [connection options] rename <chat-id> <title> [--json]
   garcon-cli [connection options] set-tags <chat-id> (--tag <tag>... | --clear) [--json]
-  garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] <content>
+  garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] [--json] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
   garcon-cli [connection options] search <query> [--filter <expression>] [--sort <relevance|activity|created>] [--limit <count>] [--offset <count>] [--snippets <count>] [--json]
@@ -107,6 +109,8 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] lookup-native-session <native-session-id> [--agent <agent-id>]
 
 start and resume wait for the accepted turn. start-async and resume-async return after acceptance.
+fork creates a whole-chat fork. With a message it atomically creates the fork and
+starts its first turn; fork-async returns after that turn is accepted.
 The selected permission mode may allow the agent to edit files and run tools.
 resume-async inherits the chat's saved execution settings, so it may edit files
 or run tools. Use - as the message to read UTF-8 text from stdin. stop uses the same command as the SPA
@@ -190,6 +194,7 @@ Options:
   --color <light[,dark]>       Custom six-digit hex accent; one value applies to both themes
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --allow-steer                With resume-async, steer the active turn when busy; never queues
+  --allow-handoff-fork         Allow a frozen-ledger fork when native forking is unavailable
   --run <run-id>               Exact permission request run fence
   --server-instance <id>       Exact permission request server-instance fence
   --answers <json>             Structured question answers as typed JSON rows
@@ -253,6 +258,7 @@ interface CliInvocationBase extends CliSelectionOptions, CliConnectionOptions {
   additionalTags?: string[];
   prompt: string | null;
   readsPromptFromStdin: boolean;
+  json: boolean;
   userMessagePresentation?: UserMessagePresentation;
 }
 
@@ -267,7 +273,6 @@ export interface StartCliInvocation extends CliInvocationBase {
 
 export interface StartAsyncCliInvocation extends Omit<StartCliInvocation, 'kind'> {
   kind: 'start-async';
-  json: boolean;
 }
 
 export interface ResumeCliInvocation extends CliInvocationBase {
@@ -306,6 +311,23 @@ export interface ResumeAsyncCliCommand extends CliConnectionOptions {
   readsMessageFromStdin: boolean;
   json: boolean;
   userMessagePresentation?: UserMessagePresentation;
+}
+
+interface ForkCliCommandBase extends CliConnectionOptions {
+  readonly sourceChatId: ChatId;
+  readonly allowHandoffFork: boolean;
+  readonly json: boolean;
+  readonly readsMessageFromStdin: boolean;
+}
+
+export interface ForkCliCommand extends ForkCliCommandBase {
+  readonly kind: 'fork';
+  readonly message?: string | null;
+}
+
+export interface ForkAsyncCliCommand extends ForkCliCommandBase {
+  readonly kind: 'fork-async';
+  readonly message: string | null;
 }
 
 export interface StopCliCommand extends CliConnectionOptions {
@@ -376,6 +398,7 @@ export interface AddRowCliCommand extends CliConnectionOptions {
   readonly title?: string;
   readonly content: string | null;
   readonly readsContentFromStdin: boolean;
+  readonly json: boolean;
 }
 
 export interface WaitCliCommand extends CliConnectionOptions {
@@ -450,6 +473,8 @@ export type ParsedCliCommand =
   | { kind: 'version' }
   | ListCliCommand
   | ResumeAsyncCliCommand
+  | ForkCliCommand
+  | ForkAsyncCliCommand
   | StopCliCommand
   | PermissionDecisionCliCommand
   | PermissionAnswerCliCommand
@@ -626,6 +651,8 @@ function isListResource(value: string): value is ListResource {
 
 type ControlCommandKind =
   | 'resume-async'
+  | 'fork'
+  | 'fork-async'
   | 'stop'
   | 'add-row'
   | 'read'
@@ -661,6 +688,7 @@ const RESUME_ASYNC_OPTIONS = optionSet(
   'collapsible',
   'json',
 );
+const FORK_OPTIONS = optionSet('allow-handoff-fork', 'json');
 const STOP_OPTIONS = optionSet('json');
 const PERMISSION_DECISION_OPTIONS = optionSet('run', 'server-instance', 'json');
 const PERMISSION_ANSWER_OPTIONS = optionSet('run', 'server-instance', 'answers', 'json');
@@ -668,7 +696,7 @@ const TRANSCRIPT_SEARCH_OPTIONS = optionSet('json');
 const CHAT_ORDER_MUTATION_OPTIONS = optionSet('json');
 const RENAME_OPTIONS = optionSet('json');
 const SET_TAGS_OPTIONS = optionSet('tag', 'clear', 'json');
-const ADD_ROW_OPTIONS = optionSet('title', 'type', 'color', 'markdown', 'collapsible');
+const ADD_ROW_OPTIONS = optionSet('title', 'type', 'color', 'markdown', 'collapsible', 'json');
 const WAIT_OPTIONS = optionSet('turn', 'json');
 const STATUS_OPTIONS = optionSet('messages', 'json');
 const EXPORT_OPTIONS = optionSet('format', 'exclude', 'output', 'force');
@@ -701,8 +729,9 @@ const START_OPTIONS = optionSet(
   'collapsible',
   'no-preamble',
   'preamble',
+  'json',
 );
-const START_ASYNC_OPTIONS = new Set([...START_OPTIONS, 'json']);
+const START_ASYNC_OPTIONS = START_OPTIONS;
 const RESUME_OPTIONS = optionSet(
   'agent',
   'provider',
@@ -716,7 +745,52 @@ const RESUME_OPTIONS = optionSet(
   'color',
   'tag',
   'collapsible',
+  'json',
 );
+
+function parseFork(
+  kind: 'fork' | 'fork-async',
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): ForkCliCommand | ForkAsyncCliCommand {
+  rejectOptionsExcept(values, FORK_OPTIONS, kind);
+  if (parsed.positionals.length < 2) {
+    throw argumentError(`${kind} requires a source chat ID${kind === 'fork-async' ? ' and a message' : ''}`);
+  }
+  const sourceChatId = parseControlChatId(parsed.positionals[1]!, kind);
+  const messageArguments = parsed.positionals.slice(2);
+  if (kind === 'fork-async' && messageArguments.length === 0) {
+    throw argumentError('fork-async requires a source chat ID and a message');
+  }
+  if (messageArguments.length === 0) {
+    return {
+      kind: 'fork',
+      ...connection,
+      sourceChatId,
+      allowHandoffFork: values['allow-handoff-fork'] === true,
+      json: values.json === true,
+      readsMessageFromStdin: false,
+    };
+  }
+  const readsMessageFromStdin = messageArguments.length === 1 && messageArguments[0] === '-';
+  if (!readsMessageFromStdin && messageArguments.includes('-')) {
+    throw argumentError('stdin marker - must be the only message argument');
+  }
+  const message = readsMessageFromStdin ? null : messageArguments.join(' ');
+  if (message !== null && message.trim().length === 0) {
+    throw argumentError('the message must not be empty');
+  }
+  return {
+    kind,
+    ...connection,
+    sourceChatId,
+    allowHandoffFork: values['allow-handoff-fork'] === true,
+    json: values.json === true,
+    message,
+    readsMessageFromStdin,
+  };
+}
 
 function parseControlChatId(value: string, command: ControlCommandKind): ChatId {
   try {
@@ -1019,6 +1093,7 @@ function parseAddRow(
     ...(title === undefined ? {} : { title }),
     content: readsContentFromStdin ? null : argument,
     readsContentFromStdin,
+    json: values.json === true,
   };
 }
 
@@ -1445,6 +1520,7 @@ export function parseCliArgs(
         answers: { type: 'string' },
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
+        'allow-handoff-fork': { type: 'boolean' },
         'no-preamble': { type: 'boolean' },
         clear: { type: 'boolean' },
         markdown: { type: 'boolean' },
@@ -1509,6 +1585,9 @@ export function parseCliArgs(
   if (commandName === undefined) throw argumentError('a command is required');
   if (commandName === 'ticket') return parseTicketCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
+  if (commandName === 'fork' || commandName === 'fork-async') {
+    return parseFork(commandName, parsed, values, connection);
+  }
   if (commandName === 'stop') return parseStop(parsed, values, connection);
   if (commandName === 'permission-decision') {
     return parsePermissionDecision(parsed, values, connection);
@@ -1633,6 +1712,7 @@ export function parseCliArgs(
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
     ...modes,
     ...promptInput,
+    json: values.json === true,
   };
 
   if (commandName === 'resume') {
@@ -1655,6 +1735,6 @@ export function parseCliArgs(
     ...(orderedPreambleIds === undefined ? {} : { orderedPreambleIds }),
   };
   return commandName === 'start-async'
-    ? { kind: 'start-async', ...start, json: values.json === true }
+    ? { kind: 'start-async', ...start }
     : { kind: 'start', ...start };
 }

@@ -35,11 +35,30 @@ export async function runAddRow(
   signal?: AbortSignal,
   createId: () => string = crypto.randomUUID,
 ): Promise<void> {
+  const response = await addRow(command, content, client, signal, createId);
+  output.result([
+    `chat id: ${response.chatId}`,
+    `transcript view id: ${response.transcriptViewId}`,
+    `ordinal: ${response.ordinal}`,
+    `type: ${response.presentation.style}`,
+    `format: ${response.format}`,
+    `disclosure: ${response.disclosure}`,
+    `status: ${response.status}`,
+  ].join('\n'));
+}
+
+export async function addRow(
+  command: AddRowCliCommand,
+  content: string,
+  client: ChatRowClient,
+  signal?: AbortSignal,
+  createId: () => string = crypto.randomUUID,
+): Promise<AddChatRowResponse> {
   const validatedContent = validateAddRowContent(content);
   const target = await client.getChatRowTarget(command.chatId, signal);
   const clientRequestId = createId();
   const clientMessageId = createId();
-  const response = await client.addChatRow({
+  return client.addChatRow({
     clientRequestId,
     clientMessageId,
     chatId: target.chatId,
@@ -50,13 +69,4 @@ export async function runAddRow(
     ...(command.title === undefined ? {} : { title: command.title }),
     content: validatedContent,
   }, signal);
-  output.result([
-    `chat id: ${response.chatId}`,
-    `transcript view id: ${response.transcriptViewId}`,
-    `ordinal: ${response.ordinal}`,
-    `type: ${response.presentation.style}`,
-    `format: ${response.format}`,
-    `disclosure: ${response.disclosure}`,
-    `status: ${response.status}`,
-  ].join('\n'));
 }

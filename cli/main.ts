@@ -3,12 +3,19 @@ import fs from 'node:fs/promises';
 import { CLI_HELP, parseCliArgs, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { resumeChatAsync, stopChat } from './chat-control.js';
-import { runAddRow, validateAddRowContent } from './chat-row.js';
+import { addRow, runAddRow, validateAddRowContent } from './chat-row.js';
+import { createFork, settleForkRun, submitForkRun } from './chat-fork.js';
 import { runChatStatus } from './chat-status.js';
 import { runChatExport } from './chat-export.js';
 import { runChatHandoff } from './chat-handoff.js';
 import { runChatWait } from './chat-wait.js';
-import { runConsultation, startConsultationAsync } from './consultation.js';
+import {
+  reportTagMutationOutcome,
+  runConsultation,
+  settleConsultation,
+  startConsultationAsync,
+  titleUpdateFailure,
+} from './consultation.js';
 import { runChatCatalog } from './chat-catalog.js';
 import { runChatSearch } from './chat-search.js';
 import { runChatRead } from './chat-read.js';
@@ -17,9 +24,14 @@ import { runChatOrderMutation, runRename, runSetTags } from './chat-metadata.js'
 import { runTranscriptSearchAdministration } from './transcript-search.js';
 import {
   resumeAsyncJsonEnvelope,
+  resumeJsonEnvelope,
+  addRowJsonEnvelope,
+  forkJsonEnvelope,
+  forkRunAsyncJsonEnvelope,
+  forkRunJsonEnvelope,
   startAsyncJsonEnvelope,
+  startJsonEnvelope,
   stopJsonEnvelope,
-  titleUpdateFailure,
 } from './automation-output.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
@@ -28,6 +40,7 @@ import { createCliOutput, type CliOutput } from './output.js';
 import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
 import { ticketLineOutput } from './ticket-output.js';
 import { readTicketStdin } from './ticket-stdin.js';
+import { requireCompletedTurnReceipt, writeTerminalResult } from './terminal-receipt.js';
 
 export interface MainOptions {
   signal?: AbortSignal;
@@ -136,11 +149,19 @@ async function connectedClient(
   return new GarconClient({ ...connection, fetch: options.fetch });
 }
 
-function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
+function interruptDiagnostic(
+  command: ParsedCliCommand | undefined,
+  forkTargetChatId?: string,
+): string {
   // A one-shot control POST may have reached the server before the terminal was
   // interrupted, so a conservative ambiguity message prevents an unsafe retry.
   if (command?.kind === 'add-row') {
     return 'terminal interrupted; the add-row command may have reached Garcon; inspect the chat before retrying';
+  }
+  if (command?.kind === 'fork' || command?.kind === 'fork-async') {
+    return forkTargetChatId
+      ? `terminal interrupted; the fork command may have reached Garcon as chat ${forkTargetChatId}; inspect that chat before retrying`
+      : 'terminal interrupted; no fork request was submitted';
   }
   if (command?.kind === 'export') {
     return 'terminal interrupted; no transcript export was written';
@@ -188,6 +209,7 @@ export async function main(
   const output = options.output ?? createCliOutput();
   let command: ParsedCliCommand | undefined;
   let ticketSubmissionStarted = false;
+  let forkTargetChatId: string | undefined;
   try {
     command = parseCliArgs(argv);
     if (command.kind === 'help') {
@@ -329,13 +351,88 @@ export async function main(
       }
       return 0;
     }
+    if (command.kind === 'fork' || command.kind === 'fork-async') {
+      const message = command.readsMessageFromStdin
+        ? await readConfiguredStdin(options)
+        : command.message;
+      if (message !== undefined && (message ?? '').trim().length === 0) {
+        throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
+      }
+      const client = await connectedClient(command, options);
+      const automationContext = {
+        workspace: command.workspace,
+        serverInstanceId: client.serverInstanceId,
+      };
+      const forkDependencies = {
+        onTargetChatId(chatId: string) {
+          forkTargetChatId = chatId;
+        },
+      };
+      if (message === undefined) {
+        if (command.kind !== 'fork') {
+          throw new CliError('arguments', 'fork-async requires a message', 2);
+        }
+        const result = await createFork(command, client, options.signal, forkDependencies);
+        if (command.json) {
+          output.result(JSON.stringify(forkJsonEnvelope(
+            automationContext,
+            command.sourceChatId,
+            result,
+          ), null, 2));
+        } else {
+          output.result(`chat id: ${result.chat.id}`);
+        }
+        return 0;
+      }
+      const accepted = await submitForkRun(
+        command,
+        message ?? '',
+        client,
+        options.signal,
+        forkDependencies,
+      );
+      if (command.kind === 'fork-async') {
+        if (command.json) {
+          output.result(JSON.stringify(forkRunAsyncJsonEnvelope(
+            automationContext,
+            command.sourceChatId,
+            accepted,
+          ), null, 2));
+        } else {
+          output.accepted(accepted);
+        }
+        return 0;
+      }
+      if (!command.json) output.accepted(accepted);
+      const result = await settleForkRun(
+        command.sourceChatId,
+        accepted,
+        client,
+        options.signal,
+      );
+      if (command.json) {
+        output.result(JSON.stringify(forkRunJsonEnvelope(automationContext, result), null, 2));
+        requireCompletedTurnReceipt(result.turnReceipt);
+      } else {
+        writeTerminalResult(result.turnReceipt, output);
+      }
+      return 0;
+    }
     if (command.kind === 'add-row') {
       const content = command.readsContentFromStdin
         ? await readConfiguredStdin(options, readStrictUtf8Stdin)
         : command.content ?? '';
       const validatedContent = validateAddRowContent(content);
       const client = await connectedClient(command, options);
-      await runAddRow(command, validatedContent, client, output, options.signal);
+      if (command.json) {
+        const response = await addRow(command, validatedContent, client, options.signal);
+        output.result(JSON.stringify(addRowJsonEnvelope({
+          workspace: command.workspace,
+          serverInstanceId: client.serverInstanceId,
+        }, response), null, 2));
+      } else {
+        await runAddRow(command, validatedContent, client, output, options.signal);
+      }
       return 0;
     }
     const prompt = command.readsPromptFromStdin
@@ -361,7 +458,27 @@ export async function main(
       const titleError = titleUpdateFailure(result);
       if (titleError !== undefined) throw titleError;
     } else {
-      await runConsultation(invocation, prompt, client, output, options.signal);
+      if (invocation.json) {
+        const result = await settleConsultation(
+          invocation,
+          prompt,
+          client,
+          options.signal,
+        );
+        reportTagMutationOutcome(result.accepted.tagMutation, output);
+        const context = {
+          workspace: invocation.workspace,
+          serverInstanceId: client.serverInstanceId,
+        };
+        output.result(JSON.stringify(invocation.kind === 'start'
+          ? startJsonEnvelope(context, result)
+          : resumeJsonEnvelope(context, result), null, 2));
+        requireCompletedTurnReceipt(result.turnReceipt);
+        const titleError = titleUpdateFailure(result);
+        if (titleError !== undefined) throw titleError;
+      } else {
+        await runConsultation(invocation, prompt, client, output, options.signal);
+      }
     }
     return 0;
   } catch (error) {
@@ -370,7 +487,7 @@ export async function main(
         ? ticketSubmissionStarted
           ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
           : 'terminal interrupted; no ticket mutation was submitted'
-        : interruptDiagnostic(command));
+        : interruptDiagnostic(command, forkTargetChatId));
       return 130;
     }
     const cliError = error instanceof CliError

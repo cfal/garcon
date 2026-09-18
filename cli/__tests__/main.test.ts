@@ -149,6 +149,24 @@ function addChatRowResponse(init?: RequestInit): Response {
   });
 }
 
+function completedTurnReceiptResponse(
+  chatId: string,
+  turnId: string,
+  clientRequestId: string,
+  text = 'Done',
+): Response {
+  return Response.json({
+    state: 'completed',
+    chatId,
+    turnId,
+    clientRequestId,
+    acceptedAt: TS,
+    updatedAt: TS,
+    settledAt: TS,
+    output: { availability: 'available', completeness: 'complete', text },
+  });
+}
+
 function startModelCatalogResponse(): Response {
   return Response.json({
     catalog: {
@@ -747,6 +765,74 @@ describe('main', () => {
     }, null, 2)}\n`);
   });
 
+  test('prints synchronous start JSON as the async envelope plus its terminal receipt', async () => {
+    const capture = capturedOutput();
+    let startRequest: Record<string, string> | undefined;
+    const exitCode = await main([
+      'start', '--agent', 'codex', '--model', 'gpt-5.4', '--json', 'Review it',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/models') return startModelCatalogResponse();
+        if (pathname === '/api/v1/app/settings') return remoteSettingsResponse();
+        if (pathname === '/api/v1/chats/start') {
+          startRequest = JSON.parse(String(init?.body)) as Record<string, string>;
+          return Response.json({
+            success: true,
+            commandType: 'chat-start',
+            clientRequestId: startRequest.clientRequestId,
+            chatId: startRequest.chatId,
+            turnId: 'turn-start',
+            status: 'accepted',
+            acceptedAt: TS,
+            parentChat: null,
+            chat: null,
+          });
+        }
+        if (pathname === '/api/v1/chats/turn-receipt') {
+          return completedTurnReceiptResponse(
+            startRequest!.chatId!,
+            'turn-start',
+            startRequest!.clientRequestId!,
+            'Reviewed',
+          );
+        }
+        throw new Error(`Unexpected request: ${pathname}`);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.diagnostics).toEqual([]);
+    expect(JSON.parse(capture.results[0]!)).toEqual({
+      schemaVersion: 1,
+      command: 'start',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'chat-start',
+        clientRequestId: startRequest?.clientRequestId,
+        chatId: startRequest?.chatId,
+        turnId: 'turn-start',
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: null,
+      titleUpdate: { status: 'not-requested' },
+      turnReceipt: {
+        state: 'completed',
+        chatId: startRequest?.chatId,
+        turnId: 'turn-start',
+        clientRequestId: startRequest?.clientRequestId,
+        acceptedAt: TS,
+        updatedAt: TS,
+        settledAt: TS,
+        output: { availability: 'available', completeness: 'complete', text: 'Reviewed' },
+      },
+    });
+  });
+
   test('resume-async delivers to an idle chat and exits after acceptance', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
@@ -804,6 +890,74 @@ describe('main', () => {
       parentChat: null,
       delivery: 'new-turn',
     }, null, 2)}\n`);
+  });
+
+  test('prints synchronous resume JSON and preserves terminal failure exit semantics', async () => {
+    const capture = capturedOutput();
+    let runRequest: Record<string, string> | undefined;
+    const exitCode = await main([
+      'resume', CHAT_ID, '--json', 'Implement the review',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/chats/snapshot') return controlSnapshotResponse();
+        if (pathname === '/api/v1/chats/run') {
+          runRequest = JSON.parse(String(init?.body)) as Record<string, string>;
+          return Response.json({
+            success: true,
+            commandType: 'agent-run',
+            clientRequestId: runRequest.clientRequestId,
+            chatId: CHAT_ID,
+            turnId: 'turn-sync',
+            status: 'accepted',
+            acceptedAt: TS,
+            parentChat: null,
+          });
+        }
+        if (pathname === '/api/v1/chats/turn-receipt') {
+          return Response.json({
+            state: 'failed',
+            chatId: CHAT_ID,
+            turnId: 'turn-sync',
+            clientRequestId: runRequest!.clientRequestId,
+            acceptedAt: TS,
+            updatedAt: TS,
+            settledAt: TS,
+            error: 'Synthetic failure',
+            errorCode: 'INTERNAL_ERROR',
+            output: { availability: 'unavailable', reason: 'no-final-response' },
+          });
+        }
+        throw new Error(`Unexpected request: ${pathname}`);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({
+      schemaVersion: 1,
+      command: 'resume',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'agent-run',
+        clientRequestId: runRequest?.clientRequestId,
+        chatId: CHAT_ID,
+        turnId: 'turn-sync',
+      },
+      parentChat: null,
+      delivery: 'new-turn',
+      titleUpdate: { status: 'not-requested' },
+      turnReceipt: {
+        state: 'failed',
+        errorCode: 'INTERNAL_ERROR',
+        error: 'Synthetic failure',
+      },
+    });
+    expect(capture.diagnostics).toEqual([
+      'receipt polling: agent turn failed [INTERNAL_ERROR]: Synthetic failure',
+    ]);
   });
 
   test('resume-async without --allow-steer reports busy and exits 3', async () => {
@@ -878,6 +1032,217 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('message read from stdin must not be empty');
   });
 
+  test('creates a bare fork and prints its correlated JSON chat', async () => {
+    const capture = capturedOutput();
+    let forkRequest: Record<string, string | boolean> | undefined;
+    const exitCode = await main([
+      'fork', CHAT_ID, '--allow-handoff-fork', '--json',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (_input, init) => {
+        forkRequest = JSON.parse(String(init?.body)) as Record<string, string | boolean>;
+        const parentChat = {
+          chatId: CHAT_ID,
+          relation: 'fork' as const,
+          transcriptViewId: 'view-1',
+          ordinal: 3,
+        };
+        return Response.json({
+          success: true,
+          chat: chat({ id: String(forkRequest.chatId), parentChat }),
+        });
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(forkRequest).toMatchObject({
+      sourceChatId: CHAT_ID,
+      allowHandoffFork: true,
+    });
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({
+      schemaVersion: 1,
+      command: 'fork',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      sourceChatId: CHAT_ID,
+      chat: {
+        id: forkRequest?.chatId,
+        parentChat: { chatId: CHAT_ID, relation: 'fork' },
+      },
+    });
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('fork-async atomically submits the first prompt and returns after acceptance', async () => {
+    const capture = capturedOutput();
+    let forkRequest: Record<string, string> | undefined;
+    let receiptCalls = 0;
+    const exitCode = await main([
+      'fork-async', CHAT_ID, '--json', 'Continue in the fork',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/chats/turn-receipt') {
+          receiptCalls += 1;
+          throw new Error('fork-async must not poll');
+        }
+        forkRequest = JSON.parse(String(init?.body)) as Record<string, string>;
+        const parentChat = {
+          chatId: CHAT_ID,
+          relation: 'fork' as const,
+          transcriptViewId: 'view-1',
+          ordinal: 3,
+        };
+        return Response.json({
+          success: true,
+          commandType: 'fork-run',
+          clientRequestId: forkRequest.clientRequestId,
+          chatId: forkRequest.chatId,
+          turnId: 'turn-fork',
+          status: 'accepted',
+          acceptedAt: TS,
+          parentChat,
+          chat: chat({ id: forkRequest.chatId, parentChat }),
+        });
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receiptCalls).toBe(0);
+    expect(forkRequest).toMatchObject({
+      sourceChatId: CHAT_ID,
+      command: 'Continue in the fork',
+    });
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({
+      schemaVersion: 1,
+      command: 'fork-async',
+      sourceChatId: CHAT_ID,
+      receipt: {
+        commandType: 'fork-run',
+        chatId: forkRequest?.chatId,
+        turnId: 'turn-fork',
+      },
+      parentChat: { chatId: CHAT_ID, relation: 'fork' },
+      chat: { id: forkRequest?.chatId },
+    });
+  });
+
+  test('synchronous fork reads stdin, waits for the exact fork turn, and emits JSON', async () => {
+    const capture = capturedOutput();
+    let forkRequest: Record<string, string> | undefined;
+    const exitCode = await main([
+      'fork', CHAT_ID, '--json', '-',
+    ], {
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => 'Continue from stdin.\n',
+      output: capture.output,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/chats/turn-receipt') {
+          return completedTurnReceiptResponse(
+            forkRequest!.chatId!,
+            'turn-fork',
+            forkRequest!.clientRequestId!,
+            'Fork complete',
+          );
+        }
+        forkRequest = JSON.parse(String(init?.body)) as Record<string, string>;
+        const parentChat = {
+          chatId: CHAT_ID,
+          relation: 'fork' as const,
+          transcriptViewId: 'view-1',
+          ordinal: 3,
+        };
+        return Response.json({
+          success: true,
+          commandType: 'fork-run',
+          clientRequestId: forkRequest.clientRequestId,
+          chatId: forkRequest.chatId,
+          turnId: 'turn-fork',
+          status: 'accepted',
+          acceptedAt: TS,
+          parentChat,
+          chat: chat({ id: forkRequest.chatId, parentChat }),
+        });
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(forkRequest?.command).toBe('Continue from stdin.\n');
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({
+      schemaVersion: 1,
+      command: 'fork',
+      sourceChatId: CHAT_ID,
+      receipt: { chatId: forkRequest?.chatId, turnId: 'turn-fork' },
+      turnReceipt: {
+        state: 'completed',
+        chatId: forkRequest?.chatId,
+        output: { text: 'Fork complete' },
+      },
+    });
+  });
+
+  test('rejects empty fork stdin before runtime discovery', async () => {
+    const capture = capturedOutput();
+    let discovered = false;
+    const exitCode = await main(['fork', CHAT_ID, '-'], {
+      discoverRuntime: async () => {
+        discovered = true;
+        return stubDiscovery();
+      },
+      readStdin: async () => ' \n ',
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(2);
+    expect(discovered).toBeFalse();
+    expect(capture.diagnostics).toEqual([
+      'arguments: the message read from stdin must not be empty',
+    ]);
+  });
+
+  test('interrupts a submitted fork with its generated target chat ID', async () => {
+    const controller = new AbortController();
+    const capture = capturedOutput();
+    let targetChatId: string | undefined;
+    let markPostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => {
+      markPostStarted = resolve;
+    });
+    const result = main(['fork', CHAT_ID], {
+      signal: controller.signal,
+      discoverRuntime: stubDiscovery,
+      fetch: async (_input, init) => {
+        targetChatId = (JSON.parse(String(init?.body)) as { chatId: string }).chatId;
+        markPostStarted();
+        await new Promise<never>((_resolve, reject) => {
+          if (init?.signal?.aborted) {
+            reject(init.signal.reason);
+            return;
+          }
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+      output: capture.output,
+    });
+
+    await postStarted;
+    controller.abort(new Error('terminal interrupted'));
+
+    await expect(result).resolves.toBe(130);
+    expect(targetChatId).toBeDefined();
+    expect(capture.diagnostics).toEqual([
+      `terminal interrupted; the fork command may have reached Garcon as chat ${targetChatId}; inspect that chat before retrying`,
+    ]);
+  });
+
   test('add-row sends positional content only through the row endpoints', async () => {
     const capture = capturedOutput();
     const requests: Array<{ url: string; body: Record<string, string> | null }> = [];
@@ -927,6 +1292,40 @@ describe('main', () => {
     expect(capture.results[0]).not.toContain('Synthetic failure detail.');
     expect(capture.results[0]).not.toContain('Release validation');
     expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('prints one complete add-row JSON response envelope', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main([
+      'add-row', CHAT_ID, '--type', 'notice', '--json', 'Synthetic notice.',
+    ], {
+      fetch: async (_input, init) => init?.method === 'POST'
+        ? addChatRowResponse(init)
+        : chatRowTargetResponse(),
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.diagnostics).toEqual([]);
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({
+      schemaVersion: 1,
+      command: 'add-row',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      response: {
+        success: true,
+        commandType: 'chat-row-add',
+        chatId: CHAT_ID,
+        transcriptViewId: 'view-1',
+        ordinal: 7,
+        presentation: { style: 'notice' },
+        format: 'plain',
+        disclosure: 'expanded',
+        status: 'appended',
+        timestamp: '2026-08-18T12:00:00.000Z',
+      },
+    });
   });
 
   test('add-row preserves stdin content and validates it before runtime discovery', async () => {
