@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import { promises as fs } from 'fs';
+import type { ProjectInspector } from '../../common/project-resolution.js';
 import {
   normalizeScheduledPromptDefinitionInput,
   isMinuteAlignedIso,
@@ -22,7 +22,6 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { errorMessage } from '../lib/errors.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { createLogger } from '../lib/log.js';
 import { isDomainError } from '../lib/domain-error.js';
 import type { PreambleService } from '../preambles/service.js';
@@ -135,6 +134,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         'hasAgent' | 'assertExecutionModeSelectionSupported'
       >;
       preambles: Pick<PreambleService, 'snapshot'>;
+      inspectProject: ProjectInspector;
       cron?: CronRuntime;
     },
   ) {
@@ -312,12 +312,9 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       permissionMode: definition.target.permissionMode,
       thinkingMode: definition.target.thinkingMode,
     });
-    let canonicalProjectPath: string;
-    try {
-      canonicalProjectPath = await assertRealWithinProjectBase(definition.target.projectPath);
-      if (!(await fs.stat(canonicalProjectPath)).isDirectory()) throw new Error('Project path is not a directory');
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
+    const resolution = await this.deps.inspectProject(definition.target.projectPath);
+    if (resolution.kind === 'unavailable') {
+      if (resolution.reason === 'outside-base') {
         throw new ScheduledPromptDomainError(
           'PROJECT_PATH_OUTSIDE_BASE',
           'Project path is outside the allowed base directory',
@@ -326,6 +323,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       }
       throw new ScheduledPromptDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
     }
+    const canonicalProjectPath = resolution.effectiveProjectKey;
     if (definition.target.preambleChoice.mode === 'explicit') {
       try {
         resolveNewChatPreambleSelection({

@@ -171,7 +171,7 @@ export class StartCommands {
       throw error;
     }
 
-    const projectPath = await resolveStartProjectPath(input.projectPath);
+    const projectPath = await resolveStartProjectPath(input.projectPath, this.deps.inspectProject);
     // Omitted IDs resolve the newest defaults here, at actual creation; an
     // explicit list is proven safe against this same catalog snapshot.
     const preambleSelection = resolveNewChatPreambleSelection({

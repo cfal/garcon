@@ -1,4 +1,5 @@
 import type { IChatRegistry } from '../chats/store.js';
+import type { ProjectInspector } from '../../common/project-resolution.js';
 import {
   createPreambleService,
   initializePreambleStore,
@@ -11,6 +12,7 @@ import { SnippetStore } from './store.js';
 export async function initializeSnippetAndPreambleServices(deps: {
   readonly workspaceDir: string;
   readonly chats: Pick<IChatRegistry, 'getChat'>;
+  readonly inspectProject: ProjectInspector;
 }): Promise<{ snippets: SnippetService; preambles: PreambleService }> {
   const snippetStore = new SnippetStore(deps.workspaceDir);
   await snippetStore.init();
@@ -21,13 +23,13 @@ export async function initializeSnippetAndPreambleServices(deps: {
   });
   snippetShortNames.assertCatalogsDoNotOverlap();
   return {
-    preambles: createPreambleService(preambleStore, snippetShortNames),
+    preambles: createPreambleService(preambleStore, deps.inspectProject, snippetShortNames),
     snippets: new SnippetService({
       store: snippetStore,
       preambles: preambleStore,
       snippetShortNames,
       chats: deps.chats,
-      projectPaths: new SnippetProjectPathService(),
+      projectPaths: new SnippetProjectPathService(deps.inspectProject),
     }),
   };
 }

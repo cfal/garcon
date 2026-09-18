@@ -48,6 +48,18 @@ afterEach(async () => {
 });
 
 describe('preamble matching', () => {
+  it.each(['/', 'C:/', '//host/share/'])('counts inherited scope budgets under portable root %s', (root) => {
+    const nested = `${root}project`;
+    const entries = [root, nested].map((projectPath) => ({
+      ...globalDefinition('Synthetic', 'x'.repeat(32_000)),
+      scope: { type: 'project-paths', rules: [{ projectPath, includeNested: true }] },
+    }));
+    expect(preambleCatalogCompositionViolation(entries)).toMatchObject({
+      kind: 'combined-limit', projectPath: nested,
+    });
+    expect(preambleRuleMatches(entries[0].scope.rules[0], nested)).toBe(true);
+  });
+
   it('matches exact and nested paths without confusing sibling prefixes', () => {
     const exact = { projectPath: '/workspace/project', includeNested: false };
     const nested = { ...exact, includeNested: true };

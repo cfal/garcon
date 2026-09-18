@@ -76,6 +76,7 @@ export type TerminalErrorCode =
   | 'terminal-replay-sequence'
   | 'terminal-backpressure'
   | 'terminal-auth-expired'
+  | 'terminal-unsupported'
   | 'terminal-internal';
 
 const TERMINAL_ERROR_CODES: ReadonlySet<TerminalErrorCode> = new Set([
@@ -88,6 +89,7 @@ const TERMINAL_ERROR_CODES: ReadonlySet<TerminalErrorCode> = new Set([
   'terminal-replay-sequence',
   'terminal-backpressure',
   'terminal-auth-expired',
+  'terminal-unsupported',
   'terminal-internal',
 ]);
 

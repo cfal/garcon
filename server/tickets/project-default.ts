@@ -16,6 +16,11 @@ function unavailable(): TicketDomainError {
     'Cannot resolve the project default. Check the context directory, or enter an explicit project.');
 }
 
+export async function rejectRemoteTicketProjectDefault(): Promise<TicketProjectDefault> {
+  throw new TicketDomainError('TICKET_PROJECT_UNAVAILABLE',
+    'Automatic ticket project selection is unavailable on a remote execution node; enter an explicit project.');
+}
+
 function singlePath(output: string): string {
   if (!output.endsWith('\n')) throw unavailable();
   const path = output.slice(0, -1);

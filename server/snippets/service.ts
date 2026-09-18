@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import { promises as fs } from 'fs';
+import type { ProjectInspector } from '../../common/project-resolution.js';
 import {
   normalizeExpandSnippetRequest,
   normalizeSnippetDefinitionInput,
@@ -16,7 +16,6 @@ import {
 } from '../../common/snippets.js';
 import { renderPreambleContent } from '../../common/preambles.js';
 import type { IChatRegistry } from '../chats/store.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { SnippetDomainError } from './errors.js';
 import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
 import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
@@ -26,29 +25,9 @@ import type {
   SnippetShortNameCoordinator,
 } from './short-name-coordinator.js';
 
-function projectPathAccessError(error: unknown, projectPath: string): SnippetDomainError | null {
-  const code =
-    error && typeof error === 'object' && 'code' in error
-      ? (error as NodeJS.ErrnoException).code
-      : undefined;
-  if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
-    return new SnippetDomainError(
-      'SNIPPET_PROJECT_PATH_NOT_FOUND',
-      `Project path not found: ${projectPath}`,
-      404,
-    );
-  }
-  if (code === 'EACCES' || code === 'EPERM') {
-    return new SnippetDomainError(
-      'SNIPPET_PROJECT_PATH_INACCESSIBLE',
-      `Project path is not accessible: ${projectPath}`,
-      403,
-    );
-  }
-  return null;
-}
-
 export class SnippetProjectPathService {
+  constructor(private readonly inspect: ProjectInspector) {}
+
   async resolve(projectPath: string): Promise<string> {
     const requestedPath = projectPath.trim();
     if (!requestedPath) {
@@ -59,38 +38,18 @@ export class SnippetProjectPathService {
       );
     }
 
-    let canonicalPath: string;
-    try {
-      canonicalPath = await assertRealWithinProjectBase(requestedPath);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
-        throw new SnippetDomainError(
-          'SNIPPET_PROJECT_PATH_OUTSIDE_BASE',
-          'Project path is outside the allowed base directory',
-          403,
-        );
-      }
-      const accessError = projectPathAccessError(error, requestedPath);
-      if (accessError) throw accessError;
-      throw error;
+    const resolution = await this.inspect(requestedPath);
+    if (resolution.kind === 'available') return resolution.effectiveProjectKey;
+    switch (resolution.reason) {
+      case 'not-found':
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_FOUND', `Project path not found: ${requestedPath}`, 404);
+      case 'outside-base':
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_OUTSIDE_BASE', 'Project path is outside the allowed base directory', 403);
+      case 'not-a-directory':
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_DIRECTORY', `Project path is not a directory: ${requestedPath}`, 400);
+      case 'permission-denied':
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_INACCESSIBLE', `Project path is not accessible: ${requestedPath}`, 403);
     }
-
-    let projectStat: Awaited<ReturnType<typeof fs.stat>>;
-    try {
-      projectStat = await fs.stat(canonicalPath);
-    } catch (error) {
-      const accessError = projectPathAccessError(error, canonicalPath);
-      if (accessError) throw accessError;
-      throw error;
-    }
-    if (!projectStat.isDirectory()) {
-      throw new SnippetDomainError(
-        'SNIPPET_PROJECT_PATH_NOT_DIRECTORY',
-        `Project path is not a directory: ${canonicalPath}`,
-        400,
-      );
-    }
-    return canonicalPath;
   }
 }
 

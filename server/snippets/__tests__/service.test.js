@@ -1,3 +1,4 @@
+import { inspectProjectDirectory } from "../../projects/project-directory-service.ts";
 import { afterEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -475,7 +476,7 @@ describe('snippet service', () => {
     createdDirs.push(projectBase);
     process.env.GARCON_PROJECT_BASE_DIR = projectBase;
     resetServerConfigForTests();
-    const projectPaths = new SnippetProjectPathService();
+    const projectPaths = new SnippetProjectPathService(inspectProjectDirectory);
 
     const loopPath = path.join(projectBase, 'loop');
     await fs.symlink('loop', loopPath);

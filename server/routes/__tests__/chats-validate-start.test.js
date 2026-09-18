@@ -11,6 +11,8 @@ mock.module('../../config.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { AgentCallError } from '@garcon/server-agent-interface';
+import { LocalExecutionProjectService } from '../../execution-nodes/project-service.ts';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const registry = {
@@ -61,6 +63,7 @@ const commandLedger = createRouteCommandLedger('chats-validate-start');
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const routeDeps = {
+  projects: new LocalExecutionProjectService(os.homedir(), () => {}),
   registry,
   settings,
   queue,
@@ -137,10 +140,9 @@ describe('GET /api/v1/chats/validate-start', () => {
   it('returns permission_denied for inaccessible directories', async () => {
     const deniedRoutes = createChatRoutes({
       ...routeDeps,
-      inspectProject: mock(async () => ({
-        kind: 'unavailable',
-        reason: 'permission-denied',
-      })),
+      projects: { inspect: mock(async () => ({
+        resolution: { kind: 'unavailable', reason: 'permission-denied' },
+      })) },
     });
     const deniedHandler = deniedRoutes['/api/v1/chats/validate-start'].GET;
     const request = new Request(
@@ -162,6 +164,17 @@ describe('GET /api/v1/chats/validate-start', () => {
     const body = await response.json();
 
     expect(body).toEqual({ valid: true, isGitRepo: false });
+  });
+
+  it('reports a node failure as unavailable, not a missing project', async () => {
+    const failed = createChatRoutes({
+      ...routeDeps,
+      projects: { inspect: async () => { throw new AgentCallError('not-dispatched', 'Node offline'); } },
+    })['/api/v1/chats/validate-start'].GET;
+    const request = new Request('http://localhost/api/v1/chats/validate-start?path=/worker/project');
+    const response = await failed(request, new URL(request.url));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'UNAVAILABLE' });
   });
 
   it('returns valid true and isGitRepo true for git repositories', async () => {

@@ -6,18 +6,20 @@ import { resolveProjectPathFromUrl } from './project-path-resolver.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import { errorMessage } from './route-helpers.js';
 import type { SlashCommandsResponse } from '../../common/slash-commands.js';
+import type { ProjectInspector } from '../../common/project-resolution.js';
+import { jsonErrorFromUnknown } from '../lib/http-error.js';
 
 interface CommandsRouteDeps {
   registry: IChatRegistry;
   agents: AgentRegistryServiceContract;
+  inspectProject: ProjectInspector;
 }
 
-export default function createCommandsRoutes({ registry, agents }: CommandsRouteDeps): RouteMap {
+export default function createCommandsRoutes({ registry, agents, inspectProject }: CommandsRouteDeps): RouteMap {
   async function getCommands(_request: Request, url: URL): Promise<Response> {
     try {
-      const resolved = await resolveProjectPathFromUrl(registry, url);
+      const resolved = await resolveProjectPathFromUrl(registry, url, inspectProject);
       if (resolved.error) return resolved.error;
 
       const agent = url.searchParams.get('agent')?.trim();
@@ -26,7 +28,7 @@ export default function createCommandsRoutes({ registry, agents }: CommandsRoute
 
       return Response.json({ commands } satisfies SlashCommandsResponse);
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { TicketCommandController } from '../command-controller.js';
+import { rejectRemoteTicketProjectDefault } from '../project-default.js';
 import { parseGarconTicketCommand } from '../../../common/garcon-ticket-command.js';
 import { parseGarconTicketResult } from '../../../common/garcon-ticket-result.js';
 import { ticketBytes } from '../../../common/ticket-validation.js';
@@ -58,6 +59,15 @@ function fixture(resolveProject) {
 }
 
 describe('ticket command controller', () => {
+  test('rejects remote automatic defaults while permitting explicit projects', async () => {
+    const f = fixture(rejectRemoteTicketProjectDefault);
+    expect(await f.send(create)).toMatchObject({ status: 'error', errorCode: 'TICKET_PROJECT_UNAVAILABLE' });
+    expect(f.service.list({}).items).toHaveLength(0);
+    const result = await f.send('<garcon-ticket-create ref="explicit">{"title":"Synthetic ticket","project":"Explicit project"}</garcon-ticket-create>', 2);
+    expect(result).toMatchObject({ status: 'ok', ticketId: 'G-1' });
+    expect(f.service.read({ ticketId: 'G-1' }, { kind: 'chat', chatId: CHAT_ID }).ticket.project).toBe('Explicit project');
+  });
+
   test('commits attributed writes, compact notices and result delivery outside the source lock', async () => {
     const f = fixture();
     const result = await f.send(create);

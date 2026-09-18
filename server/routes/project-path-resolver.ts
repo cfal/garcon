@@ -2,11 +2,10 @@
 // param, enforcing the project-base boundary. Shared by routes that operate
 // against a project directory (files, slash-command discovery).
 
-import type { ProjectUnavailableReason } from '../../common/project-resolution.js';
+import type { ProjectInspector, ProjectUnavailableReason } from '../../common/project-resolution.js';
 import { jsonError } from '../lib/http-error.js';
 import { projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import type { IChatRegistry } from '../chats/store.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 
 export type ProjectPathResolution =
   | { projectPath: string; error?: undefined }
@@ -14,7 +13,7 @@ export type ProjectPathResolution =
 
 export async function resolveAccessibleProjectPath(
   projectPath: string,
-  inspect = inspectProjectDirectory,
+  inspect: ProjectInspector,
 ): Promise<ProjectPathResolution> {
   const resolution = await inspect(projectPath);
   return resolution.kind === 'available'
@@ -52,6 +51,7 @@ function unavailableResponse(projectPath: string, reason: ProjectUnavailableReas
 export async function resolveProjectPathFromUrl(
   registry: IChatRegistry,
   url: URL,
+  inspect: ProjectInspector,
 ): Promise<ProjectPathResolution> {
   const chatId = url.searchParams.get('chatId');
   if (chatId) {
@@ -61,12 +61,12 @@ export async function resolveProjectPathFromUrl(
         error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }),
       };
     }
-    return resolveAccessibleProjectPath(chat.projectPath);
+    return resolveAccessibleProjectPath(chat.projectPath, inspect);
   }
 
   const projectPath = url.searchParams.get('projectPath');
   if (!projectPath) {
     return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
   }
-  return resolveAccessibleProjectPath(projectPath);
+  return resolveAccessibleProjectPath(projectPath, inspect);
 }

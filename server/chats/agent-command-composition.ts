@@ -5,7 +5,7 @@ import { errorMessage } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink, TicketCommandRequestSink, GarconCommandRejectionSink } from '../ledger/garcon-command-publication.js';
 import { AgentCommandReplies } from './agent-command-replies.js';
-import { TicketCommandController } from '../tickets/command-controller.js';
+import { TicketCommandController, type TicketCommandControllerOptions } from '../tickets/command-controller.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
@@ -40,6 +40,7 @@ interface AgentCommandCompositionOptions {
   readonly chatIds: ChatIdAllocator;
   readonly scheduler: ScheduledPromptScheduler;
   readonly tickets: TicketRuntime;
+  readonly resolveProject: TicketCommandControllerOptions['resolveProject'];
 }
 
 export class AgentCommandComposition {

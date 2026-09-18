@@ -10,6 +10,7 @@ import { PreambleProjectPathService } from './project-path-service.js';
 import { PreambleService } from './service.js';
 import { PreambleStore } from './store.js';
 import type { SnippetShortNameCoordinator } from '../snippets/short-name-coordinator.js';
+import type { ProjectInspector } from '../../common/project-resolution.js';
 
 export async function initializePreambleStore(workspaceDir: string): Promise<PreambleStore> {
   const store = new PreambleStore(workspaceDir);
@@ -25,17 +26,18 @@ export async function initializePreambleStore(workspaceDir: string): Promise<Pre
 
 export function createPreambleService(
   store: PreambleStore,
+  inspectProject: ProjectInspector,
   snippetShortNames?: Pick<SnippetShortNameCoordinator, 'runMutation'>,
 ): PreambleService {
   return new PreambleService({
     store,
-    projectPaths: new PreambleProjectPathService(),
+    projectPaths: new PreambleProjectPathService(inspectProject),
     snippetShortNames,
   });
 }
 
-export async function initializePreambleService(workspaceDir: string): Promise<PreambleService> {
-  return createPreambleService(await initializePreambleStore(workspaceDir));
+export async function initializePreambleService(workspaceDir: string, inspectProject: ProjectInspector): Promise<PreambleService> {
+  return createPreambleService(await initializePreambleStore(workspaceDir), inspectProject);
 }
 
 // Builds the existing-chat selection service. Kept beside catalog setup so

@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { inspectProjectDirectory } from '../../projects/project-directory-service.ts';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
 import {
@@ -743,6 +744,7 @@ function makeService(overrides = {}) {
     metadata,
     agents,
     fileMentions,
+    inspectProject: overrides.inspectProject ?? inspectProjectDirectory,
     chatListProjector,
     forkChatFileCopy,
     transcripts,

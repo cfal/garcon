@@ -16,7 +16,9 @@ describe('ProjectAdmission', () => {
   });
 
   it('preserves typed missing-chat and unavailable-project errors', async () => {
-    const missing = new ProjectAdmission({ getChat: () => null });
+    const missing = new ProjectAdmission({ getChat: () => null }, async () => {
+      throw new Error('Missing chats must not inspect a project');
+    });
     await expect(missing.assertAvailable('1783725900000800')).rejects.toMatchObject({
       code: 'SESSION_NOT_FOUND', status: 404,
     });

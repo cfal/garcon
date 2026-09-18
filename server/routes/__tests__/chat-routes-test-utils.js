@@ -5,6 +5,7 @@ import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
+import { inspectProjectDirectory } from '../../projects/project-directory-service.ts';
 
 export function createRouteCommandLedger(label = 'chat-routes') {
   return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
@@ -49,6 +50,7 @@ export function createRouteCommandService({
     deleteChat: () => undefined,
   };
   return new ChatCommandService({
+    inspectProject: inspectProjectDirectory,
     chats: registry,
     queue,
     transcripts,

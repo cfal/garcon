@@ -70,8 +70,7 @@ import type { ChatMetadata } from '../chats/metadata-store.js';
 import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
-import { readOnlyGitOptions, runGit } from '../git/run.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
+import { AgentCallError, type ExecutionProjectService } from '@garcon/server-agent-interface';
 import type {
   CompleteChatHistoryResponse,
   TranscriptReadPurpose,
@@ -203,15 +202,6 @@ type QueueDep = ChatExecutionService;
 type ChatViewsDep = TranscriptPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 
-async function isGitRepository(projectPath: string): Promise<boolean> {
-  try {
-    const { stdout } = await runGit(projectPath, ['rev-parse', '--is-inside-work-tree'], readOnlyGitOptions());
-    return stdout.trim() === 'true';
-  } catch {
-    return false;
-  }
-}
-
 function requireStringField(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || !value.trim()) {
@@ -329,7 +319,7 @@ interface ChatRouteDeps {
   searchIndex?: ChatSearchDep;
   transcriptSearchMaintenance?: TranscriptSearchMaintenanceDep;
   lastSelectedChat?: LastSelectedChatState;
-  inspectProject?: typeof inspectProjectDirectory;
+  projects: ExecutionProjectService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
 }
 
@@ -347,7 +337,7 @@ export default function createChatRoutes({
   searchIndex,
   transcriptSearchMaintenance,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
-  inspectProject = inspectProjectDirectory,
+  projects,
   chatMutationLock,
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
@@ -377,7 +367,7 @@ export default function createChatRoutes({
     }
 
     try {
-      const resolution = await inspectProject(dirPath);
+      const { resolution, isGitRepository } = await projects.inspect({ projectPath: dirPath, includeGitRepository: true });
       if (resolution.kind === 'unavailable') {
         switch (resolution.reason) {
           case 'not-found':
@@ -393,9 +383,9 @@ export default function createChatRoutes({
             return pathValidationError('Permission denied', 'permission_denied');
         }
       }
-      const isGitRepo = await isGitRepository(resolution.effectiveProjectKey);
-      return Response.json({ valid: true, isGitRepo });
+      return Response.json({ valid: true, isGitRepo: isGitRepository ?? false });
     } catch (error: unknown) {
+      if (error instanceof AgentCallError) return jsonErrorFromUnknown(error);
       return pathValidationError((error as Error).message, 'unknown');
     }
   }

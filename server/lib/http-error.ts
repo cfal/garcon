@@ -1,4 +1,4 @@
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { HttpErrorResponse } from '../../common/http-error.ts';
 import { isDomainError, transcriptUnavailableMessage } from './domain-error.js';
 import { createLogger } from './log.js';
@@ -40,6 +40,9 @@ export function jsonErrorFromUnknown(
   errorCode = defaultErrorCodeForStatus(status),
   retryable = defaultRetryableForStatus(status),
 ): Response {
+  if (error instanceof AgentCallError) {
+    return jsonError(error.message, error.code === 'OPERATION_UNSUPPORTED' ? 501 : 503, error.code, false);
+  }
   if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
     return jsonError(
       transcriptUnavailableMessage(error.retryable),

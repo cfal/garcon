@@ -7,6 +7,7 @@ import {
   listDirectoryStrict,
 } from './projects.utils.js';
 import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
+import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
@@ -236,7 +237,7 @@ export default function createFilesRoutes(
     ...dependencyOverrides,
   };
   const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
-    resolveProjectPathFromUrl(registry, url);
+    resolveProjectPathFromUrl(registry, url, inspectProjectDirectory);
   const saveLocks = new KeyedPromiseLock();
 
   async function handleBaseTree(

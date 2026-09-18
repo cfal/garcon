@@ -13,7 +13,7 @@ import {
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { assertRealWithinProjectBase } from '../lib/path-boundary.js';
+import { isCanonicalNodePath } from '../lib/portable-path.js';
 import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
 import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 import type { BundledPreambleDefinition } from './bundled.js';
@@ -64,8 +64,7 @@ function parseActivePreambles(raw: unknown): Preamble[] {
       preamble.scope.type === 'project-paths'
       && preamble.scope.rules.some((rule, index) => (
         rawRules[index]?.projectPath !== rule.projectPath
-        || !path.isAbsolute(rule.projectPath)
-        || path.resolve(rule.projectPath) !== rule.projectPath
+        || !isCanonicalNodePath(rule.projectPath)
       ))
     ) throw new Error('preambles.json contains a non-canonical project path');
     ids.add(preamble.id);
@@ -182,7 +181,6 @@ export class PreambleStore {
     const parsed: unknown = JSON.parse(raw);
     const migrated = (parsed as { version?: unknown })?.version === 1;
     const file = migrated ? normalizeVersionOneFile(parsed) : normalizeVersionTwoFile(parsed);
-    await assertCanonicalProjectPaths(file.preambles);
     if (preambleCatalogCompositionViolation(file.preambles)) {
       throw new Error('preambles.json contains an invalid combined preamble composition');
     }
@@ -465,22 +463,6 @@ function normalizeCreatedPreamble(value: unknown): Preamble {
     );
   }
   return preamble;
-}
-
-async function assertCanonicalProjectPaths(preambles: readonly Preamble[]): Promise<void> {
-  const projectPaths = new Set(preambles.flatMap((preamble) => preamble.scope.type === 'project-paths'
-    ? preamble.scope.rules.map((rule) => rule.projectPath)
-    : []));
-  await Promise.all([...projectPaths].map(async (projectPath) => {
-    let canonicalProjectPath: string;
-    try {
-      canonicalProjectPath = await assertRealWithinProjectBase(projectPath);
-    } catch (error) {
-      throw new Error('preambles.json contains a non-canonical project path', { cause: error });
-    }
-    if (canonicalProjectPath === projectPath) return;
-    throw new Error('preambles.json contains a non-canonical project path');
-  }));
 }
 
 export function reorderedPreambles(

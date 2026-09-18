@@ -1,4 +1,3 @@
-import { getProjectBasePath } from '../config.js';
 import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
@@ -96,10 +95,12 @@ export async function buildRemoteSettingsSnapshot({
   settings,
   agents,
   telegramSettings,
+  projectBasePath,
 }: {
   settings: SettingsStore;
   agents: AgentRegistryServiceContract;
   telegramSettings?: TelegramSettingsStore | null;
+  projectBasePath: string;
 }): Promise<RemoteSettingsSnapshot> {
   const settingsSource = settings.getRemoteSettingsSnapshotSource();
   const version = settingsSource.version;
@@ -157,7 +158,7 @@ export async function buildRemoteSettingsSnapshot({
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
     recentAgentSettings,
     executionDefaults,
-    projectBasePath: getProjectBasePath(),
+    projectBasePath,
     telegram: telegramSettings?.getPublicStatus?.() ?? emptyTelegramStatus,
   };
 }
@@ -175,6 +176,7 @@ export default function createWorkspaceRoutes(
   agents: AgentRegistryServiceContract,
   telegramNotifier: TelegramNotifier,
   telegramSettings: TelegramSettingsStore,
+  projectBasePath: string,
   registry?: Pick<IChatRegistry, 'getChat'>,
   transcriptSearchSettings?: {
     setEnabled(
@@ -359,7 +361,7 @@ export default function createWorkspaceRoutes(
 
   async function getAppSettings(): Promise<Response> {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json(snapshot);
     } catch (error) {
       return jsonErrorFromUnknown(error);
@@ -430,7 +432,7 @@ export default function createWorkspaceRoutes(
         await settings.setPathSettings(input.paths as Record<string, unknown>);
       }
 
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       if (error instanceof TranscriptSearchSettingsError) {
@@ -523,7 +525,7 @@ export default function createWorkspaceRoutes(
       await telegramSettings.setBotToken(botToken, identity);
       telegramNotifier?.setBotToken?.(botToken);
       await telegramSettings.beginRecipientLink();
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return jsonErrorFromUnknown(error);
@@ -538,7 +540,7 @@ export default function createWorkspaceRoutes(
       await telegramSettings.clearBotToken();
       telegramNotifier?.setBotToken?.('');
       await settings.setUiSettings({ notifications: { telegram: { enabled: false } } });
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return jsonErrorFromUnknown(error);
@@ -566,7 +568,7 @@ export default function createWorkspaceRoutes(
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
       const linkUrl = await telegramSettings.beginRecipientLink();
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, linkUrl, settings: snapshot });
     } catch (error) {
       return jsonErrorFromCorruptStateFile(error) ?? jsonErrorFromUnknown(error, 400);
@@ -589,11 +591,11 @@ export default function createWorkspaceRoutes(
         await telegramSettings.setUpdateOffset(result.nextOffset);
       }
       if (!result.recipient) {
-        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
         return Response.json({ success: false, error: 'No matching Telegram /start message found yet', settings: snapshot });
       }
       await telegramSettings.completeRecipientLink(result.recipient);
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return jsonErrorFromCorruptStateFile(error) ?? jsonErrorFromUnknown(error, 400);
@@ -606,7 +608,7 @@ export default function createWorkspaceRoutes(
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
       await telegramSettings.clearRecipient();
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return jsonErrorFromUnknown(error);

@@ -1,3 +1,4 @@
+import { inspectProjectDirectory } from "../../projects/project-directory-service.ts";
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -120,6 +121,7 @@ async function sameChatScheduler() {
   await store.init();
   const cron = new FakeCron();
   const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
     store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
     preambles: preambleCatalog(),
     chats: { getChat: (chatId) => chatId === '123' ? {} : null },
@@ -176,6 +178,7 @@ describe('scheduled prompt scheduler', () => {
     const observations = [];
     const runLog = new ScheduledPromptRunLog();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog,
       dispatcher: {
@@ -216,6 +219,7 @@ describe('scheduled prompt scheduler', () => {
     const store = new ScheduledPromptStore(dir);
     const cron = new FakeCron();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
@@ -254,6 +258,7 @@ describe('scheduled prompt scheduler', () => {
     await store.init();
     const cron = new FakeCron();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
@@ -297,6 +302,7 @@ describe('scheduled prompt scheduler', () => {
     const store = new ScheduledPromptStore(dir);
     await store.init();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
@@ -424,6 +430,7 @@ describe('scheduled prompt scheduler', () => {
     const store = new ScheduledPromptStore(dir);
     await store.init();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
@@ -475,6 +482,7 @@ describe('scheduled prompt scheduler', () => {
     const definition = newChatDefinition('2030-01-01T09:00:00.000Z');
     definition.target.preambleChoice = { mode: 'explicit', orderedPreambleIds: ids };
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: { dispatch: async () => ({ message: 'sent' }) },
@@ -506,6 +514,7 @@ describe('scheduled prompt scheduler', () => {
     await store.create(recurringPrompt('2030-01-01T09:00:00.000Z'), 0);
     const cron = new FakeCron();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
@@ -544,6 +553,7 @@ describe('scheduled prompt scheduler', () => {
     await store.create(recurringPrompt('2030-01-01T09:00:00.000Z'), 0);
     const cron = new FakeCron();
     const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory,
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {

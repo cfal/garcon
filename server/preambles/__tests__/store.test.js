@@ -187,7 +187,7 @@ describe('PreambleStore', () => {
     }
   });
 
-  it('requires persisted paths to retain server canonicalization and project containment', async () => {
+  it('loads persisted node paths without interpreting them on the controller filesystem', async () => {
     const projectBase = await temporaryDirectory();
     process.env.GARCON_PROJECT_BASE_DIR = projectBase;
     resetServerConfigForTests();
@@ -205,7 +205,8 @@ describe('PreambleStore', () => {
       path.dirname(projectBase),
       danglingPath,
       path.join(danglingAncestorPath, 'project'),
-      ` ${projectPath} `,
+      'C:/worker/project',
+      '//worker/share/project',
     ]) {
       const directory = await temporaryDirectory();
       await fs.writeFile(path.join(directory, 'preambles.json'), JSON.stringify({
@@ -218,9 +219,9 @@ describe('PreambleStore', () => {
           },
         })],
       }));
-      await expect(new PreambleStore(directory).init()).rejects.toThrow(
-        'preambles.json contains a non-canonical project path',
-      );
+      const store = new PreambleStore(directory);
+      await store.init();
+      expect(store.snapshot().preambles[0].scope.rules[0].projectPath).toBe(storedPath);
     }
   });
 

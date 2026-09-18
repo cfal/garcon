@@ -1,6 +1,5 @@
 import { CommandValidationError } from './command-validation-error.js';
-import type { ProjectUnavailableReason } from '../../common/project-resolution.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
+import type { ProjectInspector, ProjectUnavailableReason } from '../../common/project-resolution.js';
 
 export class StartProjectUnavailableError extends CommandValidationError {
   constructor(readonly reason: ProjectUnavailableReason, error: CommandValidationError) {
@@ -11,7 +10,7 @@ export class StartProjectUnavailableError extends CommandValidationError {
 
 export async function resolveStartProjectPath(
   projectPath: string | undefined,
-  inspect = inspectProjectDirectory,
+  inspect: ProjectInspector,
 ): Promise<string> {
   const requestedPath = requiredProjectPath(projectPath);
   const resolution = await inspect(requestedPath);
@@ -23,7 +22,7 @@ export async function resolveStartProjectPath(
 
 export async function resolveUpdatedProjectPath(
   projectPath: string,
-  inspect = inspectProjectDirectory,
+  inspect: ProjectInspector,
 ): Promise<string> {
   const requestedPath = requiredProjectPath(projectPath);
   const resolution = await inspect(requestedPath);

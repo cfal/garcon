@@ -548,7 +548,7 @@ export class SessionCommands {
       );
     }
 
-    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath);
+    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath, this.deps.inspectProject);
     const effectiveProjectKey = nextProjectPath;
     if (nextProjectPath === chat.projectPath) {
       return {

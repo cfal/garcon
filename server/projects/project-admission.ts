@@ -1,12 +1,12 @@
 import type { IChatRegistry } from '../chats/store.js';
 import type { ProjectAdmissionPort } from '../chat-execution/types.js';
 import { DomainError, ProjectUnavailableError } from '../lib/domain-error.js';
-import { inspectProjectDirectory } from './project-directory-service.js';
+import type { ProjectInspector } from '../../common/project-resolution.js';
 
 export class ProjectAdmission implements ProjectAdmissionPort {
   constructor(
     private readonly registry: Pick<IChatRegistry, 'getChat'>,
-    private readonly inspect = inspectProjectDirectory,
+    private readonly inspect: ProjectInspector,
   ) {}
 
   async assertAvailable(chatId: string): Promise<void> {

@@ -30,6 +30,7 @@ import {
   type PreambleId,
 } from '../../common/preambles.js';
 import type { PreambleService } from '../preambles/service.js';
+import type { ProjectInspector } from '../../common/project-resolution.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatStartupPreferences } from '../settings/types.js';
 import type {
@@ -161,6 +162,7 @@ export interface ChatCommandServiceDeps {
   metadata: MetadataDep;
   agents: AgentRegistryDep;
   fileMentions: FileMentionResolverDep;
+  inspectProject: ProjectInspector;
   forkChatFileCopy: ForkChatFileCopyDep;
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;

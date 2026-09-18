@@ -66,6 +66,9 @@ import type { ChatPreambleSelectionService } from '../preambles/chat-selection-s
 import type { ChatBoardService } from '../chat-boards/service.js';
 import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import type { ExecutionProjectService } from '@garcon/server-agent-interface';
+import { PreambleProjectPathService } from '../preambles/project-path-service.js';
+import { createUnavailableMachineRoutes } from './unavailable-machine-services.js';
 
 export default function createAllRoutes(workspaceDir: string, {
   registry,
@@ -92,6 +95,7 @@ export default function createAllRoutes(workspaceDir: string, {
   chatPreambleSelection,
   chatBoards,
   tickets,
+  resolveTicketProject,
   chatTags,
   chatMutationLock,
   terminals,
@@ -103,6 +107,9 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows,
   transcriptExport,
   handoffArtifact,
+  projects,
+  projectBasePath,
+  localMachineServices,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -128,6 +135,7 @@ export default function createAllRoutes(workspaceDir: string, {
   chatPreambleSelection: ChatPreambleSelectionService;
   chatBoards: ChatBoardService;
   tickets: TicketRuntime;
+  resolveTicketProject: Parameters<typeof createTicketRoutes>[1];
   chatTags: ChatTagMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
   terminals: TerminalManager;
@@ -139,8 +147,12 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows: ChatRowService;
   transcriptExport: TranscriptExportService;
   handoffArtifact: HandoffArtifactService;
+  projects: ExecutionProjectService;
+  projectBasePath: string;
+  localMachineServices: boolean;
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
+  const inspectProject = async (projectPath: string) => (await projects.inspect({ projectPath })).resolution;
   return {
     ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
@@ -154,7 +166,7 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createChatExportRoutes(transcriptExport),
     ...createChatHandoffArtifactRoutes(handoffArtifact),
     ...createNativeSessionLookupRoutes(registry, agents),
-    ...createProjectResolutionRoutes({ registry }),
+    ...createProjectResolutionRoutes({ registry, inspect: inspectProject }),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
@@ -174,19 +186,26 @@ export default function createAllRoutes(workspaceDir: string, {
       searchIndex,
       transcriptSearchMaintenance: transcriptSearchSettings,
       chatMutationLock,
+      projects,
     }),
     ...createChatTagRoutes(chatTags),
     ...createChatBoardRoutes(chatBoards),
-    ...createTicketRoutes(tickets),
+    ...createTicketRoutes(tickets, resolveTicketProject),
     ...createChatTicketSourceRoutes(registry, ticketSources),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
-    ...createFilesRoutes(registry),
-    ...createCommandsRoutes({ registry, agents }),
+    ...(localMachineServices ? {
+      ...createFilesRoutes(registry),
+      ...createGitRoutes(agents, settings),
+      ...createGhRoutes(),
+      ...createTerminalRoutes(terminals),
+    } : createUnavailableMachineRoutes()),
+    ...createCommandsRoutes({ registry, agents, inspectProject }),
     ...createWorkspaceRoutes(
       settings,
       agents,
       telegramNotifier,
       telegramSettings,
+      projectBasePath,
       registry,
       transcriptSearchSettings,
     ),
@@ -194,8 +213,6 @@ export default function createAllRoutes(workspaceDir: string, {
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
     }),
-    ...createGitRoutes(agents, settings),
-    ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
     ...createCanvasRoutes(canvases),
@@ -203,8 +220,8 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createChatPreambleRoutes({
       selection: chatPreambleSelection,
       preambles,
+      projectPaths: new PreambleProjectPathService(inspectProject),
     }),
     ...createPromptRefinementRoutes({ settings, agents }),
-    ...createTerminalRoutes(terminals),
   };
 }

@@ -14,7 +14,7 @@ import {
 } from '../preambles/selection.js';
 import type { ChatPreambleSelectionService } from '../preambles/chat-selection-service.js';
 import { ChatPreambleSelectionPartialError } from '../preambles/chat-selection-service.js';
-import { PreambleProjectPathService } from '../preambles/project-path-service.js';
+import type { PreambleProjectPathService } from '../preambles/project-path-service.js';
 import type { PreambleService } from '../preambles/service.js';
 import { MalformedJsonError } from '../lib/http-request.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
@@ -24,10 +24,9 @@ import { ValidationDomainError } from '../lib/domain-error.js';
 export function createChatPreambleRoutes(deps: {
   readonly selection: ChatPreambleSelectionService;
   readonly preambles: Pick<PreambleService, 'snapshot'>;
-  // Injectable for tests; defaults to the shared canonical-path authority.
-  readonly projectPaths?: Pick<PreambleProjectPathService, 'resolve'>;
+  readonly projectPaths: Pick<PreambleProjectPathService, 'resolve'>;
 }): RouteMap {
-  const projectPaths = deps.projectPaths ?? new PreambleProjectPathService();
+  const projectPaths = deps.projectPaths;
   return {
     '/api/v1/chats/preambles': {
       GET: async (request: Request, url: URL): Promise<Response> => {

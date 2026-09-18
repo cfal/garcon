@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatStopIntent, ChatStopOutcome } from '../common/chat-types.js';
+import type { ExecutionNode } from '@garcon/server-agent-interface';
 import type { TranscriptSearchStatusV1 } from '../common/chat-search.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { isErrorCode } from '../common/error-codes.ts';
@@ -60,10 +61,12 @@ interface ChatSearchEventIndex {
 }
 
 export interface ServerEventWiringDeps {
+  executionNode: Pick<ExecutionNode, 'onAvailabilityChanged'>;
   server: WebSocketPublisher;
   agentRegistry: AgentRegistry;
   chatRegistry: ChatRegistry;
   settings: SettingsStore;
+  projectBasePath: string;
   queue: ChatExecutionCoordinator;
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
@@ -98,6 +101,8 @@ export interface ServerEventWiring {
 }
 
 export function wireServerEvents({
+  executionNode,
+  projectBasePath,
   server,
   agentRegistry,
   chatRegistry,
@@ -525,6 +530,7 @@ export function wireServerEvents({
   const broadcastRemoteSettings = async () => {
     try {
       const snapshot = await buildRemoteSettingsSnapshot({
+        projectBasePath,
         settings,
         agents: agentRegistry,
         telegramSettings,
@@ -626,6 +632,15 @@ export function wireServerEvents({
   });
   queue.onTurnSettled((chatId, turn) => {
     if (turn) agentRegistry.settleTurn(chatId, turn);
+  });
+  executionNode.onAvailabilityChanged((availability) => {
+    if (availability === 'offline') agentRegistry.executionSessionLost();
+    if (availability === 'ready') {
+      logger.info('Execution node ready');
+      for (const chatId of chatRegistry.listChatIds()) {
+        void queue.triggerDrain(chatId).catch((error) => logger.warn('Execution-node queue drain failed', error));
+      }
+    }
   });
 
   return {

@@ -14,6 +14,7 @@ import { CommandSupport } from '../../../server/commands/command-support.js';
 import { CommandLedger } from '../../../server/commands/command-ledger.js';
 import { QueueCommands } from '../../../server/commands/queue-commands.js';
 import { KeyedPromiseLock } from '../../../server/lib/keyed-lock.js';
+import { inspectProjectDirectory } from '../../../server/projects/project-directory-service.js';
 import { ScheduledPromptScheduler, cronExpressionForUtcInstant } from '../../../server/scheduled-prompts/scheduler.js';
 import { ScheduledPromptStore } from '../../../server/scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from '../../../server/scheduled-prompts/run-log.js';
@@ -88,6 +89,7 @@ async function withPipeline(run) {
     agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId },
   }));
   const scheduler = new ScheduledPromptScheduler({ store: schedules, cron, chats: registry,
+    inspectProject: inspectProjectDirectory,
     agents: { hasAgent: () => true, assertExecutionModeSelectionSupported: () => {} },
     preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
     runLog: new ScheduledPromptRunLog(),

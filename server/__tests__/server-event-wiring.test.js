@@ -1,3 +1,4 @@
+import { resolveFileMentionsInCommand } from "../chats/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,7 @@ import { CommandLedger } from '../commands/command-ledger.js';
 import { ChatCommandSettlement } from '../commands/chat-command-settlement.js';
 import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.js';
 import { AgentRegistry } from '../agents/registry.js';
+import { createProducerFixture } from '../agents/__tests__/producer-fixture.ts';
 import { TranscriptLedgerService } from '../ledger/service.js';
 import { TranscriptLedgerStore } from '../ledger/store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -23,7 +25,22 @@ import {
 
 const at = '2026-08-12T00:00:00.000Z';
 
+it('settles terminal node loss but retains resumable disconnects, and drains only when ready', () => {
+  const fixture = createFixture();
+  fixture.node.availability('reconnecting');
+  expect(fixture.agentRegistry.executionSessionLost).not.toHaveBeenCalled();
+  expect(fixture.queueService.triggerDrain).not.toHaveBeenCalled();
+  fixture.node.availability('offline');
+  expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
+  fixture.node.availability('ready');
+  expect(fixture.queueService.triggerDrain).toHaveBeenCalledWith('chat-1');
+  fixture.node.availability('disposed');
+  expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
+  expect(fixture.queueService.triggerDrain).toHaveBeenCalledTimes(1);
+});
+
 function createFixture(overrides = {}) {
+  const node = {};
   const agent = {};
   const queue = {};
   const settings = {};
@@ -44,6 +61,7 @@ function createFixture(overrides = {}) {
     resendCandidates: mock(() => []),
     settleTurn: mock(() => undefined),
     discardTurn: mock(() => undefined),
+    executionSessionLost: mock(() => undefined),
     ...overrides.agentRegistry,
   };
   const queueService = overrides.queueService ?? {
@@ -56,9 +74,11 @@ function createFixture(overrides = {}) {
     getQueuedTurnFinalization: mock(() => null),
     onAgentTurnTerminal: mock(async () => undefined),
     checkChatIdle: mock(async () => undefined),
+    triggerDrain: mock(async () => undefined),
     ...overrides.queue,
   };
   const chatRegistry = {
+    listChatIds: () => ['chat-1'],
     getChat: mock(() => chatPresent ? { chatId: 'chat-1' } : null),
     hasChat: mock(() => chatPresent),
     onChatAdded: mock((callback) => { chats.added = callback; }),
@@ -104,6 +124,8 @@ function createFixture(overrides = {}) {
     ...overrides.processing,
   };
   const wiring = wireServerEvents({
+    executionNode: { onAvailabilityChanged: (listener) => { node.availability = listener; return () => {}; } },
+    projectBasePath: '/worker/projects',
     server: {
       publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
       ...overrides.server,
@@ -143,6 +165,7 @@ function createFixture(overrides = {}) {
     searchIndex,
   });
   return {
+    node,
     agent,
     agentRegistry,
     chats,
@@ -216,19 +239,22 @@ function createExecutionFixture(directory, ensureAdopted) {
     agentSettingsById: { test: agentSettings },
   };
   let sink;
+  const producer = createProducerFixture();
   const integration = {
     descriptor: { id: 'test', supportedPermissionModes: ['default'], supportedThinkingModes: ['none'] },
     settings: { defaults: () => agentSettings, parse: (input) => input },
+    producers: producer.producers,
     execution: {
       start: async (request) => {
-        sink = request.sink;
-        await request.admission.markStarted();
-        return { id: 'synthetic-handle' };
+        sink = { publish: (event) => producer.emit(request.producerBinding, event) };
+        sink.publish({ type: 'started', runId: request.runId });
+        return producer.reference('execution');
       },
-      abort: async () => undefined,
+      abort: async () => true,
     },
   };
   const agents = new AgentRegistry({
+    resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
     integrations: { require: () => integration, get: () => integration, list: () => [integration] },
     endpointResolver: {

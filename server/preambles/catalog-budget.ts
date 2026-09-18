@@ -1,4 +1,4 @@
-import path from 'node:path';
+import { parentNodePath } from '../lib/portable-path.js';
 import { renderPreamblePrefix } from '../../common/preamble-prefix.js';
 import { CHAT_ID_LENGTH } from '../../common/chat-id.js';
 import {
@@ -94,7 +94,7 @@ function inheritedNestedMask(
   let cursor = candidate.projectPath;
   let parent: PathCandidate | undefined;
   while (true) {
-    const parentPath = path.dirname(cursor);
+    const parentPath = parentNodePath(cursor);
     if (parentPath === cursor) break;
     parent = candidates.get(parentPath);
     if (parent) break;

@@ -1,3 +1,4 @@
+import { inspectProjectDirectory } from "../../projects/project-directory-service.ts";
 import { afterEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -24,7 +25,7 @@ afterEach(async () => {
 describe('preamble setup', () => {
   it('installs bundled preambles into a fresh workspace and leaves them unchanged on restart', async () => {
     const directory = await temporaryDirectory();
-    const service = await initializePreambleService(directory);
+    const service = await initializePreambleService(directory, inspectProjectDirectory);
     const snapshot = service.snapshot();
 
     expect(snapshot.revision).toBe(1);
@@ -34,7 +35,7 @@ describe('preamble setup', () => {
     expect(snapshot.preambles.every((entry) => entry.createdAt === entry.updatedAt)).toBe(true);
     const firstFile = await fs.readFile(path.join(directory, 'preambles.json'), 'utf8');
 
-    const reopened = await initializePreambleService(directory);
+    const reopened = await initializePreambleService(directory, inspectProjectDirectory);
     expect(reopened.snapshot()).toEqual(snapshot);
     expect(await fs.readFile(path.join(directory, 'preambles.json'), 'utf8')).toBe(firstFile);
   });

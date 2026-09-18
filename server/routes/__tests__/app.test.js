@@ -105,7 +105,7 @@ function createMockCtx() {
 }
 
 const ctx = createMockCtx();
-const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
+const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents, undefined, undefined, '/worker/projects');
 
 beforeEach(() => {
   ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource());
@@ -213,7 +213,7 @@ describe('PUT /api/app/session-name', () => {
   });
 
   it('returns 404 when the registry-backed chat does not exist', async () => {
-    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, undefined, undefined, {
+    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, undefined, undefined, '/worker/projects', {
       getChat: mock(() => null),
     });
     parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: 'missing', title: 'Missing' }));
@@ -913,6 +913,7 @@ describe('PUT /api/app/settings', () => {
       ctx.agents,
       undefined,
       undefined,
+      '/worker/projects',
       undefined,
       transcriptSearchSettings,
     );
@@ -1331,7 +1332,7 @@ describe('Telegram token settings API', () => {
         return Promise.resolve(undefined);
       }),
     };
-    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, telegramNotifier, telegramSettings);
+    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, telegramNotifier, telegramSettings, '/worker/projects');
     return { routes, telegramNotifier, telegramSettings, publicStatus };
   }
 

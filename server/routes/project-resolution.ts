@@ -1,23 +1,23 @@
 import {
   type ProjectResolutionResponse,
   type ProjectTarget,
+  type ProjectInspector,
 } from '../../common/project-resolution.js';
 import { parseChatId } from '../../common/chat-id.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
 import { jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 
 interface ProjectResolutionRouteDeps {
   registry: Pick<IChatRegistry, 'getChat'>;
-  inspect?: typeof inspectProjectDirectory;
+  inspect: ProjectInspector;
 }
 
 export function createProjectResolutionRoutes(
   deps: ProjectResolutionRouteDeps,
 ): RouteMap {
-  const inspect = deps.inspect ?? inspectProjectDirectory;
+  const inspect = deps.inspect;
   return {
     '/api/v1/projects/resolve': {
       GET: async (_request, url) => {
