@@ -43,9 +43,9 @@ describe('ChatSessionsStore', () => {
 		store.removeChat('a');
 
 		expect(listener.mock.calls).toEqual([
-			['a', '/workspace/a'],
-			['a', '/workspace/b'],
-			['a', null],
+			['a', '/workspace/a', undefined],
+			['a', '/workspace/b', undefined],
+			['a', null, undefined],
 		]);
 		expect(store.projectPathRevision('a')).toBe(3);
 		unsubscribe();

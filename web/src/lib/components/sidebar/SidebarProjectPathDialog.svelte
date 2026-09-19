@@ -67,11 +67,11 @@
 			return;
 		}
 
-		const nextDialogKey = `${projectPathDialog.chatId}:${projectPathDialog.currentProjectPath}`;
+		const nextDialogKey = JSON.stringify([projectPathDialog.chatId, projectPathDialog.nodeId, projectPathDialog.currentProjectPath]);
 		if (activeDialogKey === nextDialogKey) return;
 
 		activeDialogKey = nextDialogKey;
-		projectPathDialogState.open(projectPathDialog.currentProjectPath);
+		projectPathDialogState.open(projectPathDialog.currentProjectPath, projectPathDialog.nodeId);
 	});
 
 	$effect(() => {
@@ -227,7 +227,7 @@
 									type="button"
 									variant="outline"
 									size="icon"
-									disabled={projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
+									disabled={projectPathDialogState.nodeId !== 'local' || projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
 									onclick={() => {
 										projectPathDialogState.showBrowser = true;
 									}}
@@ -238,7 +238,7 @@
 								</Button>
 							</div>
 
-							{#if projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
+							{#if projectPathDialogState.nodeId === 'local' && projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
 								<DirectoryBrowser
 									currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
 									basePath={activeProjectBasePath}
@@ -253,7 +253,7 @@
 						</div>
 
 						<div class="min-h-5">
-							{#if projectPathDialogState.gitRepoStatus === 'git' && projectPathDialogState.validationStatus === 'valid'}
+							{#if projectPathDialogState.nodeId === 'local' && projectPathDialogState.gitRepoStatus === 'git' && projectPathDialogState.validationStatus === 'valid'}
 								<button
 									type="button"
 									disabled={!canOpenWorktreePicker}

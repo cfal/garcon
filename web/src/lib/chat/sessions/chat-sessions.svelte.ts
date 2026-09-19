@@ -730,6 +730,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			id,
 			parentChat: null,
 			projectPath,
+			nodeId: startup.nodeId,
 			orderGroup: null,
 			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
 			agentId: normalizedStartup.agentId,
@@ -787,7 +788,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
-		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath);
+		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath, previous?.nodeId, next.nodeId);
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -881,9 +882,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
-		if (typeof patch.projectPath === 'string' && patch.projectPath !== chat.projectPath) {
-			this.#projectBindings.publish(chatId, patch.projectPath);
-		}
+		this.#projectBindings.publishIfChanged(chatId, chat.projectPath, patch.projectPath ?? chat.projectPath,
+			chat.nodeId, 'nodeId' in patch ? patch.nodeId : chat.nodeId);
 		const nextChat = {
 			...chat,
 			...patch,

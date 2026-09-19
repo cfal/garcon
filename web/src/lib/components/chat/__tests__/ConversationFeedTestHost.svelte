@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import { onDestroy, untrack } from 'svelte';
 	import ConversationFeed from '../ConversationFeed.svelte';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';

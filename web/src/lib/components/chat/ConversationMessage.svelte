@@ -141,7 +141,8 @@
 		if (!selected?.id) return null;
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
-	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
+	const localFiles = $derived(!activeChatContext || (activeChatContext.nodeId ?? sessions.byId[activeChatContext.chatId]?.nodeId ?? 'local') === 'local');
+	const chatProjectPath = $derived(localFiles ? activeChatContext?.projectPath ?? null : null);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 
@@ -441,6 +442,7 @@
 	/** Routes a file-like markdown link to the viewer overlay. */
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
+		if (!localFiles) return true;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
@@ -462,6 +464,7 @@
 
 	/** Routes a tool file-open action to the viewer overlay. */
 	function handleToolFileOpen(filePath: string): void {
+		if (!localFiles) return;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileOpenTarget(filePath, {
@@ -680,7 +683,7 @@
 							mode="input"
 							resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={handleToolFileOpen}
+							onFileOpen={localFiles ? handleToolFileOpen : undefined}
 							{projectBasePath}
 							{chatProjectPath}
 							{resolveChatReference}
@@ -694,7 +697,7 @@
 							mode="result"
 							resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={handleToolFileOpen}
+							onFileOpen={localFiles ? handleToolFileOpen : undefined}
 							{projectBasePath}
 							{chatProjectPath}
 							{resolveChatReference}

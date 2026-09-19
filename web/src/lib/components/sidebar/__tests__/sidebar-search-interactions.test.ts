@@ -69,6 +69,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
@@ -571,6 +572,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets,
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -653,6 +655,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -773,6 +776,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -806,6 +810,7 @@ describe('sidebar search interactions', () => {
 				onShowPreambles: vi.fn(),
 				onShowSnippets: vi.fn(),
 				onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 			});
 
 			const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -834,6 +839,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -863,6 +869,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		let [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -901,6 +908,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
@@ -920,6 +928,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -1036,6 +1045,7 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
+			onShowExecutionNodes: vi.fn(),
 		});
 
 		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');

@@ -3,6 +3,7 @@ import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import { getGitWorktrees, gitCreateWorktree, type GitWorktreeItem } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 
 export type ProjectPathValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
@@ -10,6 +11,7 @@ export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
 const VALIDATION_DELAY_MS = 250;
 
 export class ProjectPathDialogState {
+	nodeId = $state('local');
 	candidatePath = $state('');
 	showBrowser = $state(false);
 	validationStatus = $state<ProjectPathValidationStatus>('idle');
@@ -50,6 +52,7 @@ export class ProjectPathDialogState {
 
 	get canSelectWorktree(): boolean {
 		return (
+			this.nodeId === 'local' &&
 			this.validationStatus === 'valid' &&
 			this.gitRepoStatus === 'git' &&
 			Boolean(this.trimmedPath) &&
@@ -57,7 +60,8 @@ export class ProjectPathDialogState {
 		);
 	}
 
-	open(currentProjectPath: string): void {
+	open(currentProjectPath: string, nodeId?: string | null): void {
+		this.nodeId = effectiveNodeId(nodeId);
 		this.currentProjectPath = currentProjectPath;
 		this.candidatePath = currentProjectPath;
 		this.showBrowser = false;
@@ -149,6 +153,7 @@ export class ProjectPathDialogState {
 	}
 
 	async loadWorktrees(): Promise<void> {
+		if (this.nodeId !== 'local') return;
 		const path = this.trimmedPath;
 		if (!path) return;
 
@@ -175,6 +180,7 @@ export class ProjectPathDialogState {
 	}
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
+		if (this.nodeId !== 'local') return;
 		const projectPath = this.trimmedPath;
 		if (!projectPath) return;
 
@@ -216,7 +222,7 @@ export class ProjectPathDialogState {
 		this.#validationAbort = abort;
 
 		try {
-			const data = await validateStart(path, { signal: abort.signal });
+			const data = await validateStart(path, { nodeId: this.nodeId, signal: abort.signal });
 			if (!this.#isCurrentValidation(path, generation, abort.signal)) return;
 
 			if (!data.valid) {

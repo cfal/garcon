@@ -16,6 +16,7 @@ export async function resolveProject(
 				expectedProjectPath: target.projectPath,
 			})
 		: new URLSearchParams({ projectPath: target.projectPath });
+	query.set('nodeId', target.nodeId ?? 'local');
 	const response = await apiFetch(`/api/v1/projects/resolve?${query}`, { signal });
 	const parsed = parseProjectResolutionResponse(await parseApiResponse<unknown>(response));
 	if (!parsed || projectTargetKey(parsed.target) !== projectTargetKey(target)) {

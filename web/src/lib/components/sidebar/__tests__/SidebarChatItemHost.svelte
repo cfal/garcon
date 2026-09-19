@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import SidebarChatItem from '../SidebarChatItem.svelte';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -84,6 +86,7 @@
 	} as never);
 
 	setModelCatalog({
+		forNode() { return this; },
 		supportsFork() {
 			return supportsFork;
 		},

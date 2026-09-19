@@ -2,8 +2,10 @@ import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { ProjectTarget, ProjectUnavailableReason } from '$shared/project-resolution';
 import type { ProjectResolutionStore } from './project-resolution-store.svelte.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 
 export interface WorkspaceContext {
+	nodeId?: string;
 	chatId: string;
 	projectPath: string;
 }
@@ -23,7 +25,7 @@ export type WorkspaceProjectState =
 export class WorkspaceContextStore {
 	constructor(
 		private readonly sessions: Pick<ChatSessionsStore, 'selectedChat'>,
-		private readonly modelCatalog: Pick<ModelCatalogStore, 'supportsUpdateProjectPath'>,
+		private readonly modelCatalog: Pick<ModelCatalogStore, 'forNode'>,
 		private readonly projectResolution: Pick<ProjectResolutionStore, 'snapshotFor'>,
 	) {}
 
@@ -31,6 +33,7 @@ export class WorkspaceContextStore {
 		const chat = this.sessions.selectedChat;
 		if (!chat) return null;
 		return {
+			nodeId: effectiveNodeId(chat.nodeId),
 			chatId: chat.id,
 			projectPath: chat.projectPath,
 		};
@@ -40,6 +43,7 @@ export class WorkspaceContextStore {
 		const current = this.current;
 		const target = this.currentTarget;
 		if (!current || !target) return null;
+		if (effectiveNodeId(current.nodeId) !== 'local') return null;
 		const resolution = this.projectResolution.snapshotFor(target);
 		if (resolution.kind !== 'available') return null;
 		return { ...current, effectiveProjectKey: resolution.effectiveProjectKey };
@@ -49,6 +53,9 @@ export class WorkspaceContextStore {
 		const current = this.current;
 		const target = this.currentTarget;
 		if (!current || !target) return { kind: 'absent' };
+		if (effectiveNodeId(current.nodeId) !== 'local') {
+			return { kind: 'request-failed', context: current, message: 'Files, Git, and terminals are unavailable on remote execution nodes.' };
+		}
 		const resolution = this.projectResolution.snapshotFor(target);
 		switch (resolution.kind) {
 			case 'available':
@@ -70,19 +77,19 @@ export class WorkspaceContextStore {
 		const chat = this.sessions.selectedChat;
 		if (!chat) return null;
 		return chat.status === 'draft'
-			? { kind: 'path', projectPath: chat.projectPath }
-			: { kind: 'chat', chatId: chat.id, projectPath: chat.projectPath };
+			? { kind: 'path', nodeId: effectiveNodeId(chat.nodeId), projectPath: chat.projectPath }
+			: { kind: 'chat', nodeId: effectiveNodeId(chat.nodeId), chatId: chat.id, projectPath: chat.projectPath };
 	}
 
 	get canUpdateProjectPath(): boolean {
 		const chat = this.sessions.selectedChat;
-		return chat ? this.modelCatalog.supportsUpdateProjectPath(chat.agentId) : false;
+		return chat ? this.modelCatalog.forNode(chat.nodeId).supportsUpdateProjectPath(chat.agentId) : false;
 	}
 }
 
 export function createWorkspaceContextStore(
 	sessions: Pick<ChatSessionsStore, 'selectedChat'>,
-	modelCatalog: Pick<ModelCatalogStore, 'supportsUpdateProjectPath'>,
+	modelCatalog: Pick<ModelCatalogStore, 'forNode'>,
 	projectResolution: Pick<ProjectResolutionStore, 'snapshotFor'>,
 ): WorkspaceContextStore {
 	return new WorkspaceContextStore(sessions, modelCatalog, projectResolution);

@@ -26,6 +26,7 @@ vi.mock('$lib/context', () => ({
 	getAppShell: () => ({ requestComposerFocus: vi.fn() }),
 	getConversationPanels: () => ({ composerPanel: null }),
 	getModelCatalog: () => ({
+		forNode() { return this; },
 		supportsFork: () => true,
 		supportsForkWhileRunning: () => false,
 		supportsUpdateProjectPath: () => true,

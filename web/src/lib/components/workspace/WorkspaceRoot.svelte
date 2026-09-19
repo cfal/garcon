@@ -209,7 +209,7 @@
 		if (!localSettings.showQuickCommitTray) return [];
 		return chatPresentations.flatMap(({ chatId }) => {
 			const chat = sessions.byId[chatId];
-			if (!chat?.projectPath) return [];
+			if (!chat?.projectPath || (chat.nodeId ?? 'local') !== 'local') return [];
 			const target = targetForChat(chat);
 			const resolution = projectResolution.snapshotFor(target);
 			return resolution.kind === 'available'
@@ -262,10 +262,10 @@
 		];
 	}
 
-	function targetForChat(chat: { id: string; status: string; projectPath: string }): ProjectTarget {
+	function targetForChat(chat: { id: string; nodeId?: string | null; status: string; projectPath: string }): ProjectTarget {
 		return chat.status === 'draft'
-			? { kind: 'path', projectPath: chat.projectPath }
-			: { kind: 'chat', chatId: chat.id, projectPath: chat.projectPath };
+			? { kind: 'path', nodeId: chat.nodeId ?? 'local', projectPath: chat.projectPath }
+			: { kind: 'chat', nodeId: chat.nodeId ?? 'local', chatId: chat.id, projectPath: chat.projectPath };
 	}
 	const rootState = new WorkspaceRootState({
 		get snapshot() {
@@ -501,16 +501,17 @@
 	{@const chat = surface?.type === 'chat' && surface.chatId ? sessions.byId[surface.chatId] : null}
 	{@const panel = surface?.type === 'chat' ? conversationPanels.panel(surface.id) : null}
 	{#if chat}
-		{@const supportsFork = modelCatalog.supportsFork(chat.agentId)}
+		{@const chatCatalog = modelCatalog.forNode(chat.nodeId)}
+		{@const supportsFork = chatCatalog.supportsFork(chat.agentId)}
 		<CurrentChatMenuItems
 			{menu}
 			selectedChat={chat}
 			canReload={chat.canReloadFromNativeHistory ?? false}
-			canUpdateProjectPath={modelCatalog.supportsUpdateProjectPath?.(chat.agentId) ?? false}
+			canUpdateProjectPath={chatCatalog.supportsUpdateProjectPath(chat.agentId)}
 			canFork={supportsFork}
 			canForkNow={canUseForkAction({
 				supportsFork,
-				supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(chat.agentId),
+				supportsForkWhileRunning: chatCatalog.supportsForkWhileRunning(chat.agentId),
 				isProcessing: chat.isProcessing,
 			})}
 			onOpenUserMessageNavigator={sessions.selectedChatId === chat.id
@@ -551,7 +552,7 @@
 				style={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
-				onChooseProjectFolder={modelCatalog.supportsUpdateProjectPath(
+				onChooseProjectFolder={modelCatalog.forNode(sessions.selectedChat?.nodeId).supportsUpdateProjectPath(
 					sessions.selectedChat?.agentId ?? '',
 				) && sessions.selectedChat
 					? () => chatActions.requestProjectPath(sessions.selectedChat!)

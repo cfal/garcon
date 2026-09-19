@@ -1,6 +1,7 @@
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { effectiveNodeId } from '$shared/execution-nodes';
 
-export type ProjectPathChangedListener = (chatId: string, projectPath: string | null) => void;
+export type ProjectPathChangedListener = (chatId: string, projectPath: string | null, nodeId?: string | null) => void;
 
 export class ChatProjectBindingState {
 	readonly #revisions = new Map<string, number>();
@@ -19,17 +20,19 @@ export class ChatProjectBindingState {
 		return () => this.#listeners.delete(listener);
 	}
 
-	publish(chatId: string, projectPath: string | null): void {
+	publish(chatId: string, projectPath: string | null, nodeId?: string | null): void {
 		this.#revisions.set(chatId, this.revision(chatId) + 1);
-		for (const listener of this.#listeners) listener(chatId, projectPath);
+		for (const listener of this.#listeners) listener(chatId, projectPath, nodeId);
 	}
 
 	publishIfChanged(
 		chatId: string,
 		previousProjectPath: string | undefined,
 		projectPath: string,
+		previousNodeId?: string | null,
+		nodeId?: string | null,
 	): void {
-		if (previousProjectPath !== projectPath) this.publish(chatId, projectPath);
+		if (previousProjectPath !== projectPath || effectiveNodeId(previousNodeId) !== effectiveNodeId(nodeId)) this.publish(chatId, projectPath, nodeId);
 	}
 
 	reconcileFetchedRecord(
@@ -42,11 +45,11 @@ export class ChatProjectBindingState {
 			previous &&
 			capturedRevisions &&
 			requestRevision !== this.revision(next.id) &&
-			next.projectPath !== previous.projectPath
+			(next.projectPath !== previous.projectPath || effectiveNodeId(next.nodeId) !== effectiveNodeId(previous.nodeId))
 		) {
-			return { ...next, projectPath: previous.projectPath };
+			return { ...next, nodeId: previous.nodeId, projectPath: previous.projectPath };
 		}
-		this.publishIfChanged(next.id, previous?.projectPath, next.projectPath);
+		this.publishIfChanged(next.id, previous?.projectPath, next.projectPath, previous?.nodeId, next.nodeId);
 		return next;
 	}
 }

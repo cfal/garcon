@@ -51,6 +51,7 @@
 	const EMPTY_PROTECTED_KEYS: readonly string[] = [];
 
 	interface Props {
+		nodeId?: string | null;
 		transcript: ActiveTranscriptState;
 		agentId: SessionAgentId;
 		scrollContainer?: HTMLDivElement | null;
@@ -82,6 +83,7 @@
 	}
 
 	let {
+		nodeId,
 		transcript,
 		agentId,
 		scrollContainer = $bindable(null),
@@ -113,7 +115,8 @@
 	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const hiddenBashCommandMatcherFor = createHiddenBashCommandMatcherCache();
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
 
 	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
 	const canShowForkAtMessage = $derived(

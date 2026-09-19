@@ -8,6 +8,7 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getExecutionNodes } from '$lib/context';
 
 	interface Props {
 		message: AgentSwitchMessage;
@@ -15,8 +16,10 @@
 
 	let { message }: Props = $props();
 
-	const fromLabel = $derived(agentLabelFor(message.fromAgentId));
-	const toLabel = $derived(agentLabelFor(message.toAgentId));
+	const executionNodes = getExecutionNodes();
+	const crossNode = $derived((message.fromNodeId ?? 'local') !== (message.toNodeId ?? 'local'));
+	const fromLabel = $derived(`${crossNode ? executionNodes.label(message.fromNodeId) + ' / ' : ''}${agentLabelFor(message.fromAgentId)}`);
+	const toLabel = $derived(`${crossNode ? executionNodes.label(message.toNodeId) + ' / ' : ''}${agentLabelFor(message.toAgentId)}`);
 </script>
 
 <ChatEventCard variant="info" compact>

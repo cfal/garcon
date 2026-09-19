@@ -10,6 +10,7 @@ import { isSidebarChatInactive } from './chat-inactivity';
 import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
 import type { PinnedInsertPosition } from '$shared/settings';
 import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import {
 	sidebarSectionKey,
 	sidebarSectionProjectKey,
@@ -43,7 +44,8 @@ function emptyOrderMap(): SidebarChatOrderMap {
 	return { pinned: [], normal: [], archived: [] };
 }
 
-export function sidebarProjectKey(projectPath: string): string {
+export function sidebarProjectKey(projectPath: string, nodeId?: string | null): string {
+	if (effectiveNodeId(nodeId) !== 'local') return `node:${JSON.stringify([nodeId, projectPath])}`;
 	return projectPath ? `path:${projectPath}` : unknownProjectKey;
 }
 
@@ -118,23 +120,26 @@ export function sidebarStatusSection(
 }
 
 interface SidebarProjectGroup {
+	nodeId: string;
 	projectKey: string;
 	projectPath: string;
 }
 
 interface NormalizedProjectPath {
+	nodeId: string;
 	originalPath: string;
 	normalizedPath: string;
 }
 
 interface ProjectGroupingContext {
-	groupForProjectPath(projectPath: string): SidebarProjectGroup;
+	groupForProjectPath(projectPath: string, nodeId?: string | null): SidebarProjectGroup;
 	distinctProjectPathCount(projectKey: string): number;
 }
 
-function exactProjectGroup(projectPath: string): SidebarProjectGroup {
+function exactProjectGroup(projectPath: string, nodeId?: string | null): SidebarProjectGroup {
 	return {
-		projectKey: sidebarProjectKey(projectPath),
+		nodeId: effectiveNodeId(nodeId),
+		projectKey: sidebarProjectKey(projectPath, nodeId),
 		projectPath,
 	};
 }
@@ -142,7 +147,7 @@ function exactProjectGroup(projectPath: string): SidebarProjectGroup {
 function createExactProjectGroupingContext(chats: ChatSessionRecord[]): ProjectGroupingContext {
 	const distinctProjectPathsByKey = new Map<string, Set<string>>();
 	for (const chat of chats) {
-		const group = exactProjectGroup(chat.projectPath);
+		const group = exactProjectGroup(chat.projectPath, chat.nodeId);
 		const distinctPaths = distinctProjectPathsByKey.get(group.projectKey) ?? new Set<string>();
 		distinctPaths.add(chat.projectPath);
 		distinctProjectPathsByKey.set(group.projectKey, distinctPaths);
@@ -160,8 +165,11 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 	const projectsByNormalizedPath = new Map<string, NormalizedProjectPath>();
 	for (const chat of chats) {
 		const normalizedPath = normalizeProjectPath(chat.projectPath);
-		if (projectsByNormalizedPath.has(normalizedPath)) continue;
-		projectsByNormalizedPath.set(normalizedPath, {
+		const nodeId = effectiveNodeId(chat.nodeId);
+		const key = sidebarProjectKey(normalizedPath, nodeId);
+		if (projectsByNormalizedPath.has(key)) continue;
+		projectsByNormalizedPath.set(key, {
+			nodeId,
 			originalPath: chat.projectPath,
 			normalizedPath,
 		});
@@ -177,25 +185,25 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 		const group =
 			(project.normalizedPath &&
 				projects.find((candidate) =>
-					isProjectPathAncestor(candidate.normalizedPath, project.normalizedPath),
+					candidate.nodeId === project.nodeId && isProjectPathAncestor(candidate.normalizedPath, project.normalizedPath),
 				)) ||
 			project;
-		groupPathByNormalizedPath.set(project.normalizedPath, group.originalPath);
+		groupPathByNormalizedPath.set(sidebarProjectKey(project.normalizedPath, project.nodeId), group.originalPath);
 	}
 
 	for (const project of projects) {
-		const groupPath = groupPathByNormalizedPath.get(project.normalizedPath) ?? project.originalPath;
-		const groupKey = sidebarProjectKey(groupPath);
+		const groupPath = groupPathByNormalizedPath.get(sidebarProjectKey(project.normalizedPath, project.nodeId)) ?? project.originalPath;
+		const groupKey = sidebarProjectKey(groupPath, project.nodeId);
 		const distinctProjectPaths = distinctProjectPathsByGroupKey.get(groupKey) ?? new Set<string>();
 		distinctProjectPaths.add(project.normalizedPath);
 		distinctProjectPathsByGroupKey.set(groupKey, distinctProjectPaths);
 	}
 
 	return {
-		groupForProjectPath(projectPath) {
+		groupForProjectPath(projectPath, nodeId) {
 			const normalizedPath = normalizeProjectPath(projectPath);
-			const groupPath = groupPathByNormalizedPath.get(normalizedPath) ?? projectPath;
-			return exactProjectGroup(groupPath);
+			const groupPath = groupPathByNormalizedPath.get(sidebarProjectKey(normalizedPath, nodeId)) ?? projectPath;
+			return exactProjectGroup(groupPath, nodeId);
 		},
 		distinctProjectPathCount(projectKey) {
 			return distinctProjectPathsByGroupKey.get(projectKey)?.size ?? 0;
@@ -237,7 +245,7 @@ function projectOrderFromDisplayedChats(
 ): string[] {
 	const seen = new Map<string, ProjectOrderEntry>();
 	for (const [index, chat] of chats.entries()) {
-		const group = grouping.groupForProjectPath(chat.projectPath);
+		const group = grouping.groupForProjectPath(chat.projectPath, chat.nodeId);
 		const key = group.projectKey;
 		if (seen.has(key)) continue;
 		const sortLabel = projectSortLabel(group.projectPath);
@@ -268,7 +276,7 @@ function createChatRow(
 	list: PersistedChatOrderGroup,
 	reorderScopeKey: string,
 	reorderScopeIds: string[],
-	group: SidebarProjectGroup = exactProjectGroup(chat.projectPath),
+	group: SidebarProjectGroup = exactProjectGroup(chat.projectPath, chat.nodeId),
 	showProjectPathInGroup = false,
 ): SidebarVirtualChatRow {
 	return {
@@ -451,13 +459,15 @@ function appendSidebarProjectGroups(input: {
 }): string[] {
 	const projectKeys = projectOrderFromDisplayedChats(input.projectChats, input.grouping);
 	const projectPathByKey = new Map<string, string>();
+	const projectNodeByKey = new Map<string, string>();
 	const projectChatIdsByKey = new Map<string, string[]>();
 	const projectRowsByKey = new Map<string, SidebarVirtualChatRow[]>();
 
 	for (const chat of input.projectChats) {
-		const group = input.grouping.groupForProjectPath(chat.projectPath);
+		const group = input.grouping.groupForProjectPath(chat.projectPath, chat.nodeId);
 		const key = group.projectKey;
 		if (!projectPathByKey.has(key)) projectPathByKey.set(key, group.projectPath);
+		projectNodeByKey.set(key, group.nodeId);
 		const projectChatIds = projectChatIdsByKey.get(key) ?? [];
 		projectChatIds.push(chat.id);
 		projectChatIdsByKey.set(key, projectChatIds);
@@ -469,7 +479,7 @@ function appendSidebarProjectGroups(input: {
 		for (const chatId of input.orders[list]) {
 			const chat = input.byList[list].get(chatId);
 			if (!chat || !input.belongsToGroup(chat)) continue;
-			const project = input.grouping.groupForProjectPath(chat.projectPath).projectKey;
+			const project = input.grouping.groupForProjectPath(chat.projectPath, chat.nodeId).projectKey;
 			const scopeIds = scopeIdsByProject.get(project) ?? [];
 			scopeIds.push(chatId);
 			scopeIdsByProject.set(project, scopeIds);
@@ -480,7 +490,7 @@ function appendSidebarProjectGroups(input: {
 			for (const chatId of scopeIds) {
 				const chat = input.byList[list].get(chatId);
 				if (!chat) continue;
-				const group = input.grouping.groupForProjectPath(chat.projectPath);
+				const group = input.grouping.groupForProjectPath(chat.projectPath, chat.nodeId);
 				const showProjectPathInGroup =
 					input.grouping.distinctProjectPathCount(group.projectKey) > 1;
 				projectRowsByKey
@@ -511,6 +521,7 @@ function appendSidebarProjectGroups(input: {
 			projectKey: project,
 			collapseKey,
 			projectPath: projectPathByKey.get(project) ?? '',
+			nodeId: projectNodeByKey.get(project),
 			count: projectChatIds.length,
 			chatIds: projectChatIds,
 			isCollapsed,
@@ -609,7 +620,7 @@ function appendSidebarChatSection(input: {
 					list,
 					`${list}:section:${input.section}`,
 					scopeIds,
-					exactProjectGroup(chat.projectPath),
+					exactProjectGroup(chat.projectPath, chat.nodeId),
 					true,
 				),
 				input.visibleOrders,

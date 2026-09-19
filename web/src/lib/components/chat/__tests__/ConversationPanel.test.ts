@@ -51,7 +51,7 @@ vi.mock('$lib/context', () => ({
 		reduceMotion: runtime.reduceMotion,
 		showQuickCommitTray: true,
 	}),
-	getModelCatalog: () => ({ supportsSteering: () => true }),
+	getModelCatalog: () => ({ forNode() { return this; }, supportsSteering: () => true }),
 	getOptionalTransientLayers: () => null,
 }));
 

@@ -31,6 +31,7 @@ export function toRecord(session: ChatSession): ChatSessionRecord {
 	}
 	return {
 		id: session.id,
+		nodeId: session.nodeId,
 		parentChat: session.parentChat,
 		projectPath: session.projectPath,
 		orderGroup: session.orderGroup,
@@ -85,6 +86,7 @@ function sameParentChat(
 export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
+		(a.nodeId ?? 'local') === (b.nodeId ?? 'local') &&
 		sameParentChat(a.parentChat, b.parentChat) &&
 		a.projectPath === b.projectPath &&
 		a.orderGroup === b.orderGroup &&

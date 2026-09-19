@@ -165,13 +165,13 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}
 		});
 	});
-	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged((chatId, projectPath) => {
+	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged((chatId, projectPath, nodeId) => {
 		if (projectPath === null) projectResolution.removeChatTargets(chatId);
-		else projectResolution.markObsoleteChatTargets(chatId, projectPath);
+		else projectResolution.markObsoleteChatTargets(chatId, projectPath, nodeId);
 	});
 	for (const chat of deps.chatSessions.orderedChats) {
 		if (chat.status !== 'draft') {
-			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath);
+			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath, chat.nodeId);
 		}
 	}
 	const context = createWorkspaceContextStore(

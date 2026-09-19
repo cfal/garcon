@@ -62,7 +62,8 @@
 	const sessions = getChatSessions();
 	const conversationUi = getConversationUi();
 	const localSettings = getLocalSettings();
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const modelCatalog = $derived(rootModelCatalog.forNode(chat.nodeId));
 	const appShell = getAppShell();
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
@@ -75,7 +76,7 @@
 		isProcessing && panel.lifecycle.loadingStatus?.can_interrupt !== false,
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
-	const projectPath = $derived(chat.projectPath || null);
+	const projectPath = $derived((chat.nodeId ?? 'local') === 'local' ? chat.projectPath || null : null);
 	const quickGitSummary = $derived(quickGit.summaryFor(projectPath));
 	const quickGitBranchError = $derived(
 		projectPath && quickGitBranches.currentProjectPath === projectPath
@@ -237,6 +238,7 @@
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed
+				nodeId={chat.nodeId}
 				transcript={panel.transcript}
 				agentId={chat.agentId}
 				bind:scrollContainer

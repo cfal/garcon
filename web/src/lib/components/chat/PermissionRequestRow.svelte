@@ -113,6 +113,7 @@
 		if (link.kind !== 'file') return;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
+		if ((chat.nodeId ?? sessions.byId[chat.chatId]?.nodeId ?? 'local') !== 'local') return true;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
 			fileRootPath: projectBasePath,
 			sourceDirectoryPath: chat.projectPath,

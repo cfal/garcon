@@ -1,4 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import {
 	projectTargetKey,
 	type ProjectResolution,
@@ -33,6 +34,7 @@ interface PendingResolution {
 }
 
 interface ChatBinding {
+	nodeId: string;
 	projectPath: string;
 	revision: number;
 }
@@ -183,10 +185,12 @@ export class ProjectResolutionStore {
 		return `${key}\u0000${this.#chatBindings.get(target.chatId)?.revision ?? 0}`;
 	}
 
-	markObsoleteChatTargets(chatId: string, currentProjectPath: string): void {
+	markObsoleteChatTargets(chatId: string, currentProjectPath: string, currentNodeId?: string | null): void {
+		const nodeId = effectiveNodeId(currentNodeId);
 		const binding = this.#chatBindings.get(chatId);
-		if (binding?.projectPath === currentProjectPath) return;
+		if (binding?.projectPath === currentProjectPath && binding.nodeId === nodeId) return;
 		this.#chatBindings.set(chatId, {
+			nodeId,
 			projectPath: currentProjectPath,
 			revision: (binding?.revision ?? 0) + 1,
 		});
@@ -195,7 +199,7 @@ export class ProjectResolutionStore {
 			if (
 				target.kind !== 'chat' ||
 				target.chatId !== chatId ||
-				target.projectPath === currentProjectPath
+				(target.projectPath === currentProjectPath && effectiveNodeId(target.nodeId) === nodeId)
 			)
 				continue;
 			retained.record.dispose();

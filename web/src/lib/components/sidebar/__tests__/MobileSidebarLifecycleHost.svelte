@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import SidebarSearchDialogs from '../SidebarSearchDialogs.svelte';
@@ -174,6 +176,7 @@
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
+		forNode() { return this; },
 		supportsFork() {
 			return true;
 		},
@@ -227,6 +230,7 @@
 		onShowPreambles={() => {}}
 		onShowSnippets={() => {}}
 		onShowSettings={() => {}}
+		onShowExecutionNodes={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 {/if}

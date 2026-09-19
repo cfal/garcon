@@ -430,6 +430,7 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 		},
 		processingReconciler: { addPresentation: () => () => {} },
 		modelCatalog: {
+			forNode() { return this; },
 			supportsFork: () => false,
 			supportsForkWhileRunning: () => false,
 			supportsUpdateProjectPath: () => false,

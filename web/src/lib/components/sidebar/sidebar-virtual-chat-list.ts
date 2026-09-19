@@ -12,6 +12,7 @@ export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
 
 export interface SidebarVirtualProjectHeaderRow {
+	nodeId?: string;
 	type: 'project-header';
 	key: string;
 	projectKey: string;

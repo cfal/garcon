@@ -1,11 +1,13 @@
 import type { RemoteSettingsSnapshot, RemotePathSettings } from '$shared/settings';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import {
 	nextPinnedProjectPaths,
 	sortedPinnedProjectPaths,
 } from '$lib/chat/project-paths/project-pinned-paths.js';
 
 interface PinnedProjectPathUpdateOptions {
+	nodeId?: string;
 	browseStartPath?: string;
 }
 
@@ -28,7 +30,14 @@ async function persistPinnedProjectPathsOptimistically(
 	pinnedProjectPaths: string[],
 	options?: PinnedProjectPathUpdateOptions,
 ): Promise<RemoteSettingsSnapshot> {
-	const pathsPatch = buildPathsPatch(pinnedProjectPaths, options);
+	const nodeId = effectiveNodeId(options?.nodeId);
+	const pathsPatch = nodeId === 'local' ? buildPathsPatch(pinnedProjectPaths, options) : {
+		byNode: { ...snap.paths.byNode, [nodeId]: {
+			...snap.paths.byNode?.[nodeId],
+			recentPaths: snap.paths.byNode?.[nodeId]?.recentPaths ?? [],
+			pinnedPaths: sortedPinnedProjectPaths(pinnedProjectPaths),
+		} },
+	};
 	const rollback = remoteSettings.applyOptimisticSnapshot({
 		...snap,
 		paths: {
@@ -60,6 +69,8 @@ export async function togglePinnedProjectPathOptimistically(
 	options?: PinnedProjectPathUpdateOptions,
 ): Promise<RemoteSettingsSnapshot> {
 	const snap = await remoteSettings.ensureLoaded();
-	const nextPinnedPaths = nextPinnedProjectPaths(snap.paths.pinnedProjectPaths, path);
+	const nodeId = effectiveNodeId(options?.nodeId);
+	const current = nodeId === 'local' ? snap.paths.pinnedProjectPaths : snap.paths.byNode?.[nodeId]?.pinnedPaths ?? [];
+	const nextPinnedPaths = nextPinnedProjectPaths(current, path);
 	return persistPinnedProjectPathsOptimistically(remoteSettings, snap, nextPinnedPaths, options);
 }
