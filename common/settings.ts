@@ -144,6 +144,34 @@ export interface NodeProjectPreferences {
   pinnedPaths: string[];
 }
 
+export type NodeProjectPreferencesPatch = Partial<Pick<NodeProjectPreferences, 'defaultPath' | 'pinnedPaths'>>;
+
+export interface RemotePathSettingsPatch extends Partial<Omit<RemotePathSettings, 'byNode'>> {
+  byNode?: Record<string, NodeProjectPreferencesPatch>;
+}
+
+export function parseNodeProjectPreferencesPatch(value: unknown): Record<string, NodeProjectPreferencesPatch> | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const patches: Record<string, NodeProjectPreferencesPatch> = {};
+  for (const [id, candidate] of Object.entries(raw)) {
+    const entry = asRecord(candidate);
+    if (!isRemoteNodeId(id) || !entry || Object.keys(entry).some((key) => key !== 'defaultPath' && key !== 'pinnedPaths')) return null;
+    const patch: NodeProjectPreferencesPatch = {};
+    if (entry.defaultPath !== undefined) {
+      if (typeof entry.defaultPath !== 'string') return null;
+      patch.defaultPath = entry.defaultPath;
+    }
+    if (entry.pinnedPaths !== undefined) {
+      const pinnedPaths = asStringArray(entry.pinnedPaths);
+      if (!pinnedPaths) return null;
+      patch.pinnedPaths = pinnedPaths;
+    }
+    patches[id] = patch;
+  }
+  return patches;
+}
+
 export function parseNodeProjectPreferences(value: unknown): Record<string, NodeProjectPreferences> | null {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -233,7 +261,7 @@ export interface UpdateRemoteSettingsInput {
     agentCommands?: Partial<AgentCommandsFeatureSettings>;
   };
   ui?: Partial<RemoteUiSettings>;
-  paths?: Partial<RemotePathSettings>;
+  paths?: RemotePathSettingsPatch;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -47,3 +47,27 @@ test('all generation selections persist their explicit target and reject invalid
     persisted: { nodeId: NODE }, authByAgent: {}, modelsByAgent: {}, generationByAgent: {},
   })).toThrow('requires an agent and model');
 });
+
+test('node path patches preserve concurrent recents and other nodes through restart', async () => {
+  const root = await mkdtemp(join(homedir(), 'garcon-node-path-patch-'));
+  roots.push(root);
+  const settings = new SettingsStore(root);
+  await settings.init();
+  const otherNode = '33333333-3333-4333-8333-333333333333';
+  await settings.recordChatStartup({ agentId: 'test', model: 'synthetic', nodeId: NODE, projectPath: '/remote/old' });
+  await settings.setPathSettings({ byNode: { [NODE]: { defaultPath: '/remote/default' } } });
+  await Promise.all([
+    settings.recordChatStartup({ agentId: 'test', model: 'synthetic', nodeId: NODE, projectPath: '/remote/new' }),
+    settings.setPathSettings({ byNode: { [otherNode]: { pinnedPaths: ['/other/pin'] } } }),
+    settings.setPathSettings({ byNode: { [NODE]: { pinnedPaths: ['/remote/pin'] } } }),
+  ]);
+  const expected = {
+    [NODE]: { defaultPath: '/remote/default', recentPaths: ['/remote/new', '/remote/old'], pinnedPaths: ['/remote/pin'] },
+    [otherNode]: { recentPaths: [], pinnedPaths: ['/other/pin'] },
+  };
+  expect(settings.getPathSettings().byNode).toEqual(expected);
+  await expect(settings.setPathSettings({ byNode: { [NODE]: { recentPaths: [] } } })).rejects.toThrow('Invalid execution-node project preferences');
+  const restarted = new SettingsStore(root);
+  await restarted.init();
+  expect(restarted.getPathSettings().byNode).toEqual(expected);
+});

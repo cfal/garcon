@@ -19,8 +19,8 @@ import {
   FolderStore,
   SavedSearchStore,
   StartupDefaultsStore,
-  UiSettingsStore,
 } from './domain-stores.js';
+import { UiSettingsStore } from './ui-settings-store.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
   GENERATION_UI_SETTING_KEYS,

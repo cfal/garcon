@@ -30,6 +30,7 @@ import {
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
   parseNodeProjectPreferences,
+  parseNodeProjectPreferencesPatch,
   type AgentCommandsFeatureSettings,
   type RemoteSettingsSnapshot,
   type RemoteFeatureSettings,
@@ -387,7 +388,7 @@ export default function createWorkspaceRoutes(
     try {
       const input = asJsonBody(body);
       const pathPatch = asPlainObject(input.paths);
-      if (pathPatch.byNode !== undefined && !parseNodeProjectPreferences(pathPatch.byNode)) {
+      if (pathPatch.byNode !== undefined && !parseNodeProjectPreferencesPatch(pathPatch.byNode)) {
         return jsonError('Invalid execution-node project preferences.', 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const generationUi = asPlainObject(input.ui);

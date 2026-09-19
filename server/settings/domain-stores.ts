@@ -15,10 +15,7 @@ import type {
   SetChatOrderStateResponse,
 } from '../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
-import {
-  normalizeRemoteSettingsVersion,
-  normalizeUiSettings,
-} from './settings-shared.js';
+import { bumpRemoteSettingsVersion } from './settings-shared.js';
 import type {
   ChatFolder,
   ChatOrderComparatorOverrides,
@@ -36,7 +33,6 @@ import type {
 import {
   dedupeRecentAgentSettings,
   withoutNodeStartupPreferences,
-  normalizePathSettings,
   recordRecentProjectPath,
   sanitizeExecutionDefaults,
   sanitizeExecutionDefaultsSettings,
@@ -65,10 +61,6 @@ const ORDER_GROUP_BY_LIST_KEY: Record<OrderListKey, PersistedChatOrderGroup> = {
   normalChatIds: 'normal',
   archivedChatIds: 'archived',
 };
-
-function bumpRemoteSettingsVersion(settings: ProjectSettings): void {
-  settings.remoteSettingsVersion = normalizeRemoteSettingsVersion(settings.remoteSettingsVersion) + 1;
-}
 
 function sameOrderedStringArray(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
@@ -296,69 +288,6 @@ export class ChatNameStore {
         await this.#context.save(settings);
       }
     });
-  }
-}
-
-export class UiSettingsStore {
-  #context: SettingsStoreContext;
-
-  constructor(context: SettingsStoreContext) {
-    this.#context = context;
-  }
-
-  getUiSettings(): ProjectSettings['ui'] {
-    const settings = this.#context.readSettings();
-    return normalizeUiSettings(settings.ui || {});
-  }
-
-  async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
-    return this.#context.mutate(async () => {
-      const settings = this.#context.readSettings();
-      settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
-      bumpRemoteSettingsVersion(settings);
-      await this.#context.saveAndMaybeEmitRemote(settings, true);
-      return settings.ui;
-    });
-  }
-
-  getPathSettings(): ProjectSettings['paths'] {
-    const settings = this.#context.readSettings();
-    return settings.paths || {};
-  }
-
-  async setPathSettings(patch: Record<string, unknown>): Promise<ProjectSettings['paths']> {
-    return this.#context.mutate(async () => {
-      const settings = this.#context.readSettings();
-      settings.paths = normalizePathSettings({ ...(settings.paths || {}), ...patch });
-      bumpRemoteSettingsVersion(settings);
-      await this.#context.saveAndMaybeEmitRemote(settings, true);
-      return settings.paths;
-    });
-  }
-
-  getRemoteSettingsVersion(): number {
-    const settings = this.#context.readSettings();
-    return normalizeRemoteSettingsVersion(settings.remoteSettingsVersion);
-  }
-
-  getRemoteSettingsSnapshotSource(): {
-    version: number;
-    ui: ProjectSettings['ui'];
-    paths: ProjectSettings['paths'];
-    pinnedChatIds: string[];
-    recentAgentSettings: ProjectSettings['recentAgentSettings'];
-    executionDefaults: ProjectSettings['executionDefaults'];
-  } {
-    const settings = this.#context.readSettings();
-    const executionDefaults = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
-    return {
-      version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
-      ui: normalizeUiSettings(settings.ui || {}),
-      paths: settings.paths || {},
-      pinnedChatIds: settings.pinnedChatIds || [],
-      recentAgentSettings: settings.recentAgentSettings || [],
-      executionDefaults,
-    };
   }
 }
 

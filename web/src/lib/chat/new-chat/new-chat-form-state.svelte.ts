@@ -617,19 +617,13 @@ export class NewChatFormState {
 		this.pinnedProjectPaths = next;
 		this.isUpdatingPinnedPath = true;
 		try {
-			if (nodeId !== 'local') {
-				const snapshot = await this.#remoteSettings.ensureLoaded();
-				await this.#remoteSettings.update({ paths: { byNode: { ...snapshot.paths.byNode, [nodeId]: {
-					...snapshot.paths.byNode?.[nodeId], recentPaths: snapshot.paths.byNode?.[nodeId]?.recentPaths ?? [], pinnedPaths: next,
-				} } } });
-				return;
-			}
 			const snap = await savePinnedProjectPathsOptimistically(this.#remoteSettings, next, {
+				nodeId,
 				browseStartPath: this.browseStartPath || path,
 			});
 			if (nodeId === this.nodeId) {
-				this.pinnedProjectPaths = snap.paths.pinnedProjectPaths;
-				this.browseStartPath = snap.paths.browseStartPath;
+				this.pinnedProjectPaths = nodeId === 'local' ? snap.paths.pinnedProjectPaths : snap.paths.byNode?.[nodeId]?.pinnedPaths ?? [];
+				if (nodeId === 'local') this.browseStartPath = snap.paths.browseStartPath;
 			}
 		} catch (err) {
 			if (nodeId === this.nodeId) this.pinnedProjectPaths = previous;

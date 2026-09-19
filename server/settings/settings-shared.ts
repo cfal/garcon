@@ -1,4 +1,4 @@
-import type { FolderFilter, UiSettings } from './types.js';
+import type { FolderFilter, ProjectSettings, UiSettings } from './types.js';
 import {
   APP_TITLE_MAX_LENGTH,
   normalizeAgentSwitchCompactionUiSettings,
@@ -86,4 +86,8 @@ export function normalizeRemoteSettingsVersion(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
     : 0;
+}
+
+export function bumpRemoteSettingsVersion(settings: ProjectSettings): void {
+  settings.remoteSettingsVersion = normalizeRemoteSettingsVersion(settings.remoteSettingsVersion) + 1;
 }
