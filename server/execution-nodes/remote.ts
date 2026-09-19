@@ -25,17 +25,22 @@ export class RemoteExecutionNode implements ExecutionNode {
   readonly #listeners = new Set<(value: NodeAvailability) => void>();
   readonly #ready = Promise.withResolvers<void>();
   readonly #unsubscribe: () => void;
-  #availability: NodeAvailability = 'reconnecting';
+  #availability: NodeAvailability = 'offline';
   #current: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
-  #id: string | null = null;
   #projectBasePath: string | null = null;
   readonly #projects: ExecutionProjectService = {
     inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
     resolveFileMentions: async (request, options) => this.#backing().rpc.call('', 'projects.resolveFileMentions', request, options),
   };
 
-  private constructor(private readonly link: WebSocketLink, setupRpc: (rpc: AgentRpc) => void) {
+  constructor(
+    readonly id: string,
+    private readonly link: WebSocketLink,
+    setupRpc: (rpc: AgentRpc) => void = () => {},
+    private readonly reportError: (message: string) => void = () => {},
+  ) {
+    void this.#ready.promise.catch(() => undefined);
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
       const rpc = new AgentRpc(transport);
@@ -52,21 +57,20 @@ export class RemoteExecutionNode implements ExecutionNode {
         this.#setAvailability(connected ? 'ready' : 'reconnecting');
       });
       void this.#install(transport, rpc).catch((error: unknown) => {
-        console.warn('Execution-node session initialization failed:', error instanceof Error ? error.message : String(error));
+        this.reportError('Execution-node initialization failed; check worker configuration and matching builds');
         transport.close(error instanceof Error ? error : new Error(String(error)));
-        if (!this.#id) this.#ready.reject(error);
       });
     });
     void link.ready.catch((error: unknown) => this.#ready.reject(error));
   }
 
   static async connect(link: WebSocketLink, setupRpc: (rpc: AgentRpc) => void = () => {}): Promise<RemoteExecutionNode> {
-    const node = new RemoteExecutionNode(link, setupRpc);
+    if (!link.nodeId) throw new Error('Remote node requires a controller link');
+    const node = new RemoteExecutionNode(link.nodeId, link, setupRpc);
     try { await node.#ready.promise; return node; }
     catch (error) { await node.dispose(); throw error; }
   }
 
-  get id(): string { return this.#id!; }
   get availability(): NodeAvailability { return this.#availability; }
 
   async getInfo(options?: NodeCallOptions): Promise<ExecutionNodeInfo> {
@@ -110,6 +114,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   async #install(transport: SessionTransport, rpc: AgentRpc): Promise<void> {
     await transport.ready;
     const { info, integrations } = await rpc.call('', 'node.describe', null);
+    if (info.nodeId !== this.id || transport.nodeId !== this.id) throw new Error('Execution-node identity mismatch');
     if (typeof info.projectBasePath !== 'string' || !info.projectBasePath) throw new Error('Execution-node project base is missing');
     if (this.#projectBasePath !== null && this.#projectBasePath !== info.projectBasePath) {
       throw new Error('Execution-node project base changed; restart the controller to accept it');
@@ -126,23 +131,24 @@ export class RemoteExecutionNode implements ExecutionNode {
       throw new Error('Execution-node integration inventory mismatch');
     }
     const backing: RemoteSessionBacking = { rpc, info, manifests };
-    if (this.#id) {
-      if (this.#id !== info.nodeId || this.#integrations.size !== manifests.size) throw new Error('Execution-node inventory changed');
+    const initial = this.#projectBasePath === null;
+    const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
+      manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()),
+    ])) : this.#integrations;
+    if (!initial) {
+      if (this.#integrations.size !== manifests.size) throw new Error('Execution-node inventory changed');
       for (const [id, integration] of this.#integrations) {
         const { scope: _oldScope, ...previous } = integration.manifest;
         const { scope: _newScope, ...replacement } = manifests.get(id) ?? {};
         if (!isDeepStrictEqual(previous, replacement)) throw new Error('Execution-node capabilities changed');
-        await integration.initializeReplacement(backing);
       }
     }
+    for (const integration of candidates.values()) await integration.initializeReplacement(backing, initial);
     if (this.#candidate !== transport || this.#availability === 'disposed' || !transport.connected) {
       throw new Error('Execution-node candidate session retired');
     }
-    if (!this.#id) {
-      for (const manifest of manifests.values()) {
-        this.#integrations.set(manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()));
-      }
-      this.#id = info.nodeId;
+    if (initial) {
+      for (const [id, integration] of candidates) this.#integrations.set(id, integration);
       this.#projectBasePath = info.projectBasePath;
     }
     rpc.onProducer(({ notification }) => {

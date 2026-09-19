@@ -49,7 +49,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     try {
       fault.inject = (encoded) => JSON.parse(encoded).kind === 'receipt' ? 'drop' : null;
       fixture.controller.disconnect(); fixture.worker.disconnect();
-      (await timers.next(100)).fire();
+      (await timers.next(linkOptions.reconnectDelayMs)).fire();
       await replayStarted.promise;
       expect(fixture.controller.current).toBe(original);
       expect(timers.at(30_000)).toHaveLength(1);
@@ -61,7 +61,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const replaced = Promise.withResolvers<void>();
       fixture.node.onAvailabilityChanged((value) => { if (value === 'ready') replaced.resolve(); });
       fault.inject = () => null;
-      (await timers.next(100)).fire();
+      (await timers.next(linkOptions.reconnectDelayMs)).fire();
       await replaced.promise;
       expect(fixture.controller.current).not.toBe(original);
       expect(availability).toEqual(['reconnecting', 'offline', 'ready']);

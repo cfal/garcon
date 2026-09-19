@@ -16,6 +16,7 @@ export class SessionTransport {
     readonly peerRuntimeId: string,
     retired: (error: Error) => void,
     limits: Pick<MessageSessionOptions, 'reconnectGraceMs' | 'maxRetainedBytes' | 'maxRetainedFrames'> = {},
+    readonly nodeId: string = 'local',
   ) {
     this.ready = this.#ready.promise;
     void this.ready.catch(() => undefined);

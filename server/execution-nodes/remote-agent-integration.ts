@@ -86,9 +86,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
       migrate: (request) => call('settings.migrate', request),
     };
     this.lifecycle = {
-      start: async () => { await call('lifecycle.start', null); this.#started = true; },
+      start: async () => { if (!this.#started) { await call('lifecycle.start', null); this.#started = true; } },
       stop: async () => { this.#started = false; await call('lifecycle.stop', null); },
-      migrateOwnedStorage: async () => { await call('lifecycle.migrateOwnedStorage', null); this.#migrated = true; },
+      migrateOwnedStorage: async () => { if (!this.#migrated) { await call('lifecycle.migrateOwnedStorage', null); this.#migrated = true; } },
     };
     this.migration = {
       translateLegacyModel: ({ signal, ...request }) => call('migration.translateLegacyModel', request, { signal }),
@@ -156,9 +156,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
     } : null;
   }
 
-  async initializeReplacement(backing: RemoteSessionBacking): Promise<void> {
-    if (this.#migrated) await backing.rpc.call(this.descriptor.id, 'lifecycle.migrateOwnedStorage', null);
-    if (this.#started) await backing.rpc.call(this.descriptor.id, 'lifecycle.start', null);
+  async initializeReplacement(backing: RemoteSessionBacking, initial = false): Promise<void> {
+    if (initial || this.#migrated) await backing.rpc.call(this.descriptor.id, 'lifecycle.migrateOwnedStorage', null);
+    if (initial || this.#started) await backing.rpc.call(this.descriptor.id, 'lifecycle.start', null);
+    if (initial) { this.#migrated = true; this.#started = true; }
   }
 
   retire(): void { this.#bindings.clear(); }

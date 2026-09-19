@@ -4,7 +4,7 @@ import { outgoingFault } from './integration-fixture.ts';
 
 for (const dialer of ['controller', 'worker']) {
   test(`authenticated WebSocket replay with ${dialer} dialing`, async () => {
-    const common = { nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters', allowInsecureDevelopment: true };
+    const common = { nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const events = [];
@@ -50,10 +50,13 @@ for (const role of ['controller', 'worker']) {
       socket.addEventListener('message', ({ data }) => {
         const frame = JSON.parse(data);
         if (frame.type === 'hello') {
-          socket.send(JSON.stringify({
+          const peer = {
             ...frame, role: role === 'controller' ? 'worker' : 'controller',
             runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID(),
-          }));
+          };
+          if (peer.role === 'controller') peer.nodeId = 'synthetic-node';
+          else delete peer.nodeId;
+          socket.send(JSON.stringify(peer));
         } else if (frame.type === 'proof') {
           socket.send(JSON.stringify({ ...frame, signature: attack === 'reflected proof' ? frame.signature : '0'.repeat(64) }));
         } else {
@@ -69,7 +72,7 @@ for (const role of ['controller', 'worker']) {
 }
 
 test('both endpoints replay retained messages before new replies', async () => {
-  const common = { nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters', allowInsecureDevelopment: true };
+  const common = { nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const fault = outgoingFault(worker);

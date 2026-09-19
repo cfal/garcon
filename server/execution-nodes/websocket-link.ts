@@ -4,30 +4,37 @@ import { SessionTransport } from './session-transport.js';
 import { version } from '../../package.json';
 
 type Role = 'controller' | 'worker';
-interface Hello {
+interface HelloFields {
   readonly type: 'hello';
   readonly version: string;
-  readonly role: Role;
-  readonly nodeId: string;
   readonly runtimeId: string;
   readonly peerRuntimeId: string | null;
   readonly sessionId: string | null;
   readonly nonce: string;
   readonly received: number;
 }
+type Hello = HelloFields & (
+  | { readonly role: 'controller'; readonly nodeId: string }
+  | { readonly role: 'worker' }
+);
 
 export interface WebSocketLinkOptions {
   readonly role: Role;
-  readonly nodeId: string;
+  readonly nodeId?: string;
   readonly secret: string;
   readonly runtimeId?: string;
   readonly allowInsecureDevelopment?: boolean;
   readonly reconnectGraceMs?: number;
   readonly maxRetainedBytes?: number;
   readonly maxRetainedFrames?: number;
+  readonly reconnectDelayMs?: number;
 }
 
-interface LinkSocket extends SessionSocket { readonly bufferedAmount: number }
+export interface LinkSocket extends SessionSocket { readonly bufferedAmount: number }
+export interface LinkSocketHandlers {
+  receive(encoded: string): void;
+  closed(): void;
+}
 
 interface Connection {
   readonly socket: LinkSocket;
@@ -49,24 +56,41 @@ export class WebSocketLink {
   readonly #sessions = new Set<(session: SessionTransport) => void>();
   readonly #connections = new Set<Connection>();
   readonly #dialSockets = new Set<WebSocket>();
+  readonly #errors = new Set<(message: string) => void>();
   #current: SessionTransport | null = null;
   #disposed = false;
   #dialTimer: ReturnType<typeof setTimeout> | null = null;
-  #server: ReturnType<typeof Bun.serve<Connection | null>> | null = null;
+  #server: ReturnType<typeof Bun.serve<LinkSocketHandlers | null>> | null = null;
+  #dialing = false;
 
   constructor(private readonly options: WebSocketLinkOptions) {
     if (options.secret.length < 32) throw new Error('Execution-node shared secret must contain at least 32 characters');
+    if (options.role === 'controller' && !options.nodeId) throw new Error('Controller execution-node ID is required');
     this.runtimeId = options.runtimeId ?? crypto.randomUUID();
     this.ready = this.#ready.promise;
     void this.ready.catch(() => undefined);
-    const deadline = setTimeout(() => {
-      this.#ready.reject(new Error('Execution-node connection timed out'));
-    }, 10_000);
-    deadline.unref();
-    void this.ready.then(() => clearTimeout(deadline), () => clearTimeout(deadline));
   }
 
   get current(): SessionTransport | null { return this.#current; }
+  get nodeId(): string | null { return this.options.role === 'controller' ? this.options.nodeId! : this.#current?.nodeId ?? null; }
+  get acceptsSocket(): boolean { return !this.#disposed && this.#connections.size < 4; }
+
+  onError(listener: (message: string) => void): () => void {
+    this.#errors.add(listener);
+    return () => { this.#errors.delete(listener); };
+  }
+
+  openSocket(socket: LinkSocket): LinkSocketHandlers {
+    if (!this.acceptsSocket) {
+      socket.close();
+      return { receive() {}, closed() {} };
+    }
+    const connection = this.#open(socket);
+    return {
+      receive: (encoded) => this.#receive(connection, encoded),
+      closed: () => this.#closed(connection),
+    };
+  }
 
   onSession(listener: (session: SessionTransport) => void): () => void {
     this.#sessions.add(listener);
@@ -77,10 +101,10 @@ export class WebSocketLink {
   listen(port = 0): string {
     if (!this.options.allowInsecureDevelopment) throw new Error('Plaintext listener requires explicit development mode; use a TLS terminator otherwise');
     if (this.#server || this.#disposed) throw new Error('Execution-node listener cannot start');
-    this.#server = Bun.serve<Connection | null>({
+    this.#server = Bun.serve<LinkSocketHandlers | null>({
       hostname: '0.0.0.0', port,
       fetch: (request, server) => {
-        if (this.#disposed || this.#connections.size >= 4) return new Response(null, { status: 503 });
+        if (!this.acceptsSocket) return new Response(null, { status: 503 });
         if (new URL(request.url).pathname !== '/execution-node') return new Response(null, { status: 404 });
         if (server.upgrade(request, { data: null })) return;
         return new Response(null, { status: 400 });
@@ -90,32 +114,39 @@ export class WebSocketLink {
         backpressureLimit: 4 * 1024 * 1024,
         closeOnBackpressureLimit: true,
         open: (socket) => {
-          socket.data = this.#open({
+          socket.data = this.openSocket({
             get bufferedAmount() { return socket.getBufferedAmount(); },
             send: (frame) => { if (socket.send(frame) === 0) throw new Error('Socket write failed'); },
             close: () => socket.close(),
           });
         },
         message: (socket, message) => {
-          if (socket.data) this.#receive(socket.data, typeof message === 'string' ? message : message.toString());
+          socket.data?.receive(typeof message === 'string' ? message : message.toString());
         },
-        close: (socket) => { if (socket.data) this.#closed(socket.data); },
+        close: (socket) => { socket.data?.closed(); },
       },
     });
     return `ws://127.0.0.1:${this.#server.port}/execution-node`;
   }
 
   dial(url: string): void {
+    if (this.#dialing || this.#disposed) throw new Error('Execution-node dial loop cannot start');
     const target = new URL(url);
     if (target.protocol !== 'wss:' && !(target.protocol === 'ws:' && this.options.allowInsecureDevelopment)) {
       throw new Error('Execution-node connections require TLS outside explicit development mode');
     }
+    if (target.hash || target.username || target.password) throw new Error('Execution-node network URL must not contain credentials');
+    this.#dialing = true;
     const connect = () => {
+      this.#dialTimer = null;
       if (this.#disposed) return;
       const socket = new WebSocket(url);
       this.#dialSockets.add(socket);
+      const connecting = setTimeout(() => socket.close(), 5000);
+      connecting.unref();
       let connection: Connection | null = null;
       socket.addEventListener('open', () => {
+        clearTimeout(connecting);
         if (this.#disposed) { socket.close(); return; }
         connection = this.#open({
           get bufferedAmount() { return socket.bufferedAmount; },
@@ -130,13 +161,16 @@ export class WebSocketLink {
         if (connection && typeof event.data === 'string') this.#receive(connection, event.data);
         else socket.close();
       });
-      socket.addEventListener('error', () => socket.close());
+      socket.addEventListener('error', () => {
+        this.#reportError('Execution-node connection could not be established');
+        socket.close();
+      });
       socket.addEventListener('close', () => {
+        clearTimeout(connecting);
         this.#dialSockets.delete(socket);
         if (connection) this.#closed(connection);
         if (!this.#disposed) {
-          this.#dialTimer = setTimeout(connect, 100);
-          this.#dialTimer.unref();
+          this.#dialTimer = setTimeout(connect, this.options.reconnectDelayMs ?? 5000);
         }
       });
     };
@@ -156,13 +190,15 @@ export class WebSocketLink {
     this.disconnect();
     for (const socket of this.#dialSockets) socket.close();
     this.#sessions.clear();
+    this.#errors.clear();
     await this.#server?.stop(true);
     this.#server = null;
   }
 
   #open(socket: LinkSocket): Connection {
     const hello: Hello = {
-      type: 'hello', version, nodeId: this.options.nodeId, role: this.options.role,
+      type: 'hello', version,
+      ...(this.options.role === 'controller' ? { role: 'controller' as const, nodeId: this.options.nodeId! } : { role: 'worker' as const }),
       runtimeId: this.runtimeId, peerRuntimeId: this.#current?.peerRuntimeId ?? null,
       sessionId: this.#current?.id ?? null,
       nonce: randomBytes(32).toString('hex'), received: this.#current?.channel.received ?? 0,
@@ -170,7 +206,10 @@ export class WebSocketLink {
     const connection: Connection = {
       socket, hello, peer: null, session: null, hooks: null, heartbeat: null, replayTimeout: null,
       closed: false, lastReceivedAt: Date.now(),
-      timeout: setTimeout(() => this.#close(connection), 5000),
+      timeout: setTimeout(() => {
+        this.#reportError('Execution-node authentication timed out');
+        this.#close(connection);
+      }, 5000),
     };
     connection.timeout.unref();
     this.#connections.add(connection);
@@ -199,7 +238,7 @@ export class WebSocketLink {
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
       const frame: unknown = JSON.parse(encoded);
       if (isHello(frame) && !connection.peer) {
-        if (frame.version !== version || frame.nodeId !== this.options.nodeId || frame.role === this.options.role) {
+        if (frame.version !== version || frame.role === this.options.role) {
           throw new Error('Execution-node handshake mismatch');
         }
         connection.peer = frame;
@@ -213,6 +252,7 @@ export class WebSocketLink {
       }
       this.#accept(connection);
     } catch {
+      this.#reportError(connection.hooks ? 'Execution-node continuity lost' : 'Execution-node authentication failed');
       this.#close(connection);
     }
   }
@@ -220,11 +260,13 @@ export class WebSocketLink {
   #accept(connection: Connection): void {
     clearTimeout(connection.timeout);
     const peer = connection.peer!;
+    const nodeId = connection.hello.role === 'controller' ? connection.hello.nodeId
+      : peer.role === 'controller' ? peer.nodeId : '';
     if (connection.hello.sessionId !== (this.#current?.id ?? null)) throw new Error('Superseded handshake');
     let session = this.#current;
     const resume = session !== null && peer.runtimeId === session.peerRuntimeId
-      && peer.peerRuntimeId === this.runtimeId && peer.sessionId === session.id;
-    if (resume && session!.channel.attached) throw new Error('Execution-node session already attached');
+      && peer.peerRuntimeId === this.runtimeId && peer.sessionId === session.id && session.nodeId === nodeId;
+    if (session?.channel.attached) throw new Error('Execution-node session already attached');
     if (!resume) {
       session?.close(new MessageContinuityError('Execution-node logical session replaced'));
       const replacement = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, () => {
@@ -232,7 +274,7 @@ export class WebSocketLink {
         for (const attached of this.#connections) {
           if (attached.session === replacement) this.#close(attached);
         }
-      }, this.options);
+      }, this.options, nodeId);
       this.#current = session = replacement;
       for (const listener of this.#sessions) listener(replacement);
     }
@@ -273,6 +315,10 @@ export class WebSocketLink {
     return createHmac('sha256', this.options.secret).update(JSON.stringify(['garcon-execution-node', purpose, transcript])).digest('hex');
   }
 
+  #reportError(message: string): void {
+    if (!this.#disposed) for (const listener of this.#errors) listener(message);
+  }
+
   #close(connection: Connection): void {
     this.#closed(connection);
     connection.socket.close();
@@ -293,7 +339,8 @@ function isHello(value: unknown): value is Hello {
   if (!value || typeof value !== 'object') return false;
   const frame = value as Record<string, unknown>;
   return frame.type === 'hello' && (frame.role === 'controller' || frame.role === 'worker')
-    && ['version', 'nodeId', 'runtimeId', 'nonce'].every((key) => typeof frame[key] === 'string' && frame[key].length > 0)
+    && ['version', 'runtimeId', 'nonce'].every((key) => typeof frame[key] === 'string' && frame[key].length > 0)
+    && (frame.role === 'controller' ? typeof frame.nodeId === 'string' && frame.nodeId.length > 0 : !('nodeId' in frame))
     && (frame.peerRuntimeId === null || typeof frame.peerRuntimeId === 'string')
     && (frame.sessionId === null || typeof frame.sessionId === 'string')
     && typeof frame.received === 'number' && Number.isSafeInteger(frame.received) && frame.received >= 0;

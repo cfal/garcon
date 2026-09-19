@@ -19,10 +19,10 @@ import { WebSocketLink } from '../websocket-link.js';
 import { serveAgentNode } from '../agent-worker.js';
 import { LocalExecutionProjectService } from '../project-service.js';
 
-export const linkOptions = { nodeId: 'test-node', secret: 'test-secret-longer-than-32-characters', allowInsecureDevelopment: true };
+export const linkOptions = { nodeId: 'test-node', secret: 'test-secret-longer-than-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
 
-export function integrationFixture(projectBasePath = '/test-project') {
-  const scope: AgentResourceScope = { nodeId: 'test-node', instanceId: crypto.randomUUID(), integrationId: 'test' };
+export function integrationFixture(projectBasePath = '/test-project', nodeId = 'test-node') {
+  const scope: AgentResourceScope = { nodeId, instanceId: crypto.randomUUID(), integrationId: 'test' };
   const published: AgentProducerNotification[] = [];
   const nativePublishers: AgentRuntimePublisher[] = [];
   const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0 };
