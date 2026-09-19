@@ -24,6 +24,7 @@
 		chats,
 		username,
 		directory,
+		nodeId = 'local',
 		onOpenChat,
 		onOpenSource,
 		onClose,
@@ -35,6 +36,7 @@
 		chats: readonly TicketChatSummary[];
 		username: string;
 		directory: string | null;
+		nodeId?: string;
 		onOpenChat: (id: string) => void;
 		onOpenSource: (source: TicketSource) => void;
 		onClose?: () => void;
@@ -205,7 +207,7 @@
 				{closeDisabled}
 				onCreate={() => {
 					panel.rememberInvoker();
-					void controller.beginCreate(directory);
+					void controller.beginCreate(directory, nodeId);
 				}}
 			/>
 			{#if !hasDetail && refreshError}<div class="ticket-notice" role="status">

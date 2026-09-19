@@ -50,7 +50,7 @@ export interface TicketsApi {
 		signal?: AbortSignal,
 	): Promise<TicketSequencePage<TicketActivity>>;
 	facets(field: 'project' | 'label', prefix: string, signal?: AbortSignal): Promise<TicketFacets>;
-	projectDefault(directory: string, signal?: AbortSignal): Promise<TicketProjectDefault>;
+	projectDefault(directory: string, signal?: AbortSignal, nodeId?: string): Promise<TicketProjectDefault>;
 	mutate(request: HttpTicketMutationRequest, signal?: AbortSignal): Promise<TicketWriteResult>;
 }
 
@@ -115,9 +115,9 @@ export const ticketsApi: TicketsApi = {
 	async facets(field, prefix, signal) {
 		return parseTicketFacets(await get(`/facets?${new URLSearchParams({ field, prefix })}`, signal));
 	},
-	async projectDefault(directory, signal) {
+	async projectDefault(directory, signal, nodeId) {
 		return parseTicketProjectDefault(
-			await apiPost<unknown>(`${route}/project-default`, { directory }, { signal }),
+			await apiPost<unknown>(`${route}/project-default`, { directory, nodeId }, { signal }),
 		);
 	},
 	async mutate(input, signal) {

@@ -78,8 +78,23 @@ describe('SettingsAuthState login lifecycle', () => {
 
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 3);
 
-		expect(getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', SESSION_ID);
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', SESSION_ID, 'local');
 		expect(settingsAuth.deviceAuthFor('codex')).toEqual(DEVICE_AUTH);
+	});
+
+	it('routes login to the selected node and ignores replies after leaving that node', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const launched = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launched.promise);
+		const remote = new SettingsAuthState(createModelCatalog(), nodeId);
+		const pending = remote.handleLogin('codex');
+		expect(launchAgentAuthLogin).toHaveBeenCalledWith('codex', nodeId);
+		remote.destroy();
+		launched.resolve({ launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: DEVICE_AUTH });
+		await pending;
+		await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 2);
+		expect(remote.deviceAuthFor('codex')).toBeUndefined();
+		expect(getAgentAuthLoginStatus).not.toHaveBeenCalled();
 	});
 
 	it('clears the device code and refreshes auth once the owned session ends', async () => {
@@ -99,7 +114,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 
 		expect(settingsAuth.deviceAuthFor('codex')).toBeUndefined();
-		expect(getAgentAuthStatus).toHaveBeenCalledWith('codex');
+		expect(getAgentAuthStatus).toHaveBeenCalledWith('codex', 'local');
 		expect(settingsAuth.authFor('codex').authenticated).toBe(true);
 	});
 
@@ -235,7 +250,7 @@ describe('SettingsAuthState login lifecycle', () => {
 
 		expect(settingsAuth.deviceAuthFor('claude')).toEqual(secondSessionAuth);
 		await settingsAuth.completeLogin('claude', 'second-code');
-		expect(completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'session-b', 'second-code');
+		expect(completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'session-b', 'second-code', 'local');
 	});
 
 	it('clears a Claude code form when its login process exits', async () => {
@@ -261,7 +276,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 
 		expect(settingsAuth.deviceAuthFor('claude')).toBeUndefined();
-		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude');
+		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude', 'local');
 	});
 
 	it('keeps the owned Claude session retryable when code submission fails', async () => {
@@ -277,7 +292,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await settingsAuth.handleLogin('claude');
 		await settingsAuth.completeLogin('claude', 'bad-code');
 
-		expect(completeAgentAuthLogin).toHaveBeenCalledWith('claude', SESSION_ID, 'bad-code');
+		expect(completeAgentAuthLogin).toHaveBeenCalledWith('claude', SESSION_ID, 'bad-code', 'local');
 		expect(settingsAuth.deviceAuthFor('claude')).toEqual(CLAUDE_AUTH);
 		expect(settingsAuth.isLoginPending('claude')).toBe(false);
 		expect(settingsAuth.authFor('claude').error).toBe('code rejected');
@@ -310,7 +325,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 		expect(settingsAuth.deviceAuthFor('claude')).toBeUndefined();
 		expect(settingsAuth.isLoginPending('claude')).toBe(false);
-		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude');
+		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude', 'local');
 	});
 
 	it('surfaces the terminal failure for the owned session', async () => {

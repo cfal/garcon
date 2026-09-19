@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import ApiProviderProtocolPanel from '../ApiProviderProtocolPanel.svelte';
 	import { setModelCatalog } from '$lib/context';
 	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
@@ -18,6 +20,7 @@
 	} = $props();
 
 	setModelCatalog({
+		forNode() { return this; },
 		version: 0,
 		get apiProviderCatalog() {
 			return apiProviderCatalog;

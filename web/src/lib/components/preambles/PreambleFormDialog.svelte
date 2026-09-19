@@ -12,7 +12,7 @@
 		restorePromptEditorSelection,
 		type PromptEditorSelection,
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
-	import { getAppShell, getLocalSettings, getModelCatalog, getSidebarSearch } from '$lib/context';
+	import { getAppShell, getLocalSettings, getModelCatalog, getSidebarSearch, getExecutionNodes } from '$lib/context';
 	import {
 		PREAMBLE_CHAT_ID_TOKEN,
 		type Preamble,
@@ -37,6 +37,7 @@
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const modelCatalog = getModelCatalog();
+	const executionNodes = getExecutionNodes();
 	const sidebarSearch = getSidebarSearch();
 	const form = new PreambleFormState();
 	const agentOptions = $derived(
@@ -237,6 +238,17 @@
 						{#each form.pathRules as rule (rule.key)}
 							{@const pathError = form.pathRuleError(rule.key)}
 							<div class="relative space-y-2 rounded-md border border-border p-3">
+								<select
+									aria-label="Execution node"
+									value={rule.nodeId ?? 'local'}
+									onchange={(event) => { rule.nodeId = event.currentTarget.value; closePathPicker(); }}
+									class="h-10 w-full rounded-md border border-input bg-background px-3 text-base sm:pointer-fine:text-sm"
+								>
+									{#each executionNodes.nodes as node (node.id)}
+										<option value={node.id}>{node.label}</option>
+									{/each}
+									{#if rule.nodeId && !executionNodes.get(rule.nodeId)}<option value={rule.nodeId}>{rule.nodeId} (Unavailable)</option>{/if}
+								</select>
 								<div class="flex min-w-0 gap-2">
 									<input
 										type="text"
@@ -255,6 +267,7 @@
 											else openPathPicker(rule.key);
 										}}
 										aria-label={m.preambles_browse_path()}
+										disabled={(rule.nodeId ?? 'local') !== 'local'}
 										title={m.preambles_browse_path()}
 									>
 										<FolderOpen class="h-4 w-4" />
@@ -277,7 +290,7 @@
 								<p id={`preamble-path-error-${rule.key}`} class="min-h-4 text-xs text-destructive">
 									{pathError ?? ''}
 								</p>
-								{#if pickerKey === rule.key}
+								{#if pickerKey === rule.key && (rule.nodeId ?? 'local') === 'local'}
 									<DirectoryBrowser
 										currentPath={rule.projectPath || appShell.projectBasePath}
 										basePath={appShell.projectBasePath}

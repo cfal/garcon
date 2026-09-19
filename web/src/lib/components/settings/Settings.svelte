@@ -3,7 +3,8 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import { getAppShell, getModelCatalog, getRemoteSettings, getExecutionNodes } from '$lib/context';
+	import { untrack } from 'svelte';
 	import ApiProvidersSection from './ApiProvidersSection.svelte';
 	import OtherAgentsSection from './OtherAgentsSection.svelte';
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
@@ -13,14 +14,23 @@
 
 	const appShell = getAppShell();
 	const remoteSettings = getRemoteSettings();
-	const settingsAuth = new SettingsAuthState(getModelCatalog());
+	const modelCatalog = getModelCatalog();
+	const executionNodes = getExecutionNodes();
+	let nodeId = $state('local');
+	const settingsAuth = $derived(new SettingsAuthState(modelCatalog.forNode(nodeId), nodeId));
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 
 	$effect(() => {
 		if (!appShell.showSettings) return;
 		void remoteSettings.refreshInBackground();
-		const cleanup = settingsAuth.initialize();
-		return cleanup;
+		void executionNodes.refresh();
+	});
+
+	$effect(() => {
+		if (!appShell.showSettings || !['providers', 'other-agents'].includes(appShell.settingsTab)) return;
+		const auth = settingsAuth;
+		if (!executionNodes.isReady(nodeId)) return;
+		return untrack(() => auth.initialize());
 	});
 
 	function handleOpenChange(open: boolean) {
@@ -72,16 +82,34 @@
 						{m.settings_tab_shortcuts()}
 					</Tabs.Trigger>
 				</Tabs.List>
+				{#if appShell.settingsTab === 'providers' || appShell.settingsTab === 'other-agents'}
+					<label class="mt-3 flex items-center gap-3 text-sm">
+						<span class="shrink-0">Execution node</span>
+						<select bind:value={nodeId} class="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-base sm:pointer-fine:text-sm">
+							{#each executionNodes.nodes as node (node.id)}
+								<option value={node.id}>{node.label}{node.availability === 'ready' ? '' : ' (Unavailable)'}</option>
+							{/each}
+						</select>
+					</label>
+				{/if}
 			</div>
 
 			<div class="flex-1 min-h-0 overflow-y-auto px-6 py-6" bind:this={scrollContainer}>
 				<Tabs.Content value="providers" class="mt-0 space-y-6">
 					{@render tabDescription(m.settings_providers_description())}
-					<ApiProvidersSection {settingsAuth} />
+					{#if executionNodes.isReady(nodeId)}
+						<ApiProvidersSection {settingsAuth} />
+					{:else}
+						<p class="text-sm text-muted-foreground">{executionNodes.label(nodeId)} is unavailable.</p>
+					{/if}
 				</Tabs.Content>
 
 				<Tabs.Content value="other-agents" class="mt-0 space-y-6">
-					<OtherAgentsSection {settingsAuth} />
+					{#if executionNodes.isReady(nodeId)}
+						<OtherAgentsSection {settingsAuth} />
+					{:else}
+						<p class="text-sm text-muted-foreground">{executionNodes.label(nodeId)} is unavailable.</p>
+					{/if}
 				</Tabs.Content>
 
 				<Tabs.Content value="remote" class="mt-0 space-y-6">

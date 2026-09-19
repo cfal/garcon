@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import Settings from '../Settings.svelte';
 	import {
 		setAppShell,
@@ -203,6 +205,7 @@
 		},
 	});
 	setModelCatalog({
+		forNode() { return this; },
 		version: 0,
 		apiProviderCatalog: [],
 		getModels() {
