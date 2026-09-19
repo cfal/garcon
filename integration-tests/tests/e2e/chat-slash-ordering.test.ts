@@ -4,6 +4,38 @@ import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 describe('Lightpanda chat slash ordering', () => {
+  test('submits bare /goal with Enter when completion has no matches', async () => {
+    await withE2eFixture('chat-former-goal-input', async (fixture) => {
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('ordinary-input-seed');
+      await app.waitForText('echo:ordinary-input-seed');
+
+      await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => {
+        const textarea = element as HTMLTextAreaElement;
+        textarea.focus();
+        textarea.value = '/goal';
+        textarea.setSelectionRange(5, 5);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await app.waitForText('No matching commands');
+      await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => {
+        element.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', bubbles: true, cancelable: true,
+        }));
+      });
+      await app.waitForText('echo:/goal');
+
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
+        request.lastUserText === '/goal'
+      ))).toHaveLength(1);
+      expect(await app.exactTextCount('/goal')).toBe(1);
+      expect(await app.exactTextCount('echo:/goal')).toBe(1);
+      fixture.assertNoBrowserErrors();
+    });
+  }, 60_000);
+
   test('renames, moves, and tags without reaching the provider', async () => {
     await withE2eFixture('chat-slash-ordering', async (fixture) => {
       // Manual-order slash commands are exercised against manual sidebar sort.

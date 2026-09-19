@@ -1,6 +1,3 @@
-import type {
-  AgentGoalControlHandoff,
-} from '@garcon/server-agent-interface';
 import type { AgentExecutionCommandType } from './session-types.js';
 import { createLogger } from '../lib/log.js';
 import { matchesTurnIdentity, type TurnReceiptOwner } from '../lib/turn-identity.js';
@@ -50,32 +47,6 @@ export class AgentEventBus {
       throw new Error(`Cannot track a new turn while chat ${chatId} has an active turn`);
     }
     this.#setTurn(chatId, turn);
-  }
-
-  handoffTurn(
-    chatId: string,
-    predecessor: TurnEventMetadata | undefined,
-    successor: TurnEventMetadata,
-    downstream: AgentGoalControlHandoff,
-  ): AgentGoalControlHandoff {
-    const next = turnMetadata(successor);
-    const validate = () => {
-      const active = this.#turnMetadataByChatId.get(chatId);
-      if (!sameTurnIdentity(active, predecessor)) {
-        throw new Error(`Cannot hand off turn for chat ${chatId} after its active turn changed`);
-      }
-    };
-    validate();
-    return {
-      validate: () => {
-        validate();
-        downstream.validate();
-      },
-      commit: () => {
-        this.#setTurn(chatId, next);
-        downstream.commit();
-      },
-    };
   }
 
   clearTurn(chatId: string): void {
@@ -197,11 +168,4 @@ function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
     ...(opts.agentOwnershipEpoch ? { agentOwnershipEpoch: opts.agentOwnershipEpoch } : {}),
     ...(opts.turnOwner ? { turnOwner: opts.turnOwner } : {}),
   };
-}
-
-function sameTurnIdentity(
-  left: TurnEventMetadata | undefined,
-  right: TurnEventMetadata | undefined,
-): boolean {
-  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }

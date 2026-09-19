@@ -75,8 +75,7 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(compact?.description).toBeTruthy();
 		expect(fork?.source).toBe('command');
 		expect(fork?.description).toBeTruthy();
-		expect(goal?.source).toBe('command');
-		expect(goal?.description).toBeTruthy();
+		expect(goal).toBeUndefined();
 		expect(scheduleIn?.source).toBe('command');
 		expect(scheduleIn?.description).toBeTruthy();
 		expect(steer?.source).toBe('command');

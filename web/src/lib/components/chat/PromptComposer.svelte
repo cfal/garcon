@@ -529,6 +529,7 @@
 		if (!ui.showFileMenu && !ui.showSlashMenu) return false;
 		const menu = ui.showFileMenu ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
+		if (menu && !ui.showFileMenu && event.key === 'Enter') return false;
 		if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) return false;
 		event.preventDefault();
 		return true;
@@ -934,7 +935,6 @@
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
 			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
-			supportsGoals={modelCatalog.supportsGoals(capabilityAgentId)}
 			canScheduleIn={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}

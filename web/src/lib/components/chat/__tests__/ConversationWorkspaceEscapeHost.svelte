@@ -181,7 +181,6 @@
 		supportsFork: () => true,
 		supportsForkWhileRunning: () => true,
 		supportsSteering: (agentId: string) => agentId === 'claude' || agentId === 'codex',
-		supportsGoals: (agentId: string) => agentId === 'codex',
 	} as never);
 
 	const workspaceInteractionGate = new WorkspaceInteractionGate();

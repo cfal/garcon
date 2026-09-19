@@ -61,7 +61,6 @@ function createIntegration() {
       captureTarget: () => ({}),
       steer: async () => ({ kind: "accepted" }),
     },
-    goals: null,
     endpoints: {},
   };
 }
@@ -94,7 +93,6 @@ describe("AgentCatalogService", () => {
       supportsForkAtMessage: true,
       supportsForkWhileRunning: true,
       supportsSteering: true,
-      supportsGoals: false,
       supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,

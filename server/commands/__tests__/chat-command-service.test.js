@@ -21,9 +21,6 @@ import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
 import { frozenConversationDrafts } from '../../ledger/projection.ts';
 import {
-  GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
-  GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
-  GoalControlDeliveryError,
   SteerDeliveryError,
   DomainError,
   ProjectUnavailableError,
@@ -189,13 +186,6 @@ class TestChatCommandService extends ChatCommandService {
 
   submitQueueEntrySteer(input) {
     return super.submitQueueEntrySteer(this.#qualify(input));
-  }
-
-  submitGoalControl(input) {
-    return super.submitGoalControl(this.#qualify({
-      ...input,
-      clientMessageId: input.clientMessageId ?? input.clientRequestId,
-    }));
   }
 
   #qualify(input) {
@@ -439,33 +429,6 @@ function makeService(overrides = {}) {
         throw error;
       }
     }),
-    deliverAcceptedGoalControl: mock(async (input) => {
-      let deliveryAccepted = false;
-      try {
-        const delivered = await queue.deliverGoalControlInput(
-          input.command.chatId,
-          input.content,
-          {
-            clientRequestId: input.command.clientRequestId,
-            clientMessageId: input.clientMessageId,
-            transcriptViewId: input.transcriptViewId,
-            turnId: input.command.turnId,
-          },
-          () => input.settlement.markScheduled(input.command, input.command.turnId),
-        );
-        if (delivered) {
-          deliveryAccepted = true;
-          await input.settlement.settleGoalControl(input.command);
-          return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
-        }
-        const result = await queue.enqueueAccepted(input);
-        return { delivery: 'queued', entryId: result.entryId, control: result.control };
-      } catch (error) {
-        deliveryAccepted ||= error instanceof GoalControlDeliveryError && error.deliveryAccepted;
-        await input.settlement.settleGoalControlFailure(input.command, error, deliveryAccepted);
-        throw error;
-      }
-    }),
     captureSteerTarget: mock(() => null),
     deliverAcceptedSteer: mock(async (input) => {
       await input.settlement.markScheduled(input.command, input.target.identity.turnId);
@@ -546,7 +509,6 @@ function makeService(overrides = {}) {
         rebased: false,
       }),
     ),
-    deliverGoalControlInput: mock(() => Promise.resolve(false)),
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     pauseChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     resumeChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
@@ -4743,39 +4705,6 @@ describe('ChatCommandService', () => {
     )).toMatchObject({ status: 'rejected', errorCode: 'QUEUE_ENTRY_IN_FLIGHT' });
   });
 
-  it('completes handled goal control without exposing a synthetic queue entry', async () => {
-    const { service, queue, ledger } = makeService({
-      queue: {
-        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([], { version: 4 }))),
-        deliverGoalControlInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
-          await afterPendingRegistered();
-          return true;
-        }),
-      },
-    });
-
-    const result = await service.submitGoalControl({
-      chatId: SOURCE_CHAT_ID,
-      content: '/goal pause',
-      clientRequestId: 'request-active',
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(result.delivery).toBe('active');
-    expect(result.control.queue.entries).toEqual([]);
-    expect(result.entryId).toBeUndefined();
-    expect(queue.triggerDrain).not.toHaveBeenCalled();
-    expect(queue.deliverGoalControlInput).toHaveBeenCalledWith(
-      SOURCE_CHAT_ID,
-      '/goal pause',
-      expect.objectContaining({ clientRequestId: 'request-active' }),
-      expect.any(Function),
-    );
-    expect(await readLedgerRecord(ledger, 'goal-control', 'request-active')).toMatchObject({
-      status: 'finished',
-    });
-  });
-
   it('delivers strict steering once under the captured active turn identity', async () => {
     const target = {
       attempt: {},
@@ -5721,61 +5650,6 @@ describe('ChatCommandService', () => {
     });
   });
 
-  it('reopens pre-accept active delivery failures for the same request id', async () => {
-    let attempts = 0;
-    const { service, queue, ledger } = makeService({
-      queue: {
-        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
-        deliverGoalControlInput: mock(async () => {
-          attempts += 1;
-          if (attempts === 1) throw new GoalControlDeliveryError(new Error('live registration failed'), false);
-          return false;
-        }),
-        createChatQueueEntry: mock(() =>
-          Promise.resolve({
-            entry: queueEntry('queued-retry', 'retry me'),
-            entryId: 'queued-retry',
-            control: storedQueue([queueEntry('queued-retry', 'retry me')], {
-              version: 1,
-            }),
-            duplicate: false,
-          }),
-        ),
-      },
-    });
-
-    const input = {
-      chatId: SOURCE_CHAT_ID,
-      content: 'retry me',
-      clientRequestId: 'request-retry',
-    };
-    await expect(service.submitGoalControl(input)).rejects.toMatchObject({
-      message: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
-      cause: expect.objectContaining({ message: 'live registration failed' }),
-      deliveryAccepted: false,
-      retryable: true,
-    });
-    let record = await readLedgerRecord(ledger, 'goal-control', input.clientRequestId);
-    expect(record).toEqual(
-      expect.objectContaining({
-        status: 'failed',
-        errorCode: 'PRE_SCHEDULE_FAILED',
-      }),
-    );
-
-    await expect(service.submitGoalControl(input)).resolves.toEqual(
-      expect.objectContaining({
-        status: 'accepted',
-        delivery: 'queued',
-        entryId: 'queued-retry',
-      }),
-    );
-    record = await readLedgerRecord(ledger, 'goal-control', input.clientRequestId);
-    expect(record.status).toBe('finished');
-    expect(queue.deliverGoalControlInput).toHaveBeenCalledTimes(2);
-    expect(queue.createChatQueueEntry).toHaveBeenCalledOnce();
-  });
-
   it('sends scheduled input immediately when the existing chat is idle', async () => {
     const { service, queue } = makeService();
 
@@ -5895,125 +5769,6 @@ describe('ChatCommandService', () => {
     expect(outcome).toEqual({ type: 'skipped-busy', chatId: SOURCE_CHAT_ID });
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
     expect(queue.admitUserInput).not.toHaveBeenCalled();
-  });
-
-  it('never redelivers an ambiguous active goal-control command', async () => {
-    const { service, queue, ledger } = makeService({
-      queue: {
-        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
-        deliverGoalControlInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
-          await afterPendingRegistered();
-          throw new GoalControlDeliveryError(new Error('live steer failed after acceptance'), true);
-        }),
-      },
-    });
-    const input = {
-      chatId: SOURCE_CHAT_ID,
-      content: 'deliver once',
-      clientRequestId: 'request-accepted',
-    };
-
-    await expect(service.submitGoalControl(input)).rejects.toMatchObject({
-      message: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
-      cause: expect.objectContaining({
-        message: 'live steer failed after acceptance',
-      }),
-      deliveryAccepted: true,
-      retryable: false,
-    });
-    let record = await readLedgerRecord(ledger, 'goal-control', input.clientRequestId);
-    expect(record).toEqual(
-      expect.objectContaining({
-        status: 'accepted',
-        error: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
-      }),
-    );
-    expect(record.errorCode).toBe('GOAL_CONTROL_OUTCOME_UNKNOWN');
-
-    const recovered = await service.submitGoalControl(input);
-    expect(recovered).toMatchObject({
-      status: 'duplicate',
-      delivery: 'active',
-      control: { queue: { entries: [] } },
-    });
-    record = await readLedgerRecord(ledger, 'goal-control', input.clientRequestId);
-    expect(record).toMatchObject({ status: 'accepted' });
-    expect(queue.deliverGoalControlInput).toHaveBeenCalledTimes(1);
-    expect(queue.triggerDrain).not.toHaveBeenCalled();
-  });
-
-  it('keeps ambiguous active delivery out of the future-turn queue', async () => {
-    const inputProjection = makeInputProjection();
-    const submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
-      await beforeDelivery(runtimeHandoff());
-      throw new Error('connection closed after provider acceptance');
-    });
-    const queueService = makeRealQueue(inputProjection, {
-      isChatRunning: mock(() => true),
-      submitGoalControl,
-    });
-    const { service, ledger } = makeService({
-      queueService,
-    });
-    const input = {
-      chatId: SOURCE_CHAT_ID,
-      content: 'recover through control state',
-      clientRequestId: 'request-real-active-recovery',
-    };
-
-    await expect(service.submitGoalControl(input)).rejects.toMatchObject({
-      deliveryAccepted: true,
-      message: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
-    });
-    const uncertain = await queueService.readChatExecutionControl(SOURCE_CHAT_ID);
-    expect(uncertain.entries).toEqual([]);
-
-    const recovered = await service.submitGoalControl(input);
-    expect(recovered).toMatchObject({
-      status: 'duplicate',
-      delivery: 'active',
-      control: { queue: { entries: [] } },
-    });
-    expect(submitGoalControl).toHaveBeenCalledTimes(1);
-    expect(await readLedgerRecord(ledger, 'goal-control', input.clientRequestId)).toMatchObject({
-      status: 'accepted',
-    });
-
-    const repeated = await service.submitGoalControl(input);
-    expect(repeated).toMatchObject({
-      status: 'duplicate',
-      delivery: 'active',
-    });
-    expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toEqual([]);
-    expect(submitGoalControl).toHaveBeenCalledTimes(1);
-  });
-
-  it('replays an accepted goal-control record without redelivery', async () => {
-    const { service, queue, ledger } = makeService();
-    await ledger.accept({
-      commandType: 'goal-control',
-      chatId: SOURCE_CHAT_ID,
-      clientRequestId: 'request-active-incomplete',
-      payload: {
-        chatId: SOURCE_CHAT_ID,
-        transcriptViewId: 'view-1',
-        clientMessageId: 'request-active-incomplete',
-        content: 'uncertain delivery',
-      },
-      entryId: 'prepared-fallback-id',
-    });
-
-    await expect(service.submitGoalControl({
-      chatId: SOURCE_CHAT_ID,
-      content: 'uncertain delivery',
-      clientRequestId: 'request-active-incomplete',
-    })).resolves.toMatchObject({
-      status: 'duplicate',
-      delivery: 'active',
-    });
-
-    expect(queue.deliverGoalControlInput).not.toHaveBeenCalled();
-    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
   });
 
   it('projects an empty queue after clear', async () => {

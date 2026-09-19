@@ -163,7 +163,6 @@ const agentCatalogEntries = [
 ].map((entry) => ({
   ...entry,
   supportsSteering: entry.id === "codex",
-  supportsGoals: entry.id === "codex",
   supportedPermissionModes: ["default", "manualBypass"],
   supportedThinkingModes: ["none", "high"],
   settings: [],
@@ -325,7 +324,6 @@ describe("GET /api/v1/models", () => {
     expect(claude.supportsForkAtMessage).toBe(true);
     expect(claude.supportsForkWhileRunning).toBe(true);
     expect(claude.supportsSteering).toBe(false);
-    expect(claude.supportsGoals).toBe(false);
     expect(claude.supportsUpdateProjectPath).toBe(true);
     expect(claude.supportsImages).toBe(true);
     expect(Array.isArray(claude.models)).toBe(true);
@@ -336,7 +334,7 @@ describe("GET /api/v1/models", () => {
     expect(codex.supportsForkAtMessage).toBe(true);
     expect(codex.supportsForkWhileRunning).toBe(true);
     expect(codex.supportsSteering).toBe(true);
-    expect(codex.supportsGoals).toBe(true);
+    expect(codex).not.toHaveProperty('supportsGoals');
     expect(codex.supportsUpdateProjectPath).toBe(true);
     expect(codex.supportsImages).toBe(true);
     expect(codex.defaultModel).toBe("gpt-5.5");

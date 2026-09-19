@@ -15,7 +15,6 @@ import {
 	replaceQueuedInput,
 	steerChat,
 	steerQueuedEntry,
-	submitGoalControl,
 	startChat,
 	stopChat,
 	updateChatModel,
@@ -75,7 +74,6 @@ vi.mock('$lib/api/chats.js', () => ({
 	runChat: vi.fn(),
 	steerChat: vi.fn(),
 	steerQueuedEntry: vi.fn(),
-	submitGoalControl: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
@@ -103,7 +101,6 @@ const mockDeleteQueuedInput = vi.mocked(deleteQueuedInput);
 const mockReplaceQueuedInput = vi.mocked(replaceQueuedInput);
 const mockSteerChat = vi.mocked(steerChat);
 const mockSteerQueuedEntry = vi.mocked(steerQueuedEntry);
-const mockSubmitGoalControl = vi.mocked(submitGoalControl);
 const mockStopChat = vi.mocked(stopChat);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
 const mockScheduleChatPrompt = vi.mocked(scheduleChatPrompt);
@@ -695,7 +692,6 @@ function createDeps(chat = createRunningChat()) {
 			supportsSteering: vi.fn(
 				(agentId: string) => agentId === 'claude' || agentId === 'codex' || agentId === 'amp',
 			),
-			supportsGoals: vi.fn((agentId: string) => agentId === 'codex'),
 		},
 		getExecutionDefaults: (agentId: string) => ({
 			permissionMode: 'default',
@@ -740,7 +736,6 @@ describe('ConversationSessionController', () => {
 		mockReplaceQueuedInput.mockReset();
 		mockSteerChat.mockReset();
 		mockSteerQueuedEntry.mockReset();
-		mockSubmitGoalControl.mockReset();
 		mockStopChat.mockReset();
 		mockUpdateChatModel.mockReset();
 		mockUpdateChatModel.mockResolvedValue({

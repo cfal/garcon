@@ -10,7 +10,6 @@ import type {
   UserMessagePresentation,
 } from '../../common/chat-types.ts';
 import type {
-  AgentGoalControlHandoff,
   AgentSteerResult,
   AgentSteerTarget,
 } from '@garcon/server-agent-interface';
@@ -44,7 +43,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'images'
   | 'excludedResendOrdinals'
 > & {
-  commandType?: AgentExecutionCommandType | 'steer' | 'goal-control';
+  commandType?: AgentExecutionCommandType | 'steer';
   createdAt?: string; userMessagePresentation?: UserMessagePresentation;
 };
 
@@ -113,12 +112,6 @@ export interface CommandSettlementPort {
   ): Promise<void>;
   settleQueueMutation(command: AcceptedExecutionCommand, entryId: string): Promise<void>;
   settleQueueMutationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
-  settleGoalControl(command: AcceptedExecutionCommand): Promise<void>;
-  settleGoalControlFailure(
-    command: AcceptedExecutionCommand,
-    error: unknown,
-    deliveryAccepted: boolean,
-  ): Promise<void>;
   settleSteerSuccess(command: AcceptedExecutionCommand, turnId: string): Promise<void>;
   settleSteerFailure(
     command: AcceptedExecutionCommand,
@@ -188,20 +181,6 @@ export interface AcceptedQueueMove {
   settlement: CommandSettlementPort;
 }
 
-export interface AcceptedGoalControl {
-  command: AcceptedExecutionCommand & { entryId: string };
-  content: string;
-  clientMessageId: string;
-  transcriptViewId: string;
-  settlement: CommandSettlementPort;
-}
-
-export interface AcceptedGoalControlOutcome {
-  delivery: 'active' | 'queued';
-  entryId?: string;
-  control: StoredChatExecutionControlState;
-}
-
 export interface CapturedSteerTarget {
   readonly attempt: QueueExecutionAttempt;
   readonly identity: Readonly<TurnIdentity> & { readonly turnId: string };
@@ -258,12 +237,6 @@ export interface AgentTurnRunnerPort {
     target: AgentSteerTarget | null,
     prepareDelivery: () => Promise<void>,
   ): Promise<AgentSteerResult>;
-  submitGoalControl(
-    chatId: string,
-    command: string,
-    options: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
-  ): Promise<boolean>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
@@ -325,7 +298,6 @@ export interface ChatExecutionCommands {
     input: AcceptedQueueEntrySteer,
   ): Promise<AcceptedQueueEntrySteerOutcome>;
   recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState>;
-  deliverAcceptedGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<ChatStopOutcome>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
@@ -416,12 +388,6 @@ export interface ChatExecutionService
     },
     command?: QueueCommandIdentity,
   ): Promise<QueueCommandMutationResult & { rebased: boolean | null }>;
-  deliverGoalControlInput(
-    chatId: string,
-    content: string,
-    options?: RunAgentTurnOptions,
-    afterPendingRegistered?: () => Promise<void>,
-  ): Promise<boolean>;
   requeueAndPauseChat(
     chatId: string,
     entryId: string,

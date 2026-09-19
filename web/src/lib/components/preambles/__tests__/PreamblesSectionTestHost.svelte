@@ -34,7 +34,6 @@
 			supportsForkWhileRunning: false,
 			supportsUpdateProjectPath: false,
 			supportsSteering: false,
-			supportsGoals: false,
 			supportsImages: false,
 			fileAttachmentMimeTypes: [],
 			acceptsApiProviderEndpoints: false,

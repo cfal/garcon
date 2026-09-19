@@ -32,7 +32,7 @@ describe('CodexAgentIntegration', () => {
     expect(CodexAgentIntegration.apiVersion).toBe(5);
     expect(integration.descriptor.id).toBe('codex');
     expect(integration.steering?.steer).toBeDefined();
-    expect(integration.goals).toBeNull();
+    expect(integration).not.toHaveProperty('goals');
     expect(integration.compaction?.compact).toBeDefined();
     expect(integration).not.toHaveProperty('permissionDecisions');
     expect(integration.projectPathUpdates).toBeNull();

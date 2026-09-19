@@ -1793,7 +1793,6 @@
 	"settings_shortcut_conflict_reassigned": "{shortcut} was removed from {command} and assigned here.",
 	"settings_slash_command_compact": "Summarize the conversation to free up context",
 	"settings_slash_command_fork": "Fork the conversation into a new chat, optionally starting it with a prompt",
-	"settings_slash_command_goal": "Set a Codex goal and start working toward it",
 	"settings_slash_command_in": "Schedule a prompt in the current chat after a delay",
 	"settings_slash_command_rename": "Rename the current chat",
 	"settings_slash_command_move": "Move the current chat to the top or bottom of its section in Manual order",

@@ -82,7 +82,6 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly compaction: NonNullable<AgentIntegration['compaction']>;
   readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
-  readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

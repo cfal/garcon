@@ -246,26 +246,6 @@ describe('transcript permission occurrences', () => {
     });
   });
 
-  it('invalidates an in-flight permission claim when control moves to another run', async () => {
-    await withLedger((ledger) => {
-      const lease = startRun(ledger);
-      publishRequest(
-        lease.sink,
-        'incarnation-1',
-        permissionDecision('incarnation-1'),
-      );
-      const claim = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
-
-      ledger.handoffRun(CHAT_ID, RUN_ID, 'run-2');
-
-      expect(() => ledger.completePermissionResolution(claim, { allow: true }))
-        .toThrow(PermissionNotActionableError);
-      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
-        'permission-requested',
-      ]);
-    });
-  });
-
   for (const [coordinate, staleControl] of [
     ['server instance', { serverInstanceId: 'server-2' }],
     ['chat', { chatId: 'chat-2' }],

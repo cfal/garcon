@@ -22,7 +22,6 @@ import {
 	moveQueuedInput,
 	steerChat,
 	steerQueuedEntry,
-	submitGoalControl,
 	getChatExecutionControl,
 	clearChatQueue,
 	pauseChatQueue,
@@ -789,16 +788,6 @@ describe('chats API contract', () => {
 			expectedTargetRevision: 3,
 		});
 
-		await submitGoalControl({
-			clientRequestId: 'req-goal',
-			clientMessageId: 'message-goal',
-			chatId: 'c/1',
-			transcriptViewId: 'view-1',
-			content: '/goal pause',
-		});
-		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/goal-control');
-		expect(fetchMock.mock.calls[5][1].method).toBe('POST');
-
 		await steerChat({
 			clientRequestId: 'req-steer',
 			clientMessageId: 'message-steer',
@@ -806,9 +795,9 @@ describe('chats API contract', () => {
 			transcriptViewId: 'view-1',
 			content: 'steer now',
 		});
-		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/steer');
-		expect(fetchMock.mock.calls[6][1].method).toBe('POST');
-		expect(JSON.parse(fetchMock.mock.calls[6][1].body)).toEqual({
+		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/steer');
+		expect(fetchMock.mock.calls[5][1].method).toBe('POST');
+		expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({
 			clientRequestId: 'req-steer',
 			clientMessageId: 'message-steer',
 			chatId: 'c/1',
@@ -820,10 +809,10 @@ describe('chats API contract', () => {
 		await pauseChatQueue('c/1');
 		await resumeChatQueue('c/1', 'pause/1');
 
-		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/clear');
-		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/queue/pause');
-		expect(fetchMock.mock.calls[9][0]).toBe('/api/v1/chats/queue/resume');
-		expect(JSON.parse(fetchMock.mock.calls[9][1].body)).toEqual({
+		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/clear');
+		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/pause');
+		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/queue/resume');
+		expect(JSON.parse(fetchMock.mock.calls[8][1].body)).toEqual({
 			chatId: 'c/1',
 			pauseId: 'pause/1',
 		});

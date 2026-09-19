@@ -38,7 +38,7 @@ only `execution.runningSessions()` and an empty `settings.applyPatch`; it does
 not infer provider behavior from capability presence. The shared black-box
 modules own only the operations listed above.
 
-Permissions, native activity probes, fork, goals, compaction, project-path
+Permissions, native activity probes, fork, compaction, project-path
 updates, shared-stream routing, source retirement, and route/callback cleanup
 remain owned by CTS and provider scripted or unit tiers. Native translation,
 storage formats, and provider-specific behavior remain provider-owned. A null

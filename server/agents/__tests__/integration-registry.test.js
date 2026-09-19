@@ -68,7 +68,6 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     compaction: null,
     forking: null,
     steering: null,
-    goals: null,
     transientControls: null,
     endpoints: null,
     singleQuery: null,

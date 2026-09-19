@@ -58,8 +58,6 @@ import type {
 	PermissionDecisionCommandRequest,
 	ProjectPathPatchRequest,
 	ProjectPathPatchResponse,
-	GoalControlCommandRequest,
-	GoalControlCommandResponse,
 	SteerCommandRequest,
 	SteerCommandResponse,
 	QueueEntryCommandResponse,
@@ -281,14 +279,6 @@ export async function moveQueuedInput(
 ): Promise<QueueEntryCommandResponse> {
 	return withParsedControl(
 		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', params),
-	);
-}
-
-export async function submitGoalControl(
-	params: GoalControlCommandRequest,
-): Promise<GoalControlCommandResponse> {
-	return withParsedControl(
-		await apiPost<GoalControlCommandResponse>('/api/v1/chats/goal-control', params),
 	);
 }
 

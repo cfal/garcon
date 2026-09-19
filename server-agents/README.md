@@ -74,7 +74,6 @@ export default class ExampleAgentIntegration implements AgentIntegration {
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
-  readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery = null;
   readonly legacyHistoryImport = null;
@@ -110,7 +109,6 @@ Required service facets are `descriptor`, `execution`, `catalog`, `settings`,
 | `compaction` | Performs provider-native in-place compaction. |
 | `forking` | Creates provider-native transcript forks. |
 | `steering` | Captures and delivers same-turn input to an exact active target. |
-| `goals` | Delivers provider-specific goal control. |
 | `endpoints` | Validates API-provider endpoint selections. |
 | `singleQuery` | Runs bounded one-shot work outside a chat execution. |
 | `legacyHistoryImport` | Imports supported pre-V5 history once during genesis adoption. |

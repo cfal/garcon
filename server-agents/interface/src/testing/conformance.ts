@@ -20,7 +20,6 @@ const NULLABLE_FACET_METHODS = {
   compaction: ['compact'],
   forking: ['fork', 'discard'],
   steering: ['captureTarget', 'steer'],
-  goals: ['prepareControl', 'deliverControl', 'cancelControl'],
   endpoints: ['validate'],
   singleQuery: ['run'],
   legacyHistoryImport: ['load'],

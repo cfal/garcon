@@ -1,5 +1,4 @@
 import {
-  GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
   type CommandLedger,
 } from './command-ledger.ts';
@@ -54,24 +53,6 @@ export class ChatCommandSettlement implements CommandSettlementPort {
       status: mutationError ? 'rejected' : 'failed',
       error: error instanceof Error ? error.message : String(error),
       errorCode: mutationError ? mutationError.code : PRE_SCHEDULE_FAILURE_ERROR_CODE,
-    });
-  }
-
-  async settleGoalControl(command: AcceptedExecutionCommand): Promise<void> {
-    await this.ledger.update(command.key, { status: 'finished', entryId: undefined });
-  }
-
-  async settleGoalControlFailure(
-    command: AcceptedExecutionCommand,
-    error: unknown,
-    deliveryAccepted: boolean,
-  ): Promise<void> {
-    await this.ledger.update(command.key, {
-      status: deliveryAccepted ? 'accepted' : 'failed',
-      error: error instanceof Error ? error.message : String(error),
-      errorCode: deliveryAccepted
-        ? GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE
-        : PRE_SCHEDULE_FAILURE_ERROR_CODE,
     });
   }
 

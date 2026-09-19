@@ -103,9 +103,6 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
       case 'forking.discard': return required(integration.forking).discard(call.request, signal);
       case 'steering.captureTarget': return required(integration.steering).captureTarget(call.request, options);
       case 'steering.steer': return required(integration.steering).steer(call.request, options);
-      case 'goals.prepareControl': return required(integration.goals).prepareControl(call.request, options);
-      case 'goals.deliverControl': return required(integration.goals).deliverControl(call.request, options);
-      case 'goals.cancelControl': return required(integration.goals).cancelControl(call.request, options);
       case 'endpoints.validate': return required(integration.endpoints).validate(call.request);
       case 'singleQuery.run': return required(integration.singleQuery).run({ ...call.request, signal });
       case 'history.open': {

@@ -19,69 +19,31 @@ const SYSTEM_PATH = `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin
 const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe('Codex producer routing', () => {
-  test('persists a goal status response once and broadcasts it before the turn terminal', async () => {
-    await withIntegrationFixture('codex-goal-status-routing', async (fixture) => {
+  test('delivers former goal syntax through ordinary start and resume', async () => {
+    await withIntegrationFixture('codex-ordinary-slash-input', async (fixture) => {
       const codex = await codexAgent(fixture);
+      expect(codex).not.toHaveProperty('supportsGoals');
       const chatId = fixture.newChatId();
-      const startedAt = fixture.client.markEvents();
-      const started = await fixture.client.startChat(startRequest(
-        fixture,
-        codex,
-        chatId,
-        'establish the Codex session',
-      ));
-      await fixture.client.waitForTurnTerminal(chatId, started.turnId, { afterIndex: startedAt });
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(startRequest(fixture, codex, chatId, '/goal status'));
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId, { afterIndex: firstCursor });
 
-      const command = '/goal';
-      const expected = 'No Codex goal is set.';
-      const goalCursor = fixture.client.markEvents();
-      const goal = await fixture.client.runChat(runRequest(codex, chatId, command));
-      await fixture.client.waitForTurnTerminal(chatId, goal.turnId, { afterIndex: goalCursor });
+      const secondCursor = fixture.client.markEvents();
+      const second = await fixture.client.runChat(runRequest(codex, chatId, '/goal pause'));
+      await fixture.client.waitForTurnTerminal(chatId, second.turnId, { afterIndex: secondCursor });
 
-      const liveEvents = fixture.client.eventsSince(goalCursor);
-      const liveRows = chatRows(liveEvents, chatId).filter((entry) => (
-        entry.message.type === 'user-message' || entry.message.type === 'assistant-message'
-      ));
-      expect(liveRows.map(messageIdentity)).toEqual([
-        ['user-message', command],
-        ['assistant-message', expected],
+      const messages = (await fixture.client.getMessages(chatId)).messages;
+      expect(assistantContents(messages)).toEqual([
+        'codex-live-/goal status', 'codex-live2-/goal status',
+        'codex-live-/goal pause', 'codex-live2-/goal pause',
       ]);
-      const responseEvent = liveEvents.findIndex((event) => (
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && event.messages.some((entry) => (
-          entry.message.type === 'assistant-message' && entry.message.content === expected
-        ))
-      ));
-      const terminalEvent = liveEvents.findIndex((event) => (
-        (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
-        && event.chatId === chatId
-        && event.turnId === goal.turnId
-      ));
-      expect(responseEvent).toBeGreaterThanOrEqual(0);
-      expect(terminalEvent).toBeGreaterThan(responseEvent);
-
-      const stored = await fixture.client.getMessages(chatId);
-      const commandIndex = stored.messages.findIndex((entry) => (
-        entry.message.type === 'user-message' && entry.message.content === command
-      ));
-      expect(commandIndex).toBeGreaterThanOrEqual(0);
-      expect(stored.messages.slice(commandIndex).map(messageIdentity)).toEqual([
-        ['user-message', command],
-        ['assistant-message', expected],
-      ]);
-      expect(assistantContents(stored.messages).filter((content) => content === expected)).toHaveLength(1);
-
-      await fixture.restartGarcon();
-      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)
-        .filter((content) => content === expected)).toHaveLength(1);
-    }, {
-      serverEnvironment: {
-        GARCON_CODEX_CLI: FAKE_CODEX,
-        PATH: SYSTEM_PATH,
-      },
-    });
-  });
+      expect(first.turnId).not.toBe(second.turnId);
+    }, { serverEnvironment: {
+      GARCON_CODEX_CLI: FAKE_CODEX,
+      PATH: SYSTEM_PATH,
+      INTEGRATION_CODEX_STREAMING_TURN: '1',
+    } });
+  }, 30_000);
 
   test('denies an approval emitted by an interrupted client after its replacement starts', async () => {
     let controlDirectory = '';

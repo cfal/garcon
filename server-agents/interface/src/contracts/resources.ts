@@ -16,7 +16,6 @@ export interface AgentResourceRef<K extends string> extends AgentResourceScope {
 
 export type AgentProducerBinding = AgentResourceRef<'producer'>;
 export type AgentPermissionResponseRef = AgentResourceRef<'permission-response'>;
-export type AgentGoalPreparation = AgentResourceRef<'goal-preparation'>;
 export type AgentProjectPathPreparation = AgentResourceRef<'project-path-preparation'>;
 
 export function createAgentResourceRef<K extends string>(

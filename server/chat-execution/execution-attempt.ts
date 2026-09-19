@@ -1,5 +1,4 @@
 import { matchesTurnIdentity, type TurnIdentity } from '../lib/turn-identity.js';
-import type { AgentGoalControlHandoff } from '@garcon/server-agent-interface';
 
 /** Owns the identity and lifecycle gates for one queue-managed provider turn. */
 export class QueueExecutionAttempt {
@@ -38,30 +37,6 @@ export class QueueExecutionAttempt {
     this.#turn = { ...turn };
   }
 
-  handoffTurn(
-    predecessor: TurnIdentity,
-    successor: TurnIdentity,
-    downstream: AgentGoalControlHandoff,
-  ): AgentGoalControlHandoff {
-    const next = { ...successor };
-    const validate = () => {
-      if (!sameTurnIdentity(this.#turn, predecessor)) {
-        throw new Error('Cannot hand off an execution attempt after its active turn changed');
-      }
-    };
-    validate();
-    return {
-      validate: () => {
-        validate();
-        downstream.validate();
-      },
-      commit: () => {
-        this.#turn = next;
-        downstream.commit();
-      },
-    };
-  }
-
   markLaunching(): void {
     if (!this.#settled) this.#launched = true;
   }
@@ -72,8 +47,4 @@ export class QueueExecutionAttempt {
     for (const resolve of this.#settledWaiters) resolve();
     this.#settledWaiters = [];
   }
-}
-
-function sameTurnIdentity(left: TurnIdentity, right: TurnIdentity): boolean {
-  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }

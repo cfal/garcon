@@ -1,5 +1,4 @@
 import type {
-  AgentGoalControlHandoff,
   AgentNativeSessionRef,
   AgentProjectPathUpdatePreparation,
   AgentSteerResult,
@@ -100,12 +99,6 @@ export interface AgentRegistryServiceContract {
     target: AgentSteerTarget | null,
     prepareDelivery: () => Promise<void>,
   ): Promise<AgentSteerResult>;
-  submitGoalControl(
-    chatId: string,
-    command: string,
-    opts: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
-  ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   getRunningChatIdsSnapshot(): string[];
   startSession(chatId: string, command: string, opts?: StartSessionOptions): Promise<void>;
@@ -329,14 +322,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     prepareDelivery: () => Promise<void>,
   ): Promise<AgentSteerResult> {
     return this.#runtime.steerInput(chatId, input, options, target, prepareDelivery);
-  }
-  submitGoalControl(
-    chatId: string,
-    command: string,
-    opts: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
-  ): Promise<boolean> {
-    return this.#runtime.submitGoalControl(chatId, command, opts, beforeDelivery);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
 
@@ -598,7 +583,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): { readonly inserted: boolean } {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    const pending = options.commandType === 'steer' || options.commandType === 'goal-control'
+    const pending = options.commandType === 'steer'
       ? null
       : session.pendingPreambleBoundary ?? null;
     const alreadyConsumed = pending

@@ -65,7 +65,6 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
-  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

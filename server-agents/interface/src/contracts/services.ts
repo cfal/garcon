@@ -20,7 +20,7 @@ import type {
   AgentResumeRequestV5,
 } from './execution-v5.js';
 import type { AgentNativeSessionRef } from './transcript.js';
-import type { AgentGoalPreparation, AgentProducerBinding, AgentResourceRef, NodeCallOptions } from './resources.js';
+import type { AgentProducerBinding, AgentResourceRef, NodeCallOptions } from './resources.js';
 
 export interface AgentCatalog {
   snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
@@ -103,26 +103,6 @@ export type AgentSteerResult =
       readonly outcome: 'not-sent' | 'unknown';
       readonly message: string;
     };
-
-export interface AgentGoals {
-  prepareControl(request: AgentGoalControlRequest, options?: NodeCallOptions): Promise<AgentGoalControlPreparation | null>;
-  deliverControl(preparation: AgentGoalPreparation, options?: NodeCallOptions): Promise<void>;
-  cancelControl(preparation: AgentGoalPreparation, options?: NodeCallOptions): Promise<void>;
-}
-
-export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
-  readonly expectedRunId: string;
-}
-
-export interface AgentGoalControlPreparation {
-  readonly preparation: AgentGoalPreparation;
-  readonly handle: AgentExecutionHandle;
-}
-
-export interface AgentGoalControlHandoff {
-  validate(): void;
-  commit(): void;
-}
 
 // Native, in-place context compaction. A provider that implements this rewrites
 // its own session history and keeps everything the transcript does not capture:

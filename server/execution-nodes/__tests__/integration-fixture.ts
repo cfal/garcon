@@ -62,7 +62,6 @@ export function integrationFixture(projectBasePath = '/test-project') {
       async stop() { calls.stop++; await hooks.stop(); },
       async migrateOwnedStorage() { calls.migrate++; },
     },
-    goals: null,
     nativeHistoryImport: { async *load({ signal }) { calls.import++; yield* hooks.history(signal); } },
     singleQuery: { async run(request: AgentSingleQueryRequest) { calls.query++; return hooks.query(request); } },
     auth: null, commands: null, compaction: null, forking: null, steering: null, endpoints: null,

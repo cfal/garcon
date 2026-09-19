@@ -27,7 +27,6 @@
 		query: string;
 		supportsFork: boolean;
 		supportsSteering: boolean;
-		supportsGoals: boolean;
 		canScheduleIn: boolean;
 		onSelect: (name: string) => void;
 		onClose: () => void;
@@ -44,7 +43,6 @@
 		query,
 		supportsFork,
 		supportsSteering,
-		supportsGoals,
 		canScheduleIn,
 		onSelect,
 		onClose,
@@ -109,7 +107,6 @@
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
 			if (command.name === 'steer' || command.name === 'st') return supportsSteering;
-			if (command.name === 'goal') return supportsGoals;
 			return true;
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));

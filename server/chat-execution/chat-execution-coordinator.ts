@@ -30,8 +30,6 @@ import {
 } from './chat-execution-control-transitions.ts';
 import {
   executionTurnIdentity,
-  type AcceptedGoalControl,
-  type AcceptedGoalControlOutcome,
   type AcceptedDirectInput,
   type AcceptedDirectOperation,
   type AcceptedQueueCreate,
@@ -71,7 +69,6 @@ import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
 import type { AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
-import { GoalControlDelivery } from './goal-control-delivery.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
 import { ControlSteerDelivery } from './control-steer-delivery.ts';
@@ -114,7 +111,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #controlOperations: ChatExecutionControlOperations;
   #acceptedInputHandler: AcceptedInputHandler;
   #acceptedInputTranscript: AcceptedInputTranscript;
-  #goalControlDelivery: GoalControlDelivery;
   #steerInputDelivery: SteerInputDelivery;
   #controlInputDelivery: ControlInputDelivery;
   #controlSteerDelivery: ControlSteerDelivery;
@@ -167,11 +163,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         this.#acceptedInputTranscript.discard(chatId, clientMessageId);
       },
     };
-    this.#goalControlDelivery = new GoalControlDelivery({
-      ...inputDeliveryOptions,
-      getDrainOptions: this.#getDrainOptions,
-      readControl: (chatId) => this.readChatExecutionControl(chatId),
-    });
     this.#steerInputDelivery = new SteerInputDelivery({
       ...inputDeliveryOptions,
       isShuttingDown: () => this.#shuttingDown,
@@ -213,9 +204,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.#runDirect(reservation, content, options, dispatch, beforeFailureRelease)
         ),
         trackDispatch: (task) => { this.#trackDispatch(task); },
-        deliverGoalControl: (chatId, content, options, beforeDelivery) => (
-          this.deliverGoalControlInput(chatId, content, options, beforeDelivery)
-        ),
         steer: (...args) => this.#steerInputDelivery.deliver(...args),
       },
       projectAdmission: options.projectAdmission,
@@ -482,26 +470,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
 
     return this.#enqueueServerControlInput(chatId, input, signal);
-  }
-
-  async deliverGoalControlInput(
-    chatId: string,
-    content: string,
-    options: RunAgentTurnOptions = {},
-    afterPendingRegistered?: () => Promise<void>,
-  ): Promise<boolean> {
-    return this.#goalControlDelivery.deliver(
-      chatId,
-      content,
-      options,
-      afterPendingRegistered,
-    );
-  }
-
-  async deliverAcceptedGoalControl(
-    input: AcceptedGoalControl,
-  ): Promise<AcceptedGoalControlOutcome> {
-    return this.#acceptedInputHandler.deliverGoalControl(input);
   }
 
   async deliverAcceptedSteer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome> {

@@ -7,7 +7,6 @@ import type {
   RunAgentTurnOptions,
 } from '../agents/session-types.ts';
 import {
-  GoalControlDeliveryError,
   DomainError,
   QueueEntrySteerError,
   QUEUE_STEER_FINALIZATION_FAILED_MESSAGE,
@@ -20,8 +19,6 @@ import { createLogger } from '../lib/log.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type {
-  AcceptedGoalControl,
-  AcceptedGoalControlOutcome,
   AcceptedDirectInput,
   AcceptedDirectOperation,
   AcceptedQueueCreate,
@@ -43,7 +40,6 @@ import {
   hasPendingTurnInput,
   type StoredChatExecutionControlState,
 } from './control-state.ts';
-import { DuplicateGoalControlInputError } from './goal-control-delivery.ts';
 import { isRecoverablePreambleAdmissionError } from '../preambles/selection.js';
 
 const logger = createLogger('accepted-input');
@@ -73,12 +69,6 @@ export interface AcceptedInputCoordinator {
     beforeFailureRelease?: (error: unknown) => Promise<void>,
   ): Promise<void>;
   trackDispatch(task: Promise<void>): void;
-  deliverGoalControl(
-    chatId: string,
-    content: string,
-    options: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
-  ): Promise<boolean>;
   steer(
     chatId: string,
     content: string,
@@ -267,52 +257,6 @@ export class AcceptedInputHandler {
         }
       }),
     );
-  }
-
-  async deliverGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome> {
-    const turnId = input.command.turnId;
-    if (!turnId) {
-      throw new DomainError('INTERNAL_ERROR', 'Accepted goal control is missing a turn identifier', 500);
-    }
-    const delivery = {
-      clientRequestId: input.command.clientRequestId,
-      clientMessageId: input.clientMessageId,
-      transcriptViewId: input.transcriptViewId,
-      turnId,
-    };
-    let deliveryAccepted = false;
-    try {
-      const delivered = await this.#coordinator.deliverGoalControl(
-        input.command.chatId,
-        input.content,
-        delivery,
-        () => input.settlement.markScheduled(input.command, turnId),
-      );
-      if (delivered) {
-        deliveryAccepted = true;
-        await input.settlement.settleGoalControl(input.command);
-        return { delivery: 'active', control: await this.#controls.read(input.command.chatId) };
-      }
-    } catch (error) {
-      if (error instanceof DuplicateGoalControlInputError) {
-        await input.settlement.settleDuplicateInput(input.command);
-        return {
-          delivery: 'active',
-          control: await this.#controls.read(input.command.chatId),
-        };
-      }
-      deliveryAccepted ||= error instanceof GoalControlDeliveryError && error.deliveryAccepted;
-      await input.settlement.settleGoalControlFailure(input.command, error, deliveryAccepted);
-      throw error;
-    }
-    const queued = await this.enqueue({
-      command: input.command,
-      content: input.content,
-      clientMessageId: input.clientMessageId,
-      transcriptViewId: input.transcriptViewId,
-      settlement: input.settlement,
-    });
-    return { delivery: 'queued', entryId: queued.entryId, control: queued.control };
   }
 
   async steer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome> {

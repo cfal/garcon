@@ -35,7 +35,6 @@ describe('delegated startup admission interleavings', () => {
       runAgentTurn: async (chatId, _command, options) => { transcripts.beginRun(chatId, options.turnId); },
       captureSteerTarget: async () => null,
       steerInput: async () => { throw new Error('Unexpected steer'); },
-      submitGoalControl: async () => false,
       abortSession: async (chatId) => transcripts.interruptRun(chatId) !== null,
       isChatRunning: (chatId) => transcripts.isRunActive(chatId),
     }, {

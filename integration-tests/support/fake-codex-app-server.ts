@@ -76,10 +76,6 @@ function respond(line: string): void {
     resumeThread(request.id, request.params);
     return;
   }
-  if (request.method === 'thread/goal/get') {
-    write(request.id, { goal: null });
-    return;
-  }
   if (request.method === 'thread/unsubscribe') {
     write(request.id, {});
     return;

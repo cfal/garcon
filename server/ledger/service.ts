@@ -228,15 +228,6 @@ export class TranscriptLedgerService {
     return runId;
   }
 
-  handoffRun(chatId: string, expectedRunId: string, nextRunId: string): void {
-    if (!nextRunId) throw new TypeError('Run ID is required');
-    if (this.#activeRuns.get(chatId) !== expectedRunId) {
-      throw new TypeError(`Transcript run changed before handoff for ${chatId}`);
-    }
-    this.#clearChatPermissions(chatId);
-    this.#activeRuns.set(chatId, nextRunId);
-  }
-
   activeRunId(chatId: string): string | null {
     return this.#activeRuns.get(chatId) ?? null;
   }
@@ -974,7 +965,6 @@ function validatePermissionDecision(
   }
   return capability;
 }
-
 
 function permissionRowKind(
   lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,

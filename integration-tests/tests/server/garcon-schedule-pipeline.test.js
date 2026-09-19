@@ -74,7 +74,6 @@ async function withPipeline(run) {
     },
     captureSteerTarget: () => null, isChatRunning: () => false,
     steerInput: async () => { throw new Error('Scheduled actions must not steer'); },
-    submitGoalControl: async () => { throw new Error('Unexpected goal control'); },
     abortSession: async () => false,
   };
   const execution = new ChatExecutionCoordinator(root, runner, admission,

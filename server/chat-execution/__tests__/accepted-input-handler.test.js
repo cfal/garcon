@@ -1,10 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
-import { DuplicateGoalControlInputError } from '../goal-control-delivery.ts';
 import {
   DomainError,
-  GoalControlDeliveryError,
   ProjectUnavailableError,
   QueueEntrySteerError,
   SteerDeliveryError,
@@ -40,8 +38,6 @@ function settlement(overrides = {}) {
     markPreScheduleFailure: mock(async () => undefined),
     settleQueueMutation: mock(async () => undefined),
     settleQueueMutationFailure: mock(async () => undefined),
-    settleGoalControl: mock(async () => undefined),
-    settleGoalControlFailure: mock(async () => undefined),
     settleSteerSuccess: mock(async () => undefined),
     settleSteerFailure: mock(async () => undefined),
     settleOperationFailure: mock(async () => undefined),
@@ -117,7 +113,6 @@ function scaffold(overrides = {}) {
     releaseDirect: mock(async () => undefined),
     runDirect: mock(async () => undefined),
     trackDispatch: mock(() => undefined),
-    deliverGoalControl: mock(async () => false),
     steer: mock(async () => ({ turnId: 'turn-1' })),
     assertProjectAvailable: mock(async () => undefined),
     ...overrides,
@@ -144,7 +139,6 @@ function scaffold(overrides = {}) {
       releaseDirect: m.releaseDirect,
       runDirect: m.runDirect,
       trackDispatch: m.trackDispatch,
-      deliverGoalControl: m.deliverGoalControl,
       steer: m.steer,
     },
     projectAdmission: {
@@ -476,119 +470,7 @@ describe('AcceptedInputHandler', () => {
     expect(events).toEqual(expected);
   });
 
-  test('settles an accepted goal-control delivery failure without queueing a fallback', async () => {
-    const providerError = new Error('connection lost');
-    const settle = settlement();
-    const { handler, m } = scaffold({
-      deliverGoalControl: mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        throw new GoalControlDeliveryError(providerError, true);
-      }),
-    });
-
-    await expect(handler.deliverGoalControl({
-      command: command(),
-      content: 'interrupt',
-      clientMessageId: 'message-goal',
-      transcriptViewId: 'view-1',
-      settlement: settle,
-    })).rejects.toBeInstanceOf(GoalControlDeliveryError);
-
-    expect(settle.settleGoalControlFailure).toHaveBeenCalledWith(
-      command(),
-      expect.any(GoalControlDeliveryError),
-      true,
-    );
-    expect(settle.markScheduled).toHaveBeenCalledWith(command(), 'turn-1');
-    expect(m.create).not.toHaveBeenCalled();
-  });
-
-  test('settles confirmed active goal-control delivery without touching the queue', async () => {
-    const events = [];
-    const settle = settlement({
-      markScheduled: mock(async () => { events.push('scheduled'); }),
-      settleGoalControl: mock(async () => { events.push('settled'); }),
-    });
-    const { handler, m } = scaffold({
-      deliverGoalControl: mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        events.push('delivered');
-        return true;
-      }),
-    });
-
-    await expect(handler.deliverGoalControl({
-      command: command(),
-      content: 'steer',
-      clientMessageId: 'message-goal',
-      transcriptViewId: 'view-1',
-      settlement: settle,
-    })).resolves.toMatchObject({ delivery: 'active' });
-
-    expect(events).toEqual(['scheduled', 'delivered', 'settled']);
-    expect(m.create).not.toHaveBeenCalled();
-  });
-
-  test('settles duplicate goal control without queueing or native redelivery', async () => {
-    const settle = settlement();
-    const { handler, m } = scaffold({
-      deliverGoalControl: mock(async () => {
-        throw new DuplicateGoalControlInputError();
-      }),
-    });
-
-    await expect(handler.deliverGoalControl({
-      command: command(),
-      content: 'already committed',
-      clientMessageId: 'message-goal',
-      transcriptViewId: 'view-1',
-      settlement: settle,
-    })).resolves.toMatchObject({ delivery: 'active' });
-
-    expect(settle.settleDuplicateInput).toHaveBeenCalledWith(command());
-    expect(settle.settleGoalControlFailure).not.toHaveBeenCalled();
-    expect(m.create).not.toHaveBeenCalled();
-  });
-
-  test('queues goal control when no active delivery target accepts it', async () => {
-    const events = [];
-    const settle = settlement({
-      settleQueueMutation: mock(async () => { events.push('settled'); }),
-    });
-    const queuedControl = control({
-      entries: [{ id: 'entry-1', content: 'interrupt', revision: 1, status: 'queued' }],
-    });
-    const { handler, m } = scaffold({
-      deliverGoalControl: mock(async () => false),
-      create: mock(async () => {
-        events.push('queued');
-        return { entryId: 'entry-1', control: queuedControl, duplicate: false };
-      }),
-      requestDrain: mock(() => { events.push('drain'); }),
-    });
-
-    await expect(handler.deliverGoalControl({
-      command: command(),
-      content: 'interrupt',
-      clientMessageId: 'message-goal',
-      transcriptViewId: 'view-1',
-      settlement: settle,
-    })).resolves.toEqual({
-      delivery: 'queued',
-      entryId: 'entry-1',
-      control: queuedControl,
-    });
-
-    expect(events).toEqual(['queued', 'settled', 'drain']);
-    expect(m.create).toHaveBeenCalledWith(
-      'chat-1',
-      'interrupt',
-      { key: 'command-1', entryId: 'entry-1' },
-      { clientMessageId: 'message-goal', transcriptViewId: 'view-1' },
-    );
-  });
-
-  test('settles strict steering without creating a goal-control fallback', async () => {
+  test('settles strict steering without creating a queue fallback', async () => {
     const events = [];
     const settle = settlement({
       markScheduled: mock(async () => { events.push('scheduled'); }),

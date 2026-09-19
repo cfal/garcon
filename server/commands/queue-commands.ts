@@ -1,7 +1,5 @@
 import crypto from 'crypto';
 import type {
-  GoalControlCommandRequest,
-  GoalControlCommandResponse,
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
@@ -218,76 +216,6 @@ export class QueueCommands {
         ),
         entryId,
         control: toClientChatExecutionControlState(result.control),
-      };
-    });
-  }
-
-  async submitGoalControl(input: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
-    this.support.requireChat(input.chatId);
-    this.support.assertContent(input.content);
-    return this.support.withChatMutationLock(input.chatId, async () => {
-      await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
-      const content = input.content;
-      const preparedEntryId = crypto.randomUUID();
-      const turnId = crypto.randomUUID();
-      const ledger = await this.deps.ledger.accept({
-        commandType: 'goal-control',
-        chatId: input.chatId,
-        clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
-        payload: {
-          chatId: input.chatId,
-          transcriptViewId: input.transcriptViewId,
-          clientMessageId: input.clientMessageId,
-          content,
-        },
-        entryId: preparedEntryId,
-        turnId,
-      });
-      this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
-      if (ledger.kind === 'duplicate') {
-        if (ledger.record.status === 'failed') {
-          this.support.throwRecordedExecutionFailure(ledger.record);
-        }
-        if (ledger.record.status === 'accepted') {
-          return {
-            ...commandResultFromRecord(ledger.record, 'duplicate'),
-            commandType: 'goal-control',
-            delivery: 'active',
-            control: toClientChatExecutionControlState(
-              await this.deps.queue.readChatExecutionControl(input.chatId),
-            ),
-          };
-        }
-        return {
-          ...commandResultFromRecord(ledger.record, 'duplicate'),
-          commandType: 'goal-control',
-          delivery: ledger.record.entryId ? 'queued' : 'active',
-          ...(ledger.record.entryId ? { entryId: ledger.record.entryId } : {}),
-          control: toClientChatExecutionControlState(
-            await this.deps.queue.readChatExecutionControl(input.chatId),
-          ),
-        };
-      }
-
-      const outcome = await this.deps.queue.deliverAcceptedGoalControl({
-        command: {
-          key: ledger.record.key,
-          chatId: input.chatId,
-          clientRequestId: ledger.record.clientRequestId,
-          turnId: ledger.record.turnId ?? turnId,
-          entryId: ledger.record.entryId ?? preparedEntryId,
-        },
-        content,
-        clientMessageId: input.clientMessageId,
-        transcriptViewId: input.transcriptViewId,
-        settlement: this.support.settlement,
-      });
-      return {
-        ...commandResultFromRecord(ledger.record),
-        commandType: 'goal-control',
-        delivery: outcome.delivery,
-        ...(outcome.entryId ? { entryId: outcome.entryId } : {}),
-        control: toClientChatExecutionControlState(outcome.control),
       };
     });
   }

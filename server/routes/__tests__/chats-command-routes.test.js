@@ -288,25 +288,6 @@ function createRouteAgent(sessionOverrides = {}) {
         throw error;
       }
     }),
-    deliverAcceptedGoalControl: mock(async (input) => {
-      const delivered = await queue.deliverGoalControlInput(
-        input.command.chatId,
-        input.content,
-        { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
-        () => input.settlement.markScheduled(input.command, input.command.turnId),
-      );
-      if (delivered) {
-        await input.settlement.settleGoalControl(input.command);
-        return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
-      }
-      const result = await queue.enqueueAccepted(input);
-      return { delivery: 'queued', entryId: result.entryId, control: result.control };
-    }),
-    recoverAcceptedGoalControl: mock(async (input) => ({
-      delivery: 'queued',
-      entryId: input.command.entryId,
-      control: await queue.readChatExecutionControl(input.command.chatId),
-    })),
     captureSteerTarget: mock(() => ({
       attempt: {},
       identity: { turnId: 'turn-active' },
@@ -396,10 +377,6 @@ function createRouteAgent(sessionOverrides = {}) {
         rebased: false,
       }),
     ),
-    deliverGoalControlInput: mock(async (_chatId, _content, _options, beforeDelivery) => {
-      await beforeDelivery();
-      return true;
-    }),
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 2 }))),
     pauseChatQueue: mock(() => Promise.resolve(storedQueue(
       [queueEntry('entry-1')],
@@ -578,6 +555,10 @@ describe('REST chat command routes', () => {
   afterEach(async () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
     await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it('does not expose a goal-control endpoint', () => {
+    expect(createRouteAgent().routes['/api/v1/chats/goal-control']).toBeUndefined();
   });
 
   it('POST /run returns before agent completion and persists before running', async () => {
@@ -1144,24 +1125,6 @@ describe('REST chat command routes', () => {
       expect.objectContaining({ entryId: 'entry-3' }),
     );
   });
-
-  it('POST /goal-control preserves immediate goal delivery', async () => {
-    const agent = createRouteAgent();
-	    const result = await callJson(agent.routes['/api/v1/chats/goal-control'].POST, {
-	      clientRequestId: 'req-goal-1',
-	      chatId: CHAT_ID,
-	      content: '/goal pause',
-	    });
-
-	    expect(result.response.status).toBe(202);
-	    expect(result.body.delivery).toBe('active');
-	    expect(agent.queue.deliverGoalControlInput).toHaveBeenCalledWith(
-	      CHAT_ID,
-	      '/goal pause',
-	      expect.objectContaining({ clientRequestId: 'req-goal-1' }),
-	      expect.any(Function),
-	    );
-	  });
 
 	  it('POST /steer returns the captured current turn without queue state', async () => {
 	    const agent = createRouteAgent();

@@ -557,33 +557,6 @@ describe('AgentRegistry session cache', () => {
     expect(ledger.currentRows(CHAT_ID)).toEqual([]);
   });
 
-  it('keeps Garcon-owned goal control outside preamble boundary handling', async () => {
-    armBoundary('epoch-goal-control', 'fork');
-    setSelection([PREAMBLE_A]);
-    const snapshot = mock(() => ({
-      revision: 1,
-      preambles: [definition(PREAMBLE_A, 'One', 'one body')],
-    }));
-    const registry = createRegistry(
-      { ensure: async () => ledger.currentView(CHAT_ID) },
-      { snapshot },
-    );
-
-    await admit(registry, 'goal-control', 'goal-control', '/goal');
-
-    expect(snapshot).not.toHaveBeenCalled();
-    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
-      kind: 'fork',
-      ownershipEpoch: 'epoch-goal-control',
-    });
-    expect(ledger.currentRows(CHAT_ID)).toEqual([
-      expect.objectContaining({
-        kind: 'user-input',
-        detail: expect.objectContaining({ preambleBoundary: null }),
-      }),
-    ]);
-  });
-
   it('updates the execution cache before an accepted session publish returns', () => {
     const registry = createRegistry();
     expect(registry).toBeDefined();

@@ -2,9 +2,6 @@ import { describe, expect, it } from 'bun:test';
 
 import { jsonError, jsonErrorFromUnknown } from '../http-error.ts';
 import {
-  GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
-  GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
-  GoalControlDeliveryError,
   STEER_NOT_DELIVERED_MESSAGE,
   STEER_OUTCOME_UNKNOWN_MESSAGE,
   SteerDeliveryError,
@@ -49,37 +46,6 @@ describe('jsonErrorFromUnknown', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('name is required');
     expect(body.errorCode).toBe('VALIDATION_FAILED');
-  });
-
-  it('sanitizes goal-control delivery errors while preserving retry safety', async () => {
-    const preAcceptCause = new Error('/secret/workspace/chat.jsonl could not be appended');
-    const postAcceptCause = new Error('Codex RPC turn/steer rejected internal request 987');
-    const preAcceptError = new GoalControlDeliveryError(preAcceptCause, false);
-    const postAcceptError = new GoalControlDeliveryError(postAcceptCause, true);
-
-    const [preAcceptResponse, postAcceptResponse] = [
-      jsonErrorFromUnknown(preAcceptError),
-      jsonErrorFromUnknown(postAcceptError),
-    ];
-    const [preAcceptBody, postAcceptBody] = await Promise.all([
-      preAcceptResponse.json(),
-      postAcceptResponse.json(),
-    ]);
-
-    expect(preAcceptError.cause).toBe(preAcceptCause);
-    expect(postAcceptError.cause).toBe(postAcceptCause);
-    expect(preAcceptBody).toMatchObject({
-      error: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
-      errorCode: 'GOAL_CONTROL_NOT_DELIVERED',
-      retryable: true,
-    });
-    expect(postAcceptBody).toMatchObject({
-      error: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
-      errorCode: 'GOAL_CONTROL_OUTCOME_UNKNOWN',
-      retryable: false,
-    });
-    expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('/secret/workspace');
-    expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('turn/steer');
   });
 
   it('sanitizes strict steering delivery failures without making them retryable', async () => {

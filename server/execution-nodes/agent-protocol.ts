@@ -20,7 +20,7 @@ type WithoutSignal<T> = Omit<T, 'signal'>;
 type Call<Q, R> = { readonly request: Q; readonly result: R };
 
 export const NULLABLE_AGENT_FACETS = [
-  'auth', 'commands', 'compaction', 'forking', 'steering', 'goals', 'endpoints', 'singleQuery',
+  'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
   'configurationValidation', 'sessionConfiguration', 'projectPathUpdates',
 ] as const satisfies readonly (keyof AgentIntegration)[];
@@ -69,9 +69,6 @@ export interface AgentRpcMethods {
   'forking.discard': Call<Request<'forking', 'discard'>, void>;
   'steering.captureTarget': Call<Request<'steering', 'captureTarget'>, Result<'steering', 'captureTarget'>>;
   'steering.steer': Call<Request<'steering', 'steer'>, Result<'steering', 'steer'>>;
-  'goals.prepareControl': Call<Request<'goals', 'prepareControl'>, Result<'goals', 'prepareControl'>>;
-  'goals.deliverControl': Call<Request<'goals', 'deliverControl'>, void>;
-  'goals.cancelControl': Call<Request<'goals', 'cancelControl'>, void>;
   'endpoints.validate': Call<Request<'endpoints', 'validate'>, void>;
   'singleQuery.run': Call<WithoutSignal<Request<'singleQuery', 'run'>>, string>;
   'history.open': Call<{ readonly source: 'legacyHistoryImport' | 'nativeHistoryImport'; readonly request: WithoutSignal<AgentHistoryImportRequest> }, HistoryReaderRef>;

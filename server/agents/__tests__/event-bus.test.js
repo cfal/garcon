@@ -46,58 +46,6 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
   });
 
-  it('commits a goal-control identity handoff at its delivery boundary', () => {
-    const bus = new AgentEventBus();
-    bus.trackTurn('chat-1', operation('turn-1'));
-    const downstream = terminalHandoff({
-      validate: mock(() => undefined),
-      commit: mock(() => undefined),
-    });
-
-    const handoff = bus.handoffTurn(
-      'chat-1',
-      operation('turn-1'),
-      operation('turn-2'),
-      downstream,
-    );
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
-    handoff.validate();
-    handoff.commit();
-
-    expect(downstream.validate).toHaveBeenCalledTimes(1);
-    expect(downstream.commit).toHaveBeenCalledTimes(1);
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
-  });
-
-  it('leaves the predecessor active when downstream validation fails', () => {
-    const bus = new AgentEventBus();
-    bus.trackTurn('chat-1', operation('turn-1'));
-    const handoff = bus.handoffTurn(
-      'chat-1',
-      operation('turn-1'),
-      operation('turn-2'),
-      terminalHandoff({ validate: () => { throw new Error('registration failed'); } }),
-    );
-
-    expect(() => handoff.validate()).toThrow('registration failed');
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
-  });
-
-  it('rejects a handoff after the predecessor identity changes', () => {
-    const bus = new AgentEventBus();
-    bus.trackTurn('chat-1', operation('turn-1'));
-    bus.settleTurn('chat-1', operation('turn-1'));
-    bus.trackTurn('chat-1', operation('turn-3'));
-
-    expect(() => bus.handoffTurn(
-      'chat-1',
-      operation('turn-1'),
-      operation('turn-2'),
-      terminalHandoff(),
-    )).toThrow('active turn changed');
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-3');
-  });
-
   it('publishes one matching terminal and clears the active turn', async () => {
     const bus = new AgentEventBus();
     const finished = mock(() => undefined);

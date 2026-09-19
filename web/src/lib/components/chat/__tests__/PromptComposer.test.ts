@@ -10,6 +10,7 @@ import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte.js';
 import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
+import * as commandsApi from '$lib/api/commands.js';
 import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 
@@ -404,6 +405,33 @@ describe('PromptComposer focus', () => {
 		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
 		expect(onsubmit).not.toHaveBeenCalled();
 	});
+
+	it.each([false, true])(
+		'uses the shared submission gate for bare /goal with admission pending=%s',
+		async (directAdmissionPending) => {
+			const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
+			try {
+				const onsubmit = vi.fn();
+				render(PromptComposerTestHost, {
+					selectedAgentId: 'codex',
+					directAdmissionPending,
+					onsubmit,
+				});
+				const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+				await inputAtCaret(textarea, '/goal', 5);
+				await screen.findByText('No matching commands');
+
+				await fireEvent.keyDown(textarea, { key: 'Enter' });
+				expect(onsubmit).toHaveBeenCalledTimes(directAdmissionPending ? 0 : 1);
+				expect(textarea.value).toBe('/goal');
+
+				await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+				expect(onsubmit).toHaveBeenCalledTimes(directAdmissionPending ? 0 : 2);
+			} finally {
+				commands.mockRestore();
+			}
+		},
+	);
 
 	it('resizes and reveals a draft block appended from another surface', async () => {
 		const { rerender } = render(PromptComposerTestHost, {

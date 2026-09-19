@@ -69,7 +69,6 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly compaction = null;
   readonly forking = null;
   readonly steering = null;
-  readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

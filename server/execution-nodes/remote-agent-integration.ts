@@ -29,7 +29,6 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly compaction: AgentIntegration['compaction'];
   readonly forking: AgentIntegration['forking'];
   readonly steering: AgentIntegration['steering'];
-  readonly goals: AgentIntegration['goals'];
   readonly endpoints: AgentIntegration['endpoints'];
   readonly singleQuery: AgentIntegration['singleQuery'];
   readonly legacyHistoryImport: AgentIntegration['legacyHistoryImport'];
@@ -112,11 +111,6 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.steering = cap.steering ? {
       captureTarget: (request, options) => call('steering.captureTarget', request, options),
       steer: (request, options) => call('steering.steer', request, options),
-    } : null;
-    this.goals = cap.goals ? {
-      prepareControl: (request, options) => call('goals.prepareControl', request, options),
-      deliverControl: (ref, options) => call('goals.deliverControl', ref, options),
-      cancelControl: (ref, options) => call('goals.cancelControl', ref, options),
     } : null;
     this.endpoints = cap.endpoints ? { validate: (request) => call('endpoints.validate', request) } : null;
     this.singleQuery = cap.singleQuery ? {

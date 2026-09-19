@@ -1,6 +1,5 @@
 import type {
   ForkChatCommandRequest,
-  GoalControlCommandRequest,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryMoveCommandRequest,
@@ -122,10 +121,6 @@ export class ChatCommandService {
 
   submitQueueEntryMove(input: QueueEntryMoveCommandRequest) {
     return this.#queue.submitQueueEntryMove(input);
-  }
-
-  submitGoalControl(input: GoalControlCommandRequest) {
-    return this.#queue.submitGoalControl(input);
   }
 
   submitSteer(input: SteerCommandRequest) {

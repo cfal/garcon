@@ -12,8 +12,6 @@ import type {
   AgentStopCommandRequest,
   AgentStopResponse,
 	AgentTurnCommandResponse,
-  GoalControlCommandRequest,
-  GoalControlCommandResponse,
   CommandAcceptedResponse,
   ForkChatCommandRequest,
   ForkChatResponse,
@@ -780,10 +778,6 @@ export class GarconTestClient {
       clientMessageId: request.clientMessageId ?? crypto.randomUUID(),
       transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
     });
-  }
-
-  submitGoalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
-    return this.post<GoalControlCommandResponse>('/api/v1/chats/goal-control', request);
   }
 
   async steer(

@@ -89,8 +89,6 @@ export type CommandErrorCode = Extract<
   | 'STEER_CAPACITY_EXHAUSTED'
   | 'QUEUE_STEER_FINALIZATION_FAILED'
   | 'QUEUE_STEER_RECOVERY_FAILED'
-  | 'GOAL_CONTROL_NOT_DELIVERED'
-  | 'GOAL_CONTROL_OUTCOME_UNKNOWN'
   | 'PERMISSION_NOT_ACTIONABLE'
   | 'PERMISSION_DECISION_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
@@ -357,21 +355,6 @@ export interface QueueEntrySteerErrorResponse extends HttpErrorResponse {
   deliveryOutcome: SteerDeliveryOutcome;
   serverInstanceId: string;
   control?: ChatExecutionControlState;
-}
-
-export interface GoalControlCommandRequest {
-  clientRequestId: string;
-  clientMessageId: string;
-  chatId: string;
-  transcriptViewId: string;
-  content: string;
-}
-
-export interface GoalControlCommandResponse extends CommandAcceptedResponse {
-  commandType: 'goal-control';
-  delivery: 'active' | 'queued';
-  entryId?: string;
-  control: ChatExecutionControlState;
 }
 
 export interface QueueCommandErrorResponse extends HttpErrorResponse {
@@ -699,9 +682,6 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
   };
 }
 
-
-
-
 export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryCreateCommandRequest {
   const body = requestRecord(value);
   return {
@@ -836,17 +816,6 @@ export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySt
     entryId: requiredQueueEntryId(body, 'entryId'),
     expectedRevision: Number(body.expectedRevision),
     expectedReorderRevision: Number(body.expectedReorderRevision),
-  };
-}
-
-export function parseGoalControlCommandRequest(value: unknown): GoalControlCommandRequest {
-  const body = requestRecord(value);
-  return {
-    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
-    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
-    chatId: requiredChatId(body, 'chatId'),
-    transcriptViewId: requiredString(body, 'transcriptViewId'),
-    content: requiredContent(body, 'content'),
   };
 }
 

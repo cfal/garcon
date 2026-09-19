@@ -22,7 +22,6 @@ vi.mock('$lib/api/chats.js', () => ({
 	runChat: vi.fn(),
 	steerChat: vi.fn(),
 	steerQueuedEntry: vi.fn(),
-	submitGoalControl: vi.fn(),
 	startChat: vi.fn(),
 }));
 
@@ -226,7 +225,6 @@ function createDeps(chat = createChat()) {
 			supportsFork: vi.fn(() => false),
 			supportsForkWhileRunning: vi.fn(() => false),
 			supportsSteering: vi.fn(() => false),
-			supportsGoals: vi.fn(() => false),
 		},
 		navigation: { navigateToChat: vi.fn() },
 		refetchTranscript: vi.fn().mockResolvedValue(undefined),
@@ -303,32 +301,6 @@ describe('ConversationSlashCommandService', () => {
 			'error',
 			'Wait for the current work and queued messages to finish before handing this chat to another agent.',
 		);
-	});
-
-	it('keeps active goal controls distinct from ordinary goal submissions', () => {
-		const chat = createChat({ agentId: 'codex', isProcessing: true });
-		const { deps } = createDeps(chat);
-		deps.modelCatalog.supportsGoals.mockReturnValue(true);
-		const service = new ConversationSlashCommandService(deps);
-		const input = {
-			chatId: 'chat-1',
-			chat,
-			text: '/goal pause',
-			images: [],
-			ownsComposer: true,
-			handoffPending: false,
-		};
-
-		expect(service.dispatchSubmission(input)).toEqual({
-			kind: 'goal-control',
-			content: '/goal pause',
-		});
-
-		chat.isProcessing = false;
-		expect(service.dispatchSubmission(input)).toEqual({
-			kind: 'continue',
-			content: '/goal pause',
-		});
 	});
 
 	it('restores rename text and attachments when rename fails', async () => {
@@ -409,6 +381,22 @@ describe('ConversationSlashCommandService', () => {
 
 		expect(composerState.inputText).toBe('original command');
 		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
+	});
+
+	it('leaves former goal commands on the ordinary submission path', () => {
+		const chat = createChat({ agentId: 'codex' });
+		const { deps, composerState } = createDeps(chat);
+		const service = new ConversationSlashCommandService(deps);
+
+		expect(service.dispatchSubmission({
+			chatId: chat.id,
+			chat,
+			text: '/goal pause',
+			images: [],
+			ownsComposer: true,
+			handoffPending: false,
+		})).toEqual({ kind: 'continue', content: '/goal pause' });
+		expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
 
 	it('claims a busy move command, clears immediately, and appends its source notice', async () => {

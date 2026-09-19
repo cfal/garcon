@@ -57,7 +57,6 @@ function createFixture(overrides = {}) {
     runAgentTurn: mock(async () => undefined),
     captureSteerTarget: mock(() => null),
     steerInput: mock(async () => ({ kind: 'declined' })),
-    submitGoalControl: mock(async () => false),
     abortSession: mock(async () => false),
     isChatRunning: mock(() => false),
     ...overrides.turnRunner,

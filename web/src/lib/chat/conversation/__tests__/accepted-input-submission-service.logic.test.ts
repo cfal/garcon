@@ -11,7 +11,6 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 		enqueue: vi.fn(),
 		steer: vi.fn(),
 		steerQueuedEntry: vi.fn(),
-		goalControl: vi.fn(),
 		...overrides,
 	};
 }
@@ -125,39 +124,26 @@ describe('AcceptedInputSubmissionService', () => {
 		});
 	});
 
-	it('uses stable request and message identities for queued and goal-control submissions', async () => {
+	it('uses stable request and message identities for queued submissions', async () => {
 		const enqueue = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
-		const goalControl = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
 		const createId = vi.fn()
 			.mockReturnValueOnce('queue-request')
-			.mockReturnValueOnce('queue-message')
-			.mockReturnValueOnce('goal-request')
-			.mockReturnValueOnce('goal-message');
+			.mockReturnValueOnce('queue-message');
 		const service = new AcceptedInputSubmissionService(
-			transport({ enqueue, goalControl }),
+			transport({ enqueue }),
 			createId,
 		);
 
 		const queued = service.enqueue({ chatId: 'chat-1', transcriptViewId: 'view-1', content: 'later' });
-		const goal = service.goalControl({ chatId: 'chat-1', transcriptViewId: 'view-1', content: '/goal pause' });
 		await queued.submit();
-		await goal.submit();
 
 		expect(queued).toMatchObject({ clientRequestId: 'queue-request', clientMessageId: 'queue-message' });
-		expect(goal).toMatchObject({ clientRequestId: 'goal-request', clientMessageId: 'goal-message' });
 		expect(enqueue).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			transcriptViewId: 'view-1',
 			content: 'later',
 			clientRequestId: 'queue-request',
 			clientMessageId: 'queue-message',
-		});
-		expect(goalControl).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			transcriptViewId: 'view-1',
-			content: '/goal pause',
-			clientRequestId: 'goal-request',
-			clientMessageId: 'goal-message',
 		});
 	});
 

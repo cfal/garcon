@@ -90,10 +90,6 @@ export function createRuntimeTranscriptFixture(options = {}) {
       activeRunId = runId;
       return runId;
     },
-    handoffRun(_chatId, expectedRunId, nextRunId) {
-      if (activeRunId !== expectedRunId) throw new Error('active run changed');
-      activeRunId = nextRunId;
-    },
     activeRunId: () => activeRunId,
     isRunActive: (_chatId, runId) => activeRunId !== null && (!runId || activeRunId === runId),
     activeChatIds: () => activeRunId === null ? [] : [activeChatId],

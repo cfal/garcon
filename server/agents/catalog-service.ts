@@ -83,7 +83,6 @@ export class AgentCatalogService {
       supportsUpdateProjectPath:
         integration.descriptor.supportsProjectPathUpdate,
       supportsSteering: integration.steering !== null,
-      supportsGoals: integration.goals !== null,
       supportsImages: integration.descriptor.supportsImages,
       fileAttachmentMimeTypes: [...(integration.attachments?.fileMimeTypes ?? [])],
       acceptsApiProviderEndpoints: integration.endpoints !== null,

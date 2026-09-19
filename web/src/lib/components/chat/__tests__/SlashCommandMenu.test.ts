@@ -16,7 +16,6 @@ const baseProps = {
 	projectPath: '',
 	supportsFork: true,
 	supportsSteering: false,
-	supportsGoals: false,
 	canScheduleIn: true,
 };
 const mockedGetSlashCommands = vi.mocked(getSlashCommands);
@@ -167,23 +166,10 @@ describe('SlashCommandMenu', () => {
 		expect(onSelect).toHaveBeenCalledWith('s');
 	});
 
-	it('lists the goal command when the agent supports goals', () => {
+	it('does not advertise a built-in goal command for Codex', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
-			supportsGoals: true,
-			isVisible: true,
-			query: 'goal',
-			onSelect: vi.fn(),
-			onClose: vi.fn(),
-		});
-
-		expect(screen.getByText('/goal')).toBeTruthy();
-		expect(screen.getByText('Set an agent goal and start working toward it')).toBeTruthy();
-	});
-
-	it('hides the goal command without the capability', () => {
-		render(SlashCommandMenuTestHost, {
-			...baseProps,
+			agent: 'codex',
 			isVisible: true,
 			query: 'goal',
 			onSelect: vi.fn(),
@@ -191,6 +177,7 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.queryByText('/goal')).toBeNull();
+		expect(screen.queryByRole('option')).toBeNull();
 	});
 
 	it('lists the steer commands from capability data', () => {
@@ -334,7 +321,6 @@ describe('SlashCommandMenu', () => {
 			projectPath: '/repo',
 			supportsFork: true,
 			supportsSteering: true,
-			supportsGoals: true,
 			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill-11',
@@ -362,7 +348,6 @@ describe('SlashCommandMenu', () => {
 			projectPath: '/repo',
 			supportsFork: true,
 			supportsSteering: true,
-			supportsGoals: true,
 			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill',

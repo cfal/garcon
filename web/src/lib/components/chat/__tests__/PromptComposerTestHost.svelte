@@ -325,7 +325,6 @@
 			supportsForkAtMessage: agentId !== 'amp',
 			supportsForkWhileRunning: agentId !== 'amp',
 			supportsSteering: agentId === 'codex',
-			supportsGoals: agentId === 'codex',
 			supportsUpdateProjectPath: true,
 			supportsImages: true,
 			acceptsApiProviderEndpoints: true,
@@ -357,7 +356,6 @@
 		supportsFork: (agentId: string) => agentId !== 'amp',
 		supportsForkWhileRunning: () => true,
 		supportsSteering: (agentId: string) => agentId === 'codex',
-		supportsGoals: (agentId: string) => agentId === 'codex',
 		supportsUpdateProjectPath: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,

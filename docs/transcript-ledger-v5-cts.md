@@ -362,7 +362,7 @@ routine local testing.
 | TLV5-L07.06 | A route survives Garcon terminal publication until its provider event source retires.                                                       | Provider unit, provider scripted                 |
 | TLV5-L07.07 | A failed new start does not retire an established source.                                                                                   | Provider unit, provider scripted                 |
 | TLV5-L07.08 | A rejected stale publish is absorbed at the provider dispatch boundary and cannot fail another chat.                                        | Provider scripted                                |
-| TLV5-L07.09 | `runExisting`, compaction, goal control, approval, cancellation, and error paths use the creating operation's publisher.                    | Provider unit, provider scripted where supported |
+| TLV5-L07.09 | `runExisting`, compaction, approval, cancellation, and error paths use the creating operation's publisher.                                  | Provider unit, provider scripted where supported |
 | TLV5-L07.10 | Provider-local route and callback state is released when its source can no longer emit.                                                     | Unit, soak                                       |
 
 ### L8 View Stability

@@ -9,7 +9,6 @@ import {
   parseAgentRunCommandRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
-  parseGoalControlCommandRequest,
   parsePermissionDecisionCommandRequest,
   parseQueueEntryMoveCommandRequest,
   parseQueueEntrySteerCommandRequest,
@@ -388,22 +387,6 @@ describe('chat command request parsers', () => {
       ...base,
       entryId: '\u00e9'.repeat((QUEUE_ENTRY_ID_MAX_BYTES / 2) + 1),
     })).toThrow(`entryId must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`);
-  });
-
-  it('qualifies goal control with logical message and transcript identities', () => {
-    expect(parseGoalControlCommandRequest({
-      clientRequestId: 'request-goal',
-      clientMessageId: 'message-goal',
-      chatId: CHAT_ID,
-      transcriptViewId: TRANSCRIPT_VIEW_ID,
-      content: '/goal pause',
-    })).toEqual({
-      clientRequestId: 'request-goal',
-      clientMessageId: 'message-goal',
-      chatId: CHAT_ID,
-      transcriptViewId: TRANSCRIPT_VIEW_ID,
-      content: '/goal pause',
-    });
   });
 
   it('rejects malformed command identities and fork cutoffs', () => {

@@ -111,46 +111,6 @@ export async function submitQueueRoute(
 	}
 }
 
-export async function submitGoalControlRoute(
-	deps: RouteDeps,
-	acceptedInputs: AcceptedInputSubmissionService,
-	queue: ConversationQueueController,
-	context: SubmissionContext,
-): Promise<ConversationSubmissionOutcome> {
-	const sequence = queue.beginSubmission(context.chatId);
-	const clearedRevision = clearOwnedComposer(deps, context);
-	if (clearedRevision !== null) queue.recordComposerClear(context.chatId, clearedRevision);
-	const submission = acceptedInputs.goalControl({
-		chatId: context.chatId,
-		transcriptViewId: requireTranscriptView(deps, context.chatId),
-		content: context.content,
-	});
-	try {
-		const result = await submission.submit();
-		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
-		return 'accepted';
-	} catch (error) {
-		return settleSubmissionFailure(deps, context, error, {
-			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
-			rejectedNotice: (failure) =>
-				m.chat_notice_failed_queue_message({
-					detail: errorDetail(failure),
-					content: context.ownsComposer ? context.previousText : context.text,
-				}),
-			restoreRejected: () =>
-				queue.recordSubmissionFailure(context.chatId, {
-					sequence,
-					text: context.previousText,
-					images: context.previousImages,
-				}),
-			refreshControl: () => queue.startControlRefresh(context.chatId),
-			onRejected: (failure) => refreshUnavailableProject(deps, context, failure),
-		});
-	} finally {
-		queue.finishSubmission(context.chatId);
-	}
-}
-
 export async function submitSteerRoute(
 	deps: RouteDeps,
 	acceptedInputs: AcceptedInputSubmissionService,

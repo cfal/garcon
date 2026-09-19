@@ -77,7 +77,6 @@ export const STEER_IDENTITY_LIMIT = 10_000;
 export const TURN_RESULT_BYTE_LIMIT = 4 * 1024 * 1024;
 export const TOTAL_TURN_RESULT_BYTE_LIMIT = 64 * 1024 * 1024;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
-export const GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE = 'GOAL_CONTROL_OUTCOME_UNKNOWN';
 
 export class SteerIdentityCapacityError extends Error {
   constructor() {
@@ -104,17 +103,10 @@ const QUEUE_RECEIPT_COMMANDS = new Set([
   'queue-entry-replace',
   'queue-entry-delete',
   'queue-entry-move',
-  'goal-control',
 ]);
 
-function isGoalControlOutcomeUnknown(record: CommandLedgerRecord): boolean {
-  return record.commandType === 'goal-control'
-    && record.status === 'accepted'
-    && record.errorCode === GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE;
-}
-
 function hasTerminalRetention(record: CommandLedgerRecord): boolean {
-  return TERMINAL_COMMAND_STATUSES.has(record.status) || isGoalControlOutcomeUnknown(record);
+  return TERMINAL_COMMAND_STATUSES.has(record.status);
 }
 
 function stableStringify(value: unknown): string {

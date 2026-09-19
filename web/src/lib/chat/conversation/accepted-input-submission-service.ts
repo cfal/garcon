@@ -5,14 +5,11 @@ import {
 	runChat,
 	steerChat,
 	steerQueuedEntry,
-	submitGoalControl,
 	startChat,
 	type StartChatParams,
 } from '$lib/api/chats.js';
 import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
 import type {
-	GoalControlCommandRequest,
-	GoalControlCommandResponse,
 	AgentRunCommandRequest,
 	AgentTurnCommandResponse,
 	ForkRunCommandRequest,
@@ -50,7 +47,6 @@ export interface AcceptedInputTransport {
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
 	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
 	steerQueuedEntry(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse>;
-	goalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse>;
 }
 
 const defaultTransport: AcceptedInputTransport = {
@@ -61,7 +57,6 @@ const defaultTransport: AcceptedInputTransport = {
 	enqueue: createQueuedInput,
 	steer: steerChat,
 	steerQueuedEntry,
-	goalControl: submitGoalControl,
 };
 
 export class AcceptedInputSubmissionService {
@@ -112,10 +107,6 @@ export class AcceptedInputSubmissionService {
 	) {
 		const request = { ...input, clientRequestId: this.createId() };
 		return this.#prepared(request, () => this.transport.steerQueuedEntry(request));
-	}
-
-	goalControl(input: Omit<GoalControlCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
-		return this.#messageSubmission(input, (request) => this.transport.goalControl(request));
 	}
 
 	#messageSubmission<T extends object, R>(

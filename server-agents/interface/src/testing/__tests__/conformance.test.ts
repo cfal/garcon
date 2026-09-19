@@ -62,7 +62,6 @@ const integration = {
   compaction: null,
   forking: null,
   steering: null,
-  goals: null,
   endpoints: null,
   singleQuery: null,
 } satisfies AgentIntegration & { readonly legacyHistoryImport: null };
@@ -116,7 +115,6 @@ describe('validateAgentIntegration', () => {
       'compaction',
       'forking',
       'steering',
-      'goals',
       'endpoints',
       'singleQuery',
       'nativeHistoryImport',
@@ -151,7 +149,6 @@ describe('validateAgentIntegration', () => {
       ['commands', {}],
       ['compaction', {}],
       ['forking', { fork: async () => ({ kind: 'unmaterialized' }) }],
-      ['goals', {}],
       ['endpoints', {}],
       ['singleQuery', {}],
       ['singleQuery', { run: async () => '', runsToolsWithoutPermission: false }],

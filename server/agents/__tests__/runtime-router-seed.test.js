@@ -60,10 +60,6 @@ function makeRouter(overrides = {}) {
     producer.emit(request.producerBinding, { type: 'run-ended', runId: request.runId, outcome: 'finished' });
     return { id: 'resume-handle' };
   });
-  const submitGoalControl = overrides.submitGoalControl ?? mock(async () => ({
-    preparation: producer.reference('goal-preparation'),
-    handle: producer.reference('execution'),
-  }));
   const steer = overrides.steer ?? mock(async () => ({ kind: 'accepted' }));
   const providerTarget = overrides.providerTarget ?? {};
   const captureTarget = overrides.captureTarget ?? mock(async () => providerTarget);
@@ -80,7 +76,6 @@ function makeRouter(overrides = {}) {
       abort: overrides.abort ?? mock(async () => undefined),
     },
     steering: { captureTarget, steer },
-    goals: { prepareControl: submitGoalControl, deliverControl: async () => {}, cancelControl: async () => {} },
     settings: { defaults: () => settings, parse: (input) => input },
   };
   const registry = {
@@ -91,16 +86,6 @@ function makeRouter(overrides = {}) {
   let activeTurn = overrides.activeTurn;
   const events = {
     trackTurn: mock((_chatId, turn) => { activeTurn = turn; }),
-    handoffTurn: mock((_chatId, predecessor, successor, downstream) => ({
-      validate: () => {
-        if (activeTurn?.turnId !== predecessor?.turnId) throw new Error('active turn changed');
-        downstream.validate();
-      },
-      commit: () => {
-        activeTurn = successor;
-        downstream.commit();
-      },
-    })),
     clearTurn: mock(() => { activeTurn = undefined; }),
     getActiveTurn: mock(() => activeTurn),
   };
@@ -137,7 +122,6 @@ function makeRouter(overrides = {}) {
     router,
     start,
     resume,
-    submitGoalControl,
     captureTarget,
     providerTarget,
     steer,
@@ -567,86 +551,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(resume.mock.calls[0][0]).not.toHaveProperty('providerPrefix');
   });
 
-  it('submits goal control without materializing the ledger conversation', async () => {
-    const conversationMessages = mock(() => {
-      throw new Error('goal control must not scan ledger context');
-    });
-    const resume = mock(async () => ({ id: 'active-handle' }));
-    const { router, submitGoalControl } = makeRouter({
-      entry: {
-        agentSessionId: 'native-1',
-        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
-      },
-      conversationMessages,
-      resume,
-    });
-    await router.runAgentTurn('chat-1', 'start active run', { turnId: 'turn-1' });
-
-    await expect(router.submitGoalControl(
-      'chat-1',
-      'update goal',
-      { turnId: 'turn-2' },
-      async () => undefined,
-    )).resolves.toBe(true);
-
-    expect(conversationMessages).not.toHaveBeenCalled();
-    expect(submitGoalControl.mock.calls[0][0]).not.toHaveProperty('priorContext');
-  });
-
-  it('finishes node-owned file expansion before reserving goal delivery', async () => {
-    const reading = Promise.withResolvers();
-    const expanded = Promise.withResolvers();
-    const f = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      resume: mock(async () => ({ id: 'active-handle' })),
-      resolveFileMentions: mock(async (prompt) => {
-        if (prompt !== 'goal @notes.txt') return prompt;
-        reading.resolve();
-        return expanded.promise;
-      }),
-    });
-    await f.router.runAgentTurn('chat-1', 'active', { turnId: 'turn-1' });
-    const goal = f.router.submitGoalControl('chat-1', 'goal @notes.txt', { turnId: 'turn-2' }, async (handoff) => {
-      handoff.validate(); handoff.commit();
-    });
-    await reading.promise;
-    expect(f.submitGoalControl).not.toHaveBeenCalled();
-    expanded.resolve('worker-expanded goal');
-    await expect(goal).resolves.toBe(true);
-    expect(f.submitGoalControl).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: 'worker-expanded goal', expectedRunId: 'turn-1', runId: 'turn-2',
-    }), expect.anything());
-  });
-
-  it('retains goal abort authority before the predecessor launch reply arrives', async () => {
-    const producer = createProducerFixture();
-    const handle = producer.reference('execution');
-    const entered = Promise.withResolvers();
-    const reply = Promise.withResolvers();
-    const abort = mock(async () => true);
-    const { router, transcript } = makeRouter({
-      producer,
-      entry: { agentSessionId: 'native-1' },
-      resume: mock(async () => { entered.resolve(); return reply.promise; }),
-      abort,
-      submitGoalControl: mock(async () => ({ preparation: producer.reference('goal-preparation'), handle })),
-    });
-    const predecessor = router.runAgentTurn('chat-1', 'first', { turnId: 'turn-1' });
-    try {
-      await entered.promise;
-      await router.submitGoalControl('chat-1', 'goal', { turnId: 'turn-2' }, async (handoff) => {
-        handoff.validate();
-        handoff.commit();
-      });
-      expect(transcript.activeRunId()).toBe('turn-2');
-      reply.resolve(handle);
-      await predecessor;
-      await router.abortSession('chat-1');
-      expect(abort.mock.calls).toEqual([[handle]]);
-      expect(transcript.activeRunId()).toBeNull();
-    } finally { reply.resolve(handle); await predecessor; }
-  });
-
   it('persists one coherent endpoint selection after a lazy start', async () => {
     const { router, registry } = makeRouter({
       entry: {
@@ -793,7 +697,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
       input: 'guidance',
     }));
     expect(prepareDelivery).toHaveBeenCalledTimes(1);
-    expect(events.handoffTurn).not.toHaveBeenCalled();
     expect(events.getActiveTurn()).toEqual(activeTurn);
   });
 

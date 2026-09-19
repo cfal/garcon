@@ -2,7 +2,7 @@ import { ApiError } from '$lib/api/client.js';
 import type { CommandErrorCode } from '$shared/chat-command-contracts';
 
 const OUTCOME_UNKNOWN_ERROR_CODES = new Set<string>(
-	['STEER_OUTCOME_UNKNOWN', 'GOAL_CONTROL_OUTCOME_UNKNOWN'] satisfies CommandErrorCode[],
+	['STEER_OUTCOME_UNKNOWN'] satisfies CommandErrorCode[],
 );
 const DEFINITIVE_ERROR_CODES = new Set<string>(
 	[
@@ -15,7 +15,6 @@ const DEFINITIVE_ERROR_CODES = new Set<string>(
 		'STEER_CAPACITY_EXHAUSTED',
 		'QUEUE_STEER_FINALIZATION_FAILED',
 		'QUEUE_STEER_RECOVERY_FAILED',
-		'GOAL_CONTROL_NOT_DELIVERED',
 	] satisfies CommandErrorCode[],
 );
 export class CommandOutcomeUnknownError extends Error {

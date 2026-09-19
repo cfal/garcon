@@ -100,7 +100,6 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly compaction = null;
   readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
-  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

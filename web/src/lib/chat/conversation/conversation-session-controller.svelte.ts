@@ -52,7 +52,6 @@ import {
 import {
 	rejectMissingDraftStartup,
 	submitDraftRoute,
-	submitGoalControlRoute,
 	submitQueueRoute,
 	submitRunRoute,
 	submitSteerPreferenceRoute,
@@ -218,7 +217,6 @@ export interface SessionControllerDeps {
 		supportsFork: (agentId: SessionAgentId) => boolean;
 		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
 		supportsSteering: (agentId: SessionAgentId) => boolean;
-		supportsGoals: (agentId: SessionAgentId) => boolean;
 	};
 	getExecutionDefaults(
 		agentId: SessionAgentId,
@@ -633,14 +631,6 @@ export class ConversationSessionController {
 			handoffPending,
 		});
 		if (slash.kind === 'handled') return slash.outcome;
-		if (handoffPending && slash.kind === 'goal-control') {
-			deps.chatState.appendLocalNoticeForChat(
-				chatId,
-				'error',
-				m.chat_notice_handoff_requires_idle(),
-			);
-			return 'rejected';
-		}
 
 		const specializedContext = {
 			chatId,
@@ -656,9 +646,6 @@ export class ConversationSessionController {
 		};
 		if (slash.kind === 'steer') {
 			return submitSteerRoute(deps, this.#acceptedInputs, specializedContext);
-		}
-		if (slash.kind === 'goal-control') {
-			return submitGoalControlRoute(deps, this.#acceptedInputs, this.#queue, specializedContext);
 		}
 		if (isDraft && !startup) return rejectMissingDraftStartup(deps, chatId);
 

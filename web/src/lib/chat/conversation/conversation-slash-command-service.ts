@@ -16,7 +16,6 @@ import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import { parseHandoffCommand } from '$lib/chat/composer/handoff-command.js';
 import {
 	parseCompactCommand,
-	isGoalCommand,
 	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
@@ -123,7 +122,6 @@ interface SlashCommandModelCatalog {
 	supportsFork(agentId: SessionAgentId): boolean;
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
 	supportsSteering(agentId: SessionAgentId): boolean;
-	supportsGoals(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -147,7 +145,6 @@ export type SlashCommandSubmissionResolution =
 			outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome>;
 	  }
 	| { kind: 'steer'; content: string }
-	| { kind: 'goal-control'; content: string }
 	| { kind: 'continue'; content: string };
 
 export class ConversationSlashCommandService {
@@ -216,22 +213,6 @@ export class ConversationSlashCommandService {
 				return { kind: 'handled', outcome: 'rejected' };
 			}
 			return { kind: 'steer', content: prompt };
-		}
-
-		if (
-			isGoalCommand(text) &&
-			chat.status === 'running' &&
-			chat.isProcessing &&
-			this.deps.modelCatalog.supportsGoals(agentId)
-		) {
-			if (images.length > 0) {
-				this.deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_queue_attachments_unavailable(),
-				);
-				return { kind: 'handled', outcome: 'rejected' };
-			}
-			return { kind: 'goal-control', content: text };
 		}
 
 		if (this.deps.modelCatalog.supportsFork(agentId)) {

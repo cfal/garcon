@@ -49,11 +49,6 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Add or remove tags on this chat',
 	},
 	{
-		name: 'goal',
-		source: 'command',
-		description: 'Set an agent goal and start working toward it',
-	},
-	{
 		name: 'steer',
 		source: 'command',
 		description: 'Send guidance to the active turn',
@@ -135,10 +130,6 @@ export function parseSteerCommand(input: string): SteerCommandParseResult {
 	const prompt = (match[1] ?? '').trim();
 	if (!prompt) return { kind: 'invalid' };
 	return { kind: 'valid', prompt };
-}
-
-export function isGoalCommand(input: string): boolean {
-	return /^\s*\/goal(?=\s|$)/i.test(input);
 }
 
 const COMPACT_COMMAND_RE = /^\s*\/compact(?:\s+([\s\S]*))?$/i;

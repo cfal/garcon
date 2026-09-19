@@ -52,9 +52,6 @@ export const QUEUE_STEER_FINALIZATION_FAILED_MESSAGE =
   'Steering was accepted, but the queued message could not be finalized. The queue was paused for review.';
 export const QUEUE_STEER_RECOVERY_FAILED_MESSAGE =
   'Steering was not delivered, and the queued message could not be restored safely. Refresh before continuing.';
-export const GOAL_CONTROL_NOT_DELIVERED_MESSAGE = 'Goal control was not delivered. Retry the request.';
-export const GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE =
-  'Goal control delivery could not be confirmed after acceptance. Check the chat before sending it again.';
 export const TRANSCRIPT_UNAVAILABLE_MESSAGE = 'Chat transcript is unavailable.';
 export const TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE =
   'Chat transcript is temporarily unavailable. Retry the request.';
@@ -99,22 +96,6 @@ export class QueueEntrySteerError extends DomainError {
     this.code = code;
     this.deliveryOutcome = deliveryOutcome;
     this.control = control ? cloneStoredChatExecutionControl(control) : undefined;
-  }
-}
-
-export class GoalControlDeliveryError extends DomainError {
-  readonly deliveryAccepted: boolean;
-
-  constructor(error: unknown, deliveryAccepted: boolean) {
-    super(
-      deliveryAccepted ? 'GOAL_CONTROL_OUTCOME_UNKNOWN' : 'GOAL_CONTROL_NOT_DELIVERED',
-      deliveryAccepted ? GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE : GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
-      500,
-      !deliveryAccepted,
-      { cause: error },
-    );
-    this.name = 'GoalControlDeliveryError';
-    this.deliveryAccepted = deliveryAccepted;
   }
 }
 

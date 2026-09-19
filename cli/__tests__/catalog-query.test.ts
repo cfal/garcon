@@ -18,7 +18,6 @@ const catalog: ModelCatalogResponse = {
       supportsForkWhileRunning: false,
       supportsUpdateProjectPath: true,
       supportsSteering: true,
-      supportsGoals: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
       supportedProtocols: ['openai-compatible'],

@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   AgentCallError,
-  type AgentGoalControlHandoff,
   type AgentProjectPathUpdatePreparation,
   type AgentSteerResult,
   type AgentSteerTarget,
@@ -332,60 +331,6 @@ export class AgentRuntimeRouter {
       producerBinding,
       expectedRunId,
     });
-  }
-
-  async submitGoalControl(
-    chatId: string,
-    prompt: string,
-    opts: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
-  ): Promise<boolean> {
-    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
-    if (!entry.agentSessionId) return false;
-    const integration = this.#directory.require(entry.agentId);
-    if (!integration.goals) return false;
-    const selection = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model: opts.model ?? entry.model,
-      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
-      modelEndpointId:
-        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
-    });
-    await this.#validateEndpoint(integration, selection);
-    const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
-    const previousTurn = this.#events.getActiveTurn(chatId);
-    const previousRunId = this.#ledger.activeRunId(chatId);
-    if (!previousRunId) return false;
-    const producer = this.#producer(chatId);
-    const preparation = await integration.goals.prepareControl({
-      ...this.#executionContextV5(chatId, entry, selection, operation.turnId, opts),
-      producerBinding: await this.#bindings.bind(integration, chatId, producer),
-      agentSessionId: entry.agentSessionId,
-      nativeSession: entry.nativeSession ?? null,
-      prompt: await this.#resolveFileMentions(prompt, entry.projectPath),
-      attachments: attachments(opts.images),
-      expectedRunId: previousRunId,
-    }, { signal: opts.executionAdmission?.signal });
-    if (!preparation) return false;
-    await this.#retainOrAbortHandle(chatId, entry.agentId, previousRunId, preparation.handle);
-    let handedOff = false;
-    try {
-      await beforeDelivery(this.#goalRunHandoff({
-          chatId,
-          previousRunId,
-          nextRunId: operation.turnId,
-          previousTurn,
-          nextTurn: operationMetadata(operation),
-          onCommitted: () => { handedOff = true; },
-      }));
-      this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
-      await integration.goals.deliverControl(preparation.preparation, { signal: opts.executionAdmission?.signal });
-      return true;
-    } finally {
-      if (!handedOff) await integration.goals.cancelControl(preparation.preparation).catch((error) => {
-        logger.warn('Goal preparation cleanup failed', error);
-      });
-    }
   }
 
   async compactSession(chatId: string, opts: {
@@ -785,45 +730,6 @@ export class AgentRuntimeRouter {
       attachments: [...preparedAttachments],
       excludedOrdinals: excluded,
       viewId,
-    };
-  }
-
-  #goalRunHandoff(input: {
-    readonly chatId: string;
-    readonly previousRunId: string;
-    readonly nextRunId: string;
-    readonly previousTurn: TurnEventMetadata | undefined;
-    readonly nextTurn: TurnEventMetadata;
-    readonly onCommitted: () => void;
-  }): AgentGoalControlHandoff {
-    const eventHandoff = this.#events.handoffTurn(
-      input.chatId,
-      input.previousTurn,
-      input.nextTurn,
-      { validate() {}, commit() {} },
-    );
-    const validate = () => {
-      if (!this.#ledger.isRunActive(input.chatId, input.previousRunId)) {
-        throw new Error(`Cannot hand off run for chat ${input.chatId} after its active run changed`);
-      }
-      eventHandoff.validate();
-    };
-    validate();
-    return {
-      validate,
-      commit: () => {
-        validate();
-        eventHandoff.commit();
-        this.#ledger.handoffRun(input.chatId, input.previousRunId, input.nextRunId);
-        const active = this.#executionHandles.get(input.chatId);
-        if (active?.runId === input.previousRunId) {
-          this.#executionHandles.set(input.chatId, {
-            ...active,
-            runId: input.nextRunId,
-          });
-        }
-        input.onCommitted();
-      },
     };
   }
 
