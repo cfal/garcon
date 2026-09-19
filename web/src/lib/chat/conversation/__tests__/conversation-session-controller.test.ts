@@ -33,6 +33,7 @@ import {
 import {
 	AssistantMessage,
 	BashToolUseMessage,
+	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
@@ -634,7 +635,7 @@ function createDeps(chat = createRunningChat()) {
 			apiProviderId: null as string | null,
 			modelEndpointId: null as string | null,
 			modelProtocol: null as SessionControllerDeps['agentState']['modelProtocol'],
-			permissionMode: 'default',
+			permissionMode: 'default' as PermissionMode,
 			thinkingMode: 'none',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		},
@@ -696,7 +697,7 @@ function createDeps(chat = createRunningChat()) {
 			),
 		},
 		modelCatalogForNode(): SessionControllerDeps['modelCatalog'] { return this.modelCatalog; },
-		canSubmitToNode: vi.fn(() => true),
+		canSubmitToNode: vi.fn((_nodeId: string) => true),
 		getExecutionDefaults: (agentId: string) => ({
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -2377,6 +2378,40 @@ describe('ConversationSessionController', () => {
 		} finally {
 			vi.stubGlobal('FileReader', originalFileReader);
 		}
+	});
+
+	it.each(['bypass', 'approve-edits'])('retains %s plan approval until the durable node admits input', async (choice) => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const { deps } = createDeps(createRunningChat({ nodeId, permissionMode: 'plan' }));
+		const request: PendingPermissionRequest = {
+			permissionOccurrenceId: 'plan-exit-1',
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		};
+		deps.conversationUi.pendingPermissionRequests = [request];
+		deps.conversationUi.previousPermissionMode = 'default';
+		deps.agentState.permissionMode = 'plan';
+		deps.agentState.nodeId = 'local';
+		deps.canSubmitToNode.mockImplementation((id) => id === 'local');
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleExitPlanModeForChat('chat-1', request.permissionOccurrenceId, choice, 'Synthetic plan');
+		await flushPromises();
+
+		expect(deps.canSubmitToNode).toHaveBeenCalledWith(nodeId);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.conversationUi.pendingPermissionRequests).toEqual([request]);
+		expect(deps.conversationUi.previousPermissionMode).toBe('default');
+		expect(deps.conversationUi.finishPlanModeForChat).not.toHaveBeenCalled();
+		expect(deps.agentState.permissionMode).toBe('plan');
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', expect.stringContaining('Execution node or model catalog is unavailable'));
+
+		deps.canSubmitToNode.mockReturnValue(true);
+		mockRunChat.mockResolvedValueOnce({ success: true, commandType: 'agent-run', clientRequestId: 'req-1', chatId: 'chat-1', turnId: 'turn-1', status: 'accepted', acceptedAt: '2026-05-14T00:00:00.000Z' });
+		controller.handleExitPlanModeForChat('chat-1', request.permissionOccurrenceId, choice, 'Synthetic plan');
+		await flushPromises();
+		expect(mockRunChat).toHaveBeenCalledOnce();
+		expect(deps.conversationUi.pendingPermissionRequests).toEqual([]);
+		expect(deps.conversationUi.finishPlanModeForChat).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('resumes approved plans with the target chat settings', async () => {

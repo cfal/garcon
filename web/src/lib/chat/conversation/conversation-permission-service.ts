@@ -14,7 +14,7 @@ import type { ConversationExecutionSelection } from './conversation-execution-dr
 export interface ConversationPermissionServiceOptions {
 	readonly deps: Pick<
 		SessionControllerDeps,
-		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell'
+		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell' | 'canSubmitToNode'
 	>;
 	readonly acceptedInputs: AcceptedInputSubmissionService;
 	readonly queue: ConversationQueueController;
@@ -81,6 +81,14 @@ export class ConversationPermissionService {
 		const { deps } = this.options;
 		const chat = deps.sessions.byId[chatId];
 		if (!chat) return;
+		if ((choice === 'bypass' || choice === 'approve-edits') && !deps.canSubmitToNode(chat.nodeId ?? 'local')) {
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_failed_resume_plan({ detail: 'Execution node or model catalog is unavailable' }),
+			);
+			return;
+		}
 		const permissionControl = deps.conversationUi
 			.pendingPermissionsFor(chatId)
 			.find((request) => request.permissionOccurrenceId === permissionOccurrenceId)?.control;
