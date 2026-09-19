@@ -72,6 +72,7 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
     await ready;
     if (disposed || signal.aborted) throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
     if (call.method === 'node.describe') return { info, integrations: [...integrations.values()].map(manifest) };
+    if (call.method === 'apiProviders.discoverModels') return node.discoverApiProviderModels(call.request, { signal });
     if (call.method === 'projects.inspect') return (await node.getProjectService()).inspect(call.request, { signal });
     if (call.method === 'projects.resolveFileMentions') return (await node.getProjectService()).resolveFileMentions(call.request, { signal });
     const integration = integrations.get(call.integrationId);

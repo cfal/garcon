@@ -5,10 +5,12 @@ import {
   type ExecutionNodeInfo,
   type NodeAvailability,
   type NodeCallOptions,
+  type ApiProviderDiscoveryRequest,
 } from '@garcon/server-agent-interface';
 import { IntegrationHostFactory, type IntegrationHostFactoryOptions } from '../agents/integration-host.js';
 import { IntegrationRegistry } from '../agents/integration-registry.js';
 import { LocalExecutionProjectService } from './project-service.js';
+import { discoverApiProviderModels } from '../api-providers/discovery.js';
 
 export class InProcessExecutionNode implements ExecutionNode {
   readonly id: string;
@@ -52,6 +54,10 @@ export class InProcessExecutionNode implements ExecutionNode {
   }
 
   async getProcessService(): Promise<never> { throw unavailableService('processes'); }
+  async discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: NodeCallOptions) {
+    this.#assertAvailable(options);
+    return discoverApiProviderModels(request, options);
+  }
   async getProjectService(options?: NodeCallOptions) {
     this.#assertAvailable(options);
     return this.#projects;

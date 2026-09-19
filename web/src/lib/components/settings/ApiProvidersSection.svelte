@@ -4,7 +4,7 @@
 	import ApiProviderProtocolPanel from './ApiProviderProtocolPanel.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 
-	let { settingsAuth }: { settingsAuth: SettingsAuthState } = $props();
+	let { settingsAuth, nodeId }: { settingsAuth: SettingsAuthState; nodeId: string } = $props();
 
 	function completeCodexLogin(code: string): void {
 		void settingsAuth.completeLogin('codex', code);
@@ -17,6 +17,7 @@
 
 <section class="space-y-8">
 	<ApiProviderProtocolPanel
+		{nodeId}
 		protocol="openai-compatible"
 		title={m.settings_api_providers_openai_title()}
 		description={m.settings_api_providers_openai_description()}
@@ -31,6 +32,7 @@
 	/>
 
 	<ApiProviderProtocolPanel
+		{nodeId}
 		protocol="anthropic-messages"
 		title={m.settings_api_providers_anthropic_title()}
 		description={m.settings_api_providers_anthropic_description()}

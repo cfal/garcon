@@ -2,6 +2,14 @@ import type { AgentIntegration } from './integration.js';
 import type { NodeCallOptions } from './resources.js';
 import type { NodePath } from '@garcon/common/node-path';
 import type { ProjectResolution } from '@garcon/common/project-resolution';
+import type { ApiProtocol, ModelDiscoveryKind, ApiProviderModelDiscoveryResponse } from '@garcon/common/api-providers';
+
+export interface ApiProviderDiscoveryRequest {
+  readonly protocol: ApiProtocol;
+  readonly baseUrl: string;
+  readonly apiKey?: string;
+  readonly modelDiscovery: ModelDiscoveryKind;
+}
 
 export interface ExecutionProjectService {
   inspect(request: {
@@ -39,6 +47,7 @@ export interface ExecutionNode {
   getInfo(options?: NodeCallOptions): Promise<ExecutionNodeInfo>;
   getAgentIntegration(agentId: string, options?: NodeCallOptions): Promise<AgentIntegration>;
   getProjectService(options?: NodeCallOptions): Promise<ExecutionProjectService>;
+  discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: NodeCallOptions): Promise<ApiProviderModelDiscoveryResponse>;
   getProcessService(options?: NodeCallOptions): Promise<never>;
   getFilesService(options?: NodeCallOptions): Promise<never>;
   getGitService(options?: NodeCallOptions): Promise<never>;

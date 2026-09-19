@@ -6,6 +6,7 @@ import {
   type ExecutionProjectService,
   type NodeAvailability,
   type NodeCallOptions,
+  type ApiProviderDiscoveryRequest,
 } from '@garcon/server-agent-interface';
 import { RemoteAgentIntegration } from './remote-agent-integration.js';
 import { AgentRpc } from './rpc.js';
@@ -13,6 +14,7 @@ import type { IntegrationManifest } from './agent-protocol.js';
 import type { SessionTransport } from './session-transport.js';
 import type { WebSocketLink } from './websocket-link.js';
 import { unavailableService } from './in-process.js';
+import { MODEL_DISCOVERY_TIMEOUT_MS } from '../api-providers/discovery.js';
 
 export interface RemoteSessionBacking {
   readonly rpc: AgentRpc;
@@ -100,6 +102,11 @@ export class RemoteExecutionNode implements ExecutionNode {
   }
 
   async getProcessService(): Promise<never> { throw unavailableService('processes'); }
+  async discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: NodeCallOptions) {
+    return this.#backing().rpc.call('', 'apiProviders.discoverModels', request, {
+      ...options, timeoutMs: options?.timeoutMs ?? MODEL_DISCOVERY_TIMEOUT_MS + 5_000,
+    });
+  }
   async getProjectService(options?: NodeCallOptions): Promise<ExecutionProjectService> {
     options?.signal?.throwIfAborted();
     this.#backing();

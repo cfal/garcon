@@ -51,12 +51,14 @@ export async function deleteApiProvider(id: string): Promise<{ success: boolean 
 
 export async function testApiProvider(
 	input: ApiProviderInput,
+	nodeId = 'local',
 ): Promise<ApiProviderModelDiscoveryResponse> {
-	return apiPost('/api/v1/api-providers/test', input);
+	return apiPost(`/api/v1/api-providers/test?nodeId=${encodeURIComponent(nodeId)}`, input);
 }
 
 export async function discoverApiProviderModels(
 	input: ApiProviderModelDiscoveryRequest,
+	nodeId = 'local',
 ): Promise<ApiProviderModelDiscoveryResponse> {
-	return apiPost('/api/v1/api-providers/models', input);
+	return apiPost(`/api/v1/api-providers/models?nodeId=${encodeURIComponent(nodeId)}`, input);
 }

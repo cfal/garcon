@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ApiProviderService } from '../service.ts';
 import { ApiProviderStore } from '../store.ts';
+import { discoverApiProviderModels } from '../discovery.ts';
 
 const createdDirs = [];
 let originalFetch = globalThis.fetch;
@@ -15,6 +16,7 @@ async function tempService(options = {}) {
   await store.init();
   const service = new ApiProviderService({
     store,
+    discoverModels: options.discoverModels ?? ((_nodeId, request) => discoverApiProviderModels(request)),
     isApiProviderReferenced: options.isApiProviderReferenced ?? (() => false),
   });
   return { service, store };
@@ -80,6 +82,27 @@ describe('ApiProviderService', () => {
     }))).rejects.toThrow('OpenAI-compatible endpoints must support Chat Completions or Responses.');
 
     expect(store.list()).toEqual([]);
+  });
+
+  it('sends only normalized discovery inputs and resolved credentials to the selected node', async () => {
+    const discoverModels = mock(async () => ({ success: true, models: [] }));
+    const { service, store } = await tempService({ discoverModels });
+    const created = await service.create(openAiInput());
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    await service.discoverModels({
+      protocol: 'openai-compatible', baseUrl: 'api.acme.test/v1/',
+      endpointId: created.endpoints[0].id, apiProviderId: created.id,
+    }, nodeId);
+    expect(discoverModels).toHaveBeenLastCalledWith(nodeId, {
+      protocol: 'openai-compatible', baseUrl: 'https://api.acme.test/v1',
+      apiKey: 'sk-acme-secret', modelDiscovery: 'openai-models',
+    });
+    await service.test(openAiInput(), nodeId);
+    expect(discoverModels).toHaveBeenLastCalledWith(nodeId, {
+      protocol: 'openai-compatible', baseUrl: 'https://api.acme.test/v1',
+      apiKey: 'sk-acme-secret', modelDiscovery: 'openai-models',
+    });
+    expect(store.list()).toHaveLength(1);
   });
 
   it('uses stored endpoint API keys for model discovery requests', async () => {

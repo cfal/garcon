@@ -16,7 +16,7 @@ import {
 } from '$shared/api-providers';
 
 interface DialogOptions {
-	modelCatalog: ModelCatalogStore;
+	readonly modelCatalog: Pick<ModelCatalogStore, 'nodeId' | 'findEndpoint' | 'forceRefresh' | 'invalidateAll'>;
 	getProtocol: () => ApiProtocol;
 	getEndpointId: () => string | null;
 	getTemplateId?: () => ApiProviderTemplateId;
@@ -43,6 +43,7 @@ export class ApiProviderEndpointDialogState {
 	error = $state<string | null>(null);
 	testMessage = $state<string | null>(null);
 	apiProviderId = $state<string | null>(null);
+	#contextVersion = 0;
 
 	constructor(private readonly options: DialogOptions) {}
 
@@ -156,6 +157,7 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	async load(): Promise<void> {
+		this.dispose();
 		this.error = null;
 		this.testMessage = null;
 		const endpointId = this.endpointId;
@@ -180,6 +182,18 @@ export class ApiProviderEndpointDialogState {
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
 		this.openAiCapabilities = this.openAiCapabilitiesFrom(found.endpoint.capabilities);
 		this.apiKey = '';
+	}
+
+	dispose(): void {
+		this.#contextVersion++;
+		this.isSaving = false;
+		this.isTesting = false;
+		this.isFetchingModels = false;
+		this.apiKey = '';
+	}
+
+	#isCurrent(catalog: DialogOptions['modelCatalog'], version: number): boolean {
+		return this.options.modelCatalog === catalog && this.#contextVersion === version;
 	}
 
 	beginCreate(): void {
@@ -254,6 +268,8 @@ export class ApiProviderEndpointDialogState {
 
 	async save(): Promise<void> {
 		if (!this.canSave) return;
+		const catalog = this.options.modelCatalog;
+		const version = this.#contextVersion;
 		this.isSaving = true;
 		this.error = null;
 		try {
@@ -262,17 +278,21 @@ export class ApiProviderEndpointDialogState {
 			} else {
 				await createApiProvider(this.payload());
 			}
-			await this.options.modelCatalog.forceRefresh();
+			catalog.invalidateAll();
+			await catalog.forceRefresh();
+			if (!this.#isCurrent(catalog, version)) return;
 			this.options.onSaved?.();
 		} catch (err) {
-			this.error = err instanceof Error ? err.message : String(err);
+			if (this.#isCurrent(catalog, version)) this.error = err instanceof Error ? err.message : String(err);
 		} finally {
-			this.isSaving = false;
+			if (this.#isCurrent(catalog, version)) this.isSaving = false;
 		}
 	}
 
 	async fetchModels(): Promise<void> {
 		if (!this.canFetchModels) return;
+		const catalog = this.options.modelCatalog;
+		const version = this.#contextVersion;
 		this.isFetchingModels = true;
 		this.error = null;
 		this.testMessage = null;
@@ -288,7 +308,8 @@ export class ApiProviderEndpointDialogState {
 				apiProviderId: this.apiProviderId,
 				endpointId: this.endpointId,
 				modelDiscovery: discoveryKind,
-			});
+			}, catalog.nodeId);
+			if (!this.#isCurrent(catalog, version)) return;
 			if (!result.success) {
 				this.error = result.error || m.settings_api_provider_dialog_fetch_failed();
 				return;
@@ -305,19 +326,22 @@ export class ApiProviderEndpointDialogState {
 				count: result.models.length,
 			});
 		} catch (err) {
-			this.error = err instanceof Error ? err.message : String(err);
+			if (this.#isCurrent(catalog, version)) this.error = err instanceof Error ? err.message : String(err);
 		} finally {
-			this.isFetchingModels = false;
+			if (this.#isCurrent(catalog, version)) this.isFetchingModels = false;
 		}
 	}
 
 	async test(): Promise<void> {
 		if (!this.canTest) return;
+		const catalog = this.options.modelCatalog;
+		const version = this.#contextVersion;
 		this.isTesting = true;
 		this.error = null;
 		this.testMessage = null;
 		try {
-			const result = await testApiProvider(this.payload());
+			const result = await testApiProvider(this.payload(), catalog.nodeId);
+			if (!this.#isCurrent(catalog, version)) return;
 			if (!result.success) {
 				this.error = result.error || m.settings_api_provider_dialog_test_failed();
 				return;
@@ -330,9 +354,9 @@ export class ApiProviderEndpointDialogState {
 				this.syncDefaultModelWithModels();
 			}
 		} catch (err) {
-			this.error = err instanceof Error ? err.message : String(err);
+			if (this.#isCurrent(catalog, version)) this.error = err instanceof Error ? err.message : String(err);
 		} finally {
-			this.isTesting = false;
+			if (this.#isCurrent(catalog, version)) this.isTesting = false;
 		}
 	}
 }
@@ -344,6 +368,7 @@ export async function deleteApiProviderEndpoint(
 	const found = modelCatalog.findEndpoint(endpointId);
 	if (!found) throw new Error(m.settings_api_provider_dialog_endpoint_missing());
 	await deleteApiProvider(found.apiProvider.id);
+	modelCatalog.invalidateAll();
 	await modelCatalog.forceRefresh();
 }
 

@@ -98,7 +98,7 @@
 				<Tabs.Content value="providers" class="mt-0 space-y-6">
 					{@render tabDescription(m.settings_providers_description())}
 					{#if executionNodes.isReady(nodeId)}
-						<ApiProvidersSection {settingsAuth} />
+						<ApiProvidersSection {settingsAuth} {nodeId} />
 					{:else}
 						<p class="text-sm text-muted-foreground">{executionNodes.label(nodeId)} is unavailable.</p>
 					{/if}

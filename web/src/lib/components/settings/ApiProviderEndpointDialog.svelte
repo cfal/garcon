@@ -14,12 +14,14 @@
 	import { ApiProviderEndpointDialogState } from './api-provider-endpoint-dialog-state.svelte';
 
 	let {
+		nodeId = 'local',
 		open = false,
 		protocol,
 		endpointId = null,
 		templateId = 'custom',
 		onOpenChange = () => undefined,
 	} = $props<{
+		nodeId?: string;
 		open?: boolean;
 		protocol: ApiProtocol;
 		endpointId?: string | null;
@@ -27,9 +29,10 @@
 		onOpenChange?: (open: boolean) => void;
 	}>();
 
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
 	const dialog = new ApiProviderEndpointDialogState({
-		modelCatalog,
+		get modelCatalog() { return modelCatalog; },
 		getProtocol: () => protocol,
 		getEndpointId: () => endpointId,
 		getTemplateId: () => templateId,
@@ -37,12 +40,14 @@
 	});
 
 	$effect(() => {
+		void nodeId;
 		dialog.open = open;
 		if (open) {
 			untrack(() => {
 				void dialog.load();
 			});
 		}
+		return () => dialog.dispose();
 	});
 
 	function handleOpenChange(next: boolean) {

@@ -103,6 +103,24 @@ describe('ModelCatalogStore', () => {
 		expect(store.getThinkingModes('claude')).toEqual([]);
 	});
 
+	it('invalidates live and uninstantiated persisted node catalogs after global provider changes', async () => {
+		const original = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'cached', label: 'Cached Model' }],
+		})])));
+		await original.forceRefresh();
+		await original.forNode(remoteExecutionNode.id).forceRefresh();
+		const store = createModelCatalogStore();
+		expect(store.isValidated).toBe(true);
+		store.invalidateAll();
+		expect(store.isValidated).toBe(false);
+		expect(store.getModels('sample')).toHaveLength(1);
+		expect(store.forNode(remoteExecutionNode.id).isValidated).toBe(false);
+		const restored = createModelCatalogStore();
+		expect(restored.isValidated).toBe(false);
+		expect(restored.forNode(remoteExecutionNode.id).isValidated).toBe(false);
+	});
+
 	it('keeps an in-flight Local catalog request when the first node snapshot arrives', async () => {
 		const response = Promise.withResolvers<Response>();
 		vi.mocked(clientApi.apiFetch).mockReturnValue(response.promise);

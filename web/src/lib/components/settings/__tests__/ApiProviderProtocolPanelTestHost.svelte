@@ -20,6 +20,7 @@
 	} = $props();
 
 	setModelCatalog({
+		nodeId: 'local',
 		forNode() { return this; },
 		version: 0,
 		get apiProviderCatalog() {
@@ -35,6 +36,7 @@
 		forceRefresh() {
 			return Promise.resolve();
 		},
+		invalidateAll() {},
 	} as never);
 </script>
 

@@ -341,6 +341,7 @@ export async function startServer(): Promise<void> {
     }
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
+      discoverModels: (nodeId, request) => executionNodes.requireNode(nodeId).discoverApiProviderModels(request),
       isApiProviderReferenced(apiProviderId) {
         return Object.values(chatRegistry.listAllChats()).some(
           (entry) => entry.apiProviderId === apiProviderId,

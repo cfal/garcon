@@ -15,6 +15,7 @@ import createApiProviderRoutes from '../api-providers.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 import { CorruptStateFileError } from '../../lib/json-file-store.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 
 describe('agent auth login routes', () => {
   const agents = {
@@ -312,12 +313,13 @@ describe('agent auth login routes', () => {
     apiProviders.test.mockImplementationOnce(() => Promise.resolve({ success: true }));
     const handler = routes['/api/v1/api-providers/test'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/api-providers/test', { method: 'POST' }));
+    const url = new URL('http://localhost/api/v1/api-providers/test');
+    const response = await handler(new Request(url, { method: 'POST' }), url);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ success: true });
-    expect(apiProviders.test).toHaveBeenCalledWith(input);
+    expect(apiProviders.test).toHaveBeenCalledWith(input, 'local');
     expect(apiProviders.create).not.toHaveBeenCalled();
   });
 
@@ -331,18 +333,41 @@ describe('agent auth login routes', () => {
     parseJsonBody.mockImplementationOnce(() => Promise.resolve(input));
     const handler = routes['/api/v1/api-providers/models'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/api-providers/models', { method: 'POST' }));
+    const url = new URL('http://localhost/api/v1/api-providers/models');
+    const response = await handler(new Request(url, { method: 'POST' }), url);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ success: true, models: [{ value: 'example', label: 'Example' }] });
-    expect(apiProviders.discoverModels).toHaveBeenCalledWith(input);
+    expect(apiProviders.discoverModels).toHaveBeenCalledWith(input, 'local');
     expect(apiProviders.create).not.toHaveBeenCalled();
   });
 
   async function populateCatalogCache() {
     await responseCache.getSnapshot({ agents, apiProviders });
   }
+
+  it.each([['test', 'test'], ['models', 'discoverModels']])('qualifies %s by node and preserves typed failures', async (path, method) => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const url = new URL(`http://localhost/api/v1/api-providers/${path}?nodeId=${nodeId}`);
+    const handler = routes[`/api/v1/api-providers/${path}`].POST;
+    const request = () => new Request(url, { method: 'POST' });
+    parseJsonBody.mockResolvedValueOnce({ synthetic: true });
+    expect((await handler(request(), url)).status).toBe(200);
+    expect(apiProviders[method]).toHaveBeenCalledWith({ synthetic: true }, nodeId);
+
+    apiProviders[method].mockRejectedValueOnce(new DomainError('EXECUTION_NODE_UNAVAILABLE', 'Node unavailable', 503));
+    const unavailable = await handler(request(), url);
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({ errorCode: 'EXECUTION_NODE_UNAVAILABLE' });
+    apiProviders[method].mockRejectedValueOnce(new AgentCallError('unknown', 'Node disconnected'));
+    expect((await handler(request(), url)).status).toBe(503);
+
+    apiProviders[method].mockClear();
+    url.searchParams.set('nodeId', 'invalid');
+    expect((await handler(request(), url)).status).toBe(400);
+    expect(apiProviders[method]).not.toHaveBeenCalled();
+  });
 
   const providerInput = {
     templateId: 'custom',
@@ -403,6 +428,7 @@ describe('agent auth login routes', () => {
     parseJsonBody.mockImplementationOnce(() => Promise.resolve(providerInput));
     await routes['/api/v1/api-providers/test'].POST(
       new Request('http://localhost/api/v1/api-providers/test', { method: 'POST' }),
+      new URL('http://localhost/api/v1/api-providers/test'),
     );
 
     parseJsonBody.mockImplementationOnce(() => Promise.resolve({
@@ -413,6 +439,7 @@ describe('agent auth login routes', () => {
     }));
     await routes['/api/v1/api-providers/models'].POST(
       new Request('http://localhost/api/v1/api-providers/models', { method: 'POST' }),
+      new URL('http://localhost/api/v1/api-providers/models'),
     );
 
     await responseCache.getSnapshot({ agents, apiProviders });

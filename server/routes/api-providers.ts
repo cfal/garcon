@@ -6,14 +6,20 @@ import type { ApiProviderInput, ApiProviderService } from '../api-providers/serv
 import type { ApiProviderModelDiscoveryRequest } from '../../common/api-providers.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import { errorMessage, jsonErrorFromCorruptStateFile } from './route-helpers.js';
+import { executionNodeIdFromUrl } from './node-target.js';
+import { DomainError } from '../lib/domain-error.js';
+import { AgentCallError } from '@garcon/server-agent-interface';
+import { jsonErrorFromUnknown } from '../lib/http-error.js';
 
 function apiProviderError(error: unknown): Response {
+  if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
   const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
   if (corruptStateResponse) return corruptStateResponse;
   return Response.json({ error: errorMessage(error) }, { status: 400 });
 }
 
 function apiProviderDiscoveryError(error: unknown): Response {
+  if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
   const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
   if (corruptStateResponse) return corruptStateResponse;
   return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
@@ -61,17 +67,17 @@ export default function createApiProviderRoutes(
     }
   }
 
-  async function testApiProvider(body: ApiProviderInput): Promise<Response> {
+  async function testApiProvider(body: ApiProviderInput, _request: Request, url: URL): Promise<Response> {
     try {
-      return Response.json(await apiProviders.test(body));
+      return Response.json(await apiProviders.test(body, executionNodeIdFromUrl(url)));
     } catch (error) {
       return apiProviderError(error);
     }
   }
 
-  async function discoverApiProviderModels(body: ApiProviderModelDiscoveryRequest): Promise<Response> {
+  async function discoverApiProviderModels(body: ApiProviderModelDiscoveryRequest, _request: Request, url: URL): Promise<Response> {
     try {
-      return Response.json(await apiProviders.discoverModels(body));
+      return Response.json(await apiProviders.discoverModels(body, executionNodeIdFromUrl(url)));
     } catch (error) {
       return apiProviderDiscoveryError(error);
     }

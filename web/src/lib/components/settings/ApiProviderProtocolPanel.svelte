@@ -35,6 +35,7 @@
 	}
 
 	let {
+		nodeId = 'local',
 		protocol,
 		title,
 		description,
@@ -47,6 +48,7 @@
 		onLogin = undefined,
 		onCompleteLogin = undefined,
 	}: {
+		nodeId?: string;
 		protocol: ApiProtocol;
 		title: string;
 		description: string;
@@ -60,7 +62,8 @@
 		onCompleteLogin?: (code: string) => void;
 	} = $props();
 
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
 	let dialogOpen = $state(false);
 	let editingEndpointId = $state<string | null>(null);
 	let createTemplateId = $state<ApiProviderTemplateId>('custom');
@@ -247,6 +250,7 @@
 
 	{#if dialogOpen}
 		<ApiProviderEndpointDialog
+			{nodeId}
 			open={dialogOpen}
 			{protocol}
 			endpointId={editingEndpointId}

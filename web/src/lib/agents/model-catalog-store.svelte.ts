@@ -517,6 +517,13 @@ export class ModelCatalogStore {
 		this.version += 1;
 	}
 
+	invalidateAll(): void {
+		for (const catalog of this.catalogs.values()) catalog.invalidate();
+		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
+		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
+		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogNodes);
+	}
+
 	getAgents(): SessionAgentId[] {
 		return Object.keys(this.agentMetadata).filter(isAgentId) as SessionAgentId[];
 	}

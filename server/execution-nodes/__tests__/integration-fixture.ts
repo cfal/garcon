@@ -18,6 +18,7 @@ import { RemoteExecutionNode } from '../remote.js';
 import { WebSocketLink } from '../websocket-link.js';
 import { serveAgentNode } from '../agent-worker.js';
 import { LocalExecutionProjectService } from '../project-service.js';
+import { discoverApiProviderModels } from '../../api-providers/discovery.js';
 
 export const linkOptions = { nodeId: 'test-node', secret: 'test-secret-longer-than-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
 
@@ -86,6 +87,7 @@ export function integrationFixture(projectBasePath = '/test-project', nodeId = '
     },
     async getAgentIntegration() { return integration; },
     async getProjectService() { return projects; },
+    discoverApiProviderModels,
     getProcessService: unavailable, getFilesService: unavailable, getGitService: unavailable, getTerminalService: unavailable,
     onAvailabilityChanged() { return () => {}; },
     async dispose() { disposed = true; await integration.lifecycle.stop(); },

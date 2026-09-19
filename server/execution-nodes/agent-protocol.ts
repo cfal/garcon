@@ -8,6 +8,7 @@ import type {
   AgentResourceRef,
   AgentResourceScope,
   ExecutionNodeInfo,
+  ExecutionNode,
   ExecutionProjectService,
 } from '@garcon/server-agent-interface';
 
@@ -42,6 +43,7 @@ export type HistoryReaderRef = AgentResourceRef<'history-reader'>;
 
 export interface AgentRpcMethods {
   'node.describe': Call<null, { readonly info: ExecutionNodeInfo; readonly integrations: readonly IntegrationManifest[] }>;
+  'apiProviders.discoverModels': Call<Parameters<ExecutionNode['discoverApiProviderModels']>[0], Awaited<ReturnType<ExecutionNode['discoverApiProviderModels']>>>;
   'projects.inspect': Call<Parameters<ExecutionProjectService['inspect']>[0], Awaited<ReturnType<ExecutionProjectService['inspect']>>>;
   'projects.resolveFileMentions': Call<Parameters<ExecutionProjectService['resolveFileMentions']>[0], string>;
   'producers.bind': Call<Request<'producers', 'bind'>, void>;
