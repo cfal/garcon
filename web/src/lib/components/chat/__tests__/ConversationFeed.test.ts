@@ -10,6 +10,8 @@ import {
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
@@ -204,6 +206,40 @@ describe('ConversationFeed', () => {
 			});
 		}
 		expect(group.getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('keeps simultaneous message and permission file links bound to their panel node', async () => {
+		const sessionsStore = createChatSessionsStore();
+		const contexts = [
+			{ chatId: 'chat-local', nodeId: 'local', projectPath: '/workspace/local' },
+			{ chatId: 'chat-remote', nodeId: '22222222-2222-4222-8222-222222222222', projectPath: '/workspace/remote' },
+		];
+		for (const context of contexts) sessionsStore.createDraft({
+			id: context.chatId, projectPath: context.projectPath,
+			startup: { nodeId: context.nodeId, agentId: 'codex', model: 'synthetic', permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, firstMessage: 'Synthetic chat' },
+		});
+		const open = vi.spyOn(FileSessionRegistry.prototype, 'open').mockResolvedValue(null);
+		const feeds = contexts.map((chatContext) => render(ConversationFeedTestHost, {
+			chatContext, sessionsStore, transcriptScenario: 'file-links',
+		}));
+		for (const selected of contexts) {
+			sessionsStore.setSelectedChatId(selected.chatId);
+			await tick();
+			for (const [index, context] of contexts.entries()) {
+				const links = await waitFor(() => {
+					const elements = feeds[index].container.querySelectorAll<HTMLAnchorElement>('a[href$=".txt"]');
+					expect(elements).toHaveLength(2);
+					return elements;
+				});
+				open.mockClear();
+				for (const link of links) await fireEvent.click(link);
+				if (context.nodeId === 'local') {
+					expect(open.mock.calls.map(([request]) => request.relativePath)).toEqual(['local/message.txt', 'local/plan.txt']);
+				} else {
+					expect(open).not.toHaveBeenCalled();
+				}
+			}
+		}
 	});
 
 	afterEach(() => {

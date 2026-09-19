@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 
 	let {
+		chatContext,
 		scrollContainer = $bindable<HTMLDivElement | null>(null),
 		announcementsEnabled = false,
 		reserveComposerTraySpace = false,
@@ -12,6 +14,7 @@
 		onViewportPortChange,
 		onPresentationPortChange,
 	}: {
+		chatContext: ConversationMessageChatContext;
 		scrollContainer?: HTMLDivElement | null;
 		announcementsEnabled?: boolean;
 		reserveComposerTraySpace?: boolean;
@@ -64,6 +67,7 @@
 <div
 	bind:this={scrollContainer}
 	data-conversation-feed-stub
+	data-chat-context={JSON.stringify(chatContext)}
 	data-announcements-enabled={announcementsEnabled}
 	data-reserve-composer-tray-space={reserveComposerTraySpace}
 >

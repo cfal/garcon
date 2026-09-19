@@ -5,6 +5,7 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import { getLocalSettings, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -51,7 +52,7 @@
 	const EMPTY_PROTECTED_KEYS: readonly string[] = [];
 
 	interface Props {
-		nodeId?: string | null;
+		chatContext: ConversationMessageChatContext;
 		transcript: ActiveTranscriptState;
 		agentId: SessionAgentId;
 		scrollContainer?: HTMLDivElement | null;
@@ -83,7 +84,7 @@
 	}
 
 	let {
-		nodeId,
+		chatContext,
 		transcript,
 		agentId,
 		scrollContainer = $bindable(null),
@@ -116,7 +117,7 @@
 	const remoteSettings = getRemoteSettings();
 	const hiddenBashCommandMatcherFor = createHiddenBashCommandMatcherCache();
 	const rootModelCatalog = getModelCatalog();
-	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forNode(chatContext.nodeId));
 
 	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
 	const canShowForkAtMessage = $derived(
@@ -482,6 +483,7 @@
 						renderModel={projection.renderModel}
 						showThinking={localSettings.showThinking}
 						{pendingPermissionRequests}
+						{chatContext}
 						earlierPageState={chatState.pageStates.earlier}
 						laterPageState={chatState.pageStates.later}
 						loadError={chatState.loadError}

@@ -234,6 +234,27 @@ describe('ConversationPanel', () => {
 		expect(detach).toHaveBeenCalledOnce();
 	});
 
+	it('passes each simultaneous panel its own node and project context', async () => {
+		const localChat = chat();
+		const remoteChat = { ...chat(), id: 'chat-remote', nodeId: '22222222-2222-4222-8222-222222222222', projectPath: '/remote/project' };
+		const panels = [localChat, remoteChat].map((entry) => render(ConversationPanel, {
+			surfaceId: `chat-view:window-${entry.id}`,
+			chat: entry,
+			panel: makePanel().panel,
+			isCommandOwner: entry === localChat,
+			ownsComposer: entry === localChat,
+			actions: makeActions(),
+		}));
+		for (const [index, entry] of [localChat, remoteChat].entries()) {
+			const feed = panels[index].container.querySelector('[data-conversation-feed-stub]');
+			expect(JSON.parse(feed?.getAttribute('data-chat-context') ?? 'null')).toEqual({
+				chatId: entry.id,
+				nodeId: entry.nodeId ?? 'local',
+				projectPath: entry.projectPath,
+			});
+		}
+	});
+
 	it('leaves remount scroll restoration to the panel registry', async () => {
 		runtime.autoScrollToBottom = true;
 		const { panel } = makePanel();

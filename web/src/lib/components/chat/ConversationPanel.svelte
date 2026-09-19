@@ -238,7 +238,7 @@
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed
-				nodeId={chat.nodeId}
+				chatContext={{ chatId, nodeId: chat.nodeId ?? 'local', projectPath: chat.projectPath }}
 				transcript={panel.transcript}
 				agentId={chat.agentId}
 				bind:scrollContainer
