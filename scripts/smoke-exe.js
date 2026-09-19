@@ -24,6 +24,7 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_BIND_ADDRESS',
   'GARCON_PROJECT_BASE_DIR',
   'GARCON_DISABLE_AUTH',
+  'GARCON_AGENT_EXECUTION_NODE_CONFIG',
   'DISABLE_AUTH',
   'PI_PACKAGE_DIR',
   'GARCON_EMBEDDED_PI_PACKAGE_DIR',
@@ -122,6 +123,52 @@ async function assertBundledPreambles(url) {
   }
 }
 
+async function assertCompiledExecutionNode(url, executablePath, workspaceDir) {
+  const response = await fetch(`${url}/api/v1/execution-nodes`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      label: 'Compiled Worker', direction: 'node-connects', allowInsecureDevelopment: true,
+    }),
+  });
+  if (!response.ok) throw new Error(`Unable to configure compiled worker: ${response.status}`);
+  const configured = await response.json();
+  const connection = new URL(configured.connectionUrl);
+  connection.protocol = 'ws:';
+  connection.host = new URL(url).host;
+  connection.hostname = '127.0.0.1';
+  const worker = Bun.spawn({
+    cmd: [
+      executablePath, 'execution-node', '--connect', connection.href,
+      '--allow-insecure-development', '--workspace-dir', path.join(workspaceDir, 'worker'),
+      '--project-base-dir', workspaceDir,
+    ],
+    env: isolatedServerEnvironment(),
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+  const workerErrors = new Response(worker.stderr).text();
+  try {
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    while (true) {
+      if (worker.exitCode !== null) throw new Error(`Compiled worker exited with code ${worker.exitCode}: ${await workerErrors}`);
+      const snapshot = await fetch(`${url}/api/v1/execution-nodes`).then((result) => result.json());
+      if (snapshot.nodes?.some((node) => node.id === configured.id && node.availability === 'ready')) break;
+      if (Date.now() >= deadline) throw new Error('Compiled worker did not become ready');
+      await delay(50);
+    }
+    const inspectionUrl = new URL('/api/v1/chats/validate-start', url);
+    inspectionUrl.searchParams.set('nodeId', configured.id);
+    inspectionUrl.searchParams.set('path', workspaceDir);
+    const inspection = await fetch(inspectionUrl);
+    if (!inspection.ok || !(await inspection.json()).valid) {
+      throw new Error('Compiled worker project inspection failed');
+    }
+  } finally {
+    await stopProcess(worker);
+  }
+}
+
 async function waitForTranscriptResult(url, token, chatId, getServerOutput) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   let lastStatus = 0;
@@ -217,7 +264,7 @@ async function run() {
       '--port',
       '0',
       '--bind-address',
-      '127.0.0.1',
+      '0.0.0.0',
       '--disable-auth',
       '--workspace-dir',
       workspaceDir,
@@ -238,6 +285,7 @@ async function run() {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
     await assertBundledPreambles(started.url);
+    await assertCompiledExecutionNode(started.url, executablePath, workspaceDir);
     await stopProcess(child);
 
     await writeFile(
