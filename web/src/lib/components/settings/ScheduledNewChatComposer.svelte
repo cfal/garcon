@@ -193,7 +193,14 @@
 		/>
 
 		{#if startup.modelSelectionError}
-			<p class="text-sm text-destructive">{startup.modelSelectionError}</p>
+			<div role="status" class="flex items-center gap-2 text-sm text-destructive">
+				<span>{startup.modelSelectionError}</span>
+				{#if startup.nodeReady && modelCatalog.error}
+					<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button>
+				{/if}
+			</div>
+		{:else if startup.modelSelectionPending}
+			<p role="status" class="text-sm text-muted-foreground">Loading models...</p>
 		{/if}
 	</div>
 

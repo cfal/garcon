@@ -16,6 +16,8 @@ import {
 
 interface CatalogOverrides {
 	getModels?(agentId: string): ModelOption[];
+	isValidated?: boolean;
+	error?: string | null;
 }
 
 function createForm(
@@ -36,6 +38,9 @@ function createForm(
 	): ModelOption | null => findModelForSelection(getModels(agentId), model, endpointId);
 	const modelCatalog = {
 		forNode() { return this; },
+		get isValidated() { return catalogOverrides.isValidated ?? true; },
+		get error() { return catalogOverrides.error ?? null; },
+		isRefreshing: false,
 		refreshIfStale: vi.fn(async () => {}),
 		getSelectableAgents: () => selectableAgentIds(),
 		getModels,
@@ -91,6 +96,39 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it.each(['local', '22222222-2222-4222-8222-222222222222'])('requires a validated catalog for a cached %s new-chat target', (nodeId) => {
+		const catalog: CatalogOverrides = { isValidated: true };
+		const form = createForm(undefined, undefined, catalog);
+		form.startup.nodeId = nodeId;
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		form.startup.agentId = 'codex';
+		form.startup.projectPath = '/workspace/project';
+		form.startup.selectedModelsByAgent = { codex: 'gpt-5' };
+		form.date = '2030-01-02';
+		form.time = '09:00';
+		form.prompt = 'Synthetic scheduled prompt';
+		const now = new Date('2030-01-01T00:00:00.000Z');
+		expect(form.canSave).toBe(true);
+		expect(form.buildDefinition(now)).not.toBeNull();
+
+		catalog.isValidated = false;
+		expect(form.startup.resolvedModelSelection).not.toBeNull();
+		expect(form.startup.modelSelectionPending).toBe(true);
+		expect(form.canSave).toBe(false);
+		expect(form.buildDefinition(now)).toBeNull();
+
+		catalog.error = 'Failed to fetch model catalog: 503';
+		expect(form.startup.modelSelectionError).toBe(catalog.error);
+		expect(form.canSave).toBe(false);
+		expect(form.buildDefinition(now)).toBeNull();
+
+		catalog.isValidated = true;
+		catalog.error = null;
+		expect(form.canSave).toBe(true);
+		expect(form.buildDefinition(now)?.prompt).toBe('Synthetic scheduled prompt');
+	});
+
 	it('builds new schedules with execution-time preamble defaults', () => {
 		const form = createForm();
 		form.targetType = 'new-chat';

@@ -101,6 +101,7 @@ export class ScheduledPromptFormState {
 		return (
 			this.startup.settingsLoaded &&
 			this.startup.nodeReady &&
+			this.startup.modelCatalogValidated &&
 			this.options.selectableAgentIds.includes(this.startup.agentId) &&
 			this.startup.validationStatus === 'valid' &&
 			this.startup.resolvedModelSelection !== null

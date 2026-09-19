@@ -77,6 +77,10 @@
 	} as never);
 	setModelCatalog({
 		forNode() { return this; },
+		isValidated: true,
+		lastValidatedAt: 1,
+		isRefreshing: false,
+		error: null,
 		version: 0,
 		agentMetadata: {
 			claude: { label: 'Claude' },

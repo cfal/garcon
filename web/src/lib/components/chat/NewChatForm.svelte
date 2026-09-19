@@ -223,6 +223,13 @@
 		};
 	});
 
+	$effect(() => {
+		if (!form.nodeReady) return;
+		const catalog = modelCatalog;
+		void catalog.lastValidatedAt;
+		untrack(() => void catalog.refreshIfStale());
+	});
+
 	// Revalidates selected models whenever the shared model catalog updates.
 	$effect(() => {
 		void modelCatalog.version;
@@ -729,7 +736,14 @@
 				/>
 
 				{#if displayedFormError}
-					<p class="text-sm text-destructive">{displayedFormError}</p>
+					<div role="status" class="flex items-center gap-2 text-sm text-destructive">
+						<span>{displayedFormError}</span>
+						{#if form.nodeReady && modelCatalog.error}
+							<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button>
+						{/if}
+					</div>
+				{:else if form.modelSelectionPending}
+					<p role="status" class="text-sm text-muted-foreground">Loading models...</p>
 				{/if}
 			</div>
 

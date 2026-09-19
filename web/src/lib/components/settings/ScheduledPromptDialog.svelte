@@ -91,6 +91,13 @@
 	});
 
 	$effect(() => {
+		if (!open || form.targetType !== 'new-chat' || !form.startup.nodeReady) return;
+		const catalog = modelCatalog;
+		void catalog.lastValidatedAt;
+		untrack(() => void catalog.refreshIfStale());
+	});
+
+	$effect(() => {
 		if (!open) return;
 		void modelCatalog.version;
 		form.startup.validateAllModelsAgainstLive();

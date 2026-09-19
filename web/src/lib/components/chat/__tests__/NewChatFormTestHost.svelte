@@ -40,6 +40,9 @@
 	interface Props {
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
+		catalogValidated?: boolean;
+		catalogError?: string | null;
+		onRetryCatalog?: () => Promise<void>;
 		endpointBackedDirectModel?: boolean;
 		modelsAvailable?: boolean;
 		supportsImages?: boolean;
@@ -55,6 +58,9 @@
 	let {
 		allowDirectChats = false,
 		catalogVersion = 0,
+		catalogValidated = true,
+		catalogError = null,
+		onRetryCatalog = async () => {},
 		endpointBackedDirectModel = false,
 		modelsAvailable = true,
 		supportsImages = true,
@@ -180,6 +186,10 @@
 
 	setModelCatalog({
 		forNode() { return this; },
+		get isValidated() { return catalogValidated; },
+		get error() { return catalogError; },
+		get lastValidatedAt() { return catalogValidated ? 1 : null; },
+		isRefreshing: false,
 		get version() {
 			return catalogVersion;
 		},
@@ -274,6 +284,7 @@
 		refreshIfStale() {
 			return Promise.resolve();
 		},
+		forceRefresh() { return onRetryCatalog(); },
 		findEndpoint() {
 			return null;
 		},

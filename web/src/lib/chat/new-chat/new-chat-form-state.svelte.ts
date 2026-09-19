@@ -128,6 +128,7 @@ export class NewChatFormState {
 
 	get localMachine(): boolean { return this.nodeId === 'local'; }
 	get nodeReady(): boolean { return this.#options.executionNodes?.isReady(this.nodeId) ?? true; }
+	get modelCatalogValidated(): boolean { return this.#modelCatalog.isValidated; }
 
 	selectNode(value?: string | null): void {
 		const nodeId = effectiveNodeId(value);
@@ -178,6 +179,7 @@ export class NewChatFormState {
 		return (
 			this.settingsLoaded &&
 			this.nodeReady &&
+			this.modelCatalogValidated &&
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
@@ -225,6 +227,8 @@ export class NewChatFormState {
 	}
 
 	get modelSelectionPending(): boolean {
+		if (!this.nodeReady) return false;
+		if (!this.modelCatalogValidated) return this.#modelCatalog.isRefreshing || !this.#modelCatalog.error;
 		return (
 			!this.resolvedModelSelection &&
 			!this.#catalogRefreshCompleted &&
@@ -233,7 +237,10 @@ export class NewChatFormState {
 	}
 
 	get modelSelectionError(): string | null {
-		if (this.resolvedModelSelection || this.modelSelectionPending) return null;
+		if (!this.nodeReady) return 'Execution node is unavailable';
+		if (this.modelSelectionPending) return null;
+		if (!this.modelCatalogValidated) return this.#modelCatalog.error ?? m.model_selector_unavailable();
+		if (this.resolvedModelSelection) return null;
 		return m.model_selector_unavailable();
 	}
 
@@ -681,7 +688,7 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
-		if (this.modelSelectionError) return null;
+		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError) return null;
 		if (!this.trimmedPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
 			return null;

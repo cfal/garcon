@@ -165,6 +165,9 @@ function modelsForAgent(agentId: string): ModelOption[] {
 
 const mockModelCatalog = {
 	forNode() { return this; },
+	isValidated: true,
+	isRefreshing: false,
+	error: null as string | null,
 	agentMetadata: {
 		claude: { label: 'Claude' },
 		codex: { label: 'Codex' },
@@ -221,6 +224,9 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
+		mockModelCatalog.isValidated = true;
+		mockModelCatalog.isRefreshing = false;
+		mockModelCatalog.error = null;
 		vi.mocked(gitApi.getGitWorktrees).mockReset();
 		vi.mocked(gitApi.gitCreateWorktree).mockReset();
 		mockModelCatalog.getSelectableAgents.mockImplementation(() => [
@@ -845,6 +851,36 @@ describe('NewChatFormState', () => {
 		expect(formState.agentId).toBe('claude');
 		expect(formState.modelValue).toBe('opus');
 		expect(formState.modelSelectionError).toBeNull();
+	});
+
+	it.each(['local', '22222222-2222-4222-8222-222222222222'])('blocks cached models on %s until catalog revalidation succeeds', async (nodeId) => {
+		await formState.loadSettingsAndModels();
+		formState.selectNode(nodeId);
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Synthetic initial prompt';
+		expect(formState.canSubmit).toBe(true);
+		expect(formState.buildConfig()).not.toBeNull();
+
+		mockModelCatalog.isValidated = false;
+		mockModelCatalog.isRefreshing = true;
+		expect(formState.resolvedModelSelection).not.toBeNull();
+		expect(formState.modelSelectionPending).toBe(true);
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+
+		mockModelCatalog.isRefreshing = false;
+		mockModelCatalog.error = 'Failed to fetch model catalog: 503';
+		expect(formState.modelSelectionPending).toBe(false);
+		expect(formState.modelSelectionError).toBe(mockModelCatalog.error);
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+		expect(formState.firstMessage).toBe('Synthetic initial prompt');
+
+		mockModelCatalog.isValidated = true;
+		mockModelCatalog.error = null;
+		expect(formState.canSubmit).toBe(true);
+		expect(formState.buildConfig()?.firstMessage).toBe('Synthetic initial prompt');
 	});
 
 	it('applies eligible startup recents after background catalog discovery', async () => {

@@ -745,7 +745,6 @@ export class ModelCatalogStore {
 
 	async #syncWithServer(options: { force?: boolean }, requestVersion: number): Promise<void> {
 		this.isRefreshing = true;
-		this.error = null;
 
 		try {
 			const response = await this.#fetchCatalogResponse(options);
@@ -755,6 +754,7 @@ export class ModelCatalogStore {
 			if (response.status === 304) {
 				this.etag = responseEtag ?? this.etag;
 				this.lastValidatedAt = Date.now();
+				this.error = null;
 				this.#persistCurrentSnapshot();
 				return;
 			}
@@ -779,6 +779,7 @@ export class ModelCatalogStore {
 			this.etag = responseEtag;
 			this.lastFetchedAt = now;
 			this.lastValidatedAt = now;
+			this.error = null;
 			persist(this.nodeId, this.#currentSnapshot());
 			this.version += 1;
 		} catch (error) {
