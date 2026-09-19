@@ -26,6 +26,7 @@ import {
 } from '../../common/transcript-seed.js';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
+import { isExecutionNodeId } from '../../common/execution-nodes.js';
 import { createLogger } from '../lib/log.js';
 import { isCarryOverSegmentId } from './carryover-segment-types.js';
 import {
@@ -108,6 +109,8 @@ export function normalizeChatRegistryEntry(
   rawEntry: Record<string, unknown>,
   chatId: string,
 ): ChatRegistryEntry {
+  const nodeId = rawEntry.nodeId;
+  if (nodeId != null && !isExecutionNodeId(nodeId)) throw new Error('Invalid execution node ID');
   const agentId = normalizeAgentId(rawEntry);
   const nativeSession = normalizeNativeSession(rawEntry.nativeSession, agentId);
   const agentSettingsById = parseAgentSettingsById(rawEntry.agentSettingsById);
@@ -121,6 +124,7 @@ export function normalizeChatRegistryEntry(
   assertPreambleBoundaryBinding({ agentOwnershipEpoch, pendingPreambleBoundary, preambleSelection });
   assertSeedReceiptBinding({ agentSessionId, nativeSeedReceipt });
   return {
+    ...(nodeId === undefined ? {} : { nodeId }),
     agentId,
     agentSessionId,
     nativeSession,

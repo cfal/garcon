@@ -38,6 +38,18 @@ function response() {
 }
 
 describe('chat list contract', () => {
+  it('preserves optional node identity and rejects malformed explicit IDs', () => {
+    for (const nodeId of [undefined, null, 'local', '22222222-2222-4222-8222-222222222222']) {
+      const value = response();
+      if (nodeId !== undefined) value.sessions[0].nodeId = nodeId;
+      expect(parseChatListResponse(value)).toEqual(value);
+    }
+    for (const nodeId of ['', 'unconfigured-name', 12]) {
+      const value = response();
+      value.sessions[0].nodeId = nodeId;
+      expect(() => parseChatListResponse(value)).toThrow('nodeId');
+    }
+  });
   it('parses every field needed for filtering, joining, and resume admission', () => {
     expect(parseChatListResponse(response())).toEqual(response());
   });

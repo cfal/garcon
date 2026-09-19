@@ -22,12 +22,14 @@ import {
   type ChatTransientFeedSnapshot,
 } from './chat-transient-feed.js';
 import { normalizeTags } from './tags.js';
+import { isExecutionNodeId } from './execution-nodes.js';
 
 export const CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 10;
 export const CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT = 200;
 
 export interface ChatSnapshotChat {
   id: string;
+  nodeId?: string | null;
   title: string;
   agentId: string;
   agentOwnershipEpoch: string;
@@ -149,8 +151,11 @@ function parseChat(value: unknown): ChatSnapshotChat {
   }
 
   const activity = record(raw.activity, 'chat.activity');
+  const nodeId = raw.nodeId;
+  if (nodeId != null && !isExecutionNodeId(nodeId)) fail('chat.nodeId is invalid');
   return {
     id,
+    ...(nodeId === undefined ? {} : { nodeId }),
     title: requiredString(raw.title, 'chat.title'),
     agentId: requiredString(raw.agentId, 'chat.agentId'),
     agentOwnershipEpoch: requiredString(

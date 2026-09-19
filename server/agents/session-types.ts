@@ -22,6 +22,7 @@ export type AgentExecutionCommandType = TurnCommandType;
 export type { ChatPreambleSelection };
 
 export interface PersistedChatExecutionConfig {
+  nodeId?: string | null;
   projectPath?: string;
   model?: string;
   permissionMode?: PermissionMode;
@@ -82,6 +83,7 @@ export interface PrepareProjectPathUpdateRequest {
 }
 
 export interface AgentChatEntry {
+  nodeId?: string | null;
   agentId: AgentName;
   projectPath: string;
   agentSessionId?: string | null;
@@ -118,6 +120,7 @@ export function requireChatExecutionConfig(
   if (!entry.model) throw new Error(`Chat ${chatId} is missing model`);
 
   return {
+    ...(entry.nodeId === undefined ? {} : { nodeId: entry.nodeId }),
     projectPath: entry.projectPath,
     model: entry.model,
     permissionMode: normalizePermissionMode(entry.permissionMode),

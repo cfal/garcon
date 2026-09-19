@@ -111,6 +111,7 @@ export class ChatListProjector {
     return {
       chat: {
         id: chatId,
+        ...(session.nodeId === undefined ? {} : { nodeId: session.nodeId }),
         agentId: session.agentId,
         agentOwnershipEpoch: session.agentOwnershipEpoch,
         carryOverRevision: carryOverRevision(
@@ -153,6 +154,7 @@ export class ChatListProjector {
     const lastActivityAt = chat.activity.lastActivityAt;
     return {
       id: chat.id,
+      ...(session.nodeId === undefined ? {} : { nodeId: session.nodeId }),
       parentChat: session.parentChat,
       agentId: chat.agentId,
       agentOwnershipEpoch: session.agentOwnershipEpoch,

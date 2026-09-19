@@ -25,6 +25,7 @@ import {
 } from '../../common/chat-parentage.js';
 import type { AgentName } from "../agents/session-types.js";
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import { isExecutionNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import {
   assertPreambleBoundaryBinding,
   assertSeedReceiptBinding,
@@ -110,6 +111,7 @@ export interface CarryOverSegmentRef {
 }
 
 export interface ChatRegistryEntry {
+  nodeId?: string | null;
   agentId: AgentName;
   nativeSession: AgentNativeSessionRef | null;
   agentOwnershipEpoch: string;
@@ -162,6 +164,7 @@ export class ChatRegistryDurabilityUnknownError extends Error {
 
 export interface NewChatRegistryEntry {
   id: string;
+  nodeId?: string | null;
   agentId: AgentName;
   model: string;
   projectPath: string;
@@ -429,6 +432,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   addChat({
     id,
+    nodeId,
     agentId,
     model,
     projectPath,
@@ -451,6 +455,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   }: NewChatRegistryEntry): boolean {
     const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
+    if (nodeId != null && !isExecutionNodeId(nodeId)) throw new Error('Invalid execution node ID');
     if (!model) throw new Error('Model not specified');
     if (!projectPath) throw new Error('Project path not specified');
     const registry = this.getRegistry();
@@ -477,6 +482,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       nativeSeedReceipt: normalizedReceipt,
     });
     registry.sessions[chatId] = {
+      ...(nodeId == null || nodeId === LOCAL_EXECUTION_NODE_ID ? {} : { nodeId }),
       agentId,
       nativeSession: nativeSession ? structuredClone(nativeSession) : null,
       agentOwnershipEpoch,
