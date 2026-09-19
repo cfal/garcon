@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AssistantMessage, BashToolUseMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, GrepToolUseMessage, ReadToolUseMessage, ThinkingMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
 import {
 	ActiveTranscriptState,
 	type ChatDisplayRow,
@@ -53,6 +53,9 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		hiddenToolTypes: NO_HIDDEN_TOOL_TYPES,
 		hiddenBashCommands: null,
 		showThinking: true,
+		combineToolUseMessages: false,
+		expandedToolMemberIds: new Set(),
+		protectedVirtualKeys: [],
 		isLiveWindow: true,
 		showRefreshError: false,
 		showEarlierBoundary: false,
@@ -65,6 +68,68 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 }
 
 describe('ConversationFeedProjectionState', () => {
+	it('groups only visible adjacent ordinary inputs after result and thinking policy', () => {
+		const projectedRows: ChatDisplayRow[] = [
+			{ kind: 'message', id: 'generation-1:1', message: new BashToolUseMessage(TS, 'a', 'pwd') },
+			{ kind: 'message', id: 'generation-1:2', message: new ToolResultMessage(TS, 'a', { raw: 'ok' }, false) },
+			{ kind: 'message', id: 'generation-1:3', message: new ThinkingMessage(TS, 'hidden') },
+			{ kind: 'message', id: 'generation-1:4', message: new ReadToolUseMessage(TS, 'b', '/a') },
+			{ kind: 'message', id: 'generation-1:5', message: new GrepToolUseMessage(TS, 'c', 'needle') },
+			{ kind: 'message', id: 'generation-1:6', message: new ToolResultMessage(TS, 'c', { raw: 'match' }, false) },
+			{ kind: 'message', id: 'generation-1:7', message: new ReadToolUseMessage(TS, 'd', '/b') },
+			{ kind: 'message', id: 'generation-1:8', message: new AssistantMessage(TS, 'done') },
+		];
+		const projection = new ConversationFeedProjectionState().reconcile(input({
+			rows: projectedRows,
+			showThinking: false,
+			combineToolUseMessages: true,
+		}));
+		const groups = projection.model.items.filter((item) => item.kind === 'tool-group');
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.members.map((member) => member.item.id)).toEqual([
+			'generation-1:1', 'generation-1:4', 'generation-1:5',
+		]);
+		expect(projection.model.indexByRowId.get('generation-1:1')).toBe(
+			projection.model.indexByRowId.get('generation-1:5'),
+		);
+		expect(projection.model.indexByRowId.has('generation-1:2')).toBe(false);
+		expect(projection.model.indexByRowId.has('generation-1:3')).toBe(false);
+		expect(projection.model.items[projection.model.indexByRowId.get('generation-1:6')!]).toMatchObject({ kind: 'transcript' });
+		expect(projection.model.items[projection.model.indexByRowId.get('generation-1:7')!]).toMatchObject({ kind: 'transcript' });
+		expect(projection.renderModel.toolResultRowIdByUseRowId.get('generation-1:5')).toBe('generation-1:6');
+	});
+
+	it('rebuilds grouped membership on tail append, disclosure, and setting changes', () => {
+		const firstRows: ChatDisplayRow[] = [
+			{ kind: 'message', id: 'generation-1:1', message: new ReadToolUseMessage(TS, 'a', '/a') },
+		];
+		const secondRows = [
+			...firstRows,
+			{ kind: 'message' as const, id: 'generation-1:2', message: new ReadToolUseMessage(TS, 'b', '/b') },
+		];
+		const thirdRows = [
+			...secondRows,
+			{ kind: 'message' as const, id: 'generation-1:3', message: new ReadToolUseMessage(TS, 'c', '/c') },
+		];
+		const projections = new ConversationFeedProjectionState();
+		const first = projections.reconcile(input({ rows: firstRows, combineToolUseMessages: true }));
+		expect(first.model.items.some((item) => item.kind === 'tool-group')).toBe(false);
+		const second = projections.reconcile(input({ rows: secondRows, combineToolUseMessages: true, mutationClock: clock(2, { 'live-append': 2 }) }));
+		const secondGroup = second.model.items.find((item) => item.kind === 'tool-group');
+		expect(secondGroup?.members).toHaveLength(2);
+		const third = projections.reconcile(input({ rows: thirdRows, combineToolUseMessages: true, mutationClock: clock(3, { 'live-append': 3 }) }));
+		const thirdGroup = third.model.items.find((item) => item.kind === 'tool-group');
+		expect(thirdGroup?.key).toBe(secondGroup?.key);
+		expect(thirdGroup?.members).toHaveLength(3);
+		expect(third.geometry.geometryRevision).toBeGreaterThan(second.geometry.geometryRevision);
+		const expandedIds = new Set(['generation-1:2']);
+		const expanded = projections.reconcile(input({ rows: thirdRows, combineToolUseMessages: true, expandedToolMemberIds: expandedIds, mutationClock: clock(3, { 'live-append': 3 }) }));
+		expect(expanded.model.items.filter((item) => item.kind === 'transcript')).toHaveLength(3);
+		expect(expanded.model.items.find((item) => item.kind === 'tool-group')?.expanded).toBe(true);
+		const off = projections.reconcile(input({ rows: thirdRows, combineToolUseMessages: false, mutationClock: clock(3, { 'live-append': 3 }) }));
+		expect(off.model.items.some((item) => item.kind === 'tool-group')).toBe(false);
+		expect(off.model.indexByRowId.size).toBe(3);
+	});
 	it('namespaces virtual keys without changing semantic row targets', () => {
 		const projection = new ConversationFeedProjectionState().reconcile(input());
 

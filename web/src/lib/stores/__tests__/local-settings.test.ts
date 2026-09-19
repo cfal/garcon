@@ -22,6 +22,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
+		expect(store.combineToolUseMessages).toBe(false);
 		expect(store.allowDirectChats).toBe(false);
 		expect(store.sidebarGrouping).toBe('project-and-activity');
 		expect(store.sidebarInactivityDuration).toBe('3-days');
@@ -52,6 +53,46 @@ describe('LocalSettingsStore', () => {
 		expect(restored.codeEditorVimMode).toBe(true);
 		store.destroy();
 		restored.destroy();
+	});
+
+	it('persists tool-use combination independently of tool expansion', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('combineToolUseMessages');
+		expect(store.combineToolUseMessages).toBe(true);
+		expect(store.autoExpandTools).toBe(false);
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'))
+			.toMatchObject({ combineToolUseMessages: true, autoExpandTools: false });
+		const restored = createLocalSettingsStore();
+		expect(restored.combineToolUseMessages).toBe(true);
+		restored.set('combineToolUseMessages', false);
+		expect(restored.combineToolUseMessages).toBe(false);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('ignores malformed persisted tool-use combination values', () => {
+		for (const value of [null, 1, 'true', {}, []]) {
+			localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: value }));
+			const store = createLocalSettingsStore();
+			expect(store.combineToolUseMessages).toBe(false);
+			store.destroy();
+		}
+	});
+
+	it('synchronizes tool-use combination from another tab and storage clear', () => {
+		const store = createLocalSettingsStore();
+		const changed = JSON.stringify({ ...store.snapshot(), combineToolUseMessages: true });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, changed);
+		window.dispatchEvent(new StorageEvent('storage', {
+			key: LOCAL_STORAGE_KEYS.localSettings, newValue: changed, storageArea: localStorage,
+		}));
+		expect(store.combineToolUseMessages).toBe(true);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(new StorageEvent('storage', {
+			key: LOCAL_STORAGE_KEYS.localSettings, newValue: null, storageArea: localStorage,
+		}));
+		expect(store.combineToolUseMessages).toBe(false);
+		store.destroy();
 	});
 
 	it('persists fixed and System theme preferences atomically', () => {

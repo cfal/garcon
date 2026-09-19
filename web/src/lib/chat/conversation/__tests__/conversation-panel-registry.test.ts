@@ -905,6 +905,24 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('restores a collapsed group summary without requesting exact-member reveal', async () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const panel = registry.panel('chat-view:window-left');
+		if (!panel) throw new Error('Expected panel');
+		const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		panel.attachPresentation(port({ kind: 'end' }));
+		await panel.restore({
+			kind: 'group-summary', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: 9,
+		});
+		expect(jump).toHaveBeenCalledWith({
+			chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1',
+		}, { viewportOffset: 9, presentation: 'group-summary' });
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('defers a detached row restore until its presentation attaches', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);

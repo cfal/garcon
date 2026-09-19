@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ConversationTranscriptItem from './ConversationTranscriptItem.svelte';
+	import ConversationToolGroupRow from './ConversationToolGroupRow.svelte';
 	import TranscriptPageBoundary from './TranscriptPageBoundary.svelte';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -42,6 +43,7 @@
 		canForkAtMessageNow: boolean;
 		itemState: ConversationFeedItemState;
 		acquireTransientActivity: (close: () => void) => () => void;
+		onToggleToolGroup?: (memberIds: readonly string[], expanded: boolean) => void;
 	}
 
 	let {
@@ -64,6 +66,7 @@
 		canForkAtMessageNow,
 		itemState,
 		acquireTransientActivity,
+		onToggleToolGroup = () => {},
 	}: Props = $props();
 
 	function permissionRequestMessage(request: PendingPermissionRequest): PermissionRequestMessage {
@@ -127,6 +130,8 @@
 			<div aria-hidden="true" class="h-2 sm:h-3"></div>
 		{/if}
 	</div>
+{:else if item.kind === 'tool-group'}
+	<ConversationToolGroupRow {item} onToggle={onToggleToolGroup} />
 {:else}
 	<div class="flow-root">
 		<ConversationTranscriptItem

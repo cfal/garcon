@@ -25,6 +25,9 @@
 		permissionRequest('occurrence-two', 'Second'),
 	];
 	const model = buildConversationVirtualFeedModel({
+		combineToolUseMessages: false,
+		expandedToolMemberIds: new Set(),
+		protectedVirtualKeys: [],
 		showRefreshError: false,
 		showEarlierBoundary: false,
 		showLaterBoundary: false,

@@ -5,4 +5,10 @@ export type ConversationPanelRestoreTarget =
 			readonly transcriptViewId: string;
 			readonly ordinal: number;
 			readonly viewportOffset: number;
+	  }
+	| {
+			readonly kind: 'group-summary';
+			readonly transcriptViewId: string;
+			readonly ordinal: number;
+			readonly viewportOffset: number;
 	  };

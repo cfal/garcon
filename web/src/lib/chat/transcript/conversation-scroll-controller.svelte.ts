@@ -16,6 +16,8 @@ import type {
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
+import { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
+import { observeConversationQueueResize } from './conversation-queue-resize.js';
 import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type {
 	ConversationViewportIntentCancellationResult,
@@ -57,6 +59,7 @@ export class ConversationScrollController {
 	#isAutoFillingViewport = $state(false);
 	#isViewportAtStart = $state(true);
 	#refillViewportAfterCurrentFill = false;
+	#compressedAutoFillBudget = new ConversationCompressedAutoFillBudget();
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
 	#initialBottomPaintChatId = $state<string | null>(null);
@@ -481,7 +484,7 @@ export class ConversationScrollController {
 
 	async jumpToMessageRow(
 		target: UserMessageNavigatorTarget,
-		options: { viewportOffset?: number } = {},
+		options: { viewportOffset?: number; presentation?: 'group-summary' } = {},
 	): Promise<UserMessageNavigatorSelectionResult> {
 		if (
 			this.deps.getChatId() !== target.chatId ||
@@ -585,6 +588,7 @@ export class ConversationScrollController {
 
 		const viewport = this.deps.getViewport();
 		if (!viewport) return;
+		this.#compressedAutoFillBudget.startChat(chatId);
 		this.#isAutoFillingViewport = true;
 		try {
 			// Deliberately chains pages only while the visible viewport remains underfilled.
@@ -597,6 +601,8 @@ export class ConversationScrollController {
 				if (layout !== 'settled') return;
 				if ((await viewport.measureViewportFill()) !== 'underfilled') return;
 				if (this.#activeTargetNavigations > 0) return;
+				const compressed = viewport.hasCollapsedToolGroups();
+				if (!this.#compressedAutoFillBudget.canLoad(compressed)) return;
 
 				let result: TranscriptPageLoadResult;
 				if (this.deps.chatState.hasLaterMessages) {
@@ -615,6 +621,7 @@ export class ConversationScrollController {
 					return;
 				}
 				if (result !== 'loaded') return;
+				this.#compressedAutoFillBudget.recordLoaded(compressed);
 				if (this.isPinnedToBottom && !this.deps.chatState.hasLaterMessages) viewport.scrollToEnd();
 			}
 		} finally {
@@ -627,21 +634,13 @@ export class ConversationScrollController {
 	}
 
 	observeQueueResize(): (() => void) | undefined {
-		const host = this.deps.getQueueContainer();
-		if (!host || typeof ResizeObserver === 'undefined') return undefined;
-		let previousHeight = host.offsetHeight;
-		const observer = new ResizeObserver((entries) => {
-			const nextHeight = entries[0]?.contentRect.height ?? host.offsetHeight;
-			const delta = nextHeight - previousHeight;
-			previousHeight = nextHeight;
-			if (!this.#isViewportVisible || this.#activeTargetNavigations > 0 || delta === 0) return;
-			const viewport = this.deps.getViewport();
-			if (!viewport) return;
-			if (this.isPinnedToBottom) this.scrollToBottom();
-			else viewport.scrollBy(delta);
-		});
-		observer.observe(host);
-		return () => observer.disconnect();
+		return observeConversationQueueResize(
+			this.deps.getQueueContainer(),
+			() => this.#isViewportVisible && this.#activeTargetNavigations === 0,
+			() => this.deps.getViewport(),
+			() => this.isPinnedToBottom,
+			() => this.scrollToBottom(),
+		);
 	}
 
 	observeScrollContainerResize(): (() => void) | undefined {

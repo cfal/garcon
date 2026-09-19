@@ -57,6 +57,7 @@ interface ConversationFeedVirtualControllerOptions {
 	get visible(): boolean;
 	get pinned(): boolean;
 	get retention(): ConversationFeedRetentionState;
+	revealToolGroup?(memberRowId: string): Promise<'applied' | 'cancelled'>;
 	onInitialEndRestored?(): void;
 	onTransaction?(record: VirtualTransactionRecord): void;
 }
@@ -201,6 +202,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		const identityChanged =
 			nextGeometry.surfaceIdentity !== this.#configuredGeometry.surfaceIdentity;
+		const previousModel = this.#configuredModel;
 		const structure = classifyConversationVirtualStructure({
 			identityChanged,
 			previousKeys: this.#configuredGeometry.keys,
@@ -232,14 +234,22 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				input.scrollbarDragActive,
 			);
 		}
-		const selectedAnchor = this.#resolveAnchor(readingAnchor, input.next.model);
+		const selected = identityChanged
+			? null
+			: this.#remapAnchor(readingAnchor, previousModel, input.next.model);
+		const selectedAnchor = selected?.anchor ?? null;
+		const nextHiddenAnchor = identityChanged
+			? null
+			: this.#remapAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null;
 		const anchor: VirtualMutationAnchor =
 			this.#activeTargetScrolls > 0 || nextGeometry.endBehavior === 'explicit-navigation'
 				? { kind: 'none' }
 				: restoreEnd
 					? { kind: 'end' }
-					: selectedAnchor
-						? { kind: 'item', key: selectedAnchor.key }
+					: selected
+						? selected.oldKey === selected.anchor.key
+							? { kind: 'item', key: selected.oldKey }
+							: { kind: 'item-remap', oldKey: selected.oldKey, newKey: selected.anchor.key }
 						: { kind: 'none' };
 		const result = this.#virt.apply(
 			identityChanged
@@ -259,6 +269,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 		this.#configuredGeometry = nextGeometry;
 		this.#configuredModel = input.next.model;
+		this.#hiddenAnchor = nextHiddenAnchor;
 		this.#configuredTranscriptKeys = transcriptKeys(input.next.model);
 		this.#configuredPinned = input.pinned;
 		this.#appliedDataRevision = Math.max(
@@ -310,6 +321,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (pinned) return { kind: 'end' };
 		const messageKeys = new Set<string>();
 		for (const item of this.#configuredModel.items) {
+			if (item.kind === 'tool-group') {
+				const first = item.members[0]?.item;
+				if (first?.kind === 'message' && first.ordinal !== undefined) {
+					messageKeys.add(item.key);
+				}
+				continue;
+			}
 			if (
 				item.kind !== 'transcript' ||
 				item.item.kind !== 'message' ||
@@ -333,6 +351,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			const index = this.#configuredModel.indexByKey.get(key);
 			if (index === undefined) continue;
 			const virtualItem = this.#configuredModel.items[index];
+			if (virtualItem?.kind === 'tool-group') {
+				const first = virtualItem.members[0]?.item;
+				if (first?.kind !== 'message' || first.ordinal === undefined) continue;
+				return {
+					kind: 'group-summary',
+					transcriptViewId,
+					ordinal: first.ordinal,
+					viewportOffset: key === anchor.key ? anchor.viewportOffset : 0,
+				};
+			}
 			if (
 				virtualItem?.kind !== 'transcript' ||
 				virtualItem.item.kind !== 'message' ||
@@ -355,6 +383,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	isReady(): boolean {
 		return !this.#destroyed && this.options.visible && this.#virt.viewportPosition !== null;
+	}
+
+	hasCollapsedToolGroups(): boolean {
+		return this.#configuredModel.collapsedGroupByMemberRowId.size > 0;
 	}
 
 	isAtEnd(threshold = CHAT_GEOMETRY_END_THRESHOLD_PX): boolean {
@@ -533,12 +565,35 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			await nextConversationLayoutFrame();
 			if (token !== this.#targetToken) return 'cancelled';
 			if (!this.isReady()) return 'not-ready';
+			const memberRowId = target.kind === 'dom-anchor'
+				? this.#configuredModel.memberRowIdByDomAnchorId.get(target.id)
+				: target.id;
+			if (
+				target.kind !== 'presentation-row' &&
+				memberRowId &&
+				this.#configuredModel.collapsedGroupByMemberRowId.has(memberRowId)
+			) {
+				const surface = this.#configuredGeometry.surfaceIdentity;
+				const revealed = await this.options.revealToolGroup?.(memberRowId);
+				if (token !== this.#targetToken || surface !== this.#configuredGeometry.surfaceIdentity) {
+					return 'cancelled';
+				}
+				if (revealed !== 'applied' || !this.isReady()) return 'not-ready';
+				if (this.#configuredModel.collapsedGroupByMemberRowId.has(memberRowId)) return 'cancelled';
+			}
 			const model = this.#configuredModel;
 			const resolved =
-				target.kind === 'row'
+				target.kind === 'row' || target.kind === 'presentation-row'
 					? (() => {
 							const index = model.indexByRowId.get(target.id);
-							return index === undefined ? undefined : { index, innerRowId: target.id };
+							if (index === undefined) return undefined;
+							const item = model.items[index];
+							return {
+								index,
+								innerRowId: target.kind === 'presentation-row' && item?.kind === 'tool-group'
+									? item.anchorId
+									: target.id,
+							};
 						})()
 					: model.targetByDomAnchorId.get(target.id);
 			if (!resolved) return 'target-missing';
@@ -614,6 +669,33 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		return key
 			? { key, viewportOffset: key === anchor.key ? anchor.viewportOffset : 0, fallbackKeys: [] }
 			: null;
+	}
+
+	#remapAnchor(
+		anchor: ConversationVirtualAnchor | null,
+		previous: ConversationVirtualFeedModel,
+		next: ConversationVirtualFeedModel,
+	): { oldKey: string; anchor: ConversationVirtualAnchor } | null {
+		if (!anchor) return null;
+		for (const candidate of [anchor.key, ...anchor.fallbackKeys]) {
+			let nextKey = candidate;
+			if (!next.indexByKey.has(candidate)) {
+				const rowId = previous.representativeRowIdByKey.get(candidate);
+				const index = rowId === undefined ? undefined : next.indexByRowId.get(rowId);
+				nextKey = index === undefined ? '' : (next.items[index]?.key ?? '');
+			}
+			if (nextKey) {
+				return {
+					oldKey: candidate,
+					anchor: {
+						key: nextKey,
+						viewportOffset: candidate === anchor.key ? anchor.viewportOffset : 0,
+						fallbackKeys: [],
+					},
+				};
+			}
+		}
+		return null;
 	}
 
 	#restoreVirtualAnchor(anchor: ConversationVirtualAnchor): boolean {
@@ -783,5 +865,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 }
 
 function transcriptKeys(model: ConversationVirtualFeedModel): ReadonlySet<string> {
-	return new Set(model.items.flatMap((item) => (item.kind === 'transcript' ? [item.key] : [])));
+	return new Set(model.items.flatMap((item) =>
+		item.kind === 'transcript' || item.kind === 'tool-group' ? [item.key] : []));
 }

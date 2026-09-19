@@ -17,7 +17,7 @@ interface RowViewportPort {
 
 export async function jumpToLoadedTranscriptRow(
 	target: UserMessageNavigatorTarget,
-	options: { viewportOffset?: number },
+	options: { viewportOffset?: number; presentation?: 'group-summary' },
 	current: () => boolean,
 	port: RowViewportPort & {
 		readonly wasPinned: boolean;
@@ -31,7 +31,7 @@ export async function jumpToLoadedTranscriptRow(
 	if (!viewport) return 'unavailable';
 	port.preserveHistoryBrowsing();
 	const result = await viewport.scrollToTarget(
-		{ kind: 'row', id: target.rowId },
+		{ kind: options.presentation === 'group-summary' ? 'presentation-row' : 'row', id: target.rowId },
 		options.viewportOffset === undefined
 			? { align: 'center' }
 			: { viewportOffset: options.viewportOffset },

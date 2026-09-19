@@ -33,6 +33,7 @@
 	};
 	const viewport: ConversationViewportPort = {
 		isReady: () => true,
+		hasCollapsedToolGroups: () => false,
 		isAtEnd: () => false,
 		ownsScrollPosition: () => false,
 		viewportPosition: () => null,

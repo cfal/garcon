@@ -78,6 +78,9 @@
 			indexByKey: new Map(keys.map((key, index) => [key, index])),
 			indexByRowId: new Map(),
 			targetByDomAnchorId: new Map(),
+			memberRowIdByDomAnchorId: new Map(),
+			representativeRowIdByKey: new Map(keys.map((key, index) => [key, `row-${index}`])),
+			collapsedGroupByMemberRowId: new Map(),
 			transcriptStartIndex: 0,
 			transcriptEndIndex: items.length,
 		};

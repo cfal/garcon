@@ -199,6 +199,11 @@ describe('Settings', () => {
 			).toBeTruthy();
 			await fireEvent.click(alwaysExpandCliMessages);
 			expect(onLocalToggle).toHaveBeenCalledWith('alwaysExpandCliMessages');
+			const combineToolUses = screen.getByRole('switch', { name: 'Combine tool use messages' });
+			expect(combineToolUses.getAttribute('aria-checked')).toBe('false');
+			await fireEvent.click(combineToolUses);
+			expect(combineToolUses.getAttribute('aria-checked')).toBe('true');
+			expect(onLocalToggle).toHaveBeenCalledWith('combineToolUseMessages');
 			const allowDirectChats = screen.getByRole('switch', { name: 'Allow direct chats' });
 			expect(allowDirectChats.getAttribute('aria-checked')).toBe('false');
 			expect(

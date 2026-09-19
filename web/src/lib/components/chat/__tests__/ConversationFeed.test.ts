@@ -110,6 +110,58 @@ describe('ConversationFeed', () => {
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
 	});
 
+	it('combines ordinary tool rows behind an accessible disclosure without changing the off path', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
+		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
+		expect(container.querySelector('[data-chat-tool-group]')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		const group = await screen.findByRole('button', { name: '3 tool uses: Bash 3' });
+		expect(group.getAttribute('aria-expanded')).toBe('false');
+		expect(group.hasAttribute('aria-controls')).toBe(false);
+		expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0);
+		await fireEvent.click(group);
+		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
+		expect(group.getAttribute('aria-expanded')).toBe('true');
+		await fireEvent.click(group);
+		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0));
+		expect(group.getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('keeps a large expanded tool run individually virtualized', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'large-tool-run' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		const group = await screen.findByRole('button', { name: '200 tool uses: Bash 200' });
+		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
+		expect(Number(container.querySelector('[data-chat-virtual-sizer]')?.getAttribute('data-chat-virtual-model-count'))).toBe(4);
+		await fireEvent.click(group);
+		await waitFor(() => {
+			const sizer = container.querySelector('[data-chat-virtual-sizer]');
+			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(204);
+			expect(Number(sizer?.getAttribute('data-chat-virtual-count'))).toBeLessThan(100);
+		});
+	});
+
+	it('restores a collapsed summary but reveals exact durable members for row navigation', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		const group = await screen.findByRole('button', { name: '3 tool uses: Bash 3' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Restore group summary' }));
+		await waitFor(() => expect(screen.getByTestId('tool-navigation-result').textContent).toBe('completed'));
+		expect(group.getAttribute('aria-expanded')).toBe('false');
+		for (const [name, ordinal] of [
+			['Navigate first tool', 1],
+			['Navigate middle tool', 2],
+			['Navigate last tool', 3],
+		] as const) {
+			await fireEvent.click(screen.getByRole('button', { name }));
+			await waitFor(() => {
+				expect(screen.getByTestId('tool-navigation-result').textContent).toBe('completed');
+				expect(container.querySelector(`[data-chat-row-id="generation-1:${ordinal}"]`)).toBeTruthy();
+			});
+		}
+		expect(group.getAttribute('aria-expanded')).toBe('true');
+	});
+
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();

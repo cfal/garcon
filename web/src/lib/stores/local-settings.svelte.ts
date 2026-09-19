@@ -134,6 +134,7 @@ export interface LocalSettingsSnapshot {
 	themePreference: ThemePreference;
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
+	combineToolUseMessages: boolean;
 	alwaysExpandCliMessages: boolean;
 	showThinking: boolean;
 	allowDirectChats: boolean;
@@ -179,6 +180,7 @@ export interface LocalSettingsSnapshot {
 type BooleanLocalSettingKey =
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
+	| 'combineToolUseMessages'
 	| 'alwaysExpandCliMessages'
 	| 'showThinking'
 	| 'allowDirectChats'
@@ -198,6 +200,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
+	combineToolUseMessages: false,
 	alwaysExpandCliMessages: false,
 	showThinking: true,
 	allowDirectChats: false,
@@ -358,6 +361,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.overlayBackdropEffects,
 		),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
+		combineToolUseMessages: parseBoolean(
+			parsed.combineToolUseMessages,
+			DEFAULTS.combineToolUseMessages,
+		),
 		alwaysExpandCliMessages: parseBoolean(
 			parsed.alwaysExpandCliMessages,
 			DEFAULTS.alwaysExpandCliMessages,
@@ -456,6 +463,7 @@ export class LocalSettingsStore {
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
+	combineToolUseMessages = $state(DEFAULTS.combineToolUseMessages);
 	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
 	showThinking = $state(DEFAULTS.showThinking);
 	allowDirectChats = $state(DEFAULTS.allowDirectChats);
@@ -575,6 +583,7 @@ export class LocalSettingsStore {
 			themePreference: this.themePreference,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
+			combineToolUseMessages: this.combineToolUseMessages,
 			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
 			showThinking: this.showThinking,
 			allowDirectChats: this.allowDirectChats,
@@ -622,6 +631,7 @@ export class LocalSettingsStore {
 		this.themePreference = snap.themePreference;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
+		this.combineToolUseMessages = snap.combineToolUseMessages;
 		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;
 		this.showThinking = snap.showThinking;
 		this.allowDirectChats = snap.allowDirectChats;

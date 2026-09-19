@@ -46,6 +46,7 @@ export function virtualItems(
 }
 export type VirtualMutationAnchor =
 	| { readonly kind: 'item'; readonly key: string }
+	| { readonly kind: 'item-remap'; readonly oldKey: string; readonly newKey: string }
 	| { readonly kind: 'end' }
 	| { readonly kind: 'none' };
 interface VirtualItemsSource {
@@ -86,7 +87,7 @@ export interface VirtualTransactionRecord {
 	readonly rejectionReason: VirtualMutationRejectionReason | null;
 	readonly provenance: VirtualCorrectionProvenance | null;
 	readonly activity: VirtualScrollActivity;
-	readonly anchorKind: 'item' | 'end' | 'none';
+	readonly anchorKind: VirtualMutationAnchor['kind'];
 	readonly anchorIndex: number | null;
 	readonly anchorPaintedStartBefore: number | null;
 	readonly anchorPaintedStartAfter: number | null;

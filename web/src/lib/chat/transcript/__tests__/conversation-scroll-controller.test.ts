@@ -86,6 +86,7 @@ function expandedTranscriptState(): ActiveTranscriptState {
 
 interface FakeViewport extends ConversationViewportPort {
 	isReady: ReturnType<typeof vi.fn<() => boolean>>;
+	hasCollapsedToolGroups: ReturnType<typeof vi.fn<() => boolean>>;
 	isAtEnd: ReturnType<typeof vi.fn<(threshold?: number) => boolean>>;
 	viewportPosition: ReturnType<typeof vi.fn<ConversationViewportPort['viewportPosition']>>;
 	scrollToStart: ReturnType<typeof vi.fn<() => void>>;
@@ -108,6 +109,7 @@ interface FakeViewport extends ConversationViewportPort {
 function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeViewport {
 	return {
 		isReady: vi.fn(() => true),
+		hasCollapsedToolGroups: vi.fn(() => false),
 		isAtEnd: vi.fn(() => false),
 		ownsScrollPosition: vi.fn(() => false),
 		viewportPosition: vi.fn(),
@@ -1164,6 +1166,46 @@ describe('ConversationScrollController', () => {
 		await controller.fillUnderfilledViewport();
 		expect(revealEarlierLoadedRows).toHaveBeenCalledOnce();
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+	});
+
+	it('bounds compressed-history autofill across repeated layout callbacks without blocking explicit paging', async () => {
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const viewport = fakeViewport({
+			hasCollapsedToolGroups: vi.fn(() => true),
+			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(async () => 'underfilled'),
+		});
+		const fixture = controllerFixture({
+			viewport,
+			state: { canLoadEarlier: true, loadEarlierPage },
+		});
+		await fixture.controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledTimes(2);
+		await fixture.controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledTimes(2);
+		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('loaded');
+		expect(loadEarlierPage).toHaveBeenCalledTimes(3);
+		fixture.sessions.selectedChatId = 'chat-2';
+		fixture.state.isUserScrolledUp = false;
+		await fixture.controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledTimes(5);
+	});
+
+	it('does not charge a failed compressed auto page against the per-chat budget', async () => {
+		const loadEarlierPage = vi.fn()
+			.mockResolvedValueOnce('failed')
+			.mockResolvedValue('loaded');
+		const viewport = fakeViewport({
+			hasCollapsedToolGroups: vi.fn(() => true),
+			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(async () => 'underfilled'),
+		});
+		const { controller } = controllerFixture({
+			viewport,
+			state: { canLoadEarlier: true, loadEarlierPage },
+		});
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledTimes(3);
 	});
 
 	it('loads later history to fill an underfilled older window', async () => {

@@ -42,6 +42,7 @@
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;
 		itemState: ConversationFeedItemState;
+		onToggleToolGroup?: (memberIds: readonly string[], expanded: boolean) => void;
 	}
 
 	let {
@@ -66,6 +67,7 @@
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow,
 		itemState,
+		onToggleToolGroup = () => {},
 	}: Props = $props();
 
 	let wrapper: HTMLDivElement;
@@ -116,6 +118,7 @@
 			{onGenerateTitleFromMessage}
 			{canForkAtMessageNow}
 			{itemState}
+			{onToggleToolGroup}
 			acquireTransientActivity={(close) => retention.acquireTransient(item.key, close)}
 		/>
 		{#snippet failed(error)}

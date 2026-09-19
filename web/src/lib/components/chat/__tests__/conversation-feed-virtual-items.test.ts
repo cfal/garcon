@@ -26,7 +26,25 @@ function userItem(index: number): Extract<ConversationFeedRenderItem, { kind: 'm
 	};
 }
 
-function build(transcriptItems: ConversationFeedRenderItem[]) {
+function bashItem(index: number, toolId = `tool-${index}`): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
+	return {
+		kind: 'message',
+		id: `generation-1:${index}`,
+		message: new BashToolUseMessage('2026-08-03T00:00:00.000Z', toolId, 'pwd'),
+		index,
+		ordinal: index,
+	};
+}
+
+function build(
+	transcriptItems: ConversationFeedRenderItem[],
+	options: {
+		combineToolUseMessages?: boolean;
+		expandedToolMemberIds?: ReadonlySet<string>;
+		protectedVirtualKeys?: readonly string[];
+		pendingPermissions?: PendingPermissionRequest[];
+	} = {},
+) {
 	return buildConversationVirtualFeedModel({
 		showRefreshError: false,
 		showEarlierBoundary: false,
@@ -34,12 +52,82 @@ function build(transcriptItems: ConversationFeedRenderItem[]) {
 		reserveComposerTraySpace: false,
 		transcriptViewId: 'view-1',
 		surfaceIdentity: 'chat-1:generation-1',
+		combineToolUseMessages: options.combineToolUseMessages ?? false,
+		expandedToolMemberIds: options.expandedToolMemberIds ?? new Set(),
+		protectedVirtualKeys: options.protectedVirtualKeys ?? [],
 		transcriptItems,
-		pendingPermissions: [],
+		pendingPermissions: options.pendingPermissions ?? [],
 	});
 }
 
 describe('conversation virtual feed model', () => {
+	it('combines two ordinary tool inputs and indexes each hidden member to the summary', () => {
+		const model = build([bashItem(1), bashItem(2, 'reused')], {
+			combineToolUseMessages: true,
+		});
+		const group = model.items[1];
+		expect(group).toMatchObject({ kind: 'tool-group', expanded: false });
+		if (group?.kind !== 'tool-group') throw new Error('Expected a tool group');
+		expect(group.members.map(({ item }) => item.id)).toEqual(['generation-1:1', 'generation-1:2']);
+		expect(model.items).toHaveLength(3);
+		expect(model.indexByRowId.get('generation-1:1')).toBe(1);
+		expect(model.indexByRowId.get('generation-1:2')).toBe(1);
+		expect(model.targetByDomAnchorId.get('tool-input-reused')).toEqual({
+			index: 1,
+			innerRowId: group.anchorId,
+		});
+		expect(model.memberRowIdByDomAnchorId.get('tool-input-reused')).toBe('generation-1:2');
+		expect(model.representativeRowIdByKey.get(group.key)).toBe('generation-1:1');
+		expect(estimateConversationFeedItemSize(group)).toBe(68);
+	});
+
+	it('keeps singleton tools and boundaries separate', () => {
+		const model = build([bashItem(1), userItem(2), bashItem(3)], {
+			combineToolUseMessages: true,
+		});
+		expect(model.items.filter((item) => item.kind === 'tool-group')).toHaveLength(0);
+		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
+			'transcript', 'transcript', 'transcript',
+		]);
+	});
+
+	it('reveals members as individually virtualized rows while retaining a stable header', () => {
+		const collapsed = build([bashItem(1), bashItem(2), bashItem(3)], {
+			combineToolUseMessages: true,
+		});
+		const expanded = build([bashItem(1), bashItem(2), bashItem(3)], {
+			combineToolUseMessages: true,
+			expandedToolMemberIds: new Set(['generation-1:2']),
+		});
+		expect(expanded.items[1]?.key).toBe(collapsed.items[1]?.key);
+		expect(expanded.items.slice(1, -1).map((item) => item.kind)).toEqual([
+			'tool-group', 'transcript', 'transcript', 'transcript',
+		]);
+		expect(expanded.indexByRowId.get('generation-1:2')).toBe(3);
+		expect(expanded.collapsedGroupByMemberRowId.size).toBe(0);
+	});
+
+	it('keeps anchored permission UI between tool runs', () => {
+		const permission: PendingPermissionRequest = {
+			chatId: 'chat-1',
+			permissionOccurrenceId: 'permission-1',
+			requestedTool: new BashToolUseMessage('', 'tool-2', 'pwd'),
+			transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+		};
+		const model = build([bashItem(1), bashItem(2), bashItem(3), bashItem(4)], {
+			combineToolUseMessages: true,
+			pendingPermissions: [permission],
+		});
+		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
+			'tool-group', 'permission', 'tool-group',
+		]);
+	});
+
+	it('rejects duplicate member keys even when a collapsed group hides them', () => {
+		const duplicate = { ...bashItem(2), id: 'generation-1:1' };
+		expect(() => build([bashItem(1), duplicate], { combineToolUseMessages: true }))
+			.toThrow('Duplicate conversation feed key');
+	});
 	it('builds stable key, row, and target indexes for 20,000 rows', () => {
 		const model = build(Array.from({ length: 20_000 }, (_, index) => userItem(index + 1)));
 
@@ -64,6 +152,9 @@ describe('conversation virtual feed model', () => {
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
 			surfaceIdentity: 'chat-2:generation-1',
+			combineToolUseMessages: false,
+			expandedToolMemberIds: new Set(),
+			protectedVirtualKeys: [],
 			transcriptItems: [item],
 			pendingPermissions: [],
 		});
@@ -102,6 +193,9 @@ describe('conversation virtual feed model', () => {
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
 			surfaceIdentity: 'chat-1:generation-1',
+			combineToolUseMessages: false,
+			expandedToolMemberIds: new Set(),
+			protectedVirtualKeys: [],
 			transcriptItems: [toolItem, resultItem],
 			pendingPermissions: [],
 		});
@@ -136,6 +230,9 @@ describe('conversation virtual feed model', () => {
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
 			surfaceIdentity: 'chat-1:generation-1',
+			combineToolUseMessages: false,
+			expandedToolMemberIds: new Set(),
+			protectedVirtualKeys: [],
 			transcriptItems: [],
 			pendingPermissions: [],
 		}).items[1];
@@ -239,6 +336,9 @@ describe('conversation virtual feed model', () => {
 			reserveComposerTraySpace: true,
 			transcriptViewId: 'view-1',
 			surfaceIdentity: 'chat-1:generation-1',
+			combineToolUseMessages: false,
+			expandedToolMemberIds: new Set(),
+			protectedVirtualKeys: [],
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [
 				permission,
@@ -280,6 +380,9 @@ describe('conversation virtual feed model', () => {
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
 			surfaceIdentity: 'chat-1:generation-1',
+			combineToolUseMessages: false,
+			expandedToolMemberIds: new Set(),
+			protectedVirtualKeys: [],
 			transcriptItems: [],
 			pendingPermissions: [first, second],
 		});
@@ -305,6 +408,9 @@ describe('conversation virtual feed model', () => {
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
 			surfaceIdentity: 'chat-1:generation-1',
+			combineToolUseMessages: false,
+			expandedToolMemberIds: new Set(),
+			protectedVirtualKeys: [],
 			transcriptItems: [userItem(1)],
 			pendingPermissions: [permission],
 		});

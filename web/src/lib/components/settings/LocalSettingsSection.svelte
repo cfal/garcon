@@ -225,6 +225,11 @@
 				ls.toggle('autoExpandTools'),
 			)}
 			{@render settingRow(
+				m.settings_chat_combine_tool_use_messages(),
+				ls.combineToolUseMessages,
+				() => ls.toggle('combineToolUseMessages'),
+			)}
+			{@render settingRow(
 				m.settings_chat_always_expand_cli_messages(),
 				ls.alwaysExpandCliMessages,
 				() => ls.toggle('alwaysExpandCliMessages'),

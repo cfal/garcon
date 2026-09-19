@@ -309,14 +309,16 @@ class PanelRegistration implements ConversationPanelRegistration {
 		this.#applyingRestoreEpoch = restoreEpoch;
 		this.scroll.setPinnedToBottom(false);
 		try {
-			const result = await this.scroll.jumpToMessageRow(
-				{
-					chatId: this.chatId,
-					transcriptViewId: this.#lastTarget.transcriptViewId,
-					rowId: `${this.#lastTarget.transcriptViewId}:${this.#lastTarget.ordinal}`,
-				},
-				{ viewportOffset: this.#lastTarget.viewportOffset },
-			);
+			const target = this.#lastTarget;
+			const row = {
+				chatId: this.chatId,
+				transcriptViewId: target.transcriptViewId,
+				rowId: `${target.transcriptViewId}:${target.ordinal}`,
+			};
+			const options = target.kind === 'group-summary'
+				? { viewportOffset: target.viewportOffset, presentation: 'group-summary' as const }
+				: { viewportOffset: target.viewportOffset };
+			const result = await this.scroll.jumpToMessageRow(row, options);
 			if (
 				result === 'completed' &&
 				restoreEpoch === this.#restoreEpoch &&

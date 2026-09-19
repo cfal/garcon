@@ -154,6 +154,49 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(70);
 	});
 
+	it('anchors a replaced presentation key against its old geometry', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'after', 'tail'], estimates: [40, 40, 40, 80],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(48);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'after', 'tail'], estimates: [20, 56, 40, 80],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		test.environment.flushMicrotasks();
+		expect(test.controller.snapshot.positions.itemAt(1)?.key).toBe('summary');
+		expect(test.viewport.scrollTop).toBe(28);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'items', anchorKind: 'item-remap', anchorIndex: 1,
+			anchorPaintedStartBefore: 40, anchorPaintedStartAfter: 20,
+		});
+	});
+
+	it('defers a remapped-key correction while native scrolling is coasting', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'after', 'tail'], estimates: [40, 40, 40, 80],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(48);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'after', 'tail'], estimates: [20, 56, 40, 80],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		expect(test.writes).toBe(0);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'items', anchorKind: 'item-remap', scrollWrites: 0,
+		});
+		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(28);
+		expect(test.writes).toBe(1);
+	});
+
 	it('retries idle deviation when a scroll returns to physical bounds', () => {
 		const test = harness({ viewportSize: 80 });
 		test.controller.apply({

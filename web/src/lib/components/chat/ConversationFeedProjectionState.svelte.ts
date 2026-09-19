@@ -23,6 +23,7 @@ import {
 	estimateConversationFeedItemSize,
 	appendConversationVirtualTranscriptTail,
 	type ConversationVirtualFeedModel,
+	type ToolGroupVirtualFeedItem,
 } from './conversation-feed-virtual-items.js';
 
 export interface ConversationFeedProjectionInput {
@@ -39,6 +40,9 @@ export interface ConversationFeedProjectionInput {
 	reserveComposerTraySpace: boolean;
 	transcriptViewId: string;
 	pendingPermissions: PendingPermissionRequest[];
+	combineToolUseMessages: boolean;
+	expandedToolMemberIds: ReadonlySet<string>;
+	protectedVirtualKeys: readonly string[];
 }
 
 export interface ConversationVirtualGeometrySnapshot {
@@ -62,6 +66,32 @@ function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function toolGroupPresentationChanged(
+	previous: ConversationVirtualFeedModel | undefined,
+	next: ConversationVirtualFeedModel,
+): boolean {
+	if (!previous) return true;
+	const groups = (model: ConversationVirtualFeedModel): ToolGroupVirtualFeedItem[] =>
+		model.items.filter((item): item is ToolGroupVirtualFeedItem => item.kind === 'tool-group');
+	const before = groups(previous);
+	const after = groups(next);
+	if (before.length !== after.length) return true;
+	return before.some((group, index) => {
+		const current = after[index];
+		if (
+			group.key !== current.key ||
+			group.expanded !== current.expanded ||
+			group.members.length !== current.members.length
+		) return true;
+		return group.members.some((member, memberIndex) => {
+			const nextMember = current.members[memberIndex];
+			if (member.item.id !== nextMember.item.id) return true;
+			if (member.item.kind !== 'message' || nextMember.item.kind !== 'message') return false;
+			return member.item.message.type !== nextMember.item.message.type;
+		});
+	});
+}
+
 function sameInput(
 	left: ConversationFeedProjectionInput | null,
 	right: ConversationFeedProjectionInput,
@@ -75,6 +105,10 @@ function sameInput(
 		left.hiddenToolTypes === right.hiddenToolTypes &&
 		left.hiddenBashCommands === right.hiddenBashCommands &&
 		left.showThinking === right.showThinking &&
+		left.combineToolUseMessages === right.combineToolUseMessages &&
+		(!right.combineToolUseMessages ||
+			(left.expandedToolMemberIds === right.expandedToolMemberIds &&
+				left.protectedVirtualKeys === right.protectedVirtualKeys)) &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
@@ -94,6 +128,10 @@ function sameProjectionConfiguration(
 		left.hiddenToolTypes === right.hiddenToolTypes &&
 		left.hiddenBashCommands === right.hiddenBashCommands &&
 		left.showThinking === right.showThinking &&
+		left.combineToolUseMessages === right.combineToolUseMessages &&
+		(!right.combineToolUseMessages ||
+			(left.expandedToolMemberIds === right.expandedToolMemberIds &&
+				left.protectedVirtualKeys === right.protectedVirtualKeys)) &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
@@ -134,6 +172,9 @@ export class ConversationFeedProjectionState {
 			transcriptItems: visibleTranscriptItems,
 			transcriptViewId: input.transcriptViewId,
 			pendingPermissions: input.pendingPermissions,
+			combineToolUseMessages: input.combineToolUseMessages,
+			expandedToolMemberIds: input.expandedToolMemberIds,
+			protectedVirtualKeys: input.protectedVirtualKeys,
 		});
 		const keys = model.items.map((item) => item.key);
 		const estimates = model.items.map(estimateConversationFeedItemSize);
@@ -143,7 +184,9 @@ export class ConversationFeedProjectionState {
 			!previousGeometry ||
 			identityChanged ||
 			!arraysEqual(previousGeometry.keys, keys) ||
-			!arraysEqual(previousGeometry.estimates, estimates);
+			!arraysEqual(previousGeometry.estimates, estimates) ||
+			(input.combineToolUseMessages &&
+				toolGroupPresentationChanged(this.#lastProjection?.model, model));
 
 		if (!previousGeometry) mutationKinds.add('initial');
 		else if (geometryChanged && mutationKinds.size === 0) {
@@ -171,6 +214,7 @@ export class ConversationFeedProjectionState {
 		mutationKinds: Set<ConversationFeedMutationKind>,
 	): ConversationFeedProjection | null {
 		const previous = this.#lastProjection;
+		if (input.combineToolUseMessages) return null;
 		if (!previous || !sameProjectionConfiguration(this.#lastInput, input)) return null;
 
 		let model: ConversationVirtualFeedModel;

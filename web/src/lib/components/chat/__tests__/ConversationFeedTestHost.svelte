@@ -5,6 +5,7 @@
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
@@ -39,6 +40,8 @@
 			| 'error-earlier'
 			| 'row-ids'
 			| 'bash-filter'
+			| 'tool-run'
+			| 'large-tool-run'
 			| 'count-shrink'
 			| 'count-shrink-survivors'
 			| 'twenty-thousand';
@@ -54,6 +57,14 @@
 	const initialTranscriptScenario = untrack(() => transcriptScenario);
 
 	const chatState = new ActiveTranscriptState();
+	let viewportPort: ConversationViewportPort | null = null;
+	let navigationResult = $state('idle');
+	async function navigateToTool(ordinal: number, presentation = false): Promise<void> {
+		navigationResult = await viewportPort?.scrollToTarget({
+			kind: presentation ? 'presentation-row' : 'row',
+			id: `generation-1:${ordinal}`,
+		}) ?? 'not-ready';
+	}
 	if (initialTranscriptScenario === 'row-ids') {
 		chatState.replaceGeneration(
 			'chat-1',
@@ -78,6 +89,18 @@
 			createdAt: '2026-07-01T00:00:01.000Z',
 			delivery: 'pending',
 		});
+	} else if (initialTranscriptScenario === 'tool-run' || initialTranscriptScenario === 'large-tool-run') {
+		const count = initialTranscriptScenario === 'large-tool-run' ? 2_000 : 3;
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: count }, (_, index) => ({
+				ordinal: index + 1,
+				message: new BashToolUseMessage('2026-07-01T00:00:00.000Z', `tool-${index}`, 'pwd'),
+			})),
+			{ lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		chatState.revealAllLoadedMessages();
 	} else if (initialTranscriptScenario === 'bash-filter') {
 		chatState.replaceGeneration(
 			'chat-1',
@@ -187,6 +210,7 @@
 	localSettings.chatMaxWidth = 'medium';
 	localSettings.showThinking = true;
 	localSettings.hiddenToolTypes = [];
+	localSettings.combineToolUseMessages = false;
 	setLocalSettings(localSettings);
 	setRemoteSettings(untrack(() => remoteSettingsStore));
 	const appShell = createAppShellStore();
@@ -225,12 +249,23 @@
 	onLoadEarlier={retryEarlierPage}
 	isVisible={true}
 	pinnedToBottom={true}
-	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
+		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
+		onViewportPortChange={(port) => (viewportPort = port)}
 />
 {#if showAnnouncementTrigger}
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
 		>Announce</button
 	>
+{/if}
+{#if transcriptScenario === 'tool-run' || transcriptScenario === 'large-tool-run'}
+	<button onclick={() => localSettings.toggle('combineToolUseMessages')}>Toggle combination</button>
+{/if}
+{#if transcriptScenario === 'tool-run'}
+	<button onclick={() => navigateToTool(1)}>Navigate first tool</button>
+	<button onclick={() => navigateToTool(2)}>Navigate middle tool</button>
+	<button onclick={() => navigateToTool(3)}>Navigate last tool</button>
+	<button onclick={() => navigateToTool(2, true)}>Restore group summary</button>
+	<div data-testid="tool-navigation-result">{navigationResult}</div>
 {/if}
 {#if transcriptScenario === 'count-shrink'}
 	<button onclick={shrinkTranscript}>Shrink transcript</button>

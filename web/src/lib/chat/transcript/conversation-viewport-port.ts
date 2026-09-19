@@ -1,7 +1,9 @@
 import type { ConversationNativeScrollActivity } from './conversation-native-scroll-settlement.js';
 
 export type ConversationViewportTarget =
-	{ kind: 'row'; id: string } | { kind: 'dom-anchor'; id: string };
+	{ kind: 'row'; id: string } |
+	{ kind: 'presentation-row'; id: string } |
+	{ kind: 'dom-anchor'; id: string };
 export type ConversationViewportIntentSource = 'viewport' | 'scrollbar-drag';
 export type ConversationViewportIntentCancellationResult =
 	'cancelled' | 'preserved-earlier-prepend' | 'blocked-scrollbar-drag';
@@ -20,6 +22,7 @@ export interface ConversationViewportPosition {
 
 export interface ConversationViewportPort {
 	isReady(): boolean;
+	hasCollapsedToolGroups(): boolean;
 	isAtEnd(threshold?: number): boolean;
 	ownsScrollPosition(): boolean;
 	viewportPosition(): ConversationViewportPosition | null;

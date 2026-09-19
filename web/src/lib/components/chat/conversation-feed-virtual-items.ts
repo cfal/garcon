@@ -12,16 +12,28 @@ import {
 
 export type ConversationFeedSpacing = 'responsive-feed' | 'transcript' | 'none';
 
+export type TranscriptVirtualFeedItem = {
+	kind: 'transcript';
+	key: string;
+	item: ConversationFeedRenderItem;
+	spacingAfter: ConversationFeedSpacing;
+};
+
+export type ToolGroupVirtualFeedItem = {
+	kind: 'tool-group';
+	key: string;
+	anchorId: string;
+	members: readonly TranscriptVirtualFeedItem[];
+	expanded: boolean;
+	spacingAfter: ConversationFeedSpacing;
+};
+
 export type ConversationVirtualFeedItem =
 	| { kind: 'viewport-start-spacer'; key: string; spacingAfter: 'none' }
 	| { kind: 'refresh-error'; key: string; spacingAfter: 'none' }
 	| { kind: 'earlier-boundary'; key: string; spacingAfter: 'none' }
-	| {
-			kind: 'transcript';
-			key: string;
-			item: ConversationFeedRenderItem;
-			spacingAfter: ConversationFeedSpacing;
-	  }
+	| TranscriptVirtualFeedItem
+	| ToolGroupVirtualFeedItem
 	| { kind: 'later-boundary'; key: string; spacingAfter: 'none' }
 	| {
 			kind: 'permission';
@@ -47,6 +59,9 @@ export interface ConversationVirtualFeedModel {
 	indexByKey: Map<string, number>;
 	indexByRowId: Map<string, number>;
 	targetByDomAnchorId: Map<string, ConversationVirtualTarget>;
+	memberRowIdByDomAnchorId: Map<string, string>;
+	representativeRowIdByKey: Map<string, string>;
+	collapsedGroupByMemberRowId: Map<string, ToolGroupVirtualFeedItem>;
 	transcriptStartIndex: number;
 	transcriptEndIndex: number;
 }
@@ -60,6 +75,9 @@ export interface ConversationVirtualFeedInput {
 	transcriptItems: ConversationFeedRenderItem[];
 	transcriptViewId: string;
 	pendingPermissions: PendingPermissionRequest[];
+	combineToolUseMessages: boolean;
+	expandedToolMemberIds: ReadonlySet<string>;
+	protectedVirtualKeys: readonly string[];
 }
 
 function namespacedKey(surfaceIdentity: string, localKey: string): string {
@@ -79,6 +97,54 @@ function toolAnchorIds(item: ConversationFeedRenderItem): string[] {
 
 function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSpacing {
 	return conversationFeedItemLayout(item) === 'hidden' ? 'none' : 'transcript';
+}
+
+function groupableToolInput(item: ConversationVirtualFeedItem): item is TranscriptVirtualFeedItem {
+	return item.kind === 'transcript' &&
+		item.item.kind === 'message' &&
+		isToolUseMessage(item.item.message) &&
+		item.item.message.type !== 'enter-plan-mode-tool-use' &&
+		conversationFeedItemLayout(item.item) === 'standard';
+}
+
+function groupToolRuns(
+	items: readonly ConversationVirtualFeedItem[],
+	key: (localKey: string) => string,
+	expandedMemberIds: ReadonlySet<string>,
+	protectedVirtualKeys: ReadonlySet<string>,
+): ConversationVirtualFeedItem[] {
+	const grouped: ConversationVirtualFeedItem[] = [];
+	let run: TranscriptVirtualFeedItem[] = [];
+	const flush = () => {
+		if (run.length < 2) {
+			grouped.push(...run);
+		} else {
+			const first = run[0].item;
+			const expanded = run.some(
+				(member) =>
+					expandedMemberIds.has(member.item.id) || protectedVirtualKeys.has(member.key),
+			);
+			grouped.push({
+				kind: 'tool-group',
+				key: key(`tool-group:${first.id}`),
+				anchorId: `tool-group:${first.id}`,
+				members: run,
+				expanded,
+				spacingAfter: expanded ? 'none' : run[run.length - 1].spacingAfter,
+			});
+			if (expanded) grouped.push(...run);
+		}
+		run = [];
+	};
+	for (const item of items) {
+		if (groupableToolInput(item)) run.push(item);
+		else {
+			flush();
+			grouped.push(item);
+		}
+	}
+	flush();
+	return grouped;
 }
 
 // Consumes the requests anchored to this row so a later row cannot claim them again.
@@ -135,10 +201,11 @@ export function buildConversationVirtualFeedModel(
 		permissionsByAnchor.set(anchor.afterOrdinal, anchored);
 	}
 
+	const body: ConversationVirtualFeedItem[] = [];
 	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
 		const anchored = takeAnchoredPermissions(permissionsByAnchor, item);
 		const isLastItem = transcriptIndex === input.transcriptItems.length - 1;
-		items.push({
+		body.push({
 			kind: 'transcript',
 			key: key(`transcript:${item.id}`),
 			item,
@@ -146,12 +213,28 @@ export function buildConversationVirtualFeedModel(
 		});
 		for (const [permissionIndex, request] of anchored.entries()) {
 			const isLastAnchored = permissionIndex === anchored.length - 1;
-			items.push(
+			body.push(
 				permissionItem(key, request, permissionIndex === 0, !(isLastAnchored && isLastItem)),
 			);
 		}
 	}
 	for (const permissions of permissionsByAnchor.values()) detachedPermissions.push(...permissions);
+	const transcriptKeys = new Set<string>();
+	for (const item of body) {
+		if (item.kind !== 'transcript') continue;
+		if (transcriptKeys.has(item.key)) {
+			throw new Error(`Duplicate conversation feed key: ${item.key}`);
+		}
+		transcriptKeys.add(item.key);
+	}
+	items.push(...(input.combineToolUseMessages
+		? groupToolRuns(
+				body,
+				key,
+				input.expandedToolMemberIds,
+				new Set(input.protectedVirtualKeys),
+			)
+		: body));
 	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {
@@ -181,20 +264,45 @@ export function buildConversationVirtualFeedModel(
 	const indexByKey = new Map<string, number>();
 	const indexByRowId = new Map<string, number>();
 	const targetByDomAnchorId = new Map<string, ConversationVirtualTarget>();
+	const memberRowIdByDomAnchorId = new Map<string, string>();
+	const representativeRowIdByKey = new Map<string, string>();
+	const collapsedGroupByMemberRowId = new Map<string, ToolGroupVirtualFeedItem>();
 	for (const [index, virtualItem] of items.entries()) {
 		if (indexByKey.has(virtualItem.key)) {
 			throw new Error(`Duplicate conversation feed key: ${virtualItem.key}`);
 		}
 		indexByKey.set(virtualItem.key, index);
-		if (virtualItem.kind !== 'transcript') continue;
-
-		indexByRowId.set(virtualItem.item.id, index);
-		targetByDomAnchorId.set(virtualItem.item.id, {
-			index,
-			innerRowId: virtualItem.item.id,
-		});
-		for (const anchorId of toolAnchorIds(virtualItem.item)) {
-			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
+		if (virtualItem.kind === 'tool-group') {
+			representativeRowIdByKey.set(virtualItem.key, virtualItem.members[0].item.id);
+			if (virtualItem.expanded) continue;
+			for (const member of virtualItem.members) {
+				collapsedGroupByMemberRowId.set(member.item.id, virtualItem);
+				indexByRowId.set(member.item.id, index);
+				targetByDomAnchorId.set(member.item.id, {
+					index,
+					innerRowId: virtualItem.anchorId,
+				});
+				memberRowIdByDomAnchorId.set(member.item.id, member.item.id);
+				for (const anchorId of toolAnchorIds(member.item)) {
+					targetByDomAnchorId.set(anchorId, {
+						index,
+						innerRowId: virtualItem.anchorId,
+					});
+					memberRowIdByDomAnchorId.set(anchorId, member.item.id);
+				}
+			}
+		} else if (virtualItem.kind === 'transcript') {
+			representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
+			indexByRowId.set(virtualItem.item.id, index);
+			targetByDomAnchorId.set(virtualItem.item.id, {
+				index,
+				innerRowId: virtualItem.item.id,
+			});
+			memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
+			for (const anchorId of toolAnchorIds(virtualItem.item)) {
+				targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
+				memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
+			}
 		}
 	}
 
@@ -203,6 +311,9 @@ export function buildConversationVirtualFeedModel(
 		indexByKey,
 		indexByRowId,
 		targetByDomAnchorId,
+		memberRowIdByDomAnchorId,
+		representativeRowIdByKey,
+		collapsedGroupByMemberRowId,
 		transcriptStartIndex,
 		transcriptEndIndex,
 	};
@@ -229,19 +340,24 @@ export function appendConversationVirtualTranscriptTail(
 	const indexByKey = new Map(model.indexByKey);
 	const indexByRowId = new Map(model.indexByRowId);
 	const targetByDomAnchorId = new Map(model.targetByDomAnchorId);
+	const memberRowIdByDomAnchorId = new Map(model.memberRowIdByDomAnchorId);
+	const representativeRowIdByKey = new Map(model.representativeRowIdByKey);
 	for (let index = insertIndex; index < items.length; index += 1) {
 		indexByKey.set(items[index].key, index);
 	}
 	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
 		if (virtualItem.kind !== 'transcript') continue;
 		const index = insertIndex + offset;
+		representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
 		indexByRowId.set(virtualItem.item.id, index);
 		targetByDomAnchorId.set(virtualItem.item.id, {
 			index,
 			innerRowId: virtualItem.item.id,
 		});
+		memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
 		for (const anchorId of toolAnchorIds(virtualItem.item)) {
 			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
+			memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
 		}
 	}
 
@@ -251,6 +367,8 @@ export function appendConversationVirtualTranscriptTail(
 		indexByKey,
 		indexByRowId,
 		targetByDomAnchorId,
+		memberRowIdByDomAnchorId,
+		representativeRowIdByKey,
 		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
 	};
 }
@@ -272,6 +390,9 @@ export function estimateConversationFeedItemSize(
 		const leadingSpacing = item.leadingSpacing ? 8 : 0;
 		const trailingSpacing = item.spacingAfter === 'responsive-feed' ? 12 : 0;
 		return 240 + leadingSpacing + trailingSpacing;
+	}
+	if (item.kind === 'tool-group') {
+		return 56 + (item.spacingAfter === 'transcript' ? 12 : 0);
 	}
 
 	const renderItem = item.item;
