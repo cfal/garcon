@@ -34,7 +34,7 @@ import type {
   StartedAgentSession,
 } from './session-types.js';
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
-import { AgentDirectory } from './directory.js';
+import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import {
   AgentRuntimeRouter,
@@ -70,19 +70,19 @@ import {
 const logger = createLogger('agents:registry');
 
 export interface AgentRegistryServiceContract {
-  hasAgent(agentId: string): boolean;
-  supportsAuthLogin(agentId: string): boolean;
-  supportsAuthLoginCompletion(agentId: string): boolean;
-  supportsFork(agentId: string): boolean;
-  singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
-  supportsForkAtMessage(agentId: string): boolean;
-  supportsForkWhileRunning(agentId: string): boolean;
-  supportsUpdateProjectPath(agentId: string): boolean;
-  requiresNativePathForProjectPathUpdate(agentId: string): boolean;
-  supportsImages(agentId: string): boolean;
-  supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean;
-  requiresStrictModelDiscovery(agentId: string): boolean;
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
+  hasAgent(agentId: string, nodeId?: string | null): boolean;
+  supportsAuthLogin(agentId: string, nodeId?: string | null): boolean;
+  supportsAuthLoginCompletion(agentId: string, nodeId?: string | null): boolean;
+  supportsFork(agentId: string, nodeId?: string | null): boolean;
+  singleQueryRunsToolsWithoutPermission(agentId: string, nodeId?: string | null): boolean;
+  supportsForkAtMessage(agentId: string, nodeId?: string | null): boolean;
+  supportsForkWhileRunning(agentId: string, nodeId?: string | null): boolean;
+  supportsUpdateProjectPath(agentId: string, nodeId?: string | null): boolean;
+  requiresNativePathForProjectPathUpdate(agentId: string, nodeId?: string | null): boolean;
+  supportsImages(agentId: string, nodeId?: string | null): boolean;
+  supportsFileAttachmentMimeType(agentId: string, mimeType: string, nodeId?: string | null): boolean;
+  requiresStrictModelDiscovery(agentId: string, nodeId?: string | null): boolean;
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, nodeId?: string | null): boolean;
   currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string>;
   hasMatchingInput(
     chatId: string,
@@ -109,29 +109,31 @@ export interface AgentRegistryServiceContract {
     messageOrdinal?: number;
     signal: AbortSignal;
   }): Promise<ForkedAgentSessionOutcome | null>;
-  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
+  discardForkedAgentSession(agentId: string, session: StartedAgentSession, nodeId?: string | null): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
-  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  getAgentAuthStatus(agentId: string): Promise<unknown | null>;
-  getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
+  getAgentAuthStatusMap(nodeId?: string | null): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(authByAgent?: Record<string, unknown>, nodeId?: string | null): Promise<Record<string, unknown>>;
+  getAgentAuthStatus(agentId: string, nodeId?: string | null): Promise<unknown | null>;
+  getAgentCatalogEntries(nodeId?: string | null): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
+    readonly nodeId?: string | null;
     readonly permissionMode?: PermissionMode;
     readonly thinkingMode?: ThinkingMode;
   }): void;
-  normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode;
-  launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult>;
-  completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
-  getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
+  normalizeThinkingModeForAgent(agentId: string, value: unknown, nodeId?: string | null): ThinkingMode;
+  launchAgentAuthLogin(agentId: string, nodeId?: string | null): Promise<AgentAuthLoginLaunchResult>;
+  completeAgentAuthLogin(agentId: string, sessionId: string, code: string, nodeId?: string | null): Promise<AgentAuthLoginCompleteResult>;
+  getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string, nodeId?: string | null): Promise<AgentAuthLoginStatus>;
   modelSupportsImages(input: {
+    nodeId?: string | null;
     agentId: string;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean>;
   runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
-  getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
+  getSlashCommands(agentId: string, projectPath: string, nodeId?: string | null): Promise<SlashCommand[]>;
   resolvePermission(
     chatId: string,
     permissionOccurrenceId: string,
@@ -197,6 +199,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
+    nodes?: ExecutionIntegrationDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
@@ -207,13 +210,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     hasPendingOwnershipTransfer(chatId: string): boolean;
     preambles: Pick<PreambleService, 'snapshot'>;
     selectionAdmissionLock: KeyedPromiseLock;
-    resolveFileMentions(command: string, projectPath: string): Promise<string>;
+    resolveFileMentions(command: string, projectPath: string, nodeId?: string | null): Promise<string>;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
     this.#ledger = args.ledger;
     this.#adoption = args.adoption;
-    this.#directory = new AgentDirectory(args.integrations);
+    this.#directory = new AgentDirectory(args.integrations, args.nodes);
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
@@ -250,12 +253,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#ledger.subscribe((event) => this.#onTranscriptCommit(event));
   }
 
-  hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
+  hasAgent(agentId: string, nodeId?: string | null): boolean { return this.#directory.has(agentId, nodeId); }
   assertExecutionModeSelectionSupported(agentId: string, selection: {
+    readonly nodeId?: string | null;
     readonly permissionMode?: PermissionMode;
     readonly thinkingMode?: ThinkingMode;
   }): void {
-    const descriptor = this.#directory.get(agentId)?.descriptor;
+    const descriptor = this.#directory.get(agentId, selection.nodeId)?.descriptor;
     if (!descriptor) throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
     if (
       selection.permissionMode !== undefined
@@ -278,31 +282,31 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       );
     }
   }
-  normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode {
+  normalizeThinkingModeForAgent(agentId: string, value: unknown, nodeId?: string | null): ThinkingMode {
     return normalizeSupportedThinkingMode(
       value,
-      this.#directory.require(agentId).descriptor.supportedThinkingModes,
+      this.#directory.require(agentId, nodeId).descriptor.supportedThinkingModes,
     );
   }
-  supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
-  supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
-  supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
-  singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
-    return this.#directory.get(agentId)?.singleQuery?.runsToolsWithoutPermission ?? false;
+  supportsAuthLogin(agentId: string, nodeId?: string | null): boolean { return Boolean(this.#directory.get(agentId, nodeId)?.auth?.launchLogin); }
+  supportsAuthLoginCompletion(agentId: string, nodeId?: string | null): boolean { return Boolean(this.#directory.get(agentId, nodeId)?.auth?.completeLogin); }
+  supportsFork(agentId: string, nodeId?: string | null): boolean { return this.#directory.has(agentId, nodeId); }
+  singleQueryRunsToolsWithoutPermission(agentId: string, nodeId?: string | null): boolean {
+    return this.#directory.get(agentId, nodeId)?.singleQuery?.runsToolsWithoutPermission ?? false;
   }
-  supportsForkAtMessage(agentId: string): boolean { return this.#directory.has(agentId); }
-  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.has(agentId); }
-  supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
-  requiresNativePathForProjectPathUpdate(agentId: string): boolean {
-    return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
+  supportsForkAtMessage(agentId: string, nodeId?: string | null): boolean { return this.#directory.has(agentId, nodeId); }
+  supportsForkWhileRunning(agentId: string, nodeId?: string | null): boolean { return this.#directory.has(agentId, nodeId); }
+  supportsUpdateProjectPath(agentId: string, nodeId?: string | null): boolean { return this.#directory.get(agentId, nodeId)?.descriptor.supportsProjectPathUpdate ?? false; }
+  requiresNativePathForProjectPathUpdate(agentId: string, nodeId?: string | null): boolean {
+    return this.#directory.get(agentId, nodeId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
   }
-  supportsImages(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsImages ?? false; }
-  supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean {
-    return this.#directory.get(agentId)?.attachments?.fileMimeTypes.includes(mimeType.toLowerCase()) ?? false;
+  supportsImages(agentId: string, nodeId?: string | null): boolean { return this.#directory.get(agentId, nodeId)?.descriptor.supportsImages ?? false; }
+  supportsFileAttachmentMimeType(agentId: string, mimeType: string, nodeId?: string | null): boolean {
+    return this.#directory.get(agentId, nodeId)?.attachments?.fileMimeTypes.includes(mimeType.toLowerCase()) ?? false;
   }
 
-  requiresStrictModelDiscovery(agentId: string): boolean {
-    return this.#catalog.requiresStrictModelDiscovery(agentId);
+  requiresStrictModelDiscovery(agentId: string, nodeId?: string | null): boolean {
+    return this.#catalog.requiresStrictModelDiscovery(agentId, nodeId);
   }
 
   startSession(chatId: string, command: string, opts: StartSessionOptions = {}): Promise<void> {
@@ -325,11 +329,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
 
-  executionSessionLost(): void { this.#runtime.executionSessionLost(); }
+  executionSessionLost(nodeId?: string): void { this.#runtime.executionSessionLost(nodeId); }
   compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
   isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
-    return this.#runtime.isAgentSessionRunning(agentId, agentSessionId);
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, nodeId?: string | null): boolean {
+    return this.#runtime.isAgentSessionRunning(agentId, agentSessionId, nodeId);
   }
   getRunningSessions() { return this.#runtime.getRunningSessions(); }
   getRunningChatIdsSnapshot(): string[] { return this.#runtime.getRunningChatIdsSnapshot(); }
@@ -357,8 +361,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }) {
     return this.#runtime.forkAgentSession(args);
   }
-  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
-    return this.#runtime.discardForkedAgentSession(agentId, session);
+  discardForkedAgentSession(agentId: string, session: StartedAgentSession, nodeId?: string | null): Promise<void> {
+    return this.#runtime.discardForkedAgentSession(agentId, session, nodeId);
   }
   validateConfiguration(input: AgentConfigurationInput): Promise<void> {
     return this.#settings.validateConfiguration(input);
@@ -369,8 +373,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);
   }
-  getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
-    return this.#runtime.discoverSlashCommands(agentId, projectPath);
+  getSlashCommands(agentId: string, projectPath: string, nodeId?: string | null): Promise<SlashCommand[]> {
+    return this.#runtime.discoverSlashCommands(agentId, projectPath, nodeId);
   }
 
   // Returns the preview from the authoritative conversational ledger fold.
@@ -402,7 +406,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   async resolveNativeSession(session: AgentChatEntry, chatId = ''): Promise<AgentNativeSessionRef | null> {
     if (!session.agentSessionId) return null;
-    const integration = this.#directory.get(session.agentId);
+    if (!this.#directory.isReady(session.nodeId)) return session.nativeSession ?? null;
+    const integration = this.#directory.get(session.agentId, session.nodeId);
     if (!integration) return null;
     const nativeSessions = integration.nativeSessions;
     if (!nativeSessions) return null;
@@ -420,7 +425,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     session: AgentChatEntry,
     chatId: string,
   ): Promise<AgentTranscriptSourceLocation | null> {
-    const integration = this.#directory.get(session.agentId);
+    const integration = this.#directory.get(session.agentId, session.nodeId);
     if (!integration) return null;
     try {
       const nativeSessions = integration.nativeSessions;
@@ -444,35 +449,35 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }
   }
 
-  async launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
-    const auth = this.#directory.require(agentId).auth;
+  async launchAgentAuthLogin(agentId: string, nodeId?: string | null): Promise<AgentAuthLoginLaunchResult> {
+    const auth = this.#directory.require(agentId, nodeId).auth;
     if (!auth?.launchLogin) throw new Error(`Auth login is not supported for agent: ${agentId}`);
     return auth.launchLogin();
   }
-  async completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult> {
-    const complete = this.#directory.require(agentId).auth?.completeLogin;
+  async completeAgentAuthLogin(agentId: string, sessionId: string, code: string, nodeId?: string | null): Promise<AgentAuthLoginCompleteResult> {
+    const complete = this.#directory.require(agentId, nodeId).auth?.completeLogin;
     if (!complete) throw new Error(`Auth login completion is not supported for agent: ${agentId}`);
     return complete(sessionId, code);
   }
-  async getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus> {
-    return this.#directory.require(agentId).auth?.loginStatus?.(expectedSessionId)
+  async getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string, nodeId?: string | null): Promise<AgentAuthLoginStatus> {
+    return this.#directory.require(agentId, nodeId).auth?.loginStatus?.(expectedSessionId)
       ?? { state: 'idle', running: false };
   }
-  async getAgentAuthStatus(agentId: string): Promise<unknown | null> {
-    const auth = this.#directory.get(agentId)?.auth;
+  async getAgentAuthStatus(agentId: string, nodeId?: string | null): Promise<unknown | null> {
+    const auth = this.#directory.require(agentId, nodeId).auth;
     return auth ? auth.status(new AbortController().signal) : null;
   }
-  async getAgentAuthStatusMap(): Promise<Record<string, unknown>> {
-    return Object.fromEntries(await Promise.all(this.#directory.list().map(async (integration) => [
+  async getAgentAuthStatusMap(nodeId?: string | null): Promise<Record<string, unknown>> {
+    return Object.fromEntries(await Promise.all(this.#directory.list(nodeId).map(async (integration) => [
       integration.descriptor.id,
       integration.auth
         ? await integration.auth.status(new AbortController().signal)
         : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' },
     ])));
   }
-  async getAgentReadinessMap(authByAgent?: Record<string, unknown>) {
-    const auth = authByAgent ?? await this.getAgentAuthStatusMap();
-    return Object.fromEntries(this.#directory.list().map((integration) => {
+  async getAgentReadinessMap(authByAgent?: Record<string, unknown>, nodeId?: string | null) {
+    const auth = authByAgent ?? await this.getAgentAuthStatusMap(nodeId);
+    return Object.fromEntries(this.#directory.list(nodeId).map((integration) => {
       const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
       const nativeReady = status?.authenticated === true;
       const endpointReady = integration.endpoints !== null
@@ -702,7 +707,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
-  getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }
+  getAgentCatalogEntries(nodeId?: string | null) { return this.#catalog.getAgentCatalogEntries(nodeId); }
 }
 
 function inputAttachments(options: UserInputAdmissionOptions) {

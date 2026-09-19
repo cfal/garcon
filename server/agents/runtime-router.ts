@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { effectiveNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import {
   AgentIntegrationError,
   AgentCallError,
@@ -69,7 +70,7 @@ export interface AgentRuntimeRouterOptions {
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
-  resolveFileMentions(command: string, projectPath: string): Promise<string>;
+  resolveFileMentions(command: string, projectPath: string, nodeId?: string | null): Promise<string>;
 }
 
 export interface CreateCarriedContextInput {
@@ -84,6 +85,7 @@ export interface CreateCarriedContextInput {
 }
 
 export interface RunSingleQueryOptions {
+  readonly nodeId?: string | null;
   readonly agentId: string;
   readonly model?: string;
   readonly thinkingMode?: ThinkingMode;
@@ -117,7 +119,7 @@ export class AgentRuntimeRouter {
   readonly #adoption: TranscriptAdoptionService;
   readonly #resolveFileMentions: AgentRuntimeRouterOptions['resolveFileMentions'];
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
-  readonly #producerLeases = new Map<string, TranscriptProducerLease>();
+  readonly #producerLeases = new Map<string, { readonly nodeId: string; readonly lease: TranscriptProducerLease }>();
   readonly #executionHandles = new Map<string, {
     readonly agentId: string;
     readonly runId: string;
@@ -175,7 +177,7 @@ export class AgentRuntimeRouter {
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       const persistedEntry = this.#registry.getChat(chatId);
       const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
-      const integration = this.#directory.require(entry.agentId);
+      const integration = this.#directory.require(entry.agentId, entry.nodeId);
       const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
       await this.#validateEndpoint(integration, selection);
       const prepared = await this.#preparePrompt(chatId, prompt, opts);
@@ -251,7 +253,7 @@ export class AgentRuntimeRouter {
         });
       }
       const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
-      const integration = this.#directory.require(entry.agentId);
+      const integration = this.#directory.require(entry.agentId, entry.nodeId);
       await this.#validateEndpoint(integration, selection);
       const prepared = await this.#preparePrompt(chatId, prompt, opts);
       if (!prepared.dispatch) return;
@@ -294,7 +296,7 @@ export class AgentRuntimeRouter {
         message: 'No active agent session',
       };
     }
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#directory.require(entry.agentId, entry.nodeId);
     if (!integration.steering) {
       throw new DomainError(
         'OPERATION_UNSUPPORTED',
@@ -318,7 +320,7 @@ export class AgentRuntimeRouter {
   async captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null> {
     const entry = this.#registry.getChat(chatId);
     if (!entry?.agentSessionId) return null;
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#directory.require(entry.agentId, entry.nodeId);
     const steering = integration.steering;
     if (!steering) return null;
     const expectedRunId = this.#ledger.activeRunId(chatId);
@@ -345,7 +347,7 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
       if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
-      const integration = this.#directory.require(entry.agentId);
+      const integration = this.#directory.require(entry.agentId, entry.nodeId);
       const selection = this.#endpointResolver.resolveSelection({
         agentId: entry.agentId,
         model: entry.model,
@@ -392,10 +394,10 @@ export class AgentRuntimeRouter {
     agentId: string,
     request: PrepareProjectPathUpdateRequest,
   ): Promise<AgentProjectPathUpdatePreparation | void> {
-    const integration = this.#directory.require(agentId);
-    if (!integration.projectPathUpdates) return;
     const entry = this.#registry.getChat(request.chatId);
     if (!entry) throw new Error(`Session not found: ${request.chatId}`);
+    const integration = this.#directory.require(agentId, entry.nodeId);
+    if (!integration.projectPathUpdates) return;
     if (
       entry.agentId !== agentId
       || entry.agentSessionId !== request.agentSessionId
@@ -421,11 +423,16 @@ export class AgentRuntimeRouter {
     };
   }
 
-  executionSessionLost(): void {
-    const runs = this.#ledger.activeChatIds().map((chatId) => ({ chatId, runId: this.#ledger.activeRunId(chatId)! }));
-    this.#executionHandles.clear();
-    this.#pendingAbortRuns.clear();
+  executionSessionLost(nodeId = LOCAL_EXECUTION_NODE_ID): void {
+    const runs = this.#ledger.activeChatIds()
+      .filter((chatId) => effectiveNodeId(this.#registry.getChat(chatId)?.nodeId) === nodeId)
+      .map((chatId) => ({ chatId, runId: this.#ledger.activeRunId(chatId)! }));
+    const leases = [...this.#producerLeases].filter(([, producer]) => producer.nodeId === nodeId);
+    for (const [chatId, active] of this.#executionHandles) {
+      if (active.handle.nodeId === nodeId) this.#executionHandles.delete(chatId);
+    }
     for (const { chatId, runId } of runs) {
+      this.#pendingAbortRuns.delete(runKey(chatId, runId));
       this.#bindings.forgetRun(runId);
       this.#ledger.failRun(chatId, runId, {
         code: 'OUTCOME_UNKNOWN',
@@ -433,8 +440,10 @@ export class AgentRuntimeRouter {
       });
     }
     // Closing a producer removes its active run, so terminal publication must precede closure.
-    for (const lease of this.#producerLeases.values()) lease.close();
-    this.#producerLeases.clear();
+    for (const [chatId, producer] of leases) {
+      producer.lease.close();
+      if (this.#producerLeases.get(chatId) === producer) this.#producerLeases.delete(chatId);
+    }
   }
 
   #failDefiniteDispatch(chatId: string, runId: string | null, error: unknown): void {
@@ -463,10 +472,13 @@ export class AgentRuntimeRouter {
     return this.#ledger.isRunActive(chatId);
   }
 
-  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
+  isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, nodeId?: string | null): boolean {
     if (!agentSessionId) return false;
-    const match = this.#registry.getChatByAgentSessionId(agentSessionId);
-    return Boolean(match && match[1].agentId === agentId && this.#ledger.isRunActive(match[0]));
+    return this.#ledger.activeChatIds().some((chatId) => {
+      const entry = this.#registry.getChat(chatId);
+      return entry?.agentId === agentId && entry.agentSessionId === agentSessionId
+        && effectiveNodeId(entry.nodeId) === effectiveNodeId(nodeId);
+    });
   }
 
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>> {
@@ -503,7 +515,12 @@ export class AgentRuntimeRouter {
     }
     const claim = this.#ledger.claimPermissionResolution(control);
     try {
-      await this.#directory.require(claim.decision.response.integrationId).permissions.respond({
+      const entry = this.#registry.getChat(chatId);
+      const response = claim.decision.response;
+      if (!entry || response.nodeId !== effectiveNodeId(entry.nodeId) || response.integrationId !== entry.agentId) {
+        throw new AgentCallError('rejected', 'Permission belongs to another execution target');
+      }
+      await this.#directory.require(response.integrationId, response.nodeId).permissions.respond({
         response: claim.decision.response, decision,
       });
     } catch (error) {
@@ -533,7 +550,7 @@ export class AgentRuntimeRouter {
     }
     try {
       const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
-      const integration = this.#directory.require(source.agentId);
+      const integration = this.#directory.require(source.agentId, source.nodeId);
       if (!integration.forking) return null;
       const selection = this.#endpointResolver.resolveSelection({
         agentId: source.agentId,
@@ -615,8 +632,8 @@ export class AgentRuntimeRouter {
     }
   }
 
-  async discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
-    const forking = this.#directory.require(agentId).forking;
+  async discardForkedAgentSession(agentId: string, session: StartedAgentSession, nodeId?: string | null): Promise<void> {
+    const forking = this.#directory.require(agentId, nodeId).forking;
     if (!forking) return;
     await forking.discard(session, new AbortController().signal);
   }
@@ -626,7 +643,7 @@ export class AgentRuntimeRouter {
     options: RunSingleQueryOptions,
   ): Promise<string> {
     const { agentId } = options;
-    const integration = this.#directory.require(agentId);
+    const integration = this.#directory.require(agentId, options.nodeId);
     if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
     const model = typeof options.model === 'string' ? options.model : '';
     const selection = model ? this.#endpointResolver.resolveSelection({
@@ -659,8 +676,8 @@ export class AgentRuntimeRouter {
     });
   }
 
-  async discoverSlashCommands(agentId: string, projectPath: string) {
-    const commands = this.#directory.get(agentId)?.commands;
+  async discoverSlashCommands(agentId: string, projectPath: string, nodeId?: string | null) {
+    const commands = this.#directory.require(agentId, nodeId).commands;
     return commands
       ? [...(await commands.discover(projectPath, new AbortController().signal))]
       : [];
@@ -722,7 +739,7 @@ export class AgentRuntimeRouter {
       ? promptRows.flatMap((row) => row.detail.attachments)
       : attachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
-    const resolvedPrompt = await this.#resolveFileMentions(prompt, entry.projectPath);
+    const resolvedPrompt = await this.#resolveFileMentions(prompt, entry.projectPath, entry.nodeId);
     return {
       dispatch: true,
       prompt: resolvedPrompt,
@@ -761,7 +778,7 @@ export class AgentRuntimeRouter {
       });
     };
     try {
-      void this.#directory.require(agentId).execution.abort(handle).catch(failed);
+      void this.#directory.require(agentId, handle.nodeId).execution.abort(handle).catch(failed);
     } catch (error) {
       failed(error);
     }
@@ -769,16 +786,16 @@ export class AgentRuntimeRouter {
 
   #producer(chatId: string): TranscriptProducerLease {
     const existing = this.#producerLeases.get(chatId);
-    if (existing && !existing.closed) return existing;
+    if (existing && !existing.lease.closed) return existing.lease;
     if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const lease = this.#ledger.openProducer(chatId, entry.agentId);
-    this.#producerLeases.set(chatId, lease);
+    this.#producerLeases.set(chatId, { nodeId: effectiveNodeId(entry.nodeId), lease });
     return lease;
   }
 
   reopenProducer(chatId: string): void {
-    this.#producerLeases.get(chatId)?.close();
+    this.#producerLeases.get(chatId)?.lease.close();
     this.#producerLeases.delete(chatId);
     this.#producer(chatId);
   }
@@ -799,7 +816,7 @@ export class AgentRuntimeRouter {
       executionAdmission?: AgentExecutionAdmission;
     },
   ) {
-    const integration = this.#directory.require(entry.agentId);
+    const integration = this.#directory.require(entry.agentId, entry.nodeId);
     const permissionMode = supportedValue(
       integration.descriptor.supportedPermissionModes,
       normalizePermissionMode(opts.permissionMode ?? entry.permissionMode),

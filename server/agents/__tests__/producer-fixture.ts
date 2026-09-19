@@ -7,7 +7,7 @@ import {
 } from '@garcon/server-agent-interface';
 
 export function createProducerFixture() {
-  const scope = { nodeId: 'test-node', instanceId: crypto.randomUUID(), integrationId: 'test' };
+  const scope = { nodeId: 'local', instanceId: crypto.randomUUID(), integrationId: 'test' };
   const listeners = new Set<(notification: AgentProducerNotification) => void>();
   const bindings = new Set<string>();
   const producers = {
@@ -31,7 +31,7 @@ export function createProducerFixture() {
 export function permissionResponse(id: string) {
   return {
     kind: 'permission-response' as const,
-    nodeId: 'test-node', instanceId: 'test-instance', integrationId: 'test', id,
+    nodeId: 'local', instanceId: 'test-instance', integrationId: 'test', id,
   };
 }
 

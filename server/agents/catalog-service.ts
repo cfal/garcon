@@ -5,10 +5,12 @@ import type {
 import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-resolver.js";
 import type { AgentDirectory } from "./directory.js";
 import { createLogger } from "../lib/log.js";
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 
 const logger = createLogger("agents:catalog-service");
 
 export interface AgentModelQuery {
+  nodeId?: string | null;
   strict?: boolean;
 }
 
@@ -35,18 +37,19 @@ export class AgentCatalogService {
     agentId: string,
     query: AgentModelQuery = {},
   ): Promise<AgentModelOption[]> {
-    const integration = this.deps.directory.get(agentId);
+    const integration = this.deps.directory.get(agentId, query.nodeId);
     if (!integration) return [];
     return [...(await this.#snapshot(agentId, query)).models];
   }
 
   async modelSupportsImages(input: {
+    nodeId?: string | null;
     agentId: string;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean> {
-    const integration = this.deps.directory.get(input.agentId);
+    const integration = this.deps.directory.get(input.agentId, input.nodeId);
     if (!integration) return false;
     if (!input.apiProviderId || !input.modelEndpointId)
       return integration.descriptor.supportsImages;
@@ -57,15 +60,15 @@ export class AgentCatalogService {
     return this.deps.endpointResolver.getModelOptions(agentId).length > 0;
   }
 
-  requiresStrictModelDiscovery(agentId: string): boolean {
-    return this.#requiresStrictByAgent.get(agentId) ?? false;
+  requiresStrictModelDiscovery(agentId: string, nodeId?: string | null): boolean {
+    return this.#requiresStrictByAgent.get(JSON.stringify([effectiveNodeId(nodeId), agentId])) ?? false;
   }
 
   async getAgentCatalogEntry(
     agentId: string,
     query: AgentModelQuery = {},
   ): Promise<AgentCatalogEntry | null> {
-    const integration = this.deps.directory.get(agentId);
+    const integration = this.deps.directory.get(agentId, query.nodeId);
     if (!integration) return null;
     const snapshot = await this.#snapshot(agentId, query);
     const endpointModels = integration.endpoints
@@ -99,13 +102,13 @@ export class AgentCatalogService {
     };
   }
 
-  async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
+  async getAgentCatalogEntries(nodeId?: string | null): Promise<AgentCatalogEntry[]> {
     const entries = (
       await Promise.all(
         this.deps.directory
-          .list()
+          .list(nodeId)
           .map((integration) =>
-            this.getAgentCatalogEntry(integration.descriptor.id),
+            this.getAgentCatalogEntry(integration.descriptor.id, { nodeId }),
           ),
       )
     ).filter((entry): entry is AgentCatalogEntry => entry !== null);
@@ -123,7 +126,7 @@ export class AgentCatalogService {
   }
 
   async #snapshot(agentId: string, query: AgentModelQuery) {
-    const integration = this.deps.directory.require(agentId);
+    const integration = this.deps.directory.require(agentId, query.nodeId);
     const signal = new AbortController().signal;
     try {
       const snapshot = await integration.catalog.snapshot({
@@ -131,7 +134,7 @@ export class AgentCatalogService {
         signal,
       });
       this.#requiresStrictByAgent.set(
-        agentId,
+        JSON.stringify([effectiveNodeId(query.nodeId), agentId]),
         snapshot.requiresStrictModelDiscovery,
       );
       return snapshot;

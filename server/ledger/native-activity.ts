@@ -5,6 +5,7 @@ import type {
   AgentNativeSessionRef,
 } from '@garcon/server-agent-interface';
 import { isDeepStrictEqual } from 'node:util';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { ChatOperationalNoticeMessage } from '../../common/ws-events.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
@@ -15,7 +16,7 @@ export const NATIVE_TRANSCRIPT_DRIFT_NOTICE =
   'The transcript may have changed outside Garcon. Consider reloading from native history.';
 
 interface NativeActivityIntegrationDirectory {
-  get(agentId: string): AgentIntegration | null;
+  get(agentId: string, nodeId?: string | null): AgentIntegration | null;
 }
 
 interface ScheduledTimeout {
@@ -23,6 +24,7 @@ interface ScheduledTimeout {
 }
 
 interface NativeActivityEligibilityKey {
+  readonly nodeId: string;
   readonly agentId: string;
   readonly transcriptViewId: string;
   readonly sessionOrdinal: number;
@@ -168,7 +170,7 @@ export class NativeTranscriptActivityService {
   #eligibility(chatId: string): EligibleNativeActivityCheck | null {
     const entry = this.options.registry.getChat(chatId);
     if (!entry) return null;
-    const integration = this.options.integrations.get(entry.agentId);
+    const integration = this.options.integrations.get(entry.agentId, entry.nodeId);
     if (!integration?.nativeActivity) return null;
     const activity = this.options.ledger.nativeActivityState(chatId);
     const session = activity.session;
@@ -177,6 +179,7 @@ export class NativeTranscriptActivityService {
     if (!session || !nativeSession || !providerWatermark) return null;
     return {
       key: {
+        nodeId: effectiveNodeId(entry.nodeId),
         agentId: entry.agentId,
         transcriptViewId: activity.viewId,
         sessionOrdinal: session.ordinal,
@@ -202,7 +205,7 @@ function eligibilityKeysEqual(
   left: NativeActivityEligibilityKey,
   right: NativeActivityEligibilityKey,
 ): boolean {
-  return left.agentId === right.agentId
+  return left.nodeId === right.nodeId && left.agentId === right.agentId
     && left.transcriptViewId === right.transcriptViewId
     && left.sessionOrdinal === right.sessionOrdinal
     && left.providerWatermark.ordinal === right.providerWatermark.ordinal

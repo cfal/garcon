@@ -15,6 +15,7 @@ import {
 import { DomainError } from '../lib/domain-error.js';
 
 export interface AgentConfigurationInput {
+  readonly nodeId?: string | null;
   readonly agentId: string;
   readonly model: string;
   readonly apiProviderId?: string | null;
@@ -37,7 +38,7 @@ export class AgentSessionSettingsService {
   }
 
   async validateConfiguration(input: AgentConfigurationInput): Promise<void> {
-    const integration = this.deps.directory.require(input.agentId);
+    const integration = this.deps.directory.require(input.agentId, input.nodeId);
     if (!integration.configurationValidation) return;
     const selection = this.deps.endpointResolver.resolveSelection(input);
     await integration.configurationValidation.validate({
@@ -59,7 +60,7 @@ export class AgentSessionSettingsService {
     return this.#lock.runExclusive(`chat:${chatId}`, async () => {
       const entry = this.deps.registry.getChat(chatId);
       if (!entry) throw new Error(`Session not found: ${chatId}`);
-      const integration = this.deps.directory.require(entry.agentId);
+      const integration = this.deps.directory.require(entry.agentId, entry.nodeId);
       const previous = this.deps.endpointResolver.resolveSelection({
         agentId: entry.agentId,
         model: entry.model,
