@@ -15,7 +15,6 @@
 		getModelCatalog,
 		getExecutionNodes,
 		getAgentState,
-		getRemoteSettings,
 		getNotifications,
 		getPreambles,
 		getSnippets,
@@ -77,15 +76,11 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import X from '@lucide/svelte/icons/x';
-	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
-	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
-	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import { matchesSelectableSnippetExpansion, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
-	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
@@ -128,7 +123,6 @@
 		void catalog.lastValidatedAt;
 		untrack(() => void catalog.refreshIfStale());
 	});
-	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const preambles = getPreambles();
 	const snippets = getSnippets();
@@ -637,37 +631,6 @@
 	});
 	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
-	// Existing (already-started) chats expose the full agent/source picker so a
-	// conversation can move between configured providers and models. Drafts keep
-	// the compact trigger; the new-chat form owns agent selection before start.
-	const isActiveModelSelection = $derived(
-		Boolean(sessions.selectedChat) && sessions.selectedChat?.status !== 'draft',
-	);
-	function selectableAgentsForNode(nodeId: string) {
-		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
-		const selectedAgentId = sessions.selectedChat?.agentId;
-		if (localSettings.allowDirectChats || (selectedAgentId && isDirectAgentId(selectedAgentId))) {
-			return allAgentIds;
-		}
-		return nonDirectAgentIds(allAgentIds);
-	}
-	const modelSelectorAgentIds = $derived(selectableAgentsForNode(agentState.nodeId));
-	const modelSelectorMode: ModelSelectorMode = $derived(
-		isActiveModelSelection
-			? composerModelSelectorMode(modelCatalog, agentState.agentId, modelSelectorAgentIds)
-			: { agent: 'fixed', source: 'hidden', surface: 'composer' },
-	);
-	const modelSelectorValue = $derived({
-		nodeId: agentState.nodeId,
-		agentId: agentState.agentId,
-		model: agentState.model,
-		apiProviderId: agentState.apiProviderId,
-		modelEndpointId: agentState.modelEndpointId,
-		modelProtocol: agentState.modelProtocol,
-	});
-	function getRecents(nodeId: string) {
-		return buildModelSelectorRecents(rootModelCatalog.forNode(nodeId), remoteSettings.snapshot?.recentAgentSettings ?? []);
-	}
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(
@@ -907,16 +870,7 @@
 					/>
 				{/snippet}
 				{#snippet modelSelector()}
-					<ComposerModelSelector
-						value={modelSelectorValue}
-						mode={modelSelectorMode}
-						onChange={(next) => onModelChange?.(next)}
-						{getRecents}
-						preferRecentsOnOpen
-						getSelectableAgentIds={selectableAgentsForNode}
-						align="end"
-						side="top"
-					/>
+					<PromptComposerModelSelector onChange={onModelChange} />
 				{/snippet}
 			</ComposerBottomBar>
 		</form>
