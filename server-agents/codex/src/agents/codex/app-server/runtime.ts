@@ -12,7 +12,6 @@ import {
   AgentIntegrationError,
   type AgentFinalResponse,
   type AgentSessionConfiguration,
-  type AgentGoalControlHandoff,
   type AgentLogger,
   type AgentSteerResult,
 } from '@garcon/server-agent-interface';
@@ -53,8 +52,6 @@ import type {
   JsonRpcNotification,
   JsonRpcServerRequest,
   CodexThread,
-  ThreadGoalClearedNotification,
-  ThreadGoalUpdatedNotification,
   ThreadStartResponse,
   ThreadSettingsUpdatedNotification,
   RawResponseItemCompletedNotification,
@@ -65,7 +62,6 @@ import type {
 import {
   buildCodexEnv,
   codexSourceRuntimeIdentity,
-  buildInjectedContextItems,
   buildThreadForkParams,
   buildThreadResumeParams,
   buildThreadSettingsUpdateParams,
@@ -80,10 +76,6 @@ import {
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
-import { RuntimeGoalCoordinator } from './runtime-goal.js';
-import type { CodexGoalCommand } from '../goal-command.js';
-import { GoalAttachmentOperationQueue, GoalAttachmentOperations } from './goal-attachment-operations.js';
-import { cleanupOwnedGoalAttachments } from './goal-files.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
   rejectedCodexSteer,
@@ -91,15 +83,12 @@ import {
 } from './steering.ts';
 import {
   adoptTurn,
-  cancelTurnStartWaiters,
   CodexSessionActivationFailure,
   providerOwnsReasoningEffort,
   recordExplicitReasoningEffort,
   sessionForClientThread,
   sourceForClientThread,
   sourceForClientTurn,
-  TurnStartWaitCancelledError,
-  waitForTurnStart,
   type BufferedClientEvent,
   type CodexAppServerRuntimeOptions,
   type FinishSessionOptions,
@@ -109,7 +98,6 @@ import {
   CAPACITY_RETRY_DELAYS_MS,
   delay,
   denialResponseForRequest,
-  GOAL_TURN_START_TIMEOUT_MS,
   hasTerminalPendingFinish,
   humanizeCodexAppServerError,
   isActiveSessionStatus,
@@ -150,8 +138,6 @@ export class CodexAppServerRuntime {
   #nativePathDiscoveryRefresh: NativePathDiscoveryRefreshLimiter;
   #logger: AgentLogger;
   #skillDiscovery: CodexSkillDiscovery;
-  #cleanupOwnedGoalAttachments: typeof cleanupOwnedGoalAttachments;
-  #goalAttachmentQueue = new GoalAttachmentOperationQueue();
   #history: CodexHistoryService;
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
@@ -167,7 +153,6 @@ export class CodexAppServerRuntime {
   // need their own sweep; without it every chat ever served pins one idle
   // app-server process for the lifetime of the server.
   #retainedSourcePurger: IdleSessionPurger<RunningCodexSession>;
-  #goal: RuntimeGoalCoordinator;
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
@@ -188,22 +173,12 @@ export class CodexAppServerRuntime {
       },
     }, options.retainedSourceIdlePurge);
     this.#logger = options.logger ?? NOOP_LOGGER;
-    this.#cleanupOwnedGoalAttachments = options.cleanupOwnedGoalAttachments ?? cleanupOwnedGoalAttachments;
     this.#history = new CodexHistoryService({
       createClient: this.#createClient,
       logger: this.#logger,
     });
     this.#skillDiscovery = options.skillDiscovery ?? new CodexSkillDiscovery({
       logger: this.#logger,
-    });
-    this.#goal = new RuntimeGoalCoordinator({
-      sessions: this.#sessions,
-      logger: this.#logger,
-      finishSession: (session, opts, operation) => this.#finishSession(session, opts, operation),
-      flushPendingFinish: (session) => this.#flushPendingFinish(session),
-      canApplyTurnAttempt: (session, generation) => this.#canApplyTurnAttempt(session, generation),
-      generationAcrossTurnBoundary: (session, generation) => this.#generationAcrossTurnBoundary(session, generation),
-      recordExplicitReasoningEffort,
     });
   }
 
@@ -224,30 +199,12 @@ export class CodexAppServerRuntime {
     request: CodexStartRequest | CodexResumeRequest,
     operation: CodexOperation,
   ): Promise<void> {
-    if (request.codexGoalCommand) {
-      if ('codexSeedContext' in request && request.codexSeedContext) {
-        await client.injectThreadItems({
-          threadId: session.threadId,
-          items: buildInjectedContextItems(request.codexSeedContext),
-        });
-      }
-      await this.#goal.handleCommand(
-        client,
-        session,
-        request.codexGoalCommand,
-        request,
-        operation,
-        { keepSession: false },
-      );
-      return;
-    }
-
     const attachments = await writeAttachmentsToTempFiles(request.images);
     session.cleanupAttachments = attachments.cleanup;
     const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
     if (request.executionAdmission?.signal.aborted || this.#sessions.get(session.threadId) !== session) {
       await attachments.cleanup();
-      throw new TurnStartWaitCancelledError('Codex session ended before starting the turn');
+      throw new Error('Codex session ended before starting the turn');
     }
     const turnAttemptGeneration = session.turnAttemptGeneration;
     session.nextTurnOperation = operation;
@@ -301,13 +258,6 @@ export class CodexAppServerRuntime {
     );
   }
 
-  submitGoalControl(
-    request: CodexResumeRequest,
-    beforeDelivery?: (handoff: AgentGoalControlHandoff) => Promise<void>,
-  ): Promise<boolean> {
-    return this.#goal.submitGoalControl(request, beforeDelivery);
-  }
-
   async startSession(
     request: CodexStartRequest,
   ): Promise<CodexStartedSession> {
@@ -334,9 +284,7 @@ export class CodexAppServerRuntime {
         operation,
       });
       activeSession = session;
-      session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
-      await this.#ensureGoalEffort(session, request);
       assertCodexExecutionOpen(request);
       request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
@@ -386,33 +334,13 @@ export class CodexAppServerRuntime {
         if (this.#sessions.get(session.threadId) !== session) {
           throw new Error('Codex session ended while resuming the thread');
         }
-        await this.#goal.synchronizeRestoredGoal(client, session);
         const initialDelivery = session.activeInputChain.then(async () => {
           if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
-            throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
+            throw new Error('Codex session ended before turn delivery');
           }
           recordExplicitReasoningEffort(session, request);
-          await this.#ensureGoalEffort(session, request);
           if (request.executionAdmission) await markCodexExecutionStarted(request);
-          if (!request.codexGoalCommand) {
-            if (session.managesGoalLifecycle) {
-              await this.#goal.deliverReservedGoalControl(session, request, operation);
-            } else {
-              await this.#startRequestedTurn(client, session, request, operation);
-            }
-          } else {
-            await this.#goal.handleCommand(
-              client,
-              session,
-              request.codexGoalCommand,
-              request,
-              operation,
-              {
-                keepSession: session.managesGoalLifecycle,
-                goalSynchronized: true,
-              },
-            );
-          }
+          await this.#startRequestedTurn(client, session, request, operation);
           if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
             session.pendingFinish = null;
           }
@@ -501,7 +429,6 @@ export class CodexAppServerRuntime {
     if (!session) return false;
     if (!turnId) {
       session.status = 'aborted';
-      cancelTurnStartWaiters(session, 'Codex session aborted');
       this.#finishSession(session, { aborted: true });
       return true;
     }
@@ -662,16 +589,6 @@ export class CodexAppServerRuntime {
     }
   }
 
-  async #ensureGoalEffort(
-    session: RunningCodexSession,
-    request: CodexStartRequest | CodexResumeRequest,
-  ): Promise<void> {
-    if (!request.codexGoalCommand) return;
-    const requested = codexThreadSettingsTarget(request);
-    if (!requested.effort || session.confirmedThreadSettings.effort === requested.effort) return;
-    await this.#applyThreadSettings(session, requested);
-  }
-
   #sourceForThread(threadId: string): RunningCodexSession | null {
     const active = this.#sessions.get(threadId);
     if (active) return active;
@@ -691,7 +608,6 @@ export class CodexAppServerRuntime {
     this.#retainedSourcePurger.stop();
     const sessions = [...new Set(this.#sources.values())];
     for (const session of sessions) {
-      cancelTurnStartWaiters(session, 'Codex runtime shut down');
       void session.cleanupAttachments?.();
     }
     this.#sessions.clear();
@@ -855,20 +771,7 @@ export class CodexAppServerRuntime {
       permissionMode: args.confirmedThreadSettings.permissionMode,
       startedAt: new Date().toISOString(),
       idleSince: null,
-      turnStartWaiters: new Set(),
-      goal: null,
-      managesGoalLifecycle: false,
-      completedGoalTurn: false,
-      ignoredGoalClears: 0,
       activeInputChain: Promise.resolve(),
-      goalAttachments: new GoalAttachmentOperations({
-        codexHome: args.codexHome,
-        threadId: args.threadId,
-        cleanup: this.#cleanupOwnedGoalAttachments,
-        logger: this.#logger,
-        chatId: args.chatId,
-        queue: this.#goalAttachmentQueue,
-      }),
       activeDeliveryReservations: 0,
       pendingFinish: null,
       pendingFinishOperation: null,
@@ -884,7 +787,6 @@ export class CodexAppServerRuntime {
       pendingCapacityFailure: null,
       sourceOperation: args.operation,
       nextTurnOperation: args.operation,
-      goalOperation: null,
       lastTurnOperation: null,
       terminalTurnIds: new Set(),
       superseded: false,
@@ -913,7 +815,7 @@ export class CodexAppServerRuntime {
   ): Promise<{ session: RunningCodexSession; buffered: boolean }> {
     const runtimeIdentity = codexSourceRuntimeIdentity(request);
     const retained = this.#latestSourceByChat.get(request.chatId);
-    // Omitted effort is reusable only when no prior turn, settings update, or goal delivery took ownership.
+    // Omitted effort is reusable only when no prior turn or settings update took ownership.
     const reasoningEffortIsReusable = () => !providerOwnsReasoningEffort(request)
       || retained?.providerOwnsReasoningEffort === true;
     const matchingPath = !retained?.nativePath
@@ -1042,10 +944,6 @@ export class CodexAppServerRuntime {
     session.idleSince = null;
     session.cleanupAttachments = undefined;
     void previousAttachmentCleanup?.();
-    session.goal = null;
-    session.managesGoalLifecycle = false;
-    session.completedGoalTurn = false;
-    session.ignoredGoalClears = 0;
     session.activeInputChain = Promise.resolve();
     session.activeDeliveryReservations = 0;
     session.pendingFinish = null;
@@ -1058,7 +956,6 @@ export class CodexAppServerRuntime {
     session.pendingCapacityFailure = null;
     session.sourceOperation = operation;
     session.nextTurnOperation = operation;
-    session.goalOperation = null;
     session.lastTurnOperation = null;
     session.threadSettingsUpdateChain = Promise.resolve();
     this.#sessions.set(session.threadId, session);
@@ -1216,12 +1113,6 @@ export class CodexAppServerRuntime {
       case 'turn/completed':
         this.#handleTurnCompleted(client, notification.params as TurnCompletedNotification);
         break;
-      case 'thread/goal/updated':
-        this.#goal.handleGoalUpdated(client, notification.params as ThreadGoalUpdatedNotification);
-        break;
-      case 'thread/goal/cleared':
-        this.#goal.handleGoalCleared(client, notification.params as ThreadGoalClearedNotification);
-        break;
       case 'error':
         this.#handleErrorNotification(client, notification.params as ErrorNotification);
         break;
@@ -1278,7 +1169,7 @@ export class CodexAppServerRuntime {
     if (!session) return;
     if (session.turnRoutes.has(params.turn.id)) return;
     if (session.configurationFenced) {
-      const operation = session.goalOperation ?? session.lastTurnOperation ?? session.sourceOperation;
+      const operation = session.lastTurnOperation ?? session.sourceOperation;
       void client.interruptTurn(session.threadId, params.turn.id).catch((error) => {
         this.#logger.warn('Codex fenced-turn interruption failed', {
           turnId: params.turn.id,
@@ -1292,10 +1183,9 @@ export class CodexAppServerRuntime {
       );
       return;
     }
-    const operation = session.nextTurnOperation ?? session.goalOperation ?? session.sourceOperation;
+    const operation = session.nextTurnOperation ?? session.sourceOperation;
     if (!adoptTurn(session, params.turn.id, operation)) return;
     if (session.status !== 'interrupting') session.status = 'running';
-    for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
 
   #handleItemCompleted(client: CodexAppServerClient, params: ItemCompletedNotification): void {
@@ -1380,12 +1270,6 @@ export class CodexAppServerRuntime {
         this.#finishSession(session, { failedMessage }, operation);
         return;
       }
-      if (session.managesGoalLifecycle && session.goal && session.goal.status !== 'active') {
-        session.activeTurnId = null;
-        session.completedGoalTurn = true;
-        this.#finishSession(session, {}, operation);
-        return;
-      }
       this.#finishSession(session, { failedMessage }, operation);
       return;
     }
@@ -1395,13 +1279,6 @@ export class CodexAppServerRuntime {
     session.status = 'completing';
     session.activeTurnId = null;
     this.#threadListCaches.clear();
-    if (session.managesGoalLifecycle && !aborted) {
-      session.completedGoalTurn = true;
-      if (session.goal?.status === 'active') {
-        session.status = 'running';
-        return;
-      }
-    }
     this.#finishSession(session, { aborted, emitFinishedOnAbort: aborted }, operation);
   }
 
@@ -1433,8 +1310,6 @@ export class CodexAppServerRuntime {
   ): Promise<boolean> {
     const delayMs = this.#capacityRetryDelaysMs[session.capacityRetryCount];
     if (delayMs === undefined) return false;
-    const resumesBlockedGoal = session.managesGoalLifecycle && session.goal?.status === 'blocked';
-    if (session.managesGoalLifecycle && !resumesBlockedGoal) return false;
 
     session.capacityRetryCount += 1;
     const retryGeneration = ++session.turnAttemptGeneration;
@@ -1452,26 +1327,6 @@ export class CodexAppServerRuntime {
 
       session.activeDeliveryReservations += 1;
       try {
-        if (resumesBlockedGoal) {
-          if (
-            !session.managesGoalLifecycle
-            || session.goal?.status !== 'blocked'
-            || session.activeTurnId
-          ) return true;
-          session.nextTurnOperation = operation;
-          const response = await session.client.setThreadGoalStatus(session.threadId, 'active');
-          if (
-            this.#sessions.get(session.threadId) !== session
-            || session.status !== 'running'
-            || hasTerminalPendingFinish(session)
-            || session.turnAttemptGeneration !== retryGeneration
-          ) return true;
-          session.goal = response.goal;
-          if (response.goal.status !== 'active') return false;
-          await waitForTurnStart(this.#sessions, session, GOAL_TURN_START_TIMEOUT_MS);
-          return true;
-        }
-
         if (session.activeTurnId) return true;
         session.nextTurnOperation = operation;
         const turn = await session.client.startTurn({
@@ -1500,15 +1355,6 @@ export class CodexAppServerRuntime {
       && (session.status === 'running' || session.status === 'completing')
       && !hasTerminalPendingFinish(session)
       && session.turnAttemptGeneration === generation;
-  }
-
-  #generationAcrossTurnBoundary(session: RunningCodexSession, generation: number): number | null {
-    const currentGeneration = session.turnAttemptGeneration;
-    // Allows an accepted delivery to cross one ordinary turn boundary while a
-    // second generation advance keeps ownership with a nested capacity retry.
-    return currentGeneration === generation || currentGeneration === generation + 1
-      ? currentGeneration
-      : null;
   }
 
   #handleServerRequest(client: CodexAppServerClient, request: JsonRpcServerRequest): void {
@@ -1610,7 +1456,6 @@ export class CodexAppServerRuntime {
   ): void {
     if (this.#sessions.get(session.threadId) !== session) return;
     if (operation && (opts.aborted || opts.failedMessage)) this.#finalResponses.delete(operation);
-    cancelTurnStartWaiters(session, 'Codex session finished');
     if (session.activeDeliveryReservations > 0) {
       session.pendingFinish = mergeFinishOptions(session.pendingFinish, opts);
       session.pendingFinishOperation = operation ?? session.pendingFinishOperation;
@@ -1622,12 +1467,7 @@ export class CodexAppServerRuntime {
     this.#threadListCaches.clear();
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
     session.interruptAcknowledgement = null;
-    // A finished session no longer drives the goal loop; leaving this state
-    // set would pin its retained source out of the idle sweep forever.
     session.activeTurnId = null;
-    session.goal = null;
-    session.managesGoalLifecycle = false;
-    session.completedGoalTurn = false;
     cancelPendingApprovals(
       this.#logger,
       this.#pendingApprovals,
@@ -1716,7 +1556,6 @@ export class CodexAppServerRuntime {
     session.interruptAcknowledgement = null;
     for (const resolve of [...session.terminalWaiters]) resolve();
     session.nextTurnOperation = null;
-    session.goalOperation = null;
     const settingsWaiter = session.pendingThreadSettings;
     if (settingsWaiter) {
       clearTimeout(settingsWaiter.timeout);
@@ -1740,7 +1579,6 @@ export class CodexAppServerRuntime {
     void cleanupAttachments?.();
     if (!session.superseded) {
       session.superseded = true;
-      cancelTurnStartWaiters(session, 'Codex session was superseded');
       this.#retireSource(session.client);
     }
     return this.#shutdownClient(session.client);

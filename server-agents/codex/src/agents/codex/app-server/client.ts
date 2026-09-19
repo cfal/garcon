@@ -10,11 +10,6 @@ import type {
   JsonRpcSuccess,
   ThreadListResponse,
   ThreadForkResponse,
-  ThreadGoalClearResponse,
-  ThreadGoalGetResponse,
-  ThreadGoalSetResponse,
-  ThreadInjectItemsParams,
-  ThreadInjectItemsResponse,
   ThreadLoadedListResponse,
   ThreadItemsListParams,
   ThreadItemsListResponse,
@@ -23,7 +18,6 @@ import type {
   ThreadResumeResponse,
   ThreadStartResponse,
   ThreadSettingsUpdateParams,
-  CodexThreadGoalStatus,
   ThreadUnsubscribeResponse,
   TurnStartResponse,
   TurnSteerResponse,
@@ -260,32 +254,6 @@ export class CodexAppServerClient extends EventEmitter {
 
   updateThreadSettings(params: ThreadSettingsUpdateParams): Promise<Record<string, never>> {
     return this.request<Record<string, never>>('thread/settings/update', params);
-  }
-
-  setThreadGoal(
-    threadId: string,
-    params: { objective?: string; status?: CodexThreadGoalStatus; tokenBudget?: number | null },
-  ): Promise<ThreadGoalSetResponse> {
-    return this.request<ThreadGoalSetResponse>('thread/goal/set', {
-      threadId,
-      ...params,
-    });
-  }
-
-  setThreadGoalStatus(threadId: string, status: CodexThreadGoalStatus): Promise<ThreadGoalSetResponse> {
-    return this.setThreadGoal(threadId, { status });
-  }
-
-  getThreadGoal(threadId: string): Promise<ThreadGoalGetResponse> {
-    return this.request<ThreadGoalGetResponse>('thread/goal/get', { threadId });
-  }
-
-  clearThreadGoal(threadId: string): Promise<ThreadGoalClearResponse> {
-    return this.request<ThreadGoalClearResponse>('thread/goal/clear', { threadId });
-  }
-
-  injectThreadItems(params: ThreadInjectItemsParams): Promise<ThreadInjectItemsResponse> {
-    return this.request<ThreadInjectItemsResponse>('thread/inject_items', params);
   }
 
   listThreads(params: Record<string, unknown>): Promise<ThreadListResponse> {

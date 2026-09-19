@@ -613,45 +613,6 @@ export interface ThreadStartResponse {
 
 export interface ThreadResumeResponse extends ThreadStartResponse {}
 export interface ThreadForkResponse extends ThreadStartResponse {}
-export type CodexThreadGoalStatus =
-  | 'active'
-  | 'paused'
-  | 'blocked'
-  | 'usageLimited'
-  | 'budgetLimited'
-  | 'complete';
-export interface CodexThreadGoal {
-  threadId: string;
-  objective: string;
-  status: CodexThreadGoalStatus;
-  tokenBudget: number | null;
-  tokensUsed: number;
-  timeUsedSeconds: number;
-  createdAt: number;
-  updatedAt: number;
-}
-export interface ThreadGoalSetResponse {
-  goal: CodexThreadGoal;
-}
-export interface ThreadGoalGetResponse {
-  goal: CodexThreadGoal | null;
-}
-export interface ThreadGoalClearResponse {
-  cleared: boolean;
-}
-export interface ThreadInjectItemsParams {
-  threadId: string;
-  items: Array<Record<string, unknown>>;
-}
-export type ThreadInjectItemsResponse = Record<string, never>;
-export interface ThreadGoalUpdatedNotification {
-  threadId: string;
-  turnId: string | null;
-  goal: CodexThreadGoal;
-}
-export interface ThreadGoalClearedNotification {
-  threadId: string;
-}
 export interface ThreadListResponse {
   data: CodexThread[];
   nextCursor: string | null;

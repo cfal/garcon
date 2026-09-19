@@ -25,7 +25,7 @@ import {
   withSingleQueryDirectory,
 } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createAgentSteering, createAgentGoals } from '@garcon/server-agent-common/execution/control-adapters';
+import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
 import {
   createHistoryImport,
   createNativeHistoryImport,
@@ -100,7 +100,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly compaction: NonNullable<AgentIntegration['compaction']>;
   readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
-  readonly goals: NonNullable<AgentIntegration['goals']>;
+  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
@@ -176,7 +176,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
       captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
       steer: (request) => runtime.steer(request),
     });
-    this.goals = createAgentGoals(producer, (request, publish) => execution.submitGoalControl(request, publish));
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CODEX_MODELS.DEFAULT,

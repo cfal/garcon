@@ -4,7 +4,6 @@ import {
   type AgentEstablishedSession,
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import type { RuntimeGoalControlRequest as AgentGoalControlRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   type AgentRuntimeExecution,
   type AgentRuntimePublisher,
@@ -24,7 +23,6 @@ import {
 import { codexOperation } from './app-server/operation-routes.js';
 import { mapThinkingModeToCodexEffort } from './app-server/request-builders.js';
 import type { CodexAppServerRuntime } from './app-server/runtime.js';
-import { parseCodexGoalCommand, type CodexGoalCommand } from './goal-command.js';
 import type {
   CodexProviderConfig,
   CodexResumeRequest,
@@ -35,8 +33,6 @@ interface CodexRuntimeConfiguration {
   readonly envOverrides: Record<string, string>;
   readonly codexConfig?: CodexProviderConfig;
 }
-
-type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'sink'>;
 
 export class CodexExecution implements AgentRuntimeExecution {
   constructor(
@@ -64,7 +60,7 @@ export class CodexExecution implements AgentRuntimeExecution {
         nativeSeedReceipt: receiptForCarriedContext(
           request.carriedContext,
           started.agentSessionId,
-          runtimeRequest.codexGoalCommand ? 'provider-context' : 'user-prefix',
+          'user-prefix',
         ),
       };
       publish({ type: 'session', session: holder.session });
@@ -91,19 +87,6 @@ export class CodexExecution implements AgentRuntimeExecution {
 
   async resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
     return this.#resume(request, publish, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
-  }
-
-  async submitGoalControl(
-    request: CodexGoalControlRuntimeRequest,
-    publish: AgentRuntimePublisher,
-  ): Promise<boolean> {
-    const runtimeRequest = prepareResumeRequest(
-      request,
-      await this.#runtimeConfiguration(request),
-      this.nativeSessions,
-      publish,
-    );
-    return this.runtime.submitGoalControl(runtimeRequest, request.beforeDelivery);
   }
 
   async compact(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
@@ -239,23 +222,13 @@ function prepareStartRequest(
   configuration: CodexRuntimeConfiguration,
   publish: AgentRuntimePublisher,
 ): CodexStartRequest {
-  const goal = parseCodexGoalCommand(request.prompt);
-  if (goal && goal.kind !== 'set') {
-    throw new AgentIntegrationError(
-      'INVALID_SETTINGS',
-      'Start a Codex session with /goal <objective> before using goal controls.',
-      false,
-    );
-  }
   const carriedContext = request.carriedContext?.prefix ?? null;
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
-    command: goal?.objective ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
+    command: carriedContext ? `${carriedContext}${request.prompt}` : request.prompt,
     images: request.attachments,
     ...configuration,
-    ...(goal ? { codexGoalCommand: goal } : {}),
-    ...(goal && carriedContext ? { codexSeedContext: carriedContext } : {}),
   };
 }
 
@@ -265,21 +238,13 @@ function prepareResumeRequest(
   nativeSessions: PathNativeSessionCodec,
   publish: AgentRuntimePublisher,
 ): CodexResumeRequest {
-  const goal = parseCodexGoalCommand(request.prompt);
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
-    command: goalObjective(goal) ?? request.prompt,
+    command: request.prompt,
     images: request.attachments,
     nativePath: nativeSessions.decode(request.nativeSession).path,
     ...configuration,
-    ...(goal ? { codexGoalCommand: goal } : {}),
   };
-}
-
-function goalObjective(goal: CodexGoalCommand | null): string | null {
-  return goal && 'objective' in goal && typeof goal.objective === 'string'
-    ? goal.objective
-    : null;
 }

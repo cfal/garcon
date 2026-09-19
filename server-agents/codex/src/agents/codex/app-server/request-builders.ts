@@ -7,7 +7,6 @@ import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import { codexModelSupportsMaxEffort } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
-import type { ThreadInjectItemsParams } from './protocol.js';
 import type {
   CodexThreadSettings,
   CodexThreadSettingsSandboxPolicy,
@@ -252,16 +251,6 @@ export function buildThreadStartParams(request: CodexStartRequest): Record<strin
   }, request);
 }
 
-export function buildInjectedContextItems(context: string): ThreadInjectItemsParams['items'] {
-  // Keeps provider-owned context distinct from user turns while Codex persists it for later model requests.
-  // https://github.com/openai/codex/blob/e363b08c9175ac1cbe5893615dd2cb9ddf95043b/codex-rs/app-server/tests/suite/v2/thread_inject_items.rs#L27-L83
-  return [{
-    type: 'message',
-    role: 'developer',
-    content: [{ type: 'input_text', text: context }],
-  }];
-}
-
 export function buildThreadResumeParams(request: {
   agentSessionId: string;
   nativePath?: string | null;
@@ -330,19 +319,6 @@ function commandWithAttachmentPaths(command: string, filePaths?: string[]): stri
     'Attached files are available on disk:',
     attachmentList,
   ].filter((part) => part.trim()).join('\n\n');
-}
-
-export function goalObjectiveWithAttachmentPaths(
-  objective: string,
-  imagePaths: string[] = [],
-  filePaths: string[] = [],
-): string {
-  const references = [
-    ...imagePaths.map((filePath) => `- Image: ${filePath}`),
-    ...filePaths.map((filePath) => `- File: ${filePath}`),
-  ];
-  if (!references.length) return objective;
-  return [objective, 'Attached inputs are available on disk:', references.join('\n')].join('\n\n');
 }
 
 // Builds the Codex turn input. When the command opens with "/<name>" and that

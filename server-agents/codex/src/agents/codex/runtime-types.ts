@@ -1,7 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type { CodexGoalCommand } from './goal-command.js';
 
 export type CodexConfigValue =
   | string
@@ -32,7 +31,6 @@ export interface CodexExecutionRequest {
   readonly clientMessageId?: string;
   readonly executionAdmission?: CodexExecutionAdmission;
   readonly command: string;
-  readonly codexGoalCommand?: CodexGoalCommand;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Record<string, string>;
   readonly codexConfig?: CodexProviderConfig;
@@ -44,7 +42,6 @@ export interface CodexRuntimeOperation extends AgentRuntimeOperation {
 }
 
 export interface CodexStartRequest extends CodexExecutionRequest {
-  readonly codexSeedContext?: string;
   // Invoked as soon as the thread is activated, before the first turn runs.
   // A blocking runtime can settle the whole turn inside startSession, so the
   // caller needs the session identity ahead of that resolution.
@@ -76,7 +73,6 @@ export interface CodexForkSessionRequest {
   // that is in progress or absent from native history.
   readonly lastTurnId?: string | null;
 }
-
 
 export function assertCodexExecutionOpen(
   request: { readonly executionAdmission?: CodexExecutionAdmission },

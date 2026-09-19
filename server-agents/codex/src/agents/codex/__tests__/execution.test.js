@@ -57,10 +57,6 @@ function createRuntime(host = createHost()) {
     return { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' };
   });
   runtime.runTurn = mock(async (request) => { capture(request); });
-  runtime.submitGoalControl = mock(async (request, beforeDelivery) => {
-    await beforeDelivery({ validate: () => undefined, commit: () => capture(request) });
-    return true;
-  });
   runtime.compact = mock(async (request) => { capture(request); });
   runtime.abort = mock(async () => false);
   runtime.isRunning = mock(() => false);
@@ -127,12 +123,7 @@ function startRequest(overrides = {}) {
   };
 }
 
-async function commitHandoff(handoff) {
-  handoff.validate();
-  handoff.commit();
-}
-
-function goalControlRequest(runId, beforeDelivery = commitHandoff) {
+function resumeRequest(runId) {
   return startRequest({
     agentSessionId: 'thread-1',
     nativeSession: {
@@ -141,7 +132,6 @@ function goalControlRequest(runId, beforeDelivery = commitHandoff) {
       value: { path: '/tmp/thread-1.jsonl', agentSessionId: 'thread-1' },
     },
     runId,
-    beforeDelivery,
     carriedContext: undefined,
   });
 }
@@ -217,6 +207,38 @@ describe('CodexExecution', () => {
     }));
   });
 
+  it('prefixes ordinary input with carried context and records its seed receipt', async () => {
+    const runtime = createRuntime();
+    const execution = createTestCodexExecution(
+      createHost(), runtime, createPathNativeSessionCodec('codex'), createConfig(),
+    );
+    const carriedContext = renderCarriedContext([
+      new UserMessage('2026-07-19T00:00:00.000Z', 'Synthetic prior context'),
+    ]);
+    const session = await execution.start(startRequest({ carriedContext }), () => {});
+
+    expect(runtime.startSession.mock.calls[0][0].command).toBe(`${carriedContext.prefix}hello`);
+    expect(session.nativeSeedReceipt).toMatchObject({
+      agentSessionId: 'thread-1', placement: 'user-prefix', codeUnitLength: carriedContext.prefix.length,
+    });
+  });
+
+  it.each(['/goal Synthetic objective', '/goal status', '/goal pause'])(
+    'passes %s through as ordinary prompt text', async (prompt) => {
+      const runtime = createRuntime();
+      const execution = createTestCodexExecution(
+        createHost(), runtime, createPathNativeSessionCodec('codex'), createConfig(),
+      );
+      await execution.start(startRequest({ prompt }), () => {});
+      await execution.resume({ ...resumeRequest('run-2'), prompt }, () => {});
+
+      expect(runtime.startSession.mock.calls[0][0]).toMatchObject({ command: prompt });
+      expect(runtime.runTurn.mock.calls[0][0]).toMatchObject({ command: prompt });
+      expect(runtime.startSession.mock.calls[0][0]).not.toHaveProperty('codexGoalCommand');
+      expect(runtime.runTurn.mock.calls[0][0]).not.toHaveProperty('codexGoalCommand');
+    },
+  );
+
   it('does not emit a pathless session when transcript materialization fails', async () => {
     const runtime = createRuntime();
     runtime.startSession.mockImplementation(async () => {
@@ -233,173 +255,6 @@ describe('CodexExecution', () => {
 
     await expect(execution.start(startRequest(), publish)).rejects.toThrow('did not materialize');
     expect(events.some((event) => event.type === 'session')).toBe(false);
-  });
-
-  it('keeps carried context separate when starting a Codex goal', async () => {
-    const publish = () => {};
-    const runtime = createRuntime();
-    const execution = createTestCodexExecution(
-      createHost(),
-      runtime,
-      createPathNativeSessionCodec('codex'),
-      createConfig(),
-    );
-    const prefix = renderCarriedContext([
-      new UserMessage('2026-07-19T00:00:00.000Z', 'earlier'),
-    ]).prefix;
-
-    const started = await execution.start(startRequest({
-      prompt: '/goal ship the migration',
-      carriedContext: { prefix },
-    }), publish);
-
-    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'ship the migration',
-      codexGoalCommand: { kind: 'set', objective: 'ship the migration' },
-      codexSeedContext: prefix,
-    }));
-    expect(started.nativeSeedReceipt).toMatchObject({
-      agentSessionId: 'thread-1',
-      placement: 'provider-context',
-      format: 'v3-xml',
-      codeUnitLength: prefix.length,
-    });
-  });
-
-  it('rejects goal controls that cannot start a new thread', async () => {
-    const publish = () => {};
-    const execution = createTestCodexExecution(
-      createHost(),
-      createRuntime(),
-      createPathNativeSessionCodec('codex'),
-      createConfig(),
-    );
-
-    await expect(execution.start(startRequest({ prompt: '/goal clear' }), publish))
-      .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
-  });
-
-  for (const outcome of ['decline', 'failure']) {
-    it(`keeps the predecessor run active when goal control has a pre-boundary ${outcome}`, async () => {
-      const runtime = createRuntime();
-      const execution = createTestCodexExecution(
-        createHost(),
-        runtime,
-        createPathNativeSessionCodec('codex'),
-        createConfig(),
-      );
-      const events = [];
-      const publish = (event) => events.push(event);
-      await execution.start(startRequest(), publish);
-      runtime.submitGoalControl.mockImplementation(async () => {
-        runtime.emitFinished('chat-1', 'run-1');
-        if (outcome === 'failure') throw new Error('failed before delivery boundary');
-        return false;
-      });
-
-      const activeInput = execution.submitGoalControl(goalControlRequest('run-2'), publish);
-      if (outcome === 'failure') await expect(activeInput).rejects.toThrow('failed before delivery boundary');
-      else await expect(activeInput).resolves.toBe(false);
-      expect(events).toContainEqual(expect.objectContaining({
-        type: 'run-ended',
-        runId: 'run-1',
-        outcome: 'finished',
-      }));
-
-      await execution.resume(goalControlRequest('run-3'), publish);
-      expect(runtime.runTurn).toHaveBeenCalledOnce();
-    });
-  }
-
-  it('retains successor correlation after a post-boundary delivery failure', async () => {
-    const runtime = createRuntime();
-    const execution = createTestCodexExecution(
-      createHost(),
-      runtime,
-      createPathNativeSessionCodec('codex'),
-      createConfig(),
-    );
-    const events = [];
-    const publish = (event) => events.push(event);
-    await execution.start(startRequest(), publish);
-    runtime.submitGoalControl.mockImplementation(async (request, beforeDelivery) => {
-      await beforeDelivery({
-        validate: () => undefined,
-        commit: () => runtime.captureOperation(request),
-      });
-      throw new Error('delivery outcome unknown');
-    });
-
-    await expect(execution.submitGoalControl(goalControlRequest('run-2'), publish))
-      .rejects.toThrow('delivery outcome unknown');
-    runtime.emitFailed('chat-1', 'run-2', 'delivery failed');
-
-    expect(events).toContainEqual(expect.objectContaining({
-      type: 'run-ended',
-      runId: 'run-2',
-      outcome: 'failed',
-    }));
-  });
-
-  it('changes runtime event correlation only when the goal handoff commits', async () => {
-    const predecessorMessages = [];
-    const rejectedMessages = [];
-    const successorMessages = [];
-    const collectRows = (messages) => (event) => {
-      if (event.type !== 'rows') return;
-      messages.push(...event.rows.map((row) => row.message.content));
-    };
-    const runtime = createRuntime();
-    const execution = createTestCodexExecution(
-      createHost(),
-      runtime,
-      createPathNativeSessionCodec('codex'),
-      createConfig(),
-    );
-    await execution.start(startRequest(), collectRows(predecessorMessages));
-    const emitOutput = (content, runId) => runtime.emitRows(
-      'chat-1',
-      runId,
-      [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
-    );
-    runtime.submitGoalControl.mockImplementation(async (request, beforeDelivery) => {
-      emitOutput('before delivery', 'run-1');
-      await beforeDelivery({
-        validate: () => undefined,
-        commit: () => runtime.captureOperation(request),
-      });
-      emitOutput('after delivery', 'run-2');
-      return true;
-    });
-
-    await expect(execution.submitGoalControl(goalControlRequest('run-rejected', async (handoff) => {
-      handoff.validate();
-      emitOutput('while rejected handoff validates', 'run-1');
-      throw new Error('persistence failed');
-    }), collectRows(rejectedMessages))).rejects.toThrow('persistence failed');
-    emitOutput('after rejected handoff', 'run-1');
-
-    await expect(execution.submitGoalControl({
-      ...goalControlRequest('run-2', async (handoff) => {
-        handoff.validate();
-        emitOutput('while accepted handoff validates', 'run-1');
-        handoff.commit();
-      }),
-      admission: {
-        signal: new AbortController().signal,
-        markStarted: mock(() => undefined),
-      },
-    }, collectRows(successorMessages))).resolves.toBe(true);
-
-    expect(predecessorMessages).toEqual([
-      'before delivery',
-      'while rejected handoff validates',
-      'after rejected handoff',
-      'before delivery',
-      'while accepted handoff validates',
-    ]);
-    expect(rejectedMessages).toEqual([]);
-    expect(successorMessages).toEqual(['after delivery']);
   });
 
   it('[TLV5-L07.07-CODEX-UNIT-01] keeps the prior source route when a replacement start fails before activation', async () => {
@@ -472,7 +327,7 @@ describe('CodexExecution', () => {
     };
     await execution.start(startRequest(), originatingPublisher);
     originatingSinkClosed = true;
-    await execution.resume(goalControlRequest('run-2'), (event) => replacementEvents.push(event));
+    await execution.resume(resumeRequest('run-2'), (event) => replacementEvents.push(event));
     const delayedContent = 'delayed output from the replaced view';
 
     expect(() => runtime.emitRows(

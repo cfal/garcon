@@ -7,8 +7,6 @@ import type {
   RunningStatus,
 } from './runtime-session-state.js';
 
-export const GOAL_TURN_START_TIMEOUT_MS = 30_000;
-export const MAX_GOAL_CONTROL_DELIVERY_TRANSITIONS = 8;
 export const MAX_CAPACITY_RETRIES = 3;
 export const CAPACITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 export const NOOP_LOGGER: AgentLogger = {
@@ -60,11 +58,6 @@ export function isCapacityError(error: CodexTurnError | null | undefined): boole
     || /selected model is at capacity/i.test(error?.message ?? '');
 }
 
-export function isActiveTurnConflictError(error: unknown): boolean {
-  const message = String((error as Error)?.message || error || '');
-  return /turn already active|active turn.*(?:exists|in progress)|cannot start.*active turn/i.test(message);
-}
-
 export function mergeFinishOptions(
   current: FinishSessionOptions | null,
   next: FinishSessionOptions,
@@ -88,28 +81,17 @@ export function isActiveSessionStatus(status: RunningStatus): boolean {
   return status === 'running' || status === 'interrupting' || status === 'completing';
 }
 
-export function hasActiveGoalContinuation(
-  session: Pick<RunningCodexSession, 'managesGoalLifecycle' | 'activeTurnId' | 'goal'>,
-): boolean {
-  return session.managesGoalLifecycle
-    && Boolean(session.activeTurnId || session.goal?.status === 'active');
-}
-
 export type RetainedSourceUsage = Pick<
   RunningCodexSession,
   | 'threadId'
   | 'status'
   | 'interruptAcknowledgement'
   | 'pendingThreadSettings'
-  | 'turnStartWaiters'
   | 'activeDeliveryReservations'
-  | 'managesGoalLifecycle'
-  | 'activeTurnId'
-  | 'goal'
 >;
 
 // A retained source is safe for the idle sweep to retire only once every
-// admission handshake (interrupt ack, turn start, settings confirmation) and
+// admission handshake (interrupt ack, settings confirmation) and
 // in-flight delivery has settled; otherwise the sweep would yank a writer the
 // runtime is actively re-arming or delivering through.
 export function isRetainedSourceInUse(
@@ -118,10 +100,8 @@ export function isRetainedSourceInUse(
 ): boolean {
   return sessions.get(session.threadId) === session
     || isActiveSessionStatus(session.status)
-    || hasActiveGoalContinuation(session)
     || session.interruptAcknowledgement !== null
     || session.pendingThreadSettings !== null
-    || session.turnStartWaiters.size > 0
     || session.activeDeliveryReservations > 0;
 }
 
