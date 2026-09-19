@@ -102,6 +102,7 @@ export class SelfHandoffCommands {
     if (source) {
       await this.support.assertAttachmentsSupported({
         agentId: source.agentId,
+        nodeId: source.nodeId,
         model: source.model,
         apiProviderId: source.apiProviderId,
         modelEndpointId: source.modelEndpointId,
@@ -184,6 +185,7 @@ export class SelfHandoffCommands {
       const added = this.deps.chats.addChat({
         id: input.chatId,
         agentId: source.agentId,
+        nodeId: source.nodeId,
         model: source.model,
         apiProviderId: source.apiProviderId ?? null,
         modelEndpointId: source.modelEndpointId ?? null,
@@ -197,6 +199,7 @@ export class SelfHandoffCommands {
         thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
           source.agentId,
           source.thinkingMode,
+          source.nodeId,
         ),
         agentSettingsById: { ...source.agentSettingsById },
         carryOverSegments: [],

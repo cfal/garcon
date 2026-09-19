@@ -90,7 +90,7 @@ const logger = createLogger('queue');
 
 interface ChatExecutionCoordinatorOptions {
   projectAdmission: ProjectAdmissionPort;
-  canDispatch?: () => boolean;
+  canDispatch?: (chatId: string) => boolean;
   isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;

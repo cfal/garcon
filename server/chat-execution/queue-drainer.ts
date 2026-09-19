@@ -22,7 +22,7 @@ import {
 const logger = createLogger('queue-dispatch');
 
 export interface QueueDispatchCallbacks {
-  canDispatch?(): boolean;
+  canDispatch?(chatId: string): boolean;
   isShuttingDown(): boolean;
   registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
   appendControlReceipt(chatId: string, entry: StoredControlInputEntry): void;
@@ -74,7 +74,7 @@ export class QueueDrainer {
   #shouldHalt(chatId: string): boolean {
     const { ownership, turnRunner, callbacks } = this.deps;
     return callbacks.isShuttingDown()
-      || callbacks.canDispatch?.() === false
+      || callbacks.canDispatch?.(chatId) === false
       || ownership.hasSuppression(chatId, 'abort')
       || ownership.hasSuppression(chatId, 'deletion')
       || ownership.hasSuppression(chatId, 'manual-stop')

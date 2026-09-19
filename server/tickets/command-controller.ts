@@ -10,13 +10,14 @@ import { AgentCommandReplies, type AgentCommandContext } from '../chats/agent-co
 import type { AgentCommandSource } from '../ledger/garcon-command-publication.js';
 import { markupTicketContext, type TicketMutationContext } from './contracts.js';
 import { TicketDomainError, validateTicketInput } from './errors.js';
-import { resolveTicketProjectDefault } from './project-default.js';
+import { resolveNodeTicketProjectDefault } from './project-default.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { TicketReadBudget } from './queries.js';
 import type { TicketRuntime } from './setup.js';
 
 export interface TicketCommandControllerOptions extends AgentCommandContext {
   readonly tickets: Pick<TicketRuntime, 'service'>;
-  readonly resolveProject?: (directory: string, signal: AbortSignal) => Promise<TicketProjectDefault>;
+  readonly resolveProject?: (directory: string, signal: AbortSignal, nodeId?: string | null) => Promise<TicketProjectDefault>;
 }
 
 export class TicketCommandController {
@@ -87,18 +88,20 @@ export class TicketCommandController {
       const previous = service.lookupOperation(context);
       if (previous) return { kind: 'complete' as const, result: this.#mutationResult(source, command, previous) };
       if (payload.action === 'create' && payload.input.project === undefined) {
-        return { kind: 'resolve-project' as const, directory: this.options.registry.getChat(source.chatId)!.projectPath };
+        const chat = this.options.registry.getChat(source.chatId)!;
+        return { kind: 'resolve-project' as const, directory: chat.projectPath, nodeId: effectiveNodeId(chat.nodeId) };
       }
       return { kind: 'complete' as const, result: this.#execute(source, command, context) };
     });
     if (prepared.kind === 'complete') return prepared.result;
-    const probe = await (this.options.resolveProject ?? resolveTicketProjectDefault)(prepared.directory, signal).then(
+    const probe = await (this.options.resolveProject ?? resolveNodeTicketProjectDefault)(prepared.directory, signal, prepared.nodeId).then(
       (value) => ({ value }), (error: unknown) => ({ error }),
     );
     return this.#locked(source, signal, storeId, () => {
       const previous = this.options.tickets.service.lookupOperation(context);
       if (previous) return this.#mutationResult(source, command, previous);
-      if (this.options.registry.getChat(source.chatId)!.projectPath !== prepared.directory) throw sourceUnavailable();
+      const chat = this.options.registry.getChat(source.chatId)!;
+      if (chat.projectPath !== prepared.directory || effectiveNodeId(chat.nodeId) !== prepared.nodeId) throw sourceUnavailable();
       if ('error' in probe) throw probe.error;
       return this.#execute(source, command, context, probe.value.project);
     });

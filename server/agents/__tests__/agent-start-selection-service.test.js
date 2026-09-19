@@ -62,6 +62,7 @@ describe('delegated start selection', () => {
     const f = fixture();
     const selected = f.resolve(command);
     expect(selected).toEqual({
+      nodeId: 'local',
       agentId: 'test', model, apiProviderId, modelEndpointId,
       modelProtocol: apiProviderId === null ? null : 'openai-compatible',
       permissionMode: 'bypassPermissions', thinkingMode,
@@ -80,6 +81,15 @@ describe('delegated start selection', () => {
     }
     f.parent.model = 'unlisted';
     expectCode(() => f.resolve(), 'UNKNOWN_MODEL');
+  });
+
+  test('inherits a remote parent node unless the command explicitly selects another node', () => {
+    const f = fixture();
+    f.parent.nodeId = '22222222-2222-4222-8222-222222222222';
+    expect(f.resolve().nodeId).toBe(f.parent.nodeId);
+    expect(f.resolve({ nodeId: 'local' }).nodeId).toBe('local');
+    expect(f.resolve({ nodeId: '33333333-3333-4333-8333-333333333333' }).nodeId)
+      .toBe('33333333-3333-4333-8333-333333333333');
   });
 
   test('uses the explicit agent rather than the parent for native selection and defaults', () => {

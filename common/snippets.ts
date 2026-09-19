@@ -78,6 +78,7 @@ export const SNIPPET_ERROR_CODES = {
   projectPathNotFound: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
   projectPathInaccessible: 'SNIPPET_PROJECT_PATH_INACCESSIBLE',
   projectPathNotDirectory: 'SNIPPET_PROJECT_PATH_NOT_DIRECTORY',
+  contextChanged: 'SNIPPET_CONTEXT_CHANGED',
 } as const;
 
 export type SnippetErrorCode = (typeof SNIPPET_ERROR_CODES)[keyof typeof SNIPPET_ERROR_CODES];
@@ -123,7 +124,7 @@ export interface SnippetsMutationResponse {
 
 export type SnippetExpansionContext =
   // Registered chats resolve their authoritative project path from the server registry.
-  { type: 'chat'; chatId: string } | { type: 'new-chat'; chatId: string; projectPath: string };
+  { type: 'chat'; chatId: string } | { type: 'new-chat'; chatId: string; projectPath: string; nodeId?: string | null };
 
 export type SnippetArgumentsInput = { type: 'default' } | { type: 'value'; value: string };
 
@@ -140,6 +141,7 @@ export interface ExpandSnippetResponse {
   sourceUpdatedAt: string;
   shortName: string;
   contextProjectPath: string;
+  contextNodeId: string;
   expandedText: string;
 }
 
@@ -301,7 +303,8 @@ export function normalizeExpandSnippetRequest(value: unknown): ExpandSnippetRequ
   }
   if (context.type === 'new-chat') {
     const projectPath = requiredString(context.projectPath);
-    if (!projectPath) return null;
+    const nodeId = parseNodeId(context.nodeId);
+    if (!nodeId || !projectPath) return null;
     try {
       return {
         shortName: raw.shortName,
@@ -310,6 +313,7 @@ export function normalizeExpandSnippetRequest(value: unknown): ExpandSnippetRequ
           type: 'new-chat',
           chatId: parseChatId(context.chatId),
           projectPath,
+          ...(nodeId === LOCAL_EXECUTION_NODE_ID ? {} : { nodeId }),
         },
       };
     } catch {
@@ -324,6 +328,7 @@ export function normalizeExpandSnippetResponse(value: unknown): ExpandSnippetRes
   const sourceId = requiredString(raw?.sourceId);
   const sourceUpdatedAt = isoTimestamp(raw?.sourceUpdatedAt);
   const contextProjectPath = requiredString(raw?.contextProjectPath);
+  const contextNodeId = parseNodeId(raw?.contextNodeId);
   if (
     !raw ||
     raw.success !== true ||
@@ -332,6 +337,7 @@ export function normalizeExpandSnippetResponse(value: unknown): ExpandSnippetRes
     !sourceUpdatedAt ||
     !isSnippetShortName(raw.shortName) ||
     !contextProjectPath ||
+    !contextNodeId ||
     typeof raw.expandedText !== 'string' ||
     raw.expandedText.length > SNIPPET_EXPANDED_MAX_LENGTH
   ) {
@@ -344,6 +350,8 @@ export function normalizeExpandSnippetResponse(value: unknown): ExpandSnippetRes
     sourceUpdatedAt,
     shortName: raw.shortName,
     contextProjectPath,
+    contextNodeId,
     expandedText: raw.expandedText,
   };
 }
+import { parseNodeId, LOCAL_EXECUTION_NODE_ID } from './execution-nodes.js';

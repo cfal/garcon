@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import { EventEmitter } from 'node:events';
 import {
   isPreambleId,
@@ -47,8 +48,8 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     return this.deps.store.snapshot();
   }
 
-  resolve(canonicalProjectPath: string): readonly Preamble[] {
-    return applicablePreambles(this.snapshot().preambles, canonicalProjectPath);
+  resolve(canonicalProjectPath: string, nodeId?: string | null): readonly Preamble[] {
+    return applicablePreambles(this.snapshot().preambles, canonicalProjectPath, nodeId);
   }
 
   async create(request: CreatePreambleRequest): Promise<PreamblesSnapshot> {
@@ -140,10 +141,10 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     if (!definition) throw this.#validationError();
     if (definition.scope.type === 'global') return definition;
     const canonical = await Promise.all(definition.scope.rules.map(async (rule) => ({
-      projectPath: await this.deps.projectPaths.resolve(rule.projectPath),
-      includeNested: rule.includeNested,
+      ...rule,
+      projectPath: await this.deps.projectPaths.resolve(rule.projectPath, rule.nodeId),
     })));
-    if (new Set(canonical.map((rule) => rule.projectPath)).size !== canonical.length) {
+    if (new Set(canonical.map((rule) => JSON.stringify([effectiveNodeId(rule.nodeId), rule.projectPath]))).size !== canonical.length) {
       throw new PreambleDomainError(
         'PREAMBLE_VALIDATION_FAILED',
         'Project paths must be unique',

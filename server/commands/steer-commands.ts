@@ -155,6 +155,7 @@ export class SteerCommands {
           clientRequestId,
           content: input.content,
           projectPath: initialChat?.projectPath,
+          nodeId: initialChat?.nodeId,
         });
         // Enqueues the command lock before releasing steering preparation order.
         return { response: scheduleResponse() };
@@ -346,6 +347,7 @@ export class SteerCommands {
             clientRequestId,
             content: observedEntry.content,
             projectPath: initialChat?.projectPath,
+            nodeId: initialChat?.nodeId,
           });
         }
         return { response: scheduleResponse() };
@@ -378,6 +380,7 @@ export class SteerCommands {
     clientRequestId: string;
     content: string;
     projectPath?: string;
+    nodeId?: string | null;
   }): Promise<string> {
     if (!input.projectPath) return input.content;
     if (
@@ -387,7 +390,7 @@ export class SteerCommands {
       return input.content;
     }
 
-    const resolution = this.deps.fileMentions.resolve(input.content, input.projectPath);
+    const resolution = this.deps.fileMentions.resolve(input.content, input.projectPath, input.nodeId);
     this.#fileContextResolutions.set(input.chatId, resolution);
     const clearResolution = () => {
       if (this.#fileContextResolutions.get(input.chatId) === resolution) {

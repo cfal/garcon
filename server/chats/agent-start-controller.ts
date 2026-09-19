@@ -1,6 +1,7 @@
 import type { AgentChildRejectionReason, AgentChildAdmissionOutcome, AgentStartOutcomeNoticeDetail } from '../../common/garcon-agent-result.js';
 import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js';
 import { StartSelectionError } from '../../common/start-selection.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { AgentStartSelectionService } from '../agents/agent-start-selection-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { AgentStartCompensatedError } from '../commands/agent-start-compensated-error.js';
@@ -49,14 +50,17 @@ export class AgentStartController {
       const rediscover = Symbol('rediscover');
       for (let discoveryAttempt = 1; ; discoveryAttempt++) {
         if (!this.#replies.current(source, signal)) return null;
-        const agentId = command.agentId ?? this.options.registry.getChat(source.chatId)!.agentId;
-        const catalog = await this.options.selection.catalog(agentId).then(
+        const initialParent = this.options.registry.getChat(source.chatId)!;
+        const agentId = command.agentId ?? initialParent.agentId;
+        const nodeId = effectiveNodeId(command.nodeId ?? initialParent.nodeId);
+        const catalog = await this.options.selection.catalog(agentId, nodeId).then(
           (value) => ({ value }), (error: unknown) => ({ error }),
         );
         const result = await this.options.chatMutationLock.runExclusiveMany([`chat:${source.chatId}`, `chat:${allocated}`], async () => {
           if (!this.#replies.current(source, signal)) return null;
           const parent = this.options.registry.getChat(source.chatId)!;
-          const agentChanged = agentId !== (command.agentId ?? parent.agentId);
+          const agentChanged = agentId !== (command.agentId ?? parent.agentId)
+            || nodeId !== effectiveNodeId(command.nodeId ?? parent.nodeId);
           let outcome: AgentChildAdmissionOutcome;
           let turnId: string | null = null;
           let start: (() => void) | undefined;

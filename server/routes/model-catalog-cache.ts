@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { AgentCatalogEntry } from '../../common/agents.js';
 import type { ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import { isRecord } from '../../common/json.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 
@@ -99,10 +100,10 @@ function isFresh(snapshot: ModelCatalogSnapshot): boolean {
   return Date.now() - snapshot.createdAt < MODEL_CATALOG_RESPONSE_CACHE_TTL_MS;
 }
 
-async function buildCatalogResponse(modelCatalog: ModelCatalog): Promise<ModelCatalogSnapshot> {
+async function buildCatalogResponse(modelCatalog: ModelCatalog, nodeId: string): Promise<ModelCatalogSnapshot> {
   const body = {
     catalog: {
-      agents: await modelCatalog.agents.getAgentCatalogEntries(),
+      agents: await modelCatalog.agents.getAgentCatalogEntries(nodeId),
       apiProviders: modelCatalog.apiProviders.getCatalog(),
     },
   };
@@ -115,41 +116,36 @@ async function buildCatalogResponse(modelCatalog: ModelCatalog): Promise<ModelCa
 }
 
 export class ModelCatalogResponseCache {
-  #cachedCatalogResponse: ModelCatalogSnapshot | null = null;
-  #inflightCatalogResponse: Promise<ModelCatalogSnapshot> | null = null;
-  // Bumped on every clear() so in-flight fetches can detect that they have
-  // been superseded and skip committing a stale snapshot back into the cache.
-  #generation = 0;
+  readonly #nodes = new Map<string, {
+    cached: ModelCatalogSnapshot | null;
+    inflight: Promise<ModelCatalogSnapshot> | null;
+  }>();
 
-  async getSnapshot(modelCatalog: ModelCatalog): Promise<ModelCatalogSnapshot> {
-    if (this.#cachedCatalogResponse && isFresh(this.#cachedCatalogResponse)) {
-      return this.#cachedCatalogResponse;
+  async getSnapshot(modelCatalog: ModelCatalog, nodeId = effectiveNodeId(undefined)): Promise<ModelCatalogSnapshot> {
+    let entry = this.#nodes.get(nodeId);
+    if (!entry) {
+      entry = { cached: null, inflight: null };
+      this.#nodes.set(nodeId, entry);
     }
-    if (this.#inflightCatalogResponse) {
-      return this.#inflightCatalogResponse;
-    }
-
-    const generation = this.#generation;
-    this.#inflightCatalogResponse = buildCatalogResponse(modelCatalog)
+    if (entry.cached && isFresh(entry.cached)) return entry.cached;
+    if (entry.inflight) return entry.inflight;
+    const current = entry;
+    current.inflight = buildCatalogResponse(modelCatalog, nodeId)
       .then((snapshot) => {
-        if (this.#generation === generation) {
-          this.#cachedCatalogResponse = snapshot;
-        }
+        if (this.#nodes.get(nodeId) === current) current.cached = snapshot;
         return snapshot;
       })
-      .finally(() => {
-        if (this.#generation === generation) {
-          this.#inflightCatalogResponse = null;
-        }
-      });
-
-    return this.#inflightCatalogResponse;
+      .catch((error: unknown) => {
+        if (this.#nodes.get(nodeId) === current) this.#nodes.delete(nodeId);
+        throw error;
+      })
+      .finally(() => { current.inflight = null; });
+    return current.inflight;
   }
 
-  clear(): void {
-    this.#generation += 1;
-    this.#cachedCatalogResponse = null;
-    this.#inflightCatalogResponse = null;
+  clear(nodeId?: string): void {
+    if (nodeId === undefined) this.#nodes.clear();
+    else this.#nodes.delete(nodeId);
   }
 }
 

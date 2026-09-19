@@ -13,7 +13,7 @@ mock.module('../../lib/http-request.js', () => ({
 import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 import { CorruptStateFileError } from '../../lib/json-file-store.ts';
 
 describe('agent auth login routes', () => {
@@ -69,7 +69,15 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ launched: true, alreadyRunning: false, sessionId: 'session-a' });
-    expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude');
+    expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude', 'local');
+  });
+
+  it('returns node unavailability when auth completion disconnects', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', sessionId: 'session-a', code: 'synthetic-code', nodeId: '22222222-2222-4222-8222-222222222222' });
+    agents.completeAgentAuthLogin.mockRejectedValueOnce(new AgentCallError('unknown', 'Node disconnected'));
+    const response = await routes['/api/v1/agents/auth/login/complete'].POST(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'OUTCOME_UNKNOWN' });
   });
 
   it('completes Claude browser-code login via the agent auth route', async () => {
@@ -85,7 +93,7 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ submitted: true, sessionId: 'session-a' });
-    expect(agents.completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'session-a', 'test-code');
+    expect(agents.completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'session-a', 'test-code', 'local');
   });
 
   it('returns the typed active login session contract', async () => {
@@ -102,7 +110,7 @@ describe('agent auth login routes', () => {
       sessionId: 'session-a',
       deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
     });
-    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a');
+    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a', 'local');
   });
 
   it('validates the missing agent query for login status', async () => {
@@ -217,7 +225,7 @@ describe('agent auth login routes', () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe('spawn failed');
+    expect(body.error).toBe('Internal server error');
   });
 
   it('validates missing agentId for auth launch', async () => {
@@ -237,7 +245,8 @@ describe('agent auth login routes', () => {
     apiProviders.getCatalog.mockImplementationOnce(() => [{ id: 'zai', endpoints: [] }]);
     const handler = routes['/api/v1/agents'].GET;
 
-    const response = await handler(new Request('http://localhost/api/v1/agents'));
+    const url = new URL('http://localhost/api/v1/agents');
+    const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(response.status).toBe(200);

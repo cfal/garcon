@@ -1,4 +1,5 @@
 import { parentNodePath } from '../lib/portable-path.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import { renderPreamblePrefix } from '../../common/preamble-prefix.js';
 import { CHAT_ID_LENGTH } from '../../common/chat-id.js';
 import {
@@ -16,6 +17,7 @@ interface RenderedPreamble {
 }
 
 interface PathCandidate {
+  readonly nodeId: string;
   readonly projectPath: string;
   exactMask: bigint;
   nestedMask: bigint;
@@ -48,14 +50,17 @@ export function preambleCatalogCompositionViolation(
       continue;
     }
     for (const rule of preamble.scope.rules) {
-      const candidate = candidates.get(rule.projectPath) ?? {
+      const nodeId = effectiveNodeId(rule.nodeId);
+      const key = JSON.stringify([nodeId, rule.projectPath]);
+      const candidate = candidates.get(key) ?? {
+        nodeId,
         projectPath: rule.projectPath,
         exactMask: 0n,
         nestedMask: 0n,
       };
       candidate.exactMask |= bit;
       if (rule.includeNested) candidate.nestedMask |= bit;
-      candidates.set(rule.projectPath, candidate);
+      candidates.set(key, candidate);
     }
   }
   const checkedMasks = new Set<bigint>();
@@ -96,7 +101,7 @@ function inheritedNestedMask(
   while (true) {
     const parentPath = parentNodePath(cursor);
     if (parentPath === cursor) break;
-    parent = candidates.get(parentPath);
+    parent = candidates.get(JSON.stringify([candidate.nodeId, parentPath]));
     if (parent) break;
     cursor = parentPath;
   }

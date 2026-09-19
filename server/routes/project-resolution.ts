@@ -8,6 +8,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
 import { jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
+import { effectiveNodeId, parseNodeId } from '../../common/execution-nodes.js';
 
 interface ProjectResolutionRouteDeps {
   registry: Pick<IChatRegistry, 'getChat'>;
@@ -24,7 +25,7 @@ export function createProjectResolutionRoutes(
         try {
           const target = parseTarget(url);
           assertCurrentBinding(deps.registry, target);
-          const resolution = await inspect(target.projectPath);
+          const resolution = await inspect(target.projectPath, target.nodeId);
           assertCurrentBinding(deps.registry, target);
           return noStore(Response.json({ target, resolution } satisfies ProjectResolutionResponse));
         } catch (error) {
@@ -36,7 +37,10 @@ export function createProjectResolutionRoutes(
 }
 
 function parseTarget(url: URL): ProjectTarget {
-  const entries = [...url.searchParams.entries()];
+  const entries = [...url.searchParams.entries()].filter(([key]) => key !== 'nodeId');
+  const nodeId = parseNodeId(url.searchParams.get('nodeId'));
+  if (!nodeId || url.searchParams.getAll('nodeId').length > 1) throw new ValidationDomainError('Invalid execution node ID');
+  const node = url.searchParams.has('nodeId') ? { nodeId } : {};
   const chatId = url.searchParams.get('chatId') ?? '';
   const expectedProjectPath = url.searchParams.get('expectedProjectPath') ?? '';
   const projectPath = url.searchParams.get('projectPath') ?? '';
@@ -48,7 +52,7 @@ function parseTarget(url: URL): ProjectTarget {
     && expectedProjectPath.trim()
   ) {
     try {
-      return { kind: 'chat', chatId: parseChatId(chatId), projectPath: expectedProjectPath };
+      return { kind: 'chat', chatId: parseChatId(chatId), ...node, projectPath: expectedProjectPath };
     } catch {
       throw new ValidationDomainError('chatId must be a canonical Garcon chat ID');
     }
@@ -58,7 +62,7 @@ function parseTarget(url: URL): ProjectTarget {
     && url.searchParams.getAll('projectPath').length === 1
     && projectPath.trim()
   ) {
-    return { kind: 'path', projectPath };
+    return { kind: 'path', ...node, projectPath };
   }
   throw new ValidationDomainError(
     'Provide either chatId with expectedProjectPath, or projectPath',
@@ -72,7 +76,7 @@ function assertCurrentBinding(
   if (target.kind !== 'chat') return;
   const chat = registry.getChat(target.chatId);
   if (!chat) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
-  if (chat.projectPath !== target.projectPath) {
+  if (chat.projectPath !== target.projectPath || effectiveNodeId(chat.nodeId) !== effectiveNodeId(target.nodeId)) {
     throw new DomainError('PROJECT_PATH_CHANGED', 'The chat project changed', 409);
   }
 }

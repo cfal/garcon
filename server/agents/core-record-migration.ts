@@ -142,6 +142,10 @@ async function createMigrationTargets(
     for (const [chatId, value] of Object.entries(chats.sessions)) {
       signal.throwIfAborted();
       if (!isRecord(value)) throw new Error(`Invalid chat registry entry for ${chatId}`);
+      if (value.nodeId != null && value.nodeId !== 'local') {
+        sessions[chatId] = value;
+        continue;
+      }
       const agentId = stringValue(value.agentId) ?? stringValue(value.provider);
       if (!agentId) throw new Error(`Chat ${chatId} has no integration ID`);
       const integration = integrations.get(agentId);
@@ -322,6 +326,10 @@ async function createMigrationTargets(
         continue;
       }
       const target = candidate.target;
+      if (target.nodeId != null && target.nodeId !== 'local') {
+        prompts.push(candidate);
+        continue;
+      }
       const hasLegacySettings = 'claudeThinkingMode' in target || 'ampAgentMode' in target;
       if (!refreshSettings && isRecord(target.agentSettingsById) && !hasLegacySettings) {
         prompts.push(candidate);
@@ -387,6 +395,7 @@ function normalizeGenerationUiThinkingModes(
   for (const key of GENERATION_UI_SETTING_KEYS) {
     const selection = raw[key];
     if (!isRecord(selection) || !Object.hasOwn(selection, 'thinkingMode')) continue;
+    if (selection.nodeId != null && selection.nodeId !== 'local') continue;
     const agentId = stringValue(selection.agentId);
     const integration = agentId ? integrations.get(agentId) : null;
     if (!integration) continue;
@@ -412,6 +421,10 @@ async function migrateRecentAgentSettings(
     signal.throwIfAborted();
     if (!isRecord(candidate)) {
       result.push(candidate as JsonValue);
+      continue;
+    }
+    if (candidate.nodeId != null && candidate.nodeId !== 'local') {
+      result.push(asJsonValue(candidate));
       continue;
     }
     const agentId = stringValue(asJsonValue(candidate.agentId));
@@ -444,6 +457,7 @@ async function migrateHandoffIntent(
     throw new Error(`Invalid handoff intent ${String(intent.operationId)}`);
   }
   const execution = intent.target.execution;
+  if (execution.nodeId != null && execution.nodeId !== 'local') return intent;
   const agentId = stringValue(execution.agentId);
   const model = stringValue(execution.model);
   if (!agentId || model === null) {

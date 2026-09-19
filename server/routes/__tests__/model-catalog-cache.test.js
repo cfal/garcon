@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 
 function buildModelCatalog({ agentsEntries = [], providers = [] } = {}) {
@@ -13,6 +13,24 @@ function buildModelCatalog({ agentsEntries = [], providers = [] } = {}) {
 }
 
 describe('ModelCatalogResponseCache', () => {
+
+  it('does not cache rejected node lookups or let a stale rejection evict a replacement', async () => {
+    const cache = new ModelCatalogResponseCache();
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const pending = Promise.withResolvers();
+    const load = mock(async () => { throw new Error('Node unavailable'); });
+    const catalog = { agents: { getAgentCatalogEntries: load }, apiProviders: { getCatalog: () => [] } };
+    await expect(cache.getSnapshot(catalog, nodeId)).rejects.toThrow('Node unavailable');
+    load.mockImplementationOnce(() => pending.promise);
+    const stale = cache.getSnapshot(catalog, nodeId);
+    cache.clear(nodeId);
+    load.mockResolvedValue([{ id: 'test' }]);
+    const replacement = await cache.getSnapshot(catalog, nodeId);
+    pending.reject(new Error('Old node unavailable'));
+    await expect(stale).rejects.toThrow('Old node unavailable');
+    expect(await cache.getSnapshot(catalog, nodeId)).toBe(replacement);
+    expect(load).toHaveBeenCalledTimes(3);
+  });
   it('caches the snapshot within the TTL', async () => {
     const cache = new ModelCatalogResponseCache();
     const catalog = buildModelCatalog({ agentsEntries: [{ id: 'claude' }] });

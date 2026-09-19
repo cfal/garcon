@@ -6,18 +6,21 @@ import type { ProjectInspector, ProjectUnavailableReason } from '../../common/pr
 import { jsonError } from '../lib/http-error.js';
 import { projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import type { IChatRegistry } from '../chats/store.js';
+import { executionNodeIdFromUrl } from './node-target.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 
 export type ProjectPathResolution =
-  | { projectPath: string; error?: undefined }
+  | { projectPath: string; nodeId: string; error?: undefined }
   | { error: Response; projectPath?: undefined };
 
 export async function resolveAccessibleProjectPath(
   projectPath: string,
   inspect: ProjectInspector,
+  nodeId?: string | null,
 ): Promise<ProjectPathResolution> {
-  const resolution = await inspect(projectPath);
+  const resolution = await inspect(projectPath, nodeId);
   return resolution.kind === 'available'
-    ? { projectPath: resolution.effectiveProjectKey }
+    ? { projectPath: resolution.effectiveProjectKey, nodeId: effectiveNodeId(nodeId) }
     : { error: unavailableResponse(projectPath, resolution.reason) };
 }
 
@@ -53,6 +56,7 @@ export async function resolveProjectPathFromUrl(
   url: URL,
   inspect: ProjectInspector,
 ): Promise<ProjectPathResolution> {
+  const nodeId = executionNodeIdFromUrl(url, registry);
   const chatId = url.searchParams.get('chatId');
   if (chatId) {
     const chat = registry.getChat(chatId);
@@ -61,12 +65,18 @@ export async function resolveProjectPathFromUrl(
         error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }),
       };
     }
-    return resolveAccessibleProjectPath(chat.projectPath, inspect);
+    const projectPath = chat.projectPath;
+    const resolved = await resolveAccessibleProjectPath(projectPath, inspect, nodeId);
+    const current = registry.getChat(chatId);
+    if (!current || current.projectPath !== projectPath || effectiveNodeId(current.nodeId) !== nodeId) {
+      return { error: jsonError('Project target changed during inspection', 409, 'PROJECT_PATH_CHANGED', true) };
+    }
+    return resolved;
   }
 
   const projectPath = url.searchParams.get('projectPath');
   if (!projectPath) {
     return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
   }
-  return resolveAccessibleProjectPath(projectPath, inspect);
+  return resolveAccessibleProjectPath(projectPath, inspect, nodeId);
 }

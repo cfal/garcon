@@ -1,4 +1,5 @@
 import { normalizeAgentSettings } from '../../common/agent-settings.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js';
 import type { ModelCatalogResponse } from '../../common/model-catalog.js';
 import type { RemoteExecutionDefaults } from '../../common/settings.js';
@@ -8,7 +9,7 @@ import type { ChatRegistryEntry } from '../chats/store.js';
 import type { AgentRegistryServiceContract } from './registry.js';
 
 type ParentSelection = Pick<ChatRegistryEntry,
-  'agentId' | 'model' | 'apiProviderId' | 'modelEndpointId' | 'modelProtocol'
+  'nodeId' | 'agentId' | 'model' | 'apiProviderId' | 'modelEndpointId' | 'modelProtocol'
   | 'permissionMode' | 'thinkingMode' | 'agentSettingsById'>;
 
 export class AgentStartSelectionService {
@@ -17,9 +18,9 @@ export class AgentStartSelectionService {
     readonly apiProviders: Pick<ApiProviderService, 'getCatalog'>;
   }) {}
 
-  async catalog(agentId: string): Promise<ModelCatalogResponse> {
+  async catalog(agentId: string, nodeId?: string | null): Promise<ModelCatalogResponse> {
     // Strict loading preserves discovery failures instead of enabling unlisted models.
-    const entry = await this.deps.agents.getAgentCatalogEntry(agentId, { strict: true });
+    const entry = await this.deps.agents.getAgentCatalogEntry(agentId, { strict: true, nodeId });
     return { catalog: {
       agents: entry ? [entry] : [],
       apiProviders: this.deps.apiProviders.getCatalog(),
@@ -68,6 +69,7 @@ export class AgentStartSelectionService {
     return {
       ...selection,
       agentId,
+      nodeId: effectiveNodeId(command.nodeId ?? parent.nodeId),
       agentSettings: inheritAgent ? normalizeAgentSettings(
         agentId, parent.agentSettingsById[agentId], requireCatalogAgent(catalog, agentId).defaultSettings,
       ) : selection.agentSettings,

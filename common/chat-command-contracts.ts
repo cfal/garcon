@@ -18,6 +18,7 @@ import type { ParentChatRef } from './chat-parentage.js';
 import type { CommandTagMutationOutcome } from './chat-tag-mutations.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
+import { isExecutionNodeId, parseNodeId } from './execution-nodes.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
 import { normalizeAskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 
@@ -194,6 +195,7 @@ export interface CommandErrorResponse extends HttpErrorResponse {
 }
 
 export interface StartChatCommandRequest {
+  nodeId?: string | null;
   origin: ClientChatStartOrigin;
   clientRequestId: string;
   clientMessageId: string;
@@ -240,6 +242,8 @@ export interface AgentRunCommandRequest {
 }
 
 export interface AgentHandoffTarget {
+  nodeId?: string | null;
+  projectPath?: string;
   agentId: string;
   model: string;
   apiProviderId?: string | null;
@@ -471,6 +475,8 @@ export interface RunningChatsResponse {
 
 export function parseStartChatCommandRequest(value: unknown): StartChatCommandRequest {
   const body = requestRecord(value);
+  const nodeId = body.nodeId;
+  if (nodeId != null && !isExecutionNodeId(nodeId)) throw new CommandRequestValidationError('nodeId is invalid');
   if ('options' in body) throw new CommandRequestValidationError('options is not supported');
   if ('parentChat' in body) {
     throw new CommandRequestValidationError('parentChat is not supported; use parentChatId');
@@ -497,6 +503,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     ...(parentChatId === undefined ? {} : { parentChatId }),
     agentId,
     projectPath: requiredString(body, 'projectPath'),
+    ...(nodeId === undefined ? {} : { nodeId }),
     model: requiredString(body, 'model'),
     apiProviderId: optionalNullableString(body, 'apiProviderId'),
     modelEndpointId: optionalNullableString(body, 'modelEndpointId'),
@@ -618,6 +625,9 @@ function optionalAgentHandoffRequest(value: unknown): AgentHandoffRequest | unde
   if (value === undefined) return undefined;
   const handoff = requestRecord(value);
   const target = requestRecord(handoff.target);
+  const nodeId = parseNodeId(target.nodeId);
+  if (!nodeId) throw new CommandRequestValidationError('handoff.target.nodeId is invalid');
+  const projectPath = optionalString(target, 'projectPath');
   const agentId = requiredString(target, 'agentId');
   const model = requiredString(target, 'model');
   const apiProviderId = optionalNullableString(target, 'apiProviderId');
@@ -638,6 +648,8 @@ function optionalAgentHandoffRequest(value: unknown): AgentHandoffRequest | unde
   }
   return {
     target: {
+      ...(target.nodeId === undefined ? {} : { nodeId }),
+      ...(projectPath === undefined ? {} : { projectPath }),
       agentId,
       model,
       ...(apiProviderId === undefined ? {} : { apiProviderId }),

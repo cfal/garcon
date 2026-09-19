@@ -119,11 +119,12 @@ export function createChatPreambleRoutes(deps: {
           return noStore(jsonErrorFromUnknown(normalizeRouteError(error)));
         }
         try {
-          const canonicalProjectPath = await projectPaths.resolve(parsed.projectPath);
+          const canonicalProjectPath = await projectPaths.resolve(parsed.projectPath, parsed.nodeId);
           const catalog = deps.preambles.snapshot();
           const orderedPreambleIds = parsed.orderedPreambleIds === undefined
             ? defaultOrderedPreambleIds(catalog, {
                 canonicalProjectPath,
+                nodeId: parsed.nodeId,
                 agentId: parsed.agentId,
                 tags: parsed.tags,
               })
@@ -131,11 +132,13 @@ export function createChatPreambleRoutes(deps: {
           const response: PreambleSelectionPreviewResponse = {
             success: true,
             canonicalProjectPath,
+            ...(parsed.nodeId ? { nodeId: parsed.nodeId } : {}),
             orderedPreambleIds,
             projection: projectPreambleSelection(
               { revision: 0, orderedPreambleIds },
               catalog,
               canonicalProjectPath,
+              parsed.nodeId,
             ),
           };
           return noStore(Response.json(response));

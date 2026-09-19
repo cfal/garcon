@@ -1,6 +1,7 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
 import { withJsonBody } from '../lib/json-route.js';
+import { executionNodeIdFromUrl } from './node-target.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import {
@@ -317,7 +318,7 @@ interface ChatRouteDeps {
   searchIndex?: ChatSearchDep;
   transcriptSearchMaintenance?: TranscriptSearchMaintenanceDep;
   lastSelectedChat?: LastSelectedChatState;
-  projects: ExecutionProjectService;
+  projects(nodeId: string): Promise<ExecutionProjectService>;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
 }
 
@@ -365,7 +366,7 @@ export default function createChatRoutes({
     }
 
     try {
-      const { resolution, isGitRepository } = await projects.inspect({ projectPath: dirPath, includeGitRepository: true });
+      const { resolution, isGitRepository } = await (await projects(executionNodeIdFromUrl(url, registry))).inspect({ projectPath: dirPath, includeGitRepository: true });
       if (resolution.kind === 'unavailable') {
         switch (resolution.reason) {
           case 'not-found':
@@ -383,7 +384,7 @@ export default function createChatRoutes({
       }
       return Response.json({ valid: true, isGitRepo: isGitRepository ?? false });
     } catch (error: unknown) {
-      if (error instanceof AgentCallError) return jsonErrorFromUnknown(error);
+      if (error instanceof AgentCallError || error instanceof DomainError) return jsonErrorFromUnknown(error);
       return pathValidationError((error as Error).message, 'unknown');
     }
   }

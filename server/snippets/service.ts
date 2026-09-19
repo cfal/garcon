@@ -28,7 +28,7 @@ import type {
 export class SnippetProjectPathService {
   constructor(private readonly inspect: ProjectInspector) {}
 
-  async resolve(projectPath: string): Promise<string> {
+  async resolve(projectPath: string, nodeId?: string | null): Promise<string> {
     const requestedPath = projectPath.trim();
     if (!requestedPath) {
       throw new SnippetDomainError(
@@ -38,7 +38,7 @@ export class SnippetProjectPathService {
       );
     }
 
-    const resolution = await this.inspect(requestedPath);
+    const resolution = await this.inspect(requestedPath, nodeId);
     if (resolution.kind === 'available') return resolution.effectiveProjectKey;
     switch (resolution.reason) {
       case 'not-found':
@@ -143,7 +143,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
         404,
       );
     }
-    const { contextProjectPath, resolvedProjectPath } = await this.#resolveProjectPath(
+    const { contextProjectPath, contextNodeId, resolvedProjectPath } = await this.#resolveProjectPath(
       input.context,
     );
     let expandedText: string;
@@ -172,6 +172,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       sourceUpdatedAt: (snippet ?? preamble)!.updatedAt,
       shortName: snippet?.shortName ?? preamble!.snippetShortName!,
       contextProjectPath,
+      contextNodeId,
       expandedText,
     };
   }
@@ -229,12 +230,14 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
 
   async #resolveProjectPath(context: SnippetExpansionContext): Promise<{
     contextProjectPath: string;
+    contextNodeId: string;
     resolvedProjectPath: string;
   }> {
     if (context.type === 'new-chat') {
       return {
         contextProjectPath: context.projectPath,
-        resolvedProjectPath: await this.deps.projectPaths.resolve(context.projectPath),
+        contextNodeId: context.nodeId ?? 'local',
+        resolvedProjectPath: await this.deps.projectPaths.resolve(context.projectPath, context.nodeId),
       };
     }
     const chat = this.deps.chats.getChat(context.chatId);
@@ -246,10 +249,13 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
         404,
       );
     }
-    return {
-      contextProjectPath,
-      resolvedProjectPath: await this.deps.projectPaths.resolve(contextProjectPath),
-    };
+    const contextNodeId = chat?.nodeId ?? 'local';
+    const resolvedProjectPath = await this.deps.projectPaths.resolve(contextProjectPath, contextNodeId);
+    const current = this.deps.chats.getChat(context.chatId);
+    if (!current || current.projectPath.trim() !== contextProjectPath || (current.nodeId ?? 'local') !== contextNodeId) {
+      throw new SnippetDomainError('SNIPPET_CONTEXT_CHANGED', 'Chat project target changed during expansion', 409);
+    }
+    return { contextProjectPath, contextNodeId, resolvedProjectPath };
   }
 
   #validationError(): SnippetDomainError {

@@ -322,6 +322,7 @@ describe('snippet contracts', () => {
       sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
       shortName: 'review_api',
       contextProjectPath: '/repo',
+      contextNodeId: 'local',
       expandedText: 'Review the API',
     };
     expect(normalizeExpandSnippetResponse(response)).toEqual(response);

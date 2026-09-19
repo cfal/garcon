@@ -24,7 +24,7 @@ export default function createCommandsRoutes({ registry, agents, inspectProject 
 
       const agent = url.searchParams.get('agent')?.trim();
       if (!agent) return Response.json({ error: 'agent is required' }, { status: 400 });
-      const commands = await agents.getSlashCommands(agent, resolved.projectPath);
+      const commands = await agents.getSlashCommands(agent, resolved.projectPath, resolved.nodeId);
 
       return Response.json({ commands } satisfies SlashCommandsResponse);
     } catch (error) {

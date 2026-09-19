@@ -12,6 +12,7 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
+import { DomainError } from '../../lib/domain-error.ts';
 import { LocalExecutionProjectService } from '../../execution-nodes/project-service.ts';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
@@ -63,7 +64,7 @@ const commandLedger = createRouteCommandLedger('chats-validate-start');
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const routeDeps = {
-  projects: new LocalExecutionProjectService(os.homedir(), () => {}),
+  projects: async () => new LocalExecutionProjectService(os.homedir(), () => {}),
   registry,
   settings,
   queue,
@@ -98,6 +99,17 @@ async function runGit(cwd, args) {
 }
 
 describe('GET /api/v1/chats/validate-start', () => {
+  it('preserves invalid and offline node HTTP errors', async () => {
+    const invalid = new Request('http://localhost/api/v1/chats/validate-start?path=/project&nodeId=invalid');
+    expect((await handler(invalid, new URL(invalid.url))).status).toBe(400);
+    const failed = createChatRoutes({ ...routeDeps, projects: async () => {
+      throw new DomainError('UNAVAILABLE', 'Node offline', 503);
+    } })['/api/v1/chats/validate-start'].GET;
+    const request = new Request('http://localhost/api/v1/chats/validate-start?path=/project');
+    const response = await failed(request, new URL(request.url));
+    expect(response.status).toBe(503);
+    expect((await response.json()).errorCode).toBe('UNAVAILABLE');
+  });
   beforeEach(async () => {
     await ensureCleanBase();
   });
@@ -140,9 +152,9 @@ describe('GET /api/v1/chats/validate-start', () => {
   it('returns permission_denied for inaccessible directories', async () => {
     const deniedRoutes = createChatRoutes({
       ...routeDeps,
-      projects: { inspect: mock(async () => ({
+      projects: async () => ({ inspect: mock(async () => ({
         resolution: { kind: 'unavailable', reason: 'permission-denied' },
-      })) },
+      })) }),
     });
     const deniedHandler = deniedRoutes['/api/v1/chats/validate-start'].GET;
     const request = new Request(
@@ -169,7 +181,7 @@ describe('GET /api/v1/chats/validate-start', () => {
   it('reports a node failure as unavailable, not a missing project', async () => {
     const failed = createChatRoutes({
       ...routeDeps,
-      projects: { inspect: async () => { throw new AgentCallError('not-dispatched', 'Node offline'); } },
+      projects: async () => ({ inspect: async () => { throw new AgentCallError('not-dispatched', 'Node offline'); } }),
     })['/api/v1/chats/validate-start'].GET;
     const request = new Request('http://localhost/api/v1/chats/validate-start?path=/worker/project');
     const response = await failed(request, new URL(request.url));

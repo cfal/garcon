@@ -114,7 +114,7 @@ describe('assistant action controllers', () => {
     f.parent.projectPath = '/synthetic/current';
     gate.resolve();
     await drain();
-    expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledWith('test', { strict: true });
+    expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledWith('test', { strict: true, nodeId: 'local' });
     expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({
       parentChatId: SOURCE.chatId, chatId: CHILD, projectPath: '/synthetic/current', permissionMode: 'bypassPermissions',
       thinkingMode: 'high', apiProviderId: null, agentSettings: f.entry.defaultSettings, command: START.prompt,
@@ -123,6 +123,16 @@ describe('assistant action controllers', () => {
     expect(f.events).toEqual(['start', 'notice', 'reply']);
     expect(f.replies[0].input.receipt).toBeNull();
     expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'accepted', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });
+  });
+
+  it('discovers the inherited remote catalog and carries the node into child admission', async () => {
+    const f = fixture();
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    f.parent.nodeId = nodeId;
+    f.start.request(SOURCE, START);
+    await drain();
+    expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledWith('test', { strict: true, nodeId });
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({ nodeId, parentChatId: SOURCE.chatId });
   });
 
   it('inherits the latest locked configuration after catalog discovery', async () => {

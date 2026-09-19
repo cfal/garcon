@@ -8,6 +8,7 @@ import {
 } from './projects.utils.js';
 import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
 import { inspectProjectDirectory } from '../projects/project-directory-service.js';
+import { assertLocalMachineNode } from './node-target.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
@@ -237,7 +238,10 @@ export default function createFilesRoutes(
     ...dependencyOverrides,
   };
   const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
-    resolveProjectPathFromUrl(registry, url, inspectProjectDirectory);
+    resolveProjectPathFromUrl(registry, url, (projectPath, nodeId) => {
+      assertLocalMachineNode(nodeId);
+      return inspectProjectDirectory(projectPath);
+    });
   const saveLocks = new KeyedPromiseLock();
 
   async function handleBaseTree(

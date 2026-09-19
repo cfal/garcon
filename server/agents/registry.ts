@@ -627,6 +627,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           session.preambleSelection,
           this.#preambles.snapshot(),
           session.projectPath,
+          session.nodeId,
         ).eligible
         : [];
       if (boundary && preambles.length > 0 && slashLeading) {

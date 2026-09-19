@@ -293,6 +293,7 @@ export async function forkChatFileCopy({
     created = registry.addChat({
       id: targetChatId,
       agentId: sourceSession.agentId,
+      nodeId: sourceSession.nodeId,
       model: sourceSession.model,
       apiProviderId: sourceSession.apiProviderId ?? null,
       modelEndpointId: sourceSession.modelEndpointId ?? null,

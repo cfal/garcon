@@ -119,11 +119,13 @@ export class ChatPreambleSelectionService {
         chatId,
         transcriptViewId: view.viewId,
         canonicalProjectPath: session.projectPath,
+        ...(session.nodeId ? { nodeId: session.nodeId } : {}),
         selection,
         projection: projectPreambleSelection(
           selection,
           this.deps.preambles.snapshot(),
           session.projectPath,
+          session.nodeId,
         ),
       };
     });
@@ -227,7 +229,7 @@ export class ChatPreambleSelectionService {
       revision: input.expectedRevision + 1,
       orderedPreambleIds: [...input.orderedPreambleIds],
     };
-    const resolved = resolvePreambleSelection(nextSelection, catalog, session.projectPath);
+    const resolved = resolvePreambleSelection(nextSelection, catalog, session.projectPath, session.nodeId);
     assertPreambleSelectionComposition(chatId, resolved.eligible);
 
     const nextBoundary = this.#nextBoundary(chatId, session, nextSelection.revision);
@@ -348,6 +350,7 @@ export class ChatPreambleSelectionService {
         selection,
         catalog,
         session.projectPath,
+        session.nodeId,
       ),
     };
   }

@@ -145,6 +145,10 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     this.on('invalidated', callback);
   }
 
+  referencesNode(nodeId: string): boolean {
+    return this.deps.store.list().some((prompt) => prompt.target.type === 'new-chat' && prompt.target.nodeId === nodeId);
+  }
+
   async start(now = new Date()): Promise<void> {
     await this.deps.store.init();
     await this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
@@ -305,14 +309,15 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       }
       return definition;
     }
-    if (!this.deps.agents.hasAgent(definition.target.agentId)) {
+    if (!this.deps.agents.hasAgent(definition.target.agentId, definition.target.nodeId)) {
       throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
     }
     this.deps.agents.assertExecutionModeSelectionSupported(definition.target.agentId, {
+      nodeId: definition.target.nodeId,
       permissionMode: definition.target.permissionMode,
       thinkingMode: definition.target.thinkingMode,
     });
-    const resolution = await this.deps.inspectProject(definition.target.projectPath);
+    const resolution = await this.deps.inspectProject(definition.target.projectPath, definition.target.nodeId);
     if (resolution.kind === 'unavailable') {
       if (resolution.reason === 'outside-base') {
         throw new ScheduledPromptDomainError(
@@ -329,6 +334,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         resolveNewChatPreambleSelection({
           catalog: this.deps.preambles.snapshot(),
           canonicalProjectPath,
+          nodeId: definition.target.nodeId,
           agentId: definition.target.agentId,
           tags: definition.target.tags,
           chatId: CHAT_ID_VALIDATION_SAMPLE,

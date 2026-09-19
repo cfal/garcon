@@ -29,6 +29,7 @@ export function resolvePreambleSelection(
   selection: ChatPreambleSelection,
   catalog: PreamblesSnapshot,
   canonicalProjectPath: string,
+  nodeId?: string | null,
 ): {
   readonly eligible: readonly Preamble[];
   readonly unavailable: readonly UnavailablePreambleSelectionReference[];
@@ -41,7 +42,7 @@ export function resolvePreambleSelection(
     const preamble = byId.get(id);
     if (!preamble) {
       unavailable.push({ id, reason: 'missing' });
-    } else if (!preambleScopeMatches(preamble, canonicalProjectPath)) {
+    } else if (!preambleScopeMatches(preamble, canonicalProjectPath, nodeId)) {
       unavailable.push({ id, reason: 'out-of-scope' });
     } else {
       eligible.push(structuredClone(preamble));
@@ -54,8 +55,9 @@ export function projectPreambleSelection(
   selection: ChatPreambleSelection,
   catalog: PreamblesSnapshot,
   canonicalProjectPath: string,
+  nodeId?: string | null,
 ): PreambleSelectionProjection {
-  const resolved = resolvePreambleSelection(selection, catalog, canonicalProjectPath);
+  const resolved = resolvePreambleSelection(selection, catalog, canonicalProjectPath, nodeId);
   return {
     catalogRevision: catalog.revision,
     eligiblePreambles: resolved.eligible.map(({ id, title }) => ({ id, title })),
@@ -116,6 +118,7 @@ export function isRecoverablePreambleAdmissionError(
 // explicit list, including empty, is stored exactly as supplied after its
 // currently eligible composition is proven safe.
 export function resolveNewChatPreambleSelection(input: {
+  readonly nodeId?: string | null;
   readonly catalog: PreamblesSnapshot;
   readonly canonicalProjectPath: string;
   readonly agentId: NewChatPreambleContext['agentId'];
@@ -128,6 +131,7 @@ export function resolveNewChatPreambleSelection(input: {
       revision: 0,
       orderedPreambleIds: defaultOrderedPreambleIds(input.catalog, {
         canonicalProjectPath: input.canonicalProjectPath,
+        nodeId: input.nodeId,
         agentId: input.agentId,
         tags: input.tags,
       }),
@@ -139,7 +143,7 @@ export function resolveNewChatPreambleSelection(input: {
   };
   assertPreambleSelectionComposition(
     input.chatId,
-    resolvePreambleSelection(selection, input.catalog, input.canonicalProjectPath).eligible,
+    resolvePreambleSelection(selection, input.catalog, input.canonicalProjectPath, input.nodeId).eligible,
   );
   return selection;
 }

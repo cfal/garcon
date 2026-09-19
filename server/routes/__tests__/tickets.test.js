@@ -40,6 +40,13 @@ describe('authenticated Tickets routes', () => {
   }
   const mutate = (payload, overrides) => call('/mutate', fixture.request(payload, overrides));
 
+  test('keeps invalid node selectors inside the ticket error contract', async () => {
+    const result = await call('/project-default', { directory: '/project', nodeId: 'invalid' });
+    expect(result.response.status).toBe(400);
+    expect(result.body.errorCode).toBe('TICKET_VALIDATION_FAILED');
+    expect(defaultCalls).toEqual([]);
+  });
+
   test('authenticates every route before accessing storage or request bodies', async () => {
     for (const [path, handlers] of Object.entries(routes)) {
       const method = Object.keys(handlers)[0];

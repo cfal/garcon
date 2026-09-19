@@ -173,7 +173,7 @@ describe('self handoff commands', () => {
 
     await commands.submitSelfHandoffRun(request());
 
-    expect(support.deps.agents.normalizeThinkingModeForAgent).toHaveBeenCalledWith('amp', 'high');
+    expect(support.deps.agents.normalizeThinkingModeForAgent).toHaveBeenCalledWith('amp', 'high', undefined);
     expect(added[0]).toMatchObject({
       agentId: 'amp',
       model: 'medium',

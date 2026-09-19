@@ -1,9 +1,33 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveAccessibleProjectPath } from '../project-path-resolver.ts';
+import { resolveAccessibleProjectPath, resolveProjectPathFromUrl } from '../project-path-resolver.ts';
+import createCommandsRoutes from '../commands.ts';
 
 const PROJECT_PATH = '/workspace/project';
 
 describe('resolveAccessibleProjectPath', () => {
+  it('rejects inspection crossing a same-path node handoff', async () => {
+    const chat = { projectPath: PROJECT_PATH, nodeId: 'local' };
+    const result = await resolveProjectPathFromUrl({ getChat: () => chat },
+      new URL('http://localhost/api/v1/commands?chatId=1787471053739199'), async () => {
+        chat.nodeId = '11111111-1111-4111-8111-111111111111';
+        return { kind: 'available', effectiveProjectKey: '/canonical/project' };
+      });
+    expect(result.error.status).toBe(409);
+    expect((await result.error.json()).errorCode).toBe('PROJECT_PATH_CHANGED');
+  });
+
+  it('discovers commands for the selected agent on the fenced chat node', async () => {
+    const calls = [];
+    const nodeId = '11111111-1111-4111-8111-111111111111';
+    const routes = createCommandsRoutes({
+      registry: { getChat: () => ({ agentId: 'claude', projectPath: PROJECT_PATH, nodeId }) },
+      agents: { getSlashCommands: async (...args) => { calls.push(args); return []; } },
+      inspectProject: async () => ({ kind: 'available', effectiveProjectKey: PROJECT_PATH }),
+    });
+    const url = new URL('http://localhost/api/v1/commands?chatId=1787471053739199&agent=codex');
+    expect((await routes['/api/v1/commands'].GET(new Request(url), url)).status).toBe(200);
+    expect(calls).toEqual([['codex', PROJECT_PATH, nodeId]]);
+  });
   it('rejects non-directory project roots with a typed response', async () => {
     const result = await resolveAccessibleProjectPath(
       PROJECT_PATH,

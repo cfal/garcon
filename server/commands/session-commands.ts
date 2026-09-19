@@ -170,6 +170,7 @@ export class SessionCommands {
       );
     }
     await this.support.assertAttachmentsSupported({
+      nodeId: chat.nodeId,
       agentId: chat.agentId,
       model: input.model ?? chat.model!,
       apiProviderId: input.apiProviderId === undefined ? chat.apiProviderId : input.apiProviderId,
@@ -205,6 +206,7 @@ export class SessionCommands {
     }
     if (input.permissionMode !== undefined || input.thinkingMode !== undefined) {
       this.deps.agents.assertExecutionModeSelectionSupported(chat.agentId, {
+        nodeId: chat.nodeId,
         permissionMode: input.permissionMode,
         thinkingMode: input.thinkingMode,
       });
@@ -486,7 +488,7 @@ export class SessionCommands {
   private async submitCompactLocked(input: CompactInput): Promise<CommandAcceptedResponse> {
     // Compaction starts its own turn and cannot share its agent session with an active turn.
     const chat = this.deps.chats.getChat(input.chatId);
-    if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
+    if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.nodeId)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while a turn is running', 409);
     }
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
@@ -540,7 +542,7 @@ export class SessionCommands {
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
-    if (!this.deps.agents.supportsUpdateProjectPath(chat.agentId)) {
+    if (!this.deps.agents.supportsUpdateProjectPath(chat.agentId, chat.nodeId)) {
       throw new CommandValidationError(
         'PROJECT_PATH_UPDATE_UNSUPPORTED',
         `Project path updates are not supported for agent: ${chat.agentId}`,
@@ -548,7 +550,7 @@ export class SessionCommands {
       );
     }
 
-    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath, this.deps.inspectProject);
+    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath, this.deps.inspectProject, chat.nodeId);
     const effectiveProjectKey = nextProjectPath;
     if (nextProjectPath === chat.projectPath) {
       return {
@@ -632,7 +634,7 @@ export class SessionCommands {
   }
 
   private async assertChatIdleForProjectPathUpdate(chat: ChatRegistryEntry): Promise<void> {
-    if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
+    if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.nodeId)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
         'Cannot update project path while a turn is running',
@@ -666,7 +668,7 @@ export class SessionCommands {
     const resolved = await this.deps.agents.resolveNativeSession(chat, chatId);
     if (resolved) return resolved;
 
-    if (this.deps.agents.requiresNativePathForProjectPathUpdate(chat.agentId)) {
+    if (this.deps.agents.requiresNativePathForProjectPathUpdate(chat.agentId, chat.nodeId)) {
       throw new CommandValidationError(
         'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
         'Cannot update the project path until the native session can be resolved',

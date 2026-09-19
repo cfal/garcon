@@ -4,8 +4,8 @@ import { PreambleDomainError } from './errors.js';
 export class PreambleProjectPathService {
   constructor(private readonly inspect: ProjectInspector) {}
 
-  async resolve(projectPath: string): Promise<string> {
-    const resolution = await this.inspect(projectPath.trim());
+  async resolve(projectPath: string, nodeId?: string | null): Promise<string> {
+    const resolution = await this.inspect(projectPath.trim(), nodeId);
     if (resolution.kind === 'available') return resolution.effectiveProjectKey;
     switch (resolution.reason) {
       case 'not-found':

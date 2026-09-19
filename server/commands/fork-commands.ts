@@ -108,6 +108,7 @@ export class ForkCommands {
     const source = forkContext.sourceSession;
     await this.support.assertAttachmentsSupported({
       agentId: source.agentId,
+      nodeId: source.nodeId,
       model: input.options?.model ?? source.model,
       apiProviderId: input.options?.apiProviderId === undefined ? source.apiProviderId : input.options.apiProviderId,
       modelEndpointId: input.options?.modelEndpointId === undefined ? source.modelEndpointId : input.options.modelEndpointId,
@@ -213,7 +214,7 @@ export class ForkCommands {
     if (!sourceSession) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
     }
-    if (!this.deps.agents.supportsFork(sourceSession.agentId)) {
+    if (!this.deps.agents.supportsFork(sourceSession.agentId, sourceSession.nodeId)) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
         `Fork unsupported for agent: ${sourceSession.agentId}`,
@@ -221,11 +222,12 @@ export class ForkCommands {
       );
     }
     this.deps.agents.assertExecutionModeSelectionSupported(sourceSession.agentId, {
+      nodeId: sourceSession.nodeId,
       thinkingMode: options.thinkingMode,
     });
     if (
       upToOrdinal !== undefined
-      && !this.deps.agents.supportsForkAtMessage(sourceSession.agentId)
+      && !this.deps.agents.supportsForkAtMessage(sourceSession.agentId, sourceSession.nodeId)
     ) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
@@ -258,6 +260,7 @@ export class ForkCommands {
         thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
           sourceSession.agentId,
           sourceSession.thinkingMode,
+          sourceSession.nodeId,
         ),
       },
       ...(upToOrdinal ? { upToOrdinal } : {}),
@@ -283,7 +286,7 @@ export class ForkCommands {
           agentSessionId: target.agentSessionId,
           nativeSession: target.nativeSession,
           nativeSeedReceipt: target.nativeSeedReceipt,
-        });
+        }, target.nodeId);
       } catch (error) {
         failures.push(error);
       }
@@ -314,7 +317,9 @@ export class ForkCommands {
       ledger: this.deps.transcripts,
       ownership: this.deps.ownership,
       forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
-      discardForkedAgentSession: this.deps.agents.discardForkedAgentSession.bind(this.deps.agents),
+      discardForkedAgentSession: (agentId, session) => this.deps.agents.discardForkedAgentSession(
+        agentId, session, context.sourceSession.nodeId,
+      ),
       readForkedNativeHistory: this.deps.readForkedNativeHistory,
     });
   }

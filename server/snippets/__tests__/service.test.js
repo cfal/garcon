@@ -17,7 +17,7 @@ const REGISTERED_CHAT_ID = '1787471053739199';
 const PROSPECTIVE_CHAT_ID = '1787471053739200';
 const MISSING_CHAT_ID = '1787471053739201';
 
-async function serviceFixture() {
+async function serviceFixture(overrides = {}) {
   const dir = path.join(os.tmpdir(), `garcon-snippet-service-${randomUUID()}`);
   await fs.mkdir(dir, { recursive: true });
   createdDirs.push(dir);
@@ -48,12 +48,26 @@ async function serviceFixture() {
     },
     newId: () => 'snippet-a',
     now: () => new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
   });
   service.onInvalidated((reason) => events.push(reason));
   return { dir, service, store, preambleStore, snippetShortNames, events, chatLookups };
 }
 
 describe('snippet service', () => {
+  it('fences expansion across a same-path node handoff', async () => {
+    const chat = { projectPath: '/project', nodeId: 'local' };
+    const { service } = await serviceFixture({
+      chats: { getChat: () => chat },
+      projectPaths: { async resolve(projectPath) {
+        chat.nodeId = '11111111-1111-4111-8111-111111111111';
+        return projectPath;
+      } },
+    });
+    await service.create({ expectedRevision: 0, snippet: { shortName: 'review', template: '{{project_path}}', defaultArguments: '' } });
+    await expect(service.expand({ shortName: 'review', arguments: { type: 'default' },
+      context: { type: 'chat', chatId: REGISTERED_CHAT_ID } })).rejects.toMatchObject({ code: 'SNIPPET_CONTEXT_CHANGED', status: 409 });
+  });
   afterEach(async () => {
     for (const dir of createdDirs.splice(0)) {
       await fs.rm(dir, { recursive: true, force: true });
@@ -131,7 +145,7 @@ describe('snippet service', () => {
       contextProjectPath: '/draft/repo',
       expandedText: 'Review routes in /canonical/draft/repo',
     });
-    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID, REGISTERED_CHAT_ID]);
     expect(events).toEqual([]);
   });
 
@@ -168,6 +182,7 @@ describe('snippet service', () => {
       sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
       shortName: 'context',
       contextProjectPath: '/draft/repo',
+      contextNodeId: 'local',
       expandedText: `Chat ${PROSPECTIVE_CHAT_ID} / {{arguments}} / {{project_path}} / {{chat_id}}`,
     });
   });
@@ -383,7 +398,7 @@ describe('snippet service', () => {
     ).resolves.toMatchObject({
       expandedText: `Reply to ${PROSPECTIVE_CHAT_ID} about the review`,
     });
-    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID, REGISTERED_CHAT_ID]);
   });
 
   it('rejects missing chats and unknown snippets', async () => {

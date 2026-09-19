@@ -53,6 +53,7 @@ export class ScheduledPromptDispatcher {
       clientRequestId: requestId,
       clientMessageId: messageId,
       agentId: scheduledPrompt.target.agentId,
+      nodeId: scheduledPrompt.target.nodeId,
       projectPath: scheduledPrompt.target.projectPath,
       command: renderScheduledPrompt(scheduledPrompt.prompt, chatId),
       model: scheduledPrompt.target.model,

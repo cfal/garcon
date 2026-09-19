@@ -12,7 +12,7 @@ describe('ProjectAdmission', () => {
     await admission.assertAvailable('1783725900000800');
 
     expect(inspect).toHaveBeenCalledTimes(2);
-    expect(inspect).toHaveBeenCalledWith('/workspace/project');
+    expect(inspect).toHaveBeenCalledWith('/workspace/project', undefined);
   });
 
   it('preserves typed missing-chat and unavailable-project errors', async () => {

@@ -8,6 +8,7 @@ type AttachmentAgentCapabilities = Pick<
 >;
 
 export interface AttachmentSupportInput {
+  nodeId?: string | null;
   agentId: string;
   model: string;
   apiProviderId?: string | null;
@@ -36,6 +37,7 @@ export async function assertAttachmentsSupported(
     let modelSupportsImages = false;
     try {
       modelSupportsImages = await agents.modelSupportsImages({
+        nodeId: input.nodeId,
         agentId: input.agentId,
         model: input.model,
         apiProviderId: input.apiProviderId,
@@ -45,7 +47,7 @@ export async function assertAttachmentsSupported(
     const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
     const supportsImages = hasBackendSelection
       ? modelSupportsImages
-      : agents.supportsImages(input.agentId);
+      : agents.supportsImages(input.agentId, input.nodeId);
     if (!supportsImages) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
@@ -57,7 +59,7 @@ export async function assertAttachmentsSupported(
 
   for (const mimeType of mimeTypes) {
     if (mimeType.startsWith('image/')) continue;
-    if (!agents.supportsFileAttachmentMimeType(input.agentId, mimeType)) {
+    if (!agents.supportsFileAttachmentMimeType(input.agentId, mimeType, input.nodeId)) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
         `${mimeType} attachments unsupported for agent: ${input.agentId}`,

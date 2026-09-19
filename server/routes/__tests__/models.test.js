@@ -2,6 +2,7 @@ import { beforeEach, describe, it, expect, mock } from "bun:test";
 
 import createModelsRoutes from "../models.js";
 import { ModelCatalogResponseCache } from "../model-catalog-cache.js";
+import { DomainError } from '../../lib/domain-error.js';
 
 const agentCatalogEntries = [
   {
@@ -191,6 +192,18 @@ const modelsRoutes = createModelsRoutes({ modelCatalog, responseCache });
 const handler = modelsRoutes["/api/v1/models"].GET;
 
 describe("GET /api/v1/models", () => {
+  it('preserves invalid-node and offline-node HTTP errors', async () => {
+    const invalid = new URL('http://localhost/api/v1/models?nodeId=invalid');
+    expect((await handler(new Request(invalid), invalid)).status).toBe(400);
+    for (const query of ['', '&agent=codex']) {
+      responseCache.clear();
+      modelCatalog.agents.getAgentCatalogEntries.mockRejectedValueOnce(new DomainError('NODE_UNAVAILABLE', 'Node is offline', 503));
+      const url = new URL(`http://localhost/api/v1/models?nodeId=22222222-2222-4222-8222-222222222222${query}`);
+      const response = await handler(new Request(url), url);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ errorCode: 'NODE_UNAVAILABLE' });
+    }
+  });
   beforeEach(() => {
     responseCache.clear();
     modelCatalog.agents.getAgentCatalogEntries.mockClear();
@@ -200,7 +213,8 @@ describe("GET /api/v1/models", () => {
   });
 
   it("returns only the agent/API provider catalog", async () => {
-    const response = await handler();
+    const url = new URL('http://localhost/api/v1/models');
+    const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(response.headers.get("etag")).toMatch(/^W\/"model-catalog:/);
@@ -312,7 +326,8 @@ describe("GET /api/v1/models", () => {
   });
 
   it("returns catalog.agents with capability metadata", async () => {
-    const response = await handler();
+    const url = new URL('http://localhost/api/v1/models');
+    const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(body.catalog).toBeDefined();
@@ -495,7 +510,7 @@ describe("GET /api/v1/models", () => {
     expect(response.status).toBe(200);
     expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledWith(
       "pi",
-      { strict: true },
+      { strict: true, nodeId: 'local' },
     );
     expect(body.catalog.agents).toHaveLength(1);
     expect(body.catalog.agents[0].id).toBe("pi");

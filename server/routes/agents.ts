@@ -4,9 +4,10 @@ import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ApiProviderService } from '../api-providers/service.js';
-import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
-import { isDomainError } from '../lib/domain-error.js';
+import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { executionNodeIdFromUrl, executionNodeIdFromValue } from './node-target.js';
+import { jsonErrorFromUnknown } from '../lib/http-error.js';
 
 interface AgentRouteDeps {
   agents: AgentRegistryServiceContract;
@@ -14,21 +15,21 @@ interface AgentRouteDeps {
 }
 
 export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDeps): RouteMap {
-  function validateAuthLoginAgent(agentId: string): Response | null {
-    if (!agents.hasAgent(agentId)) {
+  function validateAuthLoginAgent(agentId: string, nodeId: string): Response | null {
+    if (!agents.hasAgent(agentId, nodeId)) {
       return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
     }
-    if (!agents.supportsAuthLogin(agentId)) {
+    if (!agents.supportsAuthLogin(agentId, nodeId)) {
       return Response.json({ error: `Auth login is not supported for agent: ${agentId}` }, { status: 400 });
     }
     return null;
   }
 
-  function validateAuthLoginCompletionAgent(agentId: string): Response | null {
-    if (!agents.hasAgent(agentId)) {
+  function validateAuthLoginCompletionAgent(agentId: string, nodeId: string): Response | null {
+    if (!agents.hasAgent(agentId, nodeId)) {
       return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
     }
-    if (!agents.supportsAuthLoginCompletion(agentId)) {
+    if (!agents.supportsAuthLoginCompletion(agentId, nodeId)) {
       return Response.json(
         { error: `Auth login completion is not supported for agent: ${agentId}` },
         { status: 400 },
@@ -37,53 +38,55 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     return null;
   }
 
-  async function getAgents(): Promise<Response> {
+  async function getAgents(_request: Request, url: URL): Promise<Response> {
     try {
       return Response.json({
-        agents: await agents.getAgentCatalogEntries(),
+        agents: await agents.getAgentCatalogEntries(executionNodeIdFromUrl(url)),
         apiProviders: apiProviders.getCatalog(),
       });
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function getAgentAuth(_request: Request, url: URL): Promise<Response> {
     const agentId = url.searchParams.get('agent');
     try {
+      const nodeId = executionNodeIdFromUrl(url);
       if (agentId) {
-        const status = await agents.getAgentAuthStatus(agentId);
+        const status = await agents.getAgentAuthStatus(agentId, nodeId);
         if (!status) {
           return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
         }
         return Response.json({ [agentId]: status });
       }
-      return Response.json(await agents.getAgentAuthStatusMap());
+      return Response.json(await agents.getAgentAuthStatusMap(nodeId));
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
-  async function getAgentReadiness(): Promise<Response> {
+  async function getAgentReadiness(_request: Request, url: URL): Promise<Response> {
     try {
-      return Response.json(await agents.getAgentReadinessMap());
+      return Response.json(await agents.getAgentReadinessMap(undefined, executionNodeIdFromUrl(url)));
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function postAgentAuthLogin(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
+      const nodeId = executionNodeIdFromValue(input.nodeId);
       const agentId = typeof input.agentId === 'string' ? input.agentId : '';
       if (!agentId) {
         return Response.json({ error: 'agentId is required' }, { status: 400 });
       }
-      const invalidAgent = validateAuthLoginAgent(agentId);
+      const invalidAgent = validateAuthLoginAgent(agentId, nodeId);
       if (invalidAgent) return invalidAgent;
-      return Response.json(await agents.launchAgentAuthLogin(agentId));
+      return Response.json(await agents.launchAgentAuthLogin(agentId, nodeId));
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -93,18 +96,20 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     if (!agentId) {
       return Response.json({ error: 'agent is required' }, { status: 400 });
     }
-    const invalidAgent = validateAuthLoginAgent(agentId);
-    if (invalidAgent) return invalidAgent;
     try {
-      return Response.json(await agents.getAgentAuthLoginStatus(agentId, expectedSessionId));
+      const nodeId = executionNodeIdFromUrl(url);
+      const invalidAgent = validateAuthLoginAgent(agentId, nodeId);
+      if (invalidAgent) return invalidAgent;
+      return Response.json(await agents.getAgentAuthLoginStatus(agentId, expectedSessionId, nodeId));
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function postAgentAuthComplete(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
+      const nodeId = executionNodeIdFromValue(input.nodeId);
       const agentId = typeof input.agentId === 'string' ? input.agentId : '';
       const sessionId = typeof input.sessionId === 'string' ? input.sessionId : '';
       const code = typeof input.code === 'string' ? input.code : '';
@@ -117,17 +122,14 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
       if (!sessionId) {
         return Response.json({ error: 'sessionId is required' }, { status: 400 });
       }
-      const invalidAgent = validateAuthLoginCompletionAgent(agentId);
+      const invalidAgent = validateAuthLoginCompletionAgent(agentId, nodeId);
       if (invalidAgent) return invalidAgent;
-      return Response.json(await agents.completeAgentAuthLogin(agentId, sessionId, code));
+      return Response.json(await agents.completeAgentAuthLogin(agentId, sessionId, code, nodeId));
     } catch (error) {
       if (error instanceof AgentIntegrationError && error.code === 'AUTH_LOGIN_SESSION_MISMATCH') {
         return Response.json({ error: error.message }, { status: 409 });
       }
-      if (isDomainError(error)) {
-        return Response.json({ error: error.message }, { status: error.status });
-      }
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

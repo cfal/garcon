@@ -150,7 +150,7 @@ export type ForkChatFileCopyDep = (args: {
 }) => Promise<ForkChatFileCopyResult>;
 
 export interface FileMentionResolverDep {
-  resolve(command: string, projectPath: string): Promise<string>;
+  resolve(command: string, projectPath: string, nodeId?: string | null): Promise<string>;
 }
 
 export interface ChatCommandServiceDeps {
@@ -232,6 +232,7 @@ export interface AgentCommandStopInput {
 }
 
 export interface ScheduledChatStartInput {
+  nodeId?: string | null;
   chatId: ChatId;
   clientRequestId: string;
   clientMessageId: string;
@@ -250,6 +251,7 @@ export interface ScheduledChatStartInput {
 }
 
 export interface NormalizedChatStart {
+  nodeId: string;
   title: string | null;
   transcriptSnapshot: TranscriptWatermark | null;
   origin: ChatStartOrigin;
@@ -409,6 +411,7 @@ export class CommandSupport {
   }
 
   async assertAttachmentsSupported(input: {
+    nodeId?: string | null;
     agentId: string;
     model: string;
     apiProviderId?: string | null;

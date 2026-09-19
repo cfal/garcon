@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
+import { localMachineRoutes } from '../node-target.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
 import { MAX_ATTACHMENT_UPLOAD_BODY_BYTES } from '../../attachments/validation.ts';
@@ -20,6 +21,25 @@ let projectPath;
 let outsidePath;
 let originalProjectBaseDir;
 let originalHome;
+
+it('rejects a file PUT when the chat moves to a remote node while its body is read', async () => {
+  const chat = { projectPath, nodeId: undefined };
+  const registry = { getChat: () => chat };
+  const routes = localMachineRoutes(createFilesRoutes(registry), registry);
+  const url = new URL('http://localhost/api/v1/files/text?chatId=1783725900000400&path=src/main.ts');
+  const request = new Request(url, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: 'must not write', expectedRevision: 'v1:synthetic', conflictResolution: 'overwrite' }),
+  });
+  const readBody = request.text.bind(request);
+  request.text = async () => {
+    chat.nodeId = '22222222-2222-4222-8222-222222222222';
+    return readBody();
+  };
+  const response = await routes['/api/v1/files/text'].PUT(request, url);
+  expect(response.status).toBe(501);
+  expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe('hello\n');
+});
 
 beforeEach(async () => {
   originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;

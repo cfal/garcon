@@ -200,6 +200,6 @@ describe('chat preamble routes', () => {
     });
     expect(JSON.stringify(body)).not.toContain('body');
     expect(preamblesMock).toHaveBeenCalledTimes(1);
-    expect(projectPathsMock).toHaveBeenCalledWith('/repo');
+    expect(projectPathsMock).toHaveBeenCalledWith('/repo', undefined);
   });
 });

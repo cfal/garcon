@@ -11,6 +11,7 @@ import { AgentStartCompensatedError } from './agent-start-compensated-error.js';
 import { AgentStartProgress } from '../chats/agent-start-progress.js';
 import type { AcceptedDirectInput } from '../chat-execution/types.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
+import { effectiveNodeId, parseNodeId } from '../../common/execution-nodes.js';
 import { createLogger } from '../lib/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import { resolveNewChatPreambleSelection } from '../preambles/selection.js';
@@ -120,11 +121,14 @@ export class StartCommands {
   ): Promise<NormalizedChatStart> {
     const images = input.images ?? [];
     const idempotencyProjectPath = String(input.projectPath || '').trim();
+    const nodeId = parseNodeId(input.nodeId);
+    if (!nodeId) throw new CommandValidationError('VALIDATION_FAILED', 'Invalid execution node ID');
 
-    if (!this.deps.agents.hasAgent(input.agentId)) {
+    if (!this.deps.agents.hasAgent(input.agentId, nodeId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
     this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
+      nodeId,
       thinkingMode: input.thinkingMode,
     });
     const parentChatId = input.parentChatId === undefined
@@ -150,6 +154,7 @@ export class StartCommands {
     }
     this.support.assertContent(input.command, images);
     await this.support.assertAttachmentsSupported({
+      nodeId,
       agentId: input.agentId,
       model: input.model,
       apiProviderId: input.apiProviderId,
@@ -171,12 +176,14 @@ export class StartCommands {
       throw error;
     }
 
-    const projectPath = await resolveStartProjectPath(input.projectPath, this.deps.inspectProject);
+    const projectPath = await resolveStartProjectPath(input.projectPath, this.deps.inspectProject, nodeId);
+
     // Omitted IDs resolve the newest defaults here, at actual creation; an
     // explicit list is proven safe against this same catalog snapshot.
     const preambleSelection = resolveNewChatPreambleSelection({
       catalog: this.deps.preambles.snapshot(),
       canonicalProjectPath: projectPath,
+      nodeId,
       agentId: input.agentId,
       tags: input.tags ?? [],
       chatId,
@@ -186,6 +193,7 @@ export class StartCommands {
     });
 
     return {
+      nodeId,
       title,
       transcriptSnapshot: transcriptSnapshot ? { ...transcriptSnapshot } : null,
       origin: input.origin,
@@ -273,6 +281,7 @@ export class StartCommands {
             this.deps.transcripts.initializeChat(input.chatId, rows, rows.length + 1);
           }
           registered = this.deps.chats.addChat({
+            nodeId: input.nodeId,
             id: input.chatId,
             agentId: input.agentId,
             ...createPreambleBoundaryBinding(input.transcriptSnapshot ? 'fork' : 'new-chat'),
@@ -431,6 +440,7 @@ export class StartCommands {
 
 function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
+    nodeId: input.nodeId,
     title: input.title,
     transcriptSnapshot: input.transcriptSnapshot,
     origin: input.origin,
@@ -461,6 +471,7 @@ function startReplayPayload(
   chatId: NormalizedChatStart['chatId'],
 ): Record<string, unknown> {
   return {
+    nodeId: effectiveNodeId(input.nodeId),
     title: input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null,
     transcriptSnapshot: input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null,
     origin: input.origin,

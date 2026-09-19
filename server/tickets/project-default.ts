@@ -1,4 +1,5 @@
 import { isAbsolute, resolve } from 'node:path';
+import { effectiveNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import type { TicketProjectDefault } from '../../common/tickets.js';
 import { ticketProject, ticketString } from '../../common/ticket-validation.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
@@ -19,6 +20,14 @@ function unavailable(): TicketDomainError {
 export async function rejectRemoteTicketProjectDefault(): Promise<TicketProjectDefault> {
   throw new TicketDomainError('TICKET_PROJECT_UNAVAILABLE',
     'Automatic ticket project selection is unavailable on a remote execution node; enter an explicit project.');
+}
+
+export async function resolveNodeTicketProjectDefault(
+  directory: string, signal?: AbortSignal, nodeId?: string | null,
+): Promise<TicketProjectDefault> {
+  return effectiveNodeId(nodeId) === LOCAL_EXECUTION_NODE_ID
+    ? resolveTicketProjectDefault(directory, signal)
+    : rejectRemoteTicketProjectDefault();
 }
 
 function singlePath(output: string): string {

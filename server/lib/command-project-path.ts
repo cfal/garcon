@@ -11,9 +11,10 @@ export class StartProjectUnavailableError extends CommandValidationError {
 export async function resolveStartProjectPath(
   projectPath: string | undefined,
   inspect: ProjectInspector,
+  nodeId?: string | null,
 ): Promise<string> {
   const requestedPath = requiredProjectPath(projectPath);
-  const resolution = await inspect(requestedPath);
+  const resolution = await inspect(requestedPath, nodeId);
   if (resolution.kind === 'unavailable') {
     throw new StartProjectUnavailableError(resolution.reason, startPathError(requestedPath, resolution.reason));
   }
@@ -23,9 +24,10 @@ export async function resolveStartProjectPath(
 export async function resolveUpdatedProjectPath(
   projectPath: string,
   inspect: ProjectInspector,
+  nodeId?: string | null,
 ): Promise<string> {
   const requestedPath = requiredProjectPath(projectPath);
-  const resolution = await inspect(requestedPath);
+  const resolution = await inspect(requestedPath, nodeId);
   if (resolution.kind === 'unavailable') throw updatePathError(requestedPath, resolution.reason);
   return resolution.effectiveProjectKey;
 }

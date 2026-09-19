@@ -9,6 +9,8 @@ import {
 } from './model-catalog-cache.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
+import { executionNodeIdFromUrl } from './node-target.js';
+import { jsonErrorFromUnknown } from '../lib/http-error.js';
 
 interface ModelDiscoveryUnavailableError extends Error {
   staleModels?: AgentModelOption[];
@@ -57,21 +59,22 @@ export default function createModelsRoutes({
   modelCatalog: ModelCatalog;
   responseCache: ModelCatalogResponseCache;
 }): RouteMap {
-  const catalog = async () => ({
-    agents: await modelCatalog.agents.getAgentCatalogEntries(),
+  const catalog = async (nodeId: string) => ({
+    agents: await modelCatalog.agents.getAgentCatalogEntries(nodeId),
     apiProviders: modelCatalog.apiProviders.getCatalog(),
   });
 
   async function getModels(request: Request, url: URL): Promise<Response> {
+    const nodeId = executionNodeIdFromUrl(url);
     const agentId = url?.searchParams?.get('agent');
 
     if (agentId) {
-      const currentCatalog = await catalog();
+      const currentCatalog = await catalog(nodeId);
       let entry: AgentCatalogEntry | null | undefined;
       try {
-        const strict = modelCatalog.agents.requiresStrictModelDiscovery?.(agentId) ?? false;
+        const strict = modelCatalog.agents.requiresStrictModelDiscovery?.(agentId, nodeId) ?? false;
         entry = typeof modelCatalog.agents.getAgentCatalogEntry === 'function'
-          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict })
+          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict, nodeId })
           : currentCatalog.agents.find((agent) => agent.id === agentId);
       } catch (error) {
         const staleEntry = currentCatalog.agents.find((agent) => agent.id === agentId);
@@ -91,11 +94,14 @@ export default function createModelsRoutes({
       });
     }
 
-    const snapshot = await responseCache.getSnapshot(modelCatalog);
+    const snapshot = await responseCache.getSnapshot(modelCatalog, nodeId);
     return catalogResponseFromSnapshot(request, snapshot);
   }
 
   return {
-    '/api/v1/models': { GET: getModels },
+    '/api/v1/models': { GET: async (request, url) => {
+      try { return await getModels(request, url); }
+      catch (error) { return jsonErrorFromUnknown(error); }
+    } },
   };
 }

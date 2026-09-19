@@ -4,7 +4,8 @@ import { ticketRecord, ticketString } from '../../common/ticket-validation.js';
 import { deriveTicketCaller } from '../tickets/contracts.js';
 import { TicketDomainError, validateTicketInput } from '../tickets/errors.js';
 import { ticketErrorResponse, ticketJson, readTicketBody, requireTicketPrincipal } from '../tickets/http.js';
-import { resolveTicketProjectDefault } from '../tickets/project-default.js';
+import { resolveNodeTicketProjectDefault } from '../tickets/project-default.js';
+import { parseNodeId } from '../../common/execution-nodes.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { markRouteNoStore } from '../lib/http-route.js';
@@ -22,7 +23,7 @@ function authenticated(handler: RouteHandler): RouteHandler {
 }
 
 export function createTicketRoutes(tickets: TicketRuntime,
-  projectDefault = resolveTicketProjectDefault): RouteMap {
+  projectDefault = resolveNodeTicketProjectDefault): RouteMap {
   const query = (url: URL) => validateTicketInput(() => ticketQueryParams(url.searchParams));
   return {
     '/api/v1/tickets/bootstrap': { GET: authenticated((_request, url, _server, context) => {
@@ -46,8 +47,11 @@ export function createTicketRoutes(tickets: TicketRuntime,
     }) },
     '/api/v1/tickets/project-default': { POST: authenticated(async (request) => {
       const raw = await readTicketBody(request);
-      const directory = validateTicketInput(() => ticketString(ticketRecord(raw, ['directory']).directory, 'directory'));
-      return ticketJson(await projectDefault(directory, request.signal));
+      const input = validateTicketInput(() => ticketRecord(raw, ['directory', 'nodeId']));
+      const directory = validateTicketInput(() => ticketString(input.directory, 'directory'));
+      const nodeId = parseNodeId(input.nodeId);
+      if (!nodeId) throw new TicketDomainError('TICKET_VALIDATION_FAILED', 'Invalid execution node ID');
+      return ticketJson(await projectDefault(directory, request.signal, nodeId));
     }) },
     '/api/v1/tickets/mutate': { POST: authenticated(async (request, _url, _server, context) => {
       const raw = await readTicketBody(request);
