@@ -1,4 +1,5 @@
 import type { IChatRegistry } from '../chats/store.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import type { ProjectInspector } from '../../common/project-resolution.js';
 import {
   createPreambleService,
@@ -13,10 +14,11 @@ export async function initializeSnippetAndPreambleServices(deps: {
   readonly workspaceDir: string;
   readonly chats: Pick<IChatRegistry, 'getChat'>;
   readonly inspectProject: ProjectInspector;
+  readonly retainNodeReferences?: RetainNodeReferences;
 }): Promise<{ snippets: SnippetService; preambles: PreambleService }> {
   const snippetStore = new SnippetStore(deps.workspaceDir);
   await snippetStore.init();
-  const preambleStore = await initializePreambleStore(deps.workspaceDir);
+  const preambleStore = await initializePreambleStore(deps.workspaceDir, deps.retainNodeReferences);
   const snippetShortNames = new SnippetShortNameCoordinator({
     snippets: () => snippetStore.snapshot().snippets,
     preambles: () => preambleStore.snapshot().preambles,

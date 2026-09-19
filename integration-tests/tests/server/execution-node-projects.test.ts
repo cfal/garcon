@@ -32,10 +32,11 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       const projectPath = fixture.executionDirs.project;
       const client = fixture.client;
       await expect(assertRealWithinBase(fixture.dirs.project, projectPath)).rejects.toThrow();
-      expect(await client.get('/api/v1/app/settings')).toMatchObject({ projectBasePath: projectPath });
-      expect(await client.get(`/api/v1/chats/validate-start?path=${encodeURIComponent(projectPath)}`))
+      const nodeId = client.nodeId;
+      expect(await client.get('/api/v1/app/settings')).toMatchObject({ projectBasePath: fixture.dirs.project });
+      expect(await client.get(`/api/v1/chats/validate-start?nodeId=${nodeId}&path=${encodeURIComponent(projectPath)}`))
         .toMatchObject({ valid: true });
-      expect(await client.get(`/api/v1/projects/resolve?projectPath=${encodeURIComponent(fixture.dirs.project)}`))
+      expect(await client.get(`/api/v1/projects/resolve?nodeId=${nodeId}&projectPath=${encodeURIComponent(fixture.dirs.project)}`))
         .toMatchObject({ resolution: { kind: 'unavailable', reason: 'outside-base' } });
 
       await writeFile(join(projectPath, 'input.txt'), 'synthetic worker file');
@@ -46,12 +47,12 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
         expectedRevision: catalog.revision,
         preamble: {
           enabled: true, title: 'Worker scope', content: 'Private @private.txt',
-          scope: { type: 'project-paths', rules: [{ projectPath, includeNested: true }] },
+          scope: { type: 'project-paths', rules: [{ nodeId, projectPath, includeNested: true }] },
         },
       });
       const preamble = created.snapshot.preambles.find((entry) => entry.title === 'Worker scope')!;
       const preview = await client.post<PreambleSelectionPreviewResponse>('/api/v1/preambles/selection-preview', {
-        projectPath, agentId: fixture.directAgents.openAi.agentId, tags: [],
+        nodeId, projectPath, agentId: fixture.directAgents.openAi.agentId, tags: [],
       });
       expect(preview.canonicalProjectPath).toBe(projectPath);
       expect(preview.orderedPreambleIds).toContain(preamble.id);
@@ -70,13 +71,13 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       await client.waitForTurnTerminal(chatId, started.turnId);
 
       for (const route of ['files/browse', 'git/status', 'gh/pull-requests', 'terminals']) {
-        await expect(client.get(`/api/v1/${route}?projectPath=${encodeURIComponent(projectPath)}`))
+        await expect(client.get(`/api/v1/${route}?nodeId=${nodeId}&projectPath=${encodeURIComponent(projectPath)}`))
           .rejects.toMatchObject({ status: 501, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
       }
       expect(await terminalResponse(fixture.garcon.baseUrl)).toMatchObject({
-        type: 'terminal-error', code: 'terminal-unsupported',
+        type: 'terminal-error', code: 'terminal-not-found',
       });
-      await expect(client.post('/api/v1/tickets/project-default', { directory: fixture.dirs.project }))
+      await expect(client.post('/api/v1/tickets/project-default', { nodeId, directory: fixture.dirs.project }))
         .rejects.toMatchObject({ body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
 
       await fixture.crashAndRestartGarcon({ preserveExecutionWorker: true });
@@ -84,6 +85,7 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([command]);
       const target = fixture.directAgents.openAi;
       await fixture.client.updateSettings({ ui: { promptRefinement: {
+        nodeId,
         agentId: target.agentId, model: target.provider.model,
         apiProviderId: target.provider.providerId, modelEndpointId: target.provider.endpointId,
         modelProtocol: target.provider.protocol, thinkingMode: 'none',

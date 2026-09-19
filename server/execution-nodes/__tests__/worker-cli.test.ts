@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readWorkerCliOptions } from '../worker-cli.js';
@@ -68,15 +68,12 @@ test('public worker starts, prints onboarding URL, and shuts down without a cont
   }
 }, 15_000);
 
-test('private-config worker diagnostics do not disclose its credential', async () => {
+test('dialing worker starts and shuts down offline without disclosing its credential', async () => {
   const root = await workspace();
   const secret = Buffer.alloc(32, 8).toString('base64url');
-  const configPath = join(root, 'private.json');
-  await writeFile(configPath, JSON.stringify({
-    nodeId: 'test-node', secret, connection: { kind: 'listen', port: 0 },
-    workspaceDir: root, projectBasePath: root, allowInsecureDevelopment: true,
-  }), { mode: 0o600 });
-  const child = Bun.spawn(['bun', 'server/execution-nodes/worker-main.ts', configPath], { stdout: 'pipe', stderr: 'pipe' });
+  const connectionUrl = `ws://127.0.0.1:1/execution-node/22222222-2222-4222-8222-222222222222#secret=${secret}`;
+  const child = Bun.spawn(['bun', 'server/main.ts', 'execution-node', '--connect', connectionUrl,
+    '--workspace-dir', root, '--allow-insecure-development'], { stdout: 'pipe', stderr: 'pipe' });
   const reader = child.stdout.getReader();
   let output = '';
   try {

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { ExecutionNodesChangedMessage, parseServerWsMessage } from '../ws-events.ts';
 import {
   effectiveNodeId, parseNodeId, parseCreateExecutionNodeRequest, parseUpdateExecutionNodeRequest,
   parseExecutionNodes,
@@ -31,8 +32,11 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
     machineServices: { files: false, git: false, terminals: false },
   };
   expect(parseExecutionNodes([remote])).toEqual([remote]);
+  const message = new ExecutionNodesChangedMessage([remote]);
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
   for (const extra of [{ secret: 'hidden' }, { connectionUrl: 'hidden' }]) {
     expect(parseExecutionNodes([{ ...remote, ...extra }])).toBeNull();
+    expect(parseServerWsMessage({ type: 'execution-nodes-changed', nodes: [{ ...remote, ...extra }] })).toBeNull();
   }
   expect(parseExecutionNodes([remote, remote])).toBeNull();
   expect(parseExecutionNodes([{ ...remote, id: 'local' }])).toBeNull();

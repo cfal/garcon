@@ -141,6 +141,7 @@ export interface DirectTestAgents {
 }
 
 export interface DirectStartInput {
+  nodeId?: string | null;
   chatId: string;
   content: string;
   projectPath: string;
@@ -159,6 +160,8 @@ export interface DirectRunInput {
 }
 
 export interface DirectHandoffInput extends DirectRunInput {
+  nodeId?: string | null;
+  projectPath?: string;
   expectedAgentOwnershipEpoch?: string;
 }
 
@@ -200,6 +203,7 @@ interface GarconWebSocket {
 }
 
 export interface GarconTestClientOptions {
+  nodeId?: string;
   createWebSocket?: (url: string) => GarconWebSocket;
   redactSensitiveDiagnostics?: boolean;
 }
@@ -274,6 +278,8 @@ function redact(
       normalized === 'apikey'
       || normalized === 'api_key'
       || normalized === 'authorization'
+      || normalized === 'secret'
+      || normalized === 'connectionurl'
       || normalized.endsWith('token')
     ) {
       return [key, '[REDACTED]'];
@@ -311,6 +317,7 @@ async function responseBody(response: Response): Promise<unknown> {
 }
 
 export class GarconTestClient {
+  readonly nodeId: string;
   readonly #baseUrl: string;
   readonly #createWebSocket: (url: string) => GarconWebSocket;
   readonly #redactSensitiveDiagnostics: boolean;
@@ -322,6 +329,7 @@ export class GarconTestClient {
   #protocolError: Error | null = null;
 
   private constructor(baseUrl: string, options: GarconTestClientOptions) {
+    this.nodeId = options.nodeId ?? 'local';
     this.#baseUrl = baseUrl.replace(/\/$/, '');
     this.#createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
     this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
@@ -487,7 +495,7 @@ export class GarconTestClient {
   }
 
   listAgentCatalog(): Promise<AgentCatalog> {
-    return this.get<AgentCatalog>('/api/v1/agents');
+    return this.get<AgentCatalog>(`/api/v1/agents?nodeId=${encodeURIComponent(this.nodeId)}`);
   }
 
   listChats(): Promise<ChatListResponse> {
@@ -560,7 +568,9 @@ export class GarconTestClient {
   }
 
   startChat(request: StartChatCommandRequest): Promise<StartChatCommandResponse> {
-    return this.post<StartChatCommandResponse>('/api/v1/chats/start', request);
+    return this.post<StartChatCommandResponse>('/api/v1/chats/start', {
+      ...(this.nodeId === 'local' ? {} : { nodeId: this.nodeId }), ...request,
+    });
   }
 
   startDirectChat(input: DirectStartInput): Promise<StartChatCommandResponse> {
@@ -569,6 +579,7 @@ export class GarconTestClient {
 
   directStartRequest(input: DirectStartInput): StartChatCommandRequest {
     return {
+      ...(input.nodeId === undefined ? (this.nodeId === 'local' ? {} : { nodeId: this.nodeId }) : { nodeId: input.nodeId }),
       origin: 'interactive',
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
@@ -617,6 +628,8 @@ export class GarconTestClient {
       handoff: {
         expectedAgentOwnershipEpoch,
         target: {
+          ...(input.nodeId === undefined ? {} : { nodeId: input.nodeId }),
+          ...(input.projectPath === undefined ? {} : { projectPath: input.projectPath }),
           agentId: input.agent.agentId,
           model: input.agent.provider.model,
           apiProviderId: input.agent.provider.providerId,

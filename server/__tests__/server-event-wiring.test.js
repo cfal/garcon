@@ -25,16 +25,34 @@ import {
 
 const at = '2026-08-12T00:00:00.000Z';
 
+it('isolates node loss and queue wake-up, and publishes complete node snapshots', () => {
+  const remote = '22222222-2222-4222-8222-222222222222';
+  const nodes = [{ id: 'local', label: 'Local' }, { id: remote, label: 'Worker' }];
+  const fixture = createFixture({
+    nodes,
+    chatRegistry: {
+      listChatIds: () => ['local-chat', 'remote-chat', 'other-chat'],
+      getChat: (id) => ({ nodeId: id === 'local-chat' ? undefined : id === 'remote-chat' ? remote : 'other' }),
+    },
+  });
+  fixture.node.availability(remote, 'offline');
+  expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledWith(remote);
+  fixture.node.availability(remote, 'ready');
+  expect(fixture.queueService.triggerDrain.mock.calls).toEqual([['remote-chat']]);
+  fixture.node.changed();
+  expect(fixture.published).toContainEqual({ type: 'execution-nodes-changed', nodes });
+});
+
 it('settles terminal node loss but retains resumable disconnects, and drains only when ready', () => {
   const fixture = createFixture();
-  fixture.node.availability('reconnecting');
+  fixture.node.availability('local', 'reconnecting');
   expect(fixture.agentRegistry.executionSessionLost).not.toHaveBeenCalled();
   expect(fixture.queueService.triggerDrain).not.toHaveBeenCalled();
-  fixture.node.availability('offline');
+  fixture.node.availability('local', 'offline');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
-  fixture.node.availability('ready');
+  fixture.node.availability('local', 'ready');
   expect(fixture.queueService.triggerDrain).toHaveBeenCalledWith('chat-1');
-  fixture.node.availability('disposed');
+  fixture.node.availability('local', 'disposed');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
   expect(fixture.queueService.triggerDrain).toHaveBeenCalledTimes(1);
 });
@@ -124,7 +142,11 @@ function createFixture(overrides = {}) {
     ...overrides.processing,
   };
   const wiring = wireServerEvents({
-    executionNode: { onAvailabilityChanged: (listener) => { node.availability = listener; return () => {}; } },
+    executionNodes: {
+      onAvailabilityChanged: (listener) => { node.availability = listener; return () => {}; },
+      onChanged: (listener) => { node.changed = listener; return () => {}; },
+      list: () => overrides.nodes ?? [],
+    },
     projectBasePath: '/worker/projects',
     server: {
       publish: mock((_topic, payload) => published.push(JSON.parse(payload))),

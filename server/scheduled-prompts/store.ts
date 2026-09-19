@@ -8,7 +8,9 @@ import {
   type ScheduledPrompt,
 } from '../../common/scheduled-prompts.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
-import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { AtomicJsonWriteError, syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('scheduled-prompts');
@@ -263,8 +265,9 @@ export class ScheduledPromptStore {
   readonly #filePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file: ScheduledPromptsFile = emptyFile();
+  readonly #unconfirmedNodeReferences = new Set<string>();
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, private readonly retainNodeReferences?: RetainNodeReferences) {
     this.#filePath = path.join(workspaceDir, 'scheduled-prompts.json');
   }
 
@@ -299,6 +302,10 @@ export class ScheduledPromptStore {
 
   list(): ScheduledPrompt[] {
     return this.#file.prompts.map(clonePrompt);
+  }
+
+  referencesNode(nodeId: string): boolean {
+    return this.#unconfirmedNodeReferences.has(nodeId) || scheduleNodes(this.#file).includes(nodeId);
   }
 
   get(id: string): ScheduledPrompt | null {
@@ -350,7 +357,7 @@ export class ScheduledPromptStore {
       if (existing >= 0) draft.prompts[existing] = clonePrompt(scheduledPrompt);
       else draft.prompts.push(clonePrompt(scheduledPrompt));
       return true;
-    }, false);
+    }, false, scheduledPrompt.target.type === 'new-chat' ? [scheduledPrompt.target.nodeId] : []);
   }
 
   async reorder(orderedPromptIds: string[], expectedRevision: number): Promise<void> {
@@ -463,22 +470,43 @@ export class ScheduledPromptStore {
       const draft = structuredClone(this.#file);
       const result = change(draft);
       draft.revision += 1;
-      await this.#write(draft);
-      this.#file = draft;
+      await this.#publish(draft);
       return structuredClone(result);
     });
   }
 
-  async #mutateInternal<T>(change: (draft: ScheduledPromptsFile) => T | false, unchanged: T): Promise<T> {
+  async #mutateInternal<T>(
+    change: (draft: ScheduledPromptsFile) => T | false,
+    unchanged: T,
+    inheritedNodes: readonly (string | null | undefined)[] = [],
+  ): Promise<T> {
     return this.#lock.runExclusive('scheduled-prompts', async () => {
       const draft = structuredClone(this.#file);
       const result = change(draft);
       if (result === false) return structuredClone(unchanged);
       draft.revision += 1;
-      await this.#write(draft);
-      this.#file = draft;
+      await this.#publish(draft, inheritedNodes);
       return structuredClone(result);
     });
+  }
+
+  async #publish(file: ScheduledPromptsFile, inheritedNodes: readonly (string | null | undefined)[] = []): Promise<void> {
+    const nodes = scheduleNodes(file);
+    const release = this.retainNodeReferences?.(nodes, [...scheduleNodes(this.#file), ...inheritedNodes]);
+    try {
+      try {
+        await this.#write(file);
+      } catch (error) {
+        if (error instanceof AtomicJsonWriteError && error.renamed) {
+          for (const id of nodes) this.#unconfirmedNodeReferences.add(id);
+        }
+        throw error;
+      }
+      this.#file = file;
+      this.#unconfirmedNodeReferences.clear();
+    } finally {
+      release?.();
+    }
   }
 
   async #write(file: ScheduledPromptsFile): Promise<void> {
@@ -488,4 +516,9 @@ export class ScheduledPromptStore {
   #notFound(): ScheduledPromptDomainError {
     return new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
   }
+}
+
+function scheduleNodes(file: ScheduledPromptsFile): string[] {
+  return file.prompts.flatMap((prompt) => prompt.target.type === 'new-chat'
+    ? [effectiveNodeId(prompt.target.nodeId)] : []);
 }

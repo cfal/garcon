@@ -288,6 +288,7 @@ export class IntegrationFixture {
         redactEnvironmentValues: options.redactSensitiveDiagnostics,
       });
       client = await GarconTestClient.connect(garcon.baseUrl, {
+        nodeId: backend.nodeId,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
       });
       await client.ping();
@@ -315,6 +316,7 @@ export class IntegrationFixture {
       await client.updateSettings({
         ui: {
           chatTitle: options.chatTitleEnabled || hasExplicitTitleAgent ? {
+            nodeId: backend.nodeId,
             enabled: options.chatTitleEnabled === true,
             agentId: titleAgent.agentId,
             model: titleAgent.provider.model,
@@ -373,6 +375,7 @@ export class IntegrationFixture {
       throw new Error(`Integration client already exists: ${normalizedName}`);
     }
     const observer = await GarconTestClient.connect(this.garcon.baseUrl, {
+      nodeId: this.#backend.nodeId,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
     });
     try {
@@ -656,6 +659,7 @@ export class IntegrationFixture {
       port,
     });
     this.client = await GarconTestClient.connect(this.garcon.baseUrl, {
+      nodeId: this.#backend.nodeId,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
     });
     this.#clients.set('primary', this.client);

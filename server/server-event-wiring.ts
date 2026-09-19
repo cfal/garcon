@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatStopIntent, ChatStopOutcome } from '../common/chat-types.js';
-import type { ExecutionNode } from '@garcon/server-agent-interface';
+import type { ExecutionNodeManager } from './execution-nodes/manager.js';
+import { effectiveNodeId } from '../common/execution-nodes.js';
 import type { TranscriptSearchStatusV1 } from '../common/chat-search.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { isErrorCode } from '../common/error-codes.ts';
@@ -40,6 +41,7 @@ import {
   ChatExecutionControlUpdatedMessage,
   ChatTransientFeedMutationMessage,
   SettingsChangedMessage,
+  ExecutionNodesChangedMessage,
   TranscriptSearchStatusMessage,
   ScheduledPromptsInvalidatedMessage,
   SnippetsInvalidatedMessage,
@@ -61,7 +63,7 @@ interface ChatSearchEventIndex {
 }
 
 export interface ServerEventWiringDeps {
-  executionNode: Pick<ExecutionNode, 'onAvailabilityChanged'>;
+  executionNodes: Pick<ExecutionNodeManager, 'onAvailabilityChanged' | 'onChanged' | 'list'>;
   server: WebSocketPublisher;
   agentRegistry: AgentRegistry;
   chatRegistry: ChatRegistry;
@@ -101,7 +103,7 @@ export interface ServerEventWiring {
 }
 
 export function wireServerEvents({
-  executionNode,
+  executionNodes,
   projectBasePath,
   server,
   agentRegistry,
@@ -633,11 +635,13 @@ export function wireServerEvents({
   queue.onTurnSettled((chatId, turn) => {
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
-  executionNode.onAvailabilityChanged((availability) => {
-    if (availability === 'offline') agentRegistry.executionSessionLost();
+  executionNodes.onChanged(() => broadcast(new ExecutionNodesChangedMessage(executionNodes.list())));
+  executionNodes.onAvailabilityChanged((nodeId, availability) => {
+    if (availability === 'offline') agentRegistry.executionSessionLost(nodeId);
     if (availability === 'ready') {
-      logger.info('Execution node ready');
+      logger.info('Execution node ready', { nodeId });
       for (const chatId of chatRegistry.listChatIds()) {
+        if (effectiveNodeId(chatRegistry.getChat(chatId)?.nodeId) !== nodeId) continue;
         void queue.triggerDrain(chatId).catch((error) => logger.warn('Execution-node queue drain failed', error));
       }
     }

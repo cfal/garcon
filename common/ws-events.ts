@@ -24,6 +24,7 @@ import {
   parseExecutionControlServerInstanceId,
 } from './chat-execution-control';
 import type { RemoteSettingsSnapshot } from './settings';
+import { parseExecutionNodes, type ExecutionNodeSnapshot } from './execution-nodes';
 import type { ErrorCode } from './error-codes';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
@@ -351,6 +352,11 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) {}
 }
 
+export class ExecutionNodesChangedMessage {
+  readonly type = 'execution-nodes-changed' as const;
+  constructor(readonly nodes: readonly ExecutionNodeSnapshot[]) {}
+}
+
 export class TranscriptSearchStatusMessage {
   readonly type = 'transcript-search-status' as const;
   constructor(public status: TranscriptSearchStatusV1) {}
@@ -446,6 +452,7 @@ export type ServerWsMessage =
   | ChatBoardsInvalidatedMessage
   | TicketsInvalidatedMessage
   | SettingsChangedMessage
+  | ExecutionNodesChangedMessage
   | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
   | SnippetsInvalidatedMessage
@@ -881,6 +888,10 @@ export function parseServerWsMessage(
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;
+    }
+    case 'execution-nodes-changed': {
+      const nodes = parseExecutionNodes(data.nodes);
+      return nodes ? new ExecutionNodesChangedMessage(nodes) : null;
     }
     case 'transcript-search-status':
       return isTranscriptSearchStatusV1(data.status)

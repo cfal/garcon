@@ -24,6 +24,7 @@ import {
   type ParentChatRef,
 } from '../../common/chat-parentage.js';
 import type { AgentName } from "../agents/session-types.js";
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { effectiveNodeId, isExecutionNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import {
@@ -68,6 +69,7 @@ const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
 
 interface ChatRegistryOptions {
   saveDelayMs?: number;
+  retainNodeReferences?: RetainNodeReferences;
 }
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
@@ -270,11 +272,14 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   #nextChatMutationRevision = 0;
   #registryDirty = false;
   #unknownDurabilityChats = new Set<string>();
+  readonly #removedNodeReferences = new Map<string, { revision: number; release: () => void }>();
   #workspaceDir: string;
   #saveDelayMs: number;
+  readonly #retainNodeReferences?: RetainNodeReferences;
 
   constructor(workspaceDir: string, options: ChatRegistryOptions = {}) {
     super();
+    this.#retainNodeReferences = options.retainNodeReferences;
     this.#workspaceDir = workspaceDir;
     this.#saveDelayMs = options.saveDelayMs ?? REGISTRY_SAVE_DEBOUNCE_MS;
   }
@@ -483,34 +488,40 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       agentSessionId,
       nativeSeedReceipt: normalizedReceipt,
     });
-    registry.sessions[chatId] = {
-      ...(nodeId == null || nodeId === LOCAL_EXECUTION_NODE_ID ? {} : { nodeId }),
-      agentId,
-      nativeSession: nativeSession ? structuredClone(nativeSession) : null,
-      agentOwnershipEpoch,
-      agentSettingsById: structuredClone(agentSettingsById),
-      projectPath,
-      tags: [...tags],
-      agentSessionId,
-      model,
-      apiProviderId,
-      modelEndpointId,
-      modelProtocol,
-      ...normalizedModes,
-      carryOverSegments: normalizedSegments,
-      nativeSeedReceipt: normalizedReceipt,
-      carryOverMigrationQuarantine: normalizedQuarantine,
-      pendingPreambleBoundary: normalizedPreambleBoundary,
-      preambleSelection: {
-        revision: normalizedPreambleSelection.revision,
-        orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
-      },
-      parentChat: normalizedParentChat,
-    };
-    this.#advanceChatMutationRevision(chatId);
-    this.#emitChatAdded(chatId);
-    this.#scheduleRegistrySave();
-    return true;
+    // Registry additions publish synchronously before Delete can observe them.
+    const release = this.#retainNodeReferences?.([nodeId]);
+    try {
+      registry.sessions[chatId] = {
+        ...(nodeId == null || nodeId === LOCAL_EXECUTION_NODE_ID ? {} : { nodeId }),
+        agentId,
+        nativeSession: nativeSession ? structuredClone(nativeSession) : null,
+        agentOwnershipEpoch,
+        agentSettingsById: structuredClone(agentSettingsById),
+        projectPath,
+        tags: [...tags],
+        agentSessionId,
+        model,
+        apiProviderId,
+        modelEndpointId,
+        modelProtocol,
+        ...normalizedModes,
+        carryOverSegments: normalizedSegments,
+        nativeSeedReceipt: normalizedReceipt,
+        carryOverMigrationQuarantine: normalizedQuarantine,
+        pendingPreambleBoundary: normalizedPreambleBoundary,
+        preambleSelection: {
+          revision: normalizedPreambleSelection.revision,
+          orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
+        },
+        parentChat: normalizedParentChat,
+      };
+      this.#advanceChatMutationRevision(chatId);
+      this.#emitChatAdded(chatId);
+      this.#scheduleRegistrySave();
+      return true;
+    } finally {
+      release?.();
+    }
   }
 
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
@@ -784,7 +795,15 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     if (!entry) return false;
     delete registry.sessions[id];
     this.#chatMutationRevisions.delete(id);
-    this.#markRegistryDirty();
+    const revision = this.#markRegistryDirty();
+    const nodeId = effectiveNodeId(entry.nodeId);
+    if (nodeId !== LOCAL_EXECUTION_NODE_ID && this.#retainNodeReferences) {
+      const retained = this.#removedNodeReferences.get(nodeId);
+      if (retained) retained.revision = revision;
+      else this.#removedNodeReferences.set(nodeId, {
+        revision, release: this.#retainNodeReferences([], [nodeId]),
+      });
+    }
     this.#emitChatRemoved(id, reason);
     this.#scheduleRegistrySave();
     return true;
@@ -827,6 +846,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         }
         if (this.#nextChatMutationRevision === candidateRevision) {
           this.#registryDirty = false;
+        }
+        // Earlier snapshots and failed writes cannot prove a node reference was removed.
+        for (const [nodeId, retained] of this.#removedNodeReferences) {
+          if (retained.revision > candidateRevision) continue;
+          retained.release();
+          this.#removedNodeReferences.delete(nodeId);
         }
       },
     );

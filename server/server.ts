@@ -3,7 +3,6 @@
 
 import path from 'path';
 import { initializeServerConfig } from './config.js';
-import { decodeWebSocketMessage, sendWebSocketJson } from './ws/utils.js';
 import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
@@ -34,7 +33,6 @@ import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
 import {
-  PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
   publishWebSocketPayload,
   type WebSocketMessagePublisher,
 } from './ws/transport.js';
@@ -55,7 +53,11 @@ import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { AgentCommandComposition } from './chats/agent-command-composition.js';
 import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
-import { createControllerExecutionServices } from './execution-nodes/controller-node.js';
+import { ExecutionNodeManager } from './execution-nodes/manager.js';
+import { createServerSocketHandlers, type WsConnectionData } from './ws/server-sockets.js';
+import { AgentDirectory } from './agents/directory.js';
+import { executionNodeConfigGuards } from './execution-nodes/config-guards.js';
+import { effectiveNodeId } from '../common/execution-nodes.js';
 import {
   migrateAgentIntegrationCoreRecords,
   refreshAgentExecutionModeCoreRecords,
@@ -77,7 +79,6 @@ import {
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
-import { WsFaultMessage } from '../common/ws-events.ts';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -101,7 +102,7 @@ import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
 import { initializeChatPreambleSelectionService } from './preambles/setup.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
-import { resolveTicketProjectDefault, rejectRemoteTicketProjectDefault } from './tickets/project-default.js';
+import { resolveNodeTicketProjectDefault } from './tickets/project-default.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -164,11 +165,6 @@ export async function runCarryOverMigrationAtStartup(
   );
 }
 
-interface WsConnectionData {
-  connectionId: string;
-  principal: ServerPrincipal;
-}
-
 type ServeOptionsWithConnectionLimit = Parameters<
   typeof Bun.serve<WsConnectionData>
 >[0] & {
@@ -183,6 +179,9 @@ export async function startServer(): Promise<void> {
   let workspaceLease: WorkspaceLease | null = null;
   try {
     const config = initializeServerConfig();
+    if (process.env.GARCON_AGENT_EXECUTION_NODE_CONFIG) {
+      throw new Error('GARCON_AGENT_EXECUTION_NODE_CONFIG is no longer supported. Add execution nodes in the app and use a fresh workspace for experimental remote-only chats.');
+    }
     workspaceLease = await acquireWorkspaceLease(config.workspaceDir, {
       onCompromised(error) {
         logger.error('Workspace lease was compromised:', errorMessage(error));
@@ -214,17 +213,6 @@ export async function startServer(): Promise<void> {
       }
     });
 
-    // Leaf modules with no inter-service dependencies.
-    const chatRegistry = new ChatRegistry(workspaceDir);
-    const settings = new SettingsStore(workspaceDir);
-    const recentTitleIcons = new RecentTitleIconStore();
-    settings.onSessionNameChanged((_chatId, title) => {
-      try {
-        recentTitleIcons.recordTitle(title);
-      } catch (error) {
-        logger.warn('chat-title: failed to record recent icons:', errorMessage(error));
-      }
-    });
     const terminalManager = new TerminalManager();
     const terminalStream = new TerminalStreamHandler(terminalManager);
     const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
@@ -238,10 +226,7 @@ export async function startServer(): Promise<void> {
     const carryOver = new CarryOverTranscriptStore({ workspaceDir });
     await carryOver.initialize();
 
-    const {
-      node: executionNode, integrations: integrationRegistry, projects,
-      inspectProject, resolveFileMentions, projectBasePath, localMachineServices,
-    } = await createControllerExecutionServices({
+    const executionNodes = await ExecutionNodeManager.create({
       id: 'local',
       projectBasePath: config.projectBasePath,
       integrations: defaultAgentIntegrations,
@@ -253,7 +238,22 @@ export async function startServer(): Promise<void> {
         return { kind: 'api-key', value: resolved.endpoint.apiKey };
       },
     });
-    const resolveTicketProject = localMachineServices ? resolveTicketProjectDefault : rejectRemoteTicketProjectDefault;
+    const retainNodeReferences = executionNodes.retainReferences;
+    const chatRegistry = new ChatRegistry(workspaceDir, { retainNodeReferences });
+    const settings = new SettingsStore(workspaceDir, { retainNodeReferences });
+    const recentTitleIcons = new RecentTitleIconStore();
+    settings.onSessionNameChanged((_chatId, title) => {
+      try {
+        recentTitleIcons.recordTitle(title);
+      } catch (error) {
+        logger.warn('chat-title: failed to record recent icons:', errorMessage(error));
+      }
+    });
+    const integrationRegistry = executionNodes.localIntegrations;
+    const directory = new AgentDirectory(integrationRegistry, executionNodes);
+    const { inspectProject, resolveFileMentions } = executionNodes;
+    const projectBasePath = executionNodes.localInfo.projectBasePath;
+    const resolveTicketProject = resolveNodeTicketProjectDefault;
     const endpointResolver = new ApiProviderEndpointResolver(
       () => apiProviderStore.list(),
       (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],
@@ -318,8 +318,9 @@ export async function startServer(): Promise<void> {
     });
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
+      retainNodeReferences,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      integrations: directory,
       ledger: transcriptLedger,
     });
     // Persists the version before ownership recovery can remove chats and rewrite the migrated registry.
@@ -347,6 +348,12 @@ export async function startServer(): Promise<void> {
       },
     });
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
+    executionNodes.onAvailabilityChanged((nodeId) => modelCatalogResponseCache.clear(nodeId));
+    executionNodes.onChanged(() => {
+      for (const node of executionNodes.list()) {
+        if (!node.enabled) modelCatalogResponseCache.clear(node.id);
+      }
+    });
 
     // Every chat mutation shares one lock, including live settings changes.
     const chatMutationLock = new KeyedPromiseLock();
@@ -365,7 +372,7 @@ export async function startServer(): Promise<void> {
     const transcriptAdoption = new TranscriptAdoptionService({
       ledger: transcriptLedger,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      integrations: directory,
       logger,
       getCarryOverRevision: (entry) => carryOver.revision(
         entry.carryOverSegments ?? [],
@@ -381,7 +388,7 @@ export async function startServer(): Promise<void> {
     const nativeTranscriptActivity = new NativeTranscriptActivityService({
       ledger: transcriptLedger,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      integrations: directory,
       ownsExecution(chatId) {
         if (!executionQueries) throw new Error('Chat execution coordinator is not initialized');
         return executionQueries.ownsExecution(chatId);
@@ -396,6 +403,7 @@ export async function startServer(): Promise<void> {
     );
     const { snippets, preambles } = await initializeSnippetAndPreambleServices({
       workspaceDir,
+      retainNodeReferences,
       chats: chatRegistry,
       inspectProject,
     });
@@ -423,6 +431,7 @@ export async function startServer(): Promise<void> {
       resolveFileMentions,
       registry: chatRegistry,
       integrations: integrationRegistry,
+      nodes: executionNodes,
       endpointResolver,
       getCarryOverRevision: (entry) => carryOver.revision(
         entry.carryOverSegments ?? [],
@@ -433,6 +442,8 @@ export async function startServer(): Promise<void> {
           chatId: input.chatId,
           transcriptViewId: input.transcriptViewId,
           targetAgentId: input.entry.agentId,
+          targetNodeId: effectiveNodeId(input.entry.nodeId),
+          targetOwnershipEpoch: input.entry.agentOwnershipEpoch,
           clientRequestId: input.clientRequestId,
         });
         if (prepared) return prepared;
@@ -524,8 +535,9 @@ export async function startServer(): Promise<void> {
       nativeTranscriptActivity,
     );
     const handoffs = new AgentHandoffService({
+      inspectProject,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      integrations: directory,
       endpointResolver,
       catalog: agentRegistry,
       ownership: agentOwnership,
@@ -555,7 +567,7 @@ export async function startServer(): Promise<void> {
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       {
         projectAdmission,
-        canDispatch: () => executionNode.availability === 'ready',
+        canDispatch: (chatId) => executionNodes.isReady(effectiveNodeId(chatRegistry.getChat(chatId)?.nodeId)),
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,
         isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
@@ -568,7 +580,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       registry: chatRegistry,
-      integrations: integrationRegistry,
+      integrations: directory,
       execution: queue,
       reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       getCarryOverRevision: (entry) => carryOver.revision(
@@ -597,7 +609,7 @@ export async function startServer(): Promise<void> {
         return Boolean(
           session.agentSessionId
           && session.nativeSession
-          && integrationRegistry.get(session.agentId)?.nativeHistoryImport,
+          && directory.get(session.agentId, session.nodeId)?.nativeHistoryImport,
         );
       },
     });
@@ -621,7 +633,7 @@ export async function startServer(): Promise<void> {
       inspectProject,
       forkChatFileCopy,
       readForkedNativeHistory: createForkNativeHistoryReader({
-        integrations: integrationRegistry,
+        integrations: directory,
         carryOver,
       }),
       transcripts: transcriptLedger,
@@ -635,7 +647,8 @@ export async function startServer(): Promise<void> {
     });
     const scheduledPrompts = new ScheduledPromptScheduler({
       inspectProject,
-      store: new ScheduledPromptStore(workspaceDir),
+      retainNodeReferences,
+      store: new ScheduledPromptStore(workspaceDir, retainNodeReferences),
       runLog: new ScheduledPromptRunLog(),
       dispatcher: new ScheduledPromptDispatcher({ commands: chatCommands, chatIds }),
       chats: chatRegistry,
@@ -678,7 +691,7 @@ export async function startServer(): Promise<void> {
     let webSocketPublisher: WebSocketMessagePublisher | null = null;
     eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
-        executionNode,
+        executionNodes,
         projectBasePath,
         server: {
           publish(topic, payload) {
@@ -710,11 +723,22 @@ export async function startServer(): Promise<void> {
       eventWiring?.broadcastTranscriptSearchStatus(status);
     });
 
+    executionNodes.setGuards(executionNodeConfigGuards({
+      chats: chatRegistry, execution: queue, settings, schedules: scheduledPrompts, preambles, ownership: agentOwnership,
+    }));
+    let configuredNodes = new Set(executionNodes.config.list().map((node) => node.id));
+    executionNodes.onChanged(() => {
+      const current = new Set(executionNodes.config.list().map((node) => node.id));
+      for (const id of configuredNodes) {
+        if (!current.has(id)) void settings.forgetExecutionNode(id).catch((error) => logger.warn('Could not prune execution-node preferences', error));
+      }
+      configuredNodes = current;
+    });
+
     const routes = createAllRoutes(workspaceDir, {
-      projects,
+      executionNodes,
       projectBasePath,
       resolveTicketProject,
-      localMachineServices,
       registry: chatRegistry,
       settings,
       recentTitleIcons,
@@ -767,7 +791,7 @@ export async function startServer(): Promise<void> {
       transientFeeds,
       registry: chatRegistry,
     });
-    const primaryWs = new PrimaryWsHandler(chatHandler, localMachineServices ? terminalStream : null);
+    const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
 
     const listenPort = config.port;
     const bindAddress = config.bindAddress;
@@ -791,6 +815,13 @@ export async function startServer(): Promise<void> {
         const url = new URL(request.url);
 
         if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+          const nodeMatch = /^\/execution-node\/([0-9a-f-]+)$/u.exec(url.pathname);
+          if (nodeMatch) {
+            const link = executionNodes.inboundLink(nodeMatch[1]!);
+            if (!link) return new Response('Execution node is unavailable', { status: 404 });
+            if (server.upgrade(request, { data: { kind: 'execution-node', link, handlers: null } })) return;
+            return new Response('WebSocket upgrade failed', { status: 400 });
+          }
           if (url.pathname !== '/ws') {
             return new Response('Not found', { status: 404 });
           }
@@ -823,6 +854,7 @@ export async function startServer(): Promise<void> {
             headers?: HeadersInit;
           } = {
             data: {
+              kind: 'primary',
               connectionId,
               principal,
             },
@@ -846,48 +878,7 @@ export async function startServer(): Promise<void> {
 
         return new Response('Not found', { status: 404 });
       },
-      websocket: {
-        ...PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
-        idleTimeout: config.wsIdleTimeoutSeconds,
-        sendPings: true,
-        backpressureLimit: config.wsBackpressureLimit,
-        closeOnBackpressureLimit: true,
-        maxPayloadLength: config.wsMaxPayloadLength,
-        open(ws) {
-          const admission = wsAdmission.confirm(ws.data.connectionId);
-          if (!admission.ok) {
-            ws.close(1013, admission.reason);
-            return;
-          }
-          primaryWs.open(ws);
-        },
-        async message(ws, message) {
-          const text = decodeWebSocketMessage(message);
-          let data;
-          try {
-            data = JSON.parse(text);
-          } catch {
-            sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
-            return;
-          }
-          try {
-            await primaryWs.message(ws, data);
-          } catch (error) {
-            logger.error('primary WebSocket message failed:', error);
-            sendWebSocketJson(ws, new WsFaultMessage('WebSocket operation failed'));
-          }
-        },
-        drain(ws) {
-          primaryWs.drain(ws);
-        },
-        close(ws, code, reason) {
-          try {
-            primaryWs.close(ws, code, reason);
-          } finally {
-            wsAdmission.release(ws.data.connectionId);
-          }
-        },
-      },
+      websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger }),
     } satisfies ServeOptionsWithConnectionLimit;
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
@@ -917,11 +908,11 @@ export async function startServer(): Promise<void> {
       carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();
+      executionNodes.quiesce();
       handoffs.shutdown();
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
-        await server.stop(true);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
@@ -955,7 +946,7 @@ export async function startServer(): Promise<void> {
         }
         unsubscribeSearchStatus();
         await chatSearch.close();
-        await executionNode.dispose();
+        await executionNodes.dispose();
         transcriptLedger.close();
         terminalManager.shutdown();
         await metadata.flush();
@@ -964,6 +955,7 @@ export async function startServer(): Promise<void> {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
+        await server.stop(true);
         tickets.close();
         if (runtimeFilePath) {
           try {

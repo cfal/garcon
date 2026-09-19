@@ -20,6 +20,7 @@ import { parseScheduleDuration, scheduleInRunAt, SCHEDULE_IN_MAX_DELAY_MINUTES, 
 import { AtomicJsonWriteError } from '../lib/json-file-store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import { errorMessage } from '../lib/errors.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
@@ -135,6 +136,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       >;
       preambles: Pick<PreambleService, 'snapshot'>;
       inspectProject: ProjectInspector;
+      retainNodeReferences?: RetainNodeReferences;
       cron?: CronRuntime;
     },
   ) {
@@ -146,7 +148,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
   }
 
   referencesNode(nodeId: string): boolean {
-    return this.deps.store.list().some((prompt) => prompt.target.type === 'new-chat' && prompt.target.nodeId === nodeId);
+    return this.deps.store.referencesNode(nodeId);
   }
 
   async start(now = new Date()): Promise<void> {
@@ -254,18 +256,26 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       }
       const definition = await this.#validateDefinition(request.scheduledPrompt);
       const replacement = this.#promptFromDefinition(request.id, definition, new Date(), previous.createdAt);
-      await this.deps.store.replace(replacement, request.expectedRevision);
-      this.#jobs.get(request.id)?.stop();
-      this.#jobs.delete(request.id);
+      const release = this.deps.retainNodeReferences?.(
+        replacement.target.type === 'new-chat' ? [replacement.target.nodeId] : [],
+        previous.target.type === 'new-chat' ? [previous.target.nodeId] : [],
+      );
       try {
-        this.#register(replacement);
-      } catch (error) {
-        await this.deps.store.restore(previous);
-        this.#register(previous);
-        throw error;
+        await this.deps.store.replace(replacement, request.expectedRevision);
+        this.#jobs.get(request.id)?.stop();
+        this.#jobs.delete(request.id);
+        try {
+          this.#register(replacement);
+        } catch (error) {
+          await this.deps.store.restore(previous);
+          this.#register(previous);
+          throw error;
+        }
+        this.#emitInvalidated('updated');
+        return this.#snapshot();
+      } finally {
+        release?.();
       }
-      this.#emitInvalidated('updated');
-      return this.#snapshot();
     });
   }
 

@@ -23,6 +23,7 @@ import {
 } from './domain-stores.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
+  GENERATION_UI_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeRemoteFeatureSettings,
 } from '../../common/settings.js';
@@ -42,6 +43,7 @@ import {
   sanitizeRecentAgentSettings,
 } from './startup-recents.js';
 import type { IChatRegistry } from '../chats/store.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import type { DerivedChatNameInput } from '../chats/chat-title.js';
 import { isRecord } from '../../common/json.js';
 import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
@@ -256,6 +258,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #pendingSettingsNotifications: PendingSettingsNotification[] = [];
   #workspaceDir: string;
   readonly #writeFile: typeof writeJsonFileAtomic;
+  readonly #retainNodeReferences?: RetainNodeReferences;
   #writeLock = new KeyedPromiseLock();
   #chatNames: ChatNameStore;
   #uiSettings: UiSettingsStore;
@@ -267,11 +270,12 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   constructor(
     workspaceDir: string,
-    deps: { readonly writeFile?: typeof writeJsonFileAtomic } = {},
+    deps: { readonly writeFile?: typeof writeJsonFileAtomic; readonly retainNodeReferences?: RetainNodeReferences } = {},
   ) {
     super();
     this.#workspaceDir = workspaceDir;
     this.#writeFile = deps.writeFile ?? writeJsonFileAtomic;
+    this.#retainNodeReferences = deps.retainNodeReferences;
     const context: SettingsStoreContext = {
       readSettings: () => this.#readSettings(),
       mutate: (fn) => this.#withLock(fn),
@@ -389,19 +393,27 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     notifications: readonly PendingSettingsNotification[],
   ): Promise<void> {
     const validated = sanitizeProjectSettings(settings).settings;
+    const release = this.#retainNodeReferences?.(
+      GENERATION_UI_SETTING_KEYS.map((key) => validated.ui[key]?.nodeId),
+      GENERATION_UI_SETTING_KEYS.map((key) => this.#getCachedSettings().ui[key]?.nodeId),
+    );
     try {
-      await this.#writeToDisk(validated);
-    } catch (error) {
-      if (error instanceof AtomicJsonWriteError && error.renamed) {
-        this.#cache = validated;
-        this.#settingsDurabilityUnknown = true;
-        this.#pendingSettingsNotifications.push(...notifications);
+      try {
+        await this.#writeToDisk(validated);
+      } catch (error) {
+        if (error instanceof AtomicJsonWriteError && error.renamed) {
+          this.#cache = validated;
+          this.#settingsDurabilityUnknown = true;
+          this.#pendingSettingsNotifications.push(...notifications);
+        }
+        throw error;
       }
-      throw error;
+      this.#cache = validated;
+      this.#settingsDurabilityUnknown = false;
+      this.#publishSettingsNotifications(notifications);
+    } finally {
+      release?.();
     }
-    this.#cache = validated;
-    this.#settingsDurabilityUnknown = false;
-    this.#publishSettingsNotifications(notifications);
   }
 
   async #confirmSettingsDurability(): Promise<void> {

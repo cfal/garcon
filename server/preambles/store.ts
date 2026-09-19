@@ -17,6 +17,7 @@ import { isCanonicalNodePath } from '../lib/portable-path.js';
 import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
 import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 import type { BundledPreambleDefinition } from './bundled.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 
 const PREAMBLES_FILE_VERSION = 2;
 
@@ -161,7 +162,7 @@ export class PreambleStore {
   #file = emptyFile();
   #mutationFence: 'clear' | 'unknown-durability' = 'clear';
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, private readonly retainNodeReferences?: RetainNodeReferences) {
     this.#filePath = path.join(workspaceDir, 'preambles.json');
   }
 
@@ -422,18 +423,23 @@ export class PreambleStore {
           400,
         );
       }
+      const release = this.retainNodeReferences?.(preambleNodes(draft), preambleNodes(this.#file));
       try {
-        await this.#write(draft);
-      } catch (error) {
-        if (error instanceof PreambleCatalogCommittedUnknownError) {
-          // The renamed candidate is authoritative and installed; fencing keeps a
-          // later mutation from overwriting a committed selection or tombstone.
-          this.#file = draft;
-          this.#mutationFence = 'unknown-durability';
+        try {
+          await this.#write(draft);
+        } catch (error) {
+          if (error instanceof PreambleCatalogCommittedUnknownError) {
+            // The renamed candidate is authoritative and installed; fencing keeps a
+            // later mutation from overwriting a committed selection or tombstone.
+            this.#file = draft;
+            this.#mutationFence = 'unknown-durability';
+          }
+          throw error;
         }
-        throw error;
+        this.#file = draft;
+      } finally {
+        release?.();
       }
-      this.#file = draft;
     });
   }
 
@@ -451,6 +457,11 @@ export class PreambleStore {
   #notFound(): PreambleDomainError {
     return new PreambleDomainError('PREAMBLE_NOT_FOUND', 'Preamble not found', 404);
   }
+}
+
+function preambleNodes(file: PreamblesFile): (string | null | undefined)[] {
+  return file.preambles.flatMap((preamble) => preamble.scope.type === 'project-paths'
+    ? preamble.scope.rules.map((rule) => rule.nodeId) : []);
 }
 
 function normalizeCreatedPreamble(value: unknown): Preamble {

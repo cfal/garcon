@@ -59,6 +59,7 @@ export class WebSocketLink {
   readonly #errors = new Set<(message: string) => void>();
   #current: SessionTransport | null = null;
   #disposed = false;
+  #quiescing = false;
   #dialTimer: ReturnType<typeof setTimeout> | null = null;
   #server: ReturnType<typeof Bun.serve<LinkSocketHandlers | null>> | null = null;
   #dialing = false;
@@ -73,7 +74,7 @@ export class WebSocketLink {
 
   get current(): SessionTransport | null { return this.#current; }
   get nodeId(): string | null { return this.options.role === 'controller' ? this.options.nodeId! : this.#current?.nodeId ?? null; }
-  get acceptsSocket(): boolean { return !this.#disposed && this.#connections.size < 4; }
+  get acceptsSocket(): boolean { return !this.#disposed && !this.#quiescing && this.#connections.size < 4; }
 
   onError(listener: (message: string) => void): () => void {
     this.#errors.add(listener);
@@ -130,7 +131,7 @@ export class WebSocketLink {
   }
 
   dial(url: string): void {
-    if (this.#dialing || this.#disposed) throw new Error('Execution-node dial loop cannot start');
+    if (this.#dialing || this.#disposed || this.#quiescing) throw new Error('Execution-node dial loop cannot start');
     const target = new URL(url);
     if (target.protocol !== 'wss:' && !(target.protocol === 'ws:' && this.options.allowInsecureDevelopment)) {
       throw new Error('Execution-node connections require TLS outside explicit development mode');
@@ -139,7 +140,7 @@ export class WebSocketLink {
     this.#dialing = true;
     const connect = () => {
       this.#dialTimer = null;
-      if (this.#disposed) return;
+      if (this.#disposed || this.#quiescing) return;
       const socket = new WebSocket(url);
       this.#dialSockets.add(socket);
       const connecting = setTimeout(() => socket.close(), 5000);
@@ -147,7 +148,7 @@ export class WebSocketLink {
       let connection: Connection | null = null;
       socket.addEventListener('open', () => {
         clearTimeout(connecting);
-        if (this.#disposed) { socket.close(); return; }
+        if (this.#disposed || this.#quiescing) { socket.close(); return; }
         connection = this.#open({
           get bufferedAmount() { return socket.bufferedAmount; },
           send: (frame) => {
@@ -169,7 +170,7 @@ export class WebSocketLink {
         clearTimeout(connecting);
         this.#dialSockets.delete(socket);
         if (connection) this.#closed(connection);
-        if (!this.#disposed) {
+        if (!this.#disposed && !this.#quiescing) {
           this.#dialTimer = setTimeout(connect, this.options.reconnectDelayMs ?? 5000);
         }
       });
@@ -179,6 +180,15 @@ export class WebSocketLink {
 
   disconnect(): void {
     for (const connection of this.#connections) this.#close(connection);
+  }
+
+  quiesce(): void {
+    this.#quiescing = true;
+    if (this.#dialTimer) clearTimeout(this.#dialTimer);
+    this.#dialTimer = null;
+    for (const socket of this.#dialSockets) {
+      if (socket.readyState === WebSocket.CONNECTING) socket.close();
+    }
   }
 
   async dispose(): Promise<void> {

@@ -66,9 +66,10 @@ import type { ChatPreambleSelectionService } from '../preambles/chat-selection-s
 import type { ChatBoardService } from '../chat-boards/service.js';
 import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import type { ExecutionProjectService } from '@garcon/server-agent-interface';
+import type { ExecutionNodeManager } from '../execution-nodes/manager.js';
 import { PreambleProjectPathService } from '../preambles/project-path-service.js';
-import { createUnavailableMachineRoutes } from './unavailable-machine-services.js';
+import { localMachineRoutes } from './node-target.js';
+import { createExecutionNodeRoutes } from './execution-nodes.js';
 
 export default function createAllRoutes(workspaceDir: string, {
   registry,
@@ -107,9 +108,8 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows,
   transcriptExport,
   handoffArtifact,
-  projects,
+  executionNodes,
   projectBasePath,
-  localMachineServices,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -147,13 +147,13 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows: ChatRowService;
   transcriptExport: TranscriptExportService;
   handoffArtifact: HandoffArtifactService;
-  projects: ExecutionProjectService;
+  executionNodes: ExecutionNodeManager;
   projectBasePath: string;
-  localMachineServices: boolean;
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
-  const inspectProject = async (projectPath: string) => (await projects.inspect({ projectPath })).resolution;
+  const inspectProject = executionNodes.inspectProject;
   return {
+    ...createExecutionNodeRoutes(executionNodes),
     ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
     ...createChatSnapshotRoutes({
@@ -186,19 +186,19 @@ export default function createAllRoutes(workspaceDir: string, {
       searchIndex,
       transcriptSearchMaintenance: transcriptSearchSettings,
       chatMutationLock,
-      projects,
+      projects: (nodeId) => executionNodes.projectService(nodeId),
     }),
     ...createChatTagRoutes(chatTags),
     ...createChatBoardRoutes(chatBoards),
     ...createTicketRoutes(tickets, resolveTicketProject),
     ...createChatTicketSourceRoutes(registry, ticketSources),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
-    ...(localMachineServices ? {
+    ...localMachineRoutes({
       ...createFilesRoutes(registry),
       ...createGitRoutes(agents, settings),
       ...createGhRoutes(),
       ...createTerminalRoutes(terminals),
-    } : createUnavailableMachineRoutes()),
+    }, registry),
     ...createCommandsRoutes({ registry, agents, inspectProject }),
     ...createWorkspaceRoutes(
       settings,

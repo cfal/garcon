@@ -1,4 +1,5 @@
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
@@ -12,8 +13,8 @@ import { PreambleStore } from './store.js';
 import type { SnippetShortNameCoordinator } from '../snippets/short-name-coordinator.js';
 import type { ProjectInspector } from '../../common/project-resolution.js';
 
-export async function initializePreambleStore(workspaceDir: string): Promise<PreambleStore> {
-  const store = new PreambleStore(workspaceDir);
+export async function initializePreambleStore(workspaceDir: string, retainNodeReferences?: RetainNodeReferences): Promise<PreambleStore> {
+  const store = new PreambleStore(workspaceDir, retainNodeReferences);
   await store.init();
   const installation = await store.installBundledPreambles(BUNDLED_PREAMBLES, new Date());
   if (installation.deferred > 0) {

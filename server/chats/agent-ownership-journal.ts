@@ -8,7 +8,8 @@ import type { AgentDirectory } from '../agents/directory.js';
 import { effectiveNodeId } from '../../common/execution-nodes.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
-import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { AtomicJsonWriteError, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import { createLogger } from '../lib/log.js';
 import { DomainError } from '../lib/domain-error.js';
 import type {
@@ -71,6 +72,8 @@ export class AgentOwnershipJournal {
   readonly #integrations: Pick<AgentDirectory, 'get' | 'require'>;
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
+  readonly #retainNodeReferences?: RetainNodeReferences;
+  readonly #unconfirmedNodeReferences = new Set<string>();
   #journal: AgentOwnershipJournalFileV5 = emptyOwnershipJournalV5();
   #deletePromise: Promise<void> = Promise.resolve();
   #providerCleanupPromise: Promise<void> = Promise.resolve();
@@ -82,12 +85,14 @@ export class AgentOwnershipJournal {
     integrations: Pick<AgentDirectory, 'get' | 'require'>;
     ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
+    retainNodeReferences?: RetainNodeReferences;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
     this.#registry = options.registry;
     this.#integrations = options.integrations;
     this.#ledger = options.ledger;
     this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
+    this.#retainNodeReferences = options.retainNodeReferences;
     if (!Number.isSafeInteger(this.#releaseTimeoutMs) || this.#releaseTimeoutMs < 1) {
       throw new Error('Ownership cleanup release timeout must be a positive integer');
     }
@@ -114,9 +119,7 @@ export class AgentOwnershipJournal {
   }
 
   referencesNode(nodeId: string): boolean {
-    return this.#journal.ownershipIntents.some((intent) => intent.kind === 'handoff'
-      ? effectiveNodeId(intent.source.nodeId) === nodeId || effectiveNodeId(intent.target.execution.nodeId) === nodeId
-      : intent.releaseReferences.some((reference) => effectiveNodeId(reference.nodeId) === nodeId));
+    return this.#unconfirmedNodeReferences.has(nodeId) || journalNodes(this.#journal).includes(nodeId);
   }
 
   roots(): ReadonlySet<string> {
@@ -189,7 +192,7 @@ export class AgentOwnershipJournal {
         },
         result: intent,
       };
-    });
+    }, [options.source.nodeId]);
     return this.#requireHandoff(options.operationId);
   }
 
@@ -287,7 +290,7 @@ export class AgentOwnershipJournal {
         },
         result: prepared,
       };
-    });
+    }, [current?.nodeId]);
     if (!intent) return;
     this.#registry.removeChat(chatId);
     await this.#registry.flush();
@@ -421,14 +424,30 @@ export class AgentOwnershipJournal {
     mutation: (current: AgentOwnershipJournalFileV5) =>
       | AgentOwnershipJournalFileV5
       | { journal: AgentOwnershipJournalFileV5; result: T },
+    inheritedNodes: readonly (string | null | undefined)[] = [],
   ): Promise<T> {
     const operation = this.#mutationPromise.catch(() => undefined).then(async () => {
       const outcome = mutation(this.#journal);
       const journal = 'journal' in outcome ? outcome.journal : outcome;
       const result = 'journal' in outcome ? outcome.result : undefined as T;
       if (journal !== this.#journal) {
-        await writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 });
-        this.#journal = journal;
+        const nodes = journalNodes(journal);
+        const release = this.#retainNodeReferences?.(nodes, [...journalNodes(this.#journal), ...inheritedNodes]);
+        try {
+          try {
+            await writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 });
+          } catch (error) {
+            // A renamed but unconfirmed decision still prevents node deletion.
+            if (error instanceof AtomicJsonWriteError && error.renamed) {
+              for (const id of nodes) this.#unconfirmedNodeReferences.add(id);
+            }
+            throw error;
+          }
+          this.#journal = journal;
+          this.#unconfirmedNodeReferences.clear();
+        } finally {
+          release?.();
+        }
       }
       return result;
     });
@@ -447,6 +466,12 @@ export class AgentOwnershipJournal {
       throw error;
     }
   }
+}
+
+function journalNodes(journal: AgentOwnershipJournalFileV5): string[] {
+  return journal.ownershipIntents.flatMap((intent) => intent.kind === 'handoff'
+    ? [effectiveNodeId(intent.source.nodeId), effectiveNodeId(intent.target.execution.nodeId)]
+    : intent.releaseReferences.map((reference) => effectiveNodeId(reference.nodeId)));
 }
 
 function sameHandoffDecision(left: AgentHandoffIntent, right: AgentHandoffIntent): boolean {

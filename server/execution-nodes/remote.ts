@@ -20,6 +20,11 @@ export interface RemoteSessionBacking {
   readonly manifests: ReadonlyMap<string, IntegrationManifest>;
 }
 
+export interface RemoteNodeInventory {
+  readonly projectBasePath: string;
+  readonly integrations: readonly IntegrationManifest[];
+}
+
 export class RemoteExecutionNode implements ExecutionNode {
   readonly #integrations = new Map<string, RemoteAgentIntegration>();
   readonly #listeners = new Set<(value: NodeAvailability) => void>();
@@ -39,6 +44,7 @@ export class RemoteExecutionNode implements ExecutionNode {
     private readonly link: WebSocketLink,
     setupRpc: (rpc: AgentRpc) => void = () => {},
     private readonly reportError: (message: string) => void = () => {},
+    private readonly expectedInventory: RemoteNodeInventory | null = null,
   ) {
     void this.#ready.promise.catch(() => undefined);
     this.#unsubscribe = link.onSession((transport) => {
@@ -72,6 +78,13 @@ export class RemoteExecutionNode implements ExecutionNode {
   }
 
   get availability(): NodeAvailability { return this.#availability; }
+
+  get inventory(): RemoteNodeInventory | null {
+    return this.#projectBasePath === null ? null : {
+      projectBasePath: this.#projectBasePath,
+      integrations: [...this.#integrations.values()].map((integration) => integration.manifest),
+    };
+  }
 
   async getInfo(options?: NodeCallOptions): Promise<ExecutionNodeInfo> {
     options?.signal?.throwIfAborted();
@@ -129,6 +142,14 @@ export class RemoteExecutionNode implements ExecutionNode {
     }
     if (manifests.size !== info.integrationIds.length || info.integrationIds.some((id) => !manifests.has(id))) {
       throw new Error('Execution-node integration inventory mismatch');
+    }
+    if (this.expectedInventory) {
+      if (info.projectBasePath !== this.expectedInventory.projectBasePath
+        || manifests.size !== this.expectedInventory.integrations.length
+        || this.expectedInventory.integrations.some(({ scope: _scope, ...expected }) => {
+          const { scope: _replacementScope, ...replacement } = manifests.get(expected.descriptor.id) ?? {};
+          return !isDeepStrictEqual(expected, replacement);
+        })) throw new Error('Execution-node inventory changed; restart the controller to accept it');
     }
     const backing: RemoteSessionBacking = { rpc, info, manifests };
     const initial = this.#projectBasePath === null;

@@ -10,6 +10,7 @@ import { bunCronRuntime, cronExpressionForUtcInstant, ScheduledPromptScheduler }
 import { ScheduledPromptStore } from '../store.ts';
 import { parseGarconSchedule, garconScheduleActionContent } from '../../../common/garcon-schedule.ts';
 import { AtomicJsonWriteError } from '../../lib/json-file-store.ts';
+import { ExecutionNodeReferenceWrites } from '../../execution-nodes/reference-writes.js';
 
 const createdDirs = [];
 
@@ -423,6 +424,59 @@ describe('scheduled prompt scheduler', () => {
       });
       expect(store.list()).toHaveLength(1);
     } finally { register.mockRestore(); remove.mockRestore(); scheduler.stop(); }
+  });
+
+  it.each(['EXECUTION_NODE_NOT_FOUND', 'EXECUTION_NODE_IN_USE'])('restores a retained previous node after registration failure (%s)', async (code) => {
+    let writable = true;
+    const references = new ExecutionNodeReferenceWrites(() => {
+      if (!writable) throw new DomainError(code, 'Synthetic unavailable node', code === 'EXECUTION_NODE_NOT_FOUND' ? 404 : 409);
+    });
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir, references.retain);
+    await store.init();
+    const cron = new FakeCron();
+    const scheduler = new ScheduledPromptScheduler({
+      store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
+      preambles: preambleCatalog(), chats: { getChat: () => null },
+      dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+      inspectProject: async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }),
+      retainNodeReferences: references.retain,
+    });
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const definition = newChatDefinition('2099-01-01T00:00:00.000Z');
+    definition.target.nodeId = nodeId;
+    const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: definition });
+    const id = store.list()[0].id;
+    writable = false;
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const restore = store.restore.bind(store);
+    const rollback = spyOn(store, 'restore').mockImplementation(async (previous) => {
+      entered.resolve();
+      await release.promise;
+      return restore(previous);
+    });
+    const register = spyOn(cron, 'schedule').mockImplementationOnce(() => { throw new Error('Synthetic registration failure'); });
+    try {
+      const updating = scheduler.update({ id, expectedRevision: created.revision,
+        scheduledPrompt: { ...definition, target: { ...definition.target, nodeId: undefined } },
+      }).catch((error) => error);
+      await entered.promise;
+      expect(store.referencesNode(nodeId)).toBe(false);
+      expect(() => references.assertNoWrites(nodeId)).toThrow('A reference to this node is being saved');
+      release.resolve();
+      expect(await updating).toMatchObject({ message: 'Synthetic registration failure' });
+      expect(store.referencesNode(nodeId)).toBe(true);
+      const reopened = new ScheduledPromptStore(dir, references.retain);
+      await reopened.init();
+      expect(reopened.get(id).target.nodeId).toBe(nodeId);
+      references.assertNoWrites(nodeId);
+    } finally {
+      release.resolve();
+      rollback.mockRestore();
+      register.mockRestore();
+      scheduler.stop();
+    }
   });
 
   it('rejects unsupported new-chat effort before create or update persistence', async () => {
