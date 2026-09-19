@@ -1,0 +1,64 @@
+import { getExecutionNodes } from '$lib/api/execution-nodes.js';
+import { effectiveNodeId, parseExecutionNodes, type ExecutionNodeSnapshot } from '$shared/execution-nodes';
+
+const localFallback: readonly ExecutionNodeSnapshot[] = [{
+	id: 'local', label: 'Local', kind: 'local', enabled: true, direction: null,
+	availability: 'ready', projectBasePath: null, lastError: null,
+	machineServices: { files: true, git: true, terminals: true },
+}];
+
+export class ExecutionNodesStore {
+	#snapshot = $state.raw<readonly ExecutionNodeSnapshot[] | null>(null);
+	error = $state<string | null>(null);
+	loading = $state(false);
+	#version = 0;
+	#request: Promise<void> | null = null;
+
+	constructor(private readonly read = getExecutionNodes) {}
+
+	get nodes(): readonly ExecutionNodeSnapshot[] { return this.#snapshot ?? localFallback; }
+	get hasSnapshot(): boolean { return this.#snapshot !== null; }
+
+	get(id?: string | null): ExecutionNodeSnapshot | undefined {
+		return this.nodes.find((node) => node.id === effectiveNodeId(id));
+	}
+
+	label(id?: string | null): string {
+		return this.get(id)?.label ?? (effectiveNodeId(id) === 'local' ? 'Local' : effectiveNodeId(id));
+	}
+
+	isReady(id?: string | null): boolean {
+		const node = this.get(id);
+		return node?.enabled === true && node.availability === 'ready';
+	}
+
+	applySnapshot(value: unknown): void {
+		const nodes = parseExecutionNodes(value);
+		if (!nodes) throw new Error('Invalid execution nodes snapshot');
+		this.#snapshot = nodes;
+		this.error = null;
+		this.#version += 1;
+	}
+
+	async refresh(): Promise<void> {
+		if (this.#request) return this.#request;
+		const version = this.#version;
+		this.loading = true;
+		this.#request = this.read().then((nodes) => {
+			if (version === this.#version) this.applySnapshot(nodes);
+		}).catch((error: unknown) => {
+			if (version === this.#version) this.error = error instanceof Error ? error.message : 'Unable to load execution nodes';
+		}).finally(() => {
+			this.loading = false;
+			this.#request = null;
+		});
+		return this.#request;
+	}
+}
+
+export function executionNodeStatus(node: ExecutionNodeSnapshot): string {
+	if (!node.enabled) return 'Disabled';
+	if (node.availability === 'ready') return 'Ready';
+	if (node.availability === 'reconnecting') return 'Reconnecting';
+	return node.direction === 'node-connects' ? 'Waiting for connection' : 'Offline';
+}

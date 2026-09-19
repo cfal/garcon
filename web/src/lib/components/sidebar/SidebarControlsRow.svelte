@@ -16,6 +16,7 @@
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
+	import Network from '@lucide/svelte/icons/network';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import Braces from '@lucide/svelte/icons/braces';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -59,6 +60,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowSettings: () => void;
+		onShowExecutionNodes: () => void;
 	}
 
 	let {
@@ -87,6 +89,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowSettings,
+		onShowExecutionNodes,
 	}: SidebarControlsRowProps = $props();
 
 	let buttonLabel = $derived(m.sidebar_chats_new_chat());
@@ -276,6 +279,10 @@
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.sidebar_actions_settings()}
+				</DropdownMenuItem>
+				<DropdownMenuItem onclick={onShowExecutionNodes}>
+					<Network class="h-3.5 w-3.5" />
+					Execution Nodes
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

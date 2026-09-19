@@ -26,6 +26,7 @@ export interface ChatPreambleSelectionTarget {
 
 export class AppShellStore {
 	showSettings = $state(false);
+	showExecutionNodes = $state(false);
 	showScheduledPrompts = $state(false);
 	showPreambles = $state(false);
 	showSnippets = $state(false);
@@ -55,6 +56,7 @@ export class AppShellStore {
 	#preamblesReturnFocus: (() => void) | null = null;
 
 	openSettings(section: string = 'providers'): void {
+		this.showExecutionNodes = false;
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
@@ -67,7 +69,19 @@ export class AppShellStore {
 		this.showSettings = false;
 	}
 
+	openExecutionNodes(): void {
+		this.dismissSnippets();
+		this.dismissPreambles();
+		this.showSettings = false;
+		this.showScheduledPrompts = false;
+		this.showOnboardingWizard = false;
+		this.showExecutionNodes = true;
+	}
+
+	closeExecutionNodes(): void { this.showExecutionNodes = false; }
+
 	openOnboardingWizard(): void {
+		this.showExecutionNodes = false;
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
@@ -80,6 +94,7 @@ export class AppShellStore {
 	}
 
 	openScheduledPrompts(): void {
+		this.showExecutionNodes = false;
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showOnboardingWizard = false;
@@ -92,6 +107,7 @@ export class AppShellStore {
 	}
 
 	openPreambles(returnFocus?: () => void): void {
+		this.showExecutionNodes = false;
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
@@ -129,6 +145,7 @@ export class AppShellStore {
 	}
 
 	openSnippets(returnFocus?: () => void): void {
+		this.showExecutionNodes = false;
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;

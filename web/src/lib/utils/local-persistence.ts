@@ -23,6 +23,7 @@ export const LOCAL_STORAGE_KEYS = {
 	localSettings: 'pref_local_settings',
 	modelCatalog: 'pref_model_catalog_v4',
 	modelCatalogLegacy: 'pref_model_catalog_v3',
+	modelCatalogNodes: 'pref_model_catalog_nodes_v1',
 	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
 	workspaceLayout: 'workspace_layout_v2',
 } as const;

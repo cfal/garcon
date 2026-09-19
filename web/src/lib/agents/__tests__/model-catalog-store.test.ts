@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as clientApi from '$lib/api/client';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import { createModelCatalogStore } from '../model-catalog-store.svelte';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 
 vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn(),
@@ -52,6 +53,45 @@ describe('ModelCatalogStore', () => {
 		vi.mocked(clientApi.apiFetch).mockReset();
 	});
 
+	it('isolates identical agent/model identities by node in requests and persisted catalogs', async () => {
+		const store = createModelCatalogStore();
+		const remote = store.forNode(remoteExecutionNode.id);
+		vi.mocked(clientApi.apiFetch)
+			.mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample', {
+				models: [{ value: 'same', label: 'Local model' }],
+			})])))
+			.mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample', {
+				models: [{ value: 'same', label: 'Worker model' }],
+			})])));
+		await store.forceRefresh();
+		await remote.forceRefresh();
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(1, '/api/v1/models');
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(2, `/api/v1/models?nodeId=${remoteExecutionNode.id}`);
+		expect(store.getModels('sample')[0]?.label).toBe('Local model');
+		expect(remote.getModels('sample')[0]?.label).toBe('Worker model');
+		const restored = createModelCatalogStore();
+		expect(restored.getModels('sample')[0]?.label).toBe('Local model');
+		expect(restored.forNode(remoteExecutionNode.id).getModels('sample')[0]?.label).toBe('Worker model');
+	});
+
+	it('fences a pending catalog request when its node disconnects or is deleted', async () => {
+		const store = createModelCatalogStore();
+		const remote = store.forNode(remoteExecutionNode.id);
+		store.reconcileNodes([localExecutionNode, remoteExecutionNode]);
+		const response = Promise.withResolvers<Response>();
+		vi.mocked(clientApi.apiFetch).mockReturnValue(response.promise);
+		const pending = remote.forceRefresh();
+		store.reconcileNodes([localExecutionNode]);
+		response.resolve(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'late', label: 'Stale model' }],
+		})])));
+		await pending;
+		expect(remote.isRefreshing).toBe(false);
+		expect(remote.getModels('sample')).toEqual([]);
+		expect(store.forNode(remoteExecutionNode.id)).not.toBe(remote);
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.modelCatalogNodes)).toBe('{}');
+	});
+
 	it('starts empty instead of embedding integration-specific fallbacks', () => {
 		const store = createModelCatalogStore();
 
@@ -61,6 +101,34 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsSteering('claude')).toBe(false);
 		expect(store.getPermissionModes('claude')).toEqual([]);
 		expect(store.getThinkingModes('claude')).toEqual([]);
+	});
+
+	it('keeps an in-flight Local catalog request when the first node snapshot arrives', async () => {
+		const response = Promise.withResolvers<Response>();
+		vi.mocked(clientApi.apiFetch).mockReturnValue(response.promise);
+		const store = createModelCatalogStore();
+		const pending = store.forceRefresh();
+		store.reconcileNodes([localExecutionNode, remoteExecutionNode]);
+		response.resolve(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'same', label: 'Local model' }],
+		})])));
+		await pending;
+		expect(store.getModels('sample')[0]?.label).toBe('Local model');
+		expect(store.isStale()).toBe(false);
+	});
+
+	it.each([false, true])('invalidates persisted remote catalogs on reconnect (instantiated: %s)', async (instantiate) => {
+		const initial = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'same', label: 'Worker model' }],
+		})])));
+		await initial.forNode(remoteExecutionNode.id).forceRefresh();
+		const store = createModelCatalogStore();
+		if (instantiate) expect(store.forNode(remoteExecutionNode.id).isStale()).toBe(false);
+		store.reconcileNodes([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+		store.reconcileNodes([localExecutionNode, remoteExecutionNode]);
+		expect(store.forNode(remoteExecutionNode.id).isStale()).toBe(true);
+		expect(createModelCatalogStore().forNode(remoteExecutionNode.id).isStale()).toBe(true);
 	});
 
 	it('hydrates models, capabilities, modes, and settings from storage', () => {
