@@ -44,6 +44,9 @@ export class GenerationModelTestError extends DomainError {
 
 function classifyGenerationModelTestError(error: unknown): GenerationModelTestError {
   if (error instanceof GenerationModelTestError) return error;
+  if (error instanceof DomainError && error.code === 'EXECUTION_NODE_UNAVAILABLE') {
+    return new GenerationModelTestError('GENERATION_TEST_UNAVAILABLE', 'The selected execution node is unavailable.', 503, true, { cause: error });
+  }
   if (isUnsupportedSingleQueryThinkingMode(error)) {
     return new GenerationModelTestError(
       'GENERATION_TEST_UNSUPPORTED_EFFORT',
@@ -122,7 +125,7 @@ export async function testGenerationModel(input: {
     }
     if (
       input.target === 'promptRefinement'
-      && input.agents.singleQueryRunsToolsWithoutPermission(config.agentId)
+      && input.agents.singleQueryRunsToolsWithoutPermission(config.agentId, config.nodeId)
     ) {
       throw new GenerationModelTestError(
         'GENERATION_TEST_UNSAFE_AGENT',
@@ -133,6 +136,7 @@ export async function testGenerationModel(input: {
 
     generationSignal.throwIfAborted();
     const output = await input.agents.runSingleQuery(GENERATION_TEST_PROMPT, {
+      nodeId: config.nodeId,
       agentId: config.agentId,
       model: config.model,
       permissionMode: 'plan',

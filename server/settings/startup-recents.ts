@@ -7,10 +7,13 @@ import {
 } from '../../common/chat-modes.js';
 import { parseAgentSettingsById } from '../../common/agent-integration.js';
 import { isRecord } from '../../common/json.js';
+import { effectiveNodeId, parseNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
+import { parseNodeProjectPreferences } from '../../common/settings.js';
 import type {
   ExecutionDefaults,
   ExecutionDefaultsSettings,
   PathSettings,
+  ProjectSettings,
   RecentAgentSetting,
 } from './types.js';
 
@@ -64,15 +67,30 @@ function sameStringArray(left: unknown[], right: string[]): boolean {
 }
 
 export function normalizePathSettings(paths: PathSettings): PathSettings {
-  if (!Array.isArray(paths.pinnedProjectPaths)) return paths;
+  const byNode = paths.byNode === undefined ? undefined : parseNodeProjectPreferences(paths.byNode);
+  if (byNode === null) throw new Error('Invalid execution-node project preferences');
   return {
     ...paths,
-    pinnedProjectPaths: sortedPinnedProjectPaths(paths.pinnedProjectPaths),
+    ...(Array.isArray(paths.pinnedProjectPaths) ? { pinnedProjectPaths: sortedPinnedProjectPaths(paths.pinnedProjectPaths) } : {}),
+    ...(byNode ? { byNode } : {}),
+  };
+}
+
+export function withoutNodeStartupPreferences(
+  settings: Pick<ProjectSettings, 'paths' | 'recentAgentSettings'>,
+  nodeId: string,
+): Pick<ProjectSettings, 'paths' | 'recentAgentSettings'> {
+  const byNode = parseNodeProjectPreferences(settings.paths.byNode);
+  if (byNode) delete byNode[nodeId];
+  return {
+    paths: byNode ? { ...settings.paths, byNode } : settings.paths,
+    recentAgentSettings: settings.recentAgentSettings.filter((entry) => entry.nodeId !== nodeId),
   };
 }
 
 export function recentAgentSettingKey(entry: RecentAgentSetting): string {
   return [
+    effectiveNodeId(entry.nodeId),
     entry.agentId,
     entry.model,
     entry.apiProviderId ?? '',
@@ -86,8 +104,11 @@ export function sanitizeRecentAgentSetting(raw: unknown): RecentAgentSetting | n
   const agentId = optionalString(raw.agentId);
   const model = optionalString(raw.model);
   if (!agentId || !model) return null;
+  const nodeId = parseNodeId(raw.nodeId);
+  if (!nodeId) return null;
 
   return {
+    ...(nodeId !== LOCAL_EXECUTION_NODE_ID ? { nodeId } : {}),
     agentId,
     model,
     apiProviderId: optionalString(raw.apiProviderId),
@@ -263,10 +284,19 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
   return { paths, migrated };
 }
 
-export function recordRecentProjectPath(paths: PathSettings, projectPath: unknown): PathSettings {
+export function recordRecentProjectPath(paths: PathSettings, projectPath: unknown, targetNode?: unknown): PathSettings {
   const normalizedPaths = normalizePathSettings(paths);
   const value = optionalString(projectPath);
   if (!value) return normalizedPaths;
+  const nodeId = parseNodeId(targetNode);
+  if (!nodeId) throw new Error('Invalid execution node ID');
+  if (nodeId !== LOCAL_EXECUTION_NODE_ID) {
+    const byNode = parseNodeProjectPreferences(normalizedPaths.byNode ?? {})!;
+    const previous = byNode[nodeId] ?? { recentPaths: [], pinnedPaths: [] };
+    return { ...normalizedPaths, byNode: { ...byNode, [nodeId]: {
+      ...previous, recentPaths: dedupeStrings([value, ...previous.recentPaths], RECENT_PROJECT_PATHS_LIMIT),
+    } } };
+  }
   const current = dedupeStrings(normalizedPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
   return {
     ...normalizedPaths,

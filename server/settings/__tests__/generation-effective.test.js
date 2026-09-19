@@ -44,6 +44,7 @@ describe('resolveEffectiveGenerationConfig', () => {
         thinkingMode: 'max',
       },
     })).toEqual({
+      nodeId: 'local',
       enabled: true,
       agentId: 'alpha',
       model: 'alpha-default',

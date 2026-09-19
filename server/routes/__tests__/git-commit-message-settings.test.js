@@ -142,6 +142,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(response.status).toBe(200);
     expect(body.message).toBe('feat: generated');
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      nodeId: 'local',
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'amp',
@@ -173,6 +174,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     expect(response.status).toBe(200);
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      nodeId: 'local',
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'claude',
@@ -213,6 +215,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     expect(response.status).toBe(200);
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      nodeId: 'local',
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'codex',
@@ -326,6 +329,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     expect(response.status).toBe(200);
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      nodeId: 'local',
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'direct-openai-compatible',
@@ -365,6 +369,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
 
     expect(response.status).toBe(200);
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      nodeId: 'local',
       projectPath: '/proj',
       files: ['src/a.ts'],
       agentId: 'direct-anthropic-compatible',

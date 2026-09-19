@@ -255,7 +255,7 @@ export async function refinePrompt(
         409,
       );
     }
-    if (dependencies.agents.singleQueryRunsToolsWithoutPermission(selection.agentId)) {
+    if (dependencies.agents.singleQueryRunsToolsWithoutPermission(selection.agentId, selection.nodeId)) {
       throw new PromptRefinementError(
         'PROMPT_REFINEMENT_UNSAFE_AGENT',
         'The selected agent cannot safely refine untrusted prompt text.',
@@ -269,6 +269,7 @@ export async function refinePrompt(
       input.draft,
     );
     const output = await dependencies.agents.runSingleQuery(prompt, {
+      nodeId: selection.nodeId,
       agentId: selection.agentId,
       model: selection.model,
       permissionMode: 'plan',

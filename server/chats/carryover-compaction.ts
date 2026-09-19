@@ -45,11 +45,12 @@ export const CARRYOVER_COMPACTION_STARTED_NOTICE =
   'Compacting earlier chat history. This could take a while depending on the agent and model.';
 
 export interface CarryOverCompactionAgents {
-  singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
+  singleQueryRunsToolsWithoutPermission(agentId: string, nodeId?: string | null): boolean;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
   runSingleQuery(prompt: string, options: {
+    nodeId?: string | null;
     agentId: string;
     model: string;
     thinkingMode: ThinkingMode;
@@ -122,7 +123,7 @@ export class CarryOverCompactionService {
     }
     // Refuses transcript-influenced prompts when the one-shot integration can
     // act on the workspace without a permission gate.
-    if (this.deps.agents.singleQueryRunsToolsWithoutPermission(selection.agentId)) {
+    if (this.deps.agents.singleQueryRunsToolsWithoutPermission(selection.agentId, selection.nodeId)) {
       throw compactionUnavailable(
         input,
         `${selection.agentId} runs one-shot queries without a permission gate`,
@@ -184,6 +185,7 @@ export class CarryOverCompactionService {
       }
       try {
         const raw = await this.deps.agents.runSingleQuery(fitted.value.prompt, {
+          nodeId: selection.nodeId,
           agentId: selection.agentId,
           model: selection.model,
           thinkingMode: selection.thinkingMode,

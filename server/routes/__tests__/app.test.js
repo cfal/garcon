@@ -17,6 +17,7 @@ mock.module('../../config.js', () => ({
 import createWorkspaceRoutes from '../workspace.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { generationModelTestConfigurationKey } from '../../../common/generation-test-contracts.js';
+import { GENERATION_UI_SETTING_KEYS } from '../../../common/settings.js';
 import {
   FolderAlreadyExistsError,
   FolderNotFoundError,
@@ -413,6 +414,7 @@ describe('GET /api/app/settings', () => {
     const body = await response.json();
 
     expect(body.uiEffective.promptRefinement).toEqual({
+      nodeId: 'local',
       agentId: 'codex',
       model: 'gpt-5.5',
       thinkingMode: 'high',
@@ -1112,6 +1114,32 @@ describe('PUT /api/app/settings', () => {
       expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
       expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
     }
+  });
+
+  it.each(GENERATION_UI_SETTING_KEYS)('rejects invalid remote agent IDs for %s before persistence', async (target) => {
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: {
+      [target]: { nodeId: '22222222-2222-4222-8222-222222222222', agentId: '!', model: 'synthetic-model' },
+    } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    expect(response.status).toBe(400);
+    expect((await response.json()).errorCode).toBe('INVALID_REMOTE_SETTINGS');
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+  });
+
+  it.each(GENERATION_UI_SETTING_KEYS)('ignores malformed %s values rather than resetting to Auto', async (target) => {
+    for (const malformed of [null, [], '', 0, false]) {
+      parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: { [target]: malformed } }));
+      const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+      expect(response.status).toBe(200);
+      expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(GENERATION_UI_SETTING_KEYS)('accepts an explicit empty object to reset %s to Auto', async (target) => {
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: { [target]: {} } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ [target]: {} });
   });
 
   it('rejects unsupported generation efforts before mutating settings', async () => {

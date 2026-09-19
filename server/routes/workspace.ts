@@ -1,4 +1,7 @@
 import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
+import { parseNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
+import { isAgentId } from '../../common/agents.js';
+import { isRecord } from '../../common/json.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
@@ -26,6 +29,7 @@ import {
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
+  parseNodeProjectPreferences,
   type AgentCommandsFeatureSettings,
   type RemoteSettingsSnapshot,
   type RemoteFeatureSettings,
@@ -79,6 +83,10 @@ function telegramTokenTestFailedResponse(error: unknown): Response {
 
 function asPlainObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function isEmptyObject(value: unknown): boolean {
+  return isRecord(value) && Object.keys(value).length === 0;
 }
 
 function resolveUntoggledGenerationUiConfig<
@@ -154,6 +162,7 @@ export async function buildRemoteSettingsSnapshot({
       recentProjectPaths: Array.isArray(paths?.recentProjectPaths)
         ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')
         : [],
+      ...(paths?.byNode === undefined ? {} : { byNode: parseNodeProjectPreferences(paths.byNode) ?? {} }),
     },
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
     recentAgentSettings,
@@ -243,22 +252,22 @@ export default function createWorkspaceRoutes(
     }
     if ('chatTitle' in patch) {
       const chatTitle = normalizeChatTitleUiSettings(patch.chatTitle);
-      if (chatTitle) patch.chatTitle = chatTitle;
+      if (chatTitle || isEmptyObject(patch.chatTitle)) patch.chatTitle = chatTitle ?? {};
       else delete patch.chatTitle;
     }
     if ('agentSwitchCompaction' in patch) {
       const compaction = normalizeAgentSwitchCompactionUiSettings(patch.agentSwitchCompaction);
-      if (compaction) patch.agentSwitchCompaction = compaction;
+      if (compaction || isEmptyObject(patch.agentSwitchCompaction)) patch.agentSwitchCompaction = compaction ?? {};
       else delete patch.agentSwitchCompaction;
     }
     if ('commitMessage' in patch) {
       const commitMessage = normalizeCommitMessageUiSettings(patch.commitMessage);
-      if (commitMessage) patch.commitMessage = commitMessage;
+      if (commitMessage || isEmptyObject(patch.commitMessage)) patch.commitMessage = commitMessage ?? {};
       else delete patch.commitMessage;
     }
     if ('promptRefinement' in patch) {
       const promptRefinement = normalizePromptRefinementUiSettings(patch.promptRefinement);
-      if (promptRefinement) patch.promptRefinement = promptRefinement;
+      if (promptRefinement || isEmptyObject(patch.promptRefinement)) patch.promptRefinement = promptRefinement ?? {};
       else delete patch.promptRefinement;
     }
     if ('hiddenBashCommandPatterns' in patch) {
@@ -333,6 +342,7 @@ export default function createWorkspaceRoutes(
       });
       if (!resolved.agentId) continue;
       agents.assertExecutionModeSelectionSupported(resolved.agentId, {
+        nodeId: resolved.nodeId,
         thinkingMode: resolved.thinkingMode,
       });
     }
@@ -376,6 +386,19 @@ export default function createWorkspaceRoutes(
   ): Promise<Response> {
     try {
       const input = asJsonBody(body);
+      const pathPatch = asPlainObject(input.paths);
+      if (pathPatch.byNode !== undefined && !parseNodeProjectPreferences(pathPatch.byNode)) {
+        return jsonError('Invalid execution-node project preferences.', 400, 'INVALID_REMOTE_SETTINGS', false);
+      }
+      const generationUi = asPlainObject(input.ui);
+      for (const key of GENERATION_UI_SETTING_KEYS) {
+        const selection = asPlainObject(generationUi[key]);
+        const nodeId = parseNodeId(selection.nodeId);
+        if (!nodeId || (nodeId !== LOCAL_EXECUTION_NODE_ID && (
+          !isAgentId(selection.agentId)
+          || typeof selection.model !== 'string' || !selection.model.trim()
+        ))) return jsonError('A remote generation selection requires a valid node, agent, and model.', 400, 'INVALID_REMOTE_SETTINGS', false);
+      }
       const promptPatchError = generationPromptPatchError(input.ui);
       if (promptPatchError) {
         return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);

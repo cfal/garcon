@@ -15,6 +15,7 @@ import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-inte
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
+import { isExecutionNodeId, isRemoteNodeId, parseNodeId } from './execution-nodes.js';
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from './generation-prompts';
 import {
   parseAgentSwitchContextWindowTokens,
@@ -30,6 +31,7 @@ export const DEFAULT_APP_TITLE = 'Garcon';
 export const APP_TITLE_MAX_LENGTH = 120;
 
 export interface GenerationSelectionUiSettings {
+  nodeId?: string | null;
   agentId?: AgentId;
   model?: string;
   apiProviderId?: string | null;
@@ -99,6 +101,7 @@ export const GENERATION_UI_SETTING_KEYS = [
 ] as const satisfies readonly (keyof RemoteUiSettings)[];
 
 type EffectiveGenerationSelection = {
+  nodeId?: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
@@ -132,6 +135,28 @@ export interface RemotePathSettings {
   pinnedProjectPaths: string[];
   browseStartPath: string;
   recentProjectPaths: string[];
+  byNode?: Record<string, NodeProjectPreferences>;
+}
+
+export interface NodeProjectPreferences {
+  defaultPath?: string;
+  recentPaths: string[];
+  pinnedPaths: string[];
+}
+
+export function parseNodeProjectPreferences(value: unknown): Record<string, NodeProjectPreferences> | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const byNode: Record<string, NodeProjectPreferences> = {};
+  for (const [id, candidate] of Object.entries(raw)) {
+    const entry = asRecord(candidate);
+    if (!isRemoteNodeId(id) || !entry || (entry.defaultPath !== undefined && typeof entry.defaultPath !== 'string')) return null;
+    const recentPaths = asStringArray(entry.recentPaths);
+    const pinnedPaths = asStringArray(entry.pinnedPaths);
+    if (!recentPaths || !pinnedPaths) return null;
+    byNode[id] = { ...(typeof entry.defaultPath === 'string' ? { defaultPath: entry.defaultPath } : {}), recentPaths, pinnedPaths };
+  }
+  return byNode;
 }
 
 export interface TranscriptSearchFeatureSettings {
@@ -170,6 +195,7 @@ export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
 };
 
 export interface RecentAgentSetting {
+  nodeId?: string | null;
   agentId: AgentId;
   model: string;
   apiProviderId: string | null;
@@ -244,6 +270,10 @@ function normalizeGenerationSelection(
   if (!raw) return undefined;
 
   const normalized: GenerationSelectionUiSettings = {};
+  if (raw.nodeId !== undefined) {
+    if (raw.nodeId !== null && !isExecutionNodeId(raw.nodeId)) throw new Error('Invalid execution node ID');
+    normalized.nodeId = raw.nodeId;
+  }
   if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
@@ -334,6 +364,11 @@ function normalizeEffectiveGenerationSelection(
   raw: Record<string, unknown>,
   normalized: EffectiveGenerationSelection,
 ): void {
+  if (raw.nodeId !== undefined) {
+    const nodeId = parseNodeId(raw.nodeId);
+    if (!nodeId) throw new Error('Invalid execution node ID');
+    normalized.nodeId = nodeId;
+  }
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
@@ -506,7 +541,9 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
   const browseStartPath = asString(raw.browseStartPath);
   const recentProjectPaths = asStringArray(raw.recentProjectPaths);
   if (!pinnedProjectPaths || browseStartPath === null || !recentProjectPaths) return null;
-  return { pinnedProjectPaths, browseStartPath, recentProjectPaths };
+  const byNode = raw.byNode === undefined ? undefined : parseNodeProjectPreferences(raw.byNode);
+  if (byNode === null) return null;
+  return { pinnedProjectPaths, browseStartPath, recentProjectPaths, ...(byNode ? { byNode } : {}) };
 }
 
 export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
@@ -564,7 +601,10 @@ function normalizeRecentAgentSetting(value: unknown): RecentAgentSetting | null 
   if (!raw) return null;
   const model = asString(raw.model);
   if (!isAgentId(raw.agentId) || model === null || !model.trim()) return null;
+  const nodeId = parseNodeId(raw.nodeId);
+  if (!nodeId) return null;
   return {
+    ...(raw.nodeId === undefined ? {} : { nodeId }),
     agentId: raw.agentId,
     model,
     apiProviderId: safeOptionalId(raw.apiProviderId),

@@ -541,6 +541,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#startupDefaults.getRecentAgentSettings();
   }
 
+  forgetExecutionNode(nodeId: string): Promise<void> {
+    return this.#startupDefaults.forgetExecutionNode(nodeId);
+  }
+
   getRecentProjectPaths(): string[] {
     return this.#startupDefaults.getRecentProjectPaths();
   }

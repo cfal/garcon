@@ -94,6 +94,7 @@ describe('testGenerationModel', () => {
     expect(result).toMatchObject({ success: true, target: 'chatTitle' });
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(harness.runSingleQuery).toHaveBeenCalledWith('Reply with exactly OK. Do not use tools.', {
+      nodeId: 'local',
       agentId: 'direct-openai-compatible',
       model: 'glm-5.2',
       permissionMode: 'plan',
@@ -128,6 +129,35 @@ describe('testGenerationModel', () => {
         thinkingMode: 'low',
       }),
     );
+  });
+
+  it.each(['chatTitle', 'agentSwitchCompaction', 'commitMessage', 'promptRefinement'])('tests %s on the explicit node without discovery or fallback', async (target) => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const config = { nodeId, agentId: 'codex', model: 'synthetic-model', thinkingMode: 'none' };
+    harness.settings.getUiSettings.mockImplementation(() => ({ [target]: config }));
+    const input = { target, configurationKey: generationModelTestConfigurationKey(config), settings: harness.settings, agents: harness.agents };
+    await testGenerationModel(input);
+    expect(harness.runSingleQuery.mock.calls[0][1]).toMatchObject({ nodeId, agentId: 'codex', model: 'synthetic-model' });
+    harness.runSingleQuery.mockImplementationOnce(async () => { throw new Error('Execution node offline'); });
+    await expect(testGenerationModel(input)).rejects.toMatchObject({ code: 'GENERATION_TEST_FAILED' });
+    expect(harness.runSingleQuery.mock.calls.map(([, options]) => options.nodeId)).toEqual([nodeId, nodeId]);
+    expect(harness.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
+    expect(harness.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
+  });
+
+  it('Auto discovers and invokes only Local', async () => {
+    harness.settings.getUiSettings.mockImplementation(() => ({}));
+    harness.agents.getAgentAuthStatusMap.mockImplementation(async () => ({ codex: { authenticated: true } }));
+    harness.agents.getAgentCatalogEntries.mockImplementation(async () => [{
+      id: 'codex', models: [{ value: 'synthetic-model', label: 'Synthetic' }], generation: { priority: 1, model: 'synthetic-model' },
+    }]);
+    await testGenerationModel({
+      target: 'chatTitle', configurationKey: generationModelTestConfigurationKey({ agentId: 'codex', model: 'synthetic-model' }),
+      settings: harness.settings, agents: harness.agents,
+    });
+    expect(harness.agents.getAgentCatalogEntries.mock.calls).toEqual([[]]);
+    expect(harness.agents.getAgentAuthStatusMap.mock.calls).toEqual([[]]);
+    expect(harness.runSingleQuery.mock.calls[0][1].nodeId).toBe('local');
   });
 
   it('tests a safe prompt refinement target independently', async () => {

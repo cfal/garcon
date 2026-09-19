@@ -86,6 +86,7 @@ export interface FeatureSettings {
 }
 
 export interface RecentAgentSetting {
+  nodeId?: string | null;
   agentId: string;
   model: string;
   apiProviderId: string | null;
@@ -109,6 +110,7 @@ export type SettingsMutation<T> = () => T | Promise<T>;
 // Chat-start records carry startup preferences as unsanitized fields; the
 // store reads only these and ignores the rest of the start command.
 export interface ChatStartupPreferences {
+  nodeId?: unknown;
   agentId?: unknown;
   projectPath?: unknown;
   model?: unknown;

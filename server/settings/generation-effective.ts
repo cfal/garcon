@@ -2,6 +2,8 @@ import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentModelOption } from '../../common/agents.js';
 import { normalizeThinkingMode, type ThinkingMode } from '../../common/chat-modes.js';
 import { isRecord } from '../../common/json.js';
+import { parseNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
+import { ValidationDomainError } from '../lib/domain-error.js';
 
 type GenerationModelMap = Record<string, AgentModelOption[]>;
 type GenerationAuthMap = Record<string, { authenticated?: boolean }>;
@@ -17,6 +19,7 @@ interface EffectiveGenerationInput {
 }
 
 export interface EffectiveGenerationConfig {
+  nodeId: string;
   enabled: boolean;
   agentId: string;
   model: string;
@@ -79,6 +82,10 @@ export function resolveEffectiveGenerationConfig({
   const persistedEnabled = typeof cfg.enabled === 'boolean' ? cfg.enabled : null;
   const persistedAgent = isAgent(cfg.agentId) ? cfg.agentId : null;
   const persistedModel = typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model : '';
+  const nodeId = parseNodeId(cfg.nodeId);
+  if (!nodeId || (nodeId !== LOCAL_EXECUTION_NODE_ID && (!persistedAgent || !persistedModel))) {
+    throw new ValidationDomainError('An explicit execution node requires an agent and model');
+  }
   const autoAgent = pickAutoAgent(authByAgent, readinessByAgent ?? {}, generationByAgent);
   const selectedAgent = persistedAgent
     ?? autoAgent
@@ -89,6 +96,7 @@ export function resolveEffectiveGenerationConfig({
     && modelBelongsToAgent(selectedAgent, persistedModel, modelsByAgent, generationByAgent);
 
   return {
+    nodeId,
     enabled: persistedEnabled ?? Boolean(autoAgent),
     agentId: selectedAgent,
     model: persistedModelValid

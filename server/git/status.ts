@@ -561,6 +561,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
   }
 
   async function generateCommitMessageForFiles({
+    nodeId,
     projectPath,
     files,
     agentId,
@@ -595,6 +596,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       agentId,
       (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
         {
+          nodeId,
           model,
           apiProviderId,
           modelEndpointId,

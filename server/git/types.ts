@@ -191,6 +191,7 @@ export interface HunkHeaderResult {
 }
 
 export interface CommitMessageOptions {
+  nodeId?: string | null;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;

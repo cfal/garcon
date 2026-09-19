@@ -19,6 +19,7 @@ import type { SettingsStore } from '../settings/store.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { isThinkingMode } from '../../common/chat-modes.js';
 import { isRecord } from '../../common/json.js';
+import { LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import { isGitRefKind, parseGitRefSort } from '../../common/git-refs.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError, projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
@@ -368,6 +369,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
 
       const generationSignal = createGenerationRequestSignal(request.signal);
       const persistedConfig = await resolveCommitMessageConfig(settings, agents, generationSignal);
+      const nodeId = hasGenerationRoutingOverride(input) ? LOCAL_EXECUTION_NODE_ID : persistedConfig.nodeId;
       const agentId = hasOwn(input, 'agentId') && isAgentId(input.agentId) ? input.agentId : persistedConfig.agentId;
       const model = hasOwn(input, 'model') ? (typeof input.model === 'string' ? input.model : '') : typeof persistedConfig.model === 'string' ? persistedConfig.model : '';
       const apiProviderId = hasOwn(input, 'apiProviderId') ? optionalId(input.apiProviderId) : (persistedConfig.apiProviderId ?? null);
@@ -390,15 +392,16 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       if (agentId) {
         try {
           if (hasOwn(input, 'thinkingMode')) {
-            agents.assertExecutionModeSelectionSupported(agentId, { thinkingMode: selectedThinkingMode });
+            agents.assertExecutionModeSelectionSupported(agentId, { thinkingMode: selectedThinkingMode, nodeId });
           }
-          thinkingMode = agents.normalizeThinkingModeForAgent(agentId, selectedThinkingMode);
+          thinkingMode = agents.normalizeThinkingModeForAgent(agentId, selectedThinkingMode, nodeId);
         } catch (error) {
           return jsonErrorFromUnknown(error);
         }
       }
 
       const result = await git.generateCommitMessageForFiles({
+        nodeId,
         projectPath: project,
         files,
         agentId,

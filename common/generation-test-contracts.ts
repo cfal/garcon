@@ -1,4 +1,5 @@
 import { normalizeThinkingMode } from './chat-modes.js';
+import { effectiveNodeId } from './execution-nodes.js';
 
 export const GENERATION_TEST_TARGETS = [
   'chatTitle',
@@ -26,6 +27,7 @@ export interface GenerationModelTestResponse {
 }
 
 export function generationModelTestConfigurationKey(config: {
+  nodeId?: string | null;
   agentId?: unknown;
   model?: unknown;
   apiProviderId?: unknown;
@@ -34,6 +36,7 @@ export function generationModelTestConfigurationKey(config: {
   thinkingMode?: unknown;
 }): string {
   return JSON.stringify({
+    nodeId: effectiveNodeId(config.nodeId),
     agentId: typeof config.agentId === 'string' ? config.agentId : '',
     model: typeof config.model === 'string' ? config.model : '',
     apiProviderId: typeof config.apiProviderId === 'string' ? config.apiProviderId : null,

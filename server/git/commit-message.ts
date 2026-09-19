@@ -70,6 +70,7 @@ export async function generateCommitMessage(
 
   try {
     const opts: RunSingleQueryOptions = {
+      ...(options.nodeId ? { nodeId: options.nodeId } : {}),
       agentId,
       thinkingMode: thinkingMode ?? 'none',
       timeoutMs: options.timeoutMs ?? GENERATION_PROVIDER_TIMEOUT_MS,

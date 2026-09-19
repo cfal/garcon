@@ -25,6 +25,7 @@ interface TitleGenerationAgents {
   getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
   getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
   runSingleQuery(prompt: string, options: {
+    nodeId?: string | null;
     agentId: string;
     model: string;
     permissionMode: 'default';
@@ -196,6 +197,7 @@ async function runTitleGeneration({
 
     const prompt = buildTitleGenerationPrompt(normalizedSource, recentTitleIcons);
     const titleRaw = await agents.runSingleQuery(prompt, {
+      nodeId: cfg.nodeId,
       agentId: cfg.agentId,
       model: cfg.model,
       permissionMode: 'default',

@@ -35,6 +35,7 @@ import type {
 } from './types.js';
 import {
   dedupeRecentAgentSettings,
+  withoutNodeStartupPreferences,
   normalizePathSettings,
   recordRecentProjectPath,
   sanitizeExecutionDefaults,
@@ -403,6 +404,15 @@ export class StartupDefaultsStore {
     return settings.recentAgentSettings || [];
   }
 
+  async forgetExecutionNode(nodeId: string): Promise<void> {
+    await this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      Object.assign(settings, withoutNodeStartupPreferences(settings, nodeId));
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+    });
+  }
+
   getRecentProjectPaths(): string[] {
     const settings = this.#context.readSettings();
     const paths = settings.paths || {};
@@ -431,7 +441,7 @@ export class StartupDefaultsStore {
           ]);
         }
 
-        settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath);
+        settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath, defaults?.nodeId);
 
         const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
         if (agentId) {
