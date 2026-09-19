@@ -68,6 +68,30 @@ export function rejectMissingDraftStartup(
 	return 'rejected';
 }
 
+export function rejectUnavailableDraftStart(
+	deps: Pick<RouteDeps, 'chatState' | 'composerState' | 'sessions'>,
+	chatId: string,
+	text: string,
+	attachments: readonly File[],
+): ConversationSubmissionOutcome {
+	const draft = deps.composerState.draftSnapshot(chatId);
+	const retainedText = draft.text === text ? text : [text, draft.text].filter(Boolean).join('\n\n');
+	deps.composerState.restoreDraftIfRevision(
+		chatId,
+		draft.revision,
+		retainedText,
+		[...new Set([...attachments, ...draft.attachments])],
+	);
+	// A blocked automatic start becomes an editable draft, never a reconnect retry.
+	deps.sessions.patchDraftStartup(chatId, { firstMessage: '', initialImages: [] });
+	deps.chatState.appendLocalNoticeForChat(
+		chatId,
+		'error',
+		m.chat_notice_failed_start_chat({ detail: 'Execution node or model catalog is unavailable. The initial prompt is kept in the composer.' }),
+	);
+	return 'rejected';
+}
+
 export async function submitQueueRoute(
 	deps: RouteDeps,
 	acceptedInputs: AcceptedInputSubmissionService,

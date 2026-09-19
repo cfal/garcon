@@ -60,6 +60,8 @@ import {
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session.js';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
+import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
@@ -531,7 +533,14 @@ function createDeps(chat = createRunningChat()) {
 			byId: { [chat.id]: chat },
 			startupByChatId: {},
 			isDraft: vi.fn(() => false),
-			patchDraftStartup: vi.fn(),
+			patchDraftStartup: vi.fn(function (
+				this: { startupByChatId: Record<string, ChatStartupConfig> },
+				chatId: string,
+				patch: Partial<ChatStartupConfig>,
+			) {
+				const startup = this.startupByChatId[chatId];
+				if (startup) this.startupByChatId[chatId] = { ...startup, ...patch };
+			}),
 			patchChat: vi.fn(),
 			patchLastReadAt: vi.fn(),
 			applyStartEntry: vi.fn(),
@@ -2143,6 +2152,78 @@ describe('ConversationSessionController', () => {
 		const startPayload = mockStartChat.mock.calls[0][0];
 		expect(startPayload).not.toHaveProperty('options');
 		expect(startPayload.images).toBeUndefined();
+	});
+
+	it.each(['selected', 'background', 'edited'])('keeps a blocked automatic start in its %s composer without redispatch', async (scenario) => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', nodeId }));
+		const drafts = new ChatDraftStore();
+		const composer = new ComposerState(drafts, { get activeChatId() { return deps.sessions.selectedChatId; } });
+		const attachment = new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' });
+		deps.sessions.startupByChatId = { 'draft-1': createDraftStartup({ nodeId, firstMessage: 'Synthetic initial prompt', initialImages: [attachment] }) };
+		const controller = new ConversationSessionController({ ...deps, composerState: composer });
+		controller.handleChatSwitch('draft-1');
+		// Invalidates between activation and the queued automatic submission.
+		deps.canSubmitToNode.mockImplementation((id) => id !== nodeId);
+		if (scenario === 'background') {
+			const other = createRunningChat({ id: 'other-chat' });
+			deps.sessions.byId[other.id] = other;
+			deps.sessions.selectedChatId = other.id;
+			deps.sessions.selectedChat = other;
+			controller.handleChatSwitch(other.id);
+			composer.inputText = 'Unrelated draft';
+		} else if (scenario === 'edited') {
+			composer.inputText = 'Concurrent edit';
+			composer.images = [attachment];
+		}
+		await flushPromises();
+
+		const expectedText = scenario === 'edited' ? 'Synthetic initial prompt\n\nConcurrent edit' : 'Synthetic initial prompt';
+		expect(mockStartChat).not.toHaveBeenCalled();
+		expect(composer.draftSnapshot('draft-1')).toMatchObject({ text: expectedText, attachments: [attachment] });
+		expect(deps.sessions.patchDraftStartup).toHaveBeenCalledWith('draft-1', { firstMessage: '', initialImages: [] });
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('draft-1', 'error', expect.stringContaining('initial prompt is kept in the composer'));
+		if (scenario === 'background') expect(composer.inputText).toBe('Unrelated draft');
+
+		deps.canSubmitToNode.mockReturnValue(true);
+		deps.sessions.selectedChatId = 'draft-1';
+		deps.sessions.selectedChat = deps.sessions.byId['draft-1']!;
+		controller.handleChatSwitch('draft-1');
+		await flushPromises();
+		expect(mockStartChat).not.toHaveBeenCalled();
+		expect(composer.inputText).toBe(expectedText);
+		mockStartChat.mockResolvedValueOnce({ success: true, commandType: 'chat-start', clientRequestId: 'req-1', chatId: 'draft-1', turnId: 'turn-1', status: 'accepted', acceptedAt: '2026-05-14T00:00:00.000Z', chat: createServerEntry('draft-1') });
+		await expect(controller.submitForChat('draft-1')).resolves.toBe('accepted');
+		expect(mockStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ chatId: 'draft-1', nodeId, command: expectedText, images: [expect.objectContaining({ name: 'context.txt' })] }));
+		expect(composer.inputText).toBe('');
+		drafts.destroy();
+	});
+
+	it('leaves latent startup text and attachments intact when a programmatic submission is unavailable', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', nodeId }));
+		const drafts = new ChatDraftStore();
+		const composer = new ComposerState(drafts, { get activeChatId() { return deps.sessions.selectedChatId; } });
+		const attachment = new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' });
+		const startup = createDraftStartup({ nodeId, firstMessage: 'Synthetic initial prompt', initialImages: [attachment] });
+		deps.sessions.startupByChatId = { 'draft-1': startup };
+		const controller = new ConversationSessionController({ ...deps, composerState: composer });
+		composer.isSubmitting = true;
+		controller.handleChatSwitch('draft-1');
+		await flushPromises();
+		expect(mockStartChat).not.toHaveBeenCalled();
+		composer.isSubmitting = false;
+		deps.canSubmitToNode.mockReturnValue(false);
+		const draftBefore = composer.draftSnapshot('draft-1');
+
+		await expect(controller.submitForChat('draft-1', 'Synthetic programmatic prompt')).resolves.toBe('no-op');
+
+		expect(deps.sessions.startupByChatId).toEqual({ 'draft-1': startup });
+		expect(deps.sessions.patchDraftStartup).not.toHaveBeenCalled();
+		expect(composer.draftSnapshot('draft-1')).toEqual(draftBefore);
+		expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+		expect(mockStartChat).not.toHaveBeenCalled();
+		drafts.destroy();
 	});
 
 	it('keeps queued draft startup isolated from a re-entrant active-chat switch', async () => {

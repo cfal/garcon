@@ -48,6 +48,7 @@ import {
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import {
 	rejectMissingDraftStartup,
+	rejectUnavailableDraftStart,
 	submitDraftRoute,
 	submitQueueRoute,
 	submitRunRoute,
@@ -415,6 +416,7 @@ export class ConversationSessionController {
 
 		if (selected.status === 'draft') {
 			deps.lifecycle.setCurrentChatId(null);
+			deps.composerState.restoreDraft(chatId);
 			const startup = deps.sessions.startupByChatId[chatId];
 			if (startup) {
 				deps.agentState.nodeId = startup.nodeId ?? 'local';
@@ -442,7 +444,7 @@ export class ConversationSessionController {
 					const startupChatId = chatId;
 					queueMicrotask(() => {
 						if (!deps.sessions.byId[startupChatId]) return;
-						void this.submitForChat(startupChatId, startupText, startupImages);
+						void this.#submitForChat('automatic-start', startupChatId, startupText, startupImages);
 					});
 				}
 			}
@@ -596,7 +598,16 @@ export class ConversationSessionController {
 	}
 
 	// Accepts an explicit chat ID so draft startup cannot race selection changes.
-	async submitForChat(
+	submitForChat(
+		chatId: string,
+		messageOverride?: string,
+		imageOverride?: File[],
+	): Promise<ConversationSubmissionOutcome> {
+		return this.#submitForChat('explicit', chatId, messageOverride, imageOverride);
+	}
+
+	async #submitForChat(
+		source: 'explicit' | 'automatic-start',
 		chatId: string,
 		messageOverride?: string,
 		imageOverride?: File[],
@@ -610,7 +621,11 @@ export class ConversationSessionController {
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		const nodeId = deps.sessions.selectedChatId === chatId ? deps.agentState.nodeId : selected.nodeId ?? 'local';
-		if (!deps.canSubmitToNode(nodeId)) return 'no-op';
+		if (!deps.canSubmitToNode(nodeId)) {
+			return selected.status === 'draft' && source === 'automatic-start'
+				? rejectUnavailableDraftStart(deps, chatId, messageOverride ?? '', imageOverride ?? [])
+				: 'no-op';
+		}
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
 		const isDraft = selected.status === 'draft';
 		const startup = deps.sessions.startupByChatId[chatId];
