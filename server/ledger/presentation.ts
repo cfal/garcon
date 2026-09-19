@@ -98,6 +98,8 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
         row.detail.toAgentId,
         row.detail.fromModel ?? undefined,
         row.detail.toModel ?? undefined,
+        row.detail.fromNodeId,
+        row.detail.toNodeId,
       );
     case 'permission-requested':
       return row.lifecycle.kind === 'requested'

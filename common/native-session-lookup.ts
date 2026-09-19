@@ -1,6 +1,7 @@
 import { isAgentId, type AgentId } from './agents.js';
 import { parseChatId, type ChatId } from './chat-id.js';
 import { isRecord } from './json.js';
+import { parseNodeId } from './execution-nodes.js';
 
 export const NATIVE_SESSION_ID_MAX_BYTES = 256;
 
@@ -10,6 +11,7 @@ const unsafeControl = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export interface NativeSessionLookupRequest {
   readonly nativeSessionId: string;
   readonly agent?: AgentId;
+  readonly nodeId?: string;
 }
 
 export interface NativeSessionLookupResponse {
@@ -45,11 +47,14 @@ export function parseNativeSessionLookupRequest(value: unknown): NativeSessionLo
     throw new NativeSessionLookupValidationError('request body must be an object');
   }
   const nativeSessionId = parseNativeSessionId(value.nativeSessionId);
-  if (value.agent === undefined) return { nativeSessionId };
+  const nodeId = parseNodeId(value.nodeId);
+  if (!nodeId) throw new NativeSessionLookupValidationError('nodeId must be a valid execution node ID');
+  const identity = { nativeSessionId, ...(value.nodeId === undefined ? {} : { nodeId }) };
+  if (value.agent === undefined) return identity;
   if (!isAgentId(value.agent)) {
     throw new NativeSessionLookupValidationError('agent must be a valid agent ID');
   }
-  return { nativeSessionId, agent: value.agent };
+  return { ...identity, agent: value.agent };
 }
 
 export function parseNativeSessionLookupResponse(value: unknown): NativeSessionLookupResponse {

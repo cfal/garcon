@@ -230,6 +230,8 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
         at,
         detail: {
           fromAgentId: message.fromAgentId,
+          ...(message.fromNodeId ? { fromNodeId: message.fromNodeId } : {}),
+          ...(message.toNodeId ? { toNodeId: message.toNodeId } : {}),
           toAgentId: message.toAgentId,
           fromModel: message.fromModel ?? null,
           toModel: message.toModel ?? null,

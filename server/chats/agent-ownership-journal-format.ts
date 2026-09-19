@@ -1,5 +1,6 @@
 import { parseAgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import { isPermissionMode, isThinkingMode } from '@garcon/common/chat-modes';
+import { parseNodeId } from '../../common/execution-nodes.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import {
@@ -56,6 +57,7 @@ function isHandoffIntent(value: Record<string, unknown>): boolean {
     && typeof value.submittedTargetHash === 'string'
     && /^[a-f0-9]{64}$/.test(value.submittedTargetHash)
     && isObject(source)
+    && parseNodeId(source.nodeId) !== null
     && nonEmptyString(source.agentId)
     && nonEmptyString(source.agentOwnershipEpoch)
     && isObject(target)
@@ -72,6 +74,8 @@ function isResolvedHandoffTarget(value: unknown): value is ResolvedAgentHandoffT
   if (!isObject(value)) return false;
   const settings = parseAgentSettingsEnvelope(value.agentSettings);
   return nonEmptyString(value.agentId)
+    && parseNodeId(value.nodeId) !== null
+    && (value.projectPath === undefined || nonEmptyString(value.projectPath))
     && typeof value.model === 'string'
     && nullableString(value.apiProviderId)
     && nullableString(value.modelEndpointId)
@@ -90,6 +94,7 @@ function isAgentChatReference(value: unknown): value is AgentChatReference {
   if (!isObject(value)) return false;
   const settings = parseAgentSettingsEnvelope(value.settings);
   return nonEmptyString(value.chatId)
+    && parseNodeId(value.nodeId) !== null
     && nonEmptyString(value.agentId)
     && nullableString(value.agentSessionId)
     && typeof value.projectPath === 'string'

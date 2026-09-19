@@ -8,6 +8,8 @@ function prepared(overrides = {}) {
     chatId: 'chat-1',
     transcriptViewId: 'view-1',
     targetAgentId: 'claude',
+    targetNodeId: 'local',
+    targetOwnershipEpoch: 'epoch-1',
     clientRequestId: 'request-1',
     result: RESULT,
     ...overrides,
@@ -19,6 +21,8 @@ function take(store, overrides = {}) {
     chatId: 'chat-1',
     transcriptViewId: 'view-1',
     targetAgentId: 'claude',
+    targetNodeId: 'local',
+    targetOwnershipEpoch: 'epoch-1',
     clientRequestId: 'request-1',
     ...overrides,
   });
@@ -36,6 +40,8 @@ describe('PreparedCarryoverStore', () => {
   it.each([
     ['view', { transcriptViewId: 'view-2' }],
     ['agent', { targetAgentId: 'codex' }],
+    ['node', { targetNodeId: '22222222-2222-4222-8222-222222222222' }],
+    ['ownership', { targetOwnershipEpoch: 'epoch-2' }],
     ['request', { clientRequestId: 'request-2' }],
     ['missing request', { clientRequestId: null }],
   ])('discards a result after a mismatched %s fence', (_label, mismatch) => {

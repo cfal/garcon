@@ -219,6 +219,8 @@ export interface AppendSelectionChangeNoticeResult {
 }
 
 export interface LedgerAgentSwitchDetail {
+  readonly fromNodeId?: string;
+  readonly toNodeId?: string;
   readonly fromAgentId: string;
   readonly toAgentId: string;
   readonly fromModel: string | null;

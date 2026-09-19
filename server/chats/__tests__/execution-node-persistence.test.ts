@@ -59,3 +59,36 @@ test('generic patches cannot move ownership and invalid stored IDs fail closed',
     expect(() => normalizeChatRegistryEntry({ ...registry.getChat(CHAT_ID), nodeId }, CHAT_ID)).toThrow('Invalid execution node ID');
   }
 });
+
+test('native identity is qualified by node and agent', async () => {
+  const { registry } = await fixture(NODE_ID);
+  registry.updateChat(CHAT_ID, { agentSessionId: 'shared-native-id' });
+  const localId = '1783725900000301';
+  const otherAgentId = '1783725900000302';
+  for (const [id, agentId] of [[localId, 'test'], [otherAgentId, 'other']] as const) {
+    registry.addChat({ id, agentId, projectPath: '/project', model: 'synthetic-model',
+      agentSessionId: 'shared-native-id', parentChat: null,
+      preambleSelection: { revision: 0, orderedPreambleIds: [] } });
+  }
+  expect(registry.lookupNativeSession('shared-native-id')).toEqual({ status: 'ambiguous' });
+  expect(registry.lookupNativeSession('shared-native-id', 'test')).toEqual({ status: 'found', chatId: localId });
+  expect(registry.lookupNativeSession('shared-native-id', 'test', NODE_ID)).toEqual({ status: 'found', chatId: CHAT_ID });
+  expect(registry.lookupNativeSession('shared-native-id', 'other', NODE_ID)).toEqual({ status: 'not-found' });
+  expect(registry.getChatByAgentSessionId('shared-native-id', 'test', NODE_ID)?.[0]).toBe(CHAT_ID);
+  await registry.flush();
+});
+
+test('ownership installation persists node and destination path together and clears Local on return', async () => {
+  const { registry, directory, file } = await fixture();
+  registry.updateChat(CHAT_ID, { agentSessionId: 'source-native-id' });
+  await registry.installAgentOwnership(CHAT_ID, {
+    nodeId: NODE_ID, projectPath: '/remote/project', patch: { agentSessionId: null, model: 'target-model' },
+  });
+  const reloaded = new ChatRegistry(directory);
+  await reloaded.init();
+  expect(reloaded.getChat(CHAT_ID)).toMatchObject({ nodeId: NODE_ID, projectPath: '/remote/project', agentSessionId: null, model: 'target-model' });
+  await reloaded.installAgentOwnership(CHAT_ID, { nodeId: 'local', projectPath: '/project', patch: {} });
+  const local = JSON.parse(await readFile(file, 'utf8')).sessions[CHAT_ID];
+  expect(local.nodeId).toBeUndefined();
+  expect(local.projectPath).toBe('/project');
+});

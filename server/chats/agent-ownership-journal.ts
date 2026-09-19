@@ -4,7 +4,8 @@ import path from 'node:path';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
 import type { TranscriptWatermark } from '../ledger/contracts.js';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
-import type { IntegrationRegistry } from '../agents/integration-registry.js';
+import type { AgentDirectory } from '../agents/directory.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
@@ -32,6 +33,7 @@ export interface AgentHandoffIntent {
   readonly chatId: string;
   readonly phase: 'commit-decided' | 'registry-committed';
   readonly source: {
+    readonly nodeId?: string | null;
     readonly agentId: string;
     readonly agentOwnershipEpoch: string;
   };
@@ -50,7 +52,7 @@ export interface DeleteIntentV2 {
   readonly chatId: string;
   readonly phase: 'prepared' | 'registry-removed';
   readonly sourceEpoch: string | null;
-  readonly releaseReferences: readonly AgentChatReference[];
+  readonly releaseReferences: readonly (AgentChatReference & { readonly nodeId?: string | null })[];
   readonly createdAt: string;
 }
 
@@ -66,7 +68,7 @@ export function emptyOwnershipJournalV5(): AgentOwnershipJournalFileV5 {
 export class AgentOwnershipJournal {
   readonly #filePath: string;
   readonly #registry: IChatRegistry;
-  readonly #integrations: IntegrationRegistry;
+  readonly #integrations: Pick<AgentDirectory, 'get' | 'require'>;
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   #journal: AgentOwnershipJournalFileV5 = emptyOwnershipJournalV5();
@@ -77,7 +79,7 @@ export class AgentOwnershipJournal {
   constructor(options: {
     workspaceDir: string;
     registry: IChatRegistry;
-    integrations: IntegrationRegistry;
+    integrations: Pick<AgentDirectory, 'get' | 'require'>;
     ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
   }) {
@@ -111,6 +113,12 @@ export class AgentOwnershipJournal {
     return this.#journal.ownershipIntents.some((intent) => intent.chatId === chatId);
   }
 
+  referencesNode(nodeId: string): boolean {
+    return this.#journal.ownershipIntents.some((intent) => intent.kind === 'handoff'
+      ? effectiveNodeId(intent.source.nodeId) === nodeId || effectiveNodeId(intent.target.execution.nodeId) === nodeId
+      : intent.releaseReferences.some((reference) => effectiveNodeId(reference.nodeId) === nodeId));
+  }
+
   roots(): ReadonlySet<string> {
     return new Set();
   }
@@ -134,7 +142,7 @@ export class AgentOwnershipJournal {
     readonly clientRequestId: string;
     readonly submittedTargetHash: string;
     readonly chatId: string;
-    readonly source: Pick<ChatRegistryEntry, 'agentId' | 'agentOwnershipEpoch'>;
+    readonly source: Pick<ChatRegistryEntry, 'nodeId' | 'agentId' | 'agentOwnershipEpoch'>;
     readonly target: ResolvedAgentHandoffTarget;
     readonly targetAgentOwnershipEpoch: string;
     readonly watermark: TranscriptWatermark;
@@ -148,6 +156,7 @@ export class AgentOwnershipJournal {
       chatId: options.chatId,
       phase: 'commit-decided',
       source: {
+        ...(options.source.nodeId ? { nodeId: options.source.nodeId } : {}),
         agentId: options.source.agentId,
         agentOwnershipEpoch: options.source.agentOwnershipEpoch,
       },
@@ -198,25 +207,29 @@ export class AgentOwnershipJournal {
       );
     }
     const execution = intent.target.execution;
-    const updated = await this.#registry.updateChat(intent.chatId, {
-      agentId: execution.agentId,
-      model: execution.model,
-      apiProviderId: execution.apiProviderId,
-      modelEndpointId: execution.modelEndpointId,
-      modelProtocol: execution.modelProtocol,
-      permissionMode: execution.permissionMode,
-      thinkingMode: execution.thinkingMode,
-      agentSettingsById: {
-        ...current.agentSettingsById,
-        [execution.agentId]: execution.agentSettings,
+    const updated = await this.#registry.installAgentOwnership(intent.chatId, {
+      nodeId: execution.nodeId,
+      projectPath: execution.projectPath ?? current.projectPath,
+      patch: {
+        agentId: execution.agentId,
+        model: execution.model,
+        apiProviderId: execution.apiProviderId,
+        modelEndpointId: execution.modelEndpointId,
+        modelProtocol: execution.modelProtocol,
+        permissionMode: execution.permissionMode,
+        thinkingMode: execution.thinkingMode,
+        agentSettingsById: {
+          ...current.agentSettingsById,
+          [execution.agentId]: execution.agentSettings,
+        },
+        agentSessionId: null,
+        nativeSession: null,
+        nativeSeedReceipt: null,
+        carryOverSegments: [],
+        carryOverMigrationQuarantine: null,
+        ...createPreambleBoundaryBinding('agent-switch', intent.target.agentOwnershipEpoch),
       },
-      agentSessionId: null,
-      nativeSession: null,
-      nativeSeedReceipt: null,
-      carryOverSegments: [],
-      carryOverMigrationQuarantine: null,
-      ...createPreambleBoundaryBinding('agent-switch', intent.target.agentOwnershipEpoch),
-    }, { flush: true });
+    });
     if (!updated) throw new Error(`Session not found: ${intent.chatId}`);
 
     if (intent.phase !== 'registry-committed') {
@@ -247,12 +260,16 @@ export class AgentOwnershipJournal {
     const intent = await this.#mutate((journal) => {
       assertAvailable(journal, chatId, 'SESSION_BUSY');
       if (!current) return { journal, result: null };
-      const reference = toAgentChatReference(
-        this.#integrations.require(current.agentId),
-        chatId,
-        current,
-        carryOverRevision(current.carryOverSegments, current.carryOverMigrationQuarantine),
-      );
+      const integration = this.#integrations.get(current.agentId, current.nodeId);
+      const revision = carryOverRevision(current.carryOverSegments, current.carryOverMigrationQuarantine);
+      const settings = current.agentSettingsById[current.agentId];
+      const reference = integration
+        ? toAgentChatReference(integration, chatId, current, revision)
+        : settings ? {
+            chatId, agentId: current.agentId, agentSessionId: current.agentSessionId,
+            nativeSession: current.nativeSession, nativeSeedReceipt: current.nativeSeedReceipt,
+            projectPath: current.projectPath, model: current.model, settings, carryOverRevision: revision,
+          } : null;
       const prepared: DeleteIntentV2 = {
         version: 2,
         operationId: crypto.randomUUID(),
@@ -260,7 +277,7 @@ export class AgentOwnershipJournal {
         chatId,
         phase: 'prepared',
         sourceEpoch: current.agentOwnershipEpoch,
-        releaseReferences: [reference],
+        releaseReferences: reference ? [{ ...reference, ...(current.nodeId ? { nodeId: current.nodeId } : {}) }] : [],
         createdAt: new Date().toISOString(),
       };
       return {
@@ -310,11 +327,12 @@ export class AgentOwnershipJournal {
   async #finishDelete(intent: DeleteIntentV2): Promise<void> {
     let remaining = [...intent.releaseReferences];
     for (const reference of [...remaining]) {
-      const integration = this.#integrations.get(reference.agentId);
+      const { nodeId, ...chat } = reference;
+      const integration = this.#integrations.get(reference.agentId, nodeId);
       if (!integration) continue;
       try {
         await this.#releaseTranscript(integration, {
-          chat: reference,
+          chat,
           reason: 'deleted',
         });
       } catch (error) {
@@ -372,7 +390,7 @@ export class AgentOwnershipJournal {
   }
 
   async #releaseTranscript(
-    integration: ReturnType<IntegrationRegistry['require']>,
+    integration: ReturnType<AgentDirectory['require']>,
     request: { readonly chat: AgentChatReference; readonly reason: 'deleted' },
   ): Promise<void> {
     const controller = new AbortController();
@@ -436,6 +454,7 @@ function sameHandoffDecision(left: AgentHandoffIntent, right: AgentHandoffIntent
     && left.submittedTargetHash === right.submittedTargetHash
     && left.chatId === right.chatId
     && left.source.agentId === right.source.agentId
+    && effectiveNodeId(left.source.nodeId) === effectiveNodeId(right.source.nodeId)
     && left.source.agentOwnershipEpoch === right.source.agentOwnershipEpoch
     && left.target.agentOwnershipEpoch === right.target.agentOwnershipEpoch
     && JSON.stringify(left.target.execution) === JSON.stringify(right.target.execution)
@@ -448,6 +467,7 @@ function matchesHandoffSource(
   intent: AgentHandoffIntent,
 ): boolean {
   return current?.agentId === intent.source.agentId
+    && effectiveNodeId(current.nodeId) === effectiveNodeId(intent.source.nodeId)
     && current.agentOwnershipEpoch === intent.source.agentOwnershipEpoch;
 }
 
@@ -456,6 +476,8 @@ export function matchesHandoffTarget(
   intent: AgentHandoffIntent,
 ): boolean {
   return current?.agentId === intent.target.execution.agentId
+    && effectiveNodeId(current.nodeId) === effectiveNodeId(intent.target.execution.nodeId)
+    && (intent.target.execution.projectPath === undefined || current.projectPath === intent.target.execution.projectPath)
     && current.agentOwnershipEpoch === intent.target.agentOwnershipEpoch;
 }
 

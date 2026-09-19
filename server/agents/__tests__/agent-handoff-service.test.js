@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import crypto from 'node:crypto';
 import { AgentHandoffService } from '../agent-handoff-service.ts';
+import { AgentDirectory } from '../directory.ts';
+import { IntegrationRegistry } from '../integration-registry.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
 
 function envelope(ownerId) {
@@ -89,6 +91,72 @@ function installFakeTimers() {
 }
 
 describe('AgentHandoffService', () => {
+  it('resolves same-agent cross-node handoff without contacting the source node', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const current = sourceChat();
+    const inspectProject = mock(async () => ({ kind: 'available', effectiveProjectKey: '/destination/canonical' }));
+    const getIntegration = mock((agentId, targetNode) => {
+      expect(targetNode).toBe(nodeId);
+      return integration(agentId);
+    });
+    const request = handoff(current.agentId);
+    request.target.nodeId = nodeId;
+    request.target.projectPath = '/destination/alias';
+    const service = createService({
+      ...targetResolutionDeps(), inspectProject,
+      integrations: { get: getIntegration, require: () => { throw new Error('Unexpected readiness recheck during resolution'); } },
+    });
+    await expect(service.resolveTarget({ chat: current, handoff: request })).resolves.toMatchObject({
+      agentId: current.agentId, nodeId, projectPath: '/destination/canonical',
+    });
+    expect(inspectProject).toHaveBeenCalledWith('/destination/alias', nodeId);
+    expect(getIntegration).toHaveBeenCalledTimes(1);
+    expect(current.agentSessionId).toBe('source-session');
+  });
+
+  it('fails destination validation without changing source ownership', async () => {
+    const current = sourceChat();
+    const service = createService({
+      ...targetResolutionDeps(),
+      inspectProject: async () => ({ kind: 'unavailable', reason: 'not-found' }),
+    });
+    await expect(service.resolveTarget({ chat: current, handoff: handoff() })).rejects.toMatchObject({ status: 404 });
+    expect(current).toEqual(sourceChat());
+  });
+
+  it('reports an unsupported destination agent as a typed validation error', async () => {
+    const service = createService({
+      ...targetResolutionDeps(),
+      integrations: new AgentDirectory(new IntegrationRegistry({ instances: [] })),
+    });
+    await expect(service.resolveTarget({ chat: sourceChat(), handoff: handoff('unsupported') }))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_AGENT', status: 422 });
+  });
+
+  it('recovers a same-agent cross-node decision with both nodes offline', async () => {
+    const current = sourceChat();
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const calls = [];
+    const state = handoffState(current, calls);
+    const intent = persistedIntent();
+    intent.target.execution = { ...target(), agentId: current.agentId, nodeId, projectPath: '/destination' };
+    state.setIntent(intent);
+    const ledger = ledgerState(calls);
+    const service = createService({
+      registry: { getChat: () => current }, ownership: state.ownership, ledger,
+      integrations: { get: () => null, require: () => { throw new Error('offline'); } },
+      inspectProject: async () => { throw new Error('offline'); },
+      reopenProducer: () => calls.push('reopen'),
+    });
+    await service.recoverPendingHandoffs();
+    expect(current).toMatchObject({ nodeId, projectPath: '/destination', agentSessionId: null, nativeSession: null });
+    expect(state.ownership.pendingHandoffs()).toEqual([]);
+    expect(ledger.appendAgentSwitch).toHaveBeenCalledWith('chat', 'view-1', expect.objectContaining({
+      fromAgentId: 'source-agent', toAgentId: 'source-agent', fromNodeId: 'local', toNodeId: nodeId,
+    }));
+    expect(calls).toEqual(['close', 'marker', 'boundary', 'registry', 'complete', 'reopen']);
+  });
+
   it('copies a frozen conversational prefix into a target ledger', () => {
     const ledger = {
       currentView: mock(() => null),
@@ -1140,6 +1208,7 @@ function createService(overrides = {}) {
     ['target-agent', integration('target-agent')],
   ]);
   return new AgentHandoffService({
+    inspectProject: overrides.inspectProject ?? (async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath })),
     registry: overrides.registry ?? { getChat: () => sourceChat() },
     ownership: overrides.ownership ?? handoffState(sourceChat(), []).ownership,
     ledger: overrides.ledger ?? ledgerState([]),
@@ -1194,6 +1263,8 @@ function handoffState(current, calls) {
     applyHandoffDecision: mock(async () => {
       calls.push('registry');
       Object.assign(current, {
+        nodeId: intent.target.execution.nodeId,
+        projectPath: intent.target.execution.projectPath ?? current.projectPath,
         agentId: intent.target.execution.agentId,
         agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
         pendingPreambleBoundary: {
@@ -1280,7 +1351,7 @@ function targetResolutionDeps({
     ['target-agent', integration('target-agent')],
   ]);
   return {
-    integrations: { get: (agentId) => integrations.get(agentId) },
+    integrations: { get: (agentId) => integrations.get(agentId), require: (agentId) => integrations.get(agentId) },
     endpointResolver: {
       resolveSelection: ({ model }) => ({
         model,

@@ -10,7 +10,7 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
 
 interface NativeSessionLookupAgents {
-  hasAgent(agentId: string): boolean;
+  hasAgent(agentId: string, nodeId?: string | null): boolean;
 }
 
 export function createNativeSessionLookupRoutes(
@@ -28,11 +28,11 @@ export function createNativeSessionLookupRoutes(
       throw error;
     }
 
-    if (input.agent !== undefined && !agents.hasAgent(input.agent)) {
+    if (input.agent !== undefined && !agents.hasAgent(input.agent, input.nodeId)) {
       return jsonError(`Unsupported agent: ${input.agent}`, 422, 'UNSUPPORTED_AGENT', false);
     }
 
-    const result = registry.lookupNativeSession(input.nativeSessionId, input.agent);
+    const result = registry.lookupNativeSession(input.nativeSessionId, input.agent, input.nodeId);
     if (result.status === 'not-found') {
       return jsonError(
         'No chat matches the native session ID',

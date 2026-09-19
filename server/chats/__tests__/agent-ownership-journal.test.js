@@ -56,6 +56,12 @@ function createRegistry(initialEntries) {
     getChat: (chatId) => entries.get(chatId) ?? null,
     setChat: (chatId, value) => entries.set(chatId, value),
     listAllChats: () => Object.fromEntries(entries),
+    installAgentOwnership: mock(async (chatId, { nodeId, projectPath, patch }) => {
+      const current = entries.get(chatId);
+      if (!current) return null;
+      Object.assign(current, patch, { nodeId: nodeId === 'local' ? undefined : nodeId, projectPath });
+      return { id: chatId, ...current };
+    }),
     updateChat: mock(async (chatId, patch) => {
       const current = entries.get(chatId);
       if (!current) return null;
@@ -113,6 +119,26 @@ describe('AgentOwnershipJournal', () => {
 
   afterEach(async () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it('reloads and applies node/path ownership without live integration discovery', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const registry = createRegistry({ chat: chat() });
+    const integrations = { get: () => null, require: () => { throw new Error('offline'); } };
+    const options = { workspaceDir, registry, integrations, ledger: { deleteChat: mock(() => {}) } };
+    const journal = new AgentOwnershipJournal(options);
+    await journal.initialize();
+    const intent = await journal.decideHandoff(decisionInput(registry, {
+      target: { ...target(), nodeId, projectPath: '/worker/project' },
+    }));
+    expect(journal.referencesNode(nodeId)).toBe(true);
+    const restarted = new AgentOwnershipJournal(options);
+    await restarted.initialize();
+    await restarted.applyHandoffDecision(intent.operationId);
+    expect(registry.installAgentOwnership).toHaveBeenCalledTimes(1);
+    expect(registry.getChat('chat')).toMatchObject({ nodeId, projectPath: '/worker/project', agentSessionId: null });
+    await restarted.completeHandoff(intent.operationId);
+    expect(restarted.referencesNode(nodeId)).toBe(false);
   });
 
   it('persists the complete handoff decision and accepts an identical retry', async () => {

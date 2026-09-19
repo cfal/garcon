@@ -12,6 +12,7 @@ import {
   isCliRowFormat,
 } from '../../common/cli-presentation.js';
 import { parseNativeSeedReceipt } from '../../common/transcript-seed.js';
+import { isExecutionNodeId } from '../../common/execution-nodes.js';
 import { normalizePendingPreambleBoundary } from '../../common/preambles.js';
 import { parsePreamblePrefixReceipt } from '../../common/preamble-prefix.js';
 import type {
@@ -310,7 +311,12 @@ function parseUserInput(value: unknown): LedgerUserInputDetail {
 
 function parseAgentSwitch(value: unknown): LedgerAgentSwitchDetail {
   const detail = record(value, 'agent switch payload');
+  for (const key of ['fromNodeId', 'toNodeId']) {
+    if (detail[key] !== undefined && !isExecutionNodeId(detail[key])) throw new Error('Invalid agent switch node');
+  }
   return {
+    ...(typeof detail.fromNodeId === 'string' ? { fromNodeId: detail.fromNodeId } : {}),
+    ...(typeof detail.toNodeId === 'string' ? { toNodeId: detail.toNodeId } : {}),
     fromAgentId: nonEmptyString(detail.fromAgentId, 'agent switch source'),
     toAgentId: nonEmptyString(detail.toAgentId, 'agent switch target'),
     fromModel: detail.fromModel === null ? null : nonEmptyString(detail.fromModel, 'source model'),

@@ -736,6 +736,8 @@ export class AgentSwitchMessage {
     public toAgentId: string,
     public fromModel?: string,
     public toModel?: string,
+    public fromNodeId?: string,
+    public toNodeId?: string,
   ) {}
 }
 
@@ -1236,6 +1238,8 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         str(data.toAgentId),
         asOptionalString(data.fromModel),
         asOptionalString(data.toModel),
+        asOptionalString(data.fromNodeId),
+        asOptionalString(data.toNodeId),
       );
     default:
       return null;

@@ -3,6 +3,8 @@ import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 
 export interface ResolvedAgentHandoffTarget {
+  readonly nodeId?: string | null;
+  readonly projectPath?: string;
   readonly agentId: string;
   readonly model: string;
   readonly apiProviderId: string | null;

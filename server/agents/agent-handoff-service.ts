@@ -13,7 +13,10 @@ import {
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
-import type { IntegrationRegistry } from './integration-registry.js';
+import type { AgentDirectory } from './directory.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
+import type { ProjectInspector } from '../../common/project-resolution.js';
+import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { LedgerAgentSwitchRow, TranscriptWatermark } from '../ledger/contracts.js';
@@ -60,10 +63,11 @@ export class AgentHandoffService {
 
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
-    readonly integrations: IntegrationRegistry;
+    readonly integrations: Pick<AgentDirectory, 'get' | 'require'>;
+    readonly inspectProject: ProjectInspector;
     readonly endpointResolver: ApiProviderEndpointResolver;
     readonly catalog: {
-      getAgentCatalogEntry(agentId: string): Promise<AgentCatalogEntry | null>;
+      getAgentCatalogEntry(agentId: string, options?: { nodeId?: string | null }): Promise<AgentCatalogEntry | null>;
     };
     readonly ownership: AgentOwnershipJournal;
     readonly ledger: TranscriptLedgerService;
@@ -123,15 +127,17 @@ export class AgentHandoffService {
       );
     }
     const requested = input.handoff.target;
-    if (requested.agentId === input.chat.agentId) {
+    const nodeId = effectiveNodeId(requested.nodeId === undefined ? input.chat.nodeId : requested.nodeId);
+    if (requested.agentId === input.chat.agentId && nodeId === effectiveNodeId(input.chat.nodeId)) {
       throw new DomainError(
         'VALIDATION_FAILED',
         'A handoff target must differ from the current chat owner.',
         400,
       );
     }
-    const integration = this.deps.integrations.get(requested.agentId);
-    const catalog = await this.deps.catalog.getAgentCatalogEntry(requested.agentId);
+    const projectPath = await resolveStartProjectPath(requested.projectPath ?? input.chat.projectPath, this.deps.inspectProject, nodeId);
+    const integration = this.deps.integrations.get(requested.agentId, nodeId);
+    const catalog = await this.deps.catalog.getAgentCatalogEntry(requested.agentId, { nodeId });
     if (!integration || !catalog) {
       throw new DomainError(
         'UNSUPPORTED_AGENT',
@@ -215,6 +221,8 @@ export class AgentHandoffService {
       );
     }
     return {
+      nodeId,
+      projectPath,
       agentId: requested.agentId,
       model: selection.model,
       apiProviderId: selection.apiProviderId,
@@ -290,6 +298,7 @@ export class AgentHandoffService {
           }
           this.#requireUnchangedSource(input.chatId, sourceFence);
           context.assertAdmissionActive();
+          this.deps.integrations.require(input.target.agentId, input.target.nodeId);
           decisionAttempted = true;
           const intent = await this.deps.ownership.decideHandoff({
             operationId,
@@ -306,6 +315,8 @@ export class AgentHandoffService {
             chatId: input.chatId,
             transcriptViewId: checkpoint.viewId,
             targetAgentId: input.target.agentId,
+            targetNodeId: effectiveNodeId(input.target.nodeId),
+            targetOwnershipEpoch: intent.target.agentOwnershipEpoch,
             clientRequestId: input.clientRequestId,
             result: planned,
           });
@@ -395,6 +406,8 @@ export class AgentHandoffService {
       ?? this.deps.ledger.appendAgentSwitch(intent.chatId, intent.watermark.viewId, {
         fromAgentId: intent.source.agentId,
         toAgentId: intent.target.execution.agentId,
+        fromNodeId: effectiveNodeId(intent.source.nodeId),
+        toNodeId: effectiveNodeId(intent.target.execution.nodeId),
         fromModel: this.deps.registry.getChat(intent.chatId)?.model ?? null,
         toModel: intent.target.execution.model ?? null,
       });
@@ -605,6 +618,8 @@ function matchesSwitchMarker(
 ): boolean {
   return marker.detail.fromAgentId === intent.source.agentId
     && marker.detail.toAgentId === intent.target.execution.agentId
+    && effectiveNodeId(marker.detail.fromNodeId) === effectiveNodeId(intent.source.nodeId)
+    && effectiveNodeId(marker.detail.toNodeId) === effectiveNodeId(intent.target.execution.nodeId)
     && marker.detail.toModel === (intent.target.execution.model ?? null);
 }
 
@@ -652,12 +667,14 @@ function waitForHandoffRetry(delay: number, signal: AbortSignal): Promise<void> 
 }
 
 interface OwnershipFence {
+  readonly nodeId: string;
   readonly agentId: string;
   readonly agentOwnershipEpoch: string;
 }
 
 function ownershipFence(entry: ChatRegistryEntry): OwnershipFence {
   return {
+    nodeId: effectiveNodeId(entry.nodeId),
     agentId: entry.agentId,
     agentOwnershipEpoch: entry.agentOwnershipEpoch,
   };
@@ -668,6 +685,7 @@ function matchesOwnershipFence(
   expected: OwnershipFence,
 ): boolean {
   return entry?.agentId === expected.agentId
+    && effectiveNodeId(entry.nodeId) === expected.nodeId
     && entry.agentOwnershipEpoch === expected.agentOwnershipEpoch;
 }
 
