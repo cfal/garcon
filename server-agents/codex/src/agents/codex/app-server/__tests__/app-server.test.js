@@ -294,6 +294,7 @@ function createRpcClientFixture(responder, options = {}) {
   let controller;
   let resolveExit;
   const writes = [];
+  const signals = [];
   const stdout = new ReadableStream({
     start(ctrl) {
       controller = ctrl;
@@ -342,15 +343,32 @@ function createRpcClientFixture(responder, options = {}) {
     stdout,
     stderr: null,
     exited,
-    kill: mock(finishExit),
+    kill: mock((signal = 'SIGTERM') => {
+      signals.push(signal);
+      if (signal === 'SIGKILL' ? options.exitOnKill !== false : options.exitOnTerminate !== false) {
+        finishExit();
+      }
+    }),
   };
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
     resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
     shutdownGraceMs: options.shutdownGraceMs,
+    shutdownTerminateMs: options.shutdownTerminateMs,
+    shutdownKillMs: options.shutdownKillMs,
   });
-  return { client, writes, spawn, proc, finishExit, sendResult, sendServerRequest, sendNotification };
+  return {
+    client,
+    writes,
+    signals,
+    spawn,
+    proc,
+    finishExit,
+    sendResult,
+    sendServerRequest,
+    sendNotification,
+  };
 }
 
 const initializeResponse = {
@@ -374,20 +392,52 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
 
     finishExit();
     await shutdown;
-    expect(proc.kill).toHaveBeenCalledTimes(1);
+    expect(proc.kill).not.toHaveBeenCalled();
   });
 
-  it('kills the app-server when graceful shutdown exceeds its bound', async () => {
-    const { client, proc } = createRpcClientFixture(
+  it('waits for confirmed exit after graceful shutdown exceeds its bound', async () => {
+    const { client, proc, finishExit, signals } = createRpcClientFixture(
       () => initializeResponse,
-      { exitOnEnd: false, shutdownGraceMs: 1 },
+      {
+        exitOnEnd: false,
+        exitOnTerminate: false,
+        shutdownGraceMs: 1,
+        shutdownTerminateMs: 100,
+      },
+    );
+    await client.connect();
+
+    let settled = false;
+    const shutdown = client.shutdown().then(() => { settled = true; });
+    await waitForCondition(() => proc.kill.mock.calls.length === 1);
+
+    expect(proc.stdin.end).toHaveBeenCalledTimes(1);
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+    expect(signals).toEqual(['SIGTERM']);
+    expect(settled).toBe(false);
+
+    finishExit();
+    await shutdown;
+    expect(settled).toBe(true);
+  });
+
+  it('kills the app-server process tree when termination exceeds its bound', async () => {
+    const { client, proc, signals } = createRpcClientFixture(
+      () => initializeResponse,
+      {
+        exitOnEnd: false,
+        exitOnTerminate: false,
+        shutdownGraceMs: 1,
+        shutdownTerminateMs: 1,
+        shutdownKillMs: 100,
+      },
     );
     await client.connect();
 
     await client.shutdown();
 
     expect(proc.stdin.end).toHaveBeenCalledTimes(1);
-    expect(proc.kill).toHaveBeenCalledTimes(1);
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
   });
 
   it('keeps reading messages after a notification handler throws', async () => {

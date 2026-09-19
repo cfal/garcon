@@ -39,7 +39,7 @@ export interface CodexAppServerProcess {
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
-  kill(): void;
+  kill(signal?: 'SIGTERM' | 'SIGKILL'): void;
 }
 
 export type SpawnCodexAppServer = (
@@ -97,6 +97,8 @@ export interface CodexAppServerClientOptions {
   resolveCommand?: () => Promise<string>;
   clientVersion?: () => string;
   shutdownGraceMs?: number;
+  shutdownTerminateMs?: number;
+  shutdownKillMs?: number;
 }
 
 export interface CodexAppServerMetric {
@@ -113,19 +115,45 @@ function defaultSpawnCodexAppServer(
   args: string[],
   options: { env: Record<string, string> },
 ): CodexAppServerProcess {
-  const process = Bun.spawn([command, ...args], {
+  const detached = process.platform !== 'win32';
+  const child = Bun.spawn([command, ...args], {
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
     env: options.env,
+    detached,
   });
   return {
-    stdin: process.stdin,
-    stdout: process.stdout,
-    stderr: process.stderr,
-    exited: process.exited,
-    kill: () => { process.kill(); },
+    stdin: child.stdin,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    exited: child.exited,
+    kill: (signal = 'SIGTERM') => {
+      if (signal !== 'SIGKILL' || !detached) {
+        child.kill(signal);
+        return;
+      }
+      try {
+        process.kill(-child.pid, signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+    },
   };
+}
+
+async function waitForProcessExit(exited: Promise<number>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      exited.then(() => true, () => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function mergedEnv(overrides?: Record<string, string>): Record<string, string> {
@@ -146,6 +174,8 @@ export class CodexAppServerClient extends EventEmitter {
   #env: Record<string, string>;
   #clientVersion: () => string;
   #shutdownGraceMs: number;
+  #shutdownTerminateMs: number;
+  #shutdownKillMs: number;
   #shutdownPromise: Promise<void> | null = null;
 
   constructor(options: CodexAppServerClientOptions = {}) {
@@ -159,6 +189,8 @@ export class CodexAppServerClient extends EventEmitter {
     this.#env = mergedEnv(options.env);
     this.#clientVersion = options.clientVersion ?? (() => '0.1.0');
     this.#shutdownGraceMs = options.shutdownGraceMs ?? 2_000;
+    this.#shutdownTerminateMs = options.shutdownTerminateMs ?? 5_000;
+    this.#shutdownKillMs = options.shutdownKillMs ?? 5_000;
   }
 
   async connect(): Promise<InitializeResponse> {
@@ -544,17 +576,23 @@ export class CodexAppServerClient extends EventEmitter {
       try {
         // Codex closes its sole stdio connection on EOF, then shuts down loaded
         // threads and their persistence writers before exiting.
-        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server-transport/src/transport/stdio.rs#L43-L79
-        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server/src/lib.rs#L1156-L1165
-        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/core/src/session/handlers.rs#L648-L667
+        // https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/app-server-transport/src/transport/stdio.rs#L125-L181
+        // https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/app-server/src/lib.rs#L1283-L1304
+        // https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/core/src/session/handlers.rs#L454-L485
         proc.stdin?.end?.();
-        await Promise.race([
-          proc.exited.then(() => undefined),
-          Bun.sleep(this.#shutdownGraceMs),
-        ]);
-      } finally {
-        proc.kill();
+      } catch {
+        // Signal escalation remains authoritative when stdin cannot close.
       }
+      if (await waitForProcessExit(proc.exited, this.#shutdownGraceMs)) return;
+
+      proc.kill('SIGTERM');
+      if (await waitForProcessExit(proc.exited, this.#shutdownTerminateMs)) return;
+
+      // The npm launcher owns the native binary, so forced teardown targets its
+      // process group on POSIX rather than orphaning the native child.
+      proc.kill('SIGKILL');
+      if (await waitForProcessExit(proc.exited, this.#shutdownKillMs)) return;
+      throw new Error('Codex app-server did not exit after SIGKILL');
     })();
     this.#shutdownPromise = shutdown;
     try {
