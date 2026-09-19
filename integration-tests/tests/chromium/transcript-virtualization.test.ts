@@ -374,6 +374,16 @@ async function appendLedgerRows(
   });
 }
 
+async function setCombineToolUses(page: Page, enabled: boolean): Promise<void> {
+  await page.evaluate((combineToolUseMessages) => {
+    const key = 'pref_local_settings';
+    const previous = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
+    const newValue = JSON.stringify({ ...previous, combineToolUseMessages });
+    localStorage.setItem(key, newValue);
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
+  }, enabled);
+}
+
 async function selectSidebarChat(page: Page, chatId: string, marker: string): Promise<void> {
   const summary = page
     .locator('[data-slot="sidebar-chat-summary"]')
@@ -5320,6 +5330,55 @@ async function verifyReusedPermissionOccurrence(
   environment.model.assertSettled();
   fixture.assertNoBrowserErrors();
 }
+
+describe('Chromium combined tool-use presentation', () => {
+  test('combines a tool run without losing virtualized expansion or feed geometry', async () => {
+    await withChromiumFixture(
+      'transcript-combined-tool-uses',
+      async (fixture, markPhase) => {
+        markPhase('seeding a contiguous tool-use run');
+        const chatId = await seedTranscript(fixture.integration, 1, 'combined-tool-baseline');
+        const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+        const timestamp = '2026-08-15T00:00:00.000Z';
+        const drafts: LedgerRowDraft[] = Array.from({ length: 40 }, (_, index) => ({
+          kind: 'provider-row',
+          at: timestamp,
+          message: new BashToolUseMessage(timestamp, `combined-tool-${index}`, 'pwd'),
+          providerMeta: null,
+        }));
+        await appendLedgerRows(fixture, chatId, initial.transcriptViewId, drafts);
+        await prepareTranscript(fixture, chatId, 1);
+
+        for (const viewport of TRANSCRIPT_VIEWPORTS) {
+          markPhase(`checking ${viewport.label} combined-feed geometry`);
+          await fixture.page.setViewportSize(viewport);
+          await setCombineToolUses(fixture.page, true);
+          const summary = fixture.page.getByRole('button', { name: '40 tool uses: Bash 40' });
+          await summary.waitFor({ state: 'visible' });
+          expect(await summary.getAttribute('aria-expanded')).toBe('false');
+          expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
+          expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+
+          await summary.click();
+          await fixture.page.waitForFunction(() => {
+            const sizer = document.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+            return Number(sizer?.dataset.chatVirtualModelCount) > 40;
+          });
+          const expanded = await transcriptGeometry(fixture.page);
+          expect(expanded.modelCount).toBeGreaterThan(40);
+          expect(expanded.itemCount).toBeLessThan(100);
+          expect(expanded.overlaps).toEqual([]);
+
+          await setCombineToolUses(fixture.page, false);
+          await fixture.page.locator('[data-chat-tool-group]').waitFor({ state: 'detached' });
+          expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+        }
+        fixture.assertNoBrowserErrors();
+      },
+      diagnostics,
+    );
+  }, 180_000);
+});
 
 describe('Chromium transcript virtualization', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
