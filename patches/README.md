@@ -1,5 +1,15 @@
 # Dependency Patches
 
+## Bits UI deferred autofocus
+
+`bits-ui@2.19.0` must not run a menu's queued initial autofocus after a nested
+focus scope opens or the user focuses an item. The older request otherwise takes
+focus from the submenu and closes it. The patch checks scope ownership and
+existing focus when the animation-frame callback runs. Chromium coverage lives
+in `integration-tests/tests/chromium/file-editor-polish.test.ts`.
+
+Reference: [Bits UI focus scope](https://github.com/huntabyte/bits-ui/blob/80f4358f3c8d95df5572e79cae776cd77a2f69aa/packages/bits-ui/src/lib/bits/utilities/focus-scope/focus-scope.svelte.ts#L78-L99).
+
 ## Vim shared history
 
 `@replit/codemirror-vim@6.4.0` accepts per-editor `undo`, `redo`, and `save`

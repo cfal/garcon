@@ -251,6 +251,72 @@ describe('File editor controls', () => {
     });
   }, 180_000);
 
+  test('keeps submenu focus when the parent autofocus frame settles late', async () => {
+    await withChromiumFixture('file-editor-submenu-autofocus', async (fixture) => {
+      const { page, integration } = fixture;
+      const filename = 'focus-scope.txt';
+      await writeFile(join(integration.dirs.project, filename), 'focus\n', 'utf8');
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: 'focus scope fixture',
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+      await page.setViewportSize({ width: 390, height: 844 });
+
+      // Holds the parent's queued autofocus until the submenu owns focus.
+      const autofocus = await page.evaluateHandle(() => {
+        const original = window.requestAnimationFrame;
+        let held: FrameRequestCallback | null = null;
+        window.requestAnimationFrame = (callback) => {
+          if (held === null && callback.toString().includes('setFocusMemory(this,')) {
+            held = callback;
+            return -1;
+          }
+          return original.call(window, callback);
+        };
+        return {
+          hasHeld: () => held !== null,
+          release: () => {
+            window.requestAnimationFrame = original;
+            const callback = held;
+            held = null;
+            callback?.(performance.now());
+          },
+        };
+      });
+
+      try {
+        await page.getByRole('button', { name: 'Editor settings' }).click();
+        expect(await autofocus.evaluate((control) => control.hasHeld())).toBe(true);
+        const subTrigger = page.getByRole('menuitem', { name: /Font size/ });
+        await subTrigger.press('ArrowRight');
+        const font = page.getByRole('menuitemradio', { name: '16px', exact: true });
+        await font.waitFor({ state: 'visible' });
+        await page.waitForFunction(
+          () => document.activeElement?.getAttribute('role') === 'menuitemradio',
+        );
+
+        await autofocus.evaluate((control) => control.release());
+        expect(await subTrigger.getAttribute('aria-expanded')).toBe('true');
+        expect(await font.isVisible()).toBe(true);
+        expect(
+          await page.evaluate(() => document.activeElement?.getAttribute('role')),
+        ).toBe('menuitemradio');
+        await font.click();
+        expect(await font.getAttribute('aria-checked')).toBe('true');
+        fixture.assertNoBrowserErrors();
+      } finally {
+        await autofocus.evaluate((control) => control.release()).catch(() => undefined);
+        await autofocus.dispose();
+      }
+    });
+  }, 180_000);
+
   test('recovers a failed Vim chunk by reloading only after unsaved work is saved', async () => {
     await withChromiumFixture('file-editor-vim-reload', async (fixture, markPhase) => {
       const { page, integration } = fixture;
