@@ -12,6 +12,12 @@ describe('Lightpanda delegated startup', () => {
       const app = new SpaDriver(fixture.page, integration);
       await app.openChat(parent);
       await fixture.waitForSpaWebSocket();
+      await fixture.page.waitForFunction(() => document.querySelector('[data-chat-scroll-viewport]')?.getAttribute('aria-busy') === 'false');
+      await fixture.page.$eval('[data-chat-scroll-viewport]', (element) => {
+        // Supplies the flex viewport height that Lightpanda does not compute reliably.
+        Object.defineProperty(element, 'clientHeight', { configurable: true, get: () => 720 });
+        element.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
       const compacting = integration.fakeProviders.openAi.holdNext({ model: COMPACTION_MODEL });
       const { cursor } = await requestSnapshotChild(integration, parent);
       const accepted = await waitForStartOutcome(integration, parent, 'accepted', cursor);

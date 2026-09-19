@@ -2,8 +2,20 @@ import { describe, expect, test } from 'bun:test';
 import type { SnippetsMutationResponse, SnippetsSnapshot } from '../../../common/snippets.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
+import type { Page } from 'puppeteer-core';
 
 const NEW_CHAT_COMPOSER = '[role="dialog"] textarea[placeholder="How can I help you today?"]';
+
+async function clickReviewSnippet(page: Page): Promise<void> {
+  await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+    .some((element) => element.textContent?.includes('review')), { timeout: 20_000 });
+  await page.evaluate(() => {
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((element) => element.textContent?.includes('review'));
+    if (!option) throw new Error('Missing review snippet option.');
+    option.click();
+  });
+}
 
 describe('snippet palette focus', () => {
   test('reviews defaults in a short mobile viewport and preserves exact focus intent', async () => {
@@ -18,6 +30,21 @@ describe('snippet palette focus', () => {
         },
       });
 
+      await fixture.page.evaluateOnNewDocument(() => {
+        const originalFetch = globalThis.fetch.bind(globalThis);
+        const catalogReleased = new Promise<void>((resolve) => {
+          document.addEventListener('release-snippet-catalog', () => resolve(), { once: true });
+        });
+        const gatedFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (new URL(url, location.href).pathname === '/api/v1/snippets') {
+            document.documentElement.dataset.snippetCatalogPending = 'true';
+            await catalogReleased;
+          }
+          return originalFetch(input, init);
+        };
+        Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: gatedFetch });
+      });
       const app = new SpaDriver(fixture.page, fixture.integration);
       await fixture.page.setViewport({
         width: 390,
@@ -72,13 +99,10 @@ describe('snippet palette focus', () => {
       });
       expect(paletteLayout.previewVisible).toBe(false);
       expect(paletteLayout.listHeight).toBeGreaterThan(0);
-      await fixture.page.evaluate(() => {
-        const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-          (element) => element.textContent?.includes('review'),
-        );
-        if (!option) throw new Error('Missing review snippet option.');
-        option.click();
-      });
+      await fixture.page.waitForFunction(() => document.documentElement.dataset.snippetCatalogPending === 'true');
+      expect(await fixture.page.$('[role="option"]')).toBeNull();
+      await fixture.page.evaluate(() => document.dispatchEvent(new Event('release-snippet-catalog')));
+      await clickReviewSnippet(fixture.page);
 
       await fixture.page.waitForFunction(
         (expected) => {
@@ -185,13 +209,7 @@ describe('snippet palette focus', () => {
         () => document.activeElement?.getAttribute('role') === 'combobox',
         { timeout: 20_000 },
       );
-      await fixture.page.evaluate(() => {
-        const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-          (element) => element.textContent?.includes('review'),
-        );
-        if (!option) throw new Error('Missing review snippet option.');
-        option.click();
-      });
+      await clickReviewSnippet(fixture.page);
       await fixture.page.waitForFunction(
         () =>
           document.activeElement instanceof HTMLTextAreaElement &&
@@ -250,13 +268,7 @@ describe('snippet palette focus', () => {
         () => document.activeElement?.getAttribute('role') === 'combobox',
         { timeout: 20_000 },
       );
-      await fixture.page.evaluate(() => {
-        const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-          (element) => element.textContent?.includes('review'),
-        );
-        if (!option) throw new Error('Missing review snippet option.');
-        option.click();
-      });
+      await clickReviewSnippet(fixture.page);
       await fixture.page.waitForFunction(() => {
         const textarea = [...document.querySelectorAll<HTMLTextAreaElement>('textarea')].find(
           (element) => element.labels?.[0]?.textContent?.trim() === 'Arguments',

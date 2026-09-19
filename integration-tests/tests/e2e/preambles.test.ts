@@ -138,6 +138,22 @@ describe('Lightpanda preambles', () => {
             ?.textContent?.trim() === 'Global UI rules' && element.textContent?.includes('Manual only')),
         { timeout: 20_000 },
       );
+      await fixture.page.evaluate(() => {
+        const originalFetch = globalThis.fetch.bind(globalThis);
+        const released = new Promise<void>((resolve) => {
+          document.addEventListener('release-preamble-save', () => resolve(), { once: true });
+        });
+        const gatedFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = input instanceof Request ? input.url : String(input);
+          const response = await originalFetch(input, init);
+          if (new URL(url, location.href).pathname === '/api/v1/preambles' && init?.method === 'PUT') {
+            document.documentElement.dataset.preambleSavePending = 'true';
+            await released;
+          }
+          return response;
+        };
+        Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: gatedFetch });
+      });
       await clickPreambleRowAction(
         fixture,
         'Global UI rules',
@@ -149,7 +165,11 @@ describe('Lightpanda preambles', () => {
             ?.textContent?.trim() === 'Global UI rules' && !element.textContent?.includes('Manual only')),
         { timeout: 20_000 },
       );
-
+      await fixture.page.waitForFunction(() => document.documentElement.dataset.preambleSavePending === 'true');
+      expect(await fixture.page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.trim() === 'Add preamble')?.disabled)).toBe(true);
+      await fixture.page.evaluate(() => document.dispatchEvent(new Event('release-preamble-save')));
+      await app.waitForButtonEnabled('Add preamble');
       await app.clickButton('Add preamble');
       await app.fill('#preamble-title', 'Project UI rules');
       await app.fill(
