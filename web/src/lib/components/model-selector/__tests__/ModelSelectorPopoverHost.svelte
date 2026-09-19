@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import { untrack } from 'svelte';
 	import ModelSelectorPopover from '../ModelSelectorPopover.svelte';
 	import { setModelCatalog } from '$lib/context';
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
@@ -36,6 +39,7 @@
 		preferRecentsOnOpen?: boolean;
 		wrapInForm?: boolean;
 		onFormSubmit?: () => void;
+		nodes?: readonly ExecutionNodeSnapshot[];
 	}
 
 	let {
@@ -52,7 +56,9 @@
 		preferRecentsOnOpen = false,
 		wrapInForm = false,
 		onFormSubmit = () => {},
+		nodes,
 	}: Props = $props();
+	setExecutionNodesTestContext(untrack(() => nodes));
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
 		const generated = Array.from({ length: modelCount }, (_, index): ModelOption => ({
@@ -120,6 +126,8 @@
 	}
 
 	setModelCatalog({
+		forNode() { return this; },
+		refreshIfStale: async () => {},
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
 			id: agentId,
@@ -180,7 +188,7 @@
 		{onChange}
 		{recents}
 		{preferRecentsOnOpen}
-		{selectableAgentIds}
+		getSelectableAgentIds={selectableAgentIds ? () => selectableAgentIds! : undefined}
 	/>
 {/snippet}
 

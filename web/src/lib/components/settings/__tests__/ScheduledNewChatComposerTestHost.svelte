@@ -47,7 +47,7 @@
 	{startup}
 	{modelCatalog}
 	{remoteSettings}
-	{selectableAgentIds}
+	getSelectableAgentIds={() => selectableAgentIds}
 	{prompt}
 	{promptError}
 	{knownTags}

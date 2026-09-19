@@ -40,6 +40,7 @@
 		getLocalSettings,
 		getAppShell,
 		getModelCatalog,
+		getExecutionNodes,
 		getRemoteSettings,
 		getChatSessions,
 		getNotifications,
@@ -91,7 +92,8 @@
 
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const executionNodes = getExecutionNodes();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
@@ -100,17 +102,20 @@
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
 	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
-	const newChatAgentIds = $derived.by(() => {
-		const allAgentIds = modelCatalog.getSelectableAgents();
-		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
-	});
-	const form = new NewChatFormState({
-		modelCatalog,
+	const form: NewChatFormState = new NewChatFormState({
+		modelCatalog: rootModelCatalog,
+		executionNodes,
 		remoteSettings,
 		get selectableAgentIds() {
 			return newChatAgentIds;
 		},
 	});
+	const modelCatalog = $derived(rootModelCatalog.forNode(form.nodeId));
+	function selectableAgentsForNode(nodeId: string) {
+		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	}
+	const newChatAgentIds = $derived(selectableAgentsForNode(form.nodeId));
 	const canAttachImages = $derived(modelCatalog.supportsImages(form.agentId, form.modelValue));
 	const fileAttachmentMimeTypes = $derived(
 		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
@@ -148,7 +153,7 @@
 	let expansionProjectPath = '';
 	let snippetInteractionGeneration = $state(0);
 	const snippetInteractionKey = $derived(
-		`${snippetInteractionGeneration}\u0000${form.trimmedPath}`,
+		`${snippetInteractionGeneration}\u0000${form.nodeId}\u0000${form.trimmedPath}`,
 	);
 
 	const snippetPalette = new SnippetPaletteTriggerState();
@@ -263,7 +268,7 @@
 
 	// Debounced path validation reacts to path changes.
 	$effect(() => {
-		const projectPath = form.trimmedPath;
+		const projectPath = `${form.nodeId}\u0000${form.trimmedPath}`;
 		if (projectPath !== expansionProjectPath) {
 			expansionProjectPath = projectPath;
 			snippetExpansion.cancel();
@@ -383,7 +388,7 @@
 	function expansionContext() {
 		const projectPath = form.trimmedPath;
 		if (projectPath) {
-			return { type: 'new-chat' as const, chatId: ensureProspectiveChatId(), projectPath };
+			return { type: 'new-chat' as const, chatId: ensureProspectiveChatId(), projectPath, nodeId: form.nodeId };
 		}
 		notifications.error(m.chat_new_chat_errors_project_path_required());
 		return null;
@@ -421,6 +426,7 @@
 			if (
 				form.trimmedPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
+				result.response.contextNodeId !== form.nodeId ||
 				form.firstMessage !== sourceText
 			)
 				return 'cancelled';
@@ -462,6 +468,7 @@
 			if (
 				form.trimmedPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
+				result.response.contextNodeId !== form.nodeId ||
 				form.firstMessage !== sourceText
 			)
 				return;
@@ -550,6 +557,7 @@
 		surface: 'composer',
 	};
 	const modelSelectorValue = $derived({
+		nodeId: form.nodeId,
 		agentId: form.agentId,
 		model: form.modelValue,
 		...(form.modelSelectionTarget ?? {}),
@@ -563,6 +571,8 @@
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
+		if (!localSettings.allowDirectChats && nonDirectAgentIds([next.agentId]).length === 0) return;
+		form.selectNode(next.nodeId);
 		if (!newChatAgentIds.includes(next.agentId)) return;
 		form.selectAgent(next.agentId);
 		form.selectModel(next.modelValue, next);
@@ -593,7 +603,7 @@
 								bind:value={form.projectPath}
 								readonly={form.isUpdatingPinnedPath}
 								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
-									if (isMobile) {
+									if (isMobile && form.localMachine) {
 										e.currentTarget.blur();
 									}
 									if (form.isUpdatingPinnedPath) return;
@@ -604,7 +614,7 @@
 									form.resetTabCompletions();
 								}}
 								onkeydown={(e: KeyboardEvent) => {
-									if (e.key === 'Tab') {
+									if (e.key === 'Tab' && form.localMachine) {
 										e.preventDefault();
 										if (form.isUpdatingPinnedPath) return;
 										form.handleTabCompletion();
@@ -658,7 +668,7 @@
 						{/if}
 					</div>
 
-					{#if form.showBrowser && !form.isUpdatingPinnedPath}
+					{#if form.localMachine && form.showBrowser && !form.isUpdatingPinnedPath}
 						<DirectoryBrowser
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}
@@ -678,7 +688,7 @@
 						<p class="text-xs text-destructive transition-colors">
 							{form.validationError}
 						</p>
-					{:else if form.gitRepoStatus === 'git'}
+					{:else if form.localMachine && form.gitRepoStatus === 'git'}
 						<button
 							type="button"
 							disabled={form.isUpdatingPinnedPath}
@@ -790,7 +800,7 @@
 							onChange={handleModelSelectorChange}
 							recents={recentSelectorOptions}
 							{preferRecentsOnOpen}
-							selectableAgentIds={newChatAgentIds}
+							getSelectableAgentIds={selectableAgentsForNode}
 							align="end"
 							side="bottom"
 						/>

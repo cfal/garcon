@@ -14,7 +14,7 @@
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
 		recents?: ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
-		selectableAgentIds?: readonly SessionAgentId[];
+		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -26,7 +26,7 @@
 		onChange,
 		recents = [],
 		preferRecentsOnOpen = false,
-		selectableAgentIds,
+		getSelectableAgentIds,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -39,7 +39,7 @@
 	{onChange}
 	{recents}
 	{preferRecentsOnOpen}
-	{selectableAgentIds}
+	{getSelectableAgentIds}
 	{disabled}
 	{align}
 	{side}

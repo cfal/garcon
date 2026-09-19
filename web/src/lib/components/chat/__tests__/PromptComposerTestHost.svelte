@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import PromptComposer from '../PromptComposer.svelte';
 	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
 	import { onDestroy, untrack } from 'svelte';
@@ -315,6 +317,7 @@
 		startupByChatId: {},
 	} as never);
 	setModelCatalog({
+		forNode() { return this; },
 		version: 0,
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({

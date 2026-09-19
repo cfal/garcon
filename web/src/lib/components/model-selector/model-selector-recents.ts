@@ -1,4 +1,5 @@
 import type { SessionAgentId } from '$lib/types/app';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RecentAgentSetting } from '$shared/settings';
 import {
@@ -13,6 +14,7 @@ export const MODEL_SELECTOR_RECENTS_LIMIT = 20;
 
 function recentAgentSettingKey(entry: RecentAgentSetting): string {
 	return [
+		effectiveNodeId(entry.nodeId),
 		entry.agentId,
 		entry.model,
 		entry.apiProviderId ?? '',
@@ -29,6 +31,7 @@ export function buildModelSelectorRecents(
 	const rows: ModelSelectorRecentOption[] = [];
 
 	for (const recent of recents) {
+		if (effectiveNodeId(recent.nodeId) !== effectiveNodeId(modelCatalog.nodeId)) continue;
 		const agentId = recent.agentId as SessionAgentId;
 		if (!selectable.has(agentId)) continue;
 
@@ -59,6 +62,7 @@ export function buildModelSelectorRecents(
 		const modelLabel = modelDisplayLabel(selectedModel, modelValue, sourceOption);
 
 		rows.push({
+			nodeId: effectiveNodeId(recent.nodeId),
 			id: recentAgentSettingKey(recent),
 			agentId,
 			modelValue,

@@ -3,6 +3,7 @@ import type { SessionAgentId } from '$lib/types/app';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import type {
 	ConversationExecutionDraftState,
 	ConversationExecutionSelection,
@@ -16,6 +17,8 @@ interface AgentSwitchSessions {
 }
 
 interface AgentSwitchState {
+	nodeId: string;
+	projectPath: string;
 	agentId: SessionAgentId;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
@@ -51,17 +54,20 @@ export interface ConversationAgentSwitchDeps {
 	sessions: AgentSwitchSessions;
 	agentState: AgentSwitchState;
 	modelCatalog: AgentSwitchModelCatalog;
+	modelCatalogForNode(nodeId: string): AgentSwitchModelCatalog;
+	chooseProjectPath(chatId: string, nodeId: string, path: string): Promise<string | null>;
 	executionDraft: Pick<
 		ConversationExecutionDraftState,
 		'replaceSelection' | 'resetToDurable'
 	>;
-	getExecutionDefaults(agentId: SessionAgentId): Pick<
+	getExecutionDefaults(agentId: SessionAgentId, nodeId?: string): Pick<
 		ConversationExecutionSelection,
 		'permissionMode' | 'thinkingMode' | 'agentSettings'
 	>;
 }
 
 export interface AgentSwitchSelection {
+	nodeId?: string;
 	agentId: SessionAgentId;
 	modelValue: string;
 }
@@ -69,18 +75,26 @@ export interface AgentSwitchSelection {
 export class ConversationAgentSwitchService {
 	constructor(private readonly deps: ConversationAgentSwitchDeps) {}
 
-	switchAgent(chatId: string, next: AgentSwitchSelection): void {
+	async switchAgent(chatId: string, next: AgentSwitchSelection): Promise<void> {
 		const durable = this.deps.sessions.selectedChat;
 		if (!durable || durable.id !== chatId) return;
-		if (!this.deps.sessions.isDraft(chatId) && next.agentId === durable.agentId) {
+		const nodeId = effectiveNodeId(next.nodeId ?? durable.nodeId);
+		if (!this.deps.sessions.isDraft(chatId) && next.agentId === durable.agentId && nodeId === effectiveNodeId(durable.nodeId)) {
 			const selection = this.deps.executionDraft.resetToDurable();
 			if (selection) this.#applyAgentState(selection);
 			return;
 		}
 
-		const model = this.deps.modelCatalog.selectionFor(next.agentId, next.modelValue);
-		const defaults = this.deps.getExecutionDefaults(next.agentId);
+		const projectPath = nodeId === effectiveNodeId(durable.nodeId) ? durable.projectPath
+			: await this.deps.chooseProjectPath(chatId, nodeId, durable.projectPath);
+		if (!projectPath || this.deps.sessions.selectedChat?.id !== chatId
+			|| this.deps.sessions.selectedChat.agentOwnershipEpoch !== durable.agentOwnershipEpoch) return;
+		const catalog = this.deps.modelCatalogForNode(nodeId);
+		const model = catalog.selectionFor(next.agentId, next.modelValue);
+		const defaults = this.deps.getExecutionDefaults(next.agentId, nodeId);
 		const selection: ConversationExecutionSelection = {
+			nodeId,
+			projectPath,
 			agentId: next.agentId,
 			model: model.model,
 			apiProviderId: model.apiProviderId,
@@ -93,7 +107,7 @@ export class ConversationAgentSwitchService {
 
 		this.#applyAgentState(selection, next.modelValue);
 		if (this.deps.sessions.isDraft(chatId)) {
-			this.deps.sessions.patchDraftStartup(chatId, selection);
+			this.deps.sessions.patchDraftStartup(chatId, { ...selection, nodeId });
 			this.deps.sessions.patchChat(chatId, selection);
 			return;
 		}
@@ -101,7 +115,10 @@ export class ConversationAgentSwitchService {
 	}
 
 	#applyAgentState(selection: ConversationExecutionSelection, modelValue?: string): void {
-		const { agentState, modelCatalog } = this.deps;
+		const { agentState } = this.deps;
+		agentState.nodeId = effectiveNodeId(selection.nodeId);
+		agentState.projectPath = selection.projectPath ?? '';
+		const modelCatalog = this.deps.modelCatalogForNode(agentState.nodeId);
 		agentState.setAgentId(selection.agentId);
 		agentState.setModelSelection({
 			model: modelValue ?? modelCatalog.selectionValueFor(

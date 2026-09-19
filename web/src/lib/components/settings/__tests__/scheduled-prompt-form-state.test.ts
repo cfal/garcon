@@ -35,6 +35,8 @@ function createForm(
 		endpointId?: string | null,
 	): ModelOption | null => findModelForSelection(getModels(agentId), model, endpointId);
 	const modelCatalog = {
+		forNode() { return this; },
+		refreshIfStale: vi.fn(async () => {}),
 		getSelectableAgents: () => selectableAgentIds(),
 		getModels,
 		getDefaultModel: () => 'gpt-5',

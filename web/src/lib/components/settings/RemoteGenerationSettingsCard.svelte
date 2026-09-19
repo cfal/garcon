@@ -48,9 +48,9 @@
 		surface: 'settings',
 		effort: 'select',
 	};
-	const cardState = new RemoteGenerationSettingsCardState({
+	const cardState: RemoteGenerationSettingsCardState = new RemoteGenerationSettingsCardState({
 		remoteSettings,
-		modelCatalog,
+		get modelCatalog() { return modelCatalog.forNode(cardState.nodeId); },
 		get settingsKey() {
 			return settingsKey;
 		},
@@ -129,6 +129,7 @@
 		<div class="flex items-start justify-between gap-3 pb-1 pt-2">
 			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
 			<div class="flex min-w-0 flex-col items-end">
+				<Button variant={cardState.isAuto ? 'secondary' : 'ghost'} size="sm" aria-pressed={cardState.isAuto} disabled={cardState.isSaving} onclick={() => cardState.persistAuto()}>Auto (Local)</Button>
 				<SettingsModelSelector
 					value={cardState.selectorValue}
 					mode={selectorMode}

@@ -1,4 +1,5 @@
 import type { AgentHandoffRequest, AgentHandoffTarget } from '$shared/chat-command-contracts';
+import { effectiveNodeId, parseNodeId } from '$shared/execution-nodes';
 import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import {
@@ -28,6 +29,8 @@ export interface ConversationExecutionSelection extends AgentHandoffTarget {
 }
 
 export interface ConversationExecutionProjection {
+	nodeId?: string | null;
+	projectPath?: string;
 	agentId: string;
 	model: string | null;
 	apiProviderId?: string | null;
@@ -52,7 +55,7 @@ export class ConversationExecutionDraftState {
 			this.options.activeChatId !== null
 			&& this.selection !== null
 			&& durable !== null
-			&& this.selection.agentId !== durable.agentId
+			&& !sameExecutionOwner(this.selection, durable)
 		);
 	});
 
@@ -65,7 +68,7 @@ export class ConversationExecutionDraftState {
 			return null;
 		}
 		const stored = parseStoredSelection(getLocalStorageItem(chatExecutionDraftStorageKey(chatId)));
-		if (!stored || stored.agentId === durable.agentId) {
+		if (!stored || sameExecutionOwner(stored, durable)) {
 			removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 			this.selection = cloneSelection(durable);
 			return this.selection;
@@ -78,7 +81,7 @@ export class ConversationExecutionDraftState {
 		const chatId = this.options.activeChatId;
 		const durable = this.options.durableSelection;
 		if (!chatId || !durable) return;
-		if (selection.agentId === durable.agentId) {
+		if (sameExecutionOwner(selection, durable)) {
 			this.resetToDurable();
 			return;
 		}
@@ -134,6 +137,8 @@ export function executionSelectionFromProjection(
 ): ConversationExecutionSelection | null {
 	if (!projection?.model || projection.agentSettings.ownerId !== projection.agentId) return null;
 	return cloneSelection({
+		nodeId: effectiveNodeId(projection.nodeId),
+		projectPath: projection.projectPath,
 		agentId: projection.agentId,
 		model: projection.model,
 		apiProviderId: projection.apiProviderId ?? null,
@@ -155,6 +160,7 @@ function parseStoredSelection(raw: string | null): ConversationExecutionSelectio
 	}
 	if (!isRecord(value)) return null;
 	const agentId = nonEmptyString(value.agentId);
+	const nodeId = parseNodeId(value.nodeId);
 	const model = nonEmptyString(value.model);
 	const apiProviderId = nullableString(value.apiProviderId);
 	const modelEndpointId = nullableString(value.modelEndpointId);
@@ -162,6 +168,8 @@ function parseStoredSelection(raw: string | null): ConversationExecutionSelectio
 	const agentSettings = parseAgentSettingsEnvelope(value.agentSettings);
 	if (
 		!agentId
+		|| !nodeId
+		|| (value.projectPath !== undefined && !nonEmptyString(value.projectPath))
 		|| !model
 		|| apiProviderId === undefined
 		|| modelEndpointId === undefined
@@ -172,6 +180,8 @@ function parseStoredSelection(raw: string | null): ConversationExecutionSelectio
 	if (modelEndpointId !== null && apiProviderId === null) return null;
 	return {
 		agentId,
+		nodeId,
+		...(typeof value.projectPath === 'string' ? { projectPath: value.projectPath } : {}),
 		model,
 		apiProviderId,
 		modelEndpointId,
@@ -180,6 +190,10 @@ function parseStoredSelection(raw: string | null): ConversationExecutionSelectio
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
 		agentSettings,
 	};
+}
+
+function sameExecutionOwner(left: AgentHandoffTarget, right: AgentHandoffTarget): boolean {
+	return left.agentId === right.agentId && effectiveNodeId(left.nodeId) === effectiveNodeId(right.nodeId);
 }
 
 function nonEmptyString(value: unknown): string | null {

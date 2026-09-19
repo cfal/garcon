@@ -962,6 +962,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
 		});
@@ -981,6 +982,7 @@ describe('NewChatForm', () => {
 				arguments: { type: 'value', value: 'the API' },
 				context: {
 					type: 'new-chat',
+					nodeId: 'local',
 					chatId: PROSPECTIVE_CHAT_ID,
 					projectPath: '/workspace/project',
 				},
@@ -1004,6 +1006,7 @@ describe('NewChatForm', () => {
 			sourceId: '00000000-0000-4000-8000-000000000001',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'manual',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'PREAMBLE',
 		});
@@ -1047,6 +1050,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded prompt',
 		});
@@ -1100,6 +1104,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1134,6 +1139,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded',
 		});
@@ -1153,6 +1159,7 @@ describe('NewChatForm', () => {
 				arguments: { type: 'default' },
 				context: {
 					type: 'new-chat',
+					nodeId: 'local',
 					chatId: PROSPECTIVE_CHAT_ID,
 					projectPath: '/workspace/project',
 				},
@@ -1166,6 +1173,7 @@ describe('NewChatForm', () => {
 				arguments: { type: 'value', value: '' },
 				context: {
 					type: 'new-chat',
+					nodeId: 'local',
 					chatId: PROSPECTIVE_CHAT_ID,
 					projectPath: '/workspace/project',
 				},
@@ -1182,6 +1190,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
@@ -1207,6 +1216,7 @@ describe('NewChatForm', () => {
 				arguments: { type: 'value', value: '' },
 				context: {
 					type: 'new-chat',
+					nodeId: 'local',
 					chatId: PROSPECTIVE_CHAT_ID,
 					projectPath: '/workspace/project',
 				},
@@ -1223,6 +1233,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
@@ -1247,6 +1258,7 @@ describe('NewChatForm', () => {
 				arguments: { type: 'value', value: 'saved default' },
 				context: {
 					type: 'new-chat',
+					nodeId: 'local',
 					chatId: PROSPECTIVE_CHAT_ID,
 					projectPath: '/workspace/project',
 				},
@@ -1280,6 +1292,7 @@ describe('NewChatForm', () => {
 			...identity,
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1307,6 +1320,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1391,6 +1405,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1435,6 +1450,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1475,6 +1491,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1516,6 +1533,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expansion still applies',
 		});
@@ -1550,6 +1568,7 @@ describe('NewChatForm', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});

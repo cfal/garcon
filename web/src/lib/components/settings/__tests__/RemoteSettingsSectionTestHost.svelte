@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
 	import { setGhCapability, setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestGhCapability } from './gh-capability-test-context';
@@ -43,6 +45,7 @@
 	}
 
 	setModelCatalog({
+		forNode() { return this; },
 		version: 0,
 		getModels(agentId: string) {
 			return [modelForAgent(agentId)];

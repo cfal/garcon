@@ -6,6 +6,7 @@
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
+	import NodeHandoffDialog from './NodeHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
 	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
 	import {
@@ -121,7 +122,7 @@
 	const appShell = getAppShell();
 	const ws = getWs();
 	const readReceiptOutbox = getReadReceiptOutbox();
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
@@ -142,6 +143,7 @@
 		},
 	});
 	const agentState = new AgentState();
+	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
 	const lifecycle = new CurrentConversationLifecycle({
 		lifecycles: conversationLifecycles,
 		getSelectedChatId: () => sessions.selectedChatId,
@@ -212,6 +214,7 @@
 	);
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
+		controller.nodeHandoff.cancel();
 		reloadRequest?.complete();
 		reloadRequest = null;
 		drainHandle.cleanup();
@@ -271,8 +274,10 @@
 		lifecycleForChat: (chatId) => conversationLifecycles.forChat(chatId),
 		conversationUi,
 		startupCoordinator,
-		modelCatalog,
-		getExecutionDefaults: (agentId) => {
+		get modelCatalog() { return modelCatalog; },
+		modelCatalogForNode: (nodeId) => rootModelCatalog.forNode(nodeId),
+		getExecutionDefaults: (agentId, nodeId) => {
+			const modelCatalog = rootModelCatalog.forNode(nodeId ?? agentState.nodeId);
 			const defaults = executionDefaultsForAgent(
 				remoteSettings.snapshot?.executionDefaults,
 				agentId,
@@ -619,6 +624,7 @@
 	}
 
 	function openCommitForPanel(surfaceId: ChatViewSurfaceId, chatId: string): void {
+		if ((sessions.byId[chatId]?.nodeId ?? 'local') !== 'local') return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath || !quickGit.summaryFor(projectPath)) return;
 		const targetWindowId = workspace.windowOf(surfaceId);
@@ -675,6 +681,7 @@
 		chatId: string,
 		opensDropdown = false,
 	): BranchCommand | null {
+		if ((sessions.byId[chatId]?.nodeId ?? 'local') !== 'local') return null;
 		const panel = conversationPanels.panel(surfaceId);
 		const owner = workspace.focusOwner;
 		if (
@@ -748,7 +755,7 @@
 		effectiveProjectKey: string;
 	} | null> {
 		const chat = sessions.byId[chatId];
-		if (!chat?.projectPath) return null;
+		if (!chat?.projectPath || (chat.nodeId ?? 'local') !== 'local') return null;
 		const target =
 			chat.status === 'draft'
 				? { kind: 'path' as const, projectPath: chat.projectPath }
@@ -756,7 +763,7 @@
 		const lease = projectResolution.retain(target);
 		try {
 			await lease.resolve();
-			if (sessions.byId[chatId]?.projectPath !== target.projectPath) return null;
+			if (sessions.byId[chatId]?.projectPath !== target.projectPath || (sessions.byId[chatId]?.nodeId ?? 'local') !== 'local') return null;
 			return lease.snapshot.kind === 'available'
 				? {
 						projectPath: target.projectPath,
@@ -865,6 +872,7 @@
 		onCancel={cancelReload}
 		onConfirm={() => void confirmReload()}
 	/>
+	<NodeHandoffDialog handoff={controller.nodeHandoff} />
 	<HandoffForkDialog
 		open={controller.handoffForkConfirmation.isOpen}
 		onCancel={() => controller.handoffForkConfirmation.cancel()}

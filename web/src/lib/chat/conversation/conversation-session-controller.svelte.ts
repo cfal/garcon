@@ -40,6 +40,7 @@ import {
 import { ConversationQueueController } from '$lib/chat/conversation/conversation-queue-controller.svelte.js';
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
+import { NodeHandoffProjectState } from './node-handoff-project.svelte.js';
 import { ConversationPermissionService } from './conversation-permission-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
@@ -121,6 +122,8 @@ type SessionComposerState = Pick<
 type SessionAgentState = Pick<
 	AgentState,
 	| 'agentId'
+	| 'nodeId'
+	| 'projectPath'
 	| 'model'
 	| 'apiProviderId'
 	| 'modelEndpointId'
@@ -220,7 +223,9 @@ export interface SessionControllerDeps {
 	};
 	getExecutionDefaults(
 		agentId: SessionAgentId,
+		nodeId?: string,
 	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
+	modelCatalogForNode(nodeId: string): SessionControllerDeps['modelCatalog'];
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
@@ -243,6 +248,7 @@ export class ConversationSessionController {
 	readonly #permissions: ConversationPermissionService;
 	readonly #executionDraft: ConversationExecutionDraftState;
 	readonly #handoffForkConfirmation = new HandoffForkConfirmationState();
+	readonly nodeHandoff = new NodeHandoffProjectState();
 
 	constructor(private deps: SessionControllerDeps) {
 		this.#executionDraft = new ConversationExecutionDraftState({
@@ -266,6 +272,8 @@ export class ConversationSessionController {
 			sessions: deps.sessions,
 			agentState: deps.agentState,
 			modelCatalog: deps.modelCatalog,
+			modelCatalogForNode: deps.modelCatalogForNode,
+			chooseProjectPath: (chatId, nodeId, path) => this.nodeHandoff.ask(chatId, nodeId, path),
 			executionDraft: this.#executionDraft,
 			getExecutionDefaults: deps.getExecutionDefaults,
 		});
@@ -334,7 +342,10 @@ export class ConversationSessionController {
 	}
 
 	#applyExecutionSelection(selection: ConversationExecutionSelection): void {
-		const { agentState, modelCatalog } = this.deps;
+		const { agentState } = this.deps;
+		agentState.nodeId = selection.nodeId ?? 'local';
+		agentState.projectPath = selection.projectPath ?? '';
+		const modelCatalog = this.deps.modelCatalogForNode(agentState.nodeId);
 		agentState.setAgentId(selection.agentId);
 		agentState.setModelSelection({
 			model: modelCatalog.selectionValueFor(
@@ -368,6 +379,7 @@ export class ConversationSessionController {
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
+		if (this.nodeHandoff.target && this.nodeHandoff.target.chatId !== chatId) this.nodeHandoff.cancel();
 		if (chatId === this.#lastChatId) return;
 		// Route selection can arrive before the chat-list record. Defers the
 		// transition so hydration can retry without poisoning the dedupe key.
@@ -414,6 +426,8 @@ export class ConversationSessionController {
 			deps.lifecycle.setCurrentChatId(null);
 			const startup = deps.sessions.startupByChatId[chatId];
 			if (startup) {
+				deps.agentState.nodeId = startup.nodeId ?? 'local';
+				deps.agentState.projectPath = selected.projectPath;
 				deps.agentState.setAgentId(
 					startup.agentId as Parameters<typeof deps.agentState.setAgentId>[0],
 				);

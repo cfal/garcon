@@ -33,7 +33,7 @@
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
-		selectableAgentIds: readonly SessionAgentId[];
+		getSelectableAgentIds: (nodeId: string) => readonly SessionAgentId[];
 		prompt: string;
 		promptError: string | null;
 		knownTags: string[];
@@ -46,7 +46,7 @@
 		startup,
 		modelCatalog,
 		remoteSettings,
-		selectableAgentIds,
+		getSelectableAgentIds,
 		prompt,
 		promptError,
 		knownTags,
@@ -65,6 +65,7 @@
 		surface: 'composer',
 	};
 	const modelSelectorValue = $derived({
+		nodeId: startup.nodeId,
 		agentId: startup.agentId,
 		model: startup.modelValue,
 		...(startup.modelSelectionTarget ?? {}),
@@ -75,7 +76,7 @@
 	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
 
 	function handlePathKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Tab') {
+		if (event.key === 'Tab' && startup.localMachine) {
 			event.preventDefault();
 			void startup.handleTabCompletion();
 			return;
@@ -87,11 +88,12 @@
 	}
 
 	function handlePathFocus(event: FocusEvent & { currentTarget: HTMLInputElement }): void {
-		if (isMobile) event.currentTarget.blur();
+		if (isMobile && startup.localMachine) event.currentTarget.blur();
 		startup.handlePathFocus();
 	}
 
 	function handleModelChange(next: ModelSelectorChange): void {
+		startup.selectNode(next.nodeId);
 		startup.selectAgent(next.agentId);
 		startup.selectModel(next.modelValue, next);
 	}
@@ -142,7 +144,7 @@
 					onToggle={() => startup.toggleTagInput()}
 				/>
 			</div>
-			{#if startup.showBrowser && !startup.isUpdatingPinnedPath}
+			{#if startup.localMachine && startup.showBrowser && !startup.isUpdatingPinnedPath}
 				<DirectoryBrowser
 					currentPath={startup.trimmedPath || startup.browseStartPath || startup.projectBasePath}
 					basePath={startup.projectBasePath}
@@ -159,7 +161,7 @@
 		<div class="-mt-1 min-h-5">
 			{#if startup.validationStatus === 'invalid' && startup.validationError}
 				<p class="text-xs text-destructive">{startup.validationError}</p>
-			{:else if startup.gitRepoStatus === 'git'}
+			{:else if startup.localMachine && startup.gitRepoStatus === 'git'}
 				<button
 					type="button"
 					disabled={startup.isUpdatingPinnedPath}
@@ -256,7 +258,7 @@
 							onChange={handleModelChange}
 							recents={recentSelectorOptions}
 							{preferRecentsOnOpen}
-							{selectableAgentIds}
+							{getSelectableAgentIds}
 							align="end"
 							side="bottom"
 						/>
@@ -267,7 +269,7 @@
 	</ScheduledPromptField>
 </div>
 
-{#if startup.worktreeModalOpen}
+{#if startup.localMachine && startup.worktreeModalOpen}
 	<GitWorktreePickerModal
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}

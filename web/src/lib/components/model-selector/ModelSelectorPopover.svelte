@@ -1,15 +1,16 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
-	import { getModelCatalog } from '$lib/context';
+	import { getModelCatalog, getExecutionNodes } from '$lib/context';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { SessionAgentId } from '$lib/types/app';
 	import { ModelSelectorState } from './model-selector-state.svelte';
 	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
 	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';
+	import ModelSelectorNodePicker from './ModelSelectorNodePicker.svelte';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -23,7 +24,7 @@
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
 		recents?: ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
-		selectableAgentIds?: readonly SessionAgentId[];
+		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -37,7 +38,7 @@
 		onChange,
 		recents = [],
 		preferRecentsOnOpen = false,
-		selectableAgentIds,
+		getSelectableAgentIds,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -46,7 +47,9 @@
 	}: Props = $props();
 
 	const modelCatalog = getModelCatalog();
+	const nodes = getExecutionNodes();
 	const selector = new ModelSelectorState({
+		nodes,
 		get modelCatalog() {
 			return modelCatalog;
 		},
@@ -62,8 +65,8 @@
 		get preferRecentsOnOpen() {
 			return preferRecentsOnOpen;
 		},
-		get selectableAgentIds() {
-			return selectableAgentIds;
+		get getSelectableAgentIds() {
+			return getSelectableAgentIds;
 		},
 		onChange: (next) => onChange(next),
 	});
@@ -112,6 +115,7 @@
 
 	function handleOpenChange(open: boolean): void {
 		if (open) {
+			void nodes.refresh();
 			selector.openDraft();
 			return;
 		}
@@ -121,6 +125,13 @@
 		}
 		selector.commitAndClose();
 	}
+
+	$effect(() => {
+		if (!selector.open || !selector.nodeReady) return;
+		const catalog = selector.modelCatalog;
+		void catalog.version;
+		untrack(() => { void catalog.refreshIfStale(); });
+	});
 
 	$effect(() => {
 		if (!selector.open || !triggerNode || !contentNode) return;
@@ -156,7 +167,7 @@
 {#snippet triggerContent()}
 	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
 		<span class="truncate font-medium"
-			>{selector.triggerPrimary || m.model_selector_unavailable()}</span
+			>{selector.committedNodeId !== 'local' ? `${selector.nodeLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
 		>
 		{#if showTriggerSecondaryLine}
 			<span
@@ -185,11 +196,13 @@
 		<Dialog.Content
 			bind:ref={contentNode}
 			class={cn(
-				'safe-viewport-dialog top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] overflow-hidden p-0',
+				'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
 				contentClass,
 			)}
 			showCloseButton={false}
 		>
+			<ModelSelectorNodePicker {selector} />
+			<div class="min-h-0 flex-1">
 			<ModelSelectorCompactLayout
 				{selector}
 				{showAgent}
@@ -198,6 +211,7 @@
 				onCancel={() => selector.discardAndClose()}
 				onDone={() => selector.commitAndClose()}
 			/>
+			</div>
 		</Dialog.Content>
 	</Dialog.Root>
 {:else}
@@ -220,11 +234,14 @@
 			class={cn(
 				contentWidthClass,
 				contentHeightClass,
-				'max-h-(--bits-popover-content-available-height) overflow-hidden p-0',
+				'flex max-h-(--bits-popover-content-available-height) flex-col overflow-hidden p-0',
 				contentClass,
 			)}
 		>
+			<ModelSelectorNodePicker {selector} />
+			<div class="min-h-0 flex-1">
 			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
+			</div>
 		</Popover.Content>
 	</Popover.Root>
 {/if}

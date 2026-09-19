@@ -13,6 +13,7 @@
 		getChatSessions,
 		getAppShell,
 		getModelCatalog,
+		getExecutionNodes,
 		getAgentState,
 		getRemoteSettings,
 		getNotifications,
@@ -115,7 +116,10 @@
 	const localSettings = getLocalSettings();
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const nodes = getExecutionNodes();
+	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
+	const localMachine = $derived(agentState.nodeId === 'local');
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const preambles = getPreambles();
@@ -147,7 +151,7 @@
 	const focusDelivery = new PromptComposerFocusDelivery();
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
-		return chat ? [chat.id, chat.status, chat.projectPath].join('\u0000') : '';
+		return chat ? [chat.id, chat.status, agentState.nodeId, agentState.projectPath || chat.projectPath].join('\u0000') : '';
 	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
@@ -157,9 +161,10 @@
 			return sessions.selectedChat;
 		},
 		get completionDemand() {
-			return ui.showFileMenu || ui.showSlashMenu;
+			return (localMachine && ui.showFileMenu) || ui.showSlashMenu;
 		},
 		projectResolution,
+		get executionTarget() { return { nodeId: agentState.nodeId, projectPath: agentState.projectPath || sessions.selectedChat?.projectPath || '' }; },
 	});
 	const selectedProjectTarget = $derived(projectState.target);
 	const selectedProjectResolution = $derived(projectState.snapshot);
@@ -443,7 +448,6 @@
 				};
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
-			const operation = result.prepared;
 			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
 				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
 				else void preambles.refreshIfLoaded();
@@ -451,13 +455,8 @@
 				await settleComposerAfterSnippet();
 				return 'cancelled';
 			}
-			if (
-				sessions.selectedChatId !== operation.chatId ||
-				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
-				result.response.contextProjectPath !== operation.projectPath ||
-				composerState.inputText !== sourceText
-			)
-				return 'cancelled';
+			if (!projectState.matchesSnippetContext(result.prepared, result.response)
+				|| composerState.inputText !== sourceText) return 'cancelled';
 			const replacement = range
 				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
 				: {
@@ -499,14 +498,8 @@
 				};
 			});
 			if (result.kind !== 'expanded') return;
-			const operation = result.prepared;
-			if (
-				sessions.selectedChatId !== operation.chatId ||
-				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
-				result.response.contextProjectPath !== operation.projectPath ||
-				composerState.inputText !== sourceText
-			)
-				return;
+			if (!projectState.matchesSnippetContext(result.prepared, result.response)
+				|| composerState.inputText !== sourceText) return;
 			composerState.inputText = result.response.expandedText;
 			queueCurrentDraft(result.response.expandedText);
 			ui.closeSlashMenu();
@@ -610,7 +603,7 @@
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || directAdmissionPending || promptTransformPending,
+			isDisabled || directAdmissionPending || promptTransformPending || !nodes.isReady(agentState.nodeId),
 			composerState.inputText,
 			composerState.images.length,
 		) && !hasQueuedAttachmentConflict,
@@ -642,20 +635,22 @@
 	const isActiveModelSelection = $derived(
 		Boolean(sessions.selectedChat) && sessions.selectedChat?.status !== 'draft',
 	);
-	const modelSelectorAgentIds = $derived.by(() => {
-		const allAgentIds = modelCatalog.getSelectableAgents();
+	function selectableAgentsForNode(nodeId: string) {
+		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
 		const selectedAgentId = sessions.selectedChat?.agentId;
 		if (localSettings.allowDirectChats || (selectedAgentId && isDirectAgentId(selectedAgentId))) {
 			return allAgentIds;
 		}
 		return nonDirectAgentIds(allAgentIds);
-	});
+	}
+	const modelSelectorAgentIds = $derived(selectableAgentsForNode(agentState.nodeId));
 	const modelSelectorMode: ModelSelectorMode = $derived(
 		isActiveModelSelection
 			? composerModelSelectorMode(modelCatalog, agentState.agentId, modelSelectorAgentIds)
 			: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 	);
 	const modelSelectorValue = $derived({
+		nodeId: agentState.nodeId,
 		agentId: agentState.agentId,
 		model: agentState.model,
 		apiProviderId: agentState.apiProviderId,
@@ -698,6 +693,7 @@
 			isPresented &&
 			promptRefinement.layerAttachment}
 	>
+		{#if localMachine}
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
 			projectPath={completionProjectPath}
@@ -714,6 +710,8 @@
 			onClose={() => ui.closeFileMenu()}
 		/>
 
+		{/if}
+		{#if !nodes.isReady(agentState.nodeId)}<p role="status" class="px-4 py-2 text-sm text-muted-foreground">{nodes.label(agentState.nodeId)} is unavailable.</p>{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
@@ -900,7 +898,7 @@
 						onChange={(next) => onModelChange?.(next)}
 						recents={recentSelectorOptions}
 						{preferRecentsOnOpen}
-						selectableAgentIds={modelSelectorAgentIds}
+						getSelectableAgentIds={selectableAgentsForNode}
 						align="end"
 						side="top"
 					/>
@@ -922,8 +920,9 @@
 		<SlashCommandMenu
 			bind:this={slashCommandMenu}
 			agent={agentState.agentId}
+			nodeId={agentState.nodeId}
 			projectPath={completionProjectPath}
-			chatId={sessions.selectedChatId}
+			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
 			isVisible={ui.showSlashMenu}
 			projectPending={Boolean(
 				selectedProjectTarget &&

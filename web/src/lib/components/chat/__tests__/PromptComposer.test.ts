@@ -1175,6 +1175,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
 		});
@@ -1217,6 +1218,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'draft expansion',
 		});
@@ -1236,6 +1238,7 @@ describe('PromptComposer focus', () => {
 				arguments: { type: 'default' },
 				context: {
 					type: 'new-chat',
+					nodeId: 'local',
 					chatId: '1787471053739199',
 					projectPath: '/workspace/project',
 				},
@@ -1251,6 +1254,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded',
 		});
@@ -1328,6 +1332,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1400,6 +1405,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1416,6 +1422,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
@@ -1478,6 +1485,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1517,6 +1525,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1533,6 +1542,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
@@ -1571,6 +1581,7 @@ describe('PromptComposer focus', () => {
 			sourceId: '00000000-0000-4000-8000-000000000001',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'manual',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'PREAMBLE',
 		});
@@ -1714,6 +1725,7 @@ describe('PromptComposer focus', () => {
 				sourceId: 'snippet-review',
 				sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 				shortName: 'review',
+				contextNodeId: 'local',
 				contextProjectPath: '/workspace/project',
 				expandedText: 'EXPANDED',
 			});
@@ -1766,6 +1778,7 @@ describe('PromptComposer focus', () => {
 			...identity,
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1794,6 +1807,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1887,6 +1901,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/two',
 			expandedText: 'must not apply',
 		});
@@ -1915,6 +1930,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/two',
 			expandedText: 'must not apply',
 		});
@@ -2002,6 +2018,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not cross chats',
 		});
@@ -2036,6 +2053,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextNodeId: 'local',
 			contextProjectPath: '/workspace/one',
 			expandedText: 'must not cross project paths',
 		});

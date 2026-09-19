@@ -193,6 +193,7 @@ export async function submitDraftRoute(
 	const { chatId, chat, startup } = context;
 	const submission = acceptedInputs.start({
 		chatId,
+		nodeId: startup.nodeId,
 		agentId: startup.agentId,
 		projectPath: chat.projectPath,
 		model: startup.model,

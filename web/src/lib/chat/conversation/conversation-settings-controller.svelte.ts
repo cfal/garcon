@@ -1,4 +1,5 @@
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import { withAgentSetting } from '$shared/agent-settings';
 import {
 	normalizeSupportedPermissionMode,
@@ -24,6 +25,7 @@ export interface ConversationSettingsControllerOptions {
 	get agentState(): Pick<
 		SessionControllerDeps['agentState'],
 		| 'agentId'
+		| 'nodeId'
 		| 'model'
 		| 'apiProviderId'
 		| 'modelEndpointId'
@@ -59,11 +61,13 @@ export class ConversationSettingsController {
 		const chatId = this.options.sessions.selectedChatId;
 		if (!chatId) return;
 		const currentAgentId = this.options.agentState.agentId;
-		if (next.agentId === currentAgentId) {
+		if (next.agentId === currentAgentId && effectiveNodeId(next.nodeId) === effectiveNodeId(this.options.agentState.nodeId)) {
 			this.handleModelChange(next.modelValue);
 			return;
 		}
-		void this.options.agentSwitch.switchAgent(chatId, next);
+		void this.options.agentSwitch.switchAgent(chatId, next).catch((error) => {
+			this.options.chatState.appendLocalNotice('error', errorDetail(error));
+		});
 	}
 
 	handleModelChange(model: string): void {

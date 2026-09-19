@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import NewChatForm from '../NewChatForm.svelte';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 	import {
@@ -177,6 +179,7 @@
 	);
 
 	setModelCatalog({
+		forNode() { return this; },
 		get version() {
 			return catalogVersion;
 		},

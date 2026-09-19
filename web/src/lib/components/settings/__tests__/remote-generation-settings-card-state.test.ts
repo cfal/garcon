@@ -45,6 +45,27 @@ function snapshot(): RemoteSettingsSnapshot {
 }
 
 describe('RemoteGenerationSettingsCardState', () => {
+	it.each(['chatTitle', 'agentSwitchCompaction', 'commitMessage', 'promptRefinement'] as const)('Auto clears the node/model selection but preserves %s options', async (settingsKey) => {
+		const current = snapshot();
+		const preferences = settingsKey === 'chatTitle' ? { enabled: false }
+			: settingsKey === 'agentSwitchCompaction' ? { enabled: true, contextWindowTokens: 200_000 as const }
+			: settingsKey === 'commitMessage' ? { customPrompt: 'Synthetic prompt', useCommonDirPrefix: true }
+			: { customPrompt: 'Synthetic prompt' };
+		current.ui[settingsKey] = {
+			agentId: 'codex', model: 'gpt-stale', apiProviderId: 'stale', modelEndpointId: 'stale_openai',
+			modelProtocol: 'openai-compatible', thinkingMode: 'medium', ...preferences,
+			nodeId: '22222222-2222-4222-8222-222222222222',
+		};
+		const update = vi.fn<RemoteGenerationSettingsStore['update']>(async () => current);
+		const cardState = new RemoteGenerationSettingsCardState({
+			remoteSettings: { snapshot: current, update },
+			modelCatalog: { selectionFor: () => null, selectionValueFor: (_agent, model) => model },
+			get settingsKey() { return settingsKey; }, get enabledLabel() { return undefined; },
+		});
+		await cardState.persistAuto();
+		expect(update).toHaveBeenCalledWith({ ui: { [settingsKey]: preferences } });
+	});
+
 	it('preserves stale endpoint routing when saving unrelated settings', async () => {
 		const current = snapshot();
 		const update = vi.fn().mockResolvedValue(current);
@@ -68,6 +89,7 @@ describe('RemoteGenerationSettingsCardState', () => {
 		expect(update).toHaveBeenCalledWith({
 			ui: {
 				promptRefinement: {
+					nodeId: 'local',
 					agentId: 'codex',
 					model: 'gpt-stale',
 					apiProviderId: 'stale',

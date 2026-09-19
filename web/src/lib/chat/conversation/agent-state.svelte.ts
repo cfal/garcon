@@ -50,6 +50,8 @@ export interface ModelSelectionPayload {
 }
 
 export class AgentState {
+	nodeId = $state('local');
+	projectPath = $state('');
 	agentId = $state<SessionAgentId>('claude');
 	model = $state('opus');
 	apiProviderId = $state<string | null>(null);

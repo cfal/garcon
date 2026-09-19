@@ -3,6 +3,7 @@ import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
 import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
+import { browseDirectory } from '$lib/api/files';
 import type { GitWorktreeItem } from '$lib/api/git';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
@@ -163,6 +164,7 @@ function modelsForAgent(agentId: string): ModelOption[] {
 }
 
 const mockModelCatalog = {
+	forNode() { return this; },
 	agentMetadata: {
 		claude: { label: 'Claude' },
 		codex: { label: 'Codex' },
@@ -272,6 +274,50 @@ describe('NewChatFormState', () => {
 		expect(formState.agentId).toBe('claude');
 		expect(formState.validationStatus).toBe('idle');
 		expect(formState.canSubmit).toBe(false);
+	});
+
+	it('uses remote project preferences without invoking local browse or worktree IO', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byNode: {
+			[nodeId]: { defaultPath: '/remote', pinnedPaths: ['/remote'], recentPaths: [] },
+		} } });
+		vi.mocked(browseDirectory).mockClear();
+		formState.firstMessage = 'Keep this draft';
+		formState.showBrowser = true;
+		formState.selectNode(nodeId);
+		expect(formState.projectPath).toBe('/remote');
+		expect(formState.pinnedProjectPaths).toEqual(['/remote']);
+		expect(formState.firstMessage).toBe('Keep this draft');
+		formState.handlePathFocus();
+		await formState.handleTabCompletion();
+		formState.openWorktreeModal();
+		await formState.loadWorktrees();
+		expect(formState.showBrowser).toBe(false);
+		expect(formState.worktreeModalOpen).toBe(false);
+		expect(browseDirectory).not.toHaveBeenCalled();
+		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
+		formState.dispose();
+	});
+
+	it('discards Local path validation after switching nodes with the same path text', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const oldResponse = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(oldResponse.promise).mockResolvedValueOnce({ valid: false, errorCode: 'path_not_found' });
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byNode: {
+			[nodeId]: { defaultPath: '/same', pinnedPaths: [], recentPaths: [] },
+		} } });
+		formState.projectPath = '/same';
+		formState.validatePath();
+		vi.advanceTimersByTime(300);
+		formState.selectNode(nodeId);
+		oldResponse.resolve({ valid: true, isGitRepo: true });
+		await Promise.resolve();
+		expect(formState.validationStatus).toBe('checking');
+		await vi.advanceTimersByTimeAsync(300);
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', { nodeId });
+		expect(formState.validationStatus).toBe('invalid');
+		expect(formState.gitRepoStatus).toBe('non-git');
+		formState.dispose();
 	});
 
 	it('ignores a worktree load superseded after the modal closes', async () => {
@@ -1157,7 +1203,7 @@ describe('NewChatFormState', () => {
 		vi.advanceTimersByTime(500);
 		await vi.runAllTimersAsync();
 
-		expect(chatsApi.validateStart).toHaveBeenCalledWith('/fake/path');
+		expect(chatsApi.validateStart).toHaveBeenCalledWith('/fake/path', { nodeId: 'local' });
 		expect(formState.validationStatus).toBe('valid');
 	});
 
@@ -1433,6 +1479,7 @@ describe('NewChatFormState preamble selection', () => {
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
 			projectPath: '/repo',
 			agentId: 'codex',
+			nodeId: 'local',
 			tags: [],
 		});
 
@@ -1497,6 +1544,7 @@ describe('NewChatFormState preamble selection', () => {
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
 			projectPath: '/repo',
 			agentId: 'claude',
+			nodeId: 'local',
 			tags: [],
 		});
 	});
@@ -1517,6 +1565,7 @@ describe('NewChatFormState preamble selection', () => {
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
 			projectPath: '/repo',
 			agentId: 'claude',
+			nodeId: 'local',
 			tags: [],
 		});
 	});

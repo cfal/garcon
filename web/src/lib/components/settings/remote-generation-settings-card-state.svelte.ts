@@ -1,4 +1,5 @@
 import { testGenerationModel } from '$lib/api/settings.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import { ApiError } from '$lib/api/client.js';
 import type {
 	ModelSelectorChange,
@@ -118,6 +119,19 @@ export class RemoteGenerationSettingsCardState {
 			: effective?.chatTitle?.enabled !== false;
 	}
 
+	get nodeId(): string { return effectiveNodeId(this.selectionOverride?.nodeId ?? this.effectiveSelection.nodeId); }
+
+	get isAuto(): boolean {
+		const saved = this.options.remoteSettings.snapshot?.ui[this.options.settingsKey];
+		return !this.selectionOverride && !saved?.nodeId && !saved?.agentId && !saved?.model;
+	}
+
+	async persistAuto(): Promise<void> {
+		const saved: GenerationSelectionUiSettings = { ...this.options.remoteSettings.snapshot?.ui[this.options.settingsKey] };
+		for (const key of ['nodeId', 'agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol', 'thinkingMode'] as const) delete saved[key];
+		if (await this.#saveUiSettings({ [this.options.settingsKey]: saved })) this.selectionOverride = null;
+	}
+
 	get contextWindowTokens(): AgentSwitchContextWindowTokens {
 		return this.options.remoteSettings.snapshot?.uiEffective.agentSwitchCompaction
 			?.contextWindowTokens ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS;
@@ -167,6 +181,7 @@ export class RemoteGenerationSettingsCardState {
 
 	get selectorValue(): ModelSelectorValue {
 		return {
+			nodeId: this.nodeId,
 			agentId: this.provider,
 			model: this.modelValue,
 			apiProviderId: this.apiProviderId,
@@ -200,6 +215,7 @@ export class RemoteGenerationSettingsCardState {
 					modelProtocol: this.modelProtocol,
 				};
 		return generationModelTestConfigurationKey({
+			nodeId: this.nodeId,
 			agentId: this.provider,
 			...configuration,
 			thinkingMode: this.thinkingMode,
@@ -234,6 +250,7 @@ export class RemoteGenerationSettingsCardState {
 	#selectionSettings(
 		overrides: GenerationSelectionUiSettings = {},
 	): GenerationSelectionUiSettings {
+		if (this.isAuto && Object.keys(overrides).length === 0) return {};
 		const nextProvider =
 			typeof overrides.agentId === 'string'
 				? (overrides.agentId as SessionAgentId)
@@ -257,6 +274,7 @@ export class RemoteGenerationSettingsCardState {
 		};
 		return {
 			agentId: nextProvider,
+			nodeId: effectiveNodeId(overrides.nodeId ?? this.nodeId),
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
@@ -317,6 +335,7 @@ export class RemoteGenerationSettingsCardState {
 		const previousOverride = this.selectionOverride;
 		const token = ++this.#selectionSaveToken;
 		this.selectionOverride = {
+			nodeId: effectiveNodeId(next.nodeId),
 			agentId: next.agentId,
 			model: next.modelValue,
 			apiProviderId: next.apiProviderId,
@@ -326,6 +345,7 @@ export class RemoteGenerationSettingsCardState {
 		};
 
 		const selection: GenerationSelectionUiSettings = {
+			nodeId: effectiveNodeId(next.nodeId),
 			agentId: next.agentId,
 			model: next.model,
 			apiProviderId: next.apiProviderId,

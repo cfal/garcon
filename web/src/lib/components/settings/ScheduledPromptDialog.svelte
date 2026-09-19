@@ -10,6 +10,7 @@
 		getChatSessions,
 		getLocalSettings,
 		getModelCatalog,
+		getExecutionNodes,
 		getRemoteSettings,
 	} from '$lib/context';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -30,20 +31,18 @@
 	}
 
 	let { open, scheduledPrompt, onSave, onClose }: Props = $props();
-	const modelCatalog = getModelCatalog();
+	const rootModelCatalog = getModelCatalog();
+	const executionNodes = getExecutionNodes();
 	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
-	const selectableAgentIds = $derived.by(() => {
-		const allAgentIds = modelCatalog.getSelectableAgents();
-		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
-	});
 	const knownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
 	);
 
 	function createForm(): ScheduledPromptFormState {
-		return new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions, {
+		return new ScheduledPromptFormState(rootModelCatalog, remoteSettings, sessions, {
+			executionNodes,
 			get selectableAgentIds() {
 				return selectableAgentIds;
 			},
@@ -51,6 +50,12 @@
 	}
 
 	let form = $state(createForm());
+	const modelCatalog = $derived(rootModelCatalog.forNode(form.startup.nodeId));
+	function selectableAgentsForNode(nodeId: string) {
+		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	}
+	const selectableAgentIds = $derived(selectableAgentsForNode(form.startup.nodeId));
 	let pickerOpen = $state(false);
 	let isMobile = $state(false);
 	let initialization = 0;
@@ -325,7 +330,7 @@
 						startup={form.startup}
 						{modelCatalog}
 						{remoteSettings}
-						{selectableAgentIds}
+						getSelectableAgentIds={selectableAgentsForNode}
 						prompt={form.prompt}
 						promptError={form.promptError}
 						{knownTags}

@@ -18,6 +18,7 @@
 	const COMMAND_LIST_HEIGHT = 240;
 
 	interface Props {
+		nodeId?: string;
 		agent: string;
 		projectPath: string;
 		chatId?: string | null;
@@ -34,6 +35,7 @@
 	}
 
 	let {
+		nodeId = 'local',
 		agent,
 		projectPath,
 		chatId = null,
@@ -59,11 +61,12 @@
 
 	let fetchedKey = '';
 	let activeLoad: AbortController | null = null;
+	const contextKey = $derived(JSON.stringify([nodeId, agent, chatId, projectPath]));
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when the agent/project identity changes.
 	$effect(() => {
-		const key = `${agent}::${chatId ?? ''}::${projectPath}`;
+		const key = contextKey;
 		if (!projectPath || !isVisible) return;
 		if (fetchedKey === key) return;
 		isLoading = true;
@@ -72,7 +75,7 @@
 		const controller = new AbortController();
 		activeLoad = controller;
 
-		getSlashCommands({ agent, chatId, projectPath }, { signal: controller.signal })
+		getSlashCommands({ nodeId, agent, chatId, projectPath }, { signal: controller.signal })
 			.then((commands) => {
 				if (!controller.signal.aborted) {
 					allCommands = commands;
@@ -110,14 +113,13 @@
 			return true;
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));
-		const key = `${agent}::${chatId ?? ''}::${projectPath}`;
 		const discovered =
 			projectPath &&
 			!projectPending &&
 			!projectUnavailable &&
 			!isLoading &&
 			!loadFailed &&
-			fetchedKey === key
+			fetchedKey === contextKey
 				? allCommands.filter(
 						(command) => command.name !== 'in' && !builtinNames.has(command.name),
 					)

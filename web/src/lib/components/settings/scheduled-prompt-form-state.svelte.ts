@@ -1,4 +1,5 @@
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -23,6 +24,7 @@ import * as m from '$lib/paraglide/messages.js';
 const MINUTES_BY_UNIT = { minutes: 1, hours: 60, days: 1440 } as const;
 
 export interface ScheduledPromptFormStateOptions {
+	executionNodes?: ExecutionNodesStore;
 	get selectableAgentIds(): readonly SessionAgentId[];
 }
 
@@ -56,6 +58,7 @@ export class ScheduledPromptFormState {
 	) {
 		this.startup = new NewChatFormState({
 			modelCatalog,
+			executionNodes: options.executionNodes,
 			remoteSettings,
 			get selectableAgentIds() {
 				return options.selectableAgentIds;
@@ -97,6 +100,7 @@ export class ScheduledPromptFormState {
 		}
 		return (
 			this.startup.settingsLoaded &&
+			this.startup.nodeReady &&
 			this.options.selectableAgentIds.includes(this.startup.agentId) &&
 			this.startup.validationStatus === 'valid' &&
 			this.startup.resolvedModelSelection !== null
@@ -151,6 +155,8 @@ export class ScheduledPromptFormState {
 			this.busyBehavior = scheduledPrompt.target.busyBehavior;
 			return;
 		}
+		this.startup.selectNode(scheduledPrompt.target.nodeId);
+		await this.modelCatalog.forNode(this.startup.nodeId).refreshIfStale();
 		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
 			model: scheduledPrompt.target.model,
 			apiProviderId: scheduledPrompt.target.apiProviderId,
@@ -188,6 +194,7 @@ export class ScheduledPromptFormState {
 			schedule,
 			target: {
 				type: 'new-chat',
+				...(this.startup.nodeId === 'local' ? {} : { nodeId: this.startup.nodeId }),
 				agentId: this.startup.agentId,
 				projectPath: this.startup.trimmedPath,
 				model: selection.model,

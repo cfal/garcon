@@ -325,6 +325,7 @@ describe('RemoteSettingsSection', () => {
 						modelProtocol: null,
 						thinkingMode: 'none',
 						contextWindowTokens: 200_000,
+						nodeId: 'local',
 					},
 				},
 			});

@@ -16,6 +16,7 @@ export interface ModelSelectorMode {
 }
 
 export interface ModelSelectorValue {
+	nodeId?: string | null;
 	agentId: SessionAgentId;
 	model: string;
 	apiProviderId?: string | null;
@@ -25,6 +26,7 @@ export interface ModelSelectorValue {
 }
 
 export interface ModelSelectorChange {
+	nodeId?: string;
 	agentId: SessionAgentId;
 	modelValue: string;
 	model: string;

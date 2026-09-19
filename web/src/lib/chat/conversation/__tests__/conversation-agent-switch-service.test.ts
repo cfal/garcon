@@ -57,6 +57,8 @@ function createDeps(chat = createChat()) {
 	const replaceSelection = vi.fn();
 	const resetToDurable = vi.fn(() => claudeSelection());
 	const agentState = {
+		nodeId: 'local',
+		projectPath: chat.projectPath,
 		agentId: 'claude',
 		model: 'sonnet',
 		apiProviderId: null as string | null,
@@ -99,6 +101,8 @@ function createDeps(chat = createChat()) {
 			selectionValueFor: vi.fn((_agentId, model) => model),
 		},
 		executionDraft: { replaceSelection, resetToDurable },
+		modelCatalogForNode(): ConversationAgentSwitchDeps['modelCatalog'] { return this.modelCatalog; },
+		chooseProjectPath: vi.fn(async (_chatId: string, _nodeId: string, path: string) => path),
 		getExecutionDefaults: vi.fn((agentId: string) => ({
 			permissionMode: 'bypassPermissions' as const,
 			thinkingMode: 'high' as const,
@@ -118,6 +122,8 @@ describe('ConversationAgentSwitchService', () => {
 		});
 
 		expect(replaceSelection).toHaveBeenCalledWith({
+			nodeId: 'local',
+			projectPath: '/workspace/project',
 			agentId: 'codex',
 			model: 'gpt-5.5',
 			apiProviderId: 'openai',

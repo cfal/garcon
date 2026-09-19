@@ -617,6 +617,8 @@ function createDeps(chat = createRunningChat()) {
 			restoreDraft: vi.fn(),
 		},
 		agentState: {
+			nodeId: 'local',
+			projectPath: chat.projectPath,
 			setAgentId: vi.fn(function (this: { agentId: string }, agentId: string) {
 				this.agentId = agentId;
 			}),
@@ -693,6 +695,7 @@ function createDeps(chat = createRunningChat()) {
 				(agentId: string) => agentId === 'claude' || agentId === 'codex' || agentId === 'amp',
 			),
 		},
+		modelCatalogForNode(): SessionControllerDeps['modelCatalog'] { return this.modelCatalog; },
 		getExecutionDefaults: (agentId: string) => ({
 			permissionMode: 'default',
 			thinkingMode: 'none',

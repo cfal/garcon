@@ -3,6 +3,8 @@
 // the config payload used to start a session.
 
 import { browseDirectory } from '$lib/api/files.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
+import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import {
 	ImageAttachmentState,
@@ -46,6 +48,7 @@ import * as m from '$lib/paraglide/messages.js';
 
 export interface NewChatFormStateOptions {
 	modelCatalog: ModelCatalogStore;
+	executionNodes?: ExecutionNodesStore;
 	remoteSettings: RemoteSettingsStore;
 	get selectableAgentIds(): readonly SessionAgentId[];
 }
@@ -53,6 +56,7 @@ export interface NewChatFormStateOptions {
 export class NewChatFormState {
 	// Agent and model
 	agentId = $state<SessionAgentId>(DEFAULT_AGENT_ID);
+	nodeId = $state('local');
 	selectedModelsByAgent = $state<Record<string, string>>({});
 	#selectedModelTargetsByAgent = $state<Record<string, ResolvedModelSelection>>({});
 	#catalogRefreshCompleted = $state(false);
@@ -119,7 +123,31 @@ export class NewChatFormState {
 	// Derived accessors
 
 	get #modelCatalog(): ModelCatalogStore {
-		return this.#options.modelCatalog;
+		return this.nodeId === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forNode(this.nodeId);
+	}
+
+	get localMachine(): boolean { return this.nodeId === 'local'; }
+	get nodeReady(): boolean { return this.#options.executionNodes?.isReady(this.nodeId) ?? true; }
+
+	selectNode(value?: string | null): void {
+		const nodeId = effectiveNodeId(value);
+		if (nodeId === this.nodeId) return;
+		this.nodeId = nodeId;
+		this.#startupSelectionAutomatic = false;
+		this.#clearValidation();
+		this.#cancelWorktreeLoad();
+		this.worktreeModalOpen = false;
+		this.showBrowser = false;
+		this.resetTabCompletions();
+		this.selectedModelsByAgent = {};
+		this.#selectedModelTargetsByAgent = {};
+		const snapshot = this.#remoteSettings.snapshot;
+		const preferences = snapshot?.paths.byNode?.[nodeId];
+		this.projectBasePath = this.localMachine ? snapshot?.projectBasePath ?? '' : this.#options.executionNodes?.get(nodeId)?.projectBasePath ?? '';
+		this.pinnedProjectPaths = this.localMachine ? snapshot?.paths.pinnedProjectPaths ?? [] : [...preferences?.pinnedPaths ?? []];
+		this.browseStartPath = this.localMachine ? snapshot?.paths.browseStartPath ?? '' : '';
+		this.projectPath = (this.localMachine ? snapshot?.paths.recentProjectPaths[0] || this.browseStartPath : preferences?.defaultPath || preferences?.recentPaths[0]) || this.projectBasePath;
+		this.validatePath();
 	}
 
 	get #remoteSettings(): RemoteSettingsStore {
@@ -149,6 +177,7 @@ export class NewChatFormState {
 	get canSubmit(): boolean {
 		return (
 			this.settingsLoaded &&
+			this.nodeReady &&
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
@@ -426,6 +455,7 @@ export class NewChatFormState {
 	// Worktree modal
 
 	openWorktreeModal(): void {
+		if (!this.localMachine) return;
 		this.worktreeModalOpen = true;
 		this.worktreeError = null;
 		this.worktreeItems = [];
@@ -439,6 +469,7 @@ export class NewChatFormState {
 	}
 
 	async loadWorktrees(): Promise<void> {
+		if (!this.localMachine) return;
 		const projectPath = this.trimmedPath;
 		if (!projectPath) return;
 
@@ -486,6 +517,7 @@ export class NewChatFormState {
 	}
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
+		if (!this.localMachine) return false;
 		if (!this.trimmedPath) return false;
 		this.isCreatingWorktree = true;
 		this.worktreeError = null;
@@ -514,6 +546,7 @@ export class NewChatFormState {
 	/** Debounced validation of the project path against the server. */
 	validatePath(): void {
 		const path = this.trimmedPath;
+		const nodeId = this.nodeId;
 		if (!path) {
 			this.#clearValidation();
 			return;
@@ -529,7 +562,7 @@ export class NewChatFormState {
 
 		this.#validationTimer = setTimeout(async () => {
 			try {
-				const data = await validateStart(path);
+				const data = await validateStart(path, { nodeId });
 				if (requestVersion !== this.#validationRequestVersion) return;
 				if (data.valid) {
 					this.validationStatus = 'valid';
@@ -545,7 +578,7 @@ export class NewChatFormState {
 			} catch (err) {
 				if (requestVersion !== this.#validationRequestVersion) return;
 				this.validationStatus = 'invalid';
-				this.validationError = m.chat_new_chat_errors_invalid_directory();
+				this.validationError = err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
 				this.gitRepoStatus = 'non-git';
 				this.preambles.invalidatePreview();
 				console.warn('[NewChatFormState] Path validation request failed', err);
@@ -577,19 +610,29 @@ export class NewChatFormState {
 
 	async togglePinnedPath(): Promise<void> {
 		const path = this.trimmedPath;
+		const nodeId = this.nodeId;
 		if (!path || this.isUpdatingPinnedPath) return;
 		const previous = this.pinnedProjectPaths;
 		const next = nextPinnedProjectPaths(this.pinnedProjectPaths, path);
 		this.pinnedProjectPaths = next;
 		this.isUpdatingPinnedPath = true;
 		try {
+			if (nodeId !== 'local') {
+				const snapshot = await this.#remoteSettings.ensureLoaded();
+				await this.#remoteSettings.update({ paths: { byNode: { ...snapshot.paths.byNode, [nodeId]: {
+					...snapshot.paths.byNode?.[nodeId], recentPaths: snapshot.paths.byNode?.[nodeId]?.recentPaths ?? [], pinnedPaths: next,
+				} } } });
+				return;
+			}
 			const snap = await savePinnedProjectPathsOptimistically(this.#remoteSettings, next, {
 				browseStartPath: this.browseStartPath || path,
 			});
-			this.pinnedProjectPaths = snap.paths.pinnedProjectPaths;
-			this.browseStartPath = snap.paths.browseStartPath;
+			if (nodeId === this.nodeId) {
+				this.pinnedProjectPaths = snap.paths.pinnedProjectPaths;
+				this.browseStartPath = snap.paths.browseStartPath;
+			}
 		} catch (err) {
-			this.pinnedProjectPaths = previous;
+			if (nodeId === this.nodeId) this.pinnedProjectPaths = previous;
 			console.warn('[NewChatFormState] Failed to persist pinned project paths', err);
 		} finally {
 			this.isUpdatingPinnedPath = false;
@@ -635,6 +678,7 @@ export class NewChatFormState {
 
 	/** Validates and builds the config, returning null if validation fails. */
 	buildConfig(): NewChatConfig | null {
+		if (!this.nodeReady) { this.error = 'Execution node is unavailable'; return null; }
 		if (!this.settingsLoaded) {
 			this.error = m.chat_new_chat_errors_defaults_loading();
 			return null;
@@ -666,6 +710,7 @@ export class NewChatFormState {
 
 		return {
 			agentId: this.agentId,
+			nodeId: this.nodeId,
 			projectPath: this.trimmedPath,
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
@@ -789,6 +834,7 @@ export class NewChatFormState {
 	): RecentAgentSetting | null {
 		const selectable = new Set(selectableAgentIds);
 		for (const recent of recents) {
+			if (effectiveNodeId(recent.nodeId) !== this.nodeId) continue;
 			const agentId = recent.agentId as SessionAgentId;
 			if (!selectable.has(agentId)) continue;
 			const model = this.#modelCatalog.getModelForSelection(
@@ -864,7 +910,7 @@ export class NewChatFormState {
 	// Auto-open browser on first path focus
 
 	handlePathFocus(): void {
-		this.showBrowser = true;
+		if (this.localMachine) this.showBrowser = true;
 	}
 
 	// Tab-completion for the path input
@@ -874,6 +920,7 @@ export class NewChatFormState {
 
 	/** Handles Tab key in the path input. Completes the path like a terminal. */
 	async handleTabCompletion(): Promise<void> {
+		if (!this.localMachine) return;
 		const raw = this.projectPath;
 		if (!raw) return;
 
@@ -891,6 +938,7 @@ export class NewChatFormState {
 
 		try {
 			const entries = await browseDirectory(parentDir);
+			if (!this.localMachine || this.projectPath !== raw) return;
 			const matches = partial
 				? entries.filter((e) => e.name.toLowerCase().startsWith(partial))
 				: entries;

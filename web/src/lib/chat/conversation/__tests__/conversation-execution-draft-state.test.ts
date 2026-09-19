@@ -9,6 +9,7 @@ import { chatExecutionDraftStorageKey } from '$lib/utils/local-persistence.js';
 function selection(agentId = 'claude'): ConversationExecutionSelection {
 	return {
 		agentId,
+		nodeId: 'local',
 		model: agentId === 'claude' ? 'sonnet' : 'gpt-5.5',
 		apiProviderId: agentId === 'claude' ? null : 'openai',
 		modelEndpointId: null,

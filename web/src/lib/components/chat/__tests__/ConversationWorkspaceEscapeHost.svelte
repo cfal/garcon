@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import { onDestroy, tick } from 'svelte';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import ConversationWorkspace from '../ConversationWorkspace.svelte';
@@ -162,6 +164,7 @@
 	} as never);
 	setRemoteSettings({} as never);
 	setModelCatalog({
+		forNode() { return this; },
 		selectionValueFor: (_agentId: string, model: string) => model,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,

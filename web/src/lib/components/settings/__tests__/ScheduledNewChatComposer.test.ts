@@ -16,6 +16,8 @@ const ScheduledNewChatComposerTestHost = (await import('./ScheduledNewChatCompos
 
 function makeStartup(modelSelectionError: string | null = null): NewChatFormState {
 	return {
+		nodeId: 'local',
+		localMachine: true,
 		agentId: 'claude',
 		modelValue: 'opus',
 		modelSelectionTarget: null,

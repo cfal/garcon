@@ -11,7 +11,7 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
-		selectableAgentIds?: readonly SessionAgentId[];
+		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -21,7 +21,7 @@
 		value,
 		mode,
 		onChange,
-		selectableAgentIds,
+		getSelectableAgentIds,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -32,7 +32,7 @@
 	{value}
 	mode={{ ...mode, surface: 'settings' }}
 	{onChange}
-	{selectableAgentIds}
+	{getSelectableAgentIds}
 	{disabled}
 	{align}
 	{side}

@@ -33,6 +33,22 @@ describe('SlashCommandMenu', () => {
 		mockedGetSlashCommands.mockReset();
 	});
 
+	it('refetches commands for a new node and discards the old node response', async () => {
+		const stale = deferred<Awaited<ReturnType<typeof getSlashCommands>>>();
+		mockedGetSlashCommands.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
+			{ name: 'remote-command', source: 'command' },
+		]);
+		const props = { ...baseProps, projectPath: '/repo', isVisible: true, query: '-command', onSelect: vi.fn(), onClose: vi.fn() };
+		const view = render(SlashCommandMenuTestHost, props);
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledTimes(1));
+		await view.rerender({ ...props, nodeId: '11111111-1111-4111-8111-111111111111' });
+		expect(await screen.findByText('/remote-command')).toBeTruthy();
+		stale.resolve([{ name: 'local-command', source: 'command' }]);
+		await tick();
+		expect(screen.queryByText('/local-command')).toBeNull();
+		expect(screen.getByText('/remote-command')).toBeTruthy();
+	});
+
 	it('lists the built-in compact command matching the query', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
@@ -330,7 +346,7 @@ describe('SlashCommandMenu', () => {
 
 		expect(await screen.findByText('/skill-11')).toBeTruthy();
 		expect(mockedGetSlashCommands).toHaveBeenCalledWith(
-			{ agent: 'codex', chatId: null, projectPath: '/repo' },
+			{ nodeId: 'local', agent: 'codex', chatId: null, projectPath: '/repo' },
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 	});

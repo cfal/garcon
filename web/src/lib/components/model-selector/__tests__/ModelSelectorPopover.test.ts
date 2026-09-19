@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ModelSelectorPopoverHost from './ModelSelectorPopoverHost.svelte';
 import type { ModelSelectorRecentOption } from '../model-selector-types';
 import { DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID } from '$shared/agents';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 
 let originalMatchMedia: typeof window.matchMedia | undefined;
 
@@ -162,6 +163,30 @@ describe('ModelSelectorPopover', () => {
 		}
 	});
 
+	for (const committedNode of [localExecutionNode, remoteExecutionNode]) {
+		it(`keeps the ${committedNode.label} trigger unchanged while browsing another node`, async () => {
+			const onChange = vi.fn();
+			render(ModelSelectorPopoverHost, {
+				value: { nodeId: committedNode.id, agentId: 'claude', model: 'model-0' },
+				mode: { agent: 'select', source: 'select', surface: 'composer' },
+				onChange,
+				nodes: [localExecutionNode, remoteExecutionNode],
+			});
+			const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
+			const label = trigger.textContent;
+			await fireEvent.click(trigger);
+			await fireEvent.change(await screen.findByRole('combobox', { name: 'Execution node' }), {
+				target: { value: committedNode.id === 'local' ? remoteExecutionNode.id : 'local' },
+			});
+			await waitFor(() => {
+				expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Execution node' }).value)
+					.not.toBe(committedNode.id);
+			});
+			expect(trigger.textContent).toBe(label);
+			expect(onChange).not.toHaveBeenCalled();
+		});
+	}
+
 	it('commits normal model selection immediately and closes', async () => {
 		const onChange = vi.fn();
 
@@ -178,6 +203,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: 'claude',
 				modelValue: 'model-119',
 				model: 'model-119',
@@ -233,6 +259,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: 'claude',
 				modelValue: 'model-119',
 				model: 'model-119',
@@ -282,6 +309,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: 'claude',
 				modelValue: 'endpoint-model',
 				model: 'endpoint-model',
@@ -317,6 +345,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: 'claude',
 				modelValue: 'endpoint-model',
 				model: 'endpoint-model',
@@ -355,6 +384,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: 'claude',
 				modelValue: 'acme-claude:endpoint-model',
 				model: 'endpoint-model',
@@ -391,6 +421,7 @@ describe('ModelSelectorPopover', () => {
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 				modelValue: 'removed-from-catalog',
 				model: 'removed-from-catalog',
@@ -572,6 +603,7 @@ describe('ModelSelectorPopover', () => {
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledTimes(1);
 			expect(onChange).toHaveBeenCalledWith({
+				nodeId: 'local',
 				agentId: 'claude',
 				modelValue: 'acme-claude:endpoint-model',
 				model: 'endpoint-model',
@@ -716,6 +748,7 @@ describe('ModelSelectorPopover', () => {
 		);
 
 		expect(onChange).toHaveBeenCalledWith({
+			nodeId: 'local',
 			agentId: 'codex',
 			modelValue: 'codex-model-1',
 			model: 'codex-model-1',
@@ -849,6 +882,7 @@ describe('ModelSelectorPopover', () => {
 		);
 
 		expect(onChange).toHaveBeenCalledWith({
+			nodeId: 'local',
 			agentId: 'claude',
 			modelValue: 'acme-claude:endpoint-model',
 			model: 'endpoint-model',
@@ -894,7 +928,7 @@ describe('ModelSelectorPopover', () => {
 		expect(contentClass).toContain('top-[var(--app-viewport-center-y)]');
 		expect(contentClass).toContain('translate-y-[-50%]');
 		expect(contentClass).toContain('safe-viewport-dialog');
-		expect(contentClass).toContain('h-[min(32rem,calc(var(--app-height)-1rem))]');
+		expect(contentClass).toContain('h-[min(36rem,calc(var(--app-height)-1rem))]');
 		expect(contentClass).toContain('overflow-hidden');
 		expect(contentClass).toContain('p-0');
 		expect(contentClass).not.toContain('top-auto');
