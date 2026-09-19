@@ -17,6 +17,7 @@ export function buildClaudeEndpointRuntime(
       ...(endpoint.credential ? { ANTHROPIC_AUTH_TOKEN: endpoint.credential } : {}),
       ANTHROPIC_API_KEY: '',
       CLAUDE_CODE_SUBAGENT_MODEL: resolveClaudeModel(endpoint.selection.model).model,
+      CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
     },
   };
 }

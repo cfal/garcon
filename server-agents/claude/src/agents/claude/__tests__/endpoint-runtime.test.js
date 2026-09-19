@@ -32,6 +32,7 @@ describe('buildClaudeEndpointRuntime', () => {
         ANTHROPIC_AUTH_TOKEN: 'secret',
         ANTHROPIC_API_KEY: '',
         CLAUDE_CODE_SUBAGENT_MODEL: 'acme-claude',
+        CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
       },
     });
   });
@@ -42,6 +43,7 @@ describe('buildClaudeEndpointRuntime', () => {
         ANTHROPIC_BASE_URL: 'https://api.acme.test/anthropic',
         ANTHROPIC_API_KEY: '',
         CLAUDE_CODE_SUBAGENT_MODEL: 'acme-claude',
+        CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
       },
     });
   });
