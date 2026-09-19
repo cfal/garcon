@@ -1550,6 +1550,8 @@
 	"settings_theme_profile_phosphor_dark": "Phosphor Dark",
 	"settings_theme_profile_colorblind_light": "Colorblind Light",
 	"settings_theme_profile_colorblind_dark": "Colorblind Dark",
+	"settings_theme_profile_owl_light": "Owl Daybreak",
+	"settings_theme_profile_owl_dark": "Owl Nightfall",
 	"settings_chat_generate_titles": "Automatically generate chat titles",
 	"settings_chat_title_provider": "Title provider",
 	"settings_chat_title_model": "Title model",

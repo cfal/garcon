@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RendererPalette } from '$lib/theme/themes.js';
 import MermaidBlock from './MermaidBlockTestHost.svelte';
 import { renderMermaid } from '../mermaid-loader';
 
@@ -11,8 +12,8 @@ vi.mock('../mermaid-loader', () => ({
 		rendererPalette,
 	}: {
 		colorScheme: 'light' | 'dark';
-		rendererPalette: 'standard' | 'colorblind';
-	}) => `${rendererPalette === 'colorblind' ? 'colorblind' : 'standard'}-${colorScheme}`,
+		rendererPalette: RendererPalette;
+	}) => `${rendererPalette}-${colorScheme}`,
 }));
 
 const mockedRenderMermaid = vi.mocked(renderMermaid);

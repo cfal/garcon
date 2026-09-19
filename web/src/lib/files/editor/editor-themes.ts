@@ -136,11 +136,83 @@ const COLORBLIND_DARK_THEME: Extension = [
 	),
 ];
 
+const OWL_LIGHT_THEME: Extension = [
+	EditorView.theme(
+		{
+			'&': { color: '#403f53', backgroundColor: '#fbfbfb' },
+			'.cm-content': { caretColor: '#08757a' },
+			'.cm-cursor, .cm-dropCursor': { borderLeftColor: '#08757a' },
+			'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+				backgroundColor: '#d3e8f8',
+			},
+			'.cm-activeLine': { backgroundColor: '#f0f0f0' },
+			'.cm-gutters': { color: '#5f6b73', backgroundColor: '#f0f0f0' },
+			'.cm-activeLineGutter': { color: '#403f53', backgroundColor: '#dfe8ec' },
+		},
+		{ dark: false },
+	),
+	syntaxHighlighting(
+		HighlightStyle.define([
+			{ tag: tags.comment, color: '#5f6b73', fontStyle: 'italic' },
+			{ tag: tags.invalid, color: '#9f2f2f', textDecoration: 'underline wavy' },
+			{ tag: [tags.keyword, tags.operatorKeyword], color: '#7b349b' },
+			{ tag: [tags.string, tags.regexp, tags.inserted], color: '#315fbd' },
+			{ tag: [tags.number, tags.bool, tags.null, tags.atom], color: '#8c176f' },
+			{ tag: [tags.typeName, tags.className], color: '#315fbd' },
+			{
+				tag: [tags.function(tags.variableName), tags.definition(tags.variableName)],
+				color: '#7b349b',
+			},
+			{ tag: [tags.operator, tags.special(tags.string)], color: '#08757a' },
+			{ tag: tags.deleted, color: '#9f2f2f' },
+			{ tag: tags.strong, fontWeight: 'bold' },
+			{ tag: tags.emphasis, fontStyle: 'italic' },
+		]),
+	),
+];
+
+const OWL_DARK_THEME: Extension = [
+	EditorView.theme(
+		{
+			'&': { color: '#d6deeb', backgroundColor: '#011627' },
+			'.cm-content': { caretColor: '#7fdbca' },
+			'.cm-cursor, .cm-dropCursor': { borderLeftColor: '#7fdbca' },
+			'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+				backgroundColor: '#1d3b53',
+			},
+			'.cm-activeLine': { backgroundColor: '#0b253a' },
+			'.cm-gutters': { color: '#90a7b2', backgroundColor: '#00111f' },
+			'.cm-activeLineGutter': { color: '#d6deeb', backgroundColor: '#0b2942' },
+		},
+		{ dark: true },
+	),
+	syntaxHighlighting(
+		HighlightStyle.define([
+			{ tag: tags.comment, color: '#90a7b2', fontStyle: 'italic' },
+			{ tag: tags.invalid, color: '#ef5350', textDecoration: 'underline wavy' },
+			{ tag: [tags.keyword, tags.operatorKeyword], color: '#c792ea' },
+			{ tag: [tags.string, tags.regexp, tags.inserted], color: '#ecc48d' },
+			{ tag: [tags.number, tags.bool, tags.null, tags.atom], color: '#f78c6c' },
+			{ tag: [tags.typeName, tags.className], color: '#7fdbca' },
+			{
+				tag: [tags.function(tags.variableName), tags.definition(tags.variableName)],
+				color: '#82aaff',
+			},
+			{ tag: [tags.operator, tags.special(tags.string)], color: '#7fdbca' },
+			{ tag: tags.deleted, color: '#ef5350' },
+			{ tag: tags.strong, fontWeight: 'bold' },
+			{ tag: tags.emphasis, fontStyle: 'italic' },
+		]),
+	),
+];
+
 const EDITOR_THEME_EXTENSIONS: Record<EditorThemeId, Extension> = {
 	'standard-light': STANDARD_LIGHT_CONTRAST_STYLE,
 	'standard-dark': STANDARD_DARK_THEME,
 	'colorblind-light': COLORBLIND_LIGHT_THEME,
 	'colorblind-dark': COLORBLIND_DARK_THEME,
+	'owl-light': OWL_LIGHT_THEME,
+	'owl-dark': OWL_DARK_THEME,
 };
 
 export function resolveEditorThemeId(presentation: ThemeRendererPresentation): EditorThemeId {

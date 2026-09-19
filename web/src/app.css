@@ -5,6 +5,8 @@
 @import './lib/theme/profiles/phosphor-dark.css';
 @import './lib/theme/profiles/colorblind-light.css';
 @import './lib/theme/profiles/colorblind-dark.css';
+@import './lib/theme/profiles/owl-light.css';
+@import './lib/theme/profiles/owl-dark.css';
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:where(.dark, .dark *));

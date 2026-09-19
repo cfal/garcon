@@ -27,11 +27,13 @@ describe('theme profiles', () => {
 			'classic-light',
 			'phosphor-light',
 			'colorblind-light',
+			'owl-light',
 		]);
 		expect(THEME_PROFILES.filter(({ id }) => isDarkThemeId(id)).map(({ id }) => id)).toEqual([
 			'classic-dark',
 			'phosphor-dark',
 			'colorblind-dark',
+			'owl-dark',
 		]);
 	});
 
@@ -84,5 +86,6 @@ describe('theme profiles', () => {
 		expect(rendererThemeIdFor({ colorScheme: 'dark', rendererPalette: 'colorblind' })).toBe(
 			'colorblind-dark',
 		);
+		expect(rendererThemeIdFor({ colorScheme: 'light', rendererPalette: 'owl' })).toBe('owl-light');
 	});
 });

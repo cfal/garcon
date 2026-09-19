@@ -83,9 +83,56 @@ const COLORBLIND_LIGHT_THEME: ITheme = {
 	brightCyan: '#007889',
 };
 
+const OWL_LIGHT_THEME: ITheme = {
+	foreground: '#403f53',
+	cursor: '#08757a',
+	cursorAccent: '#fbfbfb',
+	selectionBackground: '#d3e8f8',
+	black: '#111111',
+	red: '#9f2f2f',
+	green: '#176c4b',
+	yellow: '#735d00',
+	blue: '#315fbd',
+	magenta: '#7b349b',
+	cyan: '#08757a',
+	white: '#403f53',
+	brightBlack: '#5f6b73',
+	brightRed: '#a33b3b',
+	brightGreen: '#1b7552',
+	brightYellow: '#7a6300',
+	brightBlue: '#3767c5',
+	brightMagenta: '#843ba4',
+	brightCyan: '#0a7d82',
+	brightWhite: '#403f53',
+};
+
+const OWL_DARK_THEME: ITheme = {
+	foreground: '#d6deeb',
+	cursor: '#7fdbca',
+	cursorAccent: '#011627',
+	selectionBackground: '#1d3b53',
+	black: '#000000',
+	red: '#ef5350',
+	green: '#22da6e',
+	yellow: '#ecc48d',
+	blue: '#82aaff',
+	magenta: '#c792ea',
+	cyan: '#7fdbca',
+	white: '#d6deeb',
+	brightBlack: '#90a7b2',
+	brightRed: '#ff6b68',
+	brightGreen: '#5ce68e',
+	brightYellow: '#ffdd9a',
+	brightBlue: '#a4c2ff',
+	brightMagenta: '#ddb0f5',
+	brightCyan: '#9ae9da',
+	brightWhite: '#ffffff',
+};
+
 const TERMINAL_THEMES: Record<RendererPalette, Record<ColorScheme, ITheme>> = {
 	standard: { light: STANDARD_LIGHT_THEME, dark: STANDARD_DARK_THEME },
 	colorblind: { light: COLORBLIND_LIGHT_THEME, dark: COLORBLIND_DARK_THEME },
+	owl: { light: OWL_LIGHT_THEME, dark: OWL_DARK_THEME },
 };
 
 const DEFAULT_PRESENTATION: TerminalThemePresentation = {

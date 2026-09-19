@@ -82,8 +82,8 @@ describe('OnboardingWizard', () => {
 
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
-		expect(lightSelect.querySelectorAll('option')).toHaveLength(3);
-		expect(darkSelect.querySelectorAll('option')).toHaveLength(3);
+		expect(lightSelect.querySelectorAll('option')).toHaveLength(4);
+		expect(darkSelect.querySelectorAll('option')).toHaveLength(4);
 
 		await fireEvent.change(lightSelect, { target: { value: 'classic-light' } });
 		await fireEvent.change(darkSelect, { target: { value: 'colorblind-dark' } });

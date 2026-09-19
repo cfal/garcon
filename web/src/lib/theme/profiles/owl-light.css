@@ -1,0 +1,269 @@
+:root:where([data-theme='owl-light']) {
+	--background: 0 0% 98.4%;
+	--foreground: 243 15% 15%;
+	--card: 0 0% 100%;
+	--card-foreground: 243 14% 29%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 243 14% 29%;
+	--primary: 182 86% 33%;
+	--primary-foreground: 0 0% 7%;
+	--brand-mark-surface: 243 14% 29%;
+	--brand-mark-foreground: 0 0% 100%;
+	--secondary: 205 20% 94%;
+	--secondary-foreground: 243 14% 29%;
+	--muted: 205 18% 94%;
+	--muted-foreground: 207 15% 36%;
+	--accent: 183 42% 90%;
+	--accent-foreground: 183 74% 23%;
+	--destructive: 0 52% 42%;
+	--destructive-foreground: 0 0% 100%;
+	--border: 205 18% 84%;
+	--workspace-window-titlebar: 205 24% 95%;
+	--workspace-window-titlebar-active: 205 28% 91%;
+	--workspace-window-tab-selected: 0 0% 100%;
+	--workspace-window-tab-selected-inactive: 205 18% 94%;
+	--composer-thinking-static-start: 207 14% 65%;
+	--composer-thinking-pulse-emphasis: 182 86% 33%;
+	--input: 207 18% 52%;
+	--ring: 182 86% 29%;
+	--radius: 0.75rem;
+	--transient-backdrop-color: 207 44% 16%;
+	--transient-backdrop-opacity: 0.38;
+	--transient-backdrop-blur: 4px;
+	--elevation-menu: 0 2px 8px hsl(207 45% 18% / 0.12), 0 12px 28px hsl(207 45% 18% / 0.14);
+	--elevation-dialog: 0 4px 18px hsl(207 45% 18% / 0.16), 0 24px 60px hsl(207 45% 18% / 0.2);
+	--glow-primary: 0 0 0 1px hsl(var(--primary) / 0.3), 0 4px 16px hsl(var(--primary) / 0.22);
+	--chat-header-bg: 0 0% 98.4%;
+	--chat-header-border: 205 18% 84%;
+	--chat-thinking-bg: 205 22% 96%;
+	--chat-message-action-highlight: 221 63% 56%;
+	--chat-message-action-highlight-opacity: 0.12;
+	--chat-tabs-rail-bg: 205 20% 93%;
+	--chat-tabs-rail-border: 205 18% 84%;
+	--chat-tabs-active-bg: 182 86% 33%;
+	--chat-tabs-active-foreground: 0 0% 7%;
+	--chat-tabs-active-border: 182 86% 29%;
+	--chat-bash-row-bg: 205 22% 96%;
+	--sidebar-background: 0 0% 94.1%;
+	--sidebar-foreground: 243 14% 29%;
+	--sidebar-primary: 182 86% 33%;
+	--sidebar-primary-foreground: 0 0% 7%;
+	--sidebar-accent: 183 42% 88%;
+	--sidebar-accent-foreground: 183 74% 23%;
+	--sidebar-border: 205 18% 82%;
+	--sidebar-ring: 182 86% 29%;
+	--sidebar-chat-item-bg: 0 0% 98.4%;
+	--sidebar-chat-item-hover-bg: 183 36% 91%;
+	--sidebar-chat-item-selected-bg: 183 45% 87%;
+	--sidebar-chat-item-selected-foreground: 183 74% 22%;
+	--sidebar-badge-pinned-bg: 45 100% 94%;
+	--sidebar-badge-pinned-foreground: 40 90% 26%;
+	--sidebar-badge-pinned-border: 45 55% 76%;
+	--sidebar-badge-archived-bg: 215 20% 94%;
+	--sidebar-badge-archived-foreground: 215 18% 35%;
+	--sidebar-badge-archived-border: 215 16% 80%;
+	--sidebar-bulk-archive-bg: 146 60% 95%;
+	--sidebar-bulk-archive-foreground: 146 65% 24%;
+	--sidebar-bulk-unarchive-bg: 0 86% 96%;
+	--sidebar-bulk-unarchive-foreground: 0 74% 38%;
+	--provider-codex-bg: 146 48% 94%;
+	--provider-codex-foreground: 146 70% 22%;
+	--provider-codex-border: 146 35% 78%;
+	--provider-cursor-bg: 256 78% 96%;
+	--provider-cursor-foreground: 256 62% 30%;
+	--provider-cursor-border: 256 42% 78%;
+	--provider-claude-bg: 214 100% 95%;
+	--provider-claude-foreground: 214 80% 28%;
+	--provider-claude-border: 214 55% 78%;
+	--provider-opencode-bg: 270 65% 95%;
+	--provider-opencode-foreground: 270 60% 30%;
+	--provider-opencode-border: 270 40% 78%;
+	--provider-amp-bg: 28 90% 95%;
+	--provider-amp-foreground: 28 80% 28%;
+	--provider-amp-border: 28 50% 78%;
+	--provider-factory-bg: 192 84% 94%;
+	--provider-factory-foreground: 192 84% 24%;
+	--provider-factory-border: 192 44% 76%;
+	--provider-pi-bg: 322 78% 95%;
+	--provider-pi-foreground: 322 72% 28%;
+	--provider-pi-border: 322 42% 78%;
+	--provider-openrouter-bg: 152 68% 93%;
+	--provider-openrouter-foreground: 152 60% 26%;
+	--provider-openrouter-border: 152 40% 74%;
+	--provider-zai-bg: 8 92% 94%;
+	--provider-zai-foreground: 8 78% 28%;
+	--provider-zai-border: 8 52% 76%;
+	--tag-blue-bg: 214 95% 93% / 0.5;
+	--tag-blue-foreground: 214 78% 30%;
+	--tag-blue-border: 214 55% 78% / 0.5;
+	--tag-green-bg: 146 60% 92% / 0.5;
+	--tag-green-foreground: 146 65% 24%;
+	--tag-green-border: 146 35% 76% / 0.5;
+	--tag-amber-bg: 45 96% 90% / 0.5;
+	--tag-amber-foreground: 38 84% 28%;
+	--tag-amber-border: 42 55% 72% / 0.5;
+	--tag-purple-bg: 270 82% 94% / 0.5;
+	--tag-purple-foreground: 270 62% 30%;
+	--tag-purple-border: 270 42% 76% / 0.5;
+	--tag-rose-bg: 350 90% 94% / 0.5;
+	--tag-rose-foreground: 346 70% 32%;
+	--tag-rose-border: 346 45% 76% / 0.5;
+	--tag-teal-bg: 174 70% 90% / 0.5;
+	--tag-teal-foreground: 176 72% 24%;
+	--tag-teal-border: 176 42% 72% / 0.5;
+	--tag-indigo-bg: 235 90% 94% / 0.5;
+	--tag-indigo-foreground: 235 62% 32%;
+	--tag-indigo-border: 235 42% 76% / 0.5;
+	--tag-orange-bg: 28 92% 92% / 0.5;
+	--tag-orange-foreground: 24 82% 30%;
+	--tag-orange-border: 24 52% 74% / 0.5;
+	--indicator-attention: 0 68% 47%;
+	--status-processing: 221 63% 56%;
+	--status-processing-foreground: 221 62% 34%;
+	--status-processing-border: 221 54% 62%;
+	--status-info: 221 75% 95%;
+	--status-info-foreground: 221 62% 34%;
+	--status-info-border: 221 42% 76%;
+	--status-success: 158 52% 94%;
+	--status-success-foreground: 158 68% 24%;
+	--status-success-border: 158 34% 73%;
+	--composer-agent-setting: 183 52% 92%;
+	--composer-agent-setting-foreground: 183 74% 24%;
+	--composer-agent-setting-border: 183 38% 70%;
+	--status-error: 0 70% 96%;
+	--status-error-foreground: 0 58% 34%;
+	--status-error-border: 0 38% 76%;
+	--status-neutral: 205 16% 95%;
+	--status-neutral-foreground: 207 15% 36%;
+	--status-neutral-border: 205 14% 78%;
+	--status-warning: 47 99% 43%;
+	--status-warning-foreground: 0 0% 7%;
+	--status-warning-muted-foreground: 42 90% 26%;
+	--status-warning-border: 45 78% 34%;
+	--queue-surface: 47 99% 43% / 0.18;
+	--queue-border: 45 78% 34%;
+	--queue-entry-border: 45 78% 34%;
+	--queue-foreground: 42 90% 22%;
+	--queue-action-bg: 47 99% 43% / 0.28;
+	--queue-action-hover-bg: 47 99% 43% / 0.42;
+	--stop-button-bg: 0 52% 42%;
+	--stop-button-foreground: 0 0% 100%;
+	--stop-button-border: 0 48% 34%;
+	--user-bubble: 190 47% 25%;
+	--user-bubble-selected: 190 48% 31%;
+	--user-bubble-foreground: 180 35% 96%;
+	--user-bubble-timestamp: 184 24% 75%;
+	--markdown-code-background: 0 0% 96.5%;
+	--markdown-code-foreground: 243 14% 29%;
+	--markdown-code-border: 205 18% 82%;
+	--markdown-code-keyword: 279 53% 39%;
+	--markdown-code-title: 221 65% 38%;
+	--markdown-code-meta: 183 85% 19%;
+	--markdown-code-string: 39 100% 24%;
+	--markdown-code-symbol: 346 51% 40%;
+	--markdown-code-comment: 207 12% 32%;
+	--markdown-code-name: 157 65% 25%;
+	--markdown-code-section: 221 65% 38%;
+	--markdown-code-addition-bg: 153 48% 94%;
+	--markdown-code-addition-fg: 157 65% 25%;
+	--markdown-code-deletion-bg: 0 70% 96%;
+	--markdown-code-deletion-fg: 0 58% 34%;
+	--diff-modified: 47 75% 92%;
+	--diff-modified-foreground: 42 90% 25%;
+	--diff-modified-border: 45 42% 72%;
+	--diff-addition: 157 65% 25%;
+	--diff-deletion: 0 58% 36%;
+	--diff-hunk: 221 59% 42%;
+	--interactive-accent: 183 82% 25%;
+	--interactive-accent-foreground: 0 0% 100%;
+	--file-icon-code: 157 58% 34%;
+	--file-icon-doc: 221 59% 47%;
+	--file-icon-image: 279 53% 46%;
+	--file-icon-folder: 183 82% 31%;
+	--terminal-bg: 0 0% 98.4%;
+	--git-action-commit: 183 82% 27%;
+	--git-action-commit-hover: 183 82% 23%;
+	--git-action-pull: 157 58% 30%;
+	--git-action-pull-hover: 157 58% 25%;
+	--git-action-push: 37 88% 32%;
+	--git-action-push-hover: 37 88% 27%;
+	--git-action-publish: 279 53% 42%;
+	--git-action-publish-hover: 279 53% 36%;
+	--git-action-foreground: 0 0% 100%;
+	--git-modified: 42 90% 25%;
+	--git-added: 157 65% 20%;
+	--pr-merged: 279 53% 43%;
+	--git-deleted: 0 58% 31%;
+	--git-untracked: 183 82% 24%;
+	--git-renamed: 221 59% 42%;
+	--diff-add-bg: 153 48% 91%;
+	--diff-add-fg: 243 14% 23%;
+	--diff-add-line-num: 243 14% 23%;
+	--diff-del-bg: 0 68% 94%;
+	--diff-del-fg: 243 14% 23%;
+	--diff-del-line-num: 243 14% 23%;
+	--diff-hunk-header-bg: 221 55% 94%;
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23403f53' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	--control-radius: var(--radius);
+	--menu-radius: var(--radius);
+	--menu-item-radius: calc(var(--radius) - 2px);
+	--dialog-radius: calc(var(--radius) + 4px);
+	--dialog-close-radius: calc(var(--radius) - 2px);
+	--menu-padding: 0.375rem;
+	--menu-shadow: var(--elevation-menu);
+	--submenu-shadow: var(--elevation-menu);
+	--tooltip-shadow: var(--elevation-menu);
+	--dialog-shadow: var(--elevation-dialog);
+	--primary-hover-shadow: var(--glow-primary);
+	--dialog-surface: hsl(var(--popover));
+	--scroll-area-thumb: hsl(var(--foreground) / 0.52);
+	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.64);
+	--switch-thumb-checked: hsl(var(--primary-foreground));
+	--switch-thumb-unchecked: hsl(var(--foreground));
+	--native-select-muted-background: hsl(var(--muted));
+	--native-select-surface-background: hsl(var(--muted));
+	--native-select-border: hsl(var(--input));
+	--native-select-radius: var(--radius);
+	--native-select-compact-radius: var(--radius);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+	:root:where([data-theme='owl-light']),
+	:root:where([data-theme='owl-light']) * {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--foreground) / 0.52) transparent;
+	}
+}
+
+@layer base {
+	:root:where([data-theme='owl-light']) ::selection {
+		background-color: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+	}
+}
+
+:root:where([data-theme='owl-light']) :is(input[type='checkbox'], input[type='radio'], progress) {
+	accent-color: hsl(var(--primary));
+}
+
+:root:where([data-theme='owl-light']) ::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+:root:where([data-theme='owl-light']) ::-webkit-scrollbar-track,
+:root:where([data-theme='owl-light']) ::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+:root:where([data-theme='owl-light']) ::-webkit-scrollbar-thumb {
+	border: 2px solid transparent;
+	border-radius: 999px;
+	background: hsl(var(--foreground) / 0.52);
+	background-clip: padding-box;
+}
+
+:root:where([data-theme='owl-light']) ::-webkit-scrollbar-thumb:hover {
+	background: hsl(var(--foreground) / 0.68);
+	background-clip: padding-box;
+}

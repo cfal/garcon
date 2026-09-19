@@ -19,12 +19,13 @@ describe('ThemeSettingsCard', () => {
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
 		expect([...lightSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual(
-			['Classic Light', 'Phosphor Light', 'Colorblind Light'],
+			['Classic Light', 'Phosphor Light', 'Colorblind Light', 'Owl Daybreak'],
 		);
 		expect([...darkSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
 			'Classic Dark',
 			'Phosphor Dark',
 			'Colorblind Dark',
+			'Owl Nightfall',
 		]);
 		localSettings.destroy();
 	});

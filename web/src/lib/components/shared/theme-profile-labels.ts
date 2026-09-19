@@ -8,4 +8,6 @@ export const THEME_PROFILE_LABELS: Record<ThemeId, () => string> = {
 	'phosphor-dark': m.settings_theme_profile_phosphor_dark,
 	'colorblind-light': m.settings_theme_profile_colorblind_light,
 	'colorblind-dark': m.settings_theme_profile_colorblind_dark,
+	'owl-light': m.settings_theme_profile_owl_light,
+	'owl-dark': m.settings_theme_profile_owl_dark,
 };

@@ -18,4 +18,12 @@ describe('editor themes', () => {
 			expect(editorThemeExtension(themeId)).toBeTruthy();
 		}
 	});
+
+	it('provides dedicated Owl light and dark extensions', () => {
+		for (const colorScheme of ['light', 'dark'] as const) {
+			const themeId = resolveEditorThemeId({ colorScheme, rendererPalette: 'owl' });
+			expect(themeId).toBe(`owl-${colorScheme}`);
+			expect(editorThemeExtension(themeId)).toBeTruthy();
+		}
+	});
 });
