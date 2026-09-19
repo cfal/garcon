@@ -39,6 +39,7 @@
     "./client-chat-id": "./client-chat-id.ts",
     "./cli-presentation": "./cli-presentation.ts",
     "./execution-defaults": "./execution-defaults.ts",
+    "./execution-nodes": "./execution-nodes.ts",
     "./file-contracts": "./file-contracts.ts",
     "./file-mention-context": "./file-mention-context.ts",
     "./generation-prompts": "./generation-prompts.ts",
