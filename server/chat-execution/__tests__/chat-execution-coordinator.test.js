@@ -324,6 +324,66 @@ describe('ChatExecutionCoordinator', () => {
     await coordinator.releaseDirectTurn(reservation);
   });
 
+  it('falls back once when the emitting turn settles during asynchronous target capture', async () => {
+    const capturing = deferred();
+    const captured = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => {
+          capturing.resolve();
+          return captured.promise;
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const onControlRun = mock(() => undefined);
+    const delivery = coordinator.deliverControlInput(
+      'chat-1', 'Synthetic command feedback', 'view-1', 'turn-1',
+      new AbortController().signal, onControlRun,
+    );
+    await capturing.promise;
+    await coordinator.releaseDirectTurn(reservation);
+    captured.resolve({ providerTurnId: 'retired-provider-turn' });
+
+    await delivery;
+
+    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    expect(onControlRun).toHaveBeenCalledTimes(1);
+    expect(fixture.turnRunner.captureSteerTarget).toHaveBeenCalledTimes(1);
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+  });
+
+  it('queues server control input instead of steering a successor after target capture', async () => {
+    const capturing = deferred();
+    const captured = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => {
+          capturing.resolve();
+          return captured.promise;
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const delivery = coordinator.deliverServerControlInput(
+      'chat-1', interAgentInput(), new AbortController().signal,
+    );
+    await capturing.promise;
+    await coordinator.releaseDirectTurn(reservation);
+    const successor = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-2' });
+    captured.resolve({ providerTurnId: 'retired-provider-turn' });
+
+    expect(await delivery).toBe('queued');
+    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.captureSteerTarget).toHaveBeenCalledTimes(1);
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toHaveLength(1);
+    await coordinator.releaseDirectTurn(successor);
+  });
+
   it('does not fall back after steering accepts without preparing delivery', async () => {
     const fixture = createFixture({
       turnRunner: {

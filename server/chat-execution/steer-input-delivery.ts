@@ -29,13 +29,12 @@ export class SteerInputDelivery {
     const attempt = this.options.ownership.attempt(chatId);
     const identity = attempt?.identity();
     if (!attempt || attempt.isSettled || !identity?.turnId) return null;
-    const target = Object.freeze({
+    // Delivery revalidates the captured attempt before control callers settle it and fall back.
+    return Object.freeze({
       attempt,
       identity: Object.freeze({ ...identity, turnId: identity.turnId }),
       providerTarget: await this.options.turnRunner.captureSteerTarget(chatId),
     });
-    this.#assertTarget(chatId, target);
-    return target;
   }
 
   async deliver(
