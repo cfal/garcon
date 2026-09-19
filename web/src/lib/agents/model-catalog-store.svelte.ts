@@ -477,6 +477,10 @@ export class ModelCatalogStore {
 		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs);
 	}
 
+	get isValidated(): boolean {
+		return this.lastValidatedAt !== null && this.error === null;
+	}
+
 	reconcileNodes(nodes: readonly ExecutionNodeSnapshot[]): void {
 		const ids = new Set(nodes.map((node) => node.id));
 		const persisted = readNodeSnapshots();

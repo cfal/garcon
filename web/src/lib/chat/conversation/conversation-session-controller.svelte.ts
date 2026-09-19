@@ -18,10 +18,6 @@ import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordina
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { JsonValue } from '$shared/json';
-import {
-	normalizeSupportedPermissionMode,
-	normalizeSupportedThinkingMode,
-} from '$shared/execution-defaults';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
@@ -226,6 +222,7 @@ export interface SessionControllerDeps {
 		nodeId?: string,
 	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
 	modelCatalogForNode(nodeId: string): SessionControllerDeps['modelCatalog'];
+	canSubmitToNode(nodeId: string): boolean;
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
@@ -337,7 +334,7 @@ export class ConversationSessionController {
 		if (!selection) return null;
 		return {
 			...selection,
-			...resolveConversationModelSelection(selection, this.deps.modelCatalog),
+			...resolveConversationModelSelection(selection, this.deps.modelCatalogForNode(selection.nodeId ?? 'local')),
 		};
 	}
 
@@ -357,14 +354,8 @@ export class ConversationSessionController {
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
 		});
-		agentState.permissionMode = normalizeSupportedPermissionMode(
-			selection.permissionMode,
-			modelCatalog.getPermissionModes(selection.agentId),
-		);
-		agentState.thinkingMode = normalizeSupportedThinkingMode(
-			selection.thinkingMode,
-			modelCatalog.getThinkingModes(selection.agentId),
-		);
+		agentState.permissionMode = selection.permissionMode;
+		agentState.thinkingMode = selection.thinkingMode;
 		agentState.setAgentSettings(selection.agentSettings);
 	}
 
@@ -442,15 +433,8 @@ export class ConversationSessionController {
 					modelEndpointId: startup.modelEndpointId ?? null,
 					modelProtocol: startup.modelProtocol ?? null,
 				});
-				const startupAgentId = startup.agentId as SessionAgentId;
-				deps.agentState.permissionMode = normalizeSupportedPermissionMode(
-					startup.permissionMode,
-					deps.modelCatalog.getPermissionModes(startupAgentId),
-				);
-				deps.agentState.thinkingMode = normalizeSupportedThinkingMode(
-					startup.thinkingMode,
-					deps.modelCatalog.getThinkingModes(startupAgentId),
-				);
+				deps.agentState.permissionMode = startup.permissionMode;
+				deps.agentState.thinkingMode = startup.thinkingMode;
 				deps.agentState.setAgentSettings(startup.agentSettings);
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
 					const startupText = startup.firstMessage.trim();
@@ -625,6 +609,8 @@ export class ConversationSessionController {
 		}
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
+		const nodeId = deps.sessions.selectedChatId === chatId ? deps.agentState.nodeId : selected.nodeId ?? 'local';
+		if (!deps.canSubmitToNode(nodeId)) return 'no-op';
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
 		const isDraft = selected.status === 'draft';
 		const startup = deps.sessions.startupByChatId[chatId];
@@ -791,7 +777,8 @@ export class ConversationSessionController {
 
 	async submitComposerWithSteerPreference(chatId: string): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
-		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
+		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)
+			|| !deps.canSubmitToNode(deps.agentState.nodeId)) {
 			return 'no-op';
 		}
 		const selected = deps.sessions.byId[chatId];

@@ -696,6 +696,7 @@ function createDeps(chat = createRunningChat()) {
 			),
 		},
 		modelCatalogForNode(): SessionControllerDeps['modelCatalog'] { return this.modelCatalog; },
+		canSubmitToNode: vi.fn(() => true),
 		getExecutionDefaults: (agentId: string) => ({
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -755,6 +756,26 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			control: emptyControl(),
 		});
+	});
+
+	it('preserves saved remote settings while its catalog is empty and fences every submit route', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const { deps } = createDeps(createRunningChat({ nodeId, permissionMode: 'manualBypass', thinkingMode: 'high' }));
+		deps.modelCatalog.getPermissionModes.mockReturnValue([]);
+		deps.modelCatalog.getThinkingModes.mockReturnValue([]);
+		deps.canSubmitToNode.mockReturnValue(false);
+		const controller = new ConversationSessionController(deps);
+		controller.handleChatSwitchIfChanged('chat-1');
+		expect(deps.agentState.nodeId).toBe(nodeId);
+		expect(deps.agentState.permissionMode).toBe('manualBypass');
+		expect(deps.agentState.thinkingMode).toBe('high');
+		deps.composerState.inputText = 'Synthetic remote prompt';
+		expect(await controller.submitForChat('chat-1')).toBe('no-op');
+		expect(await controller.submitComposerWithSteerPreference('chat-1')).toBe('no-op');
+		expect(deps.canSubmitToNode).toHaveBeenCalledWith(nodeId);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
 
 	it('renames the current chat without sending or queueing the command', async () => {

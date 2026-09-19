@@ -51,6 +51,7 @@
 		setAgentState,
 		getReadReceiptOutbox,
 		getModelCatalog,
+		getExecutionNodes,
 		getRemoteSettings,
 		getNotifications,
 		getWorkspaceCoordinator,
@@ -123,6 +124,7 @@
 	const ws = getWs();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const rootModelCatalog = getModelCatalog();
+	const nodes = getExecutionNodes();
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
@@ -276,6 +278,7 @@
 		startupCoordinator,
 		get modelCatalog() { return modelCatalog; },
 		modelCatalogForNode: (nodeId) => rootModelCatalog.forNode(nodeId),
+		canSubmitToNode: (nodeId) => nodes.isReady(nodeId) && rootModelCatalog.forNode(nodeId).isValidated,
 		getExecutionDefaults: (agentId, nodeId) => {
 			const modelCatalog = rootModelCatalog.forNode(nodeId ?? agentState.nodeId);
 			const defaults = executionDefaultsForAgent(

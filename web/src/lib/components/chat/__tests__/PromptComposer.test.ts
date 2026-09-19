@@ -13,6 +13,8 @@ import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
 import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -77,6 +79,75 @@ describe('PromptComposer focus', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.composerHeight);
+	});
+
+	it('loads a cold remote catalog and blocks click and Enter until it is validated, including reconnect', async () => {
+		const catalog = new ModelCatalogStore();
+		const remote = catalog.forNode(remoteExecutionNode.id);
+		remote.invalidate();
+		const coldLoad = Promise.withResolvers<void>();
+		const reconnectLoad = Promise.withResolvers<void>();
+		const load = vi.fn().mockReturnValueOnce(coldLoad.promise).mockReturnValueOnce(reconnectLoad.promise);
+		vi.spyOn(remote, 'refreshIfStale').mockImplementation(async () => {
+			if (!remote.isValidated) {
+				await load();
+				remote.lastValidatedAt = Date.now();
+			}
+		});
+		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode], catalog, onsubmit,
+		});
+		const textarea = screen.getByRole('textbox');
+		await fireEvent.input(textarea, { target: { value: 'Synthetic remote input' } });
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).not.toHaveBeenCalled();
+		coldLoad.resolve();
+		await waitFor(() => expect(send.disabled).toBe(false));
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).toHaveBeenCalledTimes(1);
+
+		remote.invalidate();
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+		expect(send.disabled).toBe(true);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).toHaveBeenCalledTimes(1);
+		reconnectLoad.resolve();
+		await waitFor(() => expect(send.disabled).toBe(false));
+		await fireEvent.click(send);
+		expect(onsubmit).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps remote submission blocked after catalog failure and offers an explicit retry', async () => {
+		const catalog = new ModelCatalogStore();
+		const remote = catalog.forNode(remoteExecutionNode.id);
+		remote.invalidate();
+		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+		vi.spyOn(remote, 'refreshIfStale').mockImplementation(async () => {
+			if (remote.lastValidatedAt === null) remote.error = 'Catalog unavailable';
+		});
+		const retry = vi.spyOn(remote, 'forceRefresh').mockImplementation(async () => {
+			remote.error = null;
+			remote.lastValidatedAt = Date.now();
+		});
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode], catalog, onsubmit,
+		});
+		const textarea = screen.getByRole('textbox');
+		await fireEvent.input(textarea, { target: { value: 'Synthetic retry input' } });
+		await screen.findByText('Catalog unavailable');
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(true);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(retry).toHaveBeenCalledOnce();
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
 	});
 
 	it('renders without a surface shadow', () => {

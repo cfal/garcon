@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
 	import PromptComposer from '../PromptComposer.svelte';
 	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
 	import { onDestroy, untrack } from 'svelte';
@@ -55,6 +55,9 @@
 	import type { ProjectTarget } from '$shared/project-resolution';
 
 	interface Props {
+		selectedNodeId?: string;
+		nodes?: readonly ExecutionNodeSnapshot[];
+		catalog?: ModelCatalogStore;
 		selectedChatId?: string;
 		projectPath?: string;
 		selectedAgentId?: SessionAgentId;
@@ -90,6 +93,9 @@
 	}
 
 	let {
+		selectedNodeId = 'local',
+		nodes,
+		catalog,
 		selectedChatId = 'chat-1',
 		projectPath = '/workspace/project',
 		selectedAgentId = 'claude',
@@ -232,7 +238,9 @@
 		return modelOptionsFor(agentId).find((option) => option.value === model) ?? null;
 	}
 
+	setExecutionNodesTestContext(untrack(() => nodes));
 	const selectedChat = $derived<ChatSessionRecord>({
+		nodeId: selectedNodeId,
 		id: selectedChatId,
 		parentChat: null,
 		projectPath,
@@ -262,6 +270,7 @@
 	});
 
 	$effect(() => {
+		agent.nodeId = selectedNodeId;
 		agent.setAgentId(selectedAgentId);
 		agent.setThinkingMode(selectedThinkingMode);
 		agent.setModelSelection({
@@ -316,7 +325,8 @@
 		},
 		startupByChatId: {},
 	} as never);
-	setModelCatalog({
+	const fallbackCatalog = {
+		isValidated: true,
 		forNode() { return this; },
 		version: 0,
 		getSelectableAgents: () => selectableAgents,
@@ -370,7 +380,8 @@
 		isLocalModel: () => false,
 		findEndpoint: () => null,
 		refreshIfStale: () => Promise.resolve(),
-	} as unknown as ModelCatalogStore);
+	} as unknown as ModelCatalogStore;
+	setModelCatalog(untrack(() => catalog ?? fallbackCatalog));
 	setRemoteSettings({
 		get snapshot() {
 			return remoteSettingsSnapshot;

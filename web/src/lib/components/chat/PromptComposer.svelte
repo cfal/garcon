@@ -120,6 +120,14 @@
 	const nodes = getExecutionNodes();
 	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
 	const localMachine = $derived(agentState.nodeId === 'local');
+
+	$effect(() => {
+		if (!sessions.selectedChatId || !nodes.isReady(agentState.nodeId)) return;
+		const catalog = modelCatalog;
+		// Invalidating a connected node also refreshes an already-open chat.
+		void catalog.lastValidatedAt;
+		untrack(() => void catalog.refreshIfStale());
+	});
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const preambles = getPreambles();
@@ -603,7 +611,7 @@
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || directAdmissionPending || promptTransformPending || !nodes.isReady(agentState.nodeId),
+			isDisabled || directAdmissionPending || promptTransformPending || !nodes.isReady(agentState.nodeId) || !modelCatalog.isValidated,
 			composerState.inputText,
 			composerState.images.length,
 		) && !hasQueuedAttachmentConflict,
@@ -711,6 +719,14 @@
 
 		{/if}
 		{#if !nodes.isReady(agentState.nodeId)}<p role="status" class="px-4 py-2 text-sm text-muted-foreground">{nodes.label(agentState.nodeId)} is unavailable.</p>{/if}
+		{#if nodes.isReady(agentState.nodeId) && !modelCatalog.isValidated}
+			<div role="status" class="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
+				{#if modelCatalog.error}
+					<span>{modelCatalog.error}</span>
+					<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onclick={() => void modelCatalog.forceRefresh()}>Retry</button>
+				{:else}Loading models...{/if}
+			</div>
+		{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
