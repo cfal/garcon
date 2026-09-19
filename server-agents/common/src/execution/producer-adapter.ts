@@ -20,7 +20,6 @@ import type {
   AgentRuntimePublisher,
   AgentRuntimeExecution,
   AgentRuntimeResumeRequest,
-  AgentRuntimeEvent,
   RuntimePermissionResponse,
 } from './runtime-events.js';
 
@@ -36,21 +35,12 @@ interface Operation {
   readonly runId: string;
   agentSessionId: string | null;
   ended: boolean;
-  slot: ExecutionSlot | null;
-  redirect: Operation | null;
-  terminal: ((event: Extract<AgentRuntimeEvent, { type: 'run-ended' }>) => boolean) | null;
-  afterEnd: (() => void) | null;
-}
-
-interface ExecutionSlot {
-  current: Operation;
-  ref: AgentExecutionHandle;
-  cancelPreparation: (() => void) | null;
+  readonly handle: AgentExecutionHandle;
 }
 
 export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host: Pick<AgentHost, 'logger' | 'scope'>) {
   const bindings = new AgentResourceTable<'producer', ProducerBinding>(host.scope, 'producer');
-  const handles = new AgentResourceTable<'execution', ExecutionSlot>(host.scope, 'execution');
+  const handles = new AgentResourceTable<'execution', Operation>(host.scope, 'execution');
   const responses = new AgentResourceTable<'permission-response', {
     readonly operation: Operation;
     readonly capability: RuntimePermissionResponse;
@@ -91,11 +81,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
       const binding = bindings.get(ref);
       binding.closed = true;
       bindings.delete(ref);
-      handles.removeWhere((slot) => {
-        if (slot.current.binding !== binding) return false;
-        slot.cancelPreparation?.();
-        return true;
-      });
+      handles.removeWhere((operation) => operation.binding === binding);
       responses.removeWhere((value) => value.operation.binding === binding);
       const operation = active.get(binding.chatId);
       if (operation?.binding === binding) active.delete(binding.chatId);
@@ -124,12 +110,6 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
   function publisherFor(operation: Operation): AgentRuntimePublisher {
     const binding = operation.binding;
     return (event) => {
-      if ('runId' in event && event.runId === operation.runId && operation.redirect) {
-        const successor = operation.slot!.current;
-        publisherFor(successor)({ ...event, runId: successor.runId });
-        return;
-      }
-      if (event.type === 'run-ended' && event.runId === operation.runId && operation.terminal?.(event)) return;
       if (event.type === 'permission' && !event.runId) {
         host.logger.warn('Dropped an unnamed provider permission event', {
           chatId: binding.chatId, eventType: event.type, reason: 'missing operation run ID',
@@ -168,7 +148,6 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
       } finally {
         if (event.type === 'run-ended' && event.runId === operation.runId) {
           retire(operation);
-          operation.afterEnd?.();
         }
       }
     };
@@ -182,7 +161,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
     if (binding.chatId !== request.chatId) throw new AgentCallError('rejected', 'Producer chat mismatch', 'STALE_RESOURCE');
     const operation: Operation = {
       binding, runId: request.runId, agentSessionId: null, ended: false,
-      slot: null, redirect: null, terminal: null, afterEnd: null,
+      handle: createAgentResourceRef(host.scope, 'execution'),
     };
     const { producerBinding: _binding, ...context } = request;
     const runtimeRequest = { ...context, admission: {
@@ -195,99 +174,15 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
   function activate(operation: Operation): void {
     const prior = active.get(operation.binding.chatId);
     if (prior) retire(prior);
-    handles.removeWhere((entry) => {
-      if (entry.current.binding.chatId !== operation.binding.chatId || entry.current === operation) return false;
-      entry.cancelPreparation?.();
-      return true;
-    });
+    handles.removeWhere((entry) => entry.binding.chatId === operation.binding.chatId);
     active.set(operation.binding.chatId, operation);
-    const ref = createAgentResourceRef(host.scope, 'execution');
-    const slot: ExecutionSlot = { current: operation, ref, cancelPreparation: null };
-    handles.bind(ref, slot);
-    operation.slot = slot;
+    handles.bind(operation.handle, operation);
   }
 
   function prepare<T extends { readonly producerBinding: AgentProducerBinding; readonly chatId: string; readonly runId: string }>(request: T, options?: NodeCallOptions) {
     const prepared = construct(request, options);
     activate(prepared.operation);
     return prepared;
-  }
-
-  function prepareSuccessor(predecessor: Operation, request: AgentResumeRequestV5, options?: NodeCallOptions) {
-    assertCurrent(predecessor);
-    const slot = predecessor.slot!;
-    if (slot.cancelPreparation) throw new AgentCallError('rejected', 'A goal preparation is already pending');
-    const prepared = construct(request, options);
-    if (prepared.operation.binding !== predecessor.binding || predecessor.agentSessionId !== request.agentSessionId) {
-      throw new AgentCallError('rejected', 'Goal predecessor mismatch', 'STALE_RESOURCE');
-    }
-    prepared.operation.agentSessionId = request.agentSessionId;
-    prepared.operation.slot = slot;
-    let activated = false;
-    let exposed = false;
-    let cancelled = false;
-    let completed = false;
-    let failure: AgentRunFailureDetail | undefined;
-    let terminal: Extract<AgentRuntimeEvent, { type: 'run-ended' }> | null = null;
-    let reservation = () => { cancelled = true; };
-    slot.cancelPreparation = reservation;
-    const releasePreparation = () => {
-      if (slot.cancelPreparation === reservation) slot.cancelPreparation = null;
-    };
-    const failedTerminal = () => ({
-      type: 'run-ended' as const, runId: request.runId, outcome: 'failed' as const,
-      error: failure ?? { code: 'PROVIDER_FAILURE', message: 'Goal control was not delivered' },
-    });
-    prepared.operation.terminal = (event) => {
-      if (!completed) { terminal ??= event; return true; }
-      if (failure) {
-        prepared.operation.terminal = null;
-        prepared.publish(failedTerminal());
-        return true;
-      }
-      return false;
-    };
-    return {
-      ...prepared,
-      handle: slot.ref,
-      releasePreparation,
-      expose: (cancel: () => void) => {
-        if (cancelled) { cancel(); throw new AgentCallError('rejected', 'Goal preparation interrupted', 'STALE_RESOURCE'); }
-        exposed = true;
-        slot.cancelPreparation = reservation = cancel;
-        predecessor.afterEnd = () => {
-          if (exposed && !activated) {
-            prepared.operation.terminal = null;
-            prepared.publish(failedTerminal());
-            exposed = false;
-          }
-        };
-      },
-      activate: () => {
-        assertCurrent(predecessor);
-        releasePreparation();
-        predecessor.afterEnd = null;
-        predecessor.redirect = prepared.operation;
-        retire(predecessor);
-        slot.current = prepared.operation;
-        active.set(request.chatId, prepared.operation);
-        activated = true;
-      },
-      settle: (error?: unknown) => {
-        completed = true;
-        if (error !== undefined) failure = failureDetail(error);
-        if (terminal) {
-          prepared.publish(failure ? failedTerminal() : terminal);
-          terminal = null;
-        }
-      },
-      abandon: () => {
-        exposed = false;
-        releasePreparation();
-        predecessor.afterEnd = null;
-        retire(prepared.operation);
-      },
-    };
   }
 
   const execution: AgentExecutionV5 = {
@@ -297,7 +192,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
         const session = await runtime.start(runtimeRequest, publish);
         operation.agentSessionId = session.agentSessionId;
         if (!sameSession(operation.binding.publishedSession, session)) publish({ type: 'session', session });
-        return operation.slot!.ref;
+        return operation.handle;
       } catch (error) {
         retire(operation);
         throw error;
@@ -309,14 +204,11 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
       void runtime.resume(runtimeRequest, publish).catch((error) => {
         publish({ type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) });
       });
-      return operation.slot!.ref;
+      return operation.handle;
     },
     async abort(ref, options) {
       options?.signal?.throwIfAborted();
-      const slot = handles.get(ref);
-      slot.cancelPreparation?.();
-      slot.cancelPreparation = null;
-      const operation = slot.current;
+      const operation = handles.get(ref);
       assertCurrent(operation);
       if (!operation.agentSessionId) return false;
       return runtime.abort(operation.agentSessionId);
@@ -333,14 +225,14 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
     prepared.operation.agentSessionId = request.agentSessionId;
     try {
       const value = await operation(prepared.runtimeRequest, prepared.publish);
-      return { handle: prepared.operation.slot!.ref, value };
+      return { handle: prepared.operation.handle, value };
     } catch (error) {
       retire(prepared.operation);
       throw error;
     }
   }
 
-  return { execution, producers, permissions, runExisting, expectedOperation, assertCurrent, prepareSuccessor };
+  return { execution, producers, permissions, runExisting, expectedOperation, assertCurrent };
 }
 
 export type AgentProducerAdapter = ReturnType<typeof createAgentProducerAdapter>;

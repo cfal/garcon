@@ -73,11 +73,11 @@ for (const dialer of ['controller', 'worker'] as const) {
     try {
       const integration = await fixture.node.getAgentIntegration('test');
       const projects = await fixture.node.getProjectService();
-      const preparation = createAgentResourceRef(integration.producers.scope, 'goal-preparation');
+      const binding = createAgentResourceRef(integration.producers.scope, 'producer');
       fixture.controller.disconnect(); fixture.worker.disconnect();
       for (const operation of [
         () => integration.execution.runningSessions(),
-        () => integration.goals!.cancelControl(preparation),
+        () => integration.producers.close(binding),
         () => projects.inspect({ projectPath: '/project' }),
         () => projects.resolveFileMentions({ projectPath: '/project', command: '@file' }),
       ]) {

@@ -9,7 +9,6 @@ import type {
   AgentStartRequestV5,
   AgentExecutionAdmission,
   AgentSteerRequest,
-  AgentGoalControlHandoff,
 } from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { providerMetadata } from '../native-session/provider-metadata.js';
@@ -33,10 +32,6 @@ export type RuntimeSteerTarget = object;
 export type RuntimeSteerRequest = Omit<AgentSteerRequest, 'target'> & {
   readonly target: RuntimeSteerTarget | null;
   readonly prepareDelivery: () => Promise<void>;
-};
-
-export type RuntimeGoalControlRequest = AgentRuntimeResumeRequest & {
-  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
 };
 
 type ProviderRunEndedEvent = Exclude<

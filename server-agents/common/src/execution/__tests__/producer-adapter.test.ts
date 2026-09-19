@@ -259,7 +259,7 @@ describe('createAgentProducerAdapter', () => {
   });
 });
 
-// Compaction and goal control reach the transcript through runExisting, which must hand the
+// Compaction reaches the transcript through runExisting, which must hand the
 // operation the same capability start and resume get rather than a path of its own.
 it('publishes a runExisting operation through the same capability as a run', async () => {
   const fixture = await createFixture();

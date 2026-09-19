@@ -12,8 +12,7 @@ import {
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createAgentGoals } from '@garcon/server-agent-common/execution/control-adapters';
-import type { AgentRuntimeExecution, AgentRuntimePublisher, RuntimeGoalControlRequest } from '@garcon/server-agent-common/execution/runtime-events';
+import type { AgentRuntimeExecution, AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
 import { AgentRpc } from '../rpc.js';
 import { RemoteExecutionNode } from '../remote.js';
 import { WebSocketLink } from '../websocket-link.js';
@@ -26,11 +25,10 @@ export function integrationFixture(projectBasePath = '/test-project') {
   const scope: AgentResourceScope = { nodeId: 'test-node', instanceId: crypto.randomUUID(), integrationId: 'test' };
   const published: AgentProducerNotification[] = [];
   const nativePublishers: AgentRuntimePublisher[] = [];
-  const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, goal: 0, query: 0 };
+  const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0 };
   const hooks = {
     start: async () => {},
     stop: async () => {},
-    goal: async (_request: RuntimeGoalControlRequest, _publish: AgentRuntimePublisher) => {},
     query: async (_request: AgentSingleQueryRequest) => 'query result',
     history: async function* (_signal: AbortSignal): AsyncGenerator<readonly AgentImportedTranscriptRow[]> { yield []; },
   };
@@ -64,12 +62,7 @@ export function integrationFixture(projectBasePath = '/test-project') {
       async stop() { calls.stop++; await hooks.stop(); },
       async migrateOwnedStorage() { calls.migrate++; },
     },
-    goals: createAgentGoals(producer, async (request, publish) => {
-      await request.beforeDelivery({ validate() {}, commit() {} });
-      calls.goal++;
-      await hooks.goal(request, publish);
-      return true;
-    }),
+    goals: null,
     nativeHistoryImport: { async *load({ signal }) { calls.import++; yield* hooks.history(signal); } },
     singleQuery: { async run(request: AgentSingleQueryRequest) { calls.query++; return hooks.query(request); } },
     auth: null, commands: null, compaction: null, forking: null, steering: null, endpoints: null,
