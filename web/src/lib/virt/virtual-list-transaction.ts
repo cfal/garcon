@@ -47,9 +47,9 @@ type MutableTransactionRecord = {
 	-readonly [Key in keyof VirtualTransactionRecord]: VirtualTransactionRecord[Key];
 };
 type CapturedAnchor =
-	{ kind: 'item'; key: string; nextKey: string; index: number; start: number } |
-	{ kind: 'end' } |
-	{ kind: 'none' };
+	| { kind: 'item'; key: string; nextKey: string; index: number; start: number }
+	| { kind: 'end' }
+	| { kind: 'none' };
 
 export interface VirtualListTransactionOptions {
 	readonly environment: VirtualListEnvironment;
@@ -511,17 +511,20 @@ export class VirtualListTransaction {
 			input.dom ? this.#logicalOffsetForTarget(target, input.dom) : undefined,
 		);
 		record.redeemed = true;
+		let measurementAnchor: VirtualMutationAnchor;
+		if (input.source !== 'items') {
+			measurementAnchor = pendingCorrection?.measurementAnchor ?? input.anchor;
+		} else if (input.anchor.kind === 'item-remap') {
+			measurementAnchor = { kind: 'item', key: input.anchor.newKey };
+		} else {
+			measurementAnchor = input.anchor;
+		}
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
 			source,
 			provenance,
 			target,
-			measurementAnchor:
-				input.source === 'items'
-					? input.anchor.kind === 'item-remap'
-						? { kind: 'item', key: input.anchor.newKey }
-						: input.anchor
-					: (pendingCorrection?.measurementAnchor ?? input.anchor),
+			measurementAnchor,
 			barriers: 0,
 			restoreDeviation:
 				pendingCorrection?.provenance === 'navigation'
@@ -541,7 +544,8 @@ export class VirtualListTransaction {
 		const index = this.geometry.indexOf(oldKey);
 		if (index === undefined) return { kind: 'none' };
 		const item = this.geometry.item(index);
-		return item ? { kind: 'item', key: oldKey, nextKey, index, start: item.start } : { kind: 'none' };
+		if (!item) return { kind: 'none' };
+		return { kind: 'item', key: oldKey, nextKey, index, start: item.start };
 	}
 
 	#captureMeasurementAnchor(
@@ -558,9 +562,14 @@ export class VirtualListTransaction {
 			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;
 		if (logicalOffset <= 0) {
 			const firstItem = this.geometry.item(0);
-			return firstItem
-				? { kind: 'item', key: firstItem.key, nextKey: firstItem.key, index: firstItem.index, start: firstItem.start }
-				: { kind: 'none' };
+			if (!firstItem) return { kind: 'none' };
+			return {
+				kind: 'item',
+				key: firstItem.key,
+				nextKey: firstItem.key,
+				index: firstItem.index,
+				start: firstItem.start,
+			};
 		}
 		let item =
 			this.geometry.itemAtOffset(logicalOffset) ?? this.geometry.item(this.geometry.count - 1);

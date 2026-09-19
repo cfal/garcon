@@ -100,11 +100,13 @@ function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSp
 }
 
 function groupableToolInput(item: ConversationVirtualFeedItem): item is TranscriptVirtualFeedItem {
-	return item.kind === 'transcript' &&
+	return (
+		item.kind === 'transcript' &&
 		item.item.kind === 'message' &&
 		isToolUseMessage(item.item.message) &&
 		item.item.message.type !== 'enter-plan-mode-tool-use' &&
-		conversationFeedItemLayout(item.item) === 'standard';
+		conversationFeedItemLayout(item.item) === 'standard'
+	);
 }
 
 function groupToolRuns(
@@ -121,8 +123,7 @@ function groupToolRuns(
 		} else {
 			const first = run[0].item;
 			const expanded = run.some(
-				(member) =>
-					expandedMemberIds.has(member.item.id) || protectedVirtualKeys.has(member.key),
+				(member) => expandedMemberIds.has(member.item.id) || protectedVirtualKeys.has(member.key),
 			);
 			grouped.push({
 				kind: 'tool-group',
@@ -227,14 +228,13 @@ export function buildConversationVirtualFeedModel(
 		}
 		transcriptKeys.add(item.key);
 	}
-	items.push(...(input.combineToolUseMessages
-		? groupToolRuns(
-				body,
-				key,
-				input.expandedToolMemberIds,
-				new Set(input.protectedVirtualKeys),
-			)
-		: body));
+	if (input.combineToolUseMessages) {
+		items.push(
+			...groupToolRuns(body, key, input.expandedToolMemberIds, new Set(input.protectedVirtualKeys)),
+		);
+	} else {
+		items.push(...body);
+	}
 	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {

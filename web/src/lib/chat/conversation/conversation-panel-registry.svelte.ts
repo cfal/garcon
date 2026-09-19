@@ -36,6 +36,7 @@ import type {
 	TranscriptRowNavigationResult,
 	TranscriptRowTarget,
 } from '$lib/chat/transcript/transcript-row-navigation.js';
+import type { UserMessageNavigatorSelectionResult } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 export type ConversationPanelSnapshotAdmission = 'deferred' | 'admitted';
 
@@ -315,10 +316,17 @@ class PanelRegistration implements ConversationPanelRegistration {
 				transcriptViewId: target.transcriptViewId,
 				rowId: `${target.transcriptViewId}:${target.ordinal}`,
 			};
-			const options = target.kind === 'group-summary'
-				? { viewportOffset: target.viewportOffset, presentation: 'group-summary' as const }
-				: { viewportOffset: target.viewportOffset };
-			const result = await this.scroll.jumpToMessageRow(row, options);
+			let result: UserMessageNavigatorSelectionResult;
+			if (target.kind === 'group-summary') {
+				result = await this.scroll.jumpToMessageRow(row, {
+					viewportOffset: target.viewportOffset,
+					presentation: 'group-summary',
+				});
+			} else {
+				result = await this.scroll.jumpToMessageRow(row, {
+					viewportOffset: target.viewportOffset,
+				});
+			}
 			if (
 				result === 'completed' &&
 				restoreEpoch === this.#restoreEpoch &&

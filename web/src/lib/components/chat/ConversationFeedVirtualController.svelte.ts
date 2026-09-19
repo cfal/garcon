@@ -40,7 +40,10 @@ import {
 	settleConversationTarget,
 } from './conversation-feed-virtual-runtime.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
-import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
+import type {
+	ConversationVirtualFeedModel,
+	ConversationVirtualTarget,
+} from './conversation-feed-virtual-items.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
@@ -66,6 +69,11 @@ interface ConversationProjectionApplication {
 	readonly next: ConversationFeedProjection;
 	readonly pinned: boolean;
 	readonly scrollbarDragActive: boolean;
+}
+
+interface RemappedConversationAnchor {
+	readonly oldKey: string;
+	readonly anchor: ConversationVirtualAnchor;
 }
 
 export class ConversationFeedVirtualController implements ConversationViewportPort {
@@ -240,17 +248,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const selectedAnchor = selected?.anchor ?? null;
 		const nextHiddenAnchor = identityChanged
 			? null
-			: this.#remapAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null;
-		const anchor: VirtualMutationAnchor =
-			this.#activeTargetScrolls > 0 || nextGeometry.endBehavior === 'explicit-navigation'
-				? { kind: 'none' }
-				: restoreEnd
-					? { kind: 'end' }
-					: selected
-						? selected.oldKey === selected.anchor.key
-							? { kind: 'item', key: selected.oldKey }
-							: { kind: 'item-remap', oldKey: selected.oldKey, newKey: selected.anchor.key }
-						: { kind: 'none' };
+			: (this.#remapAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null);
+		const anchor = this.#projectionMutationAnchor(
+			selected,
+			restoreEnd,
+			nextGeometry.endBehavior === 'explicit-navigation',
+		);
 		const result = this.#virt.apply(
 			identityChanged
 				? {
@@ -565,9 +568,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			await nextConversationLayoutFrame();
 			if (token !== this.#targetToken) return 'cancelled';
 			if (!this.isReady()) return 'not-ready';
-			const memberRowId = target.kind === 'dom-anchor'
-				? this.#configuredModel.memberRowIdByDomAnchorId.get(target.id)
-				: target.id;
+			const memberRowId = this.#memberRowId(target);
 			if (
 				target.kind !== 'presentation-row' &&
 				memberRowId &&
@@ -582,20 +583,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				if (this.#configuredModel.collapsedGroupByMemberRowId.has(memberRowId)) return 'cancelled';
 			}
 			const model = this.#configuredModel;
-			const resolved =
-				target.kind === 'row' || target.kind === 'presentation-row'
-					? (() => {
-							const index = model.indexByRowId.get(target.id);
-							if (index === undefined) return undefined;
-							const item = model.items[index];
-							return {
-								index,
-								innerRowId: target.kind === 'presentation-row' && item?.kind === 'tool-group'
-									? item.anchorId
-									: target.id,
-							};
-						})()
-					: model.targetByDomAnchorId.get(target.id);
+			const resolved = this.#resolveTarget(target, model);
 			if (!resolved) return 'target-missing';
 			const key = model.items[resolved.index]?.key;
 			if (!key) return 'target-missing';
@@ -666,36 +654,83 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const key = [anchor.key, ...anchor.fallbackKeys].find((candidate) =>
 			model.indexByKey.has(candidate),
 		);
-		return key
-			? { key, viewportOffset: key === anchor.key ? anchor.viewportOffset : 0, fallbackKeys: [] }
-			: null;
+		if (!key) return null;
+		return {
+			key,
+			viewportOffset: key === anchor.key ? anchor.viewportOffset : 0,
+			fallbackKeys: [],
+		};
 	}
 
 	#remapAnchor(
 		anchor: ConversationVirtualAnchor | null,
 		previous: ConversationVirtualFeedModel,
 		next: ConversationVirtualFeedModel,
-	): { oldKey: string; anchor: ConversationVirtualAnchor } | null {
+	): RemappedConversationAnchor | null {
 		if (!anchor) return null;
 		for (const candidate of [anchor.key, ...anchor.fallbackKeys]) {
-			let nextKey = candidate;
-			if (!next.indexByKey.has(candidate)) {
+			let nextKey: string | undefined;
+			if (next.indexByKey.has(candidate)) {
+				nextKey = candidate;
+			} else {
 				const rowId = previous.representativeRowIdByKey.get(candidate);
-				const index = rowId === undefined ? undefined : next.indexByRowId.get(rowId);
-				nextKey = index === undefined ? '' : (next.items[index]?.key ?? '');
+				if (rowId === undefined) continue;
+				const index = next.indexByRowId.get(rowId);
+				if (index === undefined) continue;
+				nextKey = next.items[index]?.key;
 			}
-			if (nextKey) {
-				return {
-					oldKey: candidate,
-					anchor: {
-						key: nextKey,
-						viewportOffset: candidate === anchor.key ? anchor.viewportOffset : 0,
-						fallbackKeys: [],
-					},
-				};
-			}
+			if (!nextKey) continue;
+			return {
+				oldKey: candidate,
+				anchor: {
+					key: nextKey,
+					viewportOffset: candidate === anchor.key ? anchor.viewportOffset : 0,
+					fallbackKeys: [],
+				},
+			};
 		}
 		return null;
+	}
+
+	#projectionMutationAnchor(
+		selected: RemappedConversationAnchor | null,
+		restoreEnd: boolean,
+		explicitNavigation: boolean,
+	): VirtualMutationAnchor {
+		if (this.#activeTargetScrolls > 0 || explicitNavigation) return { kind: 'none' };
+		if (restoreEnd) return { kind: 'end' };
+		if (!selected) return { kind: 'none' };
+		if (selected.oldKey === selected.anchor.key) {
+			return { kind: 'item', key: selected.oldKey };
+		}
+		return {
+			kind: 'item-remap',
+			oldKey: selected.oldKey,
+			newKey: selected.anchor.key,
+		};
+	}
+
+	#memberRowId(target: ConversationViewportTarget): string | undefined {
+		if (target.kind === 'dom-anchor') {
+			return this.#configuredModel.memberRowIdByDomAnchorId.get(target.id);
+		}
+		return target.id;
+	}
+
+	#resolveTarget(
+		target: ConversationViewportTarget,
+		model: ConversationVirtualFeedModel,
+	): ConversationVirtualTarget | undefined {
+		if (target.kind === 'dom-anchor') return model.targetByDomAnchorId.get(target.id);
+		const index = model.indexByRowId.get(target.id);
+		if (index === undefined) return undefined;
+
+		let innerRowId = target.id;
+		const item = model.items[index];
+		if (target.kind === 'presentation-row' && item?.kind === 'tool-group') {
+			innerRowId = item.anchorId;
+		}
+		return { index, innerRowId };
 	}
 
 	#restoreVirtualAnchor(anchor: ConversationVirtualAnchor): boolean {
@@ -865,6 +900,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 }
 
 function transcriptKeys(model: ConversationVirtualFeedModel): ReadonlySet<string> {
-	return new Set(model.items.flatMap((item) =>
-		item.kind === 'transcript' || item.kind === 'tool-group' ? [item.key] : []));
+	const keys = new Set<string>();
+	for (const item of model.items) {
+		if (item.kind === 'transcript' || item.kind === 'tool-group') keys.add(item.key);
+	}
+	return keys;
 }

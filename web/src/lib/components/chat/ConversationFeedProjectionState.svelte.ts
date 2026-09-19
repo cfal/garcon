@@ -66,30 +66,42 @@ function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function toolGroups(model: ConversationVirtualFeedModel): ToolGroupVirtualFeedItem[] {
+	return model.items.filter((item): item is ToolGroupVirtualFeedItem => item.kind === 'tool-group');
+}
+
+function sameToolGroupPresentation(
+	left: ToolGroupVirtualFeedItem,
+	right: ToolGroupVirtualFeedItem,
+): boolean {
+	if (
+		left.key !== right.key ||
+		left.expanded !== right.expanded ||
+		left.members.length !== right.members.length
+	) {
+		return false;
+	}
+	return left.members.every((member, index) => {
+		const other = right.members[index];
+		if (member.item.id !== other.item.id) return false;
+		if (member.item.kind !== 'message' || other.item.kind !== 'message') return true;
+		return member.item.message.type === other.item.message.type;
+	});
+}
+
 function toolGroupPresentationChanged(
 	previous: ConversationVirtualFeedModel | undefined,
 	next: ConversationVirtualFeedModel,
 ): boolean {
 	if (!previous) return true;
-	const groups = (model: ConversationVirtualFeedModel): ToolGroupVirtualFeedItem[] =>
-		model.items.filter((item): item is ToolGroupVirtualFeedItem => item.kind === 'tool-group');
-	const before = groups(previous);
-	const after = groups(next);
+	const before = toolGroups(previous);
+	const after = toolGroups(next);
 	if (before.length !== after.length) return true;
-	return before.some((group, index) => {
+	for (const [index, group] of before.entries()) {
 		const current = after[index];
-		if (
-			group.key !== current.key ||
-			group.expanded !== current.expanded ||
-			group.members.length !== current.members.length
-		) return true;
-		return group.members.some((member, memberIndex) => {
-			const nextMember = current.members[memberIndex];
-			if (member.item.id !== nextMember.item.id) return true;
-			if (member.item.kind !== 'message' || nextMember.item.kind !== 'message') return false;
-			return member.item.message.type !== nextMember.item.message.type;
-		});
-	});
+		if (!current || !sameToolGroupPresentation(group, current)) return true;
+	}
+	return false;
 }
 
 function sameInput(

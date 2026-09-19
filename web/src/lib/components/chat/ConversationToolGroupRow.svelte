@@ -10,13 +10,18 @@
 		onToggle: (memberIds: readonly string[], expanded: boolean) => void;
 	}
 
+	function messageMembers(group: ToolGroupVirtualFeedItem): ConversationFeedMessageRenderItem[] {
+		const messages: ConversationFeedMessageRenderItem[] = [];
+		for (const member of group.members) {
+			if (member.item.kind === 'message') messages.push(member.item);
+		}
+		return messages;
+	}
+
 	let { item, onToggle }: Props = $props();
-	const members = $derived(
-		item.members.flatMap(({ item }): ConversationFeedMessageRenderItem[] =>
-			item.kind === 'message' ? [item] : [],
-		),
-	);
-	const summary = $derived(summarizeToolUses(members));
+	const toolMessages = $derived(messageMembers(item));
+	const memberIds = $derived(item.members.map((member) => member.item.id));
+	const summary = $derived(summarizeToolUses(toolMessages));
 </script>
 
 <div class="flow-root">
@@ -27,7 +32,7 @@
 		data-chat-anchor-id={item.anchorId}
 		aria-label={summary.accessibleLabel}
 		aria-expanded={item.expanded}
-		onclick={() => onToggle(item.members.map(({ item }) => item.id), !item.expanded)}
+		onclick={() => onToggle(memberIds, !item.expanded)}
 		class="flex min-h-11 w-full min-w-0 items-center gap-2 border-y border-border px-2 py-2 text-left text-sm text-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	>
 		<ChevronRight
