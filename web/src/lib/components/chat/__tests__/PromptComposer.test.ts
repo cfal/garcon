@@ -150,6 +150,25 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
 	});
 
+	it('refreshes again when an unvalidated catalog is invalidated during its first load', async () => {
+		const catalog = new ModelCatalogStore();
+		const remote = catalog.forNode(remoteExecutionNode.id);
+		remote.invalidate();
+		const pending = Promise.withResolvers<void>();
+		const refresh = vi.spyOn(remote, 'refreshIfStale').mockReturnValue(pending.promise);
+		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+		render(PromptComposerTestHost, {
+			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode], catalog,
+		});
+		try {
+			await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+			expect(remote.lastValidatedAt).toBeNull();
+			remote.invalidate();
+			await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+			expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(true);
+		} finally { pending.resolve(); }
+	});
+
 	it('renders without a surface shadow', () => {
 		const { container } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',

@@ -110,15 +110,15 @@ test('new and scheduled chats retain input and require Retry after cached remote
       await fixture.integration.crashAndRestartExecutionWorker();
       await app.waitForText('Failed to fetch model catalog: 503');
       expect(await fixture.page.evaluate((label) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => (button.getAttribute('aria-label') || button.textContent)?.trim() === label)?.disabled, submitLabel)).toBe(true);
-      await fixture.page.$eval(promptSelector, (element, scheduled) => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: scheduled, bubbles: true, cancelable: true })), kind === 'scheduled');
+      expect(await fixture.page.$eval(promptSelector, (element, scheduled) => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: scheduled, bubbles: true, cancelable: true })), kind === 'scheduled')).toBe(false);
       expect(await fixture.page.$eval(promptSelector, (element) => (element as HTMLTextAreaElement).value)).toBe(prompt);
       expect((await client.listChats()).sessions).toHaveLength(kind === 'new' ? 0 : 1);
       expect((await client.getScheduledPrompts()).prompts).toHaveLength(0);
 
       await fixture.page.evaluate(() => { document.documentElement.dataset.rejectRemoteCatalog = 'false'; });
-      await app.clickDialogButton('Retry');
+      await app.clickButton('Retry', { last: true });
       await app.waitForDialogButtonEnabled(submitLabel);
-      await app.clickDialogButton(submitLabel);
+      await app.clickButton(submitLabel, { last: true });
       if (kind === 'new') {
         await app.waitForAssistantMessageContaining(`echo:${prompt}`);
         await app.waitForChatProcessing(false);

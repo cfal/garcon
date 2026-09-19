@@ -119,8 +119,8 @@
 	$effect(() => {
 		if (!sessions.selectedChatId || !nodes.isReady(agentState.nodeId)) return;
 		const catalog = modelCatalog;
-		// Invalidating a connected node also refreshes an already-open chat.
-		void catalog.lastValidatedAt;
+		// Repeated invalidation must wake consumers even before the first validation.
+		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
 	});
 	const notifications = getNotifications();

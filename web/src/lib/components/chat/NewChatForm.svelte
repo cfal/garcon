@@ -226,7 +226,7 @@
 	$effect(() => {
 		if (!form.nodeReady) return;
 		const catalog = modelCatalog;
-		void catalog.lastValidatedAt;
+		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
 	});
 
@@ -538,7 +538,6 @@
 			return;
 		}
 		if (submitOnEnter) {
-			if (!form.canSubmit) return;
 			e.preventDefault();
 			handleSubmit();
 		}

@@ -93,7 +93,7 @@
 	$effect(() => {
 		if (!open || form.targetType !== 'new-chat' || !form.startup.nodeReady) return;
 		const catalog = modelCatalog;
-		void catalog.lastValidatedAt;
+		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
 	});
 
@@ -145,7 +145,6 @@
 
 	function handlePromptKeydown(event: KeyboardEvent): void {
 		if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
-		if (!form.canSave) return;
 		event.preventDefault();
 		void save();
 	}

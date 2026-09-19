@@ -223,7 +223,7 @@ describe('NewChatForm', () => {
 		await view.rerender({ catalogValidated: false, catalogError: 'Synthetic catalog failure' });
 		expect(screen.getByText('Synthetic catalog failure')).toBeTruthy();
 		await fireEvent.click(submit);
-		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(await fireEvent.keyDown(input, { key: 'Enter' })).toBe(false);
 		expect(onStartChat).not.toHaveBeenCalled();
 		expect((input as HTMLTextAreaElement).value).toBe('Synthetic cached-catalog prompt');
 		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
