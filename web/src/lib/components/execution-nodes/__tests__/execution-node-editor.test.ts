@@ -11,7 +11,7 @@ const connection = {
 } satisfies ExecutionNodeConnection;
 
 function fixture() {
-	const read = vi.fn(async () => [localExecutionNode, remoteExecutionNode]);
+	const read = vi.fn<typeof api.getExecutionNodes>(async () => [localExecutionNode, remoteExecutionNode]);
 	const nodes = new ExecutionNodesStore(read);
 	nodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
 	const transport = {
@@ -25,6 +25,20 @@ function fixture() {
 }
 
 describe('ExecutionNodeEditor', () => {
+	it('refreshes creation after a held pre-create snapshot without WebSocket delivery', async () => {
+		const { editor, nodes, read } = fixture();
+		const response = Promise.withResolvers<readonly ExecutionNodeSnapshot[]>();
+		read.mockReturnValueOnce(response.promise);
+		const discovery = nodes.refresh();
+		editor.label = 'New worker';
+		const saving = editor.save();
+		response.resolve([localExecutionNode]);
+		await discovery;
+		expect(await saving).toBe(true);
+		expect(read).toHaveBeenCalledTimes(2);
+		expect(nodes.get(remoteExecutionNode.id)).toEqual(remoteExecutionNode);
+	});
+
 	it('creates an inbound node and reveals its connection URL only in editor state', async () => {
 		const { editor, nodes, transport } = fixture();
 		editor.label = ' Build Machine ';

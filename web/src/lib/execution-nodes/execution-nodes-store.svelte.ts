@@ -54,6 +54,11 @@ export class ExecutionNodesStore {
 		});
 		return this.#request;
 	}
+
+	async refreshAfterMutation(): Promise<void> {
+		await this.#request;
+		await this.refresh();
+	}
 }
 
 export function executionNodeStatus(node: ExecutionNodeSnapshot): string {

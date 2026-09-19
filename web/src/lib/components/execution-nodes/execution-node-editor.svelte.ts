@@ -73,14 +73,14 @@ export class ExecutionNodeEditor {
 					...(connectionChanged ? { connection: { direction: this.direction, connectionUrl: this.connectionUrl.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment } } : {}),
 				});
 				if (this.nodes.nodes === previousNodes) this.nodes.applySnapshot(nodes);
-				else await this.nodes.refresh();
+				else await this.nodes.refreshAfterMutation();
 				if (version !== this.#version) return false;
 			} else {
 				const result = await this.transport.createExecutionNode({
 					label: this.label.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment,
 					...(this.direction === 'node-connects' ? { direction: 'node-connects' } : { direction: 'controller-connects', connectionUrl: this.connectionUrl.trim() }),
 				});
-				await this.nodes.refresh();
+				await this.nodes.refreshAfterMutation();
 				if (version !== this.#version) return false;
 				this.id = result.id;
 				this.connectionUrl = result.connectionUrl;
@@ -108,7 +108,7 @@ export class ExecutionNodeEditor {
 		try {
 			const nodes = await this.transport.removeExecutionNode(this.id);
 			if (this.nodes.nodes === previousNodes) this.nodes.applySnapshot(nodes);
-			else await this.nodes.refresh();
+			else await this.nodes.refreshAfterMutation();
 			if (version !== this.#version) return false;
 			this.clear();
 			return true;
