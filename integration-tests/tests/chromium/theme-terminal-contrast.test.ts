@@ -21,6 +21,8 @@ const PRESENTATIONS: readonly TerminalPresentation[] = [
   { colorScheme: "dark", rendererPalette: "colorblind", background: "#1e1e1e" },
   { colorScheme: "light", rendererPalette: "owl", background: "#fbfbfb" },
   { colorScheme: "dark", rendererPalette: "owl", background: "#011627" },
+  { colorScheme: "light", rendererPalette: "neko", background: "#eff1f5" },
+  { colorScheme: "dark", rendererPalette: "neko", background: "#1e1e2e" },
 ];
 const SAMPLES = [
   { name: "black foreground", sequence: "\u001b[30mblack" },

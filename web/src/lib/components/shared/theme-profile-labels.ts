@@ -10,4 +10,6 @@ export const THEME_PROFILE_LABELS: Record<ThemeId, () => string> = {
 	'colorblind-dark': m.settings_theme_profile_colorblind_dark,
 	'owl-light': m.settings_theme_profile_owl_light,
 	'owl-dark': m.settings_theme_profile_owl_dark,
+	'neko-light': m.settings_theme_profile_neko_light,
+	'neko-dark': m.settings_theme_profile_neko_dark,
 };

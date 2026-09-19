@@ -1,0 +1,269 @@
+:root:where([data-theme='neko-light']) {
+	--background: 220 23% 95%;
+	--foreground: 234 16% 14%;
+	--card: 0 0% 100%;
+	--card-foreground: 234 16% 30%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 234 16% 30%;
+	--primary: 266 85% 58%;
+	--primary-foreground: 0 0% 100%;
+	--brand-mark-surface: 266 85% 58%;
+	--brand-mark-foreground: 0 0% 100%;
+	--secondary: 223 16% 83%;
+	--secondary-foreground: 234 16% 30%;
+	--muted: 220 22% 92%;
+	--muted-foreground: 233 13% 37%;
+	--accent: 266 58% 92%;
+	--accent-foreground: 266 66% 34%;
+	--destructive: 347 87% 44%;
+	--destructive-foreground: 0 0% 100%;
+	--border: 225 14% 77%;
+	--workspace-window-titlebar: 220 22% 92%;
+	--workspace-window-titlebar-active: 220 21% 89%;
+	--workspace-window-tab-selected: 0 0% 100%;
+	--workspace-window-tab-selected-inactive: 223 16% 83%;
+	--composer-thinking-static-start: 231 10% 59%;
+	--composer-thinking-pulse-emphasis: 266 85% 58%;
+	--input: 232 10% 53%;
+	--ring: 266 72% 48%;
+	--radius: 0.75rem;
+	--transient-backdrop-color: 234 24% 18%;
+	--transient-backdrop-opacity: 0.4;
+	--transient-backdrop-blur: 4px;
+	--elevation-menu: 0 2px 8px hsl(234 24% 18% / 0.1), 0 8px 24px hsl(234 24% 18% / 0.14);
+	--elevation-dialog: 0 4px 16px hsl(234 24% 18% / 0.14), 0 16px 48px hsl(234 24% 18% / 0.2);
+	--glow-primary: 0 0 0 1px hsl(var(--primary) / 0.3), 0 4px 16px hsl(var(--primary) / 0.22);
+	--chat-header-bg: 220 23% 95%;
+	--chat-header-border: 225 14% 77%;
+	--chat-thinking-bg: 220 22% 92%;
+	--chat-message-action-highlight: 220 91% 54%;
+	--chat-message-action-highlight-opacity: 0.12;
+	--chat-tabs-rail-bg: 220 22% 92%;
+	--chat-tabs-rail-border: 225 14% 77%;
+	--chat-tabs-active-bg: 266 85% 58%;
+	--chat-tabs-active-foreground: 0 0% 100%;
+	--chat-tabs-active-border: 266 72% 48%;
+	--chat-bash-row-bg: 220 22% 93%;
+	--sidebar-background: 220 22% 92%;
+	--sidebar-foreground: 234 16% 30%;
+	--sidebar-primary: 266 85% 58%;
+	--sidebar-primary-foreground: 0 0% 100%;
+	--sidebar-accent: 266 56% 90%;
+	--sidebar-accent-foreground: 266 66% 34%;
+	--sidebar-border: 225 14% 77%;
+	--sidebar-ring: 266 72% 48%;
+	--sidebar-chat-item-bg: 220 23% 95%;
+	--sidebar-chat-item-hover-bg: 266 42% 92%;
+	--sidebar-chat-item-selected-bg: 266 56% 89%;
+	--sidebar-chat-item-selected-foreground: 266 66% 32%;
+	--sidebar-badge-pinned-bg: 45 100% 94%;
+	--sidebar-badge-pinned-foreground: 40 90% 26%;
+	--sidebar-badge-pinned-border: 45 55% 76%;
+	--sidebar-badge-archived-bg: 220 22% 92%;
+	--sidebar-badge-archived-foreground: 233 13% 37%;
+	--sidebar-badge-archived-border: 225 14% 77%;
+	--sidebar-bulk-archive-bg: 109 48% 94%;
+	--sidebar-bulk-archive-foreground: 109 62% 25%;
+	--sidebar-bulk-unarchive-bg: 347 72% 95%;
+	--sidebar-bulk-unarchive-foreground: 347 76% 36%;
+	--provider-codex-bg: 109 48% 94%;
+	--provider-codex-foreground: 109 62% 25%;
+	--provider-codex-border: 109 35% 76%;
+	--provider-cursor-bg: 231 78% 95%;
+	--provider-cursor-foreground: 231 62% 31%;
+	--provider-cursor-border: 231 42% 76%;
+	--provider-claude-bg: 22 88% 94%;
+	--provider-claude-foreground: 22 82% 29%;
+	--provider-claude-border: 22 52% 76%;
+	--provider-opencode-bg: 266 72% 95%;
+	--provider-opencode-foreground: 266 66% 34%;
+	--provider-opencode-border: 266 42% 77%;
+	--provider-amp-bg: 35 82% 93%;
+	--provider-amp-foreground: 35 78% 27%;
+	--provider-amp-border: 35 50% 74%;
+	--provider-factory-bg: 189 74% 93%;
+	--provider-factory-foreground: 189 76% 25%;
+	--provider-factory-border: 189 44% 74%;
+	--provider-pi-bg: 316 70% 95%;
+	--provider-pi-foreground: 316 62% 31%;
+	--provider-pi-border: 316 42% 77%;
+	--provider-openrouter-bg: 170 58% 92%;
+	--provider-openrouter-foreground: 170 68% 24%;
+	--provider-openrouter-border: 170 38% 72%;
+	--provider-zai-bg: 347 76% 94%;
+	--provider-zai-foreground: 347 76% 34%;
+	--provider-zai-border: 347 48% 76%;
+	--tag-blue-bg: 220 91% 93% / 0.5;
+	--tag-blue-foreground: 220 76% 34%;
+	--tag-blue-border: 220 55% 76% / 0.5;
+	--tag-green-bg: 109 56% 92% / 0.5;
+	--tag-green-foreground: 109 62% 25%;
+	--tag-green-border: 109 35% 74% / 0.5;
+	--tag-amber-bg: 35 82% 91% / 0.5;
+	--tag-amber-foreground: 35 78% 27%;
+	--tag-amber-border: 35 50% 72% / 0.5;
+	--tag-purple-bg: 266 82% 94% / 0.5;
+	--tag-purple-foreground: 266 66% 34%;
+	--tag-purple-border: 266 42% 76% / 0.5;
+	--tag-rose-bg: 347 82% 94% / 0.5;
+	--tag-rose-foreground: 347 76% 34%;
+	--tag-rose-border: 347 45% 74% / 0.5;
+	--tag-teal-bg: 183 70% 90% / 0.5;
+	--tag-teal-foreground: 183 74% 24%;
+	--tag-teal-border: 183 42% 71% / 0.5;
+	--tag-indigo-bg: 231 88% 94% / 0.5;
+	--tag-indigo-foreground: 231 62% 31%;
+	--tag-indigo-border: 231 42% 75% / 0.5;
+	--tag-orange-bg: 22 90% 92% / 0.5;
+	--tag-orange-foreground: 22 82% 29%;
+	--tag-orange-border: 22 52% 73% / 0.5;
+	--indicator-attention: 347 87% 44%;
+	--status-processing: 220 91% 54%;
+	--status-processing-foreground: 220 76% 34%;
+	--status-processing-border: 220 55% 62%;
+	--status-info: 266 70% 95%;
+	--status-info-foreground: 266 66% 34%;
+	--status-info-border: 266 40% 76%;
+	--status-success: 109 48% 94%;
+	--status-success-foreground: 109 62% 25%;
+	--status-success-border: 109 35% 74%;
+	--composer-agent-setting: 183 64% 91%;
+	--composer-agent-setting-foreground: 183 74% 24%;
+	--composer-agent-setting-border: 183 44% 70%;
+	--status-error: 347 72% 95%;
+	--status-error-foreground: 347 76% 36%;
+	--status-error-border: 347 48% 76%;
+	--status-neutral: 220 22% 92%;
+	--status-neutral-foreground: 233 13% 37%;
+	--status-neutral-border: 225 14% 77%;
+	--status-warning: 35 77% 49%;
+	--status-warning-foreground: 0 0% 10%;
+	--status-warning-muted-foreground: 35 78% 27%;
+	--status-warning-border: 35 72% 39%;
+	--queue-surface: 35 77% 49% / 0.2;
+	--queue-border: 35 72% 39%;
+	--queue-entry-border: 35 72% 39%;
+	--queue-foreground: 0 0% 14%;
+	--queue-action-bg: 35 77% 49% / 0.3;
+	--queue-action-hover-bg: 35 77% 49% / 0.45;
+	--stop-button-bg: 347 87% 44%;
+	--stop-button-foreground: 0 0% 100%;
+	--stop-button-border: 347 72% 36%;
+	--user-bubble: 266 48% 25%;
+	--user-bubble-selected: 266 50% 31%;
+	--user-bubble-foreground: 266 40% 97%;
+	--user-bubble-timestamp: 266 24% 76%;
+	--markdown-code-background: 220 22% 92%;
+	--markdown-code-foreground: 234 16% 30%;
+	--markdown-code-border: 225 14% 77%;
+	--markdown-code-keyword: 266 65% 36%;
+	--markdown-code-title: 220 68% 36%;
+	--markdown-code-meta: 183 83% 21%;
+	--markdown-code-string: 111 60% 20%;
+	--markdown-code-symbol: 24 100% 26%;
+	--markdown-code-comment: 233 13% 34%;
+	--markdown-code-name: 220 68% 36%;
+	--markdown-code-section: 266 65% 36%;
+	--markdown-code-addition-bg: 109 48% 94%;
+	--markdown-code-addition-fg: 109 62% 25%;
+	--markdown-code-deletion-bg: 347 72% 95%;
+	--markdown-code-deletion-fg: 347 76% 36%;
+	--diff-modified: 35 82% 92%;
+	--diff-modified-foreground: 35 78% 27%;
+	--diff-modified-border: 35 50% 72%;
+	--diff-addition: 109 62% 25%;
+	--diff-deletion: 347 76% 36%;
+	--diff-hunk: 220 76% 34%;
+	--interactive-accent: 266 72% 43%;
+	--interactive-accent-foreground: 0 0% 100%;
+	--file-icon-code: 109 58% 34%;
+	--file-icon-doc: 220 76% 44%;
+	--file-icon-image: 316 62% 45%;
+	--file-icon-folder: 266 72% 48%;
+	--terminal-bg: 220 23% 95%;
+	--git-action-commit: 266 72% 43%;
+	--git-action-commit-hover: 266 72% 37%;
+	--git-action-pull: 109 58% 31%;
+	--git-action-pull-hover: 109 58% 26%;
+	--git-action-push: 22 82% 34%;
+	--git-action-push-hover: 22 82% 29%;
+	--git-action-publish: 220 76% 44%;
+	--git-action-publish-hover: 220 76% 37%;
+	--git-action-foreground: 0 0% 100%;
+	--git-modified: 35 78% 27%;
+	--git-added: 109 62% 20%;
+	--pr-merged: 266 72% 43%;
+	--git-deleted: 347 76% 30%;
+	--git-untracked: 183 74% 24%;
+	--git-renamed: 220 76% 34%;
+	--diff-add-bg: 109 48% 91%;
+	--diff-add-fg: 234 16% 24%;
+	--diff-add-line-num: 234 16% 24%;
+	--diff-del-bg: 347 72% 93%;
+	--diff-del-fg: 234 16% 24%;
+	--diff-del-line-num: 234 16% 24%;
+	--diff-hunk-header-bg: 220 70% 93%;
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234c4f69' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	--control-radius: var(--radius);
+	--menu-radius: var(--radius);
+	--menu-item-radius: calc(var(--radius) - 2px);
+	--dialog-radius: calc(var(--radius) + 4px);
+	--dialog-close-radius: calc(var(--radius) - 2px);
+	--menu-padding: 0.375rem;
+	--menu-shadow: var(--elevation-menu);
+	--submenu-shadow: var(--elevation-menu);
+	--tooltip-shadow: var(--elevation-menu);
+	--dialog-shadow: var(--elevation-dialog);
+	--primary-hover-shadow: var(--glow-primary);
+	--dialog-surface: hsl(var(--popover));
+	--scroll-area-thumb: hsl(var(--foreground) / 0.52);
+	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.68);
+	--switch-thumb-checked: hsl(var(--primary-foreground));
+	--switch-thumb-unchecked: hsl(var(--foreground));
+	--native-select-muted-background: hsl(var(--muted));
+	--native-select-surface-background: hsl(var(--muted));
+	--native-select-border: hsl(var(--input));
+	--native-select-radius: var(--radius);
+	--native-select-compact-radius: var(--radius);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+	:root:where([data-theme='neko-light']),
+	:root:where([data-theme='neko-light']) * {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--foreground) / 0.52) transparent;
+	}
+}
+
+@layer base {
+	:root:where([data-theme='neko-light']) ::selection {
+		background-color: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+	}
+}
+
+:root:where([data-theme='neko-light']) :is(input[type='checkbox'], input[type='radio'], progress) {
+	accent-color: hsl(var(--primary));
+}
+
+:root:where([data-theme='neko-light']) ::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+:root:where([data-theme='neko-light']) ::-webkit-scrollbar-track,
+:root:where([data-theme='neko-light']) ::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+:root:where([data-theme='neko-light']) ::-webkit-scrollbar-thumb {
+	border: 2px solid transparent;
+	border-radius: 999px;
+	background: hsl(var(--foreground) / 0.52);
+	background-clip: padding-box;
+}
+
+:root:where([data-theme='neko-light']) ::-webkit-scrollbar-thumb:hover {
+	background: hsl(var(--foreground) / 0.68);
+	background-clip: padding-box;
+}

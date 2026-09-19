@@ -26,4 +26,12 @@ describe('editor themes', () => {
 			expect(editorThemeExtension(themeId)).toBeTruthy();
 		}
 	});
+
+	it('provides dedicated Neko light and dark extensions', () => {
+		for (const colorScheme of ['light', 'dark'] as const) {
+			const themeId = resolveEditorThemeId({ colorScheme, rendererPalette: 'neko' });
+			expect(themeId).toBe(`neko-${colorScheme}`);
+			expect(editorThemeExtension(themeId)).toBeTruthy();
+		}
+	});
 });

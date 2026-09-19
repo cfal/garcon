@@ -12,6 +12,8 @@ const RENDERER_THEMES: readonly RendererThemeId[] = [
   "colorblind-dark",
   "owl-light",
   "owl-dark",
+  "neko-light",
+  "neko-dark",
 ];
 
 const DIAGRAMS = [

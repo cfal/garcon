@@ -1552,6 +1552,8 @@
 	"settings_theme_profile_colorblind_dark": "Colorblind Dark",
 	"settings_theme_profile_owl_light": "Owl Daybreak",
 	"settings_theme_profile_owl_dark": "Owl Nightfall",
+	"settings_theme_profile_neko_light": "Neko Frost",
+	"settings_theme_profile_neko_dark": "Neko Velvet",
 	"settings_chat_generate_titles": "Automatically generate chat titles",
 	"settings_chat_title_provider": "Title provider",
 	"settings_chat_title_model": "Title model",

@@ -1,0 +1,269 @@
+:root:where([data-theme='neko-dark']) {
+	--background: 240 21% 15%;
+	--foreground: 226 64% 92%;
+	--card: 240 21% 17%;
+	--card-foreground: 226 64% 88%;
+	--popover: 237 16% 23%;
+	--popover-foreground: 226 64% 88%;
+	--primary: 267 84% 81%;
+	--primary-foreground: 240 23% 9%;
+	--brand-mark-surface: 267 84% 81%;
+	--brand-mark-foreground: 240 23% 9%;
+	--secondary: 237 16% 23%;
+	--secondary-foreground: 226 64% 88%;
+	--muted: 237 16% 23%;
+	--muted-foreground: 228 17% 68%;
+	--accent: 267 30% 25%;
+	--accent-foreground: 267 72% 88%;
+	--destructive: 343 81% 75%;
+	--destructive-foreground: 240 23% 9%;
+	--border: 234 13% 31%;
+	--workspace-window-titlebar: 240 21% 12%;
+	--workspace-window-titlebar-active: 240 23% 9%;
+	--workspace-window-tab-selected: 237 16% 23%;
+	--workspace-window-tab-selected-inactive: 240 21% 17%;
+	--composer-thinking-static-start: 233 12% 39%;
+	--composer-thinking-pulse-emphasis: 267 84% 81%;
+	--input: 230 13% 55%;
+	--ring: 267 84% 81%;
+	--radius: 0.75rem;
+	--transient-backdrop-color: 240 23% 7%;
+	--transient-backdrop-opacity: 0.58;
+	--transient-backdrop-blur: 4px;
+	--elevation-menu: 0 2px 8px hsl(240 23% 7% / 0.5), 0 12px 32px hsl(240 23% 7% / 0.55);
+	--elevation-dialog: 0 4px 20px hsl(240 23% 7% / 0.6), 0 24px 64px hsl(240 23% 7% / 0.65);
+	--glow-primary: 0 0 0 1px hsl(var(--primary) / 0.42), 0 0 18px hsl(var(--primary) / 0.22);
+	--chat-header-bg: 240 21% 17%;
+	--chat-header-border: 234 13% 31%;
+	--chat-thinking-bg: 240 21% 12%;
+	--chat-message-action-highlight: 217 92% 76%;
+	--chat-message-action-highlight-opacity: 0.2;
+	--chat-tabs-rail-bg: 237 16% 23%;
+	--chat-tabs-rail-border: 234 13% 31%;
+	--chat-tabs-active-bg: 267 84% 81%;
+	--chat-tabs-active-foreground: 240 23% 9%;
+	--chat-tabs-active-border: 267 84% 81%;
+	--chat-bash-row-bg: 240 21% 12%;
+	--sidebar-background: 240 21% 12%;
+	--sidebar-foreground: 226 64% 88%;
+	--sidebar-primary: 267 84% 81%;
+	--sidebar-primary-foreground: 240 23% 9%;
+	--sidebar-accent: 267 30% 25%;
+	--sidebar-accent-foreground: 267 72% 88%;
+	--sidebar-border: 234 13% 29%;
+	--sidebar-ring: 267 84% 81%;
+	--sidebar-chat-item-bg: 240 21% 17%;
+	--sidebar-chat-item-hover-bg: 267 24% 22%;
+	--sidebar-chat-item-selected-bg: 267 30% 25%;
+	--sidebar-chat-item-selected-foreground: 267 72% 90%;
+	--sidebar-badge-pinned-bg: 45 46% 26%;
+	--sidebar-badge-pinned-foreground: 45 90% 84%;
+	--sidebar-badge-pinned-border: 45 34% 38%;
+	--sidebar-badge-archived-bg: 237 16% 23%;
+	--sidebar-badge-archived-foreground: 228 24% 72%;
+	--sidebar-badge-archived-border: 234 13% 31%;
+	--sidebar-bulk-archive-bg: 115 30% 24%;
+	--sidebar-bulk-archive-foreground: 115 54% 80%;
+	--sidebar-bulk-unarchive-bg: 343 34% 25%;
+	--sidebar-bulk-unarchive-foreground: 343 81% 82%;
+	--provider-codex-bg: 115 34% 23%;
+	--provider-codex-foreground: 115 54% 80%;
+	--provider-codex-border: 115 30% 37%;
+	--provider-cursor-bg: 232 34% 25%;
+	--provider-cursor-foreground: 232 97% 88%;
+	--provider-cursor-border: 232 30% 39%;
+	--provider-claude-bg: 23 40% 24%;
+	--provider-claude-foreground: 23 92% 82%;
+	--provider-claude-border: 23 34% 39%;
+	--provider-opencode-bg: 267 34% 25%;
+	--provider-opencode-foreground: 267 84% 85%;
+	--provider-opencode-border: 267 30% 40%;
+	--provider-amp-bg: 41 38% 24%;
+	--provider-amp-foreground: 41 86% 84%;
+	--provider-amp-border: 41 32% 39%;
+	--provider-factory-bg: 199 40% 22%;
+	--provider-factory-foreground: 199 76% 80%;
+	--provider-factory-border: 199 34% 37%;
+	--provider-pi-bg: 316 34% 24%;
+	--provider-pi-foreground: 316 72% 87%;
+	--provider-pi-border: 316 28% 39%;
+	--provider-openrouter-bg: 170 34% 22%;
+	--provider-openrouter-foreground: 170 57% 80%;
+	--provider-openrouter-border: 170 28% 37%;
+	--provider-zai-bg: 343 34% 24%;
+	--provider-zai-foreground: 343 81% 82%;
+	--provider-zai-border: 343 28% 39%;
+	--tag-blue-bg: 217 42% 24% / 0.3;
+	--tag-blue-foreground: 217 92% 82%;
+	--tag-blue-border: 217 36% 42% / 0.4;
+	--tag-green-bg: 115 34% 23% / 0.3;
+	--tag-green-foreground: 115 54% 80%;
+	--tag-green-border: 115 30% 40% / 0.4;
+	--tag-amber-bg: 41 38% 24% / 0.3;
+	--tag-amber-foreground: 41 86% 84%;
+	--tag-amber-border: 41 32% 40% / 0.4;
+	--tag-purple-bg: 267 34% 25% / 0.3;
+	--tag-purple-foreground: 267 84% 85%;
+	--tag-purple-border: 267 30% 42% / 0.4;
+	--tag-rose-bg: 343 34% 24% / 0.3;
+	--tag-rose-foreground: 343 81% 82%;
+	--tag-rose-border: 343 28% 40% / 0.4;
+	--tag-teal-bg: 170 34% 22% / 0.3;
+	--tag-teal-foreground: 170 57% 80%;
+	--tag-teal-border: 170 28% 39% / 0.4;
+	--tag-indigo-bg: 232 34% 24% / 0.3;
+	--tag-indigo-foreground: 232 97% 88%;
+	--tag-indigo-border: 232 30% 42% / 0.4;
+	--tag-orange-bg: 23 40% 24% / 0.3;
+	--tag-orange-foreground: 23 92% 82%;
+	--tag-orange-border: 23 34% 40% / 0.4;
+	--indicator-attention: 343 81% 75%;
+	--status-processing: 217 92% 76%;
+	--status-processing-foreground: 217 92% 84%;
+	--status-processing-border: 217 62% 56%;
+	--status-info: 267 34% 26%;
+	--status-info-foreground: 267 84% 87%;
+	--status-info-border: 267 30% 42%;
+	--status-success: 115 34% 24%;
+	--status-success-foreground: 115 54% 82%;
+	--status-success-border: 115 30% 39%;
+	--composer-agent-setting: 170 34% 22%;
+	--composer-agent-setting-foreground: 170 57% 82%;
+	--composer-agent-setting-border: 170 30% 38%;
+	--status-error: 343 34% 25%;
+	--status-error-foreground: 343 81% 84%;
+	--status-error-border: 343 30% 41%;
+	--status-neutral: 237 16% 23%;
+	--status-neutral-foreground: 228 24% 72%;
+	--status-neutral-border: 234 13% 35%;
+	--status-warning: 41 86% 83%;
+	--status-warning-foreground: 0 0% 8%;
+	--status-warning-muted-foreground: 41 86% 86%;
+	--status-warning-border: 41 62% 58%;
+	--queue-surface: 41 86% 83% / 0.18;
+	--queue-border: 41 62% 58%;
+	--queue-entry-border: 41 62% 58%;
+	--queue-foreground: 41 86% 86%;
+	--queue-action-bg: 41 86% 83% / 0.3;
+	--queue-action-hover-bg: 41 86% 83% / 0.46;
+	--stop-button-bg: 343 81% 75%;
+	--stop-button-foreground: 240 23% 9%;
+	--stop-button-border: 343 62% 58%;
+	--user-bubble: 267 34% 24%;
+	--user-bubble-selected: 267 34% 31%;
+	--user-bubble-foreground: 267 72% 92%;
+	--user-bubble-timestamp: 267 28% 72%;
+	--markdown-code-background: 240 21% 12%;
+	--markdown-code-foreground: 226 64% 88%;
+	--markdown-code-border: 234 13% 31%;
+	--markdown-code-keyword: 267 84% 81%;
+	--markdown-code-title: 217 92% 76%;
+	--markdown-code-meta: 170 57% 73%;
+	--markdown-code-string: 115 54% 76%;
+	--markdown-code-symbol: 23 92% 75%;
+	--markdown-code-comment: 228 24% 72%;
+	--markdown-code-name: 217 92% 76%;
+	--markdown-code-section: 267 84% 81%;
+	--markdown-code-addition-bg: 115 48% 16%;
+	--markdown-code-addition-fg: 115 54% 82%;
+	--markdown-code-deletion-bg: 343 48% 24%;
+	--markdown-code-deletion-fg: 343 81% 84%;
+	--diff-modified: 41 36% 24%;
+	--diff-modified-foreground: 41 86% 84%;
+	--diff-modified-border: 41 30% 38%;
+	--diff-addition: 115 54% 76%;
+	--diff-deletion: 343 81% 75%;
+	--diff-hunk: 217 92% 76%;
+	--interactive-accent: 267 84% 81%;
+	--interactive-accent-foreground: 240 23% 9%;
+	--file-icon-code: 115 54% 76%;
+	--file-icon-doc: 217 92% 76%;
+	--file-icon-image: 316 72% 86%;
+	--file-icon-folder: 267 84% 81%;
+	--terminal-bg: 240 21% 15%;
+	--git-action-commit: 267 56% 43%;
+	--git-action-commit-hover: 267 56% 37%;
+	--git-action-pull: 115 46% 34%;
+	--git-action-pull-hover: 115 46% 29%;
+	--git-action-push: 23 62% 38%;
+	--git-action-push-hover: 23 62% 33%;
+	--git-action-publish: 217 58% 47%;
+	--git-action-publish-hover: 217 58% 40%;
+	--git-action-foreground: 0 0% 100%;
+	--git-modified: 41 86% 83%;
+	--git-added: 115 54% 76%;
+	--pr-merged: 267 84% 81%;
+	--git-deleted: 343 81% 84%;
+	--git-untracked: 170 57% 73%;
+	--git-renamed: 217 92% 76%;
+	--diff-add-bg: 115 34% 18%;
+	--diff-add-fg: 226 64% 92%;
+	--diff-add-line-num: 226 64% 92%;
+	--diff-del-bg: 343 30% 18%;
+	--diff-del-fg: 226 64% 92%;
+	--diff-del-line-num: 226 64% 92%;
+	--diff-hunk-header-bg: 217 34% 24%;
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237f849c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	--control-radius: var(--radius);
+	--menu-radius: var(--radius);
+	--menu-item-radius: calc(var(--radius) - 2px);
+	--dialog-radius: calc(var(--radius) + 4px);
+	--dialog-close-radius: calc(var(--radius) - 2px);
+	--menu-padding: 0.375rem;
+	--menu-shadow: var(--elevation-menu);
+	--submenu-shadow: var(--elevation-menu);
+	--tooltip-shadow: var(--elevation-menu);
+	--dialog-shadow: var(--elevation-dialog);
+	--primary-hover-shadow: var(--glow-primary);
+	--dialog-surface: hsl(var(--popover));
+	--scroll-area-thumb: hsl(var(--foreground) / 0.42);
+	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.58);
+	--switch-thumb-checked: hsl(var(--primary-foreground));
+	--switch-thumb-unchecked: hsl(var(--foreground));
+	--native-select-muted-background: hsl(var(--muted));
+	--native-select-surface-background: hsl(var(--muted));
+	--native-select-border: hsl(var(--input));
+	--native-select-radius: var(--radius);
+	--native-select-compact-radius: var(--radius);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+	:root:where([data-theme='neko-dark']),
+	:root:where([data-theme='neko-dark']) * {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--foreground) / 0.42) transparent;
+	}
+}
+
+@layer base {
+	:root:where([data-theme='neko-dark']) ::selection {
+		background-color: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+	}
+}
+
+:root:where([data-theme='neko-dark']) :is(input[type='checkbox'], input[type='radio'], progress) {
+	accent-color: hsl(var(--primary));
+}
+
+:root:where([data-theme='neko-dark']) ::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+:root:where([data-theme='neko-dark']) ::-webkit-scrollbar-track,
+:root:where([data-theme='neko-dark']) ::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+:root:where([data-theme='neko-dark']) ::-webkit-scrollbar-thumb {
+	border: 2px solid transparent;
+	border-radius: 999px;
+	background: hsl(var(--foreground) / 0.42);
+	background-clip: padding-box;
+}
+
+:root:where([data-theme='neko-dark']) ::-webkit-scrollbar-thumb:hover {
+	background: hsl(var(--foreground) / 0.58);
+	background-clip: padding-box;
+}
