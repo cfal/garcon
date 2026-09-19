@@ -36,6 +36,8 @@
 		preferRecentsOnOpen?: boolean;
 		wrapInForm?: boolean;
 		onFormSubmit?: () => void;
+		onForceRefresh?: () => Promise<void>;
+		refreshRevealsEndpoint?: boolean;
 	}
 
 	let {
@@ -52,7 +54,11 @@
 		preferRecentsOnOpen = false,
 		wrapInForm = false,
 		onFormSubmit = () => {},
+		onForceRefresh = async () => {},
+		refreshRevealsEndpoint = false,
 	}: Props = $props();
+	let endpointVisible = $state(false);
+	let catalogVersion = $state(0);
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
 		const generated = Array.from({ length: modelCount }, (_, index): ModelOption => ({
@@ -62,7 +68,7 @@
 		const withDuplicate = includeDuplicateModel
 			? [...generated, { value: 'same-model', label: 'same-model' }]
 			: generated;
-		return includeEndpointModel
+		return (includeEndpointModel || endpointVisible)
 			? [
 					...withDuplicate,
 					{
@@ -120,6 +126,16 @@
 	}
 
 	setModelCatalog({
+		get version() {
+			return catalogVersion;
+		},
+		async forceRefresh() {
+			await onForceRefresh();
+			if (refreshRevealsEndpoint) {
+				endpointVisible = true;
+				catalogVersion += 1;
+			}
+		},
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
 			id: agentId,

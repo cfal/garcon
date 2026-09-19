@@ -369,6 +369,7 @@
 		isLocalModel: () => false,
 		findEndpoint: () => null,
 		refreshIfStale: () => Promise.resolve(),
+		forceRefresh: () => Promise.resolve(),
 	} as unknown as ModelCatalogStore);
 	setRemoteSettings({
 		get snapshot() {

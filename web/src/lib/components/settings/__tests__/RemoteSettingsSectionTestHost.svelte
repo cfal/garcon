@@ -93,6 +93,9 @@
 		refreshIfStale() {
 			return Promise.resolve();
 		},
+		forceRefresh() {
+			return Promise.resolve();
+		},
 		findEndpoint() {
 			return null;
 		},

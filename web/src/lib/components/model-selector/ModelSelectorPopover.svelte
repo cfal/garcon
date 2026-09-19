@@ -113,6 +113,8 @@
 	function handleOpenChange(open: boolean): void {
 		if (open) {
 			selector.openDraft();
+			// A persisted catalog can be fresh by TTL while its provider list has changed.
+			void modelCatalog.forceRefresh();
 			return;
 		}
 		if (isCompactLayout) {
