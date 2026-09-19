@@ -33,7 +33,7 @@ interface ModelSelectorStateOptions {
 	readonly nodes?: ExecutionNodesStore;
 	get value(): ModelSelectorValue;
 	get mode(): ModelSelectorMode;
-	get recents(): ModelSelectorRecentOption[];
+	getRecents(nodeId: string): ModelSelectorRecentOption[];
 	get preferRecentsOnOpen(): boolean;
 	getSelectableAgentIds?(nodeId: string): readonly SessionAgentId[];
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
@@ -161,7 +161,7 @@ export class ModelSelectorState {
 	get recentOptions(): ModelSelectorRecentOption[] {
 		if (this.mode.surface !== 'composer' || this.mode.agent !== 'select') return [];
 		const selectable = new Set(this.selectableAgentIds);
-		return this.#options.recents.filter((recent) => effectiveNodeId(recent.nodeId) === this.nodeId && selectable.has(recent.agentId));
+		return this.#options.getRecents(this.nodeId).filter((recent) => effectiveNodeId(recent.nodeId) === this.nodeId && selectable.has(recent.agentId));
 	}
 
 	get isRecentsPaneActive(): boolean {

@@ -433,6 +433,41 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it('resets the compact effort pane when changing nodes', async () => {
+		installMatchMedia(true);
+		const onChange = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'none' },
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			nodes: [localExecutionNode, remoteExecutionNode], onChange,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(within(await screen.findByRole('listbox', { name: 'Model' })).getByText('Model 1'));
+		expect(screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ })).toBeTruthy();
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Execution node' }), { target: { value: remoteExecutionNode.id } });
+		expect(screen.queryByRole('button', { name: /Ultra Highest available reasoning effort/ })).toBeNull();
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Done' }).disabled).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude' }));
+		await fireEvent.click(within(await screen.findByRole('listbox', { name: 'Model' })).getByText('Model 2'));
+		await fireEvent.click(screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ }));
+		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ nodeId: remoteExecutionNode.id, model: 'model-2', thinkingMode: 'ultra' }));
+	});
+
+	it('resets compact recents after selecting a node with no recent models', async () => {
+		installMatchMedia(true);
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			nodes: [localExecutionNode, remoteExecutionNode], recents: [claudeRecent(), codexRecent()],
+			preferRecentsOnOpen: true, onChange: vi.fn(),
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Execution node' }), { target: { value: remoteExecutionNode.id } });
+		expect(screen.queryByText('Recent models')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Claude' })).toBeTruthy();
+	});
+
 	it('advances compact generation selection from model to effort', async () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();

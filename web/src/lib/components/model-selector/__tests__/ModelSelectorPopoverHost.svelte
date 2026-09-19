@@ -186,7 +186,7 @@
 		{value}
 		{mode}
 		{onChange}
-		{recents}
+		getRecents={() => recents}
 		{preferRecentsOnOpen}
 		getSelectableAgentIds={selectableAgentIds ? () => selectableAgentIds! : undefined}
 	/>

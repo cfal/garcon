@@ -657,10 +657,9 @@
 		modelEndpointId: agentState.modelEndpointId,
 		modelProtocol: agentState.modelProtocol,
 	});
-	const recentSelectorOptions = $derived.by(() =>
-		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
-	);
-	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
+	function getRecents(nodeId: string) {
+		return buildModelSelectorRecents(rootModelCatalog.forNode(nodeId), remoteSettings.snapshot?.recentAgentSettings ?? []);
+	}
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(
@@ -896,8 +895,8 @@
 						value={modelSelectorValue}
 						mode={modelSelectorMode}
 						onChange={(next) => onModelChange?.(next)}
-						recents={recentSelectorOptions}
-						{preferRecentsOnOpen}
+						{getRecents}
+						preferRecentsOnOpen
 						getSelectableAgentIds={selectableAgentsForNode}
 						align="end"
 						side="top"

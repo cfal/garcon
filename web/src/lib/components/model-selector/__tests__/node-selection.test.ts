@@ -3,6 +3,7 @@ import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog
 import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
 import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 import { ModelSelectorState } from '../model-selector-state.svelte';
+import { buildModelSelectorRecents } from '../model-selector-recents';
 
 function metadata(id: string): AgentMetadata {
 	return {
@@ -29,7 +30,11 @@ function fixture(remoteAgent = 'sample') {
 	const onChange = vi.fn();
 	const selector = new ModelSelectorState({
 		modelCatalog: catalog, nodes, value: { nodeId: 'local', agentId: 'sample', model: 'same' },
-		mode: { agent: 'select', source: 'select', surface: 'composer' }, recents: [],
+		mode: { agent: 'select', source: 'select', surface: 'composer' },
+		getRecents: (nodeId) => buildModelSelectorRecents(catalog.forNode(nodeId), [
+			{ agentId: 'sample', model: 'same', apiProviderId: null, modelEndpointId: null, modelProtocol: null },
+			{ nodeId: remoteExecutionNode.id, agentId: remoteAgent, model: 'same', apiProviderId: null, modelEndpointId: null, modelProtocol: null },
+		]),
 		preferRecentsOnOpen: false, onChange,
 		getSelectableAgentIds: (nodeId) => catalog.forNode(nodeId).getSelectableAgents(),
 	});
@@ -43,6 +48,7 @@ describe('model selector node selection', () => {
 		const { selector, onChange } = fixture();
 		selector.openDraft();
 		expect(selector.modelRows[0]?.label).toBe('Local model');
+		expect(selector.recentOptions.map((recent) => recent.modelLabel)).toEqual(['Local model']);
 		await selector.selectNode(remoteExecutionNode.id);
 		expect(onChange).not.toHaveBeenCalled();
 		expect(selector.committedNodeId).toBe('local');
@@ -50,6 +56,7 @@ describe('model selector node selection', () => {
 		expect(selector.triggerTitle).toContain('Local');
 		expect(selector.triggerTitle).toContain('Local model');
 		expect(selector.modelRows[0]?.label).toBe('Worker model');
+		expect(selector.recentOptions.map((recent) => recent.modelLabel)).toEqual(['Worker model']);
 		selector.selectModel('same');
 		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ nodeId: remoteExecutionNode.id, agentId: 'sample', model: 'same' }));
 	});

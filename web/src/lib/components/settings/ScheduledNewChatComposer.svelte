@@ -70,10 +70,9 @@
 		model: startup.modelValue,
 		...(startup.modelSelectionTarget ?? {}),
 	});
-	const recentSelectorOptions = $derived.by(() =>
-		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
-	);
-	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
+	function getRecents(nodeId: string) {
+		return buildModelSelectorRecents(modelCatalog.forNode(nodeId), remoteSettings.snapshot?.recentAgentSettings ?? []);
+	}
 
 	function handlePathKeydown(event: KeyboardEvent): void {
 		if (event.key === 'Tab' && startup.localMachine) {
@@ -256,8 +255,8 @@
 							value={modelSelectorValue}
 							mode={modelSelectorMode}
 							onChange={handleModelChange}
-							recents={recentSelectorOptions}
-							{preferRecentsOnOpen}
+							{getRecents}
+							preferRecentsOnOpen
 							{getSelectableAgentIds}
 							align="end"
 							side="bottom"

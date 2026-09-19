@@ -28,6 +28,7 @@
 	let activeOptionId = $state<string | undefined>(undefined);
 	let visiblePageSize = $state(6);
 	let wasOpen = false;
+	let previousNodeId: string | null = null;
 
 	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
 	const canFinish = $derived(
@@ -69,8 +70,10 @@
 
 	$effect(() => {
 		const openNow = selector.open;
-		if (openNow && !wasOpen) pane = firstPane();
+		const nodeId = selector.nodeId;
+		if (openNow && (!wasOpen || nodeId !== previousNodeId)) pane = firstPane();
 		wasOpen = openNow;
+		previousNodeId = nodeId;
 	});
 
 	$effect(() => {

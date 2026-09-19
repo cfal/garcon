@@ -22,7 +22,7 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
-		recents?: ModelSelectorRecentOption[];
+		getRecents?: (nodeId: string) => ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
 		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
@@ -36,7 +36,7 @@
 		value,
 		mode,
 		onChange,
-		recents = [],
+		getRecents = () => [],
 		preferRecentsOnOpen = false,
 		getSelectableAgentIds,
 		disabled = false,
@@ -59,9 +59,7 @@
 		get mode() {
 			return mode;
 		},
-		get recents() {
-			return recents;
-		},
+		getRecents: (nodeId) => getRecents(nodeId),
 		get preferRecentsOnOpen() {
 			return preferRecentsOnOpen;
 		},

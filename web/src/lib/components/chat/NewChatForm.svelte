@@ -562,10 +562,9 @@
 		model: form.modelValue,
 		...(form.modelSelectionTarget ?? {}),
 	});
-	const recentSelectorOptions = $derived.by(() =>
-		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
-	);
-	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
+	function getRecents(nodeId: string) {
+		return buildModelSelectorRecents(rootModelCatalog.forNode(nodeId), remoteSettings.snapshot?.recentAgentSettings ?? []);
+	}
 	const displayedFormError = $derived(form.modelSelectionError ?? form.error);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
@@ -798,8 +797,8 @@
 							value={modelSelectorValue}
 							mode={modelSelectorMode}
 							onChange={handleModelSelectorChange}
-							recents={recentSelectorOptions}
-							{preferRecentsOnOpen}
+							{getRecents}
+							preferRecentsOnOpen
 							getSelectableAgentIds={selectableAgentsForNode}
 							align="end"
 							side="bottom"

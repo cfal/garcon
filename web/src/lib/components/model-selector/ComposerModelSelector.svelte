@@ -12,7 +12,7 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
-		recents?: ModelSelectorRecentOption[];
+		getRecents?: (nodeId: string) => ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
 		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
@@ -24,7 +24,7 @@
 		value,
 		mode,
 		onChange,
-		recents = [],
+		getRecents,
 		preferRecentsOnOpen = false,
 		getSelectableAgentIds,
 		disabled = false,
@@ -37,7 +37,7 @@
 	{value}
 	mode={{ ...mode, surface: 'composer' }}
 	{onChange}
-	{recents}
+	{getRecents}
 	{preferRecentsOnOpen}
 	{getSelectableAgentIds}
 	{disabled}
