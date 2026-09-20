@@ -118,23 +118,20 @@ function groupToolRuns(
 	const grouped: ConversationVirtualFeedItem[] = [];
 	let run: TranscriptVirtualFeedItem[] = [];
 	const flush = () => {
-		if (run.length < 2) {
-			grouped.push(...run);
-		} else {
-			const first = run[0].item;
-			const expanded = run.some(
-				(member) => expandedMemberIds.has(member.item.id) || protectedVirtualKeys.has(member.key),
-			);
-			grouped.push({
-				kind: 'tool-group',
-				key: key(`tool-group:${first.id}`),
-				anchorId: `tool-group:${first.id}`,
-				members: run,
-				expanded,
-				spacingAfter: expanded ? 'none' : run[run.length - 1].spacingAfter,
-			});
-			if (expanded) grouped.push(...run);
-		}
+		if (run.length === 0) return;
+		const first = run[0].item;
+		const expanded = run.some(
+			(member) => expandedMemberIds.has(member.item.id) || protectedVirtualKeys.has(member.key),
+		);
+		grouped.push({
+			kind: 'tool-group',
+			key: key(`tool-group:${first.id}`),
+			anchorId: `tool-group:${first.id}`,
+			members: run,
+			expanded,
+			spacingAfter: expanded ? 'none' : run[run.length - 1].spacingAfter,
+		});
+		if (expanded) grouped.push(...run);
 		run = [];
 	};
 	for (const item of items) {
@@ -392,7 +389,7 @@ export function estimateConversationFeedItemSize(
 		return 240 + leadingSpacing + trailingSpacing;
 	}
 	if (item.kind === 'tool-group') {
-		return 56 + (item.spacingAfter === 'transcript' ? 12 : 0);
+		return 24 + (item.spacingAfter === 'transcript' ? 12 : 0);
 	}
 
 	const renderItem = item.item;

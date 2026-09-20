@@ -78,17 +78,19 @@ describe('conversation virtual feed model', () => {
 		});
 		expect(model.memberRowIdByDomAnchorId.get('tool-input-reused')).toBe('generation-1:2');
 		expect(model.representativeRowIdByKey.get(group.key)).toBe('generation-1:1');
-		expect(estimateConversationFeedItemSize(group)).toBe(68);
+		expect(estimateConversationFeedItemSize(group)).toBe(36);
 	});
 
-	it('keeps singleton tools and boundaries separate', () => {
+	it('presents singleton tools as groups without crossing visible boundaries', () => {
 		const model = build([bashItem(1), userItem(2), bashItem(3)], {
 			combineToolUseMessages: true,
 		});
-		expect(model.items.filter((item) => item.kind === 'tool-group')).toHaveLength(0);
+		expect(model.items.filter((item) => item.kind === 'tool-group')).toHaveLength(2);
 		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'transcript', 'transcript', 'transcript',
+			'tool-group', 'transcript', 'tool-group',
 		]);
+		expect(model.indexByRowId.get('generation-1:1')).toBe(1);
+		expect(model.indexByRowId.get('generation-1:3')).toBe(3);
 	});
 
 	it('reveals members as individually virtualized rows while retaining a stable header', () => {

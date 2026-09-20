@@ -1632,9 +1632,47 @@
 	"settings_chat_show_thinking": "Show thinking",
 	"settings_chat_reduce_motion": "Reduce motion",
 	"settings_chat_hidden_tools": "Hide tool calls",
-	"chat_tool_group_total": "{count} tool uses",
-	"chat_tool_group_category": "{label} {count}",
-	"chat_tool_group_more_categories": "+{count} more",
+	"chat_tool_group_commands": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "executed {count} command",
+				"countPlural=other": "executed {count} commands"
+			}
+		}
+	],
+	"chat_tool_group_file_reads": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "read {count} file",
+				"countPlural=other": "read {count} files"
+			}
+		}
+	],
+	"chat_tool_group_file_writes": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "wrote {count} file",
+				"countPlural=other": "wrote {count} files"
+			}
+		}
+	],
+	"chat_tool_group_other_actions": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "performed {count} other action",
+				"countPlural=other": "performed {count} other actions"
+			}
+		}
+	],
+	"chat_tool_group_sentence": "{actions}.",
 	"settings_hidden_bash_commands_title": "Hide bash commands",
 	"settings_hidden_bash_commands_description": "Bash tool calls whose command matches a pattern are hidden from the chat transcript, together with their results. Globs match the whole command; regexes match anywhere. Saved on the server and synced across clients.",
 	"settings_hidden_bash_commands_pattern_label": "Command pattern",

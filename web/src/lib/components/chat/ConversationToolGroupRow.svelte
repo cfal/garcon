@@ -37,16 +37,15 @@
 		data-chat-tool-group
 		data-chat-tool-group-count={summary.count}
 		data-chat-anchor-id={item.anchorId}
-		aria-label={summary.accessibleLabel}
 		aria-expanded={item.expanded}
 		onclick={toggleGroup}
-		class="flex min-h-11 w-full min-w-0 items-center gap-2 border-y border-border px-2 py-2 text-left text-sm text-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		class="flex w-full min-w-0 items-center gap-2 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	>
 		<ChevronRight
 			class={cn('size-4 shrink-0 transition-transform', item.expanded && 'rotate-90')}
 			aria-hidden="true"
 		/>
-		<span class="min-w-0 break-words">{summary.visibleLabel}</span>
+		<span class="min-w-0 break-words">{summary.label}</span>
 	</button>
 	{#if item.spacingAfter === 'transcript'}
 		<div aria-hidden="true" class="h-2 sm:h-3"></div>

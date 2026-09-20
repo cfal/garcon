@@ -23,42 +23,49 @@ describe('summarizeToolUses', () => {
 		const members = [
 			...Array.from({ length: 3 }, (_, index) => item(new ReadToolUseMessage(TS, `read-${index}`, '/private/a'), index)),
 			...Array.from({ length: 5 }, (_, index) => item(new WriteToolUseMessage(TS, `write-${index}`, '/private/b', 'secret'), index + 3)),
-			...Array.from({ length: 5 }, (_, index) => item(new BashToolUseMessage(TS, `bash-${index}`, 'private command'), index + 8)),
+			...Array.from({ length: 4 }, (_, index) => item(new BashToolUseMessage(TS, `bash-${index}`, 'private command'), index + 8)),
+			item(new ExecToolUseMessage(TS, 'exec', 'private code', 'private language'), 12),
 		];
 		const summary = summarizeToolUses(members);
 		expect(summary.count).toBe(13);
-		expect(summary.visibleLabel).toBe('13 tool uses: Read 3, Write 5, Bash 5');
-		expect(summary.accessibleLabel).toBe(summary.visibleLabel);
-		expect(summary.visibleLabel).not.toMatch(/private|secret/);
+		expect(summary.label).toBe('Executed 5 commands, read 3 files, wrote 5 files.');
+		expect(summary.label).not.toMatch(/private|secret/);
 	});
 
-	it('bounds visual categories without shortening the accessible name', () => {
+	it('combines related message types into readable action categories', () => {
 		const summary = summarizeToolUses([
 			item(new ReadToolUseMessage(TS, 'r', '/a'), 1),
 			item(new WriteToolUseMessage(TS, 'w', '/a'), 2),
 			item(new BashToolUseMessage(TS, 'b', 'pwd'), 3),
 			item(new EditToolUseMessage(TS, 'e', '/a'), 4),
 		]);
-		expect(summary.visibleLabel).toBe('4 tool uses: Read 1, Write 1, Bash 1, +1 more');
-		expect(summary.accessibleLabel).toBe('4 tool uses: Read 1, Write 1, Bash 1, Edit 1');
+		expect(summary.label).toBe('Executed 1 command, read 1 file, wrote 2 files.');
 	});
 
-	it('never exposes provider names or payloads in generic categories', () => {
+	it('summarizes provider tools without exposing names or payloads', () => {
 		const summary = summarizeToolUses([
 			item(new UnknownToolUseMessage(TS, 'u', 'private_raw_name', { secret: 'hidden' }), 1),
 			item(new ExternalToolUseMessage(TS, 'e', 'private_external_name', { secret: 'hidden' }), 2),
 			item(new McpToolUseMessage(TS, 'm', 'private_server', 'private_tool', { secret: 'hidden' }), 3),
 		]);
-		expect(summary.accessibleLabel).toBe('3 tool uses: Tool 1, External tool 1, MCP tool 1');
-		expect(summary.accessibleLabel).not.toMatch(/private|secret|hidden/);
+		expect(summary.label).toBe('Performed 3 other actions.');
+		expect(summary.label).not.toMatch(/private|secret|hidden/);
 	});
 
-	it('does not split Exec counts by user-controlled language labels', () => {
+	it('combines Bash and Exec without exposing user-controlled labels', () => {
 		const summary = summarizeToolUses([
+			item(new BashToolUseMessage(TS, 'bash', 'private shell command'), 1),
 			item(new ExecToolUseMessage(TS, 'a', 'secret command', 'private-language-name'), 1),
 			item(new ExecToolUseMessage(TS, 'b', 'another secret', 'javascript'), 2),
 		]);
-		expect(summary.accessibleLabel).toBe('2 tool uses: Exec 2');
-		expect(summary.visibleLabel).not.toMatch(/secret|private|javascript/);
+		expect(summary.label).toBe('Executed 3 commands.');
+		expect(summary.label).not.toMatch(/secret|private|javascript/);
+	});
+
+	it('uses singular grammar for one tool', () => {
+		const summary = summarizeToolUses([
+			item(new ReadToolUseMessage(TS, 'read', '/private/file'), 1),
+		]);
+		expect(summary.label).toBe('Read 1 file.');
 	});
 });

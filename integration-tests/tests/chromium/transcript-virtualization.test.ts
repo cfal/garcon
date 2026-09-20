@@ -5353,10 +5353,39 @@ describe('Chromium combined tool-use presentation', () => {
           markPhase(`checking ${viewport.label} combined-feed geometry`);
           await fixture.page.setViewportSize(viewport);
           await setCombineToolUses(fixture.page, true);
-          const summary = fixture.page.getByRole('button', { name: '40 tool uses: Bash 40' });
+          const summary = fixture.page.getByRole('button', { name: 'Executed 40 commands.' });
           await summary.waitFor({ state: 'visible' });
           expect(await summary.getAttribute('aria-expanded')).toBe('false');
           expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
+          const restingStyle = await summary.evaluate((button) => {
+            const style = getComputedStyle(button);
+            const item = button.closest<HTMLElement>('[data-chat-virtual-item]')!;
+            const chevron = button.querySelector('svg')!;
+            return {
+              backgroundColor: style.backgroundColor,
+              borderBottomWidth: style.borderBottomWidth,
+              borderTopWidth: style.borderTopWidth,
+              chevronOffset: chevron.getBoundingClientRect().left - item.getBoundingClientRect().left,
+              fontStyle: style.fontStyle,
+              paddingBottom: style.paddingBottom,
+              paddingLeft: style.paddingLeft,
+              paddingRight: style.paddingRight,
+              paddingTop: style.paddingTop,
+            };
+          });
+          expect(restingStyle).toMatchObject({
+            borderBottomWidth: '0px',
+            borderTopWidth: '0px',
+            fontStyle: 'italic',
+            paddingBottom: '0px',
+            paddingLeft: '0px',
+            paddingRight: '0px',
+            paddingTop: '0px',
+          });
+          expect(Math.abs(restingStyle.chevronOffset)).toBeLessThanOrEqual(1);
+          await summary.hover();
+          expect(await summary.evaluate((button) => getComputedStyle(button).backgroundColor))
+            .toBe(restingStyle.backgroundColor);
           expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
 
           await summary.click();

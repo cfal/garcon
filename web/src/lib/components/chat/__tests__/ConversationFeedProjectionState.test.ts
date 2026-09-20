@@ -85,9 +85,12 @@ describe('ConversationFeedProjectionState', () => {
 			combineToolUseMessages: true,
 		}));
 		const groups = projection.model.items.filter((item) => item.kind === 'tool-group');
-		expect(groups).toHaveLength(1);
+		expect(groups).toHaveLength(2);
 		expect(groups[0]?.members.map((member) => member.item.id)).toEqual([
 			'generation-1:1', 'generation-1:4', 'generation-1:5',
+		]);
+		expect(groups[1]?.members.map((member) => member.item.id)).toEqual([
+			'generation-1:7',
 		]);
 		expect(projection.model.indexByRowId.get('generation-1:1')).toBe(
 			projection.model.indexByRowId.get('generation-1:5'),
@@ -95,7 +98,7 @@ describe('ConversationFeedProjectionState', () => {
 		expect(projection.model.indexByRowId.has('generation-1:2')).toBe(false);
 		expect(projection.model.indexByRowId.has('generation-1:3')).toBe(false);
 		expect(projection.model.items[projection.model.indexByRowId.get('generation-1:6')!]).toMatchObject({ kind: 'transcript' });
-		expect(projection.model.items[projection.model.indexByRowId.get('generation-1:7')!]).toMatchObject({ kind: 'transcript' });
+		expect(projection.model.items[projection.model.indexByRowId.get('generation-1:7')!]).toMatchObject({ kind: 'tool-group' });
 		expect(projection.renderModel.toolResultRowIdByUseRowId.get('generation-1:5')).toBe('generation-1:6');
 	});
 
@@ -113,9 +116,11 @@ describe('ConversationFeedProjectionState', () => {
 		];
 		const projections = new ConversationFeedProjectionState();
 		const first = projections.reconcile(input({ rows: firstRows, combineToolUseMessages: true }));
-		expect(first.model.items.some((item) => item.kind === 'tool-group')).toBe(false);
+		const firstGroup = first.model.items.find((item) => item.kind === 'tool-group');
+		expect(firstGroup?.members).toHaveLength(1);
 		const second = projections.reconcile(input({ rows: secondRows, combineToolUseMessages: true, mutationClock: clock(2, { 'live-append': 2 }) }));
 		const secondGroup = second.model.items.find((item) => item.kind === 'tool-group');
+		expect(secondGroup?.key).toBe(firstGroup?.key);
 		expect(secondGroup?.members).toHaveLength(2);
 		const third = projections.reconcile(input({ rows: thirdRows, combineToolUseMessages: true, mutationClock: clock(3, { 'live-append': 3 }) }));
 		const thirdGroup = third.model.items.find((item) => item.kind === 'tool-group');
