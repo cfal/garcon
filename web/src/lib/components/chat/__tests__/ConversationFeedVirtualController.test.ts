@@ -31,6 +31,8 @@ interface ControllerExposure {
 	resetMeasurements(): Promise<void>;
 	hide(): Promise<void>;
 	showAtLayout(viewportWidth: number, itemSize: number): Promise<void>;
+	prependGroup(): Promise<void>;
+	appendGroup(): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -43,7 +45,12 @@ async function settleController(): Promise<void> {
 	await Promise.resolve();
 }
 
-async function renderController(options?: { invalidInitialGeometry?: boolean }): Promise<{
+async function renderController(options?: {
+	invalidInitialGeometry?: boolean;
+	groupFocusMode?: boolean;
+	groupTailCount?: number;
+	initialPinned?: boolean;
+}): Promise<{
 	exposure: ControllerExposure;
 	unmount(): void;
 }> {
@@ -200,6 +207,53 @@ describe('ConversationFeedVirtualController', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+	});
+
+	it('restores summary focus after an intervening same-surface publication', async () => {
+		const { exposure } = await renderController({ groupFocusMode: true });
+		await exposure.setPinned(false);
+		const original = document.querySelector<HTMLButtonElement>('[data-chat-tool-group]');
+		expect(original).not.toBeNull();
+		original?.focus();
+
+		await exposure.prependGroup();
+		await exposure.appendGroup();
+		await settleController();
+
+		const replacement = document.querySelector<HTMLButtonElement>('[data-chat-tool-group]');
+		expect(replacement).not.toBe(original);
+		expect(document.activeElement).toBe(replacement);
+	});
+
+	it('retains an offscreen focused summary through a regrouping key change', async () => {
+		const { exposure } = await renderController({
+			groupFocusMode: true,
+			groupTailCount: 50,
+			initialPinned: false,
+		});
+		const original = document.querySelector<HTMLButtonElement>('[data-chat-tool-group]');
+		expect(original).not.toBeNull();
+		original?.focus();
+		const viewport = exposure.viewport();
+		expect(viewport).not.toBeNull();
+		viewport!.scrollTop = 900;
+		viewport!.dispatchEvent(new Event('scroll'));
+		await settleController();
+		expect(document.activeElement).toBe(original);
+
+		await exposure.prependGroup();
+		expect(exposure.controller.renderedIndexes(exposure.controller.snapshot)).toContain(0);
+		expect(document.querySelector('[data-chat-tool-group]')).not.toBeNull();
+		await exposure.appendGroup();
+		expect(exposure.controller.renderedIndexes(exposure.controller.snapshot)).toContain(0);
+		expect(document.querySelector('[data-chat-tool-group]')).not.toBeNull();
+		await settleController();
+
+		const replacement = document.querySelector<HTMLButtonElement>('[data-chat-tool-group]');
+		expect(replacement).not.toBe(original);
+		expect(document.activeElement).toBe(replacement);
+		replacement?.blur();
+		expect(exposure.controller.renderedIndexes(exposure.controller.snapshot)).not.toContain(0);
 	});
 
 	it('attaches one observer to the viewport and items, never the sizer', async () => {

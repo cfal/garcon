@@ -9,6 +9,7 @@ import {
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
@@ -127,6 +128,46 @@ describe('ConversationFeed', () => {
 		expect(group.getAttribute('aria-expanded')).toBe('false');
 	});
 
+	it('moves focus to a surviving member when combination is disabled in another tab', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		const group = await screen.findByRole('button', { name: '3 tool uses: Bash 3' });
+		group.focus();
+
+		const snapshot = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}');
+		const newValue = JSON.stringify({ ...snapshot, combineToolUseMessages: false });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+		window.dispatchEvent(new StorageEvent('storage', {
+			key: LOCAL_STORAGE_KEYS.localSettings,
+			newValue,
+			storageArea: localStorage,
+		}));
+
+		await waitFor(() => expect(container.querySelector('[data-chat-tool-group]')).toBeNull());
+		await waitFor(() => {
+			expect(document.activeElement).not.toBe(document.body);
+			expect((document.activeElement as HTMLElement).dataset.chatRowId).toBe('generation-1:1');
+		});
+	});
+
+	it('moves focus from a member to the summary before explicitly collapsing', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		const group = await screen.findByRole('button', { name: '3 tool uses: Bash 3' });
+		await fireEvent.click(group);
+		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
+		const member = container.querySelector<HTMLElement>('[data-chat-row-id]');
+		expect(member).not.toBeNull();
+		member!.tabIndex = -1;
+		member?.focus();
+
+		group.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+		await waitFor(() => expect(group.getAttribute('aria-expanded')).toBe('false'));
+		expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0);
+		expect(document.activeElement).toBe(group);
+	});
+
 	it('keeps a large expanded tool run individually virtualized', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'large-tool-run' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
@@ -165,6 +206,7 @@ describe('ConversationFeed', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
 		if (originalOffsetHeight) {
 			Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
 		}

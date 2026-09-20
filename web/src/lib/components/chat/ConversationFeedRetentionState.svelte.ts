@@ -106,39 +106,46 @@ export class ConversationFeedRetentionState {
 		get visible(): boolean;
 	}): () => void {
 		if (typeof document === 'undefined') return () => {};
-		let retainedKey: string | null = null;
-		let releaseSelection: (() => void) | null = null;
+		const releases = new Map<string, () => void>();
 
 		const sync = (): void => {
 			const root = options.root;
 			const selection = document.getSelection();
-			const anchorElement = elementForNode(selection?.anchorNode ?? null);
-			const wrapper =
-				options.visible && root && selection && !selection.isCollapsed && anchorElement
-					? anchorElement.closest<HTMLElement>('[data-chat-virtual-item]')
-					: null;
-			const nextKey = wrapper && root?.contains(wrapper) ? wrapper.dataset.chatVirtualItem : null;
-			if (nextKey === retainedKey) return;
-			releaseSelection?.();
-			releaseSelection = null;
-			retainedKey = nextKey ?? null;
-			if (retainedKey) releaseSelection = this.acquire(retainedKey, 'selection');
+			const selectedKeys = new Set<string>();
+			if (
+				options.visible &&
+				root &&
+				selection &&
+				!selection.isCollapsed &&
+				selection.rangeCount > 0
+			) {
+				const range = selection.getRangeAt(0);
+				if (range.intersectsNode(root)) {
+					for (const wrapper of root.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')) {
+						const key = wrapper.dataset.chatVirtualItem;
+						if (key && range.intersectsNode(wrapper)) selectedKeys.add(key);
+					}
+				}
+			}
+			for (const [key, release] of releases) {
+				if (selectedKeys.has(key)) continue;
+				release();
+				releases.delete(key);
+			}
+			for (const key of selectedKeys) {
+				if (!releases.has(key)) releases.set(key, this.acquire(key, 'selection'));
+			}
 		};
 
 		document.addEventListener('selectionchange', sync);
 		sync();
 		return () => {
 			document.removeEventListener('selectionchange', sync);
-			releaseSelection?.();
+			for (const release of releases.values()) release();
 		};
 	}
 
 	#publishKeys(): void {
 		this.#retainedKeys = [...this.#leases.keys()];
 	}
-}
-
-function elementForNode(node: Node | null): Element | null {
-	if (!node) return null;
-	return node instanceof Element ? node : node.parentElement;
 }

@@ -110,4 +110,81 @@ describe('ConversationFeedRetentionState', () => {
 		cleanup();
 		root.remove();
 	});
+
+	it('retains every virtual item intersecting a cross-row selection', () => {
+		const retention = new ConversationFeedRetentionState();
+		const root = document.createElement('div');
+		const first = document.createElement('div');
+		const second = document.createElement('div');
+		first.dataset.chatVirtualItem = 'assistant';
+		second.dataset.chatVirtualItem = 'tool';
+		const firstText = document.createTextNode('response');
+		const secondText = document.createTextNode('command');
+		first.append(firstText);
+		second.append(secondText);
+		root.append(first, second);
+		document.body.append(root);
+		const selection = document.getSelection();
+		const range = document.createRange();
+		range.setStart(firstText, 0);
+		range.setEnd(secondText, secondText.length);
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		const cleanup = retention.observeSelection({
+			get root() {
+				return root;
+			},
+			get visible() {
+				return true;
+			},
+		});
+		document.dispatchEvent(new Event('selectionchange'));
+		expect(retention.retainedKeys).toEqual(['assistant', 'tool']);
+
+		selection?.removeAllRanges();
+		document.dispatchEvent(new Event('selectionchange'));
+		expect(retention.retainedKeys).toEqual([]);
+		cleanup();
+		root.remove();
+	});
+
+	it('retains feed rows when a selection begins outside the feed', () => {
+		const retention = new ConversationFeedRetentionState();
+		const container = document.createElement('section');
+		const heading = document.createElement('h2');
+		const root = document.createElement('div');
+		const wrapper = document.createElement('div');
+		wrapper.dataset.chatVirtualItem = 'tool';
+		const headingText = document.createTextNode('Conversation');
+		const toolText = document.createTextNode('command');
+		heading.append(headingText);
+		wrapper.append(toolText);
+		root.append(wrapper);
+		container.append(heading, root);
+		document.body.append(container);
+		const selection = document.getSelection();
+		const range = document.createRange();
+		range.setStart(headingText, 0);
+		range.setEnd(toolText, toolText.length);
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		const cleanup = retention.observeSelection({
+			get root() {
+				return root;
+			},
+			get visible() {
+				return true;
+			},
+		});
+		document.dispatchEvent(new Event('selectionchange'));
+		expect(retention.retainedKeys).toEqual(['tool']);
+
+		selection?.removeAllRanges();
+		document.dispatchEvent(new Event('selectionchange'));
+		expect(retention.retainedKeys).toEqual([]);
+		cleanup();
+		container.remove();
+	});
 });

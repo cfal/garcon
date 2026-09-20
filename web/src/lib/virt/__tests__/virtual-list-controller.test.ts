@@ -167,11 +167,108 @@ describe('VirtualListController', () => {
 		});
 		test.environment.flushMicrotasks();
 		expect(test.controller.snapshot.positions.itemAt(1)?.key).toBe('summary');
-		expect(test.viewport.scrollTop).toBe(28);
+		expect(test.viewport.scrollTop).toBe(20);
 		expect(test.records.at(-1)).toMatchObject({
 			source: 'items', anchorKind: 'item-remap', anchorIndex: 1,
 			anchorPaintedStartBefore: 40, anchorPaintedStartAfter: 20,
 		});
+	});
+
+	it('keeps a shorter replacement visible when the old row was deeply scrolled', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'member', 'after', 'tail'],
+			estimates: [40, 400, 40, 80],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(340);
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'summary', 'after', 'tail'],
+			estimates: [40, 56, 40, 80],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		test.environment.flushMicrotasks();
+
+		expect(test.viewport.scrollTop).toBe(40);
+		expect(test.controller.snapshot.positions.itemAt(1)?.key).toBe('summary');
+	});
+
+	it('uses a pending correction when replacing a row before the first scroll commits', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'tail'], estimates: [1000, 400, 2000],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(1020);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'tail'], estimates: [300, 400, 2000],
+			anchor: { kind: 'item', key: 'member' },
+		});
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'tail'], estimates: [300, 56, 2000],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(300);
+	});
+
+	it('retargets a pending measurement anchor when a zero-correction remap replaces its key', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'tail'], estimates: [1000, 400, 2000],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(1000);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'tail'], estimates: [300, 400, 2000],
+			anchor: { kind: 'item', key: 'member' },
+		});
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'tail'], estimates: [300, 56, 2000],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		test.mountItem('before', 500);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(500);
+	});
+
+	it('retargets measurements through consecutive remaps before the pending scroll commits', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'tail'], estimates: [1000, 400, 2000],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(1020);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'tail'], estimates: [300, 56, 2000],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary-2', 'tail'], estimates: [300, 56, 2000],
+			anchor: { kind: 'item-remap', oldKey: 'summary', newKey: 'summary-2' },
+		});
+		test.mountItem('before', 500);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(500);
+	});
+
+	it('does not trust a replacement estimate taller than its measured height', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'tail'], estimates: [40, 400, 2000],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(100);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'tail'], estimates: [40, 68, 2000],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		test.environment.flushMicrotasks();
+		test.mountItem('summary', 44);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(40);
 	});
 
 	it('defers a remapped-key correction while native scrolling is coasting', () => {
@@ -193,8 +290,27 @@ describe('VirtualListController', () => {
 		test.controller.setScrollActivity('idle');
 		test.environment.flushFrames();
 		test.environment.flushMicrotasks();
-		expect(test.viewport.scrollTop).toBe(28);
+		expect(test.viewport.scrollTop).toBe(20);
 		expect(test.writes).toBe(1);
+	});
+
+	it('defers a deep replacement clamp until coasting ends', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'member', 'after', 'tail'], estimates: [40, 400, 40, 80],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(340);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'summary', 'after', 'tail'], estimates: [40, 56, 40, 80],
+			anchor: { kind: 'item-remap', oldKey: 'member', newKey: 'summary' },
+		});
+		expect(test.writes).toBe(0);
+		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(40);
 	});
 
 	it('retries idle deviation when a scroll returns to physical bounds', () => {

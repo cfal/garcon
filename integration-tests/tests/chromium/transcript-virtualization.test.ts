@@ -5378,6 +5378,165 @@ describe('Chromium combined tool-use presentation', () => {
       diagnostics,
     );
   }, 180_000);
+
+  test.each([60, 300])('keeps a shorter summary visible after scrolling %ipx into a tool row', async (scrollDepth) => {
+    await withChromiumFixture('combined-tool-anchor', async (fixture) => {
+      const chatId = await seedTranscript(fixture.integration, 1, 'anchor-baseline');
+      const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+      const timestamp = '2026-08-15T00:00:00.000Z';
+      const messages = [
+        new BashToolUseMessage(timestamp, 'long-tool', Array.from({ length: 80 }, (_, index) => `echo line-${index}`).join('\n')),
+        new BashToolUseMessage(timestamp, 'short-tool', 'pwd'),
+        ...Array.from({ length: 30 }, (_, index) => new AssistantMessage(timestamp, `following message ${index}`)),
+      ];
+      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, messages.map((message) => ({
+        kind: 'provider-row' as const, at: timestamp, message, providerMeta: null,
+      })));
+      await prepareTranscript(fixture, chatId, 1);
+      await scrollToPosition(fixture.page, 'start');
+      await fixture.page.locator('[data-chat-bash-command]').first().evaluate((node, scrollDepth) => {
+        const viewport = document.querySelector<HTMLElement>('[data-chat-scroll-viewport]')!;
+        const row = node.closest<HTMLElement>('[data-chat-virtual-item]')!;
+        viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        viewport.scrollTop += row.getBoundingClientRect().top - viewport.getBoundingClientRect().top + scrollDepth;
+        viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }, scrollDepth);
+      await setCombineToolUses(fixture.page, true);
+      const summary = fixture.page.locator('[data-chat-tool-group]');
+      await summary.waitFor({ state: 'visible' });
+      const position = await summary.evaluate((node) => {
+        const viewport = node.closest<HTMLElement>('[data-chat-scroll-viewport]')!;
+        return {
+          top: node.getBoundingClientRect().top - viewport.getBoundingClientRect().top,
+          bottom: node.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top,
+          viewportHeight: viewport.clientHeight,
+        };
+      });
+      expect(position.top).toBeGreaterThanOrEqual(-1);
+      expect(position.top).toBeLessThan(position.viewportHeight);
+      expect(position.bottom).toBeGreaterThan(0);
+      fixture.assertNoBrowserErrors();
+    }, diagnostics);
+  }, 180_000);
+
+  test('preserves a selection spanning from outside the virtual feed into a grouped tool row', async () => {
+    await withChromiumFixture('combined-tool-selection', async (fixture) => {
+      const chatId = await seedTranscript(fixture.integration, 1, 'selection-baseline');
+      const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+      const timestamp = '2026-08-15T00:00:00.000Z';
+      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, [0, 1].map((index) => ({
+        kind: 'provider-row' as const,
+        at: timestamp,
+        message: new BashToolUseMessage(timestamp, `selected-tool-${index}`, `echo selected-${index}`),
+        providerMeta: null,
+      })));
+      await prepareTranscript(fixture, chatId, 1);
+      await fixture.page.evaluate(() => {
+        const command = document.querySelector('[data-chat-bash-command]')!;
+        const virtualRoot = command.closest('[data-chat-virtual-sizer]')!;
+        const selectionStart = document.createElement('span');
+        selectionStart.textContent = 'Selection starts outside the virtual feed';
+        virtualRoot.before(selectionStart);
+        const range = document.createRange();
+        range.setStart(selectionStart.firstChild!, 0);
+        range.setEndAfter(command);
+        const selection = document.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+      });
+      await setCombineToolUses(fixture.page, true);
+      const summary = fixture.page.locator('[data-chat-tool-group]');
+      await summary.waitFor({ state: 'visible' });
+      expect(await summary.getAttribute('aria-expanded')).toBe('true');
+      expect(await fixture.page.evaluate(() => document.getSelection()?.toString())).toContain('echo selected-0');
+      fixture.assertNoBrowserErrors();
+    }, diagnostics);
+  }, 180_000);
+
+  test('keeps summary focus when earlier history extends its run', async () => {
+    await withChromiumFixture('combined-tool-focus', async (fixture) => {
+      const chatId = await seedTranscript(fixture.integration, 1, 'focus-baseline');
+      const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+      const timestamp = '2026-08-15T00:00:00.000Z';
+      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, Array.from({ length: 300 }, (_, index) => ({
+        kind: 'provider-row' as const,
+        at: timestamp,
+        message: new BashToolUseMessage(timestamp, `focus-tool-${index}`, 'pwd'),
+        providerMeta: null,
+      })));
+      await prepareTranscript(fixture, chatId, 1);
+      await setCombineToolUses(fixture.page, true);
+      const summary = fixture.page.locator('[data-chat-tool-group]');
+      await summary.waitFor({ state: 'visible' });
+      await summary.focus();
+      const oldAnchorId = await summary.getAttribute('data-chat-anchor-id');
+      await fixture.page.locator(FEED_SELECTOR).evaluate((viewport) =>
+        viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })));
+      await fixture.page.waitForFunction((oldId) =>
+        document.querySelector('[data-chat-tool-group]')?.getAttribute('data-chat-anchor-id') !== oldId,
+        oldAnchorId);
+      await fixture.page.waitForFunction(() => {
+        const header = document.querySelector('[data-chat-tool-group]');
+        return header !== null && header === document.activeElement;
+      });
+      expect(await summary.getAttribute('data-chat-tool-group-count')).toBe('100');
+      await summary.click();
+      await fixture.page.waitForFunction(() => {
+        const sizer = document.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+        return Number(sizer?.dataset.chatVirtualModelCount) > 100;
+      });
+      const expanded = await transcriptGeometry(fixture.page);
+      expect(expanded.modelCount).toBeGreaterThan(100);
+      expect(expanded.itemCount).toBeLessThan(80);
+      expect(expanded.overlaps).toEqual([]);
+      fixture.assertNoBrowserErrors();
+    }, diagnostics);
+  }, 180_000);
+
+  test('preserves focus when combination changes or a focused member collapses', async () => {
+    await withChromiumFixture('combined-tool-focus-transitions', async (fixture) => {
+      const chatId = await seedTranscript(fixture.integration, 1, 'focus-transition-baseline');
+      const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+      const timestamp = '2026-08-15T00:00:00.000Z';
+      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, [0, 1].map((index) => ({
+        kind: 'provider-row' as const,
+        at: timestamp,
+        message: new BashToolUseMessage(timestamp, `focus-transition-tool-${index}`, 'pwd'),
+        providerMeta: null,
+      })));
+      await prepareTranscript(fixture, chatId, 1);
+      await setCombineToolUses(fixture.page, true);
+      let summary = fixture.page.locator('[data-chat-tool-group]');
+      await summary.waitFor({ state: 'visible' });
+      await summary.focus();
+      await setCombineToolUses(fixture.page, false);
+      await summary.waitFor({ state: 'detached' });
+      await fixture.page.waitForFunction(() =>
+        document.activeElement?.hasAttribute('data-chat-row-id'));
+
+      await fixture.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await setCombineToolUses(fixture.page, true);
+      summary = fixture.page.locator('[data-chat-tool-group]');
+      await summary.waitFor({ state: 'visible' });
+      await fixture.page.waitForFunction(() =>
+        document.querySelector('[data-chat-tool-group]')?.getAttribute('aria-expanded') === 'false');
+      await summary.click();
+      await fixture.page.waitForFunction(() =>
+        document.querySelector('[data-chat-tool-group]')?.getAttribute('aria-expanded') === 'true');
+      await fixture.page.locator('[data-chat-bash-command]').first().evaluate((command) => {
+        const row = command.closest<HTMLElement>('[data-chat-row-id]')!;
+        row.tabIndex = -1;
+        row.focus();
+      });
+      await summary.evaluate((button) =>
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      await fixture.page.waitForFunction(() =>
+        document.querySelector('[data-chat-tool-group]')?.getAttribute('aria-expanded') === 'false');
+      expect(await summary.evaluate((button) => button === document.activeElement)).toBe(true);
+      fixture.assertNoBrowserErrors();
+    }, diagnostics);
+  }, 180_000);
 });
 
 describe('Chromium transcript virtualization', () => {

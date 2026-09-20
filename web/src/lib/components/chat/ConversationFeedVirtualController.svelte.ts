@@ -31,6 +31,7 @@ import {
 } from './conversation-feed-viewport-geometry.js';
 import {
 	captureConversationVirtualAnchor,
+	conversationAnchorFallbackKeys,
 	type ConversationVirtualAnchor,
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationMountedVirtualItems,
@@ -43,6 +44,7 @@ import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conver
 import type {
 	ConversationVirtualFeedModel,
 	ConversationVirtualTarget,
+	ToolGroupVirtualFeedItem,
 } from './conversation-feed-virtual-items.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
@@ -76,6 +78,21 @@ interface RemappedConversationAnchor {
 	readonly anchor: ConversationVirtualAnchor;
 }
 
+interface FocusedToolGroupTransfer {
+	readonly button: HTMLButtonElement;
+	readonly memberIds: ReadonlySet<string>;
+	readonly surfaceIdentity: string;
+}
+
+type ToolGroupFocusTarget =
+	| { readonly kind: 'group'; readonly key: string; readonly anchorId: string }
+	| { readonly kind: 'member'; readonly key: string; readonly rowId: string };
+
+interface PendingToolGroupFocus extends FocusedToolGroupTransfer {
+	readonly target: ToolGroupFocusTarget;
+	readonly release: () => void;
+}
+
 export class ConversationFeedVirtualController implements ConversationViewportPort {
 	readonly viewport: Attachment<HTMLElement>;
 	readonly sizer: Attachment<HTMLElement>;
@@ -103,6 +120,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#mountedItems = new ConversationMountedVirtualItems();
 	#itemAttachments = new Map<string, Attachment<HTMLElement>>();
 	#lastTransaction: VirtualTransactionRecord | null = null;
+	#pendingToolGroupFocus: PendingToolGroupFocus | null = null;
+	#toolGroupFocusFramePending = false;
 	#destroyed = false;
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
@@ -211,6 +230,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const identityChanged =
 			nextGeometry.surfaceIdentity !== this.#configuredGeometry.surfaceIdentity;
 		const previousModel = this.#configuredModel;
+		const focusedToolGroup = identityChanged
+			? null
+			: (this.#focusedToolGroupTransfer(previousModel, input.next.model) ??
+				this.#pendingToolGroupFocus);
+		const focusTarget = focusedToolGroup
+			? this.#toolGroupFocusTarget(input.next.model, focusedToolGroup.memberIds)
+			: null;
 		const structure = classifyConversationVirtualStructure({
 			identityChanged,
 			previousKeys: this.#configuredGeometry.keys,
@@ -279,6 +305,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#appliedDataRevision,
 			input.next.projectedDataRevision,
 		);
+		if (identityChanged || !focusedToolGroup || !focusTarget) {
+			this.#clearPendingToolGroupFocus();
+		} else {
+			this.#retainToolGroupFocus(focusedToolGroup, focusTarget);
+		}
 		this.options.retention.prune(nextGeometry.keys);
 		this.#pruneItemAttachments();
 		const isEarlierPublication = nextGeometry.mutationKinds.has('history-earlier');
@@ -618,6 +649,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#clearPendingToolGroupFocus();
 		this.#endRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.#earlierPrependAnchor.clear();
@@ -673,19 +705,39 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (next.indexByKey.has(candidate)) {
 				nextKey = candidate;
 			} else {
-				const rowId = previous.representativeRowIdByKey.get(candidate);
-				if (rowId === undefined) continue;
-				const index = next.indexByRowId.get(rowId);
-				if (index === undefined) continue;
-				nextKey = next.items[index]?.key;
+				const previousIndex = previous.indexByKey.get(candidate);
+				const previousItem = previousIndex === undefined ? undefined : previous.items[previousIndex];
+				const rowIds = previousItem?.kind === 'tool-group'
+					? previousItem.members.map((member) => member.item.id)
+					: [previous.representativeRowIdByKey.get(candidate)];
+				for (const rowId of rowIds) {
+					if (rowId === undefined) continue;
+					const index = next.indexByRowId.get(rowId);
+					if (index === undefined) continue;
+					nextKey = next.items[index]?.key;
+					if (nextKey) break;
+				}
 			}
 			if (!nextKey) continue;
+			const nextIndex = next.indexByKey.get(nextKey);
+			const fallbackKeys = nextIndex === undefined
+				? []
+				: conversationAnchorFallbackKeys(
+						next.items.map((item) => item.key),
+						nextIndex,
+					);
+			let viewportOffset = 0;
+			if (candidate === anchor.key) {
+				viewportOffset = nextKey === candidate
+					? anchor.viewportOffset
+					: Math.max(0, anchor.viewportOffset);
+			}
 			return {
 				oldKey: candidate,
 				anchor: {
 					key: nextKey,
-					viewportOffset: candidate === anchor.key ? anchor.viewportOffset : 0,
-					fallbackKeys: [],
+					viewportOffset,
+					fallbackKeys,
 				},
 			};
 		}
@@ -708,6 +760,93 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			oldKey: selected.oldKey,
 			newKey: selected.anchor.key,
 		};
+	}
+
+	#focusedToolGroupTransfer(
+		previous: ConversationVirtualFeedModel,
+		next: ConversationVirtualFeedModel,
+	): FocusedToolGroupTransfer | null {
+		if (typeof document === 'undefined') return null;
+		const button = document.activeElement;
+		if (!(button instanceof HTMLButtonElement) || !button.matches('[data-chat-tool-group]')) {
+			return null;
+		}
+		const root = this.options.virtualRoot;
+		if (!root?.contains(button)) return null;
+		const key = button.closest<HTMLElement>('[data-chat-virtual-item]')?.dataset.chatVirtualItem;
+		const index = key === undefined ? undefined : previous.indexByKey.get(key);
+		const oldGroup = index === undefined ? undefined : previous.items[index];
+		if (oldGroup?.kind !== 'tool-group') return null;
+		const memberIds = new Set(oldGroup.members.map((member) => member.item.id));
+		const replacement = this.#toolGroupFocusTarget(next, memberIds);
+		if (!replacement || replacement.key === oldGroup.key) return null;
+		return { button, memberIds, surfaceIdentity: this.#configuredGeometry.surfaceIdentity };
+	}
+
+	#toolGroupFocusTarget(
+		model: ConversationVirtualFeedModel,
+		memberIds: ReadonlySet<string>,
+	): ToolGroupFocusTarget | null {
+		const group = model.items.find(
+			(item): item is ToolGroupVirtualFeedItem =>
+				item.kind === 'tool-group' && item.members.some((member) => memberIds.has(member.item.id)),
+		);
+		if (group) return { kind: 'group', key: group.key, anchorId: group.anchorId };
+		for (const rowId of memberIds) {
+			const index = model.indexByRowId.get(rowId);
+			const item = index === undefined ? undefined : model.items[index];
+			if (item?.kind === 'transcript' && item.item.id === rowId) {
+				return { kind: 'member', key: item.key, rowId };
+			}
+		}
+		return null;
+	}
+
+	#retainToolGroupFocus(
+		transfer: FocusedToolGroupTransfer,
+		target: ToolGroupFocusTarget,
+	): void {
+		if (this.#pendingToolGroupFocus?.target.key !== target.key) {
+			const release = this.options.retention.acquire(target.key, 'focus');
+			this.#clearPendingToolGroupFocus();
+			this.#pendingToolGroupFocus = {
+				...transfer,
+				target,
+				release,
+			};
+		}
+		if (this.#toolGroupFocusFramePending) return;
+		this.#toolGroupFocusFramePending = true;
+		void nextConversationLayoutFrame().then(() => {
+			this.#toolGroupFocusFramePending = false;
+			const pending = this.#pendingToolGroupFocus;
+			if (!pending) return;
+			if (
+				this.#destroyed ||
+				this.#configuredGeometry.surfaceIdentity !== pending.surfaceIdentity ||
+				(document.activeElement !== pending.button && document.activeElement !== document.body)
+			) {
+				this.#clearPendingToolGroupFocus();
+				return;
+			}
+			const selector = pending.target.kind === 'group'
+				? '[data-chat-tool-group]'
+				: '[data-chat-row-id]';
+			const candidates = this.options.virtualRoot?.querySelectorAll<HTMLElement>(selector);
+			const replacement = [...(candidates ?? [])].find((element) =>
+				pending.target.kind === 'group'
+					? element.dataset.chatAnchorId === pending.target.anchorId
+					: element.dataset.chatRowId === pending.target.rowId,
+			);
+			if (replacement && pending.target.kind === 'member') replacement.tabIndex = -1;
+			replacement?.focus({ preventScroll: true });
+			this.#clearPendingToolGroupFocus();
+		});
+	}
+
+	#clearPendingToolGroupFocus(): void {
+		this.#pendingToolGroupFocus?.release();
+		this.#pendingToolGroupFocus = null;
 	}
 
 	#memberRowId(target: ConversationViewportTarget): string | undefined {
