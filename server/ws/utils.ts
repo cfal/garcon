@@ -1,8 +1,9 @@
 import { sendWebSocketPayload } from './transport.js';
+import type { PrimaryWebSocket } from './primary-delivery.js';
 
 const OPEN_WS_STATE = 1;
 
-type WS = import('bun').ServerWebSocket<unknown>;
+type WS = Pick<PrimaryWebSocket, 'readyState' | 'send'>;
 
 function sendWebSocketMessage(ws: WS, payload: string): boolean {
   if (ws.readyState !== OPEN_WS_STATE) return false;

@@ -3,6 +3,7 @@
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
+import type { PrimaryWebSocket } from './primary-delivery.js';
 import {
   ReconnectStateMessage,
   WsFaultMessage,
@@ -45,8 +46,7 @@ import {
 
 const logger = createLogger('ws:chat');
 
-// Bun's ServerWebSocket parameterized over the per-socket data bag.
-type WS = import('bun').ServerWebSocket<unknown>;
+type WS = PrimaryWebSocket;
 
 type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
 type ChatViewsDep = {

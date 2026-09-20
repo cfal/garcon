@@ -3,12 +3,10 @@ import { isRecord } from '../../common/json.js';
 import type { TerminalStreamServerMessage } from '../../common/terminal.js';
 import { sendWebSocketPayload } from './transport.js';
 import type { ChatHandler } from './chat.js';
-import type {
-  TerminalStreamHandler,
-  TerminalWebSocketData,
-} from './terminal-stream.js';
+import type { TerminalStreamHandler } from './terminal-stream.js';
+import type { PrimaryWebSocket } from './primary-delivery.js';
 
-type PrimarySocket = import('bun').ServerWebSocket<TerminalWebSocketData>;
+type PrimarySocket = PrimaryWebSocket;
 type ChatWsHandler = ReturnType<ChatHandler['createHandler']>;
 type TerminalWsHandler = ReturnType<TerminalStreamHandler['createHandler']>;
 

@@ -34,7 +34,6 @@ import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
 import {
   publishWebSocketPayload,
-  type WebSocketMessagePublisher,
 } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
@@ -54,7 +53,9 @@ import { AgentCommandComposition } from './chats/agent-command-composition.js';
 import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { ExecutionNodeManager } from './execution-nodes/manager.js';
+import { createNoiseServer } from '@cfal/noise-ws';
 import { createServerSocketHandlers, type WsConnectionData } from './ws/server-sockets.js';
+import { PrimarySocketDelivery } from './ws/primary-delivery.js';
 import { AgentDirectory } from './agents/directory.js';
 import { executionNodeConfigGuards } from './execution-nodes/config-guards.js';
 import { effectiveNodeId } from '../common/execution-nodes.js';
@@ -689,15 +690,14 @@ export async function startServer(): Promise<void> {
       telegramSettings,
     );
 
-    let webSocketPublisher: WebSocketMessagePublisher | null = null;
+    const primaryDelivery = new PrimarySocketDelivery(config.wsBackpressureLimit);
     eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         executionNodes,
         projectBasePath,
         server: {
           publish(topic, payload) {
-            if (!webSocketPublisher) return;
-            return publishWebSocketPayload(webSocketPublisher, topic, payload);
+            return publishWebSocketPayload(primaryDelivery, topic, payload);
           },
         },
         agentRegistry,
@@ -797,6 +797,7 @@ export async function startServer(): Promise<void> {
     const listenPort = config.port;
     const bindAddress = config.bindAddress;
     const authDisabled = config.authDisabled;
+    const executionSockets = createNoiseServer({ maxConnections: 64, maxPendingHandshakes: 16 });
 
     const serveOptions = {
       port: listenPort,
@@ -820,8 +821,7 @@ export async function startServer(): Promise<void> {
           if (nodeMatch) {
             const link = executionNodes.inboundLink(nodeMatch[1]!);
             if (!link) return new Response('Execution node is unavailable', { status: 404 });
-            if (server.upgrade(request, { data: { kind: 'execution-node', link, handlers: null } })) return;
-            return new Response('WebSocket upgrade failed', { status: 400 });
+            return link.upgrade(request, server, executionSockets);
           }
           if (url.pathname !== '/ws') {
             return new Response('Not found', { status: 404 });
@@ -879,11 +879,10 @@ export async function startServer(): Promise<void> {
 
         return new Response('Not found', { status: 404 });
       },
-      websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger }),
+      websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),
     } satisfies ServeOptionsWithConnectionLimit;
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
-    webSocketPublisher = server;
     const actualPort = server.port ?? listenPort;
     const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
     let runtimeFilePath: string | null = null;
@@ -956,6 +955,7 @@ export async function startServer(): Promise<void> {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
+        executionSockets.close();
         await server.stop(true);
         tickets.close();
         if (runtimeFilePath) {

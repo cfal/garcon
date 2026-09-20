@@ -29,6 +29,7 @@
       "name": "@garcon/server",
       "version": "0.1.0",
       "dependencies": {
+        "@cfal/noise-ws": "github:cfal/noise-ws#536eb503e81a1f9d90436006d3821e2080630488",
         "@garcon/common": "workspace:*",
         "@garcon/server-agent-amp": "workspace:*",
         "@garcon/server-agent-claude": "workspace:*",
@@ -404,6 +405,8 @@
     "@cacheable/memory": ["@cacheable/memory@2.2.0", "", { "dependencies": { "@cacheable/utils": "^2.5.0", "@keyv/bigmap": "^1.3.1", "hookified": "^1.15.1", "keyv": "^5.6.0" } }, "sha512-CTLKqLItRCEixEAewD3/j9DB3/o96gpTPD4eJ1v+DGOlxZRZncRQkGYqqnAGCscYd6RNeXfGeiuCphsPtqyIfQ=="],
 
     "@cacheable/utils": ["@cacheable/utils@2.5.0", "", { "dependencies": { "hashery": "^1.5.1", "keyv": "^5.6.0" } }, "sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA=="],
+
+    "@cfal/noise-ws": ["@cfal/noise-ws@github:cfal/noise-ws#536eb50", {}, "cfal-noise-ws-536eb50", "sha512-iR5zGlvcSZvyHhmU+9lKVwswDKDlrE0YGkb/Bj5Y97q2X+P+5OdVG8r9U7C2UKSNT5u8WpcGYO2ZUoG7SlB0fg=="],
 
     "@chevrotain/cst-dts-gen": ["@chevrotain/cst-dts-gen@11.1.2", "", { "dependencies": { "@chevrotain/gast": "11.1.2", "@chevrotain/types": "11.1.2", "lodash-es": "4.17.23" } }, "sha512-XTsjvDVB5nDZBQB8o0o/0ozNelQtn2KrUVteIHSlPd2VAV2utEb6JzyCJaJ8tGxACR4RiBNWy5uYUHX2eji88Q=="],
 

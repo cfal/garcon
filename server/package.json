@@ -8,6 +8,7 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@cfal/noise-ws": "github:cfal/noise-ws#536eb503e81a1f9d90436006d3821e2080630488",
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-amp": "workspace:*",
     "@garcon/server-agent-claude": "workspace:*",

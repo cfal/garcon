@@ -1,10 +1,13 @@
 import { expect, test } from 'bun:test';
-import { WebSocketLink } from '../websocket-link.ts';
+import { connectNoiseWebSocket } from '@cfal/noise-ws';
+import { WebSocketLink, EXECUTION_NODE_NOISE_CONTEXT } from '../websocket-link.ts';
 import { outgoingFault } from './integration-fixture.ts';
+
+const secret = Buffer.alloc(32, 42).toString('base64url');
 
 for (const dialer of ['controller', 'worker']) {
   test(`authenticated WebSocket replay with ${dialer} dialing`, async () => {
-    const common = { nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const common = { nodeId: 'synthetic-node', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const events = [];
@@ -39,15 +42,14 @@ for (const role of ['controller', 'worker']) {
   for (const attack of ['reflected proof', 'wrong secret']) {
     test(`rejects ${attack} when authenticating a ${role} peer`, async () => {
       const link = new WebSocketLink({
-        role, nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters',
+        role, nodeId: 'synthetic-node', secret,
         allowInsecureDevelopment: true,
       });
       let accepted = 0;
       link.onSession(() => { accepted++; });
-      const closed = Promise.withResolvers();
-      const socket = new WebSocket(link.listen());
-      socket.addEventListener('close', () => closed.resolve());
-      socket.addEventListener('message', ({ data }) => {
+      const socket = connectNoiseWebSocket(link.listen(), {
+        psk: Buffer.from(secret, 'base64url'), context: EXECUTION_NODE_NOISE_CONTEXT,
+        onMessage: (socket, data) => {
         const frame = JSON.parse(data);
         if (frame.type === 'hello') {
           const peer = {
@@ -62,9 +64,10 @@ for (const role of ['controller', 'worker']) {
         } else {
           socket.close();
         }
+        },
       });
       try {
-        await closed.promise;
+        await socket.closed;
         expect(accepted).toBe(0);
       } finally { socket.close(); await link.dispose(); }
     });
@@ -72,7 +75,7 @@ for (const role of ['controller', 'worker']) {
 }
 
 test('both endpoints replay retained messages before new replies', async () => {
-  const common = { nodeId: 'synthetic-node', secret: 'synthetic-secret-that-is-at-least-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+  const common = { nodeId: 'synthetic-node', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const fault = outgoingFault(worker);

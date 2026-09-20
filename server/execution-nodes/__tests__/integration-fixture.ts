@@ -20,7 +20,7 @@ import { serveAgentNode } from '../agent-worker.js';
 import { LocalExecutionProjectService } from '../project-service.js';
 import { discoverApiProviderModels } from '../../api-providers/discovery.js';
 
-export const linkOptions = { nodeId: 'test-node', secret: 'test-secret-longer-than-32-characters', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+export const linkOptions = { nodeId: 'test-node', secret: Buffer.alloc(32, 42).toString('base64url'), allowInsecureDevelopment: true, reconnectDelayMs: 20 };
 
 export function integrationFixture(projectBasePath = '/test-project', nodeId = 'test-node') {
   const scope: AgentResourceScope = { nodeId, instanceId: crypto.randomUUID(), integrationId: 'test' };

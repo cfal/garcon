@@ -1,4 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { connectNoiseWebSocket, createNoiseServer, type NoiseOptions, type NoiseSocketData, type NoiseWebSocket } from '@cfal/noise-ws';
+import { isNodeSecret } from './connection-url.js';
 import { MessageContinuityError, type SessionSocket } from './message-session.js';
 import { SessionTransport } from './session-transport.js';
 import { version } from '../../package.json';
@@ -24,17 +26,16 @@ export interface WebSocketLinkOptions {
   readonly secret: string;
   readonly runtimeId?: string;
   readonly allowInsecureDevelopment?: boolean;
+  readonly allowUnverifiedTls?: boolean;
   readonly reconnectGraceMs?: number;
   readonly maxRetainedBytes?: number;
   readonly maxRetainedFrames?: number;
   readonly reconnectDelayMs?: number;
 }
 
-export interface LinkSocket extends SessionSocket { readonly bufferedAmount: number }
-export interface LinkSocketHandlers {
-  receive(encoded: string): void;
-  closed(): void;
-}
+interface LinkSocket extends SessionSocket { readonly bufferedAmount: number }
+
+export const EXECUTION_NODE_NOISE_CONTEXT = 'garcon-execution-node/v1';
 
 interface Connection {
   readonly socket: LinkSocket;
@@ -55,17 +56,18 @@ export class WebSocketLink {
   readonly #ready = Promise.withResolvers<SessionTransport>();
   readonly #sessions = new Set<(session: SessionTransport) => void>();
   readonly #connections = new Set<Connection>();
-  readonly #dialSockets = new Set<WebSocket>();
+  readonly #sockets = new Set<NoiseWebSocket>();
   readonly #errors = new Set<(message: string) => void>();
   #current: SessionTransport | null = null;
   #disposed = false;
   #quiescing = false;
   #dialTimer: ReturnType<typeof setTimeout> | null = null;
-  #server: ReturnType<typeof Bun.serve<LinkSocketHandlers | null>> | null = null;
+  #server: ReturnType<typeof Bun.serve<NoiseSocketData>> | null = null;
+  #listenerNoise: ReturnType<typeof createNoiseServer> | null = null;
   #dialing = false;
 
   constructor(private readonly options: WebSocketLinkOptions) {
-    if (options.secret.length < 32) throw new Error('Execution-node shared secret must contain at least 32 characters');
+    if (!isNodeSecret(options.secret)) throw new Error('Execution-node shared secret must be a canonical base64url 32-byte key');
     if (options.role === 'controller' && !options.nodeId) throw new Error('Controller execution-node ID is required');
     this.runtimeId = options.runtimeId ?? crypto.randomUUID();
     this.ready = this.#ready.promise;
@@ -74,23 +76,25 @@ export class WebSocketLink {
 
   get current(): SessionTransport | null { return this.#current; }
   get nodeId(): string | null { return this.options.role === 'controller' ? this.options.nodeId! : this.#current?.nodeId ?? null; }
-  get acceptsSocket(): boolean { return !this.#disposed && !this.#quiescing && this.#connections.size < 4; }
+  get acceptsSocket(): boolean { return !this.#disposed && !this.#quiescing && this.#sockets.size < 4; }
 
   onError(listener: (message: string) => void): () => void {
     this.#errors.add(listener);
     return () => { this.#errors.delete(listener); };
   }
 
-  openSocket(socket: LinkSocket): LinkSocketHandlers {
-    if (!this.acceptsSocket) {
-      socket.close();
-      return { receive() {}, closed() {} };
-    }
-    const connection = this.#open(socket);
-    return {
-      receive: (encoded) => this.#receive(connection, encoded),
-      closed: () => this.#closed(connection),
-    };
+  upgrade(request: Request, server: Pick<Bun.Server<NoiseSocketData>, 'upgrade'>, noise: ReturnType<typeof createNoiseServer>): Response | undefined {
+    if (!this.acceptsSocket) return new Response(null, { status: 503 });
+    const options = this.#noiseOptions();
+    try {
+      return noise.upgrade(request, {
+        upgrade: (request, upgradeOptions) => {
+          // Reserves ownership before the native upgrade, including unauthenticated sockets.
+          this.#sockets.add(upgradeOptions!.data!.connection);
+          return server.upgrade(request, upgradeOptions);
+        },
+      }, options);
+    } finally { options.psk.fill(0); }
   }
 
   onSession(listener: (session: SessionTransport) => void): () => void {
@@ -100,32 +104,17 @@ export class WebSocketLink {
   }
 
   listen(port = 0, hostname = '0.0.0.0'): string {
-    if (!this.options.allowInsecureDevelopment) throw new Error('Plaintext listener requires explicit development mode; use a TLS terminator otherwise');
+    if (!this.options.allowInsecureDevelopment) throw new Error('A listener without TLS requires explicit development mode; use a TLS terminator otherwise');
     if (this.#server || this.#disposed) throw new Error('Execution-node listener cannot start');
-    this.#server = Bun.serve<LinkSocketHandlers | null>({
+    const noise = createNoiseServer({ maxConnections: 4, maxPendingHandshakes: 4 });
+    this.#listenerNoise = noise;
+    this.#server = Bun.serve<NoiseSocketData>({
       hostname, port,
       fetch: (request, server) => {
-        if (!this.acceptsSocket) return new Response(null, { status: 503 });
         if (new URL(request.url).pathname !== '/execution-node') return new Response(null, { status: 404 });
-        if (server.upgrade(request, { data: null })) return;
-        return new Response(null, { status: 400 });
+        return this.upgrade(request, server, noise);
       },
-      websocket: {
-        maxPayloadLength: 16 * 1024 * 1024,
-        backpressureLimit: 4 * 1024 * 1024,
-        closeOnBackpressureLimit: true,
-        open: (socket) => {
-          socket.data = this.openSocket({
-            get bufferedAmount() { return socket.getBufferedAmount(); },
-            send: (frame) => { if (socket.send(frame) === 0) throw new Error('Socket write failed'); },
-            close: () => socket.close(),
-          });
-        },
-        message: (socket, message) => {
-          socket.data?.receive(typeof message === 'string' ? message : message.toString());
-        },
-        close: (socket) => { socket.data?.closed(); },
-      },
+      websocket: noise.websocket,
     });
     const address = new URL(this.#server.url);
     address.protocol = 'ws:';
@@ -140,40 +129,20 @@ export class WebSocketLink {
     if (target.protocol !== 'wss:' && !(target.protocol === 'ws:' && this.options.allowInsecureDevelopment)) {
       throw new Error('Execution-node connections require TLS outside explicit development mode');
     }
-    if (target.hash || target.username || target.password) throw new Error('Execution-node network URL must not contain credentials');
+    if (target.hash || target.search || target.username || target.password) throw new Error('Execution-node network URL must not contain credentials');
     this.#dialing = true;
     const connect = () => {
       this.#dialTimer = null;
       if (this.#disposed || this.#quiescing) return;
-      const socket = new WebSocket(url);
-      this.#dialSockets.add(socket);
-      const connecting = setTimeout(() => socket.close(), 5000);
-      connecting.unref();
-      let connection: Connection | null = null;
-      socket.addEventListener('open', () => {
-        clearTimeout(connecting);
-        if (this.#disposed || this.#quiescing) { socket.close(); return; }
-        connection = this.#open({
-          get bufferedAmount() { return socket.bufferedAmount; },
-          send: (frame) => {
-            if (socket.readyState !== WebSocket.OPEN) throw new Error('Socket is not open');
-            socket.send(frame);
-          },
-          close: () => socket.close(),
-        });
-      });
-      socket.addEventListener('message', (event) => {
-        if (connection && typeof event.data === 'string') this.#receive(connection, event.data);
-        else socket.close();
-      });
-      socket.addEventListener('error', () => {
-        this.#reportError('Execution-node connection could not be established');
-        socket.close();
-      });
-      socket.addEventListener('close', () => {
-        clearTimeout(connecting);
-        this.#dialSockets.delete(socket);
-        if (connection) this.#closed(connection);
+      // Noise remains mandatory when outer TLS is unverified. Optional certificate pinning
+      // awaits https://github.com/oven-sh/bun/issues/43635.
+      const options = this.#noiseOptions();
+      let socket: NoiseWebSocket;
+      try {
+        socket = connectNoiseWebSocket(url, { ...options, allowUnverifiedTls: this.options.allowUnverifiedTls });
+      } finally { options.psk.fill(0); }
+      if (socket.readyState !== 'closed') this.#sockets.add(socket);
+      void socket.closed.then(() => {
         if (!this.#disposed && !this.#quiescing) {
           this.#dialTimer = setTimeout(connect, this.options.reconnectDelayMs ?? 5000);
         }
@@ -183,16 +152,15 @@ export class WebSocketLink {
   }
 
   disconnect(): void {
-    for (const connection of this.#connections) this.#close(connection);
+    for (const socket of this.#sockets) socket.close();
   }
 
   quiesce(): void {
     this.#quiescing = true;
     if (this.#dialTimer) clearTimeout(this.#dialTimer);
     this.#dialTimer = null;
-    for (const socket of this.#dialSockets) {
-      if (socket.readyState === WebSocket.CONNECTING) socket.close();
-    }
+    for (const socket of this.#sockets) if (socket.readyState !== 'open') socket.close();
+    for (const connection of this.#connections) if (!connection.hooks) this.#close(connection);
   }
 
   async dispose(): Promise<void> {
@@ -202,11 +170,32 @@ export class WebSocketLink {
     this.#ready.reject(new Error('Execution-node connector disposed'));
     this.#current?.close();
     this.disconnect();
-    for (const socket of this.#dialSockets) socket.close();
     this.#sessions.clear();
     this.#errors.clear();
+    this.#listenerNoise?.close();
+    this.#listenerNoise = null;
     await this.#server?.stop(true);
     this.#server = null;
+  }
+
+  #noiseOptions(): NoiseOptions {
+    let connection: Connection | null = null;
+    return {
+      psk: Buffer.from(this.options.secret, 'base64url'), context: EXECUTION_NODE_NOISE_CONTEXT,
+      onOpen: (socket) => {
+        if (this.#disposed || this.#quiescing) { socket.close(); return; }
+        connection = this.#open(socket);
+      },
+      onMessage: (socket, message) => {
+        if (connection && typeof message === 'string') this.#receive(connection, message);
+        else socket.close();
+      },
+      onError: () => this.#reportError('Execution-node encrypted connection failed'),
+      onClose: (socket) => {
+        this.#sockets.delete(socket);
+        if (connection) this.#closed(connection);
+      },
+    };
   }
 
   #open(socket: LinkSocket): Connection {

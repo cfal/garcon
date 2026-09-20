@@ -2,7 +2,7 @@ import {
   parseTerminalStreamClientMessage,
   type TerminalStreamServerMessage,
 } from "../../common/terminal.js";
-import type { ServerPrincipal } from "../lib/http-route-types.js";
+import type { PrimaryWebSocket } from "./primary-delivery.js";
 import {
   TerminalManager,
   TerminalManagerError,
@@ -29,12 +29,7 @@ export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON =
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const OPEN_WS_STATE = 1;
 
-export interface TerminalWebSocketData {
-  connectionId: string;
-  principal: ServerPrincipal;
-}
-
-type TerminalSocket = import("bun").ServerWebSocket<TerminalWebSocketData>;
+type TerminalSocket = PrimaryWebSocket;
 
 interface SocketRuntime {
   peer: TerminalStreamPeer;
