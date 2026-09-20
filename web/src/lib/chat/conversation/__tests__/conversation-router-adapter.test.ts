@@ -80,7 +80,6 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			selectedChat,
 			selectedChatId: selectedChat?.id ?? null,
 			order: selectedChat ? [selectedChat.id] : [],
-			hasChat: (chatId) => chatId === selectedChat?.id,
 			patchPreview: vi.fn(),
 			patchActivity: vi.fn(),
 			patchChat: vi.fn(),

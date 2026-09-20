@@ -3,7 +3,7 @@ import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-
 import type { ChatOrderGroup } from '$shared/chat-list';
 import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-modes';
 import { stableJsonStringify } from '$shared/json';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { ChatSession } from '$lib/types/session';
 
 export function normalizeExecutionFields<
@@ -56,6 +56,41 @@ export function toRecord(session: ChatSession): ChatSessionRecord {
 		lastMessage: session.preview?.lastMessage || undefined,
 		tags: session.tags ?? [],
 		firstMessage: session.preview?.firstMessage || undefined,
+	};
+}
+
+export function toDraftRecord(
+	id: string,
+	projectPath: string,
+	startup: ChatStartupConfig,
+	fallbackTitle: string,
+): ChatSessionRecord {
+	return {
+		id,
+		parentChat: null,
+		projectPath,
+		nodeId: startup.nodeId,
+		orderGroup: null,
+		title: startup.firstMessage.trim() || fallbackTitle,
+		agentId: startup.agentId,
+		model: startup.model,
+		apiProviderId: startup.apiProviderId ?? null,
+		modelEndpointId: startup.modelEndpointId ?? null,
+		modelProtocol: startup.modelProtocol ?? null,
+		...normalizeExecutionFields(startup),
+		createdAt: null,
+		lastActivityAt: null,
+		lastReadAt: null,
+		isPinned: false,
+		isArchived: false,
+		isProcessing: false,
+		processingPhase: null,
+		canReloadFromNativeHistory: false,
+		isUnread: false,
+		status: 'draft',
+		agentOwnershipEpoch: null,
+		tags: startup.tags ?? [],
+		firstMessage: undefined,
 	};
 }
 

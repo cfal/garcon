@@ -129,7 +129,6 @@ export interface EventRouterLifecycleStore {
 
 export interface EventRouterStartupStore {
 	startupCoordinator: StartupCoordinator;
-	onExternalChatCreated: (chatId: string) => void;
 }
 
 export interface EventRouterReadStateStore {
@@ -258,7 +257,7 @@ function buildDispatch(
 		appendLocalNotice: stores.chatState.appendLocalNotice,
 		conversationUi: stores.conversationUi,
 		startupCoordinator: stores.startup.startupCoordinator,
-		onExternalChatCreated: stores.startup.onExternalChatCreated,
+		refreshChats: () => { void stores.sessions.quietRefreshChats(); },
 		getPendingChatId,
 		setPendingChatId,
 		clearPendingChatId,

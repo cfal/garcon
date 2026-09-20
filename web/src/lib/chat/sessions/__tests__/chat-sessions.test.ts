@@ -202,7 +202,10 @@ describe('ChatSessionsStore', () => {
 	});
 
 	it('creates a pending draft and applies its projected start entry', () => {
-		const store = new ChatSessionsStore();
+		const started = makeServerSession({ id: 'draft-1', title: 'Hello' });
+		const store = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [started], total: 1, lastSelectedChatId: null }),
+		});
 
 		store.createDraft({
 			id: 'draft-1',
@@ -224,7 +227,7 @@ describe('ChatSessionsStore', () => {
 		expect(store.selectedChatId).toBe('draft-1');
 		expect(store.order[0]).toBe('draft-1');
 
-		store.applyStartEntry(makeServerSession({ id: 'draft-1', title: 'Hello' }));
+		store.applyStartEntry(started);
 
 		expect(store.byId['draft-1']?.status).toBe('running');
 		expect(store.startupByChatId['draft-1']).toBeUndefined();
@@ -595,7 +598,10 @@ describe('ChatSessionsStore', () => {
 	});
 
 	it('reapplying a server entry does not duplicate a running chat', () => {
-		const store = new ChatSessionsStore();
+		const started = makeServerSession({ id: 'a' });
+		const store = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [started], total: 1, lastSelectedChatId: null }),
+		});
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		store.applyStartEntry(makeServerSession({ id: 'a' }));
@@ -674,7 +680,10 @@ describe('ChatSessionsStore', () => {
 	});
 
 	it('isDraft returns false after promotion', () => {
-		const store = new ChatSessionsStore();
+		const started = makeServerSession({ id: 'draft-1', title: 'Hello' });
+		const store = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [started], total: 1, lastSelectedChatId: null }),
+		});
 
 		store.createDraft({
 			id: 'draft-1',

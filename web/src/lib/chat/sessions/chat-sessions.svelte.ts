@@ -68,6 +68,7 @@ import {
 	normalizeExecutionFields,
 	reconcileActivityProjection,
 	sameRecord,
+	toDraftRecord,
 	toRecord,
 } from './chat-session-records.js';
 
@@ -172,7 +173,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		try {
 			const fetchChats = this.#deps.listChats ?? listChats;
 			const projectPathRevisions = this.#projectBindings.captureRevisions();
+			const serverEntryGeneration = this.#nextServerEntryGeneration;
 			const res = await fetchChats();
+			// Command responses can install newer records while this snapshot is in flight.
+			if (serverEntryGeneration !== this.#nextServerEntryGeneration) {
+				this.#needsFollowUpFetch = true;
+				return;
+			}
 			this.lastSelectedChatId =
 				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
 			this.#upsertFromServer(res.sessions ?? [], projectPathRevisions, fetchGeneration);
@@ -726,33 +733,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			...normalizeExecutionFields(startup),
 		};
 
-		const draft: ChatSessionRecord = {
-			id,
-			parentChat: null,
-			projectPath,
-			nodeId: startup.nodeId,
-			orderGroup: null,
-			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
-			agentId: normalizedStartup.agentId,
-			model: normalizedStartup.model,
-			apiProviderId: normalizedStartup.apiProviderId ?? null,
-			modelEndpointId: normalizedStartup.modelEndpointId ?? null,
-			modelProtocol: normalizedStartup.modelProtocol ?? null,
-			...normalizeExecutionFields(normalizedStartup),
-			createdAt: null,
-			lastActivityAt: null,
-			lastReadAt: null,
-			isPinned: false,
-			isArchived: false,
-			isProcessing: false,
-			processingPhase: null,
-			canReloadFromNativeHistory: false,
-			isUnread: false,
-			status: 'draft',
-			agentOwnershipEpoch: null,
-			tags: normalizedStartup.tags ?? [],
-			firstMessage: undefined,
-		};
+		const draft = toDraftRecord(id, projectPath, normalizedStartup, m.chat_sessions_new_session());
 
 		this.#baseById = { ...this.#baseById, [id]: draft };
 		this.#baseOrder = this.#baseOrder.includes(id) ? this.#baseOrder : [id, ...this.#baseOrder];
@@ -779,6 +760,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	applyStartEntry(entry: ChatListEntry): void {
 		this.#mergeServerEntry(entry, true);
+		void this.quietRefreshChats();
 	}
 
 	upsertServerChat(entry: ChatListEntry): void {

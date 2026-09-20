@@ -23,7 +23,7 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		appendLocalNotice: vi.fn(),
 		conversationUi: makeConversationUi(),
 		startupCoordinator: new StartupCoordinator(),
-		onExternalChatCreated: vi.fn(),
+		refreshChats: vi.fn(),
 		getPendingChatId: vi.fn().mockReturnValue(null),
 		setPendingChatId: vi.fn(),
 		clearPendingChatId: vi.fn(),
@@ -46,7 +46,7 @@ describe('handleChatCreated', () => {
 		const ctx = makeCtx({ startupCoordinator: coordinator });
 		handleChatCreated(new ChatSessionCreatedMessage(''), ctx);
 
-		expect(ctx.onExternalChatCreated).not.toHaveBeenCalled();
+		expect(ctx.refreshChats).not.toHaveBeenCalled();
 	});
 
 	it('confirms local startup when coordinator matches', () => {
@@ -55,25 +55,25 @@ describe('handleChatCreated', () => {
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
 
-		expect(ctx.onExternalChatCreated).not.toHaveBeenCalled();
+		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 		expect(coordinator.currentPending).toBeNull();
 	});
 
-	it('calls onExternalChatCreated for non-local chats', () => {
+	it('refreshes non-local chats', () => {
 		const ctx = makeCtx({ startupCoordinator: coordinator });
 
 		handleChatCreated(makeMsg('remote-chat'), ctx);
 
-		expect(ctx.onExternalChatCreated).toHaveBeenCalledWith('remote-chat');
+		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 	});
 
-	it('calls onExternalChatCreated when coordinator has different pending', () => {
+	it('refreshes when the coordinator has a different pending chat', () => {
 		coordinator.beginLocalStartup('chat-1');
 		const ctx = makeCtx({ startupCoordinator: coordinator });
 
 		handleChatCreated(makeMsg('chat-2'), ctx);
 
-		expect(ctx.onExternalChatCreated).toHaveBeenCalledWith('chat-2');
+		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 		// Local pending should still be alive for chat-1.
 		expect(coordinator.matchesPendingStartup('chat-1')).toBe(true);
 	});

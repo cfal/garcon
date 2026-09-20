@@ -25,7 +25,6 @@ export interface ConversationRouterStoreDeps {
 		| 'selectedChat'
 		| 'selectedChatId'
 		| 'order'
-		| 'hasChat'
 		| 'patchPreview'
 		| 'patchActivity'
 		| 'patchChat'
@@ -167,11 +166,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		},
 		startup: {
 			startupCoordinator: deps.startupCoordinator,
-			onExternalChatCreated: (chatId) => {
-				if (!deps.sessions.hasChat(chatId)) {
-					void deps.sessions.quietRefreshChats();
-				}
-			},
 		},
 		readState: {
 			enqueueReadReceipt: (chatId, readAt) => {

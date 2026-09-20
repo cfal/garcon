@@ -25,7 +25,7 @@ export interface ChatEventContext {
 	>;
 	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
-	onExternalChatCreated: (chatId: string) => void;
+	refreshChats: () => void;
 	getPendingChatId: () => string | null;
 	setPendingChatId: (id: string) => void;
 	clearPendingChatId: () => void;
@@ -34,6 +34,7 @@ export interface ChatEventContext {
 export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEventContext) {
 	const chatId = msg.chatId;
 	if (!chatId) return;
+	ctx.refreshChats();
 
 	const coordinator = ctx.startupCoordinator;
 
@@ -52,9 +53,6 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 		);
 		return;
 	}
-
-	// External chat creation from another device/tab.
-	ctx.onExternalChatCreated(chatId);
 }
 
 export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEventContext) {
