@@ -29,7 +29,7 @@ describe('summarizeToolUses', () => {
 		];
 		const summary = summarizeToolUses(members);
 		expect(summary.count).toBe(14);
-		expect(summary.label).toBe('Read 3 files, edit 5 files, execute 5 commands, 1 action');
+		expect(summary.label).toBe('Read 3 files, edit 5 files, execute 5 commands, an action');
 		expect(summary.label).not.toMatch(/private|secret/);
 	});
 
@@ -40,7 +40,7 @@ describe('summarizeToolUses', () => {
 			item(new BashToolUseMessage(TS, 'b', 'pwd'), 3),
 			item(new EditToolUseMessage(TS, 'e', '/a'), 4),
 		]);
-		expect(summary.label).toBe('Read 1 file, edit 2 files, execute 1 command');
+		expect(summary.label).toBe('Read a file, edit 2 files, execute a command');
 	});
 
 	it('summarizes provider tools without exposing names or payloads', () => {
@@ -67,6 +67,6 @@ describe('summarizeToolUses', () => {
 		const summary = summarizeToolUses([
 			item(new ReadToolUseMessage(TS, 'read', '/private/file'), 1),
 		]);
-		expect(summary.label).toBe('Read 1 file');
+		expect(summary.label).toBe('Read a file');
 	});
 });

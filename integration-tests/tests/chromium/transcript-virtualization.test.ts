@@ -5382,7 +5382,8 @@ describe('Chromium combined tool-use presentation', () => {
             paddingRight: '0px',
             paddingTop: '0px',
           });
-          expect(Math.abs(restingStyle.chevronVisualOffset)).toBeLessThanOrEqual(1);
+          expect(restingStyle.chevronVisualOffset).toBeGreaterThanOrEqual(1);
+          expect(restingStyle.chevronVisualOffset).toBeLessThanOrEqual(3);
           await summary.hover();
           expect(await summary.evaluate((button) => getComputedStyle(button).backgroundColor))
             .toBe(restingStyle.backgroundColor);

@@ -1637,7 +1637,7 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "execute {count} command",
+					"countPlural=one": "execute a command",
 					"countPlural=other": "execute {count} commands"
 			}
 		}
@@ -1647,7 +1647,7 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "read {count} file",
+					"countPlural=one": "read a file",
 				"countPlural=other": "read {count} files"
 			}
 		}
@@ -1657,7 +1657,7 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "edit {count} file",
+					"countPlural=one": "edit a file",
 					"countPlural=other": "edit {count} files"
 			}
 		}
@@ -1667,7 +1667,7 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "{count} action",
+					"countPlural=one": "an action",
 					"countPlural=other": "{count} actions"
 			}
 		}

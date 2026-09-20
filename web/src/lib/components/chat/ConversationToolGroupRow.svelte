@@ -39,13 +39,13 @@
 		data-chat-anchor-id={item.anchorId}
 		aria-expanded={item.expanded}
 		onclick={toggleGroup}
-		class="flex w-full min-w-0 items-center gap-2 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		class="flex w-full min-w-0 items-center gap-1 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	>
 		<span class="relative h-4 w-2 shrink-0" aria-hidden="true">
 			<ChevronRight
 				class={cn(
-					'absolute top-0 size-4 transition-transform',
-					item.expanded ? '-left-1 rotate-90' : '-left-1.5',
+					'absolute -left-1 top-0 size-4 transition-transform',
+					item.expanded && 'rotate-90',
 				)}
 			/>
 		</span>
