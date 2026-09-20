@@ -1,10 +1,51 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 39 integrated design. Supersedes
+Status: revision 40 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 40 makes the complete provider integration an execution-node boundary.
+Core retains synchronous ledger acceptance and durable-before-visible ordering.
+Provider emission captures an instance-scoped producer binding, not a callback
+to a remote ledger. Core installs that binding's route to the exact producer
+lease before registering it with the integration; no event resolves the current
+sink by chat ID. Closing the original lease rejects late/replayed events even
+before worker cleanup. Run completion does not close its binding.
+
+Local dispatch may reach the sink synchronously. Remote emission snapshots and
+hands normalized events to bounded, ordered, duplicate-suppressed transport;
+its return and transport ACK do not promise ledger acceptance. Transport
+sequences are ephemeral, never ledger ordinals. A replay gap terminates the
+logical session rather than dropping a row and delivering its terminal. Runtime
+restart does not recover execution or retry mutations. Either side may establish
+a fresh logical session without a coordinated restart. Old references and
+buffered events are discarded; a surviving worker fences old bindings and
+attempts bounded best-effort cleanup, without requiring confirmed native process
+death. A surviving controller reports lost worker execution and releases the
+affected ownership; controller startup still synthesizes no run endings and
+starts execution state empty. Residual native work and missing final rows are
+accepted losses. The existing transcript-may-have-changed warning remains
+advisory, and native-history Reload remains exclusively manual. Neither a
+disconnect nor restart initiates native import or transcript replacement.
+Earlier statements about
+unbuffered synchronous publication and object-only capabilities describe the
+controller ledger boundary, not cross-machine delivery.
+
+Permission occurrences carry scoped response references. Native closures stay
+on the execution node and each response is single-flight. Confirmed success
+permits a resolved row; definite non-dispatch may release a claim; uncertainty
+or an expired resource retires actionability without recording success. Targets
+are captured asynchronously against an expected Garcon run. Controller ownership
+is rechecked before delivery; worker native-target checks remain immediately
+before native writes. Authorization already sent cannot be synchronously revoked.
+Goal behavior is removed from the product, including goal commands, automatic
+continuation, and goal-run handoff. Execution handles remain scoped to one
+operation. Ordinary steering, interruption, compaction, cross-provider handoff,
+and existing transcript rows are unchanged.
+Project-path preparations are compensation, not distributed transactions:
+expiry never rolls back potentially authoritative artifacts after a lost reply.
 
 Revision 39 keeps a bounded in-memory transcript window for recently inactive
 chat surfaces when combined tool use is enabled. A warm return restores the
@@ -1102,8 +1143,8 @@ CREATE UNIQUE INDEX transcript_submission
 
 ### 5.1 The sink
 
-Core issues each active integration one producer sink per chat — a
-capability object bound internally to the chat and its current view:
+Core owns one producer sink per active chat, bound to its current view.
+An integration captures an instance-scoped binding routed to this exact object:
 
 ```ts
 interface AgentProducerSink {
@@ -1116,7 +1157,8 @@ interface AgentProducerSink {
 }
 ```
 
-Possession of the open sink is the fence; there is no token. Core
+The open sink is the controller fence. The transport binding is an ephemeral
+capability scoped to node, runtime and integration, not another ledger identity. Core
 closes the sink at in-place handoff, manual reload, chat deletion, and
 shutdown; a closed sink rejects synchronously, and core may additionally
 verify object identity against the chat's single active sink. Old-owner
@@ -1125,10 +1167,9 @@ restart. `runId` is ephemeral correlation metadata on `run-ended`, permission,
 and producer notice events only — never ledger identity and never present on
 stored content, notice, or session rows.
 
-A runtime never looks a sink up. Core hands it a publisher closing over
-one binding, and that closure is the only route the runtime has to a
-transcript. Events therefore carry no chat id: routing is not data a
-provider can get wrong, because it is not data at all. An operation that
+A runtime never looks a sink up. Its integration hands it a publisher closing
+over one registered binding. Transport notifications carry that binding, not
+a chat ID used to discover the latest sink. An operation that
 outlives the transcript it was started against keeps publishing at its
 own closed sink and has no mechanism to discover the replacement, which
 is what makes possession the fence rather than a claim about it.
@@ -1193,7 +1234,7 @@ interface AgentIntegrationV5 {
   nativeSessions: codec;          // encode/decode session refs
   nativeActivity: AgentNativeActivityProbe | null;  // drift check (10.2)
   forking: AgentNativeForkV5 | null;  // native-fidelity fork (12.3)
-  steering; goals;                // unchanged nullable facets
+  steering;                      // unchanged nullable facet
 }
 
 interface AgentPermissionResponseCapability {
@@ -1254,8 +1295,8 @@ occurrence.
 
 ### 5.2 Acceptance semantics
 
-`publish()` is the event's acceptance point, and acceptance is
-durability:
+Controller sink `publish()` is the event's acceptance point, and acceptance
+is durability. Worker emission is only transport handoff:
 
 - Validation is synchronous: closure state and event shape. An event
   offered to a closed sink rejects synchronously, and so does an event
@@ -1277,8 +1318,9 @@ durability:
   order and the established chat-messages-before-terminal-derived-state
   contract. A crash before broadcast is harmless; reconnect reads the
   committed rows.
-- Nothing buffers, so there is no flush concept, no accepted-but-
-  unpersisted state, and no publish/close race protocol. The loss window
+- The controller ledger does not buffer. Bounded remote replay retains events
+  not yet handed to the controller; these are not ledger-accepted. There is no
+  ledger flush or distributed publish/close protocol. The loss window
   is events the provider emitted that core had not yet handled at crash,
   plus the NORMAL power-loss window (4.3); a later active history load may
   surface newer native evidence where the provider persisted it, and manual
@@ -1648,8 +1690,9 @@ type PermissionLifecycle =
   `serverInstanceId`, current run correlation, and unresolved lifecycle
   state. Those checks reject stale or historical controls; they are not a
   second source of authority. Core invokes only the claimed occurrence's
-  capability, abandons the claim if provider response fails, and appends
-  `permission-resolved` only after response succeeds.
+  capability, releases the claim only after definite non-dispatch while still
+  valid, and appends `permission-resolved` only after response succeeds.
+  Ambiguous delivery retires actionability without a resolved row or retry.
 - Ledger schema version 1 intentionally keeps the stored lifecycle JSON key
   `incarnation`. `server/ledger/codec.ts` encodes
   `permissionOccurrenceId` as `incarnation` and decodes stored `incarnation`
@@ -2127,6 +2170,23 @@ remains recorded in the ledger's session rows (3.4); whether any future
 product flow reuses it is outside this design. `transcriptViewId` does
 not change; cursors remain valid; reads stay available throughout
 (12.4).
+
+Execution ownership also includes the controller-owned `nodeId`; absent/null
+means Local. An in-place cross-node handoff follows 12.1 even when the agent
+ID is unchanged. The destination project is inspected on its node before the
+decision. The decision records source/destination node, destination path and
+execution settings; registry roll-forward installs them together, clears native
+references, and rotates the ownership epoch. Optional `fromNodeId`/`toNodeId`
+detail on the `agent-switch` row preserves that boundary through projections
+and Reload. Existing rows imply Local; no transcript rewrite is required.
+
+The controller ledger supplies carryover to a fresh destination native session.
+Native references, running tools, and project files never move between nodes.
+A committed decision rolls forward without either node being reachable;
+execution remains unavailable until the destination is ready and an explicit
+new dispatch is admitted. Source unavailability does not prevent a ledger-based
+handoff. Prepared carryover reuse is fenced by destination node and ownership
+epoch as well as the existing request and view identities.
 
 ### 12.2 Continuation to a new chat (`/handoff`)
 
