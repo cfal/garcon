@@ -8,8 +8,8 @@ export class ExecutionNodeEditor {
 	direction = $state<ExecutionNodeDirection>('node-connects');
 	connectionUrl = $state('');
 	allowInsecureDevelopment = $state(false);
+	allowUnverifiedTls = $state(false);
 	enabled = $state(true);
-	revealed = $state(false);
 	busy = $state(false);
 	error = $state<string | null>(null);
 	confirmDelete = $state(false);
@@ -17,9 +17,15 @@ export class ExecutionNodeEditor {
 	#originalUrl = '';
 	#originalDirection: ExecutionNodeDirection = 'node-connects';
 	#originalInsecure = false;
+	#originalUnverifiedTls = false;
 	#originalEnabled = true;
 
 	constructor(private readonly nodes: ExecutionNodesStore, private readonly transport = api) {}
+
+	get withoutTls(): boolean {
+		try { return new URL(this.connectionUrl.trim()).protocol === 'ws:'; }
+		catch { return false; }
+	}
 
 	clear(): void {
 		this.#version += 1;
@@ -29,8 +35,8 @@ export class ExecutionNodeEditor {
 		this.connectionUrl = '';
 		this.#originalUrl = '';
 		this.allowInsecureDevelopment = false;
+		this.allowUnverifiedTls = false;
 		this.enabled = true;
-		this.revealed = false;
 		this.busy = false;
 		this.error = null;
 		this.confirmDelete = false;
@@ -50,6 +56,7 @@ export class ExecutionNodeEditor {
 			this.connectionUrl = this.#originalUrl = connection.connectionUrl;
 			this.#originalDirection = this.direction;
 			this.allowInsecureDevelopment = this.#originalInsecure = connection.allowInsecureDevelopment;
+			this.allowUnverifiedTls = this.#originalUnverifiedTls = connection.allowUnverifiedTls;
 		} catch (error) {
 			if (version === this.#version) this.error = error instanceof Error ? error.message : 'Unable to load connection';
 		} finally {
@@ -63,21 +70,22 @@ export class ExecutionNodeEditor {
 		this.error = null;
 		const version = this.#version;
 		const previousNodes = this.nodes.nodes;
+		const allowUnverifiedTls = this.direction === 'controller-connects' && !this.withoutTls && this.allowUnverifiedTls;
 		try {
 			if (this.id) {
 				const connectionChanged = this.connectionUrl !== this.#originalUrl || this.direction !== this.#originalDirection
-					|| this.allowInsecureDevelopment !== this.#originalInsecure;
+					|| this.allowInsecureDevelopment !== this.#originalInsecure || allowUnverifiedTls !== this.#originalUnverifiedTls;
 				const nodes = await this.transport.updateExecutionNode(this.id, {
 					label: this.label.trim(),
 					...(this.enabled !== this.#originalEnabled ? { enabled: this.enabled } : {}),
-					...(connectionChanged ? { connection: { direction: this.direction, connectionUrl: this.connectionUrl.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment } } : {}),
+					...(connectionChanged ? { connection: { direction: this.direction, connectionUrl: this.connectionUrl.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment, allowUnverifiedTls } } : {}),
 				});
 				if (this.nodes.nodes === previousNodes) this.nodes.applySnapshot(nodes);
 				else await this.nodes.refreshAfterMutation();
 				if (version !== this.#version) return false;
 			} else {
 				const result = await this.transport.createExecutionNode({
-					label: this.label.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment,
+					label: this.label.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment, allowUnverifiedTls,
 					...(this.direction === 'node-connects' ? { direction: 'node-connects' } : { direction: 'controller-connects', connectionUrl: this.connectionUrl.trim() }),
 				});
 				await this.nodes.refreshAfterMutation();
@@ -85,11 +93,11 @@ export class ExecutionNodeEditor {
 				this.id = result.id;
 				this.connectionUrl = result.connectionUrl;
 				this.allowInsecureDevelopment = result.allowInsecureDevelopment;
-				this.revealed = true;
 			}
 			this.#originalUrl = this.connectionUrl;
 			this.#originalDirection = this.direction;
 			this.#originalInsecure = this.allowInsecureDevelopment;
+			this.allowUnverifiedTls = this.#originalUnverifiedTls = allowUnverifiedTls;
 			this.#originalEnabled = this.enabled;
 			return true;
 		} catch (error) {

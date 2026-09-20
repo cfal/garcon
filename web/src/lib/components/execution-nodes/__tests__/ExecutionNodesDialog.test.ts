@@ -14,6 +14,7 @@ vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard: vi.fn(async () => true
 const connection = {
 	connectionUrl: `wss://example.test/execution-node/${remoteExecutionNode.id}#secret=${'A'.repeat(43)}`,
 	allowInsecureDevelopment: false,
+	allowUnverifiedTls: false,
 };
 
 async function openDialog() {
@@ -47,7 +48,7 @@ describe('ExecutionNodesDialog', () => {
 		const url = await screen.findByLabelText('Connection URL') as HTMLInputElement;
 		expect(url.value).toBe(connection.connectionUrl);
 		expect(url.type).toBe('text');
-		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false });
+		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false });
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy connection URL' }));
 		expect(copyToClipboard).toHaveBeenCalledWith(connection.connectionUrl, expect.any(HTMLElement), expect.any(Function));
 		await fireEvent.keyDown(url, { key: 'Escape' });
@@ -72,24 +73,45 @@ describe('ExecutionNodesDialog', () => {
 		const url = screen.getByLabelText('Connection URL');
 		const descriptor = `ws://worker.test:19781/execution-node#secret=${'A'.repeat(43)}`;
 		await fireEvent.input(url, { target: { value: descriptor } });
-		await fireEvent.click(screen.getByLabelText('Allow unencrypted development connection (ws://)'));
+		await fireEvent.click(screen.getByLabelText('Allow connection without TLS (ws://)'));
+		expect(screen.getByText(/TLS is disabled/).classList.contains('text-destructive')).toBe(true);
+		expect(url.getAttribute('aria-describedby')).toBe('execution-node-tls-warning');
 		vi.mocked(api.createExecutionNode).mockRejectedValueOnce(new Error('Invalid connection address'));
 		await fireEvent.submit(url.closest('form')!);
-		expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Invalid connection address');
-		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true });
+		expect((await screen.findByText('Invalid connection address')).getAttribute('role')).toBe('alert');
+		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true, allowUnverifiedTls: false });
 		expect((url as HTMLInputElement).value).toBe(descriptor);
 	});
 
-	it('masks saved credentials until explicitly revealed', async () => {
+	it('keeps saved credentials readable without a reveal control', async () => {
 		vi.mocked(api.getExecutionNodes).mockResolvedValue([localExecutionNode, remoteExecutionNode]);
 		await openDialog();
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker' }));
 		const url = screen.getByLabelText('Connection URL') as HTMLInputElement;
 		await waitFor(() => expect(url.value).toBe(connection.connectionUrl));
-		expect(url.type).toBe('password');
-		await fireEvent.click(screen.getByRole('button', { name: 'Reveal URL' }));
 		expect(url.type).toBe('text');
+		expect(screen.queryByRole('button', { name: 'Reveal URL' })).toBeNull();
+		expect(screen.queryByText(/TLS is disabled/)).toBeNull();
+		expect(screen.queryByLabelText('Allow unverified TLS certificates')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to nodes' }));
 		expect(screen.queryByLabelText('Connection URL')).toBeNull();
+	});
+
+	it('defaults to certificate verification and saves an explicit outbound opt-out', async () => {
+		vi.mocked(api.getExecutionNodes).mockResolvedValue([localExecutionNode, { ...remoteExecutionNode, direction: 'controller-connects' }]);
+		vi.mocked(api.updateExecutionNode).mockResolvedValue([localExecutionNode, remoteExecutionNode]);
+		await openDialog();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker' }));
+		const url = screen.getByLabelText('Connection URL') as HTMLInputElement;
+		await waitFor(() => expect(url.value).toBe(connection.connectionUrl));
+		const optOut = screen.getByLabelText('Allow unverified TLS certificates') as HTMLInputElement;
+		expect(optOut.checked).toBe(false);
+		await fireEvent.click(optOut);
+		expect(screen.getByText(/TLS certificate verification is disabled/).textContent).toContain('Noise still authenticates');
+		await fireEvent.submit(url.closest('form')!);
+		await waitFor(() => expect(api.updateExecutionNode).toHaveBeenCalledWith(remoteExecutionNode.id, {
+			label: 'Worker',
+			connection: { direction: 'controller-connects', connectionUrl: connection.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true },
+		}));
 	});
 });

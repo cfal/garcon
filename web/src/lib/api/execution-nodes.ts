@@ -17,10 +17,10 @@ function nodesResponse(value: unknown): readonly ExecutionNodeSnapshot[] {
 
 function connectionResponse(value: unknown): ExecutionNodeConnection {
 	if (!isRecord(value) || typeof value.connectionUrl !== 'string'
-		|| typeof value.allowInsecureDevelopment !== 'boolean') {
+		|| typeof value.allowInsecureDevelopment !== 'boolean' || typeof value.allowUnverifiedTls !== 'boolean') {
 		throw new Error('Invalid execution node connection response');
 	}
-	return { connectionUrl: value.connectionUrl, allowInsecureDevelopment: value.allowInsecureDevelopment };
+	return { connectionUrl: value.connectionUrl, allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
 }
 
 export async function getExecutionNodes(): Promise<readonly ExecutionNodeSnapshot[]> {

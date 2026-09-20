@@ -101,6 +101,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await fixture.page.$eval('#execution-node-insecure', (element) => (element as HTMLInputElement).click());
       await app.clickDialogButton('Add Node');
       await fixture.page.waitForSelector('#execution-node-url');
+      expect(await fixture.page.$eval('#execution-node-url', (element) => (element as HTMLInputElement).type)).toBe('text');
       const inboundDescriptor = await fixture.page.$eval('#execution-node-url', (element) => (element as HTMLInputElement).value);
       const inbound = await nodeByLabel(fixture, 'Inbound Worker');
       expect(inbound.availability).toBe('offline');
@@ -108,6 +109,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       inboundUrl.protocol = 'ws:';
       inboundUrl.host = new URL(fixture.baseUrl).host;
       await app.fill('#execution-node-url', inboundUrl.href);
+      await app.waitForText('TLS is disabled. Noise encrypts execution traffic');
       await app.clickDialogButton('Save');
       await app.waitForButtonEnabled('Save');
       const inboundDirs = await workerDirectories(join(fixture.integration.dirs.root, 'inbound'));
@@ -125,7 +127,9 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.fill('#execution-node-label', 'Outbound Worker');
       await selectConnectionDirection(fixture);
       await fixture.page.waitForSelector('#execution-node-url');
+      expect(await fixture.page.$eval('#execution-node-unverified-tls', (element) => (element as HTMLInputElement).checked)).toBe(false);
       await app.fill('#execution-node-url', outboundUrl.href);
+      await app.waitForText('TLS is disabled. Noise encrypts execution traffic');
       await fixture.page.$eval('#execution-node-insecure', (element) => (element as HTMLInputElement).click());
       await app.clickDialogButton('Add Node');
       await app.waitForButtonEnabled('Save');

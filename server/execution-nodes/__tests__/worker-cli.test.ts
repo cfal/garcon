@@ -30,6 +30,9 @@ test('listener reuses a private persisted secret while connect takes the complet
   expect(dialing.connection).toEqual({ kind: 'dial', url: full.split('#')[0] });
   expect(dialing).not.toHaveProperty('nodeId');
   expect(dialing).not.toHaveProperty('label');
+  expect(dialing.allowUnverifiedTls).toBe(false);
+  expect((await readWorkerCliOptions(['--connect', full, '--allow-unverified-tls', '--workspace-dir', root])).allowUnverifiedTls).toBe(true);
+  await expect(readWorkerCliOptions([...args, '--allow-unverified-tls'])).rejects.toThrow('only to --connect');
 });
 
 test('listener bind address is independent of the advertised URL and rejects empty values or dial mode', async () => {

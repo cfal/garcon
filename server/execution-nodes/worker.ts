@@ -10,6 +10,7 @@ export interface ExecutionWorkerOptions {
   readonly workspaceDir: string;
   readonly projectBasePath: string;
   readonly allowInsecureDevelopment: boolean;
+  readonly allowUnverifiedTls?: boolean;
   readonly connection: { readonly kind: 'dial'; readonly url: string }
     | { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string };
   readonly advertisedUrl?: string;
@@ -23,7 +24,8 @@ export async function runExecutionWorker(
   delete process.env.GARCON_WORKSPACE_DIR;
   process.env.GARCON_WORKSPACE = 'execution-node-unavailable';
   process.env.GARCON_CONFIG_DIR = join(options.workspaceDir, 'cli-unavailable');
-  const link = new WebSocketLink({ role: 'worker', secret: options.secret, allowInsecureDevelopment: options.allowInsecureDevelopment });
+  const link = new WebSocketLink({ role: 'worker', secret: options.secret,
+    allowInsecureDevelopment: options.allowInsecureDevelopment, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveAgentNode> | null = null;
   const stopped = Promise.withResolvers<void>();
   let stopping = false;

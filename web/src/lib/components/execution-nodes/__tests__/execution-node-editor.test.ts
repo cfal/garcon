@@ -8,6 +8,7 @@ import { ExecutionNodeEditor } from '../execution-node-editor.svelte';
 const connection = {
 	connectionUrl: `wss://example.test/execution-node/${remoteExecutionNode.id}#secret=synthetic`,
 	allowInsecureDevelopment: false,
+	allowUnverifiedTls: false,
 } satisfies ExecutionNodeConnection;
 
 function fixture() {
@@ -39,20 +40,18 @@ describe('ExecutionNodeEditor', () => {
 		expect(nodes.get(remoteExecutionNode.id)).toEqual(remoteExecutionNode);
 	});
 
-	it('creates an inbound node and reveals its connection URL only in editor state', async () => {
+	it('creates an inbound node and keeps its connection URL only in editor state', async () => {
 		const { editor, nodes, transport } = fixture();
 		editor.label = ' Build Machine ';
 		expect(await editor.save()).toBe(true);
 		expect(transport.createExecutionNode).toHaveBeenCalledWith({
-			label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false,
+			label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false,
 		});
 		expect(editor.id).toBe(remoteExecutionNode.id);
 		expect(editor.connectionUrl).toBe(connection.connectionUrl);
-		expect(editor.revealed).toBe(true);
 		expect(JSON.stringify(nodes.nodes)).not.toContain('secret');
 		editor.clear();
 		expect(editor.connectionUrl).toBe('');
-		expect(editor.revealed).toBe(false);
 	});
 
 	it('passes a pasted listener URL through the outbound creation contract', async () => {
@@ -63,15 +62,14 @@ describe('ExecutionNodeEditor', () => {
 		editor.allowInsecureDevelopment = true;
 		await editor.save();
 		expect(transport.createExecutionNode).toHaveBeenCalledWith({
-			label: 'Worker', direction: 'controller-connects', allowInsecureDevelopment: true,
+			label: 'Worker', direction: 'controller-connects', allowInsecureDevelopment: true, allowUnverifiedTls: false,
 			connectionUrl: 'ws://worker.test:1234/execution-node#secret=synthetic',
 		});
 	});
 
-	it('keeps existing credentials masked and omits a connection edit for a rename', async () => {
+	it('omits a connection edit for a rename', async () => {
 		const { editor, transport } = fixture();
 		await editor.edit(remoteExecutionNode);
-		expect(editor.revealed).toBe(false);
 		editor.label = 'Renamed';
 		await editor.save();
 		expect(transport.updateExecutionNode).toHaveBeenCalledWith(remoteExecutionNode.id, {
@@ -81,11 +79,28 @@ describe('ExecutionNodeEditor', () => {
 		await editor.save();
 		expect(transport.updateExecutionNode).toHaveBeenLastCalledWith(remoteExecutionNode.id, {
 			label: 'Renamed',
-			connection: { direction: 'node-connects', connectionUrl: editor.connectionUrl, allowInsecureDevelopment: false },
+			connection: { direction: 'node-connects', connectionUrl: editor.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: false },
 		});
 		editor.enabled = false;
 		await editor.save();
 		expect(transport.updateExecutionNode).toHaveBeenLastCalledWith(remoteExecutionNode.id, { label: 'Renamed', enabled: false });
+	});
+
+	it('persists certificate opt-out only for outbound connections and clears it with the editor', async () => {
+		const { editor, transport } = fixture();
+		await editor.edit({ ...remoteExecutionNode, direction: 'controller-connects' });
+		expect(editor.allowUnverifiedTls).toBe(false);
+		editor.allowUnverifiedTls = true;
+		await editor.save();
+		expect(transport.updateExecutionNode).toHaveBeenLastCalledWith(remoteExecutionNode.id, {
+			label: remoteExecutionNode.label,
+			connection: { direction: 'controller-connects', connectionUrl: editor.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true },
+		});
+		editor.direction = 'node-connects';
+		await editor.save();
+		expect(transport.updateExecutionNode.mock.lastCall?.[1].connection?.allowUnverifiedTls).toBe(false);
+		editor.clear();
+		expect(editor.allowUnverifiedTls).toBe(false);
 	});
 
 	it('does not restore a secret after the editor closes during reveal', async () => {

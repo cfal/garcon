@@ -19,17 +19,19 @@ Options:
   --project-base-dir <path>    Worker project base (default: home directory).
   --bind-address <host-or-ip>  Listener bind address (default: 0.0.0.0).
   --advertise-url <url>        Listener URL printed for onboarding behind a proxy.
-  --allow-insecure-development Allow unencrypted ws: connections/listener.
+  --allow-insecure-development Allow ws: without outer TLS on a trusted private network.
+  --allow-unverified-tls       Skip TLS certificate verification with --connect.
   --help                      Show this help.
 
 The full connection URL is a credential. Shell history, process arguments,
 clipboard contents and captured startup output can expose it. Use wss: and
-an access-controlled TLS proxy outside local development.\n`;
+an access-controlled TLS proxy outside local development. Execution traffic always
+requires Noise encryption and shared-secret authentication, including over ws:.\n`;
 
 export async function readWorkerCliOptions(args: readonly string[]): Promise<ExecutionWorkerOptions> {
   let values: {
     connect?: string; listen?: string; 'workspace-dir'?: string; 'project-base-dir'?: string;
-    'bind-address'?: string; 'advertise-url'?: string; 'allow-insecure-development'?: boolean;
+    'bind-address'?: string; 'advertise-url'?: string; 'allow-insecure-development'?: boolean; 'allow-unverified-tls'?: boolean;
   };
   try {
     ({ values } = parseArgs({ args: [...args], strict: true, allowPositionals: false, options: {
@@ -37,6 +39,7 @@ export async function readWorkerCliOptions(args: readonly string[]): Promise<Exe
       'workspace-dir': { type: 'string' }, 'project-base-dir': { type: 'string' },
       'bind-address': { type: 'string' },
       'advertise-url': { type: 'string' }, 'allow-insecure-development': { type: 'boolean' },
+      'allow-unverified-tls': { type: 'boolean' },
     } }));
   } catch { throw new Error('Invalid execution-node arguments; use execution-node --help'); }
   if ((values.connect === undefined) === (values.listen === undefined)) throw new Error('Choose exactly one of --connect or --listen');
@@ -48,8 +51,10 @@ export async function readWorkerCliOptions(args: readonly string[]): Promise<Exe
     if (values['advertise-url'] !== undefined) throw new Error('--advertise-url applies only to listeners');
     const { socketUrl, secret } = parseConnectionUrl(values.connect);
     const url = validateNodeSocketUrl(socketUrl, { direction: 'node-connects', allowInsecureDevelopment });
-    return { workspaceDir, projectBasePath, secret, allowInsecureDevelopment, connection: { kind: 'dial', url } };
+    return { workspaceDir, projectBasePath, secret, allowInsecureDevelopment,
+      allowUnverifiedTls: url.startsWith('wss:') && values['allow-unverified-tls'] === true, connection: { kind: 'dial', url } };
   }
+  if (values['allow-unverified-tls'] !== undefined) throw new Error('--allow-unverified-tls applies only to --connect');
   const port = Number(values.listen);
   if (!/^\d+$/u.test(values.listen!) || !Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Listener port must be between 0 and 65535');
   const bindAddress = parseBindAddress(values['bind-address']);

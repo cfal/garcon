@@ -3,8 +3,6 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Copy from '@lucide/svelte/icons/copy';
-	import Eye from '@lucide/svelte/icons/eye';
-	import EyeOff from '@lucide/svelte/icons/eye-off';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -73,16 +71,24 @@
 				</label>
 				{#if editor.id || editor.direction === 'controller-connects'}
 					<label class="block space-y-1 text-sm">Connection URL
-						<input id="execution-node-url" class={`${inputClass} text-base pointer-fine:text-sm`} type={editor.revealed ? 'text' : 'password'} bind:value={editor.connectionUrl} required autocomplete="off" spellcheck={false} disabled={editor.busy} />
+						<input id="execution-node-url" class={`${inputClass} text-base pointer-fine:text-sm`} type="text" bind:value={editor.connectionUrl} required autocomplete="off" spellcheck={false} disabled={editor.busy} aria-describedby={editor.withoutTls ? 'execution-node-tls-warning' : undefined} />
 					</label>
+					{#if editor.withoutTls}
+						<p id="execution-node-tls-warning" role="alert" class="text-sm text-destructive">TLS is disabled. Noise encrypts execution traffic, but connection metadata remains exposed. Use only on a private network you trust.</p>
+					{/if}
 					<div class="flex items-center gap-2">
-						<Button type="button" variant="outline" size="icon-sm" title={editor.revealed ? 'Hide URL' : 'Reveal URL'} aria-label={editor.revealed ? 'Hide URL' : 'Reveal URL'} onclick={() => editor.revealed = !editor.revealed}>{#if editor.revealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}</Button>
 						<Button type="button" variant="outline" size="icon-sm" title="Copy connection URL" aria-label="Copy connection URL" disabled={!editor.connectionUrl} onclick={copy}><Copy class="size-4" /></Button>
 						{#if copied}<span role="status" class="text-xs text-muted-foreground">Copied</span>{/if}
 					</div>
 					<p class="text-xs text-muted-foreground">This URL contains a secret. Shell history and startup logs may retain it.</p>
 				{/if}
-				<label class="flex items-center gap-2 text-sm"><input id="execution-node-insecure" type="checkbox" bind:checked={editor.allowInsecureDevelopment} disabled={editor.busy} />Allow unencrypted development connection (ws://)</label>
+				<label class="flex items-center gap-2 text-sm"><input id="execution-node-insecure" type="checkbox" bind:checked={editor.allowInsecureDevelopment} disabled={editor.busy} />Allow connection without TLS (ws://)</label>
+				{#if editor.direction === 'controller-connects' && !editor.withoutTls}
+					<label class="flex items-center gap-2 text-sm"><input id="execution-node-unverified-tls" type="checkbox" bind:checked={editor.allowUnverifiedTls} disabled={editor.busy} />Allow unverified TLS certificates</label>
+					{#if editor.allowUnverifiedTls}
+						<p role="alert" class="text-sm text-destructive">TLS certificate verification is disabled. Noise still authenticates the peer and encrypts execution traffic, but the outer TLS endpoint is not verified.</p>
+					{/if}
+				{/if}
 				{#if editor.id}<label class="flex items-center gap-2 text-sm"><input type="checkbox" bind:checked={editor.enabled} disabled={editor.busy} />Enabled</label>{/if}
 				{#if editor.error}<p role="alert" class="break-words text-sm text-destructive">{editor.error}</p>{/if}
 				<div class="flex items-center justify-between gap-2 border-t border-border pt-4">

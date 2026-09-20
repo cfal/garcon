@@ -216,7 +216,8 @@ export class ExecutionNodeManager {
         entry.error = { code: 'EXECUTION_NODE_UNAVAILABLE', message };
         this.#changed();
       };
-      const link = new WebSocketLink({ role: 'controller', nodeId: config.id, secret: config.secret, allowInsecureDevelopment: config.allowInsecureDevelopment });
+      const link = new WebSocketLink({ role: 'controller', nodeId: config.id, secret: config.secret,
+        allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
       link.onError(reportError);
       entry.node = new RemoteExecutionNode(config.id, link, (rpc) => rpc.handle(async (call, signal) => {
@@ -269,6 +270,7 @@ export class ExecutionNodeManager {
 
 function sameConnector(left: RemoteNodeConfig, right: RemoteNodeConfig): boolean {
   if (left.enabled !== right.enabled || left.secret !== right.secret || left.allowInsecureDevelopment !== right.allowInsecureDevelopment
+    || left.allowUnverifiedTls !== right.allowUnverifiedTls
     || left.connection.kind !== right.connection.kind) return false;
   return left.connection.kind !== 'controller-connects' || right.connection.kind !== 'controller-connects'
     || left.connection.targetUrl === right.connection.targetUrl;

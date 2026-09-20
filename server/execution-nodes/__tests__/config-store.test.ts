@@ -68,3 +68,24 @@ test('insecurely readable persisted secrets reject startup', async () => {
   await chmod(join(root, 'execution-nodes.json'), 0o644);
   await expect(new ExecutionNodeConfigStore(root).initialize()).rejects.toThrow('OS account');
 });
+
+test('TLS verification defaults on and explicit opt-out survives restart and rename', async () => {
+  const { root, store } = await fixture();
+  const connectionUrl = nodeConnectionUrl('wss://worker.example.com/execution-node', createNodeSecret());
+  const node = await store.create({ direction: 'controller-connects', label: 'Worker', connectionUrl });
+  expect(store.connection(node.id).allowUnverifiedTls).toBe(false);
+  await store.update(node.id, { connection: {
+    direction: 'controller-connects', connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true,
+  } });
+  await store.update(node.id, { label: 'Renamed' });
+  const reloaded = new ExecutionNodeConfigStore(root);
+  await reloaded.initialize();
+  expect(reloaded.connection(node.id)).toEqual({ connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true });
+  await reloaded.update(node.id, { connection: { direction: 'controller-connects', connectionUrl, allowInsecureDevelopment: false } });
+  expect(reloaded.connection(node.id).allowUnverifiedTls).toBe(false);
+  await reloaded.update(node.id, { connection: {
+    direction: 'controller-connects', connectionUrl: connectionUrl.replace('wss:', 'ws:'),
+    allowInsecureDevelopment: true, allowUnverifiedTls: true,
+  } });
+  expect(reloaded.connection(node.id).allowUnverifiedTls).toBe(false);
+});

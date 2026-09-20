@@ -44,6 +44,7 @@ export interface ExecutionNodeSnapshot {
 export type CreateExecutionNodeRequest = {
   readonly label: string;
   readonly allowInsecureDevelopment?: boolean;
+  readonly allowUnverifiedTls?: boolean;
 } & (
   | { readonly direction: 'node-connects' }
   | { readonly direction: 'controller-connects'; readonly connectionUrl: string }
@@ -56,12 +57,14 @@ export interface UpdateExecutionNodeRequest {
     readonly direction: ExecutionNodeDirection;
     readonly connectionUrl: string;
     readonly allowInsecureDevelopment: boolean;
+    readonly allowUnverifiedTls?: boolean;
   };
 }
 
 export interface ExecutionNodeConnection {
   readonly connectionUrl: string;
   readonly allowInsecureDevelopment: boolean;
+  readonly allowUnverifiedTls: boolean;
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -78,13 +81,15 @@ function isConnectionUrl(value: unknown): value is string {
 
 export function parseCreateExecutionNodeRequest(value: unknown): CreateExecutionNodeRequest | null {
   if (!isRecord(value) || !isLabel(value.label)
-    || value.allowInsecureDevelopment !== undefined && typeof value.allowInsecureDevelopment !== 'boolean') return null;
-  const common = { label: value.label.trim(), allowInsecureDevelopment: value.allowInsecureDevelopment };
-  if (value.direction === 'node-connects' && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment'])) {
+    || value.allowInsecureDevelopment !== undefined && typeof value.allowInsecureDevelopment !== 'boolean'
+    || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean') return null;
+  const common = { label: value.label.trim(), allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
+  if (value.direction === 'node-connects' && value.allowUnverifiedTls !== true
+    && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment', 'allowUnverifiedTls'])) {
     return { ...common, direction: 'node-connects' };
   }
   if (value.direction === 'controller-connects' && isConnectionUrl(value.connectionUrl)
-    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls'])) {
     return { ...common, direction: 'controller-connects', connectionUrl: value.connectionUrl };
   }
   return null;
@@ -96,8 +101,10 @@ export function parseUpdateExecutionNodeRequest(value: unknown): UpdateExecution
     || value.enabled !== undefined && typeof value.enabled !== 'boolean') return null;
   const connection = value.connection;
   if (connection !== undefined && (!isRecord(connection)
-    || !hasOnlyKeys(connection, ['direction', 'connectionUrl', 'allowInsecureDevelopment'])
+    || !hasOnlyKeys(connection, ['direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls'])
     || (connection.direction !== 'node-connects' && connection.direction !== 'controller-connects')
+    || connection.allowUnverifiedTls !== undefined && typeof connection.allowUnverifiedTls !== 'boolean'
+    || connection.direction === 'node-connects' && connection.allowUnverifiedTls === true
     || !isConnectionUrl(connection.connectionUrl) || typeof connection.allowInsecureDevelopment !== 'boolean')) return null;
   return {
     ...(value.label === undefined ? {} : { label: (value.label as string).trim() }),

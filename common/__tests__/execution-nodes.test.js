@@ -16,13 +16,24 @@ test('only absent or null node identity defaults to Local', () => {
 
 test('node mutation contracts reject incomplete and extraneous fields', () => {
   expect(parseCreateExecutionNodeRequest({ label: ' Worker ', direction: 'node-connects' }))
-    .toEqual({ label: 'Worker', direction: 'node-connects', allowInsecureDevelopment: undefined });
+    .toEqual({ label: 'Worker', direction: 'node-connects', allowInsecureDevelopment: undefined, allowUnverifiedTls: undefined });
   expect(parseCreateExecutionNodeRequest({ label: 'Worker', direction: 'controller-connects' })).toBeNull();
   expect(parseCreateExecutionNodeRequest({ label: 'Worker', direction: 'node-connects', secret: 'hidden' })).toBeNull();
   expect(parseUpdateExecutionNodeRequest({})).toBeNull();
   expect(parseUpdateExecutionNodeRequest({ enabled: false })).toEqual({ enabled: false });
   expect(parseUpdateExecutionNodeRequest({ label: ' ' })).toBeNull();
   expect(parseUpdateExecutionNodeRequest({ connection: { direction: 'node-connects', connectionUrl: 'url' } })).toBeNull();
+});
+
+test('certificate verification opt-out is explicit and only applies to the dialing controller', () => {
+  const request = { label: 'Worker', direction: 'controller-connects', connectionUrl: 'wss://worker.test/execution-node#secret=synthetic' };
+  expect(parseCreateExecutionNodeRequest({ ...request, allowUnverifiedTls: true })?.allowUnverifiedTls).toBe(true);
+  expect(parseCreateExecutionNodeRequest({ ...request, allowUnverifiedTls: 'true' })).toBeNull();
+  expect(parseCreateExecutionNodeRequest({ label: 'Worker', direction: 'node-connects', allowUnverifiedTls: true })).toBeNull();
+  const connection = { direction: 'controller-connects', connectionUrl: request.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true };
+  expect(parseUpdateExecutionNodeRequest({ connection })).toEqual({ connection });
+  expect(parseUpdateExecutionNodeRequest({ connection: { ...connection, direction: 'node-connects' } })).toBeNull();
+  expect(parseUpdateExecutionNodeRequest({ connection: { ...connection, allowUnverifiedTls: 1 } })).toBeNull();
 });
 
 test('public snapshots exclude credentials and preserve unavailable remote targets', () => {

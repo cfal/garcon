@@ -51,7 +51,7 @@ test('node onboarding is available offline and keeps credentials out of public s
     expect(JSON.stringify(nodes)).not.toContain(secret);
     const reveal = await fetch(`${fixture.garcon.baseUrl}/api/v1/execution-nodes/${created.id}/connection`);
     expect(reveal.headers.get('cache-control')).toBe('no-store');
-    expect(await reveal.json()).toEqual({ connectionUrl: created.connectionUrl, allowInsecureDevelopment: false });
+    expect(await reveal.json()).toEqual({ connectionUrl: created.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: false });
     await expect(client.get(`/api/v1/models?nodeId=${created.id}`)).rejects.toMatchObject({ status: 503 });
     await expect(client.delete('/api/v1/execution-nodes/local')).rejects.toMatchObject({
       status: 404, body: { errorCode: 'EXECUTION_NODE_NOT_FOUND' },

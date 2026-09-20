@@ -29,6 +29,31 @@ Common options and environment variables:
 
 Run `bun run help` for the complete server option list.
 
+## Execution Node Connections
+
+Add nodes from the Execution Nodes dialog. For a node that connects to the controller, pass the complete generated URL as one quoted argument:
+
+```bash
+bun server/main.ts execution-node --connect 'wss://controller.example.com/execution-node/NODE_ID#secret=SECRET' \
+  --workspace-dir "$HOME/.garcon/execution-node" --project-base-dir /path/to/repos
+```
+
+For a controller that connects to a worker, start its listener and paste the printed connection URL into the dialog:
+
+```bash
+bun server/main.ts execution-node --listen 19781 --bind-address 0.0.0.0 \
+  --allow-insecure-development --workspace-dir "$HOME/.garcon/execution-node" \
+  --project-base-dir /path/to/repos
+```
+
+Replace `0.0.0.0` in the printed URL with a reachable hostname or IP. `--advertise-url wss://worker.example.com/execution-node` advertises an external TLS proxy; it does not enable TLS on the listener. Keep raw listeners on trusted private networks or behind access-controlled proxies. Worker state directories must not be shared with another running worker or controller.
+
+Every execution-node connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
+
+WSS certificate verification is enabled by default. **Allow unverified TLS certificates** in an outbound node's editor, or `--allow-unverified-tls` on a dialing worker, explicitly disables only outer certificate verification. Noise still requires the shared secret. Optional certificate pinning is deferred pending [Bun issue 43635](https://github.com/oven-sh/bun/issues/43635). Non-TLS connections require the separate **Allow connection without TLS** checkbox or `--allow-insecure-development` flag. HTTP metadata and traffic timing remain visible without outer TLS; Noise protects the execution payload, not the browser UI or other HTTP routes.
+
+Connection URLs are credentials. Their `#secret` fragment is removed before dialing the execution endpoint, never sent in the upgrade's HTTP headers, query, or WebSocket subprotocol. The authenticated management API still carries full descriptors; protect browser-to-controller access with HTTPS or a trusted private network. Keep the URL private: clipboard contents, shell history, process arguments, and captured onboarding output can expose it locally. Stored listener credentials and controller node configuration require private file permissions. Use an independent random 32-byte secret for every node; human-chosen passwords are not supported. Disable a compromised node immediately, replace its credential on both endpoints, then re-enable it. Routine connection diagnostics and node-list responses omit credentials.
+
 ## Tickets
 
 Tickets belong to the selected Garcon workspace, independently of chats and Git. All commands use the authenticated server API; the CLI never opens the ticket database or starts an agent.
