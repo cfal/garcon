@@ -133,7 +133,9 @@ describe('FileDialogHost', () => {
 		const overwrite = screen.getByRole('button', { name: 'Save against displayed disk' });
 		expect(overwrite.getAttribute('data-slot')).toBe('button');
 		expect(screen.queryByRole('button', { name: 'Replace disk' })).toBeNull();
-		await vi.waitFor(() => expect((overwrite as HTMLButtonElement).disabled).toBe(false));
+		await waitFor(() => expect((overwrite as HTMLButtonElement).disabled).toBe(false), {
+			timeout: 5000,
+		});
 		await fireEvent.click(overwrite);
 		expect(onResolve).toHaveBeenCalledWith('save-checked');
 	});

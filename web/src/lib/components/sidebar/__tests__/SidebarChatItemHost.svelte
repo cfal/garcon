@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import SidebarChatItem from '../SidebarChatItem.svelte';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -94,7 +95,7 @@
 		},
 	} as never);
 
-	setWorkspaceWindowDndTestContext(hasChatPlacement ? session.id : undefined);
+	untrack(() => setWorkspaceWindowDndTestContext(hasChatPlacement ? session.id : undefined));
 </script>
 
 <SidebarChatItem
