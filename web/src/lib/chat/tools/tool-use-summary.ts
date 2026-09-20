@@ -8,12 +8,12 @@ export interface ToolUseSummary {
 	label: string;
 }
 
-type ToolUseSummaryCategory = 'commands' | 'fileReads' | 'fileWrites' | 'other';
+type ToolUseSummaryCategory = 'commands' | 'fileReads' | 'fileEdits' | 'other';
 
 const CATEGORY_ORDER = [
 	'commands',
 	'fileReads',
-	'fileWrites',
+	'fileEdits',
 	'other',
 ] as const satisfies readonly ToolUseSummaryCategory[];
 
@@ -30,7 +30,7 @@ function summaryCategory(message: ToolUseChatMessage): ToolUseSummaryCategory {
 		case 'edit-tool-use':
 		case 'write-tool-use':
 		case 'apply-patch-tool-use':
-			return 'fileWrites';
+			return 'fileEdits';
 		default:
 			return 'other';
 	}
@@ -42,8 +42,8 @@ function categoryClause(category: ToolUseSummaryCategory, count: number): string
 			return m.chat_tool_group_commands({ count });
 		case 'fileReads':
 			return m.chat_tool_group_file_reads({ count });
-		case 'fileWrites':
-			return m.chat_tool_group_file_writes({ count });
+		case 'fileEdits':
+			return m.chat_tool_group_file_edits({ count });
 		case 'other':
 			return m.chat_tool_group_other_actions({ count });
 	}
@@ -63,7 +63,7 @@ export function summarizeToolUses(
 	const counts: Record<ToolUseSummaryCategory, number> = {
 		commands: 0,
 		fileReads: 0,
-		fileWrites: 0,
+		fileEdits: 0,
 		other: 0,
 	};
 	for (const { message } of members) {

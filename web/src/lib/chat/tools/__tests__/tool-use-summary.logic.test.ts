@@ -28,7 +28,7 @@ describe('summarizeToolUses', () => {
 		];
 		const summary = summarizeToolUses(members);
 		expect(summary.count).toBe(13);
-		expect(summary.label).toBe('Executed 5 commands, read 3 files, wrote 5 files.');
+		expect(summary.label).toBe('Executed 5 commands, read 3 files, edited 5 files');
 		expect(summary.label).not.toMatch(/private|secret/);
 	});
 
@@ -39,7 +39,7 @@ describe('summarizeToolUses', () => {
 			item(new BashToolUseMessage(TS, 'b', 'pwd'), 3),
 			item(new EditToolUseMessage(TS, 'e', '/a'), 4),
 		]);
-		expect(summary.label).toBe('Executed 1 command, read 1 file, wrote 2 files.');
+		expect(summary.label).toBe('Executed 1 command, read 1 file, edited 2 files');
 	});
 
 	it('summarizes provider tools without exposing names or payloads', () => {
@@ -48,7 +48,7 @@ describe('summarizeToolUses', () => {
 			item(new ExternalToolUseMessage(TS, 'e', 'private_external_name', { secret: 'hidden' }), 2),
 			item(new McpToolUseMessage(TS, 'm', 'private_server', 'private_tool', { secret: 'hidden' }), 3),
 		]);
-		expect(summary.label).toBe('Performed 3 other actions.');
+		expect(summary.label).toBe('Performed 3 other actions');
 		expect(summary.label).not.toMatch(/private|secret|hidden/);
 	});
 
@@ -58,7 +58,7 @@ describe('summarizeToolUses', () => {
 			item(new ExecToolUseMessage(TS, 'a', 'secret command', 'private-language-name'), 1),
 			item(new ExecToolUseMessage(TS, 'b', 'another secret', 'javascript'), 2),
 		]);
-		expect(summary.label).toBe('Executed 3 commands.');
+		expect(summary.label).toBe('Executed 3 commands');
 		expect(summary.label).not.toMatch(/secret|private|javascript/);
 	});
 
@@ -66,6 +66,6 @@ describe('summarizeToolUses', () => {
 		const summary = summarizeToolUses([
 			item(new ReadToolUseMessage(TS, 'read', '/private/file'), 1),
 		]);
-		expect(summary.label).toBe('Read 1 file.');
+		expect(summary.label).toBe('Read 1 file');
 	});
 });

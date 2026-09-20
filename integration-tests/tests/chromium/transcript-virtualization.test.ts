@@ -5353,7 +5353,7 @@ describe('Chromium combined tool-use presentation', () => {
           markPhase(`checking ${viewport.label} combined-feed geometry`);
           await fixture.page.setViewportSize(viewport);
           await setCombineToolUses(fixture.page, true);
-          const summary = fixture.page.getByRole('button', { name: 'Executed 40 commands.' });
+          const summary = fixture.page.getByRole('button', { name: 'Executed 40 commands' });
           await summary.waitFor({ state: 'visible' });
           expect(await summary.getAttribute('aria-expanded')).toBe('false');
           expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
@@ -5361,16 +5361,18 @@ describe('Chromium combined tool-use presentation', () => {
             const style = getComputedStyle(button);
             const item = button.closest<HTMLElement>('[data-chat-virtual-item]')!;
             const chevron = button.querySelector('svg')!;
+            const text = button.querySelector('span')!;
             return {
               backgroundColor: style.backgroundColor,
               borderBottomWidth: style.borderBottomWidth,
               borderTopWidth: style.borderTopWidth,
-              chevronOffset: chevron.getBoundingClientRect().left - item.getBoundingClientRect().left,
+              chevronRightOffset: item.getBoundingClientRect().right - chevron.getBoundingClientRect().right,
               fontStyle: style.fontStyle,
               paddingBottom: style.paddingBottom,
               paddingLeft: style.paddingLeft,
               paddingRight: style.paddingRight,
               paddingTop: style.paddingTop,
+              textOffset: text.getBoundingClientRect().left - item.getBoundingClientRect().left,
             };
           });
           expect(restingStyle).toMatchObject({
@@ -5382,7 +5384,8 @@ describe('Chromium combined tool-use presentation', () => {
             paddingRight: '0px',
             paddingTop: '0px',
           });
-          expect(Math.abs(restingStyle.chevronOffset)).toBeLessThanOrEqual(1);
+          expect(Math.abs(restingStyle.chevronRightOffset)).toBeLessThanOrEqual(1);
+          expect(Math.abs(restingStyle.textOffset)).toBeLessThanOrEqual(1);
           await summary.hover();
           expect(await summary.evaluate((button) => getComputedStyle(button).backgroundColor))
             .toBe(restingStyle.backgroundColor);

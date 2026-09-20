@@ -1652,13 +1652,13 @@
 			}
 		}
 	],
-	"chat_tool_group_file_writes": [
+	"chat_tool_group_file_edits": [
 		{
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "wrote {count} file",
-				"countPlural=other": "wrote {count} files"
+				"countPlural=one": "edited {count} file",
+				"countPlural=other": "edited {count} files"
 			}
 		}
 	],
@@ -1672,7 +1672,7 @@
 			}
 		}
 	],
-	"chat_tool_group_sentence": "{actions}.",
+	"chat_tool_group_sentence": "{actions}",
 	"settings_hidden_bash_commands_title": "Hide bash commands",
 	"settings_hidden_bash_commands_description": "Bash tool calls whose command matches a pattern are hidden from the chat transcript, together with their results. Globs match the whole command; regexes match anywhere. Saved on the server and synced across clients.",
 	"settings_hidden_bash_commands_pattern_label": "Command pattern",
