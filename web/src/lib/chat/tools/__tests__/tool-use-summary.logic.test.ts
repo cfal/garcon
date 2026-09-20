@@ -19,16 +19,17 @@ function item(message: ConversationFeedMessageRenderItem['message'], index: numb
 }
 
 describe('summarizeToolUses', () => {
-	it('counts invocations by display category in first-occurrence order', () => {
+		it('counts invocations by category in first-occurrence order', () => {
 		const members = [
 			...Array.from({ length: 3 }, (_, index) => item(new ReadToolUseMessage(TS, `read-${index}`, '/private/a'), index)),
 			...Array.from({ length: 5 }, (_, index) => item(new WriteToolUseMessage(TS, `write-${index}`, '/private/b', 'secret'), index + 3)),
 			...Array.from({ length: 4 }, (_, index) => item(new BashToolUseMessage(TS, `bash-${index}`, 'private command'), index + 8)),
 			item(new ExecToolUseMessage(TS, 'exec', 'private code', 'private language'), 12),
+			item(new McpToolUseMessage(TS, 'mcp', 'private server', 'private tool', { secret: 'hidden' }), 13),
 		];
 		const summary = summarizeToolUses(members);
-		expect(summary.count).toBe(13);
-		expect(summary.label).toBe('Executed 5 commands, read 3 files, edited 5 files');
+		expect(summary.count).toBe(14);
+		expect(summary.label).toBe('Read 3 files, edit 5 files, execute 5 commands, 1 action');
 		expect(summary.label).not.toMatch(/private|secret/);
 	});
 
@@ -39,7 +40,7 @@ describe('summarizeToolUses', () => {
 			item(new BashToolUseMessage(TS, 'b', 'pwd'), 3),
 			item(new EditToolUseMessage(TS, 'e', '/a'), 4),
 		]);
-		expect(summary.label).toBe('Executed 1 command, read 1 file, edited 2 files');
+		expect(summary.label).toBe('Read 1 file, edit 2 files, execute 1 command');
 	});
 
 	it('summarizes provider tools without exposing names or payloads', () => {
@@ -48,7 +49,7 @@ describe('summarizeToolUses', () => {
 			item(new ExternalToolUseMessage(TS, 'e', 'private_external_name', { secret: 'hidden' }), 2),
 			item(new McpToolUseMessage(TS, 'm', 'private_server', 'private_tool', { secret: 'hidden' }), 3),
 		]);
-		expect(summary.label).toBe('Performed 3 other actions');
+		expect(summary.label).toBe('3 actions');
 		expect(summary.label).not.toMatch(/private|secret|hidden/);
 	});
 
@@ -58,7 +59,7 @@ describe('summarizeToolUses', () => {
 			item(new ExecToolUseMessage(TS, 'a', 'secret command', 'private-language-name'), 1),
 			item(new ExecToolUseMessage(TS, 'b', 'another secret', 'javascript'), 2),
 		]);
-		expect(summary.label).toBe('Executed 3 commands');
+		expect(summary.label).toBe('Execute 3 commands');
 		expect(summary.label).not.toMatch(/secret|private|javascript/);
 	});
 

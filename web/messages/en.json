@@ -1637,8 +1637,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "executed {count} command",
-				"countPlural=other": "executed {count} commands"
+					"countPlural=one": "execute {count} command",
+					"countPlural=other": "execute {count} commands"
 			}
 		}
 	],
@@ -1657,8 +1657,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "edited {count} file",
-				"countPlural=other": "edited {count} files"
+					"countPlural=one": "edit {count} file",
+					"countPlural=other": "edit {count} files"
 			}
 		}
 	],
@@ -1667,8 +1667,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "performed {count} other action",
-				"countPlural=other": "performed {count} other actions"
+					"countPlural=one": "{count} action",
+					"countPlural=other": "{count} actions"
 			}
 		}
 	],

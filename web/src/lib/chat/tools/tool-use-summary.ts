@@ -10,13 +10,6 @@ export interface ToolUseSummary {
 
 type ToolUseSummaryCategory = 'commands' | 'fileReads' | 'fileEdits' | 'other';
 
-const CATEGORY_ORDER = [
-	'commands',
-	'fileReads',
-	'fileEdits',
-	'other',
-] as const satisfies readonly ToolUseSummaryCategory[];
-
 function summaryCategory(message: ToolUseChatMessage): ToolUseSummaryCategory {
 	switch (message.type) {
 		case 'bash-tool-use':
@@ -32,7 +25,7 @@ function summaryCategory(message: ToolUseChatMessage): ToolUseSummaryCategory {
 		case 'apply-patch-tool-use':
 			return 'fileEdits';
 		default:
-			return 'other';
+				return 'other';
 	}
 }
 
@@ -66,11 +59,14 @@ export function summarizeToolUses(
 		fileEdits: 0,
 		other: 0,
 	};
+	const categoryOrder: ToolUseSummaryCategory[] = [];
 	for (const { message } of members) {
 		if (!isToolUseMessage(message)) continue;
-		counts[summaryCategory(message)] += 1;
+		const category = summaryCategory(message);
+		if (counts[category] === 0) categoryOrder.push(category);
+		counts[category] += 1;
 	}
-	const clauses = CATEGORY_ORDER.flatMap((category) => {
+	const clauses = categoryOrder.flatMap((category) => {
 		const count = counts[category];
 		return count > 0 ? [categoryClause(category, count)] : [];
 	});

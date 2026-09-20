@@ -41,11 +41,15 @@
 		onclick={toggleGroup}
 		class="flex w-full min-w-0 items-center gap-2 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	>
+		<span class="relative h-4 w-2 shrink-0" aria-hidden="true">
+			<ChevronRight
+				class={cn(
+					'absolute top-0 size-4 transition-transform',
+					item.expanded ? '-left-1 rotate-90' : '-left-1.5',
+				)}
+			/>
+		</span>
 		<span class="min-w-0 break-words">{summary.label}</span>
-		<ChevronRight
-			class={cn('ml-auto size-4 shrink-0 transition-transform', item.expanded && 'rotate-90')}
-			aria-hidden="true"
-		/>
 	</button>
 	{#if item.expanded || item.spacingAfter === 'transcript'}
 		<div aria-hidden="true" class="h-2 sm:h-3"></div>
