@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { readWorkerCliOptions } from '../worker-cli.js';
 import { parseConnectionUrl } from '../connection-url.js';
@@ -22,6 +22,7 @@ test('listener reuses a private persisted secret while connect takes the complet
   const first = await readWorkerCliOptions(args);
   const restarted = await readWorkerCliOptions(args);
   expect(first.secret).toBe(restarted.secret);
+  expect(first.connection).toEqual({ kind: 'listen', port: 0, bindAddress: '0.0.0.0' });
   if (process.platform !== 'win32') expect((await stat(join(root, 'execution-node-secret.json'))).mode & 0o777).toBe(0o600);
   const full = `wss://example.com/execution-node/22222222-2222-4222-8222-222222222222#secret=${first.secret}`;
   const dialing = await readWorkerCliOptions(['--connect', full, '--workspace-dir', root]);
@@ -29,6 +30,48 @@ test('listener reuses a private persisted secret while connect takes the complet
   expect(dialing.connection).toEqual({ kind: 'dial', url: full.split('#')[0] });
   expect(dialing).not.toHaveProperty('nodeId');
   expect(dialing).not.toHaveProperty('label');
+});
+
+test('listener bind address is independent of the advertised URL and rejects empty values or dial mode', async () => {
+  const root = await workspace();
+  const args = ['--listen', '0', '--allow-insecure-development', '--workspace-dir', root];
+  const options = await readWorkerCliOptions([...args, '--bind-address', '127.0.0.1', '--advertise-url', 'ws://worker.example.com:19781/execution-node']);
+  expect(options.connection).toEqual({ kind: 'listen', port: 0, bindAddress: '127.0.0.1' });
+  expect(options.advertisedUrl).toBe('ws://worker.example.com:19781/execution-node');
+  await expect(readWorkerCliOptions([...args, '--bind-address', ' '])).rejects.toThrow('non-empty hostname or IP address');
+  await expect(readWorkerCliOptions(['--connect', `ws://worker.example.com/execution-node#secret=${options.secret}`,
+    '--bind-address', '127.0.0.1'])).rejects.toThrow('--bind-address applies only to listeners');
+});
+
+test.each([
+  ['0', '0.0.0.0'],
+  ['127.1', '127.0.0.1'],
+  ['localhost', 'localhost'],
+  ['::1', '::1'],
+  ['[::1]', '::1'],
+  ['::', '::'],
+])('canonicalizes listener bind address %s to %s', async (input, expected) => {
+  const root = await workspace();
+  const options = await readWorkerCliOptions([
+    '--listen', '0', '--bind-address', input, '--allow-insecure-development', '--workspace-dir', root,
+  ]);
+  expect(options.connection).toEqual({ kind: 'listen', port: 0, bindAddress: expected });
+});
+
+test.each(['fe80::1%eth0', '[fe80::1%eth0]'])('rejects scoped IPv6 %s before creating listener state', async (bindAddress) => {
+  const root = await workspace();
+  await expect(readWorkerCliOptions([
+    '--listen', '0', '--bind-address', bindAddress, '--allow-insecure-development', '--workspace-dir', root,
+    '--advertise-url', 'ws://worker.example.com:19781/execution-node',
+  ])).rejects.toThrow('Scoped IPv6 listener bind addresses are not supported');
+  await expect(stat(join(root, 'execution-node-secret.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+test.each(['localhost:8080', 'http://localhost', 'user@localhost', 'localhost/path', 'localhost?query', 'localhost#fragment'])('rejects a URL or port in bind address %s', async (bindAddress) => {
+  const root = await workspace();
+  await expect(readWorkerCliOptions([
+    '--listen', '0', '--bind-address', bindAddress, '--allow-insecure-development', '--workspace-dir', root,
+  ])).rejects.toThrow('Listener bind address must be a hostname or IP address without a port');
 });
 
 test('CLI validation does not disclose connection credentials', async () => {
@@ -41,9 +84,12 @@ test('CLI validation does not disclose connection credentials', async () => {
   }
 });
 
-test('public worker starts, prints onboarding URL, and shuts down without a controller', async () => {
+test.each([undefined, '127.0.0.1', '0'])('public worker starts with bind address %s, prints onboarding URL, and shuts down without a controller', async (bindAddress) => {
   const root = await workspace();
-  const process = Bun.spawn(['bun', 'server/main.ts', 'execution-node', '--listen', '0', '--allow-insecure-development', '--workspace-dir', root], {
+  const advertisedUrl = bindAddress === '127.0.0.1' ? 'ws://worker.example.com:19781/execution-node' : undefined;
+  const process = Bun.spawn(['bun', 'server/main.ts', 'execution-node', '--listen', '0', '--allow-insecure-development', '--workspace-dir', root,
+    ...(bindAddress ? ['--bind-address', bindAddress] : []),
+    ...(advertisedUrl ? ['--advertise-url', advertisedUrl] : [])], {
     stdout: 'pipe', stderr: 'pipe',
   });
   try {
@@ -58,8 +104,21 @@ test('public worker starts, prints onboarding URL, and shuts down without a cont
     reader.releaseLock();
     const listening = JSON.parse(output.split('\n')[0]!);
     expect(listening.type).toBe('execution-node-listening');
-    expect(new URL(listening.url).hostname).toBe('0.0.0.0');
-    expect(parseConnectionUrl(listening.connectionUrl).socketUrl).toBe(listening.url);
+    const listener = new URL(listening.url);
+    expect(listener.hostname).toBe(bindAddress === '127.0.0.1' ? bindAddress : '0.0.0.0');
+    expect(parseConnectionUrl(listening.connectionUrl).socketUrl).toBe(advertisedUrl ?? listening.url);
+    listener.protocol = 'http:';
+    listener.hostname = '127.0.0.1';
+    expect((await fetch(listener)).status).toBe(400);
+    const external = Object.values(networkInterfaces()).flat().find((entry) => entry?.family === 'IPv4' && !entry.internal);
+    if (external) {
+      listener.hostname = external.address;
+      if (bindAddress === '127.0.0.1') {
+        await expect(fetch(listener, { signal: AbortSignal.timeout(1000) })).rejects.toThrow();
+      } else {
+        expect((await fetch(listener, { signal: AbortSignal.timeout(1000) })).status).toBe(400);
+      }
+    }
     process.kill('SIGTERM');
     expect(await process.exited).toBe(0);
   } finally {

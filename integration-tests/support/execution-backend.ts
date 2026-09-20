@@ -55,13 +55,14 @@ export class ExecutionNodeProcess {
     readonly repoRoot: string;
     readonly directories: IntegrationDirectories;
     readonly environment: Record<string, string>;
-    readonly connection: { readonly kind: 'listen'; readonly port: number } | { readonly kind: 'dial'; readonly url: string };
+    readonly connection: { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string } | { readonly kind: 'dial'; readonly url: string };
   }): Promise<ExecutionNodeProcess> {
     const env = isolatedEnvironment(input.directories.home, input.environment);
     await mkdir(env.TMPDIR, { recursive: true });
     const child = Bun.spawn({
       cmd: [process.execPath, 'server/main.ts', 'execution-node',
         ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : ['--connect', input.connection.url]),
+        ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
         '--allow-insecure-development', '--workspace-dir', input.directories.workspace,
         '--project-base-dir', input.directories.project],
       cwd: input.repoRoot, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',

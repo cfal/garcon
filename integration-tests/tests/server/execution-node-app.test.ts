@@ -82,9 +82,10 @@ test('Local and two public workers coexist, reject remote machine IO, and retain
       workers.push(workerA);
       await waitReady(client, inbound.id);
       const workerB = await ExecutionNodeProcess.start({
-        repoRoot, directories: b, environment: {}, connection: { kind: 'listen', port: 0 },
+        repoRoot, directories: b, environment: {}, connection: { kind: 'listen', port: 0, bindAddress: '127.0.0.1' },
       });
       workers.push(workerB);
+      expect(new URL(await workerB.listening()).hostname).toBe('127.0.0.1');
       const outboundUrl = new URL(await workerB.connectionUrl());
       outboundUrl.hostname = '127.0.0.1';
       const outbound = await client.post<ExecutionNodeConnection & { id: string }>('/api/v1/execution-nodes', {

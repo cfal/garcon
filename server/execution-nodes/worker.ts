@@ -10,7 +10,8 @@ export interface ExecutionWorkerOptions {
   readonly workspaceDir: string;
   readonly projectBasePath: string;
   readonly allowInsecureDevelopment: boolean;
-  readonly connection: { readonly kind: 'dial'; readonly url: string } | { readonly kind: 'listen'; readonly port: number };
+  readonly connection: { readonly kind: 'dial'; readonly url: string }
+    | { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string };
   readonly advertisedUrl?: string;
 }
 
@@ -59,8 +60,9 @@ export async function runExecutionWorker(
   });
   try {
     if (options.connection.kind === 'listen') {
-      const address = new URL(link.listen(options.connection.port));
-      address.hostname = '0.0.0.0';
+      const bindAddress = options.connection.bindAddress ?? '0.0.0.0';
+      const address = new URL(link.listen(options.connection.port, bindAddress));
+      if (bindAddress === '0.0.0.0') address.hostname = bindAddress;
       onListening(address.href);
     } else {
       link.dial(options.connection.url);

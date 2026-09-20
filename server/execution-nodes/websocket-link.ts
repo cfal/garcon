@@ -99,11 +99,11 @@ export class WebSocketLink {
     return () => { this.#sessions.delete(listener); };
   }
 
-  listen(port = 0): string {
+  listen(port = 0, hostname = '0.0.0.0'): string {
     if (!this.options.allowInsecureDevelopment) throw new Error('Plaintext listener requires explicit development mode; use a TLS terminator otherwise');
     if (this.#server || this.#disposed) throw new Error('Execution-node listener cannot start');
     this.#server = Bun.serve<LinkSocketHandlers | null>({
-      hostname: '0.0.0.0', port,
+      hostname, port,
       fetch: (request, server) => {
         if (!this.acceptsSocket) return new Response(null, { status: 503 });
         if (new URL(request.url).pathname !== '/execution-node') return new Response(null, { status: 404 });
@@ -127,7 +127,11 @@ export class WebSocketLink {
         close: (socket) => { socket.data?.closed(); },
       },
     });
-    return `ws://127.0.0.1:${this.#server.port}/execution-node`;
+    const address = new URL(this.#server.url);
+    address.protocol = 'ws:';
+    address.pathname = '/execution-node';
+    if (address.hostname === '0.0.0.0') address.hostname = '127.0.0.1';
+    return address.href;
   }
 
   dial(url: string): void {
