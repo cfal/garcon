@@ -3936,6 +3936,7 @@ async function verifyDetachedNativeReload(
   environment: ScriptedClaudeTestEnvironment,
   viewport: { height: number; width: number },
 ): Promise<void> {
+  await initializeCombineToolUses(fixture, false);
   const chatId = await seedHeterogeneousTranscript(fixture, environment);
   const beforeReload = await fixture.integration.client.getMessages(chatId, {
     limit: 200,
@@ -4655,6 +4656,7 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
 }
 
 async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<void> {
+  await initializeCombineToolUses(fixture, false);
   const chatId = await seedTranscript(fixture.integration, 1, 'mixed-ordering-ledger-baseline');
   const initial = await fixture.integration.client.getMessages(chatId, {
     limit: 200,
@@ -4746,6 +4748,7 @@ async function verifyCrossPageToolPairPrepend(
   fixture: ChromiumFixture,
   viewport: { height: number; width: number },
 ): Promise<void> {
+  await initializeCombineToolUses(fixture, false);
   const chatId = await seedTranscript(fixture.integration, 1, 'tool-boundary-baseline');
   const initial = await fixture.integration.client.getMessages(chatId, {
     limit: 200,
