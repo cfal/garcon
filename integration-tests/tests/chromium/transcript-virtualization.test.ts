@@ -33,6 +33,7 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import {
   canonicalFilesWindowId,
   clickWorkspaceWindowAddAction,
@@ -382,6 +383,13 @@ async function setCombineToolUses(page: Page, enabled: boolean): Promise<void> {
     localStorage.setItem(key, newValue);
     window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
   }, enabled);
+}
+
+async function initializeCombineToolUses(
+  fixture: ChromiumFixture,
+  enabled: boolean,
+): Promise<void> {
+  await fixture.context.addInitScript(seedLocalSettings, { combineToolUseMessages: enabled });
 }
 
 async function selectSidebarChat(page: Page, chatId: string, marker: string): Promise<void> {
@@ -5336,6 +5344,7 @@ describe('Chromium combined tool-use presentation', () => {
     await withChromiumFixture(
       'transcript-combined-tool-uses',
       async (fixture, markPhase) => {
+        await initializeCombineToolUses(fixture, false);
         markPhase('seeding a contiguous tool-use run');
         const chatId = await seedTranscript(fixture.integration, 1, 'combined-tool-baseline');
         const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
@@ -5411,6 +5420,7 @@ describe('Chromium combined tool-use presentation', () => {
 
   test.each([60, 300])('keeps a shorter summary visible after scrolling %ipx into a tool row', async (scrollDepth) => {
     await withChromiumFixture('combined-tool-anchor', async (fixture) => {
+      await initializeCombineToolUses(fixture, false);
       const chatId = await seedTranscript(fixture.integration, 1, 'anchor-baseline');
       const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
       const timestamp = '2026-08-15T00:00:00.000Z';
@@ -5451,6 +5461,7 @@ describe('Chromium combined tool-use presentation', () => {
 
   test('preserves a selection spanning from outside the virtual feed into a grouped tool row', async () => {
     await withChromiumFixture('combined-tool-selection', async (fixture) => {
+      await initializeCombineToolUses(fixture, false);
       const chatId = await seedTranscript(fixture.integration, 1, 'selection-baseline');
       const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
       const timestamp = '2026-08-15T00:00:00.000Z';
@@ -5486,6 +5497,7 @@ describe('Chromium combined tool-use presentation', () => {
 
   test('keeps summary focus when earlier history extends its run', async () => {
     await withChromiumFixture('combined-tool-focus', async (fixture) => {
+      await initializeCombineToolUses(fixture, false);
       const chatId = await seedTranscript(fixture.integration, 1, 'focus-baseline');
       const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
       const timestamp = '2026-08-15T00:00:00.000Z';
@@ -5526,6 +5538,7 @@ describe('Chromium combined tool-use presentation', () => {
 
   test('preserves focus when combination changes or a focused member collapses', async () => {
     await withChromiumFixture('combined-tool-focus-transitions', async (fixture) => {
+      await initializeCombineToolUses(fixture, false);
       const chatId = await seedTranscript(fixture.integration, 1, 'focus-transition-baseline');
       const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
       const timestamp = '2026-08-15T00:00:00.000Z';
