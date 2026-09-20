@@ -75,9 +75,9 @@ function canonicalize(raw: unknown): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
-// Pins the built-in tool inventory shipped by OpenCode 1.18.29 so dependency
+// Pins the built-in tool inventory shipped by OpenCode 1.18.31 so dependency
 // upgrades must reconcile every provider-owned tool with Garcon's contract.
-// https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/tool/registry.ts#L229-L249
+// https://github.com/anomalyco/opencode/blob/014614d35b397775e5d397a490fc72368c894ec2/packages/opencode/src/tool/registry.ts#L231-L249
 export const OPENCODE_BUILTIN_TOOL_IDS = Object.freeze([
   'invalid',
   'question',
