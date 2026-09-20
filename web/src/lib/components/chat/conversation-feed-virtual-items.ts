@@ -12,6 +12,8 @@ import {
 
 export type ConversationFeedSpacing = 'responsive-feed' | 'transcript' | 'none';
 
+export type ConversationEarlierBoundaryMode = 'hidden' | 'visible' | 'when-collapsed';
+
 export type TranscriptVirtualFeedItem = {
 	kind: 'transcript';
 	key: string;
@@ -68,7 +70,7 @@ export interface ConversationVirtualFeedModel {
 
 export interface ConversationVirtualFeedInput {
 	showRefreshError: boolean;
-	showEarlierBoundary: boolean;
+	earlierBoundary: ConversationEarlierBoundaryMode;
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
 	surfaceIdentity: string;
@@ -174,15 +176,6 @@ export function buildConversationVirtualFeedModel(
 			spacingAfter: 'none',
 		});
 	}
-	if (input.showEarlierBoundary) {
-		items.push({
-			kind: 'earlier-boundary',
-			key: key('prefix:earlier-boundary'),
-			spacingAfter: 'none',
-		});
-	}
-	const transcriptStartIndex = items.length;
-
 	// A permission request renders after the row it was raised against, so it stays put as
 	// the transcript grows. Requests whose anchor belongs to another view, or to a row this
 	// window has not loaded, fall through to the end of the feed.
@@ -225,13 +218,24 @@ export function buildConversationVirtualFeedModel(
 		}
 		transcriptKeys.add(item.key);
 	}
-	if (input.combineToolUseMessages) {
-		items.push(
-			...groupToolRuns(body, key, input.expandedToolMemberIds, new Set(input.protectedVirtualKeys)),
-		);
-	} else {
-		items.push(...body);
+	const presentedBody = input.combineToolUseMessages
+		? groupToolRuns(body, key, input.expandedToolMemberIds, new Set(input.protectedVirtualKeys))
+		: body;
+	const hasCollapsedToolGroup = presentedBody.some(
+		(item) => item.kind === 'tool-group' && !item.expanded,
+	);
+	if (
+		input.earlierBoundary === 'visible' ||
+		(input.earlierBoundary === 'when-collapsed' && hasCollapsedToolGroup)
+	) {
+		items.push({
+			kind: 'earlier-boundary',
+			key: key('prefix:earlier-boundary'),
+			spacingAfter: 'none',
+		});
 	}
+	const transcriptStartIndex = items.length;
+	items.push(...presentedBody);
 	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {

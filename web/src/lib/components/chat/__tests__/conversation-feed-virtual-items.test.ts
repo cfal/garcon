@@ -13,6 +13,7 @@ import {
 	appendConversationVirtualTranscriptTail,
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
+	type ConversationEarlierBoundaryMode,
 } from '../conversation-feed-virtual-items.js';
 
 function userItem(index: number): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
@@ -26,7 +27,10 @@ function userItem(index: number): Extract<ConversationFeedRenderItem, { kind: 'm
 	};
 }
 
-function bashItem(index: number, toolId = `tool-${index}`): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
+function bashItem(
+	index: number,
+	toolId = `tool-${index}`,
+): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
 	return {
 		kind: 'message',
 		id: `generation-1:${index}`,
@@ -40,6 +44,7 @@ function build(
 	transcriptItems: ConversationFeedRenderItem[],
 	options: {
 		combineToolUseMessages?: boolean;
+		earlierBoundary?: ConversationEarlierBoundaryMode;
 		expandedToolMemberIds?: ReadonlySet<string>;
 		protectedVirtualKeys?: readonly string[];
 		pendingPermissions?: PendingPermissionRequest[];
@@ -47,7 +52,7 @@ function build(
 ) {
 	return buildConversationVirtualFeedModel({
 		showRefreshError: false,
-		showEarlierBoundary: false,
+		earlierBoundary: options.earlierBoundary ?? 'hidden',
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
 		transcriptViewId: 'view-1',
@@ -87,10 +92,32 @@ describe('conversation virtual feed model', () => {
 		});
 		expect(model.items.filter((item) => item.kind === 'tool-group')).toHaveLength(2);
 		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'tool-group', 'transcript', 'tool-group',
+			'tool-group',
+			'transcript',
+			'tool-group',
 		]);
 		expect(model.indexByRowId.get('generation-1:1')).toBe(1);
 		expect(model.indexByRowId.get('generation-1:3')).toBe(3);
+	});
+
+	it('shows compressed-history paging only for a collapsed tool group', () => {
+		const ordinary = build([userItem(1)], {
+			combineToolUseMessages: true,
+			earlierBoundary: 'when-collapsed',
+		});
+		const collapsed = build([bashItem(1)], {
+			combineToolUseMessages: true,
+			earlierBoundary: 'when-collapsed',
+		});
+		const expanded = build([bashItem(1)], {
+			combineToolUseMessages: true,
+			earlierBoundary: 'when-collapsed',
+			expandedToolMemberIds: new Set(['generation-1:1']),
+		});
+
+		expect(ordinary.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
+		expect(collapsed.items.some((item) => item.kind === 'earlier-boundary')).toBe(true);
+		expect(expanded.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
 	});
 
 	it('reveals members as individually virtualized rows while retaining a stable header', () => {
@@ -103,7 +130,10 @@ describe('conversation virtual feed model', () => {
 		});
 		expect(expanded.items[1]?.key).toBe(collapsed.items[1]?.key);
 		expect(expanded.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'tool-group', 'transcript', 'transcript', 'transcript',
+			'tool-group',
+			'transcript',
+			'transcript',
+			'transcript',
 		]);
 		expect(expanded.indexByRowId.get('generation-1:2')).toBe(3);
 		expect(expanded.collapsedGroupByMemberRowId.size).toBe(0);
@@ -121,14 +151,17 @@ describe('conversation virtual feed model', () => {
 			pendingPermissions: [permission],
 		});
 		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'tool-group', 'permission', 'tool-group',
+			'tool-group',
+			'permission',
+			'tool-group',
 		]);
 	});
 
 	it('rejects duplicate member keys even when a collapsed group hides them', () => {
 		const duplicate = { ...bashItem(2), id: 'generation-1:1' };
-		expect(() => build([bashItem(1), duplicate], { combineToolUseMessages: true }))
-			.toThrow('Duplicate conversation feed key');
+		expect(() => build([bashItem(1), duplicate], { combineToolUseMessages: true })).toThrow(
+			'Duplicate conversation feed key',
+		);
 	});
 	it('builds stable key, row, and target indexes for 20,000 rows', () => {
 		const model = build(Array.from({ length: 20_000 }, (_, index) => userItem(index + 1)));
@@ -149,7 +182,7 @@ describe('conversation virtual feed model', () => {
 		const first = build([item]);
 		const second = buildConversationVirtualFeedModel({
 			showRefreshError: false,
-			showEarlierBoundary: false,
+			earlierBoundary: 'hidden',
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
@@ -190,7 +223,7 @@ describe('conversation virtual feed model', () => {
 		};
 		const model = buildConversationVirtualFeedModel({
 			showRefreshError: false,
-			showEarlierBoundary: false,
+			earlierBoundary: 'hidden',
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
@@ -227,7 +260,7 @@ describe('conversation virtual feed model', () => {
 		const transcript = build([userItem(1)]).items[1];
 		const boundary = buildConversationVirtualFeedModel({
 			showRefreshError: false,
-			showEarlierBoundary: true,
+			earlierBoundary: 'visible',
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
@@ -333,7 +366,7 @@ describe('conversation virtual feed model', () => {
 		};
 		const model = buildConversationVirtualFeedModel({
 			showRefreshError: false,
-			showEarlierBoundary: false,
+			earlierBoundary: 'hidden',
 			showLaterBoundary: false,
 			reserveComposerTraySpace: true,
 			transcriptViewId: 'view-1',
@@ -377,7 +410,7 @@ describe('conversation virtual feed model', () => {
 
 		const model = buildConversationVirtualFeedModel({
 			showRefreshError: false,
-			showEarlierBoundary: false,
+			earlierBoundary: 'hidden',
 			showLaterBoundary: false,
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',
@@ -405,7 +438,7 @@ describe('conversation virtual feed model', () => {
 		};
 		const model = buildConversationVirtualFeedModel({
 			showRefreshError: false,
-			showEarlierBoundary: false,
+			earlierBoundary: 'hidden',
 			showLaterBoundary: true,
 			reserveComposerTraySpace: false,
 			transcriptViewId: 'view-1',

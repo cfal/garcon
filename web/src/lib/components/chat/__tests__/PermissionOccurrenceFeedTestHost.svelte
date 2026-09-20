@@ -29,7 +29,7 @@
 		expandedToolMemberIds: new Set(),
 		protectedVirtualKeys: [],
 		showRefreshError: false,
-		showEarlierBoundary: false,
+		earlierBoundary: 'hidden',
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
 		transcriptViewId: 'view-1',

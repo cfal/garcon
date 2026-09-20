@@ -22,6 +22,7 @@ import {
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
 	appendConversationVirtualTranscriptTail,
+	type ConversationEarlierBoundaryMode,
 	type ConversationVirtualFeedModel,
 	type ToolGroupVirtualFeedItem,
 } from './conversation-feed-virtual-items.js';
@@ -35,7 +36,7 @@ export interface ConversationFeedProjectionInput {
 	showThinking: boolean;
 	isLiveWindow: boolean;
 	showRefreshError: boolean;
-	showEarlierBoundary: boolean;
+	earlierBoundary: ConversationEarlierBoundaryMode;
 	showLaterBoundary: boolean;
 	reserveComposerTraySpace: boolean;
 	transcriptViewId: string;
@@ -123,7 +124,7 @@ function sameInput(
 				left.protectedVirtualKeys === right.protectedVirtualKeys)) &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
-		left.showEarlierBoundary === right.showEarlierBoundary &&
+		left.earlierBoundary === right.earlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
 		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
 		left.pendingPermissions === right.pendingPermissions,
@@ -146,7 +147,7 @@ function sameProjectionConfiguration(
 				left.protectedVirtualKeys === right.protectedVirtualKeys)) &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
-		left.showEarlierBoundary === right.showEarlierBoundary &&
+		left.earlierBoundary === right.earlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
 		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
 		left.pendingPermissions.length === right.pendingPermissions.length &&
@@ -178,7 +179,7 @@ export class ConversationFeedProjectionState {
 		const model = buildConversationVirtualFeedModel({
 			surfaceIdentity: input.surfaceIdentity,
 			showRefreshError: input.showRefreshError,
-			showEarlierBoundary: input.showEarlierBoundary,
+			earlierBoundary: input.earlierBoundary,
 			showLaterBoundary: input.showLaterBoundary,
 			reserveComposerTraySpace: input.reserveComposerTraySpace,
 			transcriptItems: visibleTranscriptItems,

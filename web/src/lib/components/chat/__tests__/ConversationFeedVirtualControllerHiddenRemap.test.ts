@@ -111,7 +111,7 @@ function fallbackProjection(
 		surfaceIdentity: 'same-surface',
 		transcriptViewId: 'view',
 		showRefreshError: false,
-		showEarlierBoundary: false,
+		earlierBoundary: 'hidden',
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
 		pendingPermissions: [],

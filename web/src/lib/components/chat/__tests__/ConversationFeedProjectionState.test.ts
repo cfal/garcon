@@ -58,7 +58,7 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		protectedVirtualKeys: [],
 		isLiveWindow: true,
 		showRefreshError: false,
-		showEarlierBoundary: false,
+		earlierBoundary: 'hidden',
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
 		transcriptViewId: 'generation-1',

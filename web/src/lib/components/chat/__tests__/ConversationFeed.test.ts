@@ -179,9 +179,10 @@ describe('ConversationFeed', () => {
 		await fireEvent.click(group);
 		await waitFor(() => {
 			const sizer = container.querySelector('[data-chat-virtual-sizer]');
-			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(204);
+			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(203);
 			expect(Number(sizer?.getAttribute('data-chat-virtual-count'))).toBeLessThan(100);
 		});
+		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
 	});
 
 	it('restores a collapsed summary but reveals exact durable members for row navigation', async () => {

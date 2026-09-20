@@ -31,7 +31,10 @@
 		conversationScrollbarTrackDirection,
 		conversationWheelScrollDirection,
 	} from '$lib/chat/transcript/conversation-scroll-gesture.js';
-	import { ConversationFeedProjectionState } from './ConversationFeedProjectionState.svelte.js';
+	import {
+		ConversationFeedProjectionState,
+		type ConversationFeedProjectionInput,
+	} from './ConversationFeedProjectionState.svelte.js';
 	import { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
 	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
@@ -240,7 +243,20 @@
 	const hiddenBashCommands = $derived(
 		hiddenBashCommandMatcherFor(remoteSettings.snapshot?.ui.hiddenBashCommandPatterns ?? []),
 	);
-	const projectionInput = $derived({
+	function earlierBoundaryMode(): ConversationFeedProjectionInput['earlierBoundary'] {
+		if (
+			chatState.pageStates.earlier.status === 'error' ||
+			(chatState.pageStates.earlier.status === 'loading' &&
+				chatState.pageStates.earlier.error !== null)
+		) {
+			return 'visible';
+		}
+		if (localSettings.combineToolUseMessages && chatState.canLoadEarlier) {
+			return 'when-collapsed';
+		}
+		return 'hidden';
+	}
+	const projectionInput: ConversationFeedProjectionInput = $derived({
 		surfaceIdentity,
 		rows: chatState.visibleRows,
 		mutationClock: chatState.feedMutationClock,
@@ -256,11 +272,7 @@
 			: EMPTY_PROTECTED_KEYS,
 		isLiveWindow: !chatState.hasLaterMessages,
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
-		showEarlierBoundary:
-			chatState.pageStates.earlier.status === 'error' ||
-			(localSettings.combineToolUseMessages && chatState.canLoadEarlier) ||
-			(chatState.pageStates.earlier.status === 'loading' &&
-				chatState.pageStates.earlier.error !== null),
+		earlierBoundary: earlierBoundaryMode(),
 		showLaterBoundary: chatState.hasLaterMessages || chatState.pageStates.later.status !== 'idle',
 		reserveComposerTraySpace,
 		transcriptViewId: chatState.getCursor().transcriptViewId,
