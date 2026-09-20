@@ -39,7 +39,7 @@
 		data-chat-anchor-id={item.anchorId}
 		aria-expanded={item.expanded}
 		onclick={toggleGroup}
-		class="flex w-full min-w-0 items-center gap-1 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		class="flex w-full min-w-0 items-center gap-1.5 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	>
 		<span class="relative h-4 w-2 shrink-0" aria-hidden="true">
 			<ChevronRight
