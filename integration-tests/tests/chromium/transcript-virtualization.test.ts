@@ -157,6 +157,18 @@ interface TranscriptLayoutSnapshot {
   } | null;
 }
 
+interface ShortTranscriptLayoutSnapshot {
+  feedHeight: number;
+  lastRowBottomGap: number | null;
+  leadingSpace: number;
+  pinned: boolean;
+  scrollHeight: number;
+  scrollTop: number;
+  sizerBottomGap: number;
+  sizerHeight: number;
+  sizerLeadingPosition: number;
+}
+
 async function withDiagnosticTimeout<T>(
   description: string,
   operation: Promise<T>,
@@ -740,6 +752,28 @@ async function waitForStablePinnedTranscriptLayout(
 async function waitForTranscriptReady(page: Page): Promise<void> {
   await page.locator(FEED_SELECTOR).waitFor({ state: 'visible' });
   await page.locator(`${FEED_SELECTOR}[aria-busy="false"]`).waitFor({ state: 'visible' });
+}
+
+async function shortTranscriptLayout(page: Page): Promise<ShortTranscriptLayoutSnapshot> {
+  return page.locator(FEED_SELECTOR).evaluate((feedElement, sizerSelector) => {
+    const feed = feedElement as HTMLElement;
+    const sizer = feed.querySelector<HTMLElement>(sizerSelector);
+    if (!sizer) throw new Error('The transcript virtual sizer is missing.');
+    const feedRect = feed.getBoundingClientRect();
+    const sizerRect = sizer.getBoundingClientRect();
+    const lastRow = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].at(-1);
+    return {
+      feedHeight: feed.clientHeight,
+      lastRowBottomGap: lastRow ? feedRect.bottom - lastRow.getBoundingClientRect().bottom : null,
+      leadingSpace: sizerRect.top - feedRect.top,
+      pinned: feed.dataset.chatPinnedToBottom === 'true',
+      scrollHeight: feed.scrollHeight,
+      scrollTop: feed.scrollTop,
+      sizerBottomGap: feedRect.bottom - sizerRect.bottom,
+      sizerHeight: sizerRect.height,
+      sizerLeadingPosition: sizerRect.top - feedRect.top + feed.scrollTop,
+    };
+  }, SIZER_SELECTOR);
 }
 
 async function surfaceIdentity(page: Page): Promise<string> {
@@ -5341,6 +5375,79 @@ async function verifyReusedPermissionOccurrence(
   environment.model.assertSettled();
   fixture.assertNoBrowserErrors();
 }
+
+describe('Chromium short transcript alignment', () => {
+  test('bottom-aligns underfilled content and follows growth into overflow', async () => {
+    await withChromiumFixture('short-transcript-alignment', async (fixture) => {
+      await fixture.page.setViewportSize({ width: 1280, height: 900 });
+      const chatId = await seedTranscript(fixture.integration, 1, 'short-alignment');
+      const response = await fixture.page.goto(
+        `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+        { waitUntil: 'domcontentloaded' },
+      );
+      if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+      await waitForTranscriptReady(fixture.page);
+      await fixture.page.waitForFunction(
+        ({ feedSelector, sizerSelector }) => {
+          const feed = document.querySelector<HTMLElement>(feedSelector);
+          const sizer = feed?.querySelector<HTMLElement>(sizerSelector);
+          if (!feed || !sizer || sizer.getBoundingClientRect().height >= feed.clientHeight) {
+            return false;
+          }
+          return Math.abs(feed.getBoundingClientRect().bottom - sizer.getBoundingClientRect().bottom) <= 1;
+        },
+        { feedSelector: FEED_SELECTOR, sizerSelector: SIZER_SELECTOR },
+      );
+
+      const underfilled = await shortTranscriptLayout(fixture.page);
+      expect(underfilled.sizerHeight).toBeLessThan(underfilled.feedHeight);
+      expect(underfilled.leadingSpace).toBeGreaterThan(0);
+      expect(Math.abs(underfilled.sizerBottomGap)).toBeLessThanOrEqual(1);
+      expect(underfilled.scrollHeight).toBe(underfilled.feedHeight);
+      expect(underfilled.scrollTop).toBe(0);
+
+      const longContent = Array.from(
+        { length: 80 },
+        (_, index) => `short-alignment-overflow-paragraph-${index}`,
+      ).join('\n\n');
+      await appendTurn(fixture.integration, chatId, longContent);
+      await fixture.page.waitForFunction(
+        ({ feedSelector, sizerSelector }) => {
+          const feed = document.querySelector<HTMLElement>(feedSelector);
+          const sizer = feed?.querySelector<HTMLElement>(sizerSelector);
+          const lastRow = [...(feed?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [])].at(
+            -1,
+          );
+          const feedRect = feed?.getBoundingClientRect();
+          const lastRowRect = lastRow?.getBoundingClientRect();
+          return Boolean(
+            feed &&
+              sizer &&
+              feedRect &&
+              lastRowRect &&
+              Number(sizer.dataset.chatTranscriptEntryCount ?? 0) >= 4 &&
+              sizer.getBoundingClientRect().height > feed.clientHeight &&
+              feed.dataset.chatPinnedToBottom === 'true' &&
+              lastRowRect.bottom <= feedRect.bottom + 1 &&
+              lastRowRect.bottom > feedRect.top,
+          );
+        },
+        { feedSelector: FEED_SELECTOR, sizerSelector: SIZER_SELECTOR },
+      );
+
+      const overflowing = await shortTranscriptLayout(fixture.page);
+      expect(overflowing.sizerHeight).toBeGreaterThan(overflowing.feedHeight);
+      expect(overflowing.scrollHeight).toBeGreaterThan(overflowing.feedHeight);
+      expect(overflowing.pinned).toBe(true);
+      expect(overflowing.lastRowBottomGap).not.toBeNull();
+      expect(overflowing.lastRowBottomGap ?? overflowing.feedHeight).toBeLessThan(
+        overflowing.feedHeight,
+      );
+      expect(Math.abs(overflowing.sizerLeadingPosition)).toBeLessThanOrEqual(2);
+      fixture.assertNoBrowserErrors();
+    }, diagnostics);
+  }, 180_000);
+});
 
 describe('Chromium combined tool-use presentation', () => {
   test('combines a tool run without losing virtualized expansion or feed geometry', async () => {

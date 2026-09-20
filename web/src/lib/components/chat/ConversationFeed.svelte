@@ -177,6 +177,7 @@
 		cn(
 			CHAT_FEED_CONTENT_BASE_CLASS,
 			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+			chatState.displayMessageCount > 0 && 'min-h-full justify-end',
 			chatState.displayMessageCount === 0 && 'pt-3 sm:pt-4',
 			chatState.displayMessageCount === 0 && (reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4'),
 			isPreparingInitialScroll && 'invisible',
