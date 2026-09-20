@@ -200,7 +200,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
-	combineToolUseMessages: false,
+	combineToolUseMessages: true,
 	alwaysExpandCliMessages: false,
 	showThinking: true,
 	allowDirectChats: false,
