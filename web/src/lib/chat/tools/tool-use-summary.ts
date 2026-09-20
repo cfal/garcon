@@ -42,6 +42,13 @@ function categoryClause(category: ToolUseSummaryCategory, count: number): string
 	}
 }
 
+function categoryCount(message: ToolUseChatMessage): number {
+	if (message.type === 'edit-tool-use' && message.changes && message.changes.length > 0) {
+		return message.changes.length;
+	}
+	return 1;
+}
+
 function formatSentence(clauses: readonly string[]): string {
 	const locale = getLocale();
 	const actions = new Intl.ListFormat(locale, { style: 'long', type: 'unit' }).format(clauses);
@@ -64,7 +71,7 @@ export function summarizeToolUses(
 		if (!isToolUseMessage(message)) continue;
 		const category = summaryCategory(message);
 		if (counts[category] === 0) categoryOrder.push(category);
-		counts[category] += 1;
+		counts[category] += categoryCount(message);
 	}
 	const clauses = categoryOrder.flatMap((category) => {
 		const count = counts[category];

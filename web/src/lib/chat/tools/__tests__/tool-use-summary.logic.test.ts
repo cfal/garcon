@@ -63,6 +63,25 @@ describe('summarizeToolUses', () => {
 		expect(summary.label).not.toMatch(/secret|private|javascript/);
 	});
 
+	it('counts every file in a multi-file edit', () => {
+		const edit = new EditToolUseMessage(
+			TS,
+			'edit',
+			undefined,
+			undefined,
+			undefined,
+			[
+				{ path: '/private/a', kind: 'update' },
+				{ path: '/private/b', kind: 'create' },
+				{ path: '/private/c', kind: 'delete' },
+			],
+		);
+		const summary = summarizeToolUses([item(edit, 1)]);
+		expect(summary.count).toBe(1);
+		expect(summary.label).toBe('Edit 3 files');
+		expect(summary.label).not.toMatch(/private/);
+	});
+
 	it('uses singular grammar for one tool', () => {
 		const summary = summarizeToolUses([
 			item(new ReadToolUseMessage(TS, 'read', '/private/file'), 1),
