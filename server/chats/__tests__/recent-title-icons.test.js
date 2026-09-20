@@ -16,6 +16,13 @@ describe('extractTitleIcons', () => {
   it('returns an empty list for titles without emojis', () => {
     expect(extractTitleIcons('Release planning')).toEqual([]);
   });
+
+  it('recognizes Unicode 18 emoji sequences', () => {
+    expect(extractTitleIcons('New \u{1F6D9} and \u{1FAF9}\u{1F3FB}')).toEqual([
+      '\u{1F6D9}',
+      '\u{1FAF9}\u{1F3FB}',
+    ]);
+  });
 });
 
 describe('RecentTitleIconStore', () => {
