@@ -13,7 +13,6 @@ import type {
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import type {
 	VirtualListSnapshot,
-	VirtualMutationAnchor,
 	VirtualResumeTarget,
 	VirtualTransactionRecord,
 } from '$lib/virt/virtual-list-types.js';
@@ -31,7 +30,6 @@ import {
 } from './conversation-feed-viewport-geometry.js';
 import {
 	captureConversationVirtualAnchor,
-	conversationAnchorFallbackKeys,
 	type ConversationVirtualAnchor,
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationMountedVirtualItems,
@@ -40,6 +38,10 @@ import {
 	settleConversationEndRestore,
 	settleConversationTarget,
 } from './conversation-feed-virtual-runtime.js';
+import {
+	conversationProjectionMutationAnchor,
+	remapConversationAnchor,
+} from './conversation-feed-anchor-remapping.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type {
 	ConversationVirtualFeedModel,
@@ -71,11 +73,6 @@ interface ConversationProjectionApplication {
 	readonly next: ConversationFeedProjection;
 	readonly pinned: boolean;
 	readonly scrollbarDragActive: boolean;
-}
-
-interface RemappedConversationAnchor {
-	readonly oldKey: string;
-	readonly anchor: ConversationVirtualAnchor;
 }
 
 interface FocusedToolGroupTransfer {
@@ -270,16 +267,17 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		const selected = identityChanged
 			? null
-			: this.#remapAnchor(readingAnchor, previousModel, input.next.model);
+				: remapConversationAnchor(readingAnchor, previousModel, input.next.model);
 		const selectedAnchor = selected?.anchor ?? null;
 		const nextHiddenAnchor = identityChanged
 			? null
-			: (this.#remapAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null);
-		const anchor = this.#projectionMutationAnchor(
-			selected,
-			restoreEnd,
-			nextGeometry.endBehavior === 'explicit-navigation',
-		);
+				: (remapConversationAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null);
+			const anchor = conversationProjectionMutationAnchor({
+				selected,
+				restoreEnd,
+				explicitNavigation: nextGeometry.endBehavior === 'explicit-navigation',
+				targetScrollActive: this.#activeTargetScrolls > 0,
+			});
 		const result = this.#virt.apply(
 			identityChanged
 				? {
@@ -691,74 +689,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			key,
 			viewportOffset: key === anchor.key ? anchor.viewportOffset : 0,
 			fallbackKeys: [],
-		};
-	}
-
-	#remapAnchor(
-		anchor: ConversationVirtualAnchor | null,
-		previous: ConversationVirtualFeedModel,
-		next: ConversationVirtualFeedModel,
-	): RemappedConversationAnchor | null {
-		if (!anchor) return null;
-		for (const candidate of [anchor.key, ...anchor.fallbackKeys]) {
-			let nextKey: string | undefined;
-			if (next.indexByKey.has(candidate)) {
-				nextKey = candidate;
-			} else {
-				const previousIndex = previous.indexByKey.get(candidate);
-				const previousItem = previousIndex === undefined ? undefined : previous.items[previousIndex];
-				const rowIds = previousItem?.kind === 'tool-group'
-					? previousItem.members.map((member) => member.item.id)
-					: [previous.representativeRowIdByKey.get(candidate)];
-				for (const rowId of rowIds) {
-					if (rowId === undefined) continue;
-					const index = next.indexByRowId.get(rowId);
-					if (index === undefined) continue;
-					nextKey = next.items[index]?.key;
-					if (nextKey) break;
-				}
-			}
-			if (!nextKey) continue;
-			const nextIndex = next.indexByKey.get(nextKey);
-			const fallbackKeys = nextIndex === undefined
-				? []
-				: conversationAnchorFallbackKeys(
-						next.items.map((item) => item.key),
-						nextIndex,
-					);
-			let viewportOffset = 0;
-			if (candidate === anchor.key) {
-				viewportOffset = nextKey === candidate
-					? anchor.viewportOffset
-					: Math.max(0, anchor.viewportOffset);
-			}
-			return {
-				oldKey: candidate,
-				anchor: {
-					key: nextKey,
-					viewportOffset,
-					fallbackKeys,
-				},
-			};
-		}
-		return null;
-	}
-
-	#projectionMutationAnchor(
-		selected: RemappedConversationAnchor | null,
-		restoreEnd: boolean,
-		explicitNavigation: boolean,
-	): VirtualMutationAnchor {
-		if (this.#activeTargetScrolls > 0 || explicitNavigation) return { kind: 'none' };
-		if (restoreEnd) return { kind: 'end' };
-		if (!selected) return { kind: 'none' };
-		if (selected.oldKey === selected.anchor.key) {
-			return { kind: 'item', key: selected.oldKey };
-		}
-		return {
-			kind: 'item-remap',
-			oldKey: selected.oldKey,
-			newKey: selected.anchor.key,
 		};
 	}
 
