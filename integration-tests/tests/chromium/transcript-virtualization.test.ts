@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { appendFile, chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Browser, CDPSession, Page } from 'playwright';
+import type { Browser, CDPSession, Page, Request } from 'playwright';
 import {
   AssistantMessage,
   BashToolUseMessage,
@@ -5450,6 +5450,61 @@ describe('Chromium short transcript alignment', () => {
 });
 
 describe('Chromium combined tool-use presentation', () => {
+  test('refills compressed history on initial load and chat reselection', async () => {
+    await withChromiumFixture('combined-tool-history-refill', async (fixture) => {
+      await initializeCombineToolUses(fixture, true);
+      const chatId = await seedTranscript(fixture.integration, 1, 'compressed-history');
+      const otherChatId = await seedTranscript(fixture.integration, 1, 'compressed-switch-target');
+      const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+      const timestamp = '2026-08-15T00:00:00.000Z';
+      const context: LedgerRowDraft[] = Array.from({ length: 20 }, (_, index) => ({
+        kind: 'provider-row',
+        at: timestamp,
+        message: new AssistantMessage(timestamp, `earlier-context-${index}`),
+        providerMeta: null,
+      }));
+      const tools: LedgerRowDraft[] = Array.from({ length: 450 }, (_, index) => ({
+        kind: 'provider-row',
+        at: timestamp,
+        message: new BashToolUseMessage(timestamp, `compressed-tool-${index}`, 'pwd'),
+        providerMeta: null,
+      }));
+      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, [...context, ...tools]);
+
+      await prepareTranscript(fixture, chatId, 1);
+      const waitForContext = async () => {
+        await fixture.page.waitForFunction((selector) => {
+          const sizer = document.querySelector<HTMLElement>(selector);
+          return Number(sizer?.dataset.chatTranscriptEntryCount) > 450;
+        }, SIZER_SELECTOR);
+        await fixture.page.locator(FEED_SELECTOR).getByText('earlier-context-19').waitFor({ state: 'visible' });
+        expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
+        expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+      };
+      await waitForContext();
+
+      await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
+      let earlierRequestCount = 0;
+      const recordEarlierRequest = (request: Request) => {
+        const url = new URL(request.url());
+        if (
+          url.pathname.endsWith('/chats/messages') &&
+          url.searchParams.get('chatId') === chatId &&
+          url.searchParams.has('beforeOrdinal')
+        ) earlierRequestCount += 1;
+      };
+      fixture.page.on('request', recordEarlierRequest);
+      try {
+        await selectSidebarChat(fixture.page, chatId, 'compressed-history-0');
+        await waitForContext();
+        expect(earlierRequestCount).toBeGreaterThan(2);
+      } finally {
+        fixture.page.off('request', recordEarlierRequest);
+      }
+      fixture.assertNoBrowserErrors();
+    }, diagnostics);
+  }, 180_000);
+
   test('combines a tool run without losing virtualized expansion or feed geometry', async () => {
     await withChromiumFixture(
       'transcript-combined-tool-uses',

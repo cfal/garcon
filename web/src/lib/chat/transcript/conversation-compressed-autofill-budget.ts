@@ -1,23 +1,24 @@
-const MAX_AUTOMATIC_PAGES_PER_CHAT = 2;
+const MAX_AUTOMATIC_COMPRESSED_PAGE_REQUESTS = 10;
 
 export class ConversationCompressedAutoFillBudget {
 	#chatId: string | null = null;
-	#loadedPages = 0;
+	#transcriptViewId: string | null = null;
+	#requestedPages = 0;
 
-	constructor(private readonly maxPages = MAX_AUTOMATIC_PAGES_PER_CHAT) {}
+	constructor(private readonly maxPages = MAX_AUTOMATIC_COMPRESSED_PAGE_REQUESTS) {}
 
-	startChat(chatId: string): void {
-		if (this.#chatId !== chatId) {
+	startView(chatId: string, transcriptViewId: string): void {
+		if (this.#chatId !== chatId || this.#transcriptViewId !== transcriptViewId) {
 			this.#chatId = chatId;
-			this.#loadedPages = 0;
+			this.#transcriptViewId = transcriptViewId;
+			this.#requestedPages = 0;
 		}
 	}
 
-	canLoad(compressed: boolean): boolean {
-		return !compressed || this.#loadedPages < this.maxPages;
-	}
-
-	recordLoaded(compressed: boolean): void {
-		if (compressed) this.#loadedPages += 1;
+	admitRequest(compressed: boolean): boolean {
+		if (!compressed) return true;
+		if (this.#requestedPages >= this.maxPages) return false;
+		this.#requestedPages += 1;
+		return true;
 	}
 }

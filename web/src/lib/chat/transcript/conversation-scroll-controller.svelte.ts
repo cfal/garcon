@@ -17,6 +17,7 @@ import type {
 } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
 import { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
+import { fillConversationViewport } from './conversation-viewport-auto-fill.js';
 import { observeConversationQueueResize } from './conversation-queue-resize.js';
 import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type {
@@ -259,10 +260,24 @@ export class ConversationScrollController {
 	}
 
 	completeInitialBottomRestore(): void {
-		if (this.#initialBottomRestoreChatId !== this.deps.getChatId()) return;
+		const chatId = this.deps.getChatId();
+		if (!chatId || this.#initialBottomRestoreChatId !== chatId) return;
 		if (this.deps.chatState.displayMessageCount === 0) return;
 		this.#initialBottomPaintChatId = null;
 		this.#initialBottomRestoreChatId = null;
+		const intentEpoch = this.#userScrollIntent.epoch;
+		// Defers filling until a cancelling gesture has recorded its intent.
+		queueMicrotask(() => {
+			if (
+				this.deps.getChatId() === chatId &&
+				this.#isViewportVisible &&
+				this.isPinnedToBottom &&
+				!this.deps.chatState.isUserScrolledUp &&
+				this.#userScrollIntent.epoch === intentEpoch
+			) {
+				void this.fillUnderfilledViewport();
+			}
+		});
 	}
 
 	reconcileInitialBottomRestore(autoScrollToBottom: boolean): void {
@@ -588,42 +603,28 @@ export class ConversationScrollController {
 
 		const viewport = this.deps.getViewport();
 		if (!viewport) return;
-		this.#compressedAutoFillBudget.startChat(chatId);
+		const transcriptViewId = this.deps.chatState.transcriptViewId;
+		const intentEpoch = this.#userScrollIntent.epoch;
+		const ownsFill = () =>
+			this.deps.getChatId() === chatId &&
+			this.deps.chatState.transcriptViewId === transcriptViewId &&
+			this.#isViewportVisible &&
+			this.#userScrollIntent.epoch === intentEpoch &&
+			this.#activeTargetNavigations === 0;
 		this.#isAutoFillingViewport = true;
 		try {
-			// Deliberately chains pages only while the visible viewport remains underfilled.
-			// This is the sole geometry-driven paging path.
-			while (this.deps.getChatId() === chatId && this.#isViewportVisible) {
-				if (this.#activeTargetNavigations > 0) return;
-				const layout = await viewport.waitForLayout({
-					minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-				});
-				if (layout !== 'settled') return;
-				if ((await viewport.measureViewportFill()) !== 'underfilled') return;
-				if (this.#activeTargetNavigations > 0) return;
-				const compressed = viewport.hasCollapsedToolGroups();
-				if (!this.#compressedAutoFillBudget.canLoad(compressed)) return;
-
-				let result: TranscriptPageLoadResult;
-				if (this.deps.chatState.hasLaterMessages) {
-					if (!this.#canRequestPage('later')) return;
-					result = await this.#mutatePage('later', () => this.deps.chatState.loadLaterPage(chatId));
-				} else if (this.deps.chatState.canLoadEarlier) {
-					if (!this.#canRequestPage('earlier')) return;
-					if (this.deps.chatState.revealEarlierLoadedRows()) {
-						result = await this.#waitForCurrentLayout('loaded');
-					} else {
-						result = await this.#mutatePage('earlier', () =>
-							this.deps.chatState.loadEarlierPage(chatId),
-						);
-					}
-				} else {
-					return;
-				}
-				if (result !== 'loaded') return;
-				this.#compressedAutoFillBudget.recordLoaded(compressed);
-				if (this.isPinnedToBottom && !this.deps.chatState.hasLaterMessages) viewport.scrollToEnd();
-			}
+			await fillConversationViewport({
+				chatId,
+				transcriptViewId,
+				viewport,
+				chatState: this.deps.chatState,
+				budget: this.#compressedAutoFillBudget,
+				isCurrent: ownsFill,
+				canRequestPage: (direction) => this.#canRequestPage(direction),
+				mutatePage: (direction, load) => this.#mutatePage(direction, load),
+				waitForCurrentLayout: () => this.#waitForCurrentLayout('loaded'),
+				isPinnedToBottom: () => this.isPinnedToBottom,
+			});
 		} finally {
 			this.#isAutoFillingViewport = false;
 			if (this.#refillViewportAfterCurrentFill) {
