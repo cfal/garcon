@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   assistantContents,
@@ -85,6 +85,69 @@ describe('scripted Claude persistence', () => {
         prompt,
       );
       expect(restored).toEqual(live);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
+  test('keeps provider-origin native rows out of an explicit reload', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = 'SCRIPTED_CLAUDE_ORIGIN_FILTER_PROMPT';
+    const reply = 'SCRIPTED_CLAUDE_ORIGIN_FILTER_REPLY';
+    const providerText = 'SCRIPTED_CLAUDE_ORIGIN_FILTER_PROVIDER_ROW';
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-origin-reload-filter', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+      await reloadUntilNativeStableAfterPrompt(fixture, chatId, prompt);
+
+      const binding = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      const nativePath = binding.nativeSession?.value.path;
+      if (typeof nativePath !== 'string') throw new Error('Claude native path was not persisted.');
+      const providerEntry = {
+        parentUuid: null,
+        isSidechain: false,
+        userType: 'external',
+        cwd: fixture.dirs.project,
+        sessionId: binding.agentSessionId,
+        version: '2.1.278',
+        type: 'user',
+        message: { role: 'user', content: providerText },
+        uuid: '00000000-0000-4000-8000-000000000278',
+        timestamp: '2099-01-01T00:00:00.000Z',
+        origin: { kind: 'peer', from: 'synthetic-peer' },
+      };
+      await appendFile(
+        nativePath,
+        `${JSON.stringify(providerEntry)}\n`,
+        'utf8',
+      );
+
+      await fixture.client.reloadChat(chatId);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(userContents(reloaded.messages)).toEqual([prompt]);
+      expect(assistantContents(reloaded.messages)).toContain(reply);
+      expect(JSON.stringify(reloaded.messages)).not.toContain(providerText);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

@@ -96,7 +96,12 @@ function isProviderOwnedUserMessage(
   entry: Record<string, unknown>,
   text: string,
 ): boolean {
-  return asRecord(entry.origin).kind === 'task-notification' || isSystemUserMessage(text);
+  const originKind = asRecord(entry.origin).kind;
+  // The SDK classifies every present origin except "human" as provider-injected, including future kinds.
+  // https://github.com/anthropics/claude-agent-sdk-python/blob/99a734c94ff4f41e08a9edb05371003538a366b2/src/claude_agent_sdk/types.py#L1049-L1120
+  return (
+    typeof originKind === 'string' && originKind !== 'human'
+  ) || isSystemUserMessage(text);
 }
 
 function queuedCommandPrompts(entry: Record<string, unknown>): readonly string[] {
