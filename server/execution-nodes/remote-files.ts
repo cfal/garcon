@@ -1,6 +1,6 @@
 import { AgentCallError, type ExecutionFilesService, type NodeCallOptions } from '@garcon/server-agent-interface';
-import { MAX_FILE_SAVE_BYTES, isFileRevision, parseSaveTextResponse } from '../../common/file-contracts.js';
-import { DomainError } from '../lib/domain-error.js';
+import { MAX_FILE_SAVE_BYTES, isFileRevision, parseSaveTextRequest, parseSaveTextResponse } from '../../common/file-contracts.js';
+import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
 import type { RemoteSessionBacking } from './remote.js';
 import type { AgentRpc } from './rpc.js';
 import { FILE_CHUNK_BYTES, FILE_OPERATION_TIMEOUT_MS, decodeFileChunk, invalidFileTransfer, isFileSize, type FileTransferRef } from './file-protocol.js';
@@ -36,7 +36,8 @@ export class RemoteExecutionFilesService implements ExecutionFilesService {
   }
 
   async save(request: Parameters<ExecutionFilesService['save']>[0], options?: NodeCallOptions) {
-    if (typeof request.content !== 'string' || Buffer.byteLength(request.content) > MAX_FILE_SAVE_BYTES) throw new DomainError('FILE_TOO_LARGE', 'File exceeds the text save limit', 413);
+    if (!parseSaveTextRequest(request)) throw new ValidationDomainError('Content, expectedRevision, and conflictResolution are required');
+    if (Buffer.byteLength(request.content) > MAX_FILE_SAVE_BYTES) throw new DomainError('FILE_TOO_LARGE', 'File exceeds the text save limit', 413);
     const { rpc } = this.backing();
     const callOptions = deadline(options);
     const { content, ...target } = request;

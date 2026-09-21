@@ -15,6 +15,7 @@ export interface FileIdentityResponse {
 export type FileRevision = string;
 
 export const FILE_REVISION_HEADER = 'X-Garcon-File-Revision';
+export const MAX_FILE_REVISION_LENGTH = 128;
 export const MAX_FILE_VIEW_BYTES = 25 * 1024 * 1024;
 export const MAX_FILE_SAVE_BYTES = 25 * 1024 * 1024;
 
@@ -85,7 +86,8 @@ function isNonEmptyString(value: unknown): value is string {
 
 export function isFileRevision(value: unknown): value is FileRevision {
   return (
-    typeof value === 'string' && /^v1:[A-Za-z0-9_-]+$/.test(value)
+    typeof value === 'string' && value.length <= MAX_FILE_REVISION_LENGTH
+    && /^v1:[A-Za-z0-9_-]+$/.test(value)
   );
 }
 

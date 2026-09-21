@@ -9,6 +9,23 @@ import { serveAgentNode } from '../agent-worker.js';
 import { WebSocketLink } from '../websocket-link.js';
 import { linkOptions, outgoingFault } from './integration-fixture.js';
 import { FILE_CHUNK_BYTES } from '../file-protocol.js';
+import { RemoteExecutionFilesService } from '../remote-files.js';
+import { MAX_FILE_REVISION_LENGTH } from '../../../common/file-contracts.js';
+
+test.each([MAX_FILE_REVISION_LENGTH + 1, 17 * 1024 * 1024])('rejects a %d-character save revision before accessing the RPC session', async (length) => {
+  let backingCalls = 0;
+  const files = new RemoteExecutionFilesService(() => {
+    backingCalls++;
+    throw new Error('Save must not access the RPC session');
+  });
+  for (const conflictResolution of ['reject', 'overwrite'] as const) {
+    await expect(files.save({
+      projectPath: '/project', filePath: 'file.txt', content: 'x',
+      expectedRevision: `v1:${'a'.repeat(length - 3)}`, conflictResolution,
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+  }
+  expect(backingCalls).toBe(0);
+});
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`file reads and saves above the Noise message limit with ${dialer} dialing`, async () => {

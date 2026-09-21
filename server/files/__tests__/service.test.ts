@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { LocalExecutionFilesService } from '../service.js';
-import { MAX_FILE_SAVE_BYTES } from '../../../common/file-contracts.js';
+import { MAX_FILE_REVISION_LENGTH, MAX_FILE_SAVE_BYTES } from '../../../common/file-contracts.js';
 
 let directory: string;
 let service: LocalExecutionFilesService;
@@ -102,6 +102,16 @@ describe('node files service', () => {
 
   it('observes cancellation before file operations', async () => {
     await expect(service.read(target(), { signal: AbortSignal.abort() })).rejects.toThrow();
+  });
+
+  it('rejects oversized revisions before mutation even for explicit overwrites', async () => {
+    for (const conflictResolution of ['reject', 'overwrite'] as const) {
+      await expect(service.save({
+        ...target(), content: 'changed', conflictResolution,
+        expectedRevision: `v1:${'a'.repeat(MAX_FILE_REVISION_LENGTH - 2)}`,
+      })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+    }
+    expect(await fs.readFile(path.join(target().projectPath, 'file.txt'), 'utf8')).toBe('initial');
   });
 
   it('serializes a replacement service behind an already dispatched, cancelled save', async () => {
