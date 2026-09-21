@@ -74,7 +74,7 @@ export class ExecutionNodeManager {
     if (this.#disposed || this.#changing.has(nodeId)) return false;
     if (nodeId === LOCAL_EXECUTION_NODE_ID) return this.local.availability === 'ready';
     const entry = this.#remotes.get(nodeId);
-    return Boolean(entry?.config.enabled && entry.integrations && entry.node?.availability === 'ready');
+    return Boolean(entry?.config.enabled && !entry.preparation && entry.integrations && entry.node?.availability === 'ready');
   }
 
   requireNode(nodeId: string): ExecutionNode {
@@ -111,12 +111,14 @@ export class ExecutionNodeManager {
     return [{
       id: LOCAL_EXECUTION_NODE_ID, label: 'Local', kind: 'local', enabled: true, direction: null,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
+      instanceId: this.localInfo.instanceId,
       lastError: null, machineServices: { files: true, git: true, terminals: true },
     }, ...[...this.#remotes.values()].map((entry): ExecutionNodeSnapshot => ({
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
       direction: entry.config.connection.kind,
       availability: this.isReady(entry.config.id) ? 'ready' : entry.node?.availability === 'reconnecting' ? 'reconnecting' : 'offline',
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
+      instanceId: entry.info?.instanceId ?? null,
       machineServices: { files: entry.info?.services.files === true, git: false, terminals: false },
     }))];
   }
@@ -257,6 +259,7 @@ export class ExecutionNodeManager {
     entry.knownIntegrations = integrations;
     entry.inventory = node.inventory;
     entry.error = null;
+    entry.preparation = null;
     this.#publishAvailability(entry.config.id, 'ready');
     this.#changed();
   }

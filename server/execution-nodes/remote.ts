@@ -24,9 +24,10 @@ export interface RemoteSessionBacking {
 }
 
 export interface RemoteNodeInventory {
-  readonly projectBasePath: string;
   readonly integrations: readonly IntegrationManifest[];
 }
+
+class NodeConfigurationError extends Error {}
 
 export class RemoteExecutionNode implements ExecutionNode {
   readonly #integrations = new Map<string, RemoteAgentIntegration>();
@@ -36,7 +37,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   #availability: NodeAvailability = 'offline';
   #current: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
-  #projectBasePath: string | null = null;
+  #initialized = false;
   readonly #files = new RemoteExecutionFilesService(() => this.#backing());
   readonly #projects: ExecutionProjectService = {
     inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
@@ -67,7 +68,10 @@ export class RemoteExecutionNode implements ExecutionNode {
         this.#setAvailability(connected ? 'ready' : 'reconnecting');
       });
       void this.#install(transport, rpc).catch((error: unknown) => {
-        this.reportError('Execution-node initialization failed; check worker configuration and matching builds');
+        if (this.#candidate === transport && this.#availability !== 'disposed') {
+          this.reportError(error instanceof NodeConfigurationError ? error.message
+            : 'Execution-node initialization failed; check worker configuration and matching builds');
+        }
         transport.close(error instanceof Error ? error : new Error(String(error)));
       });
     });
@@ -84,8 +88,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   get availability(): NodeAvailability { return this.#availability; }
 
   get inventory(): RemoteNodeInventory | null {
-    return this.#projectBasePath === null ? null : {
-      projectBasePath: this.#projectBasePath,
+    return !this.#initialized ? null : {
       integrations: [...this.#integrations.values()].map((integration) => integration.manifest),
     };
   }
@@ -140,41 +143,37 @@ export class RemoteExecutionNode implements ExecutionNode {
   async #install(transport: SessionTransport, rpc: AgentRpc): Promise<void> {
     await transport.ready;
     const { info, integrations } = await rpc.call('', 'node.describe', null);
-    if (info.nodeId !== this.id || transport.nodeId !== this.id) throw new Error('Execution-node identity mismatch');
-    if (typeof info.projectBasePath !== 'string' || !info.projectBasePath) throw new Error('Execution-node project base is missing');
-    if (this.#projectBasePath !== null && this.#projectBasePath !== info.projectBasePath) {
-      throw new Error('Execution-node project base changed; restart the controller to accept it');
-    }
+    if (info.nodeId !== this.id || transport.nodeId !== this.id) throw new NodeConfigurationError('Execution-node identity mismatch');
+    if (typeof info.projectBasePath !== 'string' || !info.projectBasePath) throw new NodeConfigurationError('Execution-node project base is missing');
     const manifests = new Map<string, IntegrationManifest>();
     for (const manifest of integrations) {
       if (manifest.scope.nodeId !== info.nodeId || manifest.scope.instanceId !== info.instanceId
         || manifest.scope.integrationId !== manifest.descriptor.id || manifests.has(manifest.descriptor.id)) {
-        throw new Error('Execution-node integration scope mismatch');
+        throw new NodeConfigurationError('Execution-node integration scope mismatch');
       }
       manifests.set(manifest.descriptor.id, manifest);
     }
     if (manifests.size !== info.integrationIds.length || info.integrationIds.some((id) => !manifests.has(id))) {
-      throw new Error('Execution-node integration inventory mismatch');
+      throw new NodeConfigurationError('Execution-node integration inventory mismatch');
     }
     if (this.expectedInventory) {
-      if (info.projectBasePath !== this.expectedInventory.projectBasePath
-        || manifests.size !== this.expectedInventory.integrations.length
+      if (manifests.size !== this.expectedInventory.integrations.length
         || this.expectedInventory.integrations.some(({ scope: _scope, ...expected }) => {
           const { scope: _replacementScope, ...replacement } = manifests.get(expected.descriptor.id) ?? {};
           return !isDeepStrictEqual(expected, replacement);
-        })) throw new Error('Execution-node inventory changed; restart the controller to accept it');
+        })) throw new NodeConfigurationError('Execution-node provider inventory changed; restart the controller to accept it');
     }
     const backing: RemoteSessionBacking = { rpc, info, manifests };
-    const initial = this.#projectBasePath === null;
+    const initial = !this.#initialized;
     const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
       manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()),
     ])) : this.#integrations;
     if (!initial) {
-      if (this.#integrations.size !== manifests.size) throw new Error('Execution-node inventory changed');
+      if (this.#integrations.size !== manifests.size) throw new NodeConfigurationError('Execution-node provider inventory changed; restart the controller to accept it');
       for (const [id, integration] of this.#integrations) {
         const { scope: _oldScope, ...previous } = integration.manifest;
         const { scope: _newScope, ...replacement } = manifests.get(id) ?? {};
-        if (!isDeepStrictEqual(previous, replacement)) throw new Error('Execution-node capabilities changed');
+        if (!isDeepStrictEqual(previous, replacement)) throw new NodeConfigurationError('Execution-node provider capabilities changed; restart the controller to accept them');
       }
     }
     for (const integration of candidates.values()) await integration.initializeReplacement(backing, initial);
@@ -183,7 +182,7 @@ export class RemoteExecutionNode implements ExecutionNode {
     }
     if (initial) {
       for (const [id, integration] of candidates) this.#integrations.set(id, integration);
-      this.#projectBasePath = info.projectBasePath;
+      this.#initialized = true;
     }
     rpc.onProducer(({ notification }) => {
       if (this.#current !== backing) return;

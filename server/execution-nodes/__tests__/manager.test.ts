@@ -38,11 +38,12 @@ function waitReady(manager: ExecutionNodeManager, id: string): Promise<void> {
   });
 }
 
-function worker(secret: string, projectPath: string) {
+function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
   const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 });
   cleanups.push(() => link.dispose());
   link.onSession((transport) => {
     const provider = integrationFixture(projectPath, transport.nodeId);
+    configure(provider);
     const serving = serveAgentNode(provider.node, new AgentRpc(transport));
     cleanups.push(() => serving.dispose());
   });
@@ -95,6 +96,75 @@ test('offline configuration never blocks Local or fabricates remote inventory', 
   expect((await manager.inspectProject(root)).kind).toBe('available');
   await expect(manager.inspectProject(root, configured.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_UNAVAILABLE' });
   await expect(manager.inspectProject(root, crypto.randomUUID())).rejects.toMatchObject({ code: 'EXECUTION_NODE_UNAVAILABLE' });
+});
+
+test('connector replacement retains provider checks but accepts a new project base', async () => {
+  const { manager, root } = await fixture();
+  const narrow = join(root, 'narrow');
+  await mkdir(narrow);
+  const config = await manager.create({ label: 'Changing root', direction: 'node-connects' });
+  const { url } = sharedListener(manager);
+  const first = worker(config.secret, narrow);
+  first.dial(url(config.id));
+  await waitReady(manager, config.id);
+  const previous = manager.list().find((item) => item.id === config.id)!;
+  await manager.update(config.id, { enabled: false });
+  await first.dispose();
+  await manager.update(config.id, { enabled: true });
+  const replacement = worker(config.secret, root);
+  replacement.dial(url(config.id));
+  await waitReady(manager, config.id);
+  const accepted = manager.list().find((item) => item.id === config.id)!;
+  expect(accepted).toMatchObject({ projectBasePath: root, availability: 'ready', lastError: null });
+  expect(accepted.instanceId).not.toBe(previous.instanceId);
+  await manager.update(config.id, { enabled: false });
+  await replacement.dispose();
+  await manager.update(config.id, { enabled: true });
+  const rejected = Promise.withResolvers<void>();
+  const off = manager.onChanged(() => {
+    if (manager.list().find((item) => item.id === config.id)?.lastError) rejected.resolve();
+  });
+  const incompatible = worker(config.secret, narrow, (provider) => { provider.integration.descriptor.label = 'Incompatible'; });
+  incompatible.dial(url(config.id));
+  await rejected.promise;
+  off();
+  expect(manager.list().find((item) => item.id === config.id)).toMatchObject({
+    projectBasePath: root, instanceId: accepted.instanceId, availability: 'offline',
+    lastError: { message: expect.stringContaining('provider inventory changed') },
+  });
+  expect(manager.isReady('local')).toBe(true);
+});
+
+test('manager readiness waits for replacement metadata publication', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Metadata', direction: 'node-connects' });
+  const { url } = sharedListener(manager);
+  const first = worker(config.secret, root);
+  first.dial(url(config.id));
+  await waitReady(manager, config.id);
+  const node = manager.requireNode(config.id);
+  const original = node.getInfo.bind(node);
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const pending = spyOn(node, 'getInfo').mockImplementation(async () => {
+    const info = await original();
+    entered.resolve();
+    await release.promise;
+    return info;
+  });
+  try {
+    await first.dispose();
+    const replacement = worker(config.secret, '/');
+    replacement.dial(url(config.id));
+    await entered.promise;
+    expect(node.availability).toBe('ready');
+    expect(manager.isReady(config.id)).toBe(false);
+    expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe(root);
+    const ready = waitReady(manager, config.id);
+    release.resolve();
+    await ready;
+    expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe('/');
+  } finally { release.resolve(); pending.mockRestore(); }
 });
 
 test('two inbound workers share one listener and keep distinct integration/resource scopes', async () => {

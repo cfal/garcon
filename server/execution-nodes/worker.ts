@@ -61,7 +61,7 @@ export async function runExecutionWorker(
     transport.onAvailability((connected) => {
       if (!connected) return;
       lastError = null;
-      console.log(JSON.stringify({ type: 'execution-node-ready', nodeId: transport.nodeId, runtimeId: link.runtimeId }));
+      console.log(JSON.stringify({ type: 'execution-node-connected', nodeId: transport.nodeId, runtimeId: link.runtimeId }));
     });
   });
   try {

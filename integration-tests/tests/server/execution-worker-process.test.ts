@@ -7,7 +7,7 @@ import { WebSocketLink } from '../../../server/execution-nodes/websocket-link.js
 import { parseConnectionUrl } from '../../../server/execution-nodes/connection-url.js';
 
 for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as const) {
-  test(`worker harness retains exit classification after readiness: ${ending}`, async () => {
+  test(`worker harness retains exit classification after connection: ${ending}`, async () => {
     const root = await mkdtemp(join(homedir(), 'garcon-worker-exit-'));
     const directories = {
       root, workspace: join(root, 'workspace'), project: join(root, 'project'),
@@ -26,7 +26,8 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
       url.hostname = '127.0.0.1';
       controller = new WebSocketLink({ role: 'controller', nodeId: '22222222-2222-4222-8222-222222222222', secret: connection.secret, allowInsecureDevelopment: true });
       controller.dial(url.href);
-      await worker.ready();
+      await worker.connected();
+      expect(worker.logs.join('\n')).not.toContain('execution-node-ready');
       expect(worker.logs.join('\n')).not.toContain(connection.secret);
       if (ending === 'unexpected exit') {
         worker.child.kill('SIGKILL');

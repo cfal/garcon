@@ -16,7 +16,7 @@ export function executionBackend(value = process.env.GARCON_TEST_EXECUTION_BACKE
 
 export class ExecutionNodeProcess {
   readonly #logs = new BoundedLog<string>(2000);
-  readonly #ready = Promise.withResolvers<void>();
+  readonly #connected = Promise.withResolvers<void>();
   readonly #listening = Promise.withResolvers<string>();
   readonly #connection = Promise.withResolvers<string>();
   readonly #pumps: Promise<void>[];
@@ -24,7 +24,7 @@ export class ExecutionNodeProcess {
   #unexpectedExit: Error | null = null;
 
   private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>) {
-    void this.#ready.promise.catch(() => undefined);
+    void this.#connected.promise.catch(() => undefined);
     void this.#listening.promise.catch(() => undefined);
     void this.#connection.promise.catch(() => undefined);
     const capture = (line: string) => {
@@ -38,7 +38,7 @@ export class ExecutionNodeProcess {
           this.#logs.push(JSON.stringify({ type: frame.type, url: frame.url }));
           return;
         }
-        if (frame.type === 'execution-node-ready') this.#ready.resolve();
+        if (frame.type === 'execution-node-connected') this.#connected.resolve();
       } catch { /* Provider logs are not worker readiness frames. */ }
       this.#logs.push(line);
     };
@@ -47,7 +47,7 @@ export class ExecutionNodeProcess {
       if (this.#stopping) return;
       const error = new Error(`Execution worker exited (${code})\n${this.logs.join('\n')}`);
       this.#unexpectedExit = error;
-      this.#ready.reject(error); this.#listening.reject(error); this.#connection.reject(error);
+      this.#connected.reject(error); this.#listening.reject(error); this.#connection.reject(error);
     });
   }
 
@@ -73,7 +73,7 @@ export class ExecutionNodeProcess {
   get logs(): readonly string[] { return this.#logs.values(); }
   listening(): Promise<string> { return withTimeout(this.#listening.promise, 20_000, () => `Worker did not listen\n${this.logs.join('\n')}`); }
   connectionUrl(): Promise<string> { return withTimeout(this.#connection.promise, 20_000, () => 'Worker did not print its connection URL'); }
-  ready(): Promise<void> { return withTimeout(this.#ready.promise, 20_000, () => `Worker did not become ready\n${this.logs.join('\n')}`); }
+  connected(): Promise<void> { return withTimeout(this.#connected.promise, 20_000, () => `Worker did not connect\n${this.logs.join('\n')}`); }
 
   async stop(): Promise<void> {
     if (!this.#stopping && this.child.exitCode === null) {
@@ -174,7 +174,7 @@ export class ExecutionBackendFixture {
         if (!this.#worker) await launchWorker(this.#workerLaunch!.connection);
       }
       if (!this.#worker) throw new Error('Remote lane did not launch a worker');
-      await this.#worker.ready();
+      await this.#worker.connected();
       await this.#waitReady();
       if (this.#worker.child.pid === controller.pid) throw new Error('Remote lane reused the controller process');
       return controller;
@@ -185,12 +185,15 @@ export class ExecutionBackendFixture {
     }
   }
 
-  async crashAndRestartWorker(): Promise<void> {
+  async crashAndRestartWorker(projectBasePath?: string): Promise<void> {
     if (!this.#worker || !this.#workerLaunch) throw new Error('No remote execution worker is running');
     await this.#worker.crash();
     this.#completedLogs.push(...this.#worker.logs);
+    if (projectBasePath !== undefined) {
+      this.#workerLaunch = { ...this.#workerLaunch, directories: { ...this.#workerLaunch.directories, project: projectBasePath } };
+    }
     this.#worker = await ExecutionNodeProcess.start(this.#workerLaunch);
-    await this.#worker.ready();
+    await this.#worker.connected();
     await this.#waitReady();
   }
 

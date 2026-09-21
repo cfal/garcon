@@ -4,6 +4,20 @@ import { ExecutionNodesStore, executionNodeStatus } from '../execution-nodes-sto
 import { localExecutionNode, remoteExecutionNode } from './fixtures';
 
 describe('ExecutionNodesStore', () => {
+	it('changes path context only for the affected node, including missed disconnects', () => {
+		const nodes = new ExecutionNodesStore();
+		nodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
+		const local = nodes.pathContextKey('local');
+		const initial = nodes.pathContextKey(remoteExecutionNode.id);
+		nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, label: 'Renamed' }]);
+		expect(nodes.pathContextKey(remoteExecutionNode.id)).toBe(initial);
+		for (const change of [{ instanceId: 'replacement' }, { projectBasePath: '/' }, { availability: 'offline' as const }]) {
+			nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, ...change }]);
+			expect(nodes.pathContextKey(remoteExecutionNode.id)).not.toBe(initial);
+			expect(nodes.pathContextKey('local')).toBe(local);
+		}
+	});
+
 	it('keeps Local usable before discovery and after an isolated discovery failure', async () => {
 		const nodes = new ExecutionNodesStore(async () => { throw new Error('Discovery failed'); });
 		expect(nodes.isReady()).toBe(true);

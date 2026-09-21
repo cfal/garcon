@@ -32,6 +32,7 @@ export interface ExecutionNodeSnapshot {
   readonly enabled: boolean;
   readonly direction: ExecutionNodeDirection | null;
   readonly availability: 'ready' | 'reconnecting' | 'offline';
+  readonly instanceId: string | null;
   readonly projectBasePath: string | null;
   readonly lastError: { readonly code: string; readonly message: string } | null;
   readonly machineServices: {
@@ -114,9 +115,10 @@ export function parseUpdateExecutionNodeRequest(value: unknown): UpdateExecution
 }
 
 export function parseExecutionNodeSnapshot(value: unknown): ExecutionNodeSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'projectBasePath', 'lastError', 'machineServices'])
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices'])
     || !isExecutionNodeId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
     || (value.availability !== 'ready' && value.availability !== 'offline' && value.availability !== 'reconnecting')
+    || !(value.instanceId === null || typeof value.instanceId === 'string' && value.instanceId.length > 0 && value.instanceId.length <= 128)
     || !(value.projectBasePath === null || typeof value.projectBasePath === 'string')) return null;
   if (value.id === LOCAL_EXECUTION_NODE_ID
     ? value.kind !== 'local' || value.direction !== null || !value.enabled

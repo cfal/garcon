@@ -13,6 +13,7 @@ const localFallback: readonly ExecutionNodeSnapshot[] = [
 		enabled: true,
 		direction: null,
 		availability: 'ready',
+		instanceId: null,
 		projectBasePath: null,
 		lastError: null,
 		machineServices: { files: true, git: true, terminals: true },
@@ -50,6 +51,12 @@ export class ExecutionNodesStore {
 
 	filesAvailable(id?: string | null): boolean {
 		return this.isReady(id) && this.get(id)?.machineServices.files === true;
+	}
+
+	pathContextKey(id?: string | null): string {
+		const node = this.get(id);
+		return JSON.stringify([effectiveNodeId(id), node?.instanceId, node?.projectBasePath,
+			node?.enabled, node?.availability, node?.machineServices.files]);
 	}
 
 	applySnapshot(value: unknown): void {

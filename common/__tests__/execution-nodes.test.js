@@ -39,10 +39,16 @@ test('certificate verification opt-out is explicit and only applies to the diali
 test('public snapshots exclude credentials and preserve unavailable remote targets', () => {
   const remote = {
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'node-connects',
-    availability: 'offline', projectBasePath: null, lastError: null,
+    availability: 'offline', instanceId: null, projectBasePath: null, lastError: null,
     machineServices: { files: false, git: false, terminals: false },
   };
   expect(parseExecutionNodes([remote])).toEqual([remote]);
+  const ready = { ...remote, availability: 'ready', instanceId: 'synthetic-instance', projectBasePath: '/' };
+  const readyMessage = new ExecutionNodesChangedMessage([ready]);
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(readyMessage)))).toEqual(readyMessage);
+  for (const instanceId of [undefined, '', 3, {}, 'x'.repeat(129)]) {
+    expect(parseExecutionNodes([{ ...remote, instanceId }])).toBeNull();
+  }
   const message = new ExecutionNodesChangedMessage([remote]);
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
   for (const extra of [{ secret: 'hidden' }, { connectionUrl: 'hidden' }]) {

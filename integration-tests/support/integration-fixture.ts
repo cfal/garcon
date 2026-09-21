@@ -419,8 +419,8 @@ export class IntegrationFixture {
     await this.#startReplacementGarcon(options.reusePort ? previousPort : undefined);
   }
 
-  async crashAndRestartExecutionWorker(): Promise<void> {
-    await this.#backend.crashAndRestartWorker();
+  async crashAndRestartExecutionWorker(projectBasePath?: string): Promise<void> {
+    await this.#backend.crashAndRestartWorker(projectBasePath);
   }
 
   async crashAndRestartBeforeNativeUserPersistence(input: {
