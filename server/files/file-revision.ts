@@ -153,8 +153,25 @@ export async function readVersionedFile(
   const maxBytes = options.maxBytes ?? MAX_FILE_VIEW_BYTES;
   const openFile =
     options.openFile ??
-    (async (targetPath: string): Promise<VersionedReadHandle> =>
-      fs.open(targetPath, constants.O_RDONLY | constants.O_NONBLOCK));
+    (async (targetPath: string): Promise<VersionedReadHandle> => {
+      const handle = await fs.open(targetPath, constants.O_RDONLY | constants.O_NONBLOCK);
+      return {
+        stat: (statOptions) => handle.stat(statOptions),
+        close: () => handle.close(),
+        readFile: async () => {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          while (true) {
+            const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes - size + 1));
+            const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+            if (!bytesRead) return Buffer.concat(chunks, size);
+            size += bytesRead;
+            if (size > maxBytes) throw new FileTooLargeError(maxBytes);
+            chunks.push(chunk.subarray(0, bytesRead));
+          }
+        },
+      };
+    });
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const handle = await openFile(filePath);
