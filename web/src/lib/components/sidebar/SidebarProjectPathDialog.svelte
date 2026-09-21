@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { getExecutionNodes } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -45,6 +45,7 @@
 	let isUpdatingPinnedProjectPath = $state(false);
 
 	let isOpen = $derived(projectPathDialog !== null);
+	const pathContextKey = $derived(nodes.pathContextKey(projectPathDialogState.nodeId));
 	let activeProjectBasePath = $derived(
 		projectPathDialogState.nodeId === 'local'
 			? projectBasePath || '/'
@@ -86,8 +87,10 @@
 	});
 
 	$effect(() => {
+		if (!activeDialogKey) return;
 		void projectPathDialogState.trimmedPath;
-		projectPathDialogState.scheduleValidation();
+		const contextKey = pathContextKey;
+		untrack(() => projectPathDialogState.scheduleValidation(contextKey));
 	});
 
 	onDestroy(() => {
@@ -251,6 +254,7 @@
 
 							{#if filesAvailable && projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
 								<DirectoryBrowser
+									nodeContextKey={nodes.pathContextKey(projectPathDialogState.nodeId)}
 									nodeId={projectPathDialogState.nodeId}
 									currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
 									basePath={activeProjectBasePath}

@@ -370,6 +370,22 @@ export class FileTreeStore {
 		}
 	}
 
+	invalidateNodePaths(): void {
+		const response = this.retainedResponse;
+		const target: FileTreeDirectoryTarget = this.navigation.kind === 'loading' || this.navigation.kind === 'error'
+			? this.navigation.target : response ? {
+				path: response.directory.path, label: response.directory.path, breadcrumbs: [], reason: 'initial' as const,
+			} : this.#initialTarget();
+		const captureAsChatProject = target.captureAsChatProject || target.path === this.#canonicalChatProjectPath;
+		this.#abortRequests();
+		this.#clearDirectoryCaches();
+		this.#canonicalChatProjectPath = null;
+		this.#chatProjectBreadcrumbs = [];
+		this.refreshError = null;
+		this.navigation = { kind: 'loading', target: { ...target, captureAsChatProject, breadcrumbs: [] }, previous: null };
+		this.#resumePendingWork();
+	}
+
 	setProjectState(projectState: WorkspaceProjectState): void {
 		const target =
 			projectState.kind === 'available'

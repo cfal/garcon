@@ -165,7 +165,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				bindingRefreshes.delete(target.chatId);
 			}
 		});
-	});
+	}, deps.executionNodes);
 	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
 		(chatId, projectPath, nodeId) => {
 			if (projectPath === null) projectResolution.removeChatTargets(chatId);

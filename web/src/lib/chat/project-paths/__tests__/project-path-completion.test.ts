@@ -55,4 +55,24 @@ describe('ProjectPathCompletionController', () => {
 		expect(browseDirectory).not.toHaveBeenCalled();
 		expect(form.projectPath).toBe('/repo/s');
 	});
+
+	it('drops old matches and pending replies after a same-node replacement', async () => {
+		const form = { ...target(), pathContextKey: 'first-instance' };
+		const old = Promise.withResolvers<Awaited<ReturnType<typeof browseDirectory>>>();
+		vi.mocked(browseDirectory).mockReturnValueOnce(old.promise).mockResolvedValueOnce([
+			{ name: 'src', path: '/repo/src', type: 'directory' },
+			{ name: 'scripts', path: '/repo/scripts', type: 'directory' },
+		]).mockResolvedValueOnce([{ name: 'second', path: '/repo/second', type: 'directory' }]);
+		const completion = new ProjectPathCompletionController(form);
+		const loading = completion.complete();
+		form.pathContextKey = 'second-instance';
+		old.resolve([{ name: 'stale', path: '/repo/stale', type: 'directory' }]);
+		await loading;
+		expect(form.projectPath).toBe('/repo/s');
+		await completion.complete();
+		form.pathContextKey = 'third-instance';
+		await completion.complete();
+		expect(form.projectPath).toBe('/repo/second/');
+		expect(browseDirectory).toHaveBeenCalledTimes(3);
+	});
 });

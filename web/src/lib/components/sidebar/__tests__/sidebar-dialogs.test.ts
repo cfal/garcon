@@ -9,6 +9,8 @@ import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
 import { ProjectPathDialogState } from '../project-path-dialog-state.svelte.js';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { tick } from 'svelte';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/chats')>();
@@ -58,6 +60,71 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
+	it('revalidates the unchanged chat path after replacement and dialog reopening', async () => {
+		vi.useFakeTimers();
+		vi.mocked(chatsApi.validateStart).mockReset()
+			.mockResolvedValueOnce({ valid: true, isGitRepo: false })
+			.mockResolvedValue({ valid: false, errorCode: 'outside_base_dir' });
+		const nodes = [localExecutionNode, remoteExecutionNode];
+		const projectPathDialog = {
+			chatId: 'chat-1', chatTitle: 'Synthetic project',
+			nodeId: remoteExecutionNode.id, currentProjectPath: '/worker/project',
+		};
+		const rendered = render(SidebarProjectPathDialog, {
+			nodes,
+			projectPathDialog,
+			projectBasePath: '/local', isMobile: false, onClose: vi.fn(), onConfirm: vi.fn(),
+		});
+		try {
+			await tick();
+			await vi.advanceTimersByTimeAsync(250);
+			expect(chatsApi.validateStart).toHaveBeenCalledTimes(1);
+			await rendered.rerender({ nodes: [localExecutionNode, {
+				...remoteExecutionNode, instanceId: 'narrower', projectBasePath: '/worker/project/narrow',
+			}] });
+			await vi.advanceTimersByTimeAsync(250);
+			await tick();
+			expect(screen.getByText('Path is outside the allowed base directory.')).toBeTruthy();
+			expect(screen.getByRole('textbox', { name: /new path/i })).toHaveProperty('value', '/worker/project');
+			await rendered.rerender({ nodes: [{ ...localExecutionNode, instanceId: 'unrelated' }, {
+				...remoteExecutionNode, instanceId: 'narrower', projectBasePath: '/worker/project/narrow',
+			}] });
+			await vi.advanceTimersByTimeAsync(250);
+			expect(screen.getByText('Path is outside the allowed base directory.')).toBeTruthy();
+			expect(chatsApi.validateStart).toHaveBeenCalledTimes(2);
+			await rendered.rerender({ projectPathDialog: null });
+			await vi.advanceTimersByTimeAsync(250);
+			expect(chatsApi.validateStart).toHaveBeenCalledTimes(2);
+			await rendered.rerender({ projectPathDialog });
+			await vi.advanceTimersByTimeAsync(250);
+			await tick();
+			expect(screen.getByText('Path is outside the allowed base directory.')).toBeTruthy();
+			expect(chatsApi.validateStart).toHaveBeenCalledTimes(3);
+		} finally { await unmountDialog(rendered); }
+	});
+
+	it('revalidates an unchanged path against a new serving context without losing the candidate', async () => {
+		vi.useFakeTimers();
+		const dialog = new ProjectPathDialogState();
+		const old = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReset().mockResolvedValueOnce({ valid: true, isGitRepo: false })
+			.mockReturnValueOnce(old.promise).mockResolvedValueOnce({ valid: false, errorCode: 'outside_base_dir' });
+		try {
+			dialog.open('/worker/project', '22222222-2222-4222-8222-222222222222');
+			dialog.scheduleValidation('first');
+			await vi.advanceTimersByTimeAsync(250);
+			expect(dialog.validationStatus).toBe('valid');
+			dialog.scheduleValidation('second');
+			expect(dialog.validationStatus).toBe('checking');
+			vi.advanceTimersByTime(250);
+			dialog.scheduleValidation('third');
+			old.resolve({ valid: true });
+			await vi.advanceTimersByTimeAsync(250);
+			expect(dialog.validationStatus).toBe('invalid');
+			expect(dialog.candidatePath).toBe('/worker/project');
+		} finally { dialog.dispose(); vi.useRealTimers(); }
+	});
+
 	it('explains rejected and unconfirmed project path updates', () => {
 		const dialog = new ProjectPathDialogState();
 

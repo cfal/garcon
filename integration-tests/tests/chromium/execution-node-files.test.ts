@@ -15,6 +15,10 @@ test('edits remote files and retains offline buffers without touching controller
     const chatId = integration.newChatId();
     const started = await client.startDirectChat({ chatId, content: 'Synthetic remote files fixture', projectPath: executionDirs.project, agent: directAgents.openAi });
     await client.waitForTurnTerminal(chatId, started.turnId);
+    const failedRequests: string[] = [];
+    page.on('response', (response) => {
+      if (response.status() >= 400) failedRequests.push(`${response.status()} ${response.url()}`);
+    });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     const fileEntry = page.locator('[data-file-tree-entry-text]').filter({ hasText: 'remote-file.txt' });
     await fileEntry.click();
@@ -66,6 +70,7 @@ test('edits remote files and retains offline buffers without touching controller
     await page.setViewportSize({ width: 390, height: 844 });
     await browserExpect(source).toHaveText('Synthetic offline edit');
     await page.screenshot({ path: join(dirs.root, 'remote-files-mobile.png') });
+    expect(failedRequests).toEqual([]);
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-node-dials', projectRoots: 'separate' });
 }, 180_000);

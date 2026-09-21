@@ -29,6 +29,7 @@ export class ProjectPathDialogState {
 
 	#validationTimer: ReturnType<typeof setTimeout> | null = null;
 	#validationGeneration = 0;
+	#validationContextKey = '';
 	#validationAbort: AbortController | null = null;
 	#worktreeGeneration = 0;
 	#worktreeAbort: AbortController | null = null;
@@ -97,9 +98,13 @@ export class ProjectPathDialogState {
 		this.worktreeError = null;
 	}
 
-	scheduleValidation(): void {
+	scheduleValidation(nodeContextKey = ''): void {
 		const path = this.trimmedPath;
 		this.#clearPendingValidation();
+		if (this.#validationContextKey !== nodeContextKey) {
+			this.#validationContextKey = nodeContextKey;
+			this.gitRepoStatus = 'unknown';
+		}
 
 		if (!path) {
 			this.#validationGeneration += 1;

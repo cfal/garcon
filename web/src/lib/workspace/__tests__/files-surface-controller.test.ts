@@ -140,6 +140,35 @@ describe('FilesSurfaceController node browsing', () => {
 		return nodes;
 	}
 
+	it.each([false, true])('refreshes root metadata and fences pending loads without an offline edge (browsing: %s)', async (browsing) => {
+		const nodes = nodeStore();
+		const before = response('/worker/project');
+		const after = { ...before, fileRootPath: '/', homeDirectory: null };
+		const stale = Promise.withResolvers<FileTreeResponse>();
+		vi.mocked(getTree).mockResolvedValueOnce(before).mockReturnValueOnce(stale.promise).mockResolvedValue(after);
+		const controller = createController(nodes);
+		controller.setProjectState({ kind: 'available', project: {
+			nodeId: remoteExecutionNode.id, chatId: 'chat', projectPath: '/worker/project', effectiveProjectKey: '/worker/project',
+		} });
+		if (browsing) controller.selectNode(remoteExecutionNode.id);
+		controller.setPresentationVisible(true);
+		flushSync();
+		await vi.waitFor(() => expect(controller.tree.readyResponse).toEqual(before));
+		controller.tree.childrenCache = new Map([['/worker/project/old', []]]);
+		const loading = controller.tree.refresh();
+		const signal = vi.mocked(getTree).mock.calls[1][1]?.signal;
+		nodes.applySnapshot(nodes.nodes.map((node) => node.id === remoteExecutionNode.id
+			? { ...node, instanceId: 'replacement', projectBasePath: '/' } : node));
+		flushSync();
+		expect(signal?.aborted).toBe(true);
+		expect(controller.tree.childrenCache.size).toBe(0);
+		await vi.waitFor(() => expect(controller.tree.readyResponse).toEqual(after));
+		stale.resolve(before);
+		await loading;
+		expect(controller.tree.readyResponse).toEqual(after);
+		expect(getTree).toHaveBeenLastCalledWith({ nodeId: remoteExecutionNode.id, directoryPath: '/worker/project' }, expect.anything());
+	});
+
 	it('opens the destination root, fences the old response, and returns to the current chat explicitly', async () => {
 		const nodes = nodeStore();
 		const oldRequest = Promise.withResolvers<FileTreeResponse>();

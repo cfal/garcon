@@ -21,6 +21,24 @@ describe('FileMentionMenu', () => {
 		vi.mocked(getFileList).mockReset();
 	});
 
+	it('refetches after a same-node replacement and discards old-instance results', async () => {
+		const stale = deferred<Awaited<ReturnType<typeof getFileList>>>();
+		vi.mocked(getFileList).mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
+			{ name: 'current.txt', path: '/repo/current.txt', relativePath: 'current.txt' },
+		]);
+		const view = render(FileMentionMenuTestHost, {
+			projectPath: '/repo', nodeContextKey: 'old', isVisible: true, query: '', onSelect: vi.fn(), onClose: vi.fn(),
+		});
+		await waitFor(() => expect(getFileList).toHaveBeenCalledOnce());
+		const signal = vi.mocked(getFileList).mock.calls[0][1]?.signal;
+		await view.rerender({ nodeContextKey: 'new' });
+		expect(await screen.findByText('current.txt')).toBeTruthy();
+		expect(signal?.aborted).toBe(true);
+		stale.resolve([{ name: 'old.txt', path: '/repo/old.txt', relativePath: 'old.txt' }]);
+		await tick();
+		expect(screen.queryByText('old.txt')).toBeNull();
+	});
+
 	it('shows project-relative files and excludes directory entries', async () => {
 		vi.mocked(getFileList).mockResolvedValue([
 			{ name: 'src', path: '/repo/src', type: 'directory' },

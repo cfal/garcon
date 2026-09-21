@@ -277,8 +277,9 @@
 	});
 
 	// Debounced path validation reacts to path changes.
+	const validationTargetKey = $derived(`${form.pathContextKey}\u0000${form.trimmedPath}`);
 	$effect(() => {
-		const projectPath = `${form.nodeId}\u0000${form.trimmedPath}`;
+		const projectPath = validationTargetKey;
 		if (projectPath !== expansionProjectPath) {
 			expansionProjectPath = projectPath;
 			snippetExpansion.cancel();
@@ -686,6 +687,7 @@
 
 					{#if form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath}
 						<DirectoryBrowser
+							nodeContextKey={form.pathContextKey}
 							nodeId={form.nodeId}
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}

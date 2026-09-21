@@ -18,6 +18,7 @@
 	const COMMAND_LIST_HEIGHT = 240;
 
 	interface Props {
+		nodeContextKey?: string;
 		nodeId?: string;
 		agent: string;
 		projectPath: string;
@@ -35,6 +36,7 @@
 	}
 
 	let {
+		nodeContextKey = '',
 		nodeId = 'local',
 		agent,
 		projectPath,
@@ -61,7 +63,7 @@
 
 	let fetchedKey = '';
 	let activeLoad: AbortController | null = null;
-	const contextKey = $derived(JSON.stringify([nodeId, agent, chatId, projectPath]));
+	const contextKey = $derived(JSON.stringify([nodeId, nodeContextKey, agent, chatId, projectPath]));
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when the agent/project identity changes.

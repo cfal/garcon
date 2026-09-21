@@ -687,6 +687,7 @@
 	>
 		{#if filesAvailable}
 			<FileMentionMenu
+				nodeContextKey={nodes.pathContextKey(agentState.nodeId)}
 				nodeId={agentState.nodeId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
@@ -918,6 +919,7 @@
 		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
 		     so the upward-opening menu is not cut off. -->
 		<SlashCommandMenu
+			nodeContextKey={nodes.pathContextKey(agentState.nodeId)}
 			bind:this={slashCommandMenu}
 			agent={agentState.agentId}
 			nodeId={agentState.nodeId}

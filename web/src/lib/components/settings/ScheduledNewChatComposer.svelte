@@ -145,6 +145,7 @@
 			</div>
 			{#if startup.localMachine && startup.showBrowser && !startup.isUpdatingPinnedPath}
 				<DirectoryBrowser
+					nodeContextKey={startup.pathContextKey}
 					currentPath={startup.trimmedPath || startup.browseStartPath || startup.projectBasePath}
 					basePath={startup.projectBasePath}
 					onSelect={(path) => {

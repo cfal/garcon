@@ -29,7 +29,7 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	comparisonPreferences: GitComparisonPreferences;
 	createChatBoard?(): ChatBoardController;
 	createTickets?(): TicketsController;
-	executionNodes?: Pick<ExecutionNodesStore, 'filesAvailable'>;
+	executionNodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'pathContextKey'>;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
@@ -44,12 +44,19 @@ export class FilesSurfaceController implements PortableSingletonController {
 		relativePath: string;
 	} | null>(null);
 
-	constructor(private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable'>) {
+	constructor(private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'pathContextKey'>) {
+		let previous: { nodeId: string; key: string } | null = null;
 		$effect(() => {
-			const nodeId = this.#selectedNodeId;
-			if (nodeId === null) return;
+			const nodeId = this.tree.nodeId;
+			const key = this.nodes?.pathContextKey(nodeId) ?? nodeId;
+			const browsingNode = this.browsingNode;
 			const available = this.#filesAvailable(nodeId);
-			untrack(() => this.tree.setNodeAvailable(available));
+			untrack(() => {
+				if (!available) this.tree.setNodeAvailable(false);
+				if (previous?.nodeId === nodeId && previous.key !== key) this.tree.invalidateNodePaths();
+				previous = { nodeId, key };
+				if (browsingNode && available) this.tree.setNodeAvailable(true);
+			});
 		});
 		$effect(() => {
 			const pending = this.#pendingReveal;

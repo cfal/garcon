@@ -103,6 +103,27 @@ describe('ModelCatalogStore', () => {
 		expect(store.getThinkingModes('claude')).toEqual([]);
 	});
 
+	it('invalidates only the replaced node catalog when the browser missed offline', async () => {
+		const store = createModelCatalogStore();
+		const remote = store.forNode(remoteExecutionNode.id);
+		store.reconcileNodes([localExecutionNode, remoteExecutionNode]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'same', label: 'Cached model' }],
+		})])));
+		await store.forceRefresh(); await remote.forceRefresh();
+		const stale = Promise.withResolvers<Response>();
+		vi.mocked(clientApi.apiFetch).mockReturnValueOnce(stale.promise);
+		const loading = remote.forceRefresh();
+		store.reconcileNodes([localExecutionNode, { ...remoteExecutionNode, instanceId: 'replacement' }]);
+		expect(store.isValidated).toBe(true);
+		expect(remote.isValidated).toBe(false);
+		expect(remote.getModels('sample')[0]?.value).toBe('same');
+		stale.resolve(mockResponse(catalogBody([agentEntry('sample', { models: [{ value: 'stale', label: 'Stale' }] })])));
+		await loading;
+		expect(remote.getModels('sample')[0]?.value).toBe('same');
+		expect(createModelCatalogStore().forNode(remoteExecutionNode.id).isValidated).toBe(false);
+	});
+
 	it('invalidates live and uninstantiated persisted node catalogs after global provider changes', async () => {
 		const original = createModelCatalogStore();
 		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {

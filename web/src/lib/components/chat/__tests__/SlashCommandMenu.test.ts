@@ -49,6 +49,22 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('/remote-command')).toBeTruthy();
 	});
 
+	it('refetches for a replacement instance with identical node and project strings', async () => {
+		const stale = deferred<Awaited<ReturnType<typeof getSlashCommands>>>();
+		mockedGetSlashCommands.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
+			{ name: 'current-command', source: 'command' },
+		]);
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps, projectPath: '/repo', nodeContextKey: 'old', isVisible: true, query: '-command', onSelect: vi.fn(), onClose: vi.fn(),
+		});
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledOnce());
+		await view.rerender({ nodeContextKey: 'new' });
+		expect(await screen.findByText('/current-command')).toBeTruthy();
+		stale.resolve([{ name: 'old-command', source: 'command' }]);
+		await tick();
+		expect(screen.queryByText('/old-command')).toBeNull();
+	});
+
 	it('lists the built-in compact command matching the query', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,

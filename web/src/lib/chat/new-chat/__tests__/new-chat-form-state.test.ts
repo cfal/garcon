@@ -298,6 +298,31 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
+	it('updates a selected remote base without resetting the draft and ignores old validation', async () => {
+		executionNodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
+		formState.selectNode(remoteExecutionNode.id);
+		formState.projectPath = '/worker/typed';
+		formState.firstMessage = 'Synthetic preserved prompt';
+		const previous = formState.pathContextKey;
+		const old = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(old.promise)
+			.mockResolvedValueOnce({ valid: false, errorCode: 'outside_base_dir' });
+		formState.validatePath();
+		vi.advanceTimersByTime(300);
+		executionNodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, instanceId: 'replacement', projectBasePath: '/narrow' }]);
+		expect(formState.pathContextKey).not.toBe(previous);
+		expect(formState.projectBasePath).toBe('/narrow');
+		expect(formState.projectPath).toBe('/worker/typed');
+		expect(formState.firstMessage).toBe('Synthetic preserved prompt');
+		old.resolve({ valid: true });
+		await Promise.resolve();
+		expect(formState.validationStatus).not.toBe('valid');
+		formState.validatePath();
+		await vi.advanceTimersByTimeAsync(300);
+		expect(formState.validationStatus).toBe('invalid');
+		formState.dispose();
+	});
+
 	it('uses remote project preferences without invoking local browse or worktree IO', async () => {
 		const nodeId = '22222222-2222-4222-8222-222222222222';
 		mockRemoteSettings.snapshot = makeSnapshot({

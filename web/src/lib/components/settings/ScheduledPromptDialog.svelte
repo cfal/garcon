@@ -51,6 +51,7 @@
 
 	let form = $state(createForm());
 	const modelCatalog = $derived(rootModelCatalog.forNode(form.startup.nodeId));
+	const pathContextKey = $derived(form.startup.pathContextKey);
 	function selectableAgentsForNode(nodeId: string) {
 		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
@@ -87,6 +88,7 @@
 		const activeForm = form;
 		if (!open || activeForm.targetType !== 'new-chat') return;
 		void activeForm.startup.trimmedPath;
+		void pathContextKey;
 		untrack(() => activeForm.startup.validatePath());
 	});
 

@@ -15,6 +15,7 @@
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface DirectoryBrowserProps {
+		nodeContextKey?: string;
 		nodeId?: string;
 		currentPath: string;
 		/** Confines browsing to this subtree. */
@@ -25,6 +26,7 @@
 	}
 
 	let {
+		nodeContextKey = '',
 		nodeId = 'local',
 		currentPath,
 		basePath,
@@ -91,6 +93,7 @@
 	// Fetch directory contents whenever browsePath changes.
 	$effect(() => {
 		const path = browsePath;
+		void nodeContextKey;
 		if (!path) return;
 
 		loading = true;

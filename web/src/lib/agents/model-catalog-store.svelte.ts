@@ -492,7 +492,7 @@ export class ModelCatalogStore {
 			this.catalogs.delete(id);
 		}
 		for (const node of nodes) {
-			const availability = `${node.enabled}:${node.availability}`;
+			const availability = JSON.stringify([node.enabled, node.availability, node.instanceId]);
 			const previous = this.#nodeAvailability.get(node.id);
 			if (previous !== undefined && availability !== previous) {
 				if (node.id === 'local') {

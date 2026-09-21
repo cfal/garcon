@@ -118,6 +118,29 @@ describe('FileTreeStore', () => {
 		);
 	});
 
+	it('preserves the chat-project target when a replacement interrupts child navigation', async () => {
+		const pending = Promise.withResolvers<FileTreeResponse>();
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project'))
+			.mockReturnValueOnce(pending.promise)
+			.mockResolvedValueOnce(response('/workspace/project/src'))
+			.mockResolvedValueOnce(response('/workspace/project'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		const navigation = store.enterDirectory(entry('src', 'directory'));
+		store.invalidateNodePaths();
+		await tick();
+		expect(store.currentDirectoryPath).toBe('/workspace/project/src');
+		expect(store.isAtChatProject).toBe(false);
+		await store.goToChatProject();
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(store.isAtChatProject).toBe(true);
+		pending.resolve(response('/workspace/project/src'));
+		await navigation;
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+	});
+
 	it('captures the chat-project anchor when returning after the initial load fails', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockRejectedValueOnce(new Error('Initial directory unavailable'))

@@ -65,7 +65,7 @@ export class NewChatFormState {
 	projectPath = $state('');
 	pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
-	projectBasePath = $state('/');
+	#localProjectBasePath = $state('/');
 
 	// Path validation
 	validationStatus = $state<PathValidationStatus>('idle');
@@ -132,6 +132,12 @@ export class NewChatFormState {
 	get localMachine(): boolean {
 		return this.nodeId === 'local';
 	}
+	get projectBasePath(): string {
+		return this.localMachine ? this.#localProjectBasePath : (this.#options.executionNodes?.get(this.nodeId)?.projectBasePath ?? '');
+	}
+	get pathContextKey(): string {
+		return this.#options.executionNodes?.pathContextKey(this.nodeId) ?? this.nodeId;
+	}
 	get filesAvailable(): boolean {
 		return this.#options.executionNodes?.filesAvailable(this.nodeId) ?? this.localMachine;
 	}
@@ -156,9 +162,7 @@ export class NewChatFormState {
 		this.#selectedModelTargetsByAgent = {};
 		const snapshot = this.#remoteSettings.snapshot;
 		const preferences = snapshot?.paths.byNode?.[nodeId];
-		this.projectBasePath = this.localMachine
-			? (snapshot?.projectBasePath ?? '')
-			: (this.#options.executionNodes?.get(nodeId)?.projectBasePath ?? '');
+		this.#localProjectBasePath = snapshot?.projectBasePath ?? '';
 		this.pinnedProjectPaths = this.localMachine
 			? (snapshot?.paths.pinnedProjectPaths ?? [])
 			: [...(preferences?.pinnedPaths ?? [])];
@@ -575,6 +579,7 @@ export class NewChatFormState {
 	validatePath(): void {
 		const path = this.trimmedPath;
 		const nodeId = this.nodeId;
+		const contextKey = this.pathContextKey;
 		if (!path) {
 			this.#clearValidation();
 			return;
@@ -591,7 +596,7 @@ export class NewChatFormState {
 		this.#validationTimer = setTimeout(async () => {
 			try {
 				const data = await validateStart(path, { nodeId });
-				if (requestVersion !== this.#validationRequestVersion) return;
+				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey) return;
 				if (data.valid) {
 					this.validationStatus = 'valid';
 					this.validationError = null;
@@ -604,7 +609,7 @@ export class NewChatFormState {
 					this.preambles.invalidatePreview();
 				}
 			} catch (err) {
-				if (requestVersion !== this.#validationRequestVersion) return;
+				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey) return;
 				this.validationStatus = 'invalid';
 				this.validationError =
 					err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
@@ -828,7 +833,7 @@ export class NewChatFormState {
 	}
 
 	#applySettings(snap: RemoteSettingsSnapshot): void {
-		this.projectBasePath = snap.projectBasePath;
+		this.#localProjectBasePath = snap.projectBasePath;
 		this.#executionDefaults = snap.executionDefaults;
 		this.#startupRecents = snap.recentAgentSettings;
 		this.#seedAgentSettings(snap.executionDefaults);

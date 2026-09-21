@@ -3,6 +3,7 @@ import { browseDirectory } from '$lib/api/files.js';
 interface ProjectPathCompletionTarget {
 	readonly nodeId: string;
 	readonly filesAvailable: boolean;
+	readonly pathContextKey?: string;
 	projectPath: string;
 	showBrowser: boolean;
 }
@@ -11,6 +12,7 @@ export class ProjectPathCompletionController {
 	#matches: string[] = [];
 	#index = 0;
 	#generation = 0;
+	#contextKey: string | undefined;
 
 	constructor(private readonly target: ProjectPathCompletionTarget) {}
 
@@ -21,7 +23,11 @@ export class ProjectPathCompletionController {
 	}
 
 	async complete(): Promise<void> {
-		const { nodeId, projectPath: raw, filesAvailable } = this.target;
+		const { nodeId, projectPath: raw, filesAvailable, pathContextKey } = this.target;
+		if (this.#contextKey !== pathContextKey) {
+			this.reset();
+			this.#contextKey = pathContextKey;
+		}
 		if (!filesAvailable || !raw) return;
 		if (this.#matches.length > 1) {
 			this.#index = (this.#index + 1) % this.#matches.length;
@@ -37,6 +43,7 @@ export class ProjectPathCompletionController {
 			const entries = await browseDirectory(parentDir, undefined, nodeId);
 			if (
 				this.#generation !== generation ||
+				this.target.pathContextKey !== pathContextKey ||
 				this.target.nodeId !== nodeId ||
 				!this.target.filesAvailable ||
 				this.target.projectPath !== raw

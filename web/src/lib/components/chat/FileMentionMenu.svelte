@@ -10,6 +10,7 @@
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	interface Props {
+		nodeContextKey?: string;
 		nodeId?: string;
 		projectPath: string;
 		isVisible: boolean;
@@ -22,6 +23,7 @@
 	}
 
 	let {
+		nodeContextKey = '',
 		nodeId = 'local',
 		projectPath,
 		isVisible,
@@ -48,7 +50,7 @@
 	// Re-fetches when projectPath changes.
 	$effect(() => {
 		if (!projectPath || !isVisible) return;
-		const targetKey = JSON.stringify([nodeId, projectPath]);
+		const targetKey = JSON.stringify([nodeId, nodeContextKey, projectPath]);
 		if (fetchedForProject === targetKey) return;
 		allFiles = [];
 		fetchedForProject = '';
