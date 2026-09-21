@@ -653,8 +653,8 @@
 			class={cn(
 				'pointer-events-none absolute overflow-visible',
 				composerPlacement && !isMobile ? 'inset-x-0 bottom-0' : 'inset-0',
-				composerHasLeftSeparator && 'ml-3',
-				composerHasRightSeparator && 'mr-3',
+				composerHasLeftSeparator && 'any-pointer-coarse:ml-3',
+				composerHasRightSeparator && 'any-pointer-coarse:mr-3',
 			)}
 			style:top={composerPlacement && !isMobile ? `${liveChatBodyTopPx}px` : undefined}
 			data-workspace-live-chat-body

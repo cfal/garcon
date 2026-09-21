@@ -1,8 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Locator, Page } from 'playwright';
-import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import { chromium, type Locator, type Page } from 'playwright';
+import {
+  closeChromiumBrowser,
+  withChromiumFixture,
+  type ChromiumFixture,
+} from '../../support/chromium-fixture.js';
 import {
   canonicalFilesWindowId,
   clickWorkspaceWindowAddAction,
@@ -12,6 +16,8 @@ import {
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
 const TWO_TRUNCATED_CLOSABLE_TABS_WIDTH = 178;
 const MAX_DROP_ZONE_NUDGE_PASSES = 3;
+const HYBRID_POINTER_BLINK_SETTINGS =
+  '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=6';
 
 function conversationPanel(page: Page, windowId: string): Locator {
   return page.locator(
@@ -644,40 +650,122 @@ async function nudgePointerUntilVisible(
   );
 }
 
-async function verifyCanonicalSeparatorClearance(
+async function verifyChatFilesSeparatorGeometry(
   page: Page,
   chatWindowId: string,
   filesWindowId: string,
+  pointerMode: 'fine-only' | 'hybrid',
 ): Promise<void> {
   const resizeHitArea = page
     .getByRole('separator', { name: 'Resize windows' })
     .first()
     .locator('[data-workspace-window-resize-hit-area]');
   const chatContent = page.locator(`[data-workspace-window-content="${chatWindowId}"]`);
+  const filesContent = page.locator(`[data-workspace-window-content="${filesWindowId}"]`);
   const composerBody = page.locator('[data-workspace-live-chat-body]');
+  const fileViewport = page.locator(
+    `[data-workspace-window-id="${filesWindowId}"] [data-file-tree-grid]`,
+  );
   const disclosure = page
     .locator(`[data-workspace-window-id="${filesWindowId}"] button.file-tree-disclosure-slot`)
     .first();
   await disclosure.waitFor({ state: 'visible' });
-  const [hitAreaBox, chatContentBox, composerBodyBox, disclosureBox] = await Promise.all([
-    resizeHitArea.boundingBox(),
-    chatContent.boundingBox(),
-    composerBody.boundingBox(),
-    disclosure.boundingBox(),
-  ]);
-  if (!hitAreaBox || !chatContentBox || !composerBodyBox || !disclosureBox) {
-    throw new Error('Missing canonical separator clearance geometry.');
+  const [hitAreaBox, chatContentBox, filesContentBox, composerBodyBox, disclosureBox] =
+    await Promise.all([
+      resizeHitArea.boundingBox(),
+      chatContent.boundingBox(),
+      filesContent.boundingBox(),
+      composerBody.boundingBox(),
+      disclosure.boundingBox(),
+    ]);
+  if (!hitAreaBox || !chatContentBox || !filesContentBox || !composerBodyBox || !disclosureBox) {
+    throw new Error('Missing Chat/Files separator geometry.');
   }
 
-  expect(hitAreaBox.width).toBeGreaterThanOrEqual(24);
-  expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatContentBox.x + chatContentBox.width);
-  expect(hitAreaBox.x + hitAreaBox.width).toBeLessThan(disclosureBox.x);
+  const chatContentRight = chatContentBox.x + chatContentBox.width;
+  const hitAreaRight = hitAreaBox.x + hitAreaBox.width;
+  if (pointerMode === 'fine-only') {
+    expect(Math.abs(chatContentRight - filesContentBox.x)).toBeLessThanOrEqual(1);
+    expect(hitAreaBox.width).toBeLessThanOrEqual(6);
+    expect(hitAreaBox.x).toBeLessThan(chatContentRight);
+    expect(hitAreaRight).toBeGreaterThan(chatContentRight);
+  } else {
+    expect(Math.abs(filesContentBox.x - chatContentRight - 24)).toBeLessThanOrEqual(1);
+    expect(hitAreaBox.width).toBeGreaterThanOrEqual(24);
+    expect(Math.abs(hitAreaBox.x - chatContentRight)).toBeLessThanOrEqual(1);
+    expect(Math.abs(hitAreaRight - filesContentBox.x)).toBeLessThanOrEqual(1);
+  }
+  expect(hitAreaRight).toBeLessThan(disclosureBox.x);
   expect(Math.abs(composerBodyBox.x - chatContentBox.x)).toBeLessThanOrEqual(1);
   expect(
-    Math.abs(
-      composerBodyBox.x + composerBodyBox.width - (chatContentBox.x + chatContentBox.width),
-    ),
+    Math.abs(composerBodyBox.x + composerBodyBox.width - chatContentRight),
   ).toBeLessThanOrEqual(1);
+  expect(
+    await fileViewport.evaluate(
+      (element) => getComputedStyle(element, '::-webkit-scrollbar').width,
+    ),
+  ).toBe('12px');
+}
+
+async function verifyChatScrollbarDragDoesNotResizePartition(
+  page: Page,
+  chatWindowId: string,
+): Promise<void> {
+  const chatWindow = page.locator(`[data-workspace-window-id="${chatWindowId}"]`);
+  const feedContent = chatWindow.locator('[data-chat-feed-content]');
+  const viewportSelector =
+    `[data-workspace-window-id="${chatWindowId}"] [data-chat-scroll-viewport]`;
+  const viewport = page.locator(viewportSelector);
+  const scrollbar = chatWindow.locator('[data-chat-feed-scrollbar]');
+  const thumb = scrollbar.locator('[data-slot="scroll-area-thumb"]');
+  const separator = page.getByRole('separator', { name: 'Resize windows' }).first();
+  const resizeHitArea = separator.locator('[data-workspace-window-resize-hit-area]');
+  const initialSeparatorRatio = await separator.getAttribute('aria-valuenow');
+
+  await feedContent.evaluate((element) => {
+    element.style.minHeight = '2000px';
+  });
+  try {
+    await thumb.waitFor({ state: 'visible' });
+    // The wheel gesture unpins the feed before the test fixes the exact starting offset.
+    await viewport.hover();
+    await page.mouse.wheel(0, -100_000);
+    await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
+    await page.waitForFunction(
+      (selector) => document.querySelector<HTMLElement>(selector)?.scrollTop === 0,
+      viewportSelector,
+    );
+    const initialViewportOffset = await viewport.evaluate((element) => element.scrollTop);
+    const [thumbBox, hitAreaBox] = await Promise.all([
+      thumb.boundingBox(),
+      resizeHitArea.boundingBox(),
+    ]);
+    if (!thumbBox || !hitAreaBox || !initialSeparatorRatio) {
+      throw new Error('Missing scrollbar drag geometry.');
+    }
+    expect(thumbBox.x + thumbBox.width).toBeLessThanOrEqual(hitAreaBox.x + 1);
+
+    const x = thumbBox.x + thumbBox.width / 2;
+    const y = thumbBox.y + thumbBox.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 80, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction(
+      ({ selector, previousOffset }) =>
+        (document.querySelector<HTMLElement>(selector)?.scrollTop ?? 0) > previousOffset,
+      {
+        selector: viewportSelector,
+        previousOffset: initialViewportOffset,
+      },
+    );
+    expect(await separator.getAttribute('aria-valuenow')).toBe(initialSeparatorRatio);
+  } finally {
+    await feedContent.evaluate((element) => {
+      element.style.removeProperty('min-height');
+    });
+    await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
+  }
 }
 
 function chatDropLabel(target: ChatDropTarget): string {
@@ -1159,8 +1247,13 @@ describe('Chromium workspace windows', () => {
         .getAttribute('data-workspace-window-id');
       if (!chatWindowId) throw new Error('Missing initial Chat window.');
       const filesWindowId = await canonicalFilesWindowId(fixture.page);
-      markPhase('verifying canonical separator clearance');
-      await verifyCanonicalSeparatorClearance(fixture.page, chatWindowId, filesWindowId);
+      markPhase('verifying canonical separator geometry');
+      await verifyChatFilesSeparatorGeometry(
+        fixture.page,
+        chatWindowId,
+        filesWindowId,
+        'fine-only',
+      );
       expect(await fixture.page.locator('[data-workspace-window-focus-ring]').count()).toBe(0);
       expect(
         await fixture.page
@@ -1457,6 +1550,58 @@ describe('Chromium workspace windows', () => {
 
       fixture.assertNoBrowserErrors();
     });
+  });
+
+  test('protects split scrollbars on hybrid-pointer desktops', async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      args: [HYBRID_POINTER_BLINK_SETTINGS],
+    });
+    try {
+      await withChromiumFixture(
+        'workspace-window-hybrid-pointer-resize',
+        async (fixture, markPhase) => {
+          await fixture.page.setViewportSize({ width: 1440, height: 900 });
+          await mkdir(join(fixture.integration.dirs.project, 'src'));
+          await writeFile(
+            join(fixture.integration.dirs.project, 'src', 'workspace.ts'),
+            'export const workspace = true;\n',
+            'utf8',
+          );
+          const chatId = await createChat(fixture, 'workspace-window-hybrid-pointer');
+          await openChat(fixture, chatId);
+          const chatWindowId = await fixture.page
+            .locator('[data-workspace-window-current="true"]')
+            .getAttribute('data-workspace-window-id');
+          if (!chatWindowId) throw new Error('Missing hybrid-pointer Chat window.');
+          const filesWindowId = await canonicalFilesWindowId(fixture.page);
+
+          markPhase('verifying hybrid pointer capabilities');
+          expect(
+            await fixture.page.evaluate(() => ({
+              primaryFine: matchMedia('(pointer: fine)').matches,
+              availableFine: matchMedia('(any-pointer: fine)').matches,
+              availableCoarse: matchMedia('(any-pointer: coarse)').matches,
+            })),
+          ).toEqual({ primaryFine: true, availableFine: true, availableCoarse: true });
+
+          markPhase('verifying protected separator and scrollbar drag');
+          await verifyChatFilesSeparatorGeometry(
+            fixture.page,
+            chatWindowId,
+            filesWindowId,
+            'hybrid',
+          );
+          await verifyChatScrollbarDragDoesNotResizePartition(fixture.page, chatWindowId);
+          fixture.assertNoBrowserErrors();
+        },
+        undefined,
+        {},
+        browser,
+      );
+    } finally {
+      await closeChromiumBrowser(browser);
+    }
   });
 
   test('closes all other windows from the menu and persists the kept window', async () => {

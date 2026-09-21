@@ -44,11 +44,34 @@ describe('WorkspaceWindowResizer', () => {
 	});
 
 	it.each([
-		['horizontal', 'w-px', 'inset-y-0', '40px', 'w-6'],
-		['vertical', 'h-px', 'inset-x-0', '', 'h-6'],
+		{
+			direction: 'horizontal',
+			lineClasses: ['w-px', 'inset-y-0'],
+			top: '40px',
+			hitAreaClasses: [
+				'w-6',
+				'pointer-fine:inset-x-0',
+				'pointer-fine:w-auto',
+				'any-pointer-coarse:-left-2.5',
+				'any-pointer-coarse:right-auto',
+				'any-pointer-coarse:w-6',
+			],
+		},
+		{
+			direction: 'vertical',
+			lineClasses: ['h-px', 'inset-x-0'],
+			top: '',
+			hitAreaClasses: [
+				'h-6',
+				'pointer-fine:inset-y-0',
+				'pointer-fine:h-auto',
+				'any-pointer-coarse:top-auto',
+				'any-pointer-coarse:h-6',
+			],
+		},
 	] as const)(
-		'renders a one-pixel %s window separator',
-		(direction, thickness, span, top, hitAreaSize) => {
+		'renders a one-pixel $direction separator with modality-aware hit targets',
+		({ direction, lineClasses, top, hitAreaClasses }) => {
 			const { container } = renderResizer(direction);
 			const line = container.querySelector('[data-workspace-window-separator-line]')!;
 			const target = container.querySelector<HTMLElement>(
@@ -56,12 +79,15 @@ describe('WorkspaceWindowResizer', () => {
 			)!;
 
 			expect(line.classList.contains('bg-border')).toBe(true);
-			expect(line.classList.contains(thickness)).toBe(true);
-			expect(line.classList.contains(span)).toBe(true);
+			for (const className of lineClasses) {
+				expect(line.classList.contains(className)).toBe(true);
+			}
 			expect(target.classList.contains('pointer-events-auto')).toBe(true);
 			expect(target.style.top).toBe(top);
 			expect(target.classList.contains('bottom-0')).toBe(true);
-			expect(target.classList.contains(hitAreaSize)).toBe(true);
+			for (const className of hitAreaClasses) {
+				expect(target.classList.contains(className)).toBe(true);
+			}
 		},
 	);
 

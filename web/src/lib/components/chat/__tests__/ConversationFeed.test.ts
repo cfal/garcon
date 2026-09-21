@@ -275,6 +275,21 @@ describe('ConversationFeed', () => {
 		}
 	});
 
+	it('widens the draggable scrollbar for fine pointers', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				transcriptScenario: 'twenty-thousand',
+			});
+			const { scrollbar } = await showFeedScrollbar(container);
+
+			expect(scrollbar.classList.contains('w-1.5')).toBe(true);
+			expect(scrollbar.classList.contains('pointer-fine:w-3')).toBe(true);
+		} finally {
+			restoreResizeObserver();
+		}
+	});
+
 	it('reports an immediate scrollbar track jump from its committed offset', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		let feedViewport: HTMLElement | null = null;

@@ -7,6 +7,16 @@
 
 	// Pixel step applied per arrow-key press when resizing via keyboard.
 	const KEYBOARD_RESIZE_STEP = 24;
+	const HORIZONTAL_RESIZE_HIT_AREA_CLASS = cn(
+		'-left-2.5 bottom-0 w-6',
+		'pointer-fine:inset-x-0 pointer-fine:w-auto',
+		'any-pointer-coarse:-left-2.5 any-pointer-coarse:right-auto any-pointer-coarse:w-6',
+	);
+	const VERTICAL_RESIZE_HIT_AREA_CLASS = cn(
+		'inset-x-0 bottom-0 h-6',
+		'pointer-fine:inset-y-0 pointer-fine:h-auto',
+		'any-pointer-coarse:top-auto any-pointer-coarse:h-6',
+	);
 
 	interface WorkspaceWindowResizerProps {
 		direction: WorkspacePartitionDirection;
@@ -169,13 +179,13 @@
 				: 'inset-x-0 top-1/2 h-px -translate-y-1/2',
 		)}
 	></div>
-	<!-- The vertical target stays inside the content gutters reserved by adjacent windows. -->
+	<!-- Devices with coarse input retain a protected touch target, including touchscreen laptops. -->
 	<div
 		data-workspace-window-resize-hit-area
 		class={cn(
 			'absolute z-10',
 			disabled ? 'pointer-events-none' : 'pointer-events-auto',
-			isHorizontal ? '-left-2.5 bottom-0 w-6' : 'inset-x-0 bottom-0 h-6',
+			isHorizontal ? HORIZONTAL_RESIZE_HIT_AREA_CLASS : VERTICAL_RESIZE_HIT_AREA_CLASS,
 		)}
 		style:top={isHorizontal ? `${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px` : undefined}
 	></div>

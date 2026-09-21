@@ -544,7 +544,7 @@
 	</ScrollAreaPrimitive.Viewport>
 	<Scrollbar
 		orientation="vertical"
-		class={cn('w-1.5', isPreparingInitialScroll && 'invisible')}
+		class={cn('w-1.5 pointer-fine:w-3', isPreparingInitialScroll && 'invisible')}
 		data-chat-feed-scrollbar
 		onpointerdowncapture={handleScrollbarPointerDownCapture}
 		onwheel={handleScrollbarWheel}

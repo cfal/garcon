@@ -209,4 +209,15 @@
 		height: var(--file-tree-entry-icon-size);
 		width: var(--file-tree-entry-icon-size);
 	}
+
+	@media (pointer: fine) {
+		.file-tree-virtual-grid {
+			scrollbar-width: auto;
+		}
+
+		.file-tree-virtual-grid::-webkit-scrollbar {
+			width: 0.75rem;
+			height: 0.75rem;
+		}
+	}
 </style>

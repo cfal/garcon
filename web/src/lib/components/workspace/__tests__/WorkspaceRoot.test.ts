@@ -526,7 +526,7 @@ describe('WorkspaceRoot', () => {
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 	});
 
-	it('reserves content gutters only beside vertical separators', () => {
+	it('keeps fine-pointer content flush while reserving coarse-pointer separator gutters', () => {
 		const { layout } = installContext();
 		layout.publish(
 			layout.revision,
@@ -552,14 +552,20 @@ describe('WorkspaceRoot', () => {
 		const edgeContent = contentFor('window-edge');
 		const composerBody = container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')!;
 
-		expect(chatContent.classList.contains('ml-3')).toBe(false);
-		expect(chatContent.classList.contains('mr-3')).toBe(true);
-		expect(composerBody.classList.contains('ml-3')).toBe(false);
-		expect(composerBody.classList.contains('mr-3')).toBe(true);
-		expect(filesContent.classList.contains('ml-3')).toBe(true);
-		expect(filesContent.classList.contains('mr-3')).toBe(true);
-		expect(edgeContent.classList.contains('ml-3')).toBe(true);
-		expect(edgeContent.classList.contains('mr-3')).toBe(false);
+		function expectGutters(
+			element: HTMLElement,
+			expected: { left: boolean; right: boolean },
+		): void {
+			expect(element.classList.contains('ml-3')).toBe(false);
+			expect(element.classList.contains('mr-3')).toBe(false);
+			expect(element.classList.contains('any-pointer-coarse:ml-3')).toBe(expected.left);
+			expect(element.classList.contains('any-pointer-coarse:mr-3')).toBe(expected.right);
+		}
+
+		expectGutters(chatContent, { left: false, right: true });
+		expectGutters(composerBody, { left: false, right: true });
+		expectGutters(filesContent, { left: true, right: true });
+		expectGutters(edgeContent, { left: true, right: false });
 	});
 
 	it('renders a draft conversation panel without requesting a server transcript', async () => {

@@ -281,8 +281,8 @@
 	<div
 		class={cn(
 			'relative min-h-0 flex-1 overflow-hidden',
-			hasLeftSeparator && 'ml-3',
-			hasRightSeparator && 'mr-3',
+			hasLeftSeparator && 'any-pointer-coarse:ml-3',
+			hasRightSeparator && 'any-pointer-coarse:mr-3',
 		)}
 		data-workspace-window-content={workspaceWindow.id}
 	>
