@@ -85,6 +85,7 @@
 	const remoteSettings = getRemoteSettings();
 	const ticketSourceNavigation = getTicketSourceNavigation();
 	const projectState = $derived(workspaceContext.projectState);
+	const filesProjectState = $derived(workspaceContext.filesProjectState);
 </script>
 
 <svelte:boundary>
@@ -133,7 +134,7 @@
 		{#await filesRenderer()}
 			{@const controller = singletonSurfaces.files()}
 			<ProjectSurfaceGate
-				{projectState}
+				projectState={filesProjectState}
 				target={workspaceContext.currentTarget}
 				retainedProjectPath={controller.tree.projectPath}
 				retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
@@ -146,7 +147,7 @@
 		{:then FilesPanel}
 			<FilesPanel
 				{presentation}
-				{projectState}
+				projectState={filesProjectState}
 				target={workspaceContext.currentTarget}
 				{onChooseProjectFolder}
 			/>

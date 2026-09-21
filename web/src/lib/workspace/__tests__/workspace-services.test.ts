@@ -47,6 +47,7 @@ vi.mock('$lib/api/files.js', async (importOriginal) => {
 			}) => ({
 				success: true as const,
 				identity: {
+					nodeId: 'local',
 					canonicalFileRootPath: projectPath ?? '/workspace',
 					normalizedRelativePath: relativePath,
 				},
@@ -163,6 +164,7 @@ describe('createWorkspaceServices', () => {
 			await services.files.initializeRecovery('test-user');
 			const location: FileLocation = {
 				key: '["/workspace","first.md"]',
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: 'first.md',
 				displayPath: 'first.md',
@@ -203,7 +205,7 @@ describe('createWorkspaceServices', () => {
 			const assembled = assembleWorkspaceServices(rootLocalSettings);
 			services = assembled.services;
 			const session = new FileSession(
-				{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+				{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 				'command-copy',
 			);
 			vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -238,7 +240,7 @@ describe('createWorkspaceServices', () => {
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
 		const session = new FileSession(
-			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-chat',
 		);
 		vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -282,6 +284,7 @@ describe('createWorkspaceServices', () => {
 		expect(services.commands.isEnabled('file.navigate-forward')).toBe(false);
 		const location: FileLocation = {
 			key: 'first',
+			nodeId: 'local',
 			canonicalFileRootPath: '/workspace',
 			normalizedRelativePath: 'first.ts',
 			displayPath: 'first.ts',
@@ -308,7 +311,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-reveal',
 		);
 		vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -324,14 +327,14 @@ describe('createWorkspaceServices', () => {
 		attached.resolve();
 		await pending;
 		expect(controller.tree.readyResponse).toBeNull();
-		expect(reveal).toHaveBeenCalledWith('/workspace', 'file.ts');
+		expect(reveal).toHaveBeenCalledWith('/workspace', 'file.ts', 'local');
 	});
 
 	it('opens a side view from the command context window', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-side',
 		);
 		vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -349,7 +352,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-save',
 		);
 		session.rendererMode = 'code';
@@ -387,7 +390,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.txt' },
+			{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.txt' },
 			'command-editor',
 		);
 		session.content = 'local text';

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { getExecutionNodes } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -37,12 +38,18 @@
 	}: SidebarProjectPathDialogProps = $props();
 
 	const projectPathDialogState = new ProjectPathDialogState();
+	const nodes = getExecutionNodes();
+	const filesAvailable = $derived(nodes.filesAvailable(projectPathDialogState.nodeId));
 	let activeDialogKey = $state('');
 	let pathInputRef = $state<HTMLInputElement | null>(null);
 	let isUpdatingPinnedProjectPath = $state(false);
 
 	let isOpen = $derived(projectPathDialog !== null);
-	let activeProjectBasePath = $derived(projectBasePath || '/');
+	let activeProjectBasePath = $derived(
+		projectPathDialogState.nodeId === 'local'
+			? projectBasePath || '/'
+			: (nodes.get(projectPathDialogState.nodeId)?.projectBasePath ?? ''),
+	);
 	let validationMessage = $derived(
 		projectPathDialogState.submitError ?? projectPathDialogState.validationError,
 	);
@@ -67,7 +74,11 @@
 			return;
 		}
 
-		const nextDialogKey = JSON.stringify([projectPathDialog.chatId, projectPathDialog.nodeId, projectPathDialog.currentProjectPath]);
+		const nextDialogKey = JSON.stringify([
+			projectPathDialog.chatId,
+			projectPathDialog.nodeId,
+			projectPathDialog.currentProjectPath,
+		]);
 		if (activeDialogKey === nextDialogKey) return;
 
 		activeDialogKey = nextDialogKey;
@@ -154,9 +165,7 @@
 			onOpenAutoFocus={handleOpenAutoFocus}
 		>
 			<div class="flex h-full min-w-0 max-w-full flex-col sm:h-auto">
-				<Dialog.Header
-					class="min-w-0 max-w-full overflow-hidden border-b border-border px-5 py-4"
-				>
+				<Dialog.Header class="min-w-0 max-w-full overflow-hidden border-b border-border px-5 py-4">
 					<Dialog.Title>{m.sidebar_project_path_title()}</Dialog.Title>
 					<Dialog.Description class="block w-full min-w-0 max-w-full truncate">
 						{projectPathDialog?.chatTitle || m.sidebar_chats_unnamed()}
@@ -227,7 +236,9 @@
 									type="button"
 									variant="outline"
 									size="icon"
-									disabled={projectPathDialogState.nodeId !== 'local' || projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
+									disabled={!filesAvailable ||
+										projectPathDialogState.isSubmitting ||
+										isUpdatingPinnedProjectPath}
 									onclick={() => {
 										projectPathDialogState.showBrowser = true;
 									}}
@@ -238,8 +249,9 @@
 								</Button>
 							</div>
 
-							{#if projectPathDialogState.nodeId === 'local' && projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
+							{#if filesAvailable && projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
 								<DirectoryBrowser
+									nodeId={projectPathDialogState.nodeId}
 									currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
 									basePath={activeProjectBasePath}
 									onSelect={(path) => {

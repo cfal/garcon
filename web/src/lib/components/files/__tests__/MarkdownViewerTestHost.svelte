@@ -56,6 +56,7 @@
 		resolveFileIdentity: async ({ relativePath }) => ({
 			success: true,
 			identity: {
+				nodeId: 'local',
 				canonicalFileRootPath: session.canonicalFileRootPath,
 				normalizedRelativePath: relativePath,
 			},

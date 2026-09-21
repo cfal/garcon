@@ -1,4 +1,5 @@
 import { getTree } from '$lib/api/files.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import { ApiError } from '$lib/api/client.js';
 import { buildVisibleFileRows, filterFileRows } from './file-tree-rows.js';
 import { FILE_TREE_PARENT_ROW_KEY } from './file-tree-render-rows.js';
@@ -188,6 +189,10 @@ export function resizeVisibleFileTreeColumnBoundary(
 }
 
 export class FileTreeStore {
+	#nodeId = $state('local');
+	get nodeId(): string {
+		return this.#nodeId;
+	}
 	navigation = $state.raw<FileTreeNavigationState>({ kind: 'idle' });
 	isRefreshing = $state(false);
 	refreshError = $state.raw<FileTreeNavigationError | null>(null);
@@ -329,12 +334,22 @@ export class FileTreeStore {
 	}
 
 	get knownFiles(): readonly FileTreeEntry[] {
-		return this.#materializedRows.flatMap((row) =>
-			row.entry.type === 'file' ? [row.entry] : [],
-		);
+		return this.#materializedRows.flatMap((row) => (row.entry.type === 'file' ? [row.entry] : []));
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
+		const target =
+			projectState.kind === 'available'
+				? projectState.project
+				: projectState.kind === 'absent'
+					? null
+					: projectState.context;
+		const nodeId = effectiveNodeId(target?.nodeId);
+		if (this.#nodeId !== nodeId) {
+			this.#resetBrowsingState();
+			this.#effectiveProjectKey = '';
+			this.#nodeId = nodeId;
+		}
 		if (projectState.kind === 'absent') {
 			this.#projectRequestsAllowed = false;
 			this.#projectPath = null;
@@ -480,7 +495,9 @@ export class FileTreeStore {
 			reason: 'reveal-file',
 			focusPathOnSuccess: `${directoryPath.replace(/\/$/, '')}/${fileName}`,
 		});
-		return this.readyResponse?.entries.some((entry) => entry.relativePath === relativePath) ?? false;
+		return (
+			this.readyResponse?.entries.some((entry) => entry.relativePath === relativePath) ?? false
+		);
 	}
 
 	async retryNavigation(): Promise<void> {
@@ -510,7 +527,10 @@ export class FileTreeStore {
 		this.isRefreshing = true;
 		this.refreshError = null;
 		try {
-			const refreshed = await getTree({ directoryPath }, { signal: controller.signal });
+			const refreshed = await getTree(
+				{ nodeId: this.nodeId, directoryPath },
+				{ signal: controller.signal },
+			);
 			if (
 				controller.signal.aborted ||
 				token !== this.#refreshToken ||
@@ -568,7 +588,10 @@ export class FileTreeStore {
 		errors.delete(path);
 		this.childErrors = errors;
 		try {
-			const response = await getTree({ directoryPath: path }, { signal: controller.signal });
+			const response = await getTree(
+				{ nodeId: this.nodeId, directoryPath: path },
+				{ signal: controller.signal },
+			);
 			if (controller.signal.aborted || this.#childControllers.get(path) !== controller) return;
 			const cache = new Map(this.childrenCache);
 			cache.set(path, response.entries);
@@ -755,7 +778,10 @@ export class FileTreeStore {
 		this.#navigationController = controller;
 		this.navigation = { kind: 'loading', target, previous };
 		try {
-			const response = await getTree({ directoryPath: target.path }, { signal: controller.signal });
+			const response = await getTree(
+				{ nodeId: this.nodeId, directoryPath: target.path },
+				{ signal: controller.signal },
+			);
 			if (controller.signal.aborted || token !== this.#navigationToken) return;
 			this.navigation = { kind: 'ready', response };
 			this.refreshError = null;

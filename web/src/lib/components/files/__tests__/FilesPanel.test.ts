@@ -51,6 +51,7 @@ describe('FilesPanel', () => {
 				userNamespace: 'user',
 				deploymentId: 'deployment',
 				documentId: draftId,
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: 'draft.txt',
 				content: 'local text',
@@ -91,6 +92,7 @@ describe('FilesPanel', () => {
 				);
 				await fireEvent.click(screen.getByRole('button', { name: 'draft.txt' }));
 				expect(open).toHaveBeenLastCalledWith({
+					nodeId: 'local',
 					fileRootPath: '/workspace',
 					relativePath: 'draft.txt',
 					mode: 'code',
@@ -115,6 +117,7 @@ describe('FilesPanel', () => {
 			const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
 				success: true as const,
 				identity: {
+					nodeId: 'local',
 					canonicalFileRootPath: '/workspace',
 					normalizedRelativePath: relativePath,
 				},
@@ -204,6 +207,7 @@ describe('FilesPanel', () => {
 
 			await waitFor(() =>
 				expect(resolveFileIdentity).toHaveBeenCalledWith({
+					nodeId: 'local',
 					projectPath: '/workspace',
 					relativePath: 'sibling-project/file.ts',
 				}),

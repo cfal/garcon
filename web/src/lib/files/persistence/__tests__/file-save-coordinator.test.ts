@@ -6,7 +6,7 @@ import { MAX_FILE_VIEW_BYTES } from '$shared/file-contracts';
 
 function document() {
 	const value = new FileDocumentState(
-		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+		{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 		'file',
 	);
 	value.baseline = 'initial';

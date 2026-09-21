@@ -113,7 +113,7 @@ describe('FileTreeStore', () => {
 		expect(store.fileRootPath).toBe('/workspace');
 		expect(store.isAtChatProject).toBe(true);
 		expect(filesApi.getTree).toHaveBeenCalledWith(
-			{ directoryPath: '/workspace/project' },
+			{ directoryPath: '/workspace/project', nodeId: 'local' },
 			expect.any(Object),
 		);
 	});
@@ -197,6 +197,44 @@ describe('FileTreeStore', () => {
 		expect(store.currentDirectoryPath).toBe('/workspace/project/b');
 	});
 
+	it('discards same-path navigation and child results from the previous node', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const child = Promise.withResolvers<FileTreeResponse>();
+		const refresh = Promise.withResolvers<FileTreeResponse>();
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [entry('src', 'directory')]))
+			.mockReturnValueOnce(child.promise)
+			.mockReturnValueOnce(refresh.promise)
+			.mockResolvedValueOnce(response('/workspace/project', [entry('remote.ts', 'file')]));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.toggleDirectory('/workspace/project/src');
+		const refreshing = store.refresh();
+		store.setProjectState({
+			kind: 'available',
+			project: {
+				nodeId,
+				chatId: 'remote',
+				projectPath: '/workspace/project',
+				effectiveProjectKey: '/workspace/project',
+			},
+		});
+		await tick();
+		child.resolve(response('/workspace/project/src', [entry('local.ts', 'file')]));
+		refresh.resolve(response('/workspace/project', [entry('stale.ts', 'file')]));
+		await refreshing;
+		await tick();
+		expect(store.nodeId).toBe(nodeId);
+		expect(store.rootEntries.map((file) => file.name)).toEqual(['remote.ts']);
+		expect(store.childrenCache.size).toBe(0);
+		expect(filesApi.getTree).toHaveBeenLastCalledWith(
+			{ directoryPath: '/workspace/project', nodeId },
+			expect.anything(),
+		);
+		store.reset();
+	});
+
 	it('retains ready rows while refresh is pending or fails', async () => {
 		let rejectRefresh!: (error: Error) => void;
 		const initial = response('/workspace/project', [entry('old.ts', 'file')]);
@@ -243,7 +281,7 @@ describe('FileTreeStore', () => {
 		expect(store.expandedDirs.has(first.path)).toBe(false);
 		expect(store.expandedDirs.has(second.path)).toBe(true);
 		expect(filesApi.getTree).toHaveBeenLastCalledWith(
-			{ directoryPath: second.path },
+			{ directoryPath: second.path, nodeId: 'local' },
 			expect.any(Object),
 		);
 	});
@@ -380,7 +418,7 @@ describe('FileTreeStore', () => {
 		expect(store.rootEntries[0]?.name).toBe('new.ts');
 		await store.refresh();
 		expect(filesApi.getTree).toHaveBeenLastCalledWith(
-			{ directoryPath: '/workspace/project/packages/app' },
+			{ directoryPath: '/workspace/project/packages/app', nodeId: 'local' },
 			expect.any(Object),
 		);
 	});

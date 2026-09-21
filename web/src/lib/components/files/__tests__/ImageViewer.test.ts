@@ -13,6 +13,7 @@ describe('ImageViewer', () => {
 	it('keeps manual zoom state on the file session across presentation remounts', async () => {
 		const session = new FileSession(
 			{
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'image.png',
 			},
@@ -33,6 +34,7 @@ describe('ImageViewer', () => {
 	it('restores manual viewport offsets across presentation remounts', async () => {
 		const session = new FileSession(
 			{
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'image.png',
 			},
@@ -80,6 +82,7 @@ describe('ImageViewer', () => {
 		vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame));
 		const session = new FileSession(
 			{
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'image.png',
 			},
@@ -111,6 +114,7 @@ describe('ImageViewer', () => {
 		vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame));
 		const session = new FileSession(
 			{
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'image.png',
 			},
@@ -138,6 +142,7 @@ describe('ImageViewer', () => {
 	it('keeps the initial cursor focal point stable through a rapid wheel burst', async () => {
 		const session = new FileSession(
 			{
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'image.png',
 			},
@@ -196,6 +201,7 @@ describe('ImageViewer', () => {
 	it('keeps rendered geometry stable while persisting user scroll', async () => {
 		const session = new FileSession(
 			{
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'image.png',
 			},

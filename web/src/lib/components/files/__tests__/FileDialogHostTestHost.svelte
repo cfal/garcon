@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import { onDestroy, untrack } from 'svelte';
 	import {
 		setAppShell,
@@ -40,6 +42,7 @@
 	const initialRequest = untrack(() => request);
 	const fileSession = new FileSession(
 		{
+			nodeId: 'local',
 			canonicalFileRootPath: '/workspace',
 			normalizedRelativePath: 'assets/image.png',
 		},
@@ -76,6 +79,7 @@
 		initialRequest === 'threshold'
 			? {
 					identity: {
+						nodeId: 'local',
 						canonicalFileRootPath: '/workspace',
 						normalizedRelativePath: 'next.ts',
 					},

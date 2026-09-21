@@ -36,6 +36,7 @@
 		getAppShell,
 		getChatSessions,
 		getFileSessions,
+		getExecutionNodes,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
@@ -73,16 +74,29 @@
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
+	const nodes = getExecutionNodes();
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
 
-	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
 		if (chatContext?.chatId) return chatContext;
 		const selected = sessions.selectedChat;
 		if (!selected?.id) return null;
-		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
+		return {
+			chatId: selected.id,
+			nodeId: selected.nodeId,
+			projectPath: selected.projectPath ?? null,
+		};
 	});
+	const nodeId = $derived(
+		activeChatContext?.nodeId ??
+			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.nodeId : null) ??
+			'local',
+	);
+	const filesAvailable = $derived(nodes.filesAvailable(nodeId));
+	const projectBasePath = $derived(
+		nodeId === 'local' ? appShell.projectBasePath : (nodes.get(nodeId)?.projectBasePath ?? ''),
+	);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 	const isPending = $derived(!terminal && actionable);
@@ -113,13 +127,14 @@
 		if (link.kind !== 'file') return;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
-		if ((chat.nodeId ?? sessions.byId[chat.chatId]?.nodeId ?? 'local') !== 'local') return true;
+		if (!filesAvailable) return true;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
 			fileRootPath: projectBasePath,
 			sourceDirectoryPath: chat.projectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({
+			nodeId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
@@ -289,20 +304,14 @@
 	function respondToAskUserQuestion(outcome: StructuredQuestionOutcome): void {
 		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
-			response: structuredQuestionResponse(
-				askUserQuestionRequest?.questions ?? [],
-				outcome,
-			),
+			response: structuredQuestionResponse(askUserQuestionRequest?.questions ?? [], outcome),
 		});
 	}
 
 	function respondToCursorQuestion(outcome: StructuredQuestionOutcome): void {
 		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
-			response: structuredQuestionResponse(
-				cursorAskQuestionRequest?.questions ?? [],
-				outcome,
-			),
+			response: structuredQuestionResponse(cursorAskQuestionRequest?.questions ?? [], outcome),
 		});
 	}
 

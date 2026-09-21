@@ -90,6 +90,7 @@ export function resolveConfiguredFilePlacement(
 }
 
 export interface WorkspaceRootDependencies {
+	executionNodes?: import('$lib/execution-nodes/execution-nodes-store.svelte.js').ExecutionNodesStore;
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
@@ -165,10 +166,12 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}
 		});
 	});
-	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged((chatId, projectPath, nodeId) => {
-		if (projectPath === null) projectResolution.removeChatTargets(chatId);
-		else projectResolution.markObsoleteChatTargets(chatId, projectPath, nodeId);
-	});
+	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
+		(chatId, projectPath, nodeId) => {
+			if (projectPath === null) projectResolution.removeChatTargets(chatId);
+			else projectResolution.markObsoleteChatTargets(chatId, projectPath, nodeId);
+		},
+	);
 	for (const chat of deps.chatSessions.orderedChats) {
 		if (chat.status !== 'draft') {
 			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath, chat.nodeId);
@@ -178,6 +181,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		deps.chatSessions,
 		deps.modelCatalog,
 		projectResolution,
+		deps.executionNodes,
 	);
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
@@ -347,6 +351,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 
 	const files: FileSessionRegistry = new FileSessionRegistry({
+		isNodeAvailable: (nodeId) => deps.executionNodes?.filesAvailable(nodeId) ?? nodeId === 'local',
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
 			resolveConfiguredFilePlacement(

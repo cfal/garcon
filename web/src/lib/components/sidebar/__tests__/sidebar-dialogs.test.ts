@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import SidebarSaveFolderDialog from '../SidebarSaveFolderDialog.svelte';
 import SidebarTagDialog from '../SidebarTagDialog.svelte';
-import SidebarProjectPathDialog from '../SidebarProjectPathDialog.svelte';
+import SidebarProjectPathDialog from './SidebarProjectPathDialogTestHost.svelte';
 import { ApiError } from '$lib/api/client';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
@@ -71,7 +71,9 @@ describe('Sidebar dialogs', () => {
 		);
 		expect(dialog.submitError).toMatch(/retry the same destination/i);
 
-		dialog.setSubmitFailure(new ApiError(503, 'raw provider failure', 'PROJECT_PATH_UPDATE_FAILED'));
+		dialog.setSubmitFailure(
+			new ApiError(503, 'raw provider failure', 'PROJECT_PATH_UPDATE_FAILED'),
+		);
 		expect(dialog.submitError).toBe('Failed to update project path.');
 	});
 
@@ -460,11 +462,7 @@ describe('Sidebar dialogs', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith(
-					'chat-1',
-					['existing'],
-					['existing', 'pending-tag'],
-				);
+				expect(onSave).toHaveBeenCalledWith('chat-1', ['existing'], ['existing', 'pending-tag']);
 			});
 		} finally {
 			await unmountDialog(rendered);
@@ -472,7 +470,8 @@ describe('Sidebar dialogs', () => {
 	});
 
 	it('retries tag confirmation without discarding the staged edit', async () => {
-		const onRetryReconciliation = vi.fn()
+		const onRetryReconciliation = vi
+			.fn()
 			.mockRejectedValueOnce(new TypeError('Offline'))
 			.mockResolvedValueOnce(undefined);
 		const onSave = vi.fn().mockResolvedValue(undefined);
@@ -496,7 +495,11 @@ describe('Sidebar dialogs', () => {
 			const input = screen.getByRole('textbox', { name: 'Type a tag and press Enter' });
 			expect(input.hasAttribute('disabled')).toBe(true);
 			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
-			expect(await screen.findByText('Saved tags still could not be confirmed. Check your connection and try again.')).toBeTruthy();
+			expect(
+				await screen.findByText(
+					'Saved tags still could not be confirmed. Check your connection and try again.',
+				),
+			).toBeTruthy();
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
 			await waitFor(() => expect(onRetryReconciliation).toHaveBeenCalledTimes(2));
@@ -506,7 +509,11 @@ describe('Sidebar dialogs', () => {
 				reconciliationKind: null,
 			});
 			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
-			expect(screen.getByText('Tags changed since this editor opened. Review the latest saved tags before saving.')).toBeTruthy();
+			expect(
+				screen.getByText(
+					'Tags changed since this editor opened. Review the latest saved tags before saving.',
+				),
+			).toBeTruthy();
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
 			expect(screen.getByRole('button', { name: 'Remove tag saved' })).toBeTruthy();

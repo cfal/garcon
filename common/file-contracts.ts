@@ -1,6 +1,8 @@
 import { isRecord } from './json.js';
+import { parseNodeId } from './execution-nodes.js';
 
 export interface CanonicalFileIdentity {
+  nodeId: string;
   canonicalFileRootPath: string;
   normalizedRelativePath: string;
 }
@@ -270,7 +272,9 @@ export function parseFileIdentityResponse(
   if (record.success !== true || !identity || typeof identity !== 'object')
     return null;
   const fields = identity as Record<string, unknown>;
+  const nodeId = parseNodeId(fields.nodeId);
   if (
+    !nodeId ||
     typeof fields.canonicalFileRootPath !== 'string' ||
     !fields.canonicalFileRootPath ||
     typeof fields.normalizedRelativePath !== 'string' ||
@@ -280,6 +284,7 @@ export function parseFileIdentityResponse(
   return {
     success: true,
     identity: {
+      nodeId,
       canonicalFileRootPath: fields.canonicalFileRootPath,
       normalizedRelativePath: fields.normalizedRelativePath,
     },

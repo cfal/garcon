@@ -1,4 +1,5 @@
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import * as m from '$lib/paraglide/messages.js';
 import { fileDraftKey, type FileDraftRepository, type FileDraft } from './file-draft-repository.js';
 
@@ -38,22 +39,26 @@ export class FileDraftCoordinator {
 		}
 	}
 
-	find(root: string, relativePath: string): FileDraft | undefined {
+	find(root: string, relativePath: string, nodeId?: string | null): FileDraft | undefined {
 		return this.available.find(
 			(draft) =>
-				draft.canonicalFileRootPath === root && draft.normalizedRelativePath === relativePath,
+				effectiveNodeId(draft.nodeId) === effectiveNodeId(nodeId) &&
+				draft.canonicalFileRootPath === root &&
+				draft.normalizedRelativePath === relativePath,
 		);
 	}
 
-	opened(root: string, relativePath: string): void {
+	opened(root: string, relativePath: string, nodeId?: string | null): void {
 		this.available = this.available.filter(
 			(draft) =>
-				draft.canonicalFileRootPath !== root || draft.normalizedRelativePath !== relativePath,
+				effectiveNodeId(draft.nodeId) !== effectiveNodeId(nodeId) ||
+				draft.canonicalFileRootPath !== root ||
+				draft.normalizedRelativePath !== relativePath,
 		);
 	}
 
 	discard(draft: FileDraft): void {
-		this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath);
+		this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath, draft.nodeId);
 		void this.#enqueue(draft.documentId, async () => {
 			try {
 				await this.options.repository.deleteDraft(draft.documentId);
@@ -129,6 +134,7 @@ export class FileDraftCoordinator {
 			this.options.deploymentId,
 			document.canonicalFileRootPath,
 			document.relativePath,
+			document.nodeId,
 		);
 		const record: FileDraft | null = document.dirty
 			? {
@@ -137,6 +143,7 @@ export class FileDraftCoordinator {
 					userNamespace: this.options.userNamespace,
 					documentId,
 					canonicalFileRootPath: document.canonicalFileRootPath,
+					nodeId: document.nodeId,
 					normalizedRelativePath: document.relativePath,
 					content: document.currentContent(),
 					savedAt: Date.now(),

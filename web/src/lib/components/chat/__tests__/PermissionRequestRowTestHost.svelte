@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { untrack } from 'svelte';
+	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte';
 	import PermissionRequestRow from '../PermissionRequestRow.svelte';
 	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
@@ -9,6 +13,8 @@
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
+		executionNodes?: readonly ExecutionNodeSnapshot[];
+		onFileOpen?: (request: FileOpenRequest) => void;
 		request: PermissionRequestMessage;
 		terminal?: PermissionTerminalState;
 		onDecision: (
@@ -22,6 +28,8 @@
 	}
 
 	let {
+		executionNodes,
+		onFileOpen,
 		request,
 		terminal,
 		onDecision,
@@ -30,6 +38,7 @@
 		chatContext = null,
 		chatTitles = {},
 	}: Props = $props();
+	setExecutionNodesTestContext(untrack(() => executionNodes));
 	setCanonicalWorkspaceLayout();
 
 	setChatSessions({
@@ -43,7 +52,10 @@
 		},
 	} as never);
 	setFileSessions({
-		open: async () => null,
+		open: async (input: FileOpenRequest) => {
+			onFileOpen?.(input);
+			return null;
+		},
 	} as never);
 	setAppShell({
 		get projectBasePath() {

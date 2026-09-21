@@ -259,6 +259,7 @@ export class FileDocumentIoCoordinator {
 
 	async checkFreshness(sessionId: string): Promise<void> {
 		const session = this.options.getSession(sessionId);
+		if (session && !session.document.nodeAvailable) return;
 		const loadedRevision = session?.loadedRevision;
 		if (
 			!session ||
@@ -277,6 +278,7 @@ export class FileDocumentIoCoordinator {
 		try {
 			const result = await (this.options.getFileRevision ?? getFileRevision)(
 				{
+					nodeId: session.nodeId,
 					projectPath: session.canonicalFileRootPath,
 					filePath: session.relativePath,
 				},
@@ -334,6 +336,7 @@ export class FileDocumentIoCoordinator {
 		try {
 			const result = await (this.options.readText ?? readText)(
 				{
+					nodeId: session.nodeId,
 					projectPath: session.canonicalFileRootPath,
 					filePath: session.relativePath,
 				},
@@ -400,6 +403,7 @@ export class FileDocumentIoCoordinator {
 
 	async #readLatest(session: FileViewSession, signal: AbortSignal): Promise<LoadedFileContent> {
 		const params = {
+			nodeId: session.nodeId,
 			projectPath: session.canonicalFileRootPath,
 			filePath: session.relativePath,
 		};
@@ -436,6 +440,7 @@ export class FileDocumentIoCoordinator {
 	#canRefresh(session: FileViewSession): boolean {
 		return (
 			this.options.getSession(session.id) === session &&
+			session.document.nodeAvailable &&
 			!session.loading &&
 			!session.refreshing &&
 			!session.mutationGuarded

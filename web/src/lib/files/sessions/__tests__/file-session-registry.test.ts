@@ -29,8 +29,9 @@ import {
 const testEditorRuntime: FileEditorRuntimeModule =
 	await import('$lib/files/editor/code-editor-controller.svelte.js');
 
-function identity(path: string): CanonicalFileIdentity {
+function identity(path: string, nodeId = 'local'): CanonicalFileIdentity {
 	return {
+		nodeId,
 		canonicalFileRootPath: '/workspace',
 		normalizedRelativePath: path,
 	};
@@ -88,6 +89,7 @@ function createHarness(
 		placement?: FilePlacementPort;
 		userNamespace?: string | null;
 		isDocumentVisible?: (documentId: string) => boolean;
+		isNodeAvailable?: (nodeId: string) => boolean;
 	} = {},
 ) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
@@ -105,10 +107,12 @@ function createHarness(
 		},
 	};
 	const placement = options.placement ?? defaultPlacement;
-	const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
-		success: true as const,
-		identity: identity(relativePath.replace(/^alias\//, '')),
-	}));
+	const resolveFileIdentity = vi.fn(
+		async ({ relativePath, nodeId }: { relativePath: string; nodeId?: string | null }) => ({
+			success: true as const,
+			identity: identity(relativePath.replace(/^alias\//, ''), nodeId ?? 'local'),
+		}),
+	);
 	const readText = vi.fn(async () => ({
 		content: 'initial',
 		path: '/workspace/file.ts',
@@ -134,6 +138,7 @@ function createHarness(
 	);
 	const onOpenError = options.onOpenError ?? vi.fn();
 	const registry = new FileSessionRegistry({
+		isNodeAvailable: options.isNodeAvailable,
 		getIsMobile: () => options.isMobile ?? false,
 		getDefaultPlacement,
 		getEditorSettings: () => ({
@@ -179,6 +184,63 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
+	it('isolates same-path documents, IO and recovery by node across node loss', async () => {
+		const worker = '22222222-2222-4222-8222-222222222222';
+		let workerReady = true;
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({
+			draftRepository: repository,
+			isNodeAvailable: (nodeId) => nodeId === 'local' || workerReady,
+		});
+		const local = (await harness.registry.open(request('same.txt')))!;
+		const remote = (await harness.registry.open({ ...request('same.txt'), nodeId: worker }))!;
+		await vi.waitFor(() => expect(local.loading || remote.loading).toBe(false));
+		expect(local.document).not.toBe(remote.document);
+		expect(local.identityKey).not.toBe(remote.identityKey);
+		local.content = 'local edit';
+		remote.content = 'remote edit';
+		await harness.registry.flushRecovery();
+		expect(
+			(await repository.getDrafts('test-user', 'test-deployment'))
+				.map((draft) => draft.nodeId)
+				.sort(),
+		).toEqual([worker, 'local'].sort());
+		workerReady = false;
+		await expect(harness.registry.save(remote.id)).resolves.toBe(false);
+		expect(remote.content).toBe('remote edit');
+		expect(remote.dirty).toBe(true);
+		await expect(harness.registry.save(local.id)).resolves.toBe(true);
+		workerReady = true;
+		await expect(harness.registry.save(remote.id)).resolves.toBe(true);
+		expect(harness.saveText).toHaveBeenLastCalledWith(
+			expect.objectContaining({ nodeId: worker, filePath: 'same.txt', content: 'remote edit' }),
+			expect.anything(),
+		);
+		await harness.registry.checkFreshness(remote.id);
+		expect(harness.getFileRevision).toHaveBeenLastCalledWith(
+			expect.objectContaining({ nodeId: worker }),
+			expect.anything(),
+		);
+		await harness.registry.destroyAll();
+	});
+
+	it('rejects a canonical identity response from the wrong node without opening a document', async () => {
+		const harness = createHarness();
+		harness.resolveFileIdentity.mockResolvedValueOnce({
+			success: true,
+			identity: identity('same.txt'),
+		});
+		await expect(
+			harness.registry.open({
+				...request('same.txt'),
+				nodeId: '22222222-2222-4222-8222-222222222222',
+			}),
+		).resolves.toBeNull();
+		expect(harness.readText).not.toHaveBeenCalled();
+		expect(harness.onOpenError).toHaveBeenCalled();
+		await harness.registry.destroyAll();
+	});
+
 	it('keeps background polling out of an interactive conflict read', async () => {
 		const harness = createHarness();
 		const session = (await harness.registry.open(request('file.txt')))!;
@@ -513,6 +575,7 @@ describe('FileSessionRegistry', () => {
 		});
 
 		expect(harness.resolveFileIdentity).toHaveBeenCalledWith({
+			nodeId: 'local',
 			projectPath: '/workspace',
 			relativePath: 'current/src/file.ts',
 		});
@@ -1163,6 +1226,7 @@ describe('FileSessionRegistry', () => {
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
 				content: 'newer edit',
+				nodeId: 'local',
 				expectedRevision: 'v1:first-save',
 				conflictResolution: 'reject',
 			},
@@ -1539,6 +1603,7 @@ describe('FileSessionRegistry', () => {
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
 				content: 'merged local',
+				nodeId: 'local',
 				expectedRevision: 'v1:initial',
 				conflictResolution: 'reject',
 			},
@@ -1570,6 +1635,7 @@ describe('FileSessionRegistry', () => {
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
 				content: 'local',
+				nodeId: 'local',
 				expectedRevision: 'v1:initial',
 				conflictResolution: 'reject',
 			},
@@ -2435,7 +2501,7 @@ describe('best-effort file recovery', () => {
 		await harness.registry.destroyAll();
 	});
 
-	it('releases a timed-out Save and ignores its late response after retry', async () => {
+	it('reconciles a timed-out Save before a deliberate retry and ignores its late response', async () => {
 		const harness = createHarness({ saveTimeoutMs: 5 });
 		const session = (await harness.registry.open(request('file.txt')))!;
 		await vi.waitFor(() => expect(session.loading).toBe(false));
@@ -2447,7 +2513,11 @@ describe('best-effort file recovery', () => {
 		expect(session.document.mutationGuarded).toBe(false);
 		expect(session.saveError).toContain('not confirmed');
 		session.content = 'newer edit';
-		await expect(harness.registry.save(session.id)).resolves.toBe(true);
+		const retry = harness.registry.save(session.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest).not.toBeNull());
+		expect(harness.saveText).toHaveBeenCalledOnce();
+		harness.registry.resolveOverwrite('save-checked');
+		await expect(retry).resolves.toBe(true);
 		pending.resolve({
 			success: true,
 			path: '/workspace/file.txt',

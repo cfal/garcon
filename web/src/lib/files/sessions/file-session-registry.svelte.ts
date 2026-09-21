@@ -1,4 +1,6 @@
 import * as m from '$lib/paraglide/messages.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
+import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 import {
 	getFileRevision,
 	readContent,
@@ -62,6 +64,7 @@ export type { FileOpenMode };
 export type FilePlacementResult = 'placed' | 'cancelled';
 
 export interface FileOpenRequest {
+	nodeId?: string | null;
 	fileRootPath: string;
 	relativePath: string;
 	mode: FileOpenMode;
@@ -115,6 +118,7 @@ export interface FileThresholdRequest {
 }
 
 export interface FileSessionsDeps {
+	isNodeAvailable?(nodeId: string): boolean;
 	getIsMobile(): boolean;
 	getEditorSettings(): Omit<EditorPresentationSettings, 'editorThemeId'>;
 	getDefaultPlacement(mode: FileRendererMode, origin: PresentationHostId): DesktopPlacement;
@@ -140,9 +144,7 @@ export type { FileEditorRuntimeModule };
 export const FILE_SESSION_SOFT_LIMIT = 32;
 export { FILE_SAVE_TIMEOUT_MS };
 
-export function fileIdentityKey(root: string, relativePath: string): string {
-	return JSON.stringify([root, relativePath]);
-}
+export { fileIdentityKey };
 
 export class FileSessionRegistry {
 	sessions = $state.raw<Readonly<Record<string, FileViewSession>>>({});
@@ -264,15 +266,22 @@ export class FileSessionRegistry {
 		let response: FileIdentityResponse;
 		try {
 			response = await (this.deps.resolveFileIdentity ?? resolveFileIdentity)({
+				nodeId: effectiveNodeId(request.nodeId),
 				projectPath: request.fileRootPath,
 				relativePath: request.relativePath,
 			});
+			if (response.identity.nodeId !== effectiveNodeId(request.nodeId))
+				throw new Error('File identity belongs to a different execution node');
 		} catch (error) {
 			this.deps.onOpenError?.(request, error);
 			return null;
 		}
 		const identity = response.identity;
-		const key = fileIdentityKey(identity.canonicalFileRootPath, identity.normalizedRelativePath);
+		const key = fileIdentityKey(
+			identity.canonicalFileRootPath,
+			identity.normalizedRelativePath,
+			identity.nodeId,
+		);
 		await this.#teardowns.drain(key);
 		if (this.#destroyed) return null;
 		const documentId = this.#documentIdByIdentity.get(key);
@@ -354,7 +363,12 @@ export class FileSessionRegistry {
 
 	async refresh(sessionId: string): Promise<void> {
 		const current = this.get(sessionId);
-		if (!current || current.loading || !(await this.#prepareDraftRecovery(current.document)))
+		if (
+			!current ||
+			!current.document.nodeAvailable ||
+			current.loading ||
+			!(await this.#prepareDraftRecovery(current.document))
+		)
 			return;
 		await this.#io.refresh(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
 		const session = this.get(sessionId);
@@ -505,6 +519,7 @@ export class FileSessionRegistry {
 		const session = this.get(sessionId);
 		if (!session) return null;
 		return this.open({
+			nodeId: session.nodeId,
 			fileRootPath: session.canonicalFileRootPath,
 			relativePath: session.relativePath,
 			mode: session.rendererMode,
@@ -540,11 +555,12 @@ export class FileSessionRegistry {
 		if (this.#destroyed) return null;
 		const existingDocumentId = this.#documentIdByIdentity.get(key);
 		let existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
-		let document = existingDocument ?? new FileDocumentState(identity, key);
+		const options = { isNodeAvailable: () => this.deps.isNodeAvailable?.(identity.nodeId) ?? true };
+		let document = existingDocument ?? new FileDocumentState(identity, key, options);
 		if (!(await this.#prepareDraftRecovery(document)) || this.#destroyed) return null;
 		if (existingDocument && this.documents[document.id] !== document) {
 			const pendingRecoveryContent = document.pendingRecoveryContent;
-			document = new FileDocumentState(identity, key);
+			document = new FileDocumentState(identity, key, options);
 			document.pendingRecoveryContent = pendingRecoveryContent;
 			existingDocument = null;
 		}
@@ -601,7 +617,7 @@ export class FileSessionRegistry {
 
 	async showConflict(sessionId: string): Promise<void> {
 		const session = this.get(sessionId);
-		if (!session || session.document.mutationGuarded) return;
+		if (!session || !session.document.nodeAvailable || session.document.mutationGuarded) return;
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return;
 		const decision = await this.#confirmConflict(session, disk);
@@ -635,14 +651,18 @@ export class FileSessionRegistry {
 			document.loadedRevision ||
 			document.dirty ||
 			document.pendingRecoveryContent !== null ||
-			!this.#drafts?.find(document.canonicalFileRootPath, document.relativePath)
+			!this.#drafts?.find(document.canonicalFileRootPath, document.relativePath, document.nodeId)
 		)
 			return Promise.resolve(true);
 		return this.#decisionQueue.enqueue(async () => {
 			if (this.#destroyed) return false;
 			if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
 				return true;
-			const draft = this.#drafts?.find(document.canonicalFileRootPath, document.relativePath);
+			const draft = this.#drafts?.find(
+				document.canonicalFileRootPath,
+				document.relativePath,
+				document.nodeId,
+			);
 			if (!draft) return true;
 			const choice = await new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
 				this.#openMainInert(() => {
@@ -667,7 +687,7 @@ export class FileSessionRegistry {
 		for (const document of Object.values(this.documents)) {
 			if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
 				continue;
-			this.#drafts?.opened(document.canonicalFileRootPath, document.relativePath);
+			this.#drafts?.opened(document.canonicalFileRootPath, document.relativePath, document.nodeId);
 			void this.#drafts?.settle(document);
 		}
 	}
@@ -679,8 +699,9 @@ export class FileSessionRegistry {
 			session.document.pendingRecoveryContent !== null
 		)
 			return;
-		if (!this.#drafts?.find(session.canonicalFileRootPath, session.relativePath)) return;
-		this.#drafts.opened(session.canonicalFileRootPath, session.relativePath);
+		if (!this.#drafts?.find(session.canonicalFileRootPath, session.relativePath, session.nodeId))
+			return;
+		this.#drafts.opened(session.canonicalFileRootPath, session.relativePath, session.nodeId);
 		void this.#drafts.settle(session.document);
 	}
 
@@ -723,7 +744,7 @@ export class FileSessionRegistry {
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return false;
 		const decision = await this.#confirmConflict(session, disk, true);
-		if (decision.choice !== 'save-checked') return false;
+		if (decision.choice !== 'save-checked' || !session.document.nodeAvailable) return false;
 		this.#applyConflictResolution(session, decision);
 		await this.#saves.submit(
 			session.document,
@@ -803,6 +824,7 @@ export class FileSessionRegistry {
 	#recordNavigation(session: FileViewSession): void {
 		const selection = session.editor?.selectionLocation();
 		this.navigation?.record({
+			nodeId: session.nodeId,
 			key: session.identityKey,
 			canonicalFileRootPath: session.canonicalFileRootPath,
 			normalizedRelativePath: session.relativePath,

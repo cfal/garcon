@@ -123,12 +123,23 @@ export class NewChatFormState {
 	// Derived accessors
 
 	get #modelCatalog(): ModelCatalogStore {
-		return this.nodeId === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forNode(this.nodeId);
+		return this.nodeId === 'local'
+			? this.#options.modelCatalog
+			: this.#options.modelCatalog.forNode(this.nodeId);
 	}
 
-	get localMachine(): boolean { return this.nodeId === 'local'; }
-	get nodeReady(): boolean { return this.#options.executionNodes?.isReady(this.nodeId) ?? true; }
-	get modelCatalogValidated(): boolean { return this.#modelCatalog.isValidated; }
+	get localMachine(): boolean {
+		return this.nodeId === 'local';
+	}
+	get filesAvailable(): boolean {
+		return this.#options.executionNodes?.filesAvailable(this.nodeId) ?? this.localMachine;
+	}
+	get nodeReady(): boolean {
+		return this.#options.executionNodes?.isReady(this.nodeId) ?? true;
+	}
+	get modelCatalogValidated(): boolean {
+		return this.#modelCatalog.isValidated;
+	}
 
 	selectNode(value?: string | null): void {
 		const nodeId = effectiveNodeId(value);
@@ -144,10 +155,17 @@ export class NewChatFormState {
 		this.#selectedModelTargetsByAgent = {};
 		const snapshot = this.#remoteSettings.snapshot;
 		const preferences = snapshot?.paths.byNode?.[nodeId];
-		this.projectBasePath = this.localMachine ? snapshot?.projectBasePath ?? '' : this.#options.executionNodes?.get(nodeId)?.projectBasePath ?? '';
-		this.pinnedProjectPaths = this.localMachine ? snapshot?.paths.pinnedProjectPaths ?? [] : [...preferences?.pinnedPaths ?? []];
-		this.browseStartPath = this.localMachine ? snapshot?.paths.browseStartPath ?? '' : '';
-		this.projectPath = (this.localMachine ? snapshot?.paths.recentProjectPaths[0] || this.browseStartPath : preferences?.defaultPath || preferences?.recentPaths[0]) || this.projectBasePath;
+		this.projectBasePath = this.localMachine
+			? (snapshot?.projectBasePath ?? '')
+			: (this.#options.executionNodes?.get(nodeId)?.projectBasePath ?? '');
+		this.pinnedProjectPaths = this.localMachine
+			? (snapshot?.paths.pinnedProjectPaths ?? [])
+			: [...(preferences?.pinnedPaths ?? [])];
+		this.browseStartPath = this.localMachine ? (snapshot?.paths.browseStartPath ?? '') : '';
+		this.projectPath =
+			(this.localMachine
+				? snapshot?.paths.recentProjectPaths[0] || this.browseStartPath
+				: preferences?.defaultPath || preferences?.recentPaths[0]) || this.projectBasePath;
 		this.validatePath();
 	}
 
@@ -228,7 +246,8 @@ export class NewChatFormState {
 
 	get modelSelectionPending(): boolean {
 		if (!this.nodeReady) return false;
-		if (!this.modelCatalogValidated) return this.#modelCatalog.isRefreshing || !this.#modelCatalog.error;
+		if (!this.modelCatalogValidated)
+			return this.#modelCatalog.isRefreshing || !this.#modelCatalog.error;
 		return (
 			!this.resolvedModelSelection &&
 			!this.#catalogRefreshCompleted &&
@@ -239,7 +258,8 @@ export class NewChatFormState {
 	get modelSelectionError(): string | null {
 		if (!this.nodeReady) return 'Execution node is unavailable';
 		if (this.modelSelectionPending) return null;
-		if (!this.modelCatalogValidated) return this.#modelCatalog.error ?? m.model_selector_unavailable();
+		if (!this.modelCatalogValidated)
+			return this.#modelCatalog.error ?? m.model_selector_unavailable();
 		if (this.resolvedModelSelection) return null;
 		return m.model_selector_unavailable();
 	}
@@ -585,7 +605,8 @@ export class NewChatFormState {
 			} catch (err) {
 				if (requestVersion !== this.#validationRequestVersion) return;
 				this.validationStatus = 'invalid';
-				this.validationError = err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
+				this.validationError =
+					err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
 				this.gitRepoStatus = 'non-git';
 				this.preambles.invalidatePreview();
 				console.warn('[NewChatFormState] Path validation request failed', err);
@@ -629,7 +650,10 @@ export class NewChatFormState {
 				browseStartPath: this.browseStartPath || path,
 			});
 			if (nodeId === this.nodeId) {
-				this.pinnedProjectPaths = nodeId === 'local' ? snap.paths.pinnedProjectPaths : snap.paths.byNode?.[nodeId]?.pinnedPaths ?? [];
+				this.pinnedProjectPaths =
+					nodeId === 'local'
+						? snap.paths.pinnedProjectPaths
+						: (snap.paths.byNode?.[nodeId]?.pinnedPaths ?? []);
 				if (nodeId === 'local') this.browseStartPath = snap.paths.browseStartPath;
 			}
 		} catch (err) {
@@ -679,7 +703,10 @@ export class NewChatFormState {
 
 	/** Validates and builds the config, returning null if validation fails. */
 	buildConfig(): NewChatConfig | null {
-		if (!this.nodeReady) { this.error = 'Execution node is unavailable'; return null; }
+		if (!this.nodeReady) {
+			this.error = 'Execution node is unavailable';
+			return null;
+		}
 		if (!this.settingsLoaded) {
 			this.error = m.chat_new_chat_errors_defaults_loading();
 			return null;
@@ -688,7 +715,8 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
-		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError) return null;
+		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError)
+			return null;
 		if (!this.trimmedPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
 			return null;
@@ -911,7 +939,7 @@ export class NewChatFormState {
 	// Auto-open browser on first path focus
 
 	handlePathFocus(): void {
-		if (this.localMachine) this.showBrowser = true;
+		if (this.filesAvailable) this.showBrowser = true;
 	}
 
 	// Tab-completion for the path input
@@ -921,7 +949,8 @@ export class NewChatFormState {
 
 	/** Handles Tab key in the path input. Completes the path like a terminal. */
 	async handleTabCompletion(): Promise<void> {
-		if (!this.localMachine) return;
+		if (!this.filesAvailable) return;
+		const nodeId = this.nodeId;
 		const raw = this.projectPath;
 		if (!raw) return;
 
@@ -938,8 +967,8 @@ export class NewChatFormState {
 		const partial = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
 
 		try {
-			const entries = await browseDirectory(parentDir);
-			if (!this.localMachine || this.projectPath !== raw) return;
+			const entries = await browseDirectory(parentDir, undefined, nodeId);
+			if (this.nodeId !== nodeId || !this.filesAvailable || this.projectPath !== raw) return;
 			const matches = partial
 				? entries.filter((e) => e.name.toLowerCase().startsWith(partial))
 				: entries;

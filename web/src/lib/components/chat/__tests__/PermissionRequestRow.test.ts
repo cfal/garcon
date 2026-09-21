@@ -7,6 +7,7 @@ import {
 	PermissionRequestMessage,
 } from '$shared/chat-types';
 import PermissionRequestRowTestHost from './PermissionRequestRowTestHost.svelte';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 
 const TS = '2026-07-02T00:00:00.000Z';
 
@@ -186,5 +187,36 @@ describe('PermissionRequestRow', () => {
 
 		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
 		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
+	});
+
+	it('resolves plan file links on the panel node rather than the selected Local chat', async () => {
+		const onFileOpen = vi.fn();
+		const request = new PermissionRequestMessage(
+			TS,
+			'permission-plan',
+			new ExitPlanModeToolUseMessage(TS, 'tool-plan', '[Plan file](plan.md)'),
+		);
+		render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+			onFileOpen,
+			chatContext: {
+				chatId: 'remote-chat',
+				nodeId: remoteExecutionNode.id,
+				projectPath: '/worker/project',
+			},
+			executionNodes: [
+				localExecutionNode,
+				{ ...remoteExecutionNode, machineServices: { files: true, git: false, terminals: false } },
+			],
+		});
+		await fireEvent.click(screen.getByRole('link', { name: 'Plan file' }));
+		expect(onFileOpen).toHaveBeenCalledWith(
+			expect.objectContaining({
+				nodeId: remoteExecutionNode.id,
+				fileRootPath: '/worker',
+				relativePath: 'project/plan.md',
+			}),
+		);
 	});
 });

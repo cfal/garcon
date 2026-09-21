@@ -25,6 +25,7 @@
 		getAppShell,
 		getChatSessions,
 		getFileSessions,
+		getExecutionNodes,
 		getLocalSettings,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
@@ -130,19 +131,33 @@
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
+	const nodes = getExecutionNodes();
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
 
-	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
 		if (chatContext?.chatId) return chatContext;
 		const selected = sessions.selectedChat;
 		if (!selected?.id) return null;
-		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
+		return {
+			chatId: selected.id,
+			nodeId: selected.nodeId,
+			projectPath: selected.projectPath ?? null,
+		};
 	});
-	const localFiles = $derived(!activeChatContext || (activeChatContext.nodeId ?? sessions.byId[activeChatContext.chatId]?.nodeId ?? 'local') === 'local');
-	const chatProjectPath = $derived(localFiles ? activeChatContext?.projectPath ?? null : null);
+	const nodeId = $derived(
+		activeChatContext?.nodeId ??
+			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.nodeId : null) ??
+			'local',
+	);
+	const filesAvailable = $derived(nodes.filesAvailable(nodeId));
+	const projectBasePath = $derived(
+		nodeId === 'local' ? appShell.projectBasePath : (nodes.get(nodeId)?.projectBasePath ?? ''),
+	);
+	const chatProjectPath = $derived(
+		filesAvailable ? (activeChatContext?.projectPath ?? null) : null,
+	);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 
@@ -442,7 +457,7 @@
 	/** Routes a file-like markdown link to the viewer overlay. */
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		if (!localFiles) return true;
+		if (!filesAvailable) return true;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
@@ -451,6 +466,7 @@
 		});
 		if (!resolved) return;
 		void fileSessions.open({
+			nodeId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
@@ -464,7 +480,7 @@
 
 	/** Routes a tool file-open action to the viewer overlay. */
 	function handleToolFileOpen(filePath: string): void {
-		if (!localFiles) return;
+		if (!filesAvailable) return;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileOpenTarget(filePath, {
@@ -473,6 +489,7 @@
 		});
 		if (!resolved) return;
 		void fileSessions.open({
+			nodeId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
@@ -683,7 +700,7 @@
 							mode="input"
 							resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={localFiles ? handleToolFileOpen : undefined}
+							onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
 							{projectBasePath}
 							{chatProjectPath}
 							{resolveChatReference}
@@ -697,7 +714,7 @@
 							mode="result"
 							resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={localFiles ? handleToolFileOpen : undefined}
+							onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
 							{projectBasePath}
 							{chatProjectPath}
 							{resolveChatReference}

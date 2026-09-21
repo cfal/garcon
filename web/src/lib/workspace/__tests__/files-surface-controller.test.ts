@@ -62,7 +62,7 @@ describe('FilesSurfaceController reveal', () => {
 			expect(controller.tree.focusPathAfterNavigation).toBe('/workspace/src/new.ts'),
 		);
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ directoryPath: '/workspace/src' },
+			{ directoryPath: '/workspace/src', nodeId: 'local' },
 			expect.anything(),
 		);
 	});
@@ -95,7 +95,7 @@ describe('FilesSurfaceController reveal', () => {
 			flushSync();
 			expect(controller.tree.focusPathAfterNavigation).toBeNull();
 			expect(getTree).not.toHaveBeenCalledWith(
-				{ directoryPath: '/workspace/cancelled' },
+				{ directoryPath: '/workspace/cancelled', nodeId: 'local' },
 				expect.anything(),
 			);
 		},

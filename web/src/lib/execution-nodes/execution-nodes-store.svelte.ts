@@ -1,11 +1,23 @@
 import { getExecutionNodes } from '$lib/api/execution-nodes.js';
-import { effectiveNodeId, parseExecutionNodes, type ExecutionNodeSnapshot } from '$shared/execution-nodes';
+import {
+	effectiveNodeId,
+	parseExecutionNodes,
+	type ExecutionNodeSnapshot,
+} from '$shared/execution-nodes';
 
-const localFallback: readonly ExecutionNodeSnapshot[] = [{
-	id: 'local', label: 'Local', kind: 'local', enabled: true, direction: null,
-	availability: 'ready', projectBasePath: null, lastError: null,
-	machineServices: { files: true, git: true, terminals: true },
-}];
+const localFallback: readonly ExecutionNodeSnapshot[] = [
+	{
+		id: 'local',
+		label: 'Local',
+		kind: 'local',
+		enabled: true,
+		direction: null,
+		availability: 'ready',
+		projectBasePath: null,
+		lastError: null,
+		machineServices: { files: true, git: true, terminals: true },
+	},
+];
 
 export class ExecutionNodesStore {
 	#snapshot = $state.raw<readonly ExecutionNodeSnapshot[] | null>(null);
@@ -16,8 +28,12 @@ export class ExecutionNodesStore {
 
 	constructor(private readonly read = getExecutionNodes) {}
 
-	get nodes(): readonly ExecutionNodeSnapshot[] { return this.#snapshot ?? localFallback; }
-	get hasSnapshot(): boolean { return this.#snapshot !== null; }
+	get nodes(): readonly ExecutionNodeSnapshot[] {
+		return this.#snapshot ?? localFallback;
+	}
+	get hasSnapshot(): boolean {
+		return this.#snapshot !== null;
+	}
 
 	get(id?: string | null): ExecutionNodeSnapshot | undefined {
 		return this.nodes.find((node) => node.id === effectiveNodeId(id));
@@ -32,6 +48,10 @@ export class ExecutionNodesStore {
 		return node?.enabled === true && node.availability === 'ready';
 	}
 
+	filesAvailable(id?: string | null): boolean {
+		return this.isReady(id) && this.get(id)?.machineServices.files === true;
+	}
+
 	applySnapshot(value: unknown): void {
 		const nodes = parseExecutionNodes(value);
 		if (!nodes) throw new Error('Invalid execution nodes snapshot');
@@ -44,14 +64,18 @@ export class ExecutionNodesStore {
 		if (this.#request) return this.#request;
 		const version = this.#version;
 		this.loading = true;
-		this.#request = this.read().then((nodes) => {
-			if (version === this.#version) this.applySnapshot(nodes);
-		}).catch((error: unknown) => {
-			if (version === this.#version) this.error = error instanceof Error ? error.message : 'Unable to load execution nodes';
-		}).finally(() => {
-			this.loading = false;
-			this.#request = null;
-		});
+		this.#request = this.read()
+			.then((nodes) => {
+				if (version === this.#version) this.applySnapshot(nodes);
+			})
+			.catch((error: unknown) => {
+				if (version === this.#version)
+					this.error = error instanceof Error ? error.message : 'Unable to load execution nodes';
+			})
+			.finally(() => {
+				this.loading = false;
+				this.#request = null;
+			});
 		return this.#request;
 	}
 

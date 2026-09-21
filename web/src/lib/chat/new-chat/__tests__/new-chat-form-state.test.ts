@@ -4,6 +4,8 @@ import * as chatsApi from '$lib/api/chats';
 import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
 import { browseDirectory } from '$lib/api/files';
+import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 import type { GitWorktreeItem } from '$lib/api/git';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
@@ -44,7 +46,15 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, tickets: true },
+			agentCommands: {
+				enabled: true,
+				chatIdDiscovery: true,
+				sendMessage: true,
+				startAgent: true,
+				resumeAgent: true,
+				schedule: true,
+				tickets: true,
+			},
 		},
 		ui: {},
 		uiEffective: {},
@@ -164,7 +174,9 @@ function modelsForAgent(agentId: string): ModelOption[] {
 }
 
 const mockModelCatalog = {
-	forNode() { return this; },
+	forNode() {
+		return this;
+	},
 	isValidated: true,
 	isRefreshing: false,
 	error: null as string | null,
@@ -221,6 +233,7 @@ describe('NewChatFormState', () => {
 	let formState: NewChatFormState;
 	let mockRemoteSettings: ReturnType<typeof makeMockRemoteSettings>;
 	let selectableAgentIds: SessionAgentId[];
+	let executionNodes: ExecutionNodesStore;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -251,7 +264,10 @@ describe('NewChatFormState', () => {
 			'direct-openai-compatible',
 		];
 		mockRemoteSettings = makeMockRemoteSettings();
+		executionNodes = new ExecutionNodesStore(async () => [localExecutionNode]);
+		executionNodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
 		formState = new NewChatFormState({
+			executionNodes,
 			modelCatalog: mockModelCatalog as any,
 			remoteSettings: mockRemoteSettings as any,
 			get selectableAgentIds() {
@@ -284,9 +300,13 @@ describe('NewChatFormState', () => {
 
 	it('uses remote project preferences without invoking local browse or worktree IO', async () => {
 		const nodeId = '22222222-2222-4222-8222-222222222222';
-		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byNode: {
-			[nodeId]: { defaultPath: '/remote', pinnedPaths: ['/remote'], recentPaths: [] },
-		} } });
+		mockRemoteSettings.snapshot = makeSnapshot({
+			paths: {
+				byNode: {
+					[nodeId]: { defaultPath: '/remote', pinnedPaths: ['/remote'], recentPaths: [] },
+				},
+			},
+		});
 		vi.mocked(browseDirectory).mockClear();
 		formState.firstMessage = 'Keep this draft';
 		formState.showBrowser = true;
@@ -308,10 +328,16 @@ describe('NewChatFormState', () => {
 	it('discards Local path validation after switching nodes with the same path text', async () => {
 		const nodeId = '22222222-2222-4222-8222-222222222222';
 		const oldResponse = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
-		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(oldResponse.promise).mockResolvedValueOnce({ valid: false, errorCode: 'path_not_found' });
-		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byNode: {
-			[nodeId]: { defaultPath: '/same', pinnedPaths: [], recentPaths: [] },
-		} } });
+		vi.mocked(chatsApi.validateStart)
+			.mockReturnValueOnce(oldResponse.promise)
+			.mockResolvedValueOnce({ valid: false, errorCode: 'path_not_found' });
+		mockRemoteSettings.snapshot = makeSnapshot({
+			paths: {
+				byNode: {
+					[nodeId]: { defaultPath: '/same', pinnedPaths: [], recentPaths: [] },
+				},
+			},
+		});
 		formState.projectPath = '/same';
 		formState.validatePath();
 		vi.advanceTimersByTime(300);
@@ -323,6 +349,40 @@ describe('NewChatFormState', () => {
 		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', { nodeId });
 		expect(formState.validationStatus).toBe('invalid');
 		expect(formState.gitRepoStatus).toBe('non-git');
+		formState.dispose();
+	});
+
+	it('browses remote files and fences same-path tab completion across nodes', async () => {
+		const nodeId = remoteExecutionNode.id;
+		executionNodes.applySnapshot([
+			localExecutionNode,
+			{
+				...remoteExecutionNode,
+				projectBasePath: '/same',
+				machineServices: { files: true, git: false, terminals: false },
+			},
+		]);
+		const local = deferred<Awaited<ReturnType<typeof browseDirectory>>>();
+		vi.mocked(browseDirectory)
+			.mockReset()
+			.mockReturnValueOnce(local.promise)
+			.mockResolvedValueOnce([{ name: 'remote', path: '/same/remote', type: 'directory' }]);
+		formState.projectPath = '/same/';
+		const pending = formState.handleTabCompletion();
+		formState.selectNode(nodeId);
+		formState.projectPath = '/same/';
+		formState.handlePathFocus();
+		expect(formState.showBrowser).toBe(true);
+		local.resolve([{ name: 'local', path: '/same/local', type: 'directory' }]);
+		await pending;
+		expect(formState.projectPath).toBe('/same/');
+		await formState.handleTabCompletion();
+		expect(browseDirectory).toHaveBeenLastCalledWith('/same', undefined, nodeId);
+		expect(formState.projectPath).toBe('/same/remote/');
+		formState.openWorktreeModal();
+		await formState.loadWorktrees();
+		expect(formState.worktreeModalOpen).toBe(false);
+		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
 	});
 
@@ -853,35 +913,38 @@ describe('NewChatFormState', () => {
 		expect(formState.modelSelectionError).toBeNull();
 	});
 
-	it.each(['local', '22222222-2222-4222-8222-222222222222'])('blocks cached models on %s until catalog revalidation succeeds', async (nodeId) => {
-		await formState.loadSettingsAndModels();
-		formState.selectNode(nodeId);
-		formState.projectPath = '/valid/path';
-		formState.validationStatus = 'valid';
-		formState.firstMessage = 'Synthetic initial prompt';
-		expect(formState.canSubmit).toBe(true);
-		expect(formState.buildConfig()).not.toBeNull();
+	it.each(['local', '22222222-2222-4222-8222-222222222222'])(
+		'blocks cached models on %s until catalog revalidation succeeds',
+		async (nodeId) => {
+			await formState.loadSettingsAndModels();
+			formState.selectNode(nodeId);
+			formState.projectPath = '/valid/path';
+			formState.validationStatus = 'valid';
+			formState.firstMessage = 'Synthetic initial prompt';
+			expect(formState.canSubmit).toBe(true);
+			expect(formState.buildConfig()).not.toBeNull();
 
-		mockModelCatalog.isValidated = false;
-		mockModelCatalog.isRefreshing = true;
-		expect(formState.resolvedModelSelection).not.toBeNull();
-		expect(formState.modelSelectionPending).toBe(true);
-		expect(formState.canSubmit).toBe(false);
-		expect(formState.buildConfig()).toBeNull();
+			mockModelCatalog.isValidated = false;
+			mockModelCatalog.isRefreshing = true;
+			expect(formState.resolvedModelSelection).not.toBeNull();
+			expect(formState.modelSelectionPending).toBe(true);
+			expect(formState.canSubmit).toBe(false);
+			expect(formState.buildConfig()).toBeNull();
 
-		mockModelCatalog.isRefreshing = false;
-		mockModelCatalog.error = 'Failed to fetch model catalog: 503';
-		expect(formState.modelSelectionPending).toBe(false);
-		expect(formState.modelSelectionError).toBe(mockModelCatalog.error);
-		expect(formState.canSubmit).toBe(false);
-		expect(formState.buildConfig()).toBeNull();
-		expect(formState.firstMessage).toBe('Synthetic initial prompt');
+			mockModelCatalog.isRefreshing = false;
+			mockModelCatalog.error = 'Failed to fetch model catalog: 503';
+			expect(formState.modelSelectionPending).toBe(false);
+			expect(formState.modelSelectionError).toBe(mockModelCatalog.error);
+			expect(formState.canSubmit).toBe(false);
+			expect(formState.buildConfig()).toBeNull();
+			expect(formState.firstMessage).toBe('Synthetic initial prompt');
 
-		mockModelCatalog.isValidated = true;
-		mockModelCatalog.error = null;
-		expect(formState.canSubmit).toBe(true);
-		expect(formState.buildConfig()?.firstMessage).toBe('Synthetic initial prompt');
-	});
+			mockModelCatalog.isValidated = true;
+			mockModelCatalog.error = null;
+			expect(formState.canSubmit).toBe(true);
+			expect(formState.buildConfig()?.firstMessage).toBe('Synthetic initial prompt');
+		},
+	);
 
 	it('applies eligible startup recents after background catalog discovery', async () => {
 		const refresh = deferred<void>();

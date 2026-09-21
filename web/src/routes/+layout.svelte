@@ -135,6 +135,7 @@
 	});
 	const ghCapability = createGhCapabilityStore();
 	const workspaceServices = createWorkspaceServices({
+		executionNodes,
 		appShell,
 		chatSessions,
 		ghCapability,

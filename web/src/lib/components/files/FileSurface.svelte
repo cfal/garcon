@@ -14,7 +14,7 @@
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
 	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
-	import { getFileSessions, getWorkbenchCommands } from '$lib/context';
+	import { getFileSessions, getWorkbenchCommands, getExecutionNodes } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
 	import ResponsiveSurfaceActions, {
@@ -42,6 +42,8 @@
 		onAppendToChatDraft,
 	}: Props = $props();
 	const files = getFileSessions();
+	const nodes = getExecutionNodes();
+	const nodeLabel = $derived(nodes.label(session.nodeId));
 	const commands = getWorkbenchCommands();
 	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
@@ -79,7 +81,7 @@
 			label: m.file_session_refresh(),
 			icon: RefreshCw,
 			onclick: () => void files.refresh(session.id),
-			disabled: session.loading || session.mutationGuarded,
+			disabled: !session.document.nodeAvailable || session.loading || session.mutationGuarded,
 			busy: session.refreshing,
 			priority: 2,
 			iconClass: session.refreshing ? 'animate-spin' : undefined,
@@ -89,6 +91,7 @@
 				id: 'compare-file',
 				label: m.file_session_compare(),
 				icon: Eye,
+				disabled: !session.document.nodeAvailable,
 				onclick: () => void files.showConflict(session.id),
 				priority: 1,
 			});
@@ -130,7 +133,11 @@
 		class="surface-toolbar flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3"
 		style="container-name: surface-toolbar; container-type: inline-size;"
 	>
-		<FilePathTitle path={session.fullPath} fileName={session.fileName} dirty={session.dirty} />
+		<FilePathTitle
+			path={session.nodeId === 'local' ? session.fullPath : `${nodeLabel}: ${session.fullPath}`}
+			fileName={session.nodeId === 'local' ? session.fileName : `${nodeLabel}: ${session.fileName}`}
+			dirty={session.dirty}
+		/>
 		<ResponsiveSurfaceActions
 			actions={toolbarActions}
 			menuLabel={m.workspace_surface_actions()}
@@ -155,7 +162,16 @@
 		{/if}
 	</header>
 
-	{#if session.isExternallyStale || session.refreshError || session.freshnessError}
+	{#if !session.document.nodeAvailable}
+		<div
+			class="border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
+			role="status"
+		>
+			Files unavailable on {nodeLabel}. Unsaved edits are retained.
+		</div>
+	{/if}
+
+	{#if session.document.nodeAvailable && (session.isExternallyStale || session.refreshError || session.freshnessError)}
 		<FileFreshnessBanner
 			changed={session.isExternallyStale}
 			isRefreshing={session.refreshing}

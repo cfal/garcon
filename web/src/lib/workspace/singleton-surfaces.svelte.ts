@@ -19,6 +19,7 @@ import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-con
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import { untrack } from 'svelte';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
@@ -34,7 +35,11 @@ export class FilesSurfaceController implements PortableSingletonController {
 	presentationVisible = $state(false);
 	#projectAvailable = $state(false);
 	#projectPath: string | null = null;
-	#pendingReveal = $state.raw<{ fileRootPath: string; relativePath: string } | null>(null);
+	#pendingReveal = $state.raw<{
+		nodeId: string;
+		fileRootPath: string;
+		relativePath: string;
+	} | null>(null);
 
 	constructor() {
 		$effect(() => {
@@ -43,6 +48,7 @@ export class FilesSurfaceController implements PortableSingletonController {
 			if (!pending || !response || !this.presentationVisible || !this.#projectAvailable) return;
 			untrack(() => {
 				this.#pendingReveal = null;
+				if (pending.nodeId !== this.tree.nodeId) return;
 				const relativePath = filePathRelativeToTreeRoot(
 					response.fileRootPath,
 					pending.fileRootPath,
@@ -53,8 +59,8 @@ export class FilesSurfaceController implements PortableSingletonController {
 		});
 	}
 
-	revealFile(fileRootPath: string, relativePath: string): void {
-		this.#pendingReveal = { fileRootPath, relativePath };
+	revealFile(fileRootPath: string, relativePath: string, nodeId?: string | null): void {
+		this.#pendingReveal = { nodeId: effectiveNodeId(nodeId), fileRootPath, relativePath };
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
@@ -110,6 +116,7 @@ export class SingletonSurfaceRegistry {
 	#controllers = new Map<PortableSingletonKind, OwnedSingletonController>();
 	readonly #factories: SingletonControllerFactories;
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
+	#filesProjectState: WorkspaceProjectState = { kind: 'absent' };
 	#pullRequestsCapability: {
 		hasChecked: boolean;
 		available: boolean;
@@ -220,10 +227,11 @@ export class SingletonSurfaceRegistry {
 		return this.#controller('pull-requests');
 	}
 
-	setProjectState(projectState: WorkspaceProjectState): void {
+	setProjectState(projectState: WorkspaceProjectState, filesProjectState = projectState): void {
 		this.#projectState = projectState;
-		for (const owned of this.#controllers.values()) {
-			owned.controller.setProjectState(projectState);
+		this.#filesProjectState = filesProjectState;
+		for (const [kind, owned] of this.#controllers) {
+			owned.controller.setProjectState(kind === 'files' ? filesProjectState : projectState);
 		}
 	}
 
@@ -290,7 +298,7 @@ export class SingletonSurfaceRegistry {
 		// A registry-owned root keeps lazy rune state alive across presentation remounts.
 		const destroyRoot = $effect.root(() => {
 			controller = this.#factories[kind]();
-			controller.setProjectState(this.#projectState);
+			controller.setProjectState(kind === 'files' ? this.#filesProjectState : this.#projectState);
 			controller.setPresentationVisible(this.#visible[kind]);
 		});
 		this.#controllers.set(kind, { controller, destroyRoot });

@@ -73,7 +73,10 @@
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
-	import { matchesSelectableSnippetExpansion, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+	import {
+		matchesSelectableSnippetExpansion,
+		type SelectableSnippet,
+	} from '$lib/snippets/selectable-snippet.js';
 	import { createClientChatId } from '$shared/client-chat-id';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
@@ -395,7 +398,12 @@
 	function expansionContext() {
 		const projectPath = form.trimmedPath;
 		if (projectPath) {
-			return { type: 'new-chat' as const, chatId: ensureProspectiveChatId(), projectPath, nodeId: form.nodeId };
+			return {
+				type: 'new-chat' as const,
+				chatId: ensureProspectiveChatId(),
+				projectPath,
+				nodeId: form.nodeId,
+			};
 		}
 		notifications.error(m.chat_new_chat_errors_project_path_required());
 		return null;
@@ -569,7 +577,10 @@
 		...(form.modelSelectionTarget ?? {}),
 	});
 	function getRecents(nodeId: string) {
-		return buildModelSelectorRecents(rootModelCatalog.forNode(nodeId), remoteSettings.snapshot?.recentAgentSettings ?? []);
+		return buildModelSelectorRecents(
+			rootModelCatalog.forNode(nodeId),
+			remoteSettings.snapshot?.recentAgentSettings ?? [],
+		);
 	}
 	const displayedFormError = $derived(form.modelSelectionError ?? form.error);
 	const sendButtonClass =
@@ -608,7 +619,7 @@
 								bind:value={form.projectPath}
 								readonly={form.isUpdatingPinnedPath}
 								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
-									if (isMobile && form.localMachine) {
+									if (isMobile && form.filesAvailable) {
 										e.currentTarget.blur();
 									}
 									if (form.isUpdatingPinnedPath) return;
@@ -619,7 +630,7 @@
 									form.resetTabCompletions();
 								}}
 								onkeydown={(e: KeyboardEvent) => {
-									if (e.key === 'Tab' && form.localMachine) {
+									if (e.key === 'Tab' && form.filesAvailable) {
 										e.preventDefault();
 										if (form.isUpdatingPinnedPath) return;
 										form.handleTabCompletion();
@@ -673,8 +684,9 @@
 						{/if}
 					</div>
 
-					{#if form.localMachine && form.showBrowser && !form.isUpdatingPinnedPath}
+					{#if form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath}
 						<DirectoryBrowser
+							nodeId={form.nodeId}
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}
 							onSelect={(selPath) => {
@@ -738,7 +750,11 @@
 					<div role="status" class="flex items-center gap-2 text-sm text-destructive">
 						<span>{displayedFormError}</span>
 						{#if form.nodeReady && modelCatalog.error}
-							<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button>
+							<button
+								type="button"
+								class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button
+							>
 						{/if}
 					</div>
 				{:else if form.modelSelectionPending}

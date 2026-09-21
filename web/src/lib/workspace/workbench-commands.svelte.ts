@@ -70,9 +70,10 @@ export class WorkbenchCommandRegistry {
 		);
 		if (tree && fileRootPath) {
 			for (const entry of tree.knownFiles) {
-				const key = fileIdentityKey(fileRootPath, entry.relativePath);
+				const key = fileIdentityKey(fileRootPath, entry.relativePath, tree.nodeId);
 				if (byKey.has(key)) continue;
 				byKey.set(key, {
+					nodeId: tree.nodeId,
 					key,
 					canonicalFileRootPath: fileRootPath,
 					normalizedRelativePath: entry.relativePath,
@@ -137,6 +138,7 @@ export class WorkbenchCommandRegistry {
 			? windowIdOfSurface(this.deps.workspace.layout.snapshot.desktopRoot, context.surfaceId)
 			: null;
 		const opened = await this.deps.files.open({
+			nodeId: location.nodeId,
 			fileRootPath: location.canonicalFileRootPath,
 			relativePath: location.normalizedRelativePath,
 			mode: rendererModeForNavigation(location.viewPreference),
@@ -283,7 +285,9 @@ export class WorkbenchCommandRegistry {
 					const session = viewId ? this.deps.files.get(viewId) : null;
 					if (!session) return;
 					await this.deps.workspace.openSingleton('files');
-					this.deps.filesSurface().revealFile(session.canonicalFileRootPath, session.relativePath);
+					this.deps
+						.filesSurface()
+						.revealFile(session.canonicalFileRootPath, session.relativePath, session.nodeId);
 				},
 			},
 			{

@@ -2,6 +2,7 @@ import type { FileViewSession } from '$lib/files/sessions/file-view-session.svel
 
 export function canSubmitFileWrite(session: FileViewSession): boolean {
 	return !(
+		!session.document.nodeAvailable ||
 		session.rendererMode === 'image' ||
 		session.loading ||
 		session.refreshing ||

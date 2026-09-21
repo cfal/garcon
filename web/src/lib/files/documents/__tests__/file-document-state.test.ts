@@ -3,7 +3,7 @@ import { FileDocumentState } from '$lib/files/documents/file-document-state.svel
 
 function document() {
 	return new FileDocumentState(
-		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
+		{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
 		'["/workspace","src/file.ts"]',
 	);
 }

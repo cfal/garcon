@@ -18,7 +18,7 @@ afterEach(() => {
 
 function documentState() {
 	const document = new FileDocumentState(
-		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.txt' },
+		{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.txt' },
 		'file',
 	);
 	document.content = document.baseline = 'one\ntwo\nthree';

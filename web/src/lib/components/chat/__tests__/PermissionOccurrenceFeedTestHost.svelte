@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import PermissionRequestRow from '../PermissionRequestRow.svelte';
 	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
 	import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte.js';

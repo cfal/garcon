@@ -13,6 +13,9 @@ export interface ImageViewState {
 }
 
 export class FileViewSession {
+	get nodeId(): string {
+		return this.document.nodeId;
+	}
 	readonly id: string;
 	readonly document: FileDocumentState;
 	readonly documentId: string;

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context';
 	import ConversationMessage from '../ConversationMessage.svelte';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
 	import type { ChatMessage } from '$shared/chat-types';
@@ -16,6 +19,8 @@
 	type OpenAutoInput = FileOpenRequest;
 
 	interface Props {
+		executionNodes?: readonly ExecutionNodeSnapshot[];
+		chatContext?: ConversationMessageChatContext;
 		message: ChatMessage;
 		rowId?: string;
 		openAuto?: (input: OpenAutoInput) => void;
@@ -36,6 +41,8 @@
 	}
 
 	let {
+		executionNodes,
+		chatContext,
 		message,
 		rowId,
 		openAuto = () => {},
@@ -54,6 +61,7 @@
 		selectedChatId = 'chat-1',
 		removableChatId,
 	}: Props = $props();
+	setExecutionNodesTestContext(untrack(() => executionNodes));
 	setCanonicalWorkspaceLayout();
 	const initialHost = untrack(() => ({
 		projectBasePath,
@@ -121,6 +129,7 @@
 </script>
 
 <ConversationMessage
+	{chatContext}
 	{message}
 	{rowId}
 	{forkUpToSeq}

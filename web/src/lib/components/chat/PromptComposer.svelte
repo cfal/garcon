@@ -78,7 +78,10 @@
 	import X from '@lucide/svelte/icons/x';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
-	import { matchesSelectableSnippetExpansion, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+	import {
+		matchesSelectableSnippetExpansion,
+		type SelectableSnippet,
+	} from '$lib/snippets/selectable-snippet.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
@@ -114,7 +117,7 @@
 	const rootModelCatalog = getModelCatalog();
 	const nodes = getExecutionNodes();
 	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
-	const localMachine = $derived(agentState.nodeId === 'local');
+	const filesAvailable = $derived(nodes.filesAvailable(agentState.nodeId));
 
 	$effect(() => {
 		if (!sessions.selectedChatId || !nodes.isReady(agentState.nodeId)) return;
@@ -153,7 +156,11 @@
 	const focusDelivery = new PromptComposerFocusDelivery();
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
-		return chat ? [chat.id, chat.status, agentState.nodeId, agentState.projectPath || chat.projectPath].join('\u0000') : '';
+		return chat
+			? [chat.id, chat.status, agentState.nodeId, agentState.projectPath || chat.projectPath].join(
+					'\u0000',
+				)
+			: '';
 	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
@@ -163,10 +170,15 @@
 			return sessions.selectedChat;
 		},
 		get completionDemand() {
-			return (localMachine && ui.showFileMenu) || ui.showSlashMenu;
+			return (filesAvailable && ui.showFileMenu) || ui.showSlashMenu;
 		},
 		projectResolution,
-		get executionTarget() { return { nodeId: agentState.nodeId, projectPath: agentState.projectPath || sessions.selectedChat?.projectPath || '' }; },
+		get executionTarget() {
+			return {
+				nodeId: agentState.nodeId,
+				projectPath: agentState.projectPath || sessions.selectedChat?.projectPath || '',
+			};
+		},
 	});
 	const selectedProjectTarget = $derived(projectState.target);
 	const selectedProjectResolution = $derived(projectState.snapshot);
@@ -457,8 +469,11 @@
 				await settleComposerAfterSnippet();
 				return 'cancelled';
 			}
-			if (!projectState.matchesSnippetContext(result.prepared, result.response)
-				|| composerState.inputText !== sourceText) return 'cancelled';
+			if (
+				!projectState.matchesSnippetContext(result.prepared, result.response) ||
+				composerState.inputText !== sourceText
+			)
+				return 'cancelled';
 			const replacement = range
 				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
 				: {
@@ -500,8 +515,11 @@
 				};
 			});
 			if (result.kind !== 'expanded') return;
-			if (!projectState.matchesSnippetContext(result.prepared, result.response)
-				|| composerState.inputText !== sourceText) return;
+			if (
+				!projectState.matchesSnippetContext(result.prepared, result.response) ||
+				composerState.inputText !== sourceText
+			)
+				return;
 			composerState.inputText = result.response.expandedText;
 			queueCurrentDraft(result.response.expandedText);
 			ui.closeSlashMenu();
@@ -605,7 +623,11 @@
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || directAdmissionPending || promptTransformPending || !nodes.isReady(agentState.nodeId) || !modelCatalog.isValidated,
+			isDisabled ||
+				directAdmissionPending ||
+				promptTransformPending ||
+				!nodes.isReady(agentState.nodeId) ||
+				!modelCatalog.isValidated,
 			composerState.inputText,
 			composerState.images.length,
 		) && !hasQueuedAttachmentConflict,
@@ -663,30 +685,39 @@
 			isPresented &&
 			promptRefinement.layerAttachment}
 	>
-		{#if localMachine}
-		<FileMentionMenu
-			bind:this={fileMentionMenu}
-			projectPath={completionProjectPath}
-			isVisible={ui.showFileMenu}
-			projectPending={Boolean(
-				selectedProjectTarget &&
-				(selectedProjectResolution.kind === 'unchecked' ||
-					selectedProjectResolution.kind === 'resolving'),
-			)}
-			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
-				selectedProjectResolution.kind === 'request-failed'}
-			query={ui.fileQuery}
-			onSelect={insertFileMention}
-			onClose={() => ui.closeFileMenu()}
-		/>
-
+		{#if filesAvailable}
+			<FileMentionMenu
+				nodeId={agentState.nodeId}
+				bind:this={fileMentionMenu}
+				projectPath={completionProjectPath}
+				isVisible={ui.showFileMenu}
+				projectPending={Boolean(
+					selectedProjectTarget &&
+					(selectedProjectResolution.kind === 'unchecked' ||
+						selectedProjectResolution.kind === 'resolving'),
+				)}
+				projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+					selectedProjectResolution.kind === 'request-failed'}
+				query={ui.fileQuery}
+				onSelect={insertFileMention}
+				onClose={() => ui.closeFileMenu()}
+			/>
 		{/if}
-		{#if !nodes.isReady(agentState.nodeId)}<p role="status" class="px-4 py-2 text-sm text-muted-foreground">{nodes.label(agentState.nodeId)} is unavailable.</p>{/if}
+		{#if !nodes.isReady(agentState.nodeId)}<p
+				role="status"
+				class="px-4 py-2 text-sm text-muted-foreground"
+			>
+				{nodes.label(agentState.nodeId)} is unavailable.
+			</p>{/if}
 		{#if nodes.isReady(agentState.nodeId) && !modelCatalog.isValidated}
 			<div role="status" class="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
 				{#if modelCatalog.error}
 					<span>{modelCatalog.error}</span>
-					<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onclick={() => void modelCatalog.forceRefresh()}>Retry</button>
+					<button
+						type="button"
+						class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => void modelCatalog.forceRefresh()}>Retry</button
+					>
 				{:else}Loading models...{/if}
 			</div>
 		{/if}

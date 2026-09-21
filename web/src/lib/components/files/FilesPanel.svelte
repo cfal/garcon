@@ -41,7 +41,7 @@
 		if (surface?.type !== 'file') return null;
 		const session = files.get(surface.fileSessionId);
 		const treeRoot = tree.fileRootPath;
-		return session && treeRoot
+		return session && session.nodeId === tree.nodeId && treeRoot
 			? filePathRelativeToTreeRoot(treeRoot, session.canonicalFileRootPath, session.relativePath)
 			: null;
 	});
@@ -50,6 +50,7 @@
 		const fileRootPath = tree.fileRootPath;
 		if (!fileRootPath) return;
 		void files.open({
+			nodeId: tree.nodeId,
 			fileRootPath,
 			relativePath: node.relativePath,
 			mode: 'auto',
@@ -61,6 +62,7 @@
 	async function openRecoveredFile(draft: FileDraft): Promise<void> {
 		try {
 			await files.open({
+				nodeId: draft.nodeId,
 				fileRootPath: draft.canonicalFileRootPath,
 				relativePath: draft.normalizedRelativePath,
 				mode: 'code',

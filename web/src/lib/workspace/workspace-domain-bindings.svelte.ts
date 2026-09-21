@@ -57,7 +57,10 @@ export class WorkspaceDomainBindings {
 			});
 
 			$effect(() => {
-				deps.singletons.setProjectState(deps.workspaceContext.projectState);
+				deps.singletons.setProjectState(
+					deps.workspaceContext.projectState,
+					deps.workspaceContext.filesProjectState,
+				);
 			});
 
 			$effect(() => {

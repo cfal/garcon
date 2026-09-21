@@ -101,7 +101,10 @@ describe('FileNavigationStore', () => {
 		const restored = new FileNavigationStore(repository, scope);
 		await restored.restore();
 
-		expect(restored.recents.map((entry) => entry.key)).toEqual(['1', '0']);
-		expect(restored.back()?.key).toBe('0');
+		expect(restored.recents.map((entry) => entry.key)).toEqual([
+			JSON.stringify(['local', '/workspace', 'src/1.ts']),
+			JSON.stringify(['local', '/workspace', 'src/0.ts']),
+		]);
+		expect(restored.back()?.key).toBe(JSON.stringify(['local', '/workspace', 'src/0.ts']));
 	});
 });

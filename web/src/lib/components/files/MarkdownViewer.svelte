@@ -72,6 +72,7 @@
 		void files
 			.open({
 				...target,
+				nodeId: session.nodeId,
 				mode: 'auto',
 				origin: presentation,
 				reason: 'user-open',

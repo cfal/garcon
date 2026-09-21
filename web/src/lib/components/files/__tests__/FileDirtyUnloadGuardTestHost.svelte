@@ -20,7 +20,7 @@
 	} = $props();
 	const initial = untrack(() => ({ dirty, saving }));
 	const documentState = new FileDocumentState(
-		{ canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+		{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 		'["/workspace","file.ts"]',
 	);
 	const session = new FileViewSession(documentState, 'file-view');

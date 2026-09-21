@@ -25,6 +25,7 @@ export class FileSaveCoordinator {
 			const result = await Promise.race([
 				this.options.saveText(
 					{
+						nodeId: document.nodeId,
 						projectPath: document.canonicalFileRootPath,
 						filePath: document.relativePath,
 						content,
@@ -56,6 +57,10 @@ export class FileSaveCoordinator {
 			document.freshnessError = null;
 			document.saveError = null;
 			document.recovered = false;
+		} catch (error) {
+			if (!(error instanceof ApiError) || error.errorCode === 'FILE_SAVE_OUTCOME_UNKNOWN')
+				document.isExternallyStale = true;
+			throw error;
 		} finally {
 			clearTimeout(timeout);
 		}

@@ -182,12 +182,13 @@ describe('files API contract', () => {
 			.mockResolvedValueOnce(jsonResponse({ status: 'ready', revision: 'v1:latest' }))
 			.mockResolvedValueOnce(jsonResponse({ status: 'missing' }));
 
-		await expect(
-			getFileRevision({ projectPath: '/p', filePath: 'a.ts' }),
-		).resolves.toEqual({ status: 'ready', revision: 'v1:latest' });
-		await expect(
-			getFileRevision({ projectPath: '/p', filePath: 'a.ts' }),
-		).resolves.toEqual({ status: 'missing' });
+		await expect(getFileRevision({ projectPath: '/p', filePath: 'a.ts' })).resolves.toEqual({
+			status: 'ready',
+			revision: 'v1:latest',
+		});
+		await expect(getFileRevision({ projectPath: '/p', filePath: 'a.ts' })).resolves.toEqual({
+			status: 'missing',
+		});
 		expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/files/revision');
 	});
 
@@ -196,9 +197,9 @@ describe('files API contract', () => {
 			.mockResolvedValueOnce(jsonResponse({ status: 'ready', revision: 'bad' }))
 			.mockResolvedValueOnce(jsonResponse({ content: 'text', path: '/p/a.ts' }));
 
-		await expect(
-			getFileRevision({ projectPath: '/p', filePath: 'a.ts' }),
-		).rejects.toThrow('Invalid file revision response');
+		await expect(getFileRevision({ projectPath: '/p', filePath: 'a.ts' })).rejects.toThrow(
+			'Invalid file revision response',
+		);
 		await expect(readText({ projectPath: '/p', filePath: 'a.ts' })).rejects.toThrow(
 			'Invalid file text response',
 		);
@@ -218,9 +219,9 @@ describe('files API contract', () => {
 	it('rejects raw content without a valid revision header', async () => {
 		fetchMock.mockResolvedValue(new Response('image'));
 
-		await expect(
-			readContent({ projectPath: '/p', filePath: 'image.png' }),
-		).rejects.toThrow('Invalid file content revision');
+		await expect(readContent({ projectPath: '/p', filePath: 'image.png' })).rejects.toThrow(
+			'Invalid file content revision',
+		);
 	});
 
 	it('builds a content URL with encoded canonical project and file paths', () => {
@@ -239,6 +240,7 @@ describe('files API contract', () => {
 			jsonResponse({
 				success: true,
 				identity: {
+					nodeId: 'local',
 					canonicalFileRootPath: '/workspace/project',
 					normalizedRelativePath: 'src/file.ts',
 				},
@@ -254,6 +256,7 @@ describe('files API contract', () => {
 		).resolves.toEqual({
 			success: true,
 			identity: {
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'src/file.ts',
 			},
@@ -262,6 +265,47 @@ describe('files API contract', () => {
 		expect(url).toContain('/api/v1/files/identity');
 		expect(url).toContain('chatId=chat-1');
 		expect(url).toContain('path=alias%2Ffile.ts');
+	});
+
+	it('qualifies every file operation with the captured node, without putting it in the save body', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const target = { nodeId, projectPath: '/worker', filePath: 'a.ts' };
+		fetchMock.mockResolvedValueOnce(jsonResponse(treePayload));
+		await getTree({ nodeId });
+		fetchMock.mockResolvedValueOnce(jsonResponse([]));
+		await browseDirectory('/worker', undefined, nodeId);
+		fetchMock.mockResolvedValueOnce(jsonResponse([]));
+		await getFileList(target);
+		fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'missing' }));
+		await getFileRevision(target);
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ content: '', path: '/worker/a.ts', revision: 'v1:read' }),
+		);
+		await readText(target);
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				success: true,
+				identity: { nodeId, canonicalFileRootPath: '/worker', normalizedRelativePath: 'a.ts' },
+			}),
+		);
+		expect((await resolveFileIdentity({ ...target, relativePath: 'a.ts' })).identity.nodeId).toBe(
+			nodeId,
+		);
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ success: true, path: '/worker/a.ts', revision: 'v1:saved', message: 'Saved' }),
+		);
+		await saveText({
+			...target,
+			content: 'edit',
+			expectedRevision: 'v1:read',
+			conflictResolution: 'reject',
+		});
+		expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).not.toHaveProperty('nodeId');
+		for (const [url] of fetchMock.mock.calls)
+			expect(new URL(url, 'http://controller').searchParams.get('nodeId')).toBe(nodeId);
+		expect(new URL(getContentUrl(target), 'http://controller').searchParams.get('nodeId')).toBe(
+			nodeId,
+		);
 	});
 
 	it('rejects an invalid canonical file identity payload', async () => {

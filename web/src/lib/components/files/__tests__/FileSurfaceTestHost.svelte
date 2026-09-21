@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	setExecutionNodesTestContext();
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
 		setFileSessions,
@@ -82,6 +84,7 @@
 		resolveFileIdentity: async ({ relativePath }) => ({
 			success: true,
 			identity: {
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: relativePath,
 			},
@@ -123,6 +126,7 @@
 	}
 	const session = new FileSession(
 		{
+			nodeId: 'local',
 			canonicalFileRootPath: '/workspace',
 			normalizedRelativePath: relativePath,
 		},

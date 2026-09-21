@@ -117,4 +117,34 @@ describe('FileMentionMenu', () => {
 		expect(screen.queryByText('cached.ts')).toBeNull();
 		expect(onSelect).not.toHaveBeenCalled();
 	});
+
+	it('reloads a same-path project on node change and ignores old file results', async () => {
+		const local = deferred<Awaited<ReturnType<typeof getFileList>>>();
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		vi.mocked(getFileList)
+			.mockReturnValueOnce(local.promise)
+			.mockResolvedValueOnce([
+				{ name: 'remote.ts', path: '/repo/remote.ts', relativePath: 'remote.ts' },
+			]);
+		const view = render(FileMentionMenuTestHost, {
+			projectPath: '/repo',
+			isVisible: true,
+			query: '',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		await waitFor(() => expect(getFileList).toHaveBeenCalledOnce());
+		const oldSignal = vi.mocked(getFileList).mock.calls[0][1]?.signal;
+		await view.rerender({ nodeId });
+		await screen.findByText('remote.ts');
+		expect(getFileList).toHaveBeenLastCalledWith(
+			{ projectPath: '/repo', nodeId },
+			expect.anything(),
+		);
+		expect(oldSignal?.aborted).toBe(true);
+		local.resolve([{ name: 'local.ts', path: '/repo/local.ts', relativePath: 'local.ts' }]);
+		await tick();
+		expect(screen.queryByText('local.ts')).toBeNull();
+		expect(screen.getByText('remote.ts')).toBeTruthy();
+	});
 });
