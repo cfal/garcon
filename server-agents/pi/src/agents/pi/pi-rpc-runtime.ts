@@ -333,6 +333,15 @@ export class PiRpcRuntime {
     }
   }
 
+  async releaseSession(chatId: string, agentSessionId: string | null): Promise<void> {
+    const sessions = [...this.#liveSessions].filter(
+      (session) => session.chatId === chatId && session.id === agentSessionId,
+    );
+    await Promise.all(sessions.map((session) => this.#retire(session, 'session released', {
+      turnOutcome: 'stopped',
+    })));
+  }
+
   startPurgeTimer(): void {
     this.#idlePurger.start();
   }

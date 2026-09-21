@@ -100,7 +100,7 @@ export default class PiAgentIntegration implements AgentIntegration {
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
-    const nativeEvidence = createPiNativeEvidence(config, nativeSessions);
+    const nativeEvidence = createPiNativeEvidence(config, nativeSessions, runtime);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
@@ -198,6 +198,7 @@ async function loadPiMessages(
 function createPiNativeEvidence(
   config: PiConfig,
   nativeSessions: NativeSessionCodec,
+  runtime: LazyPiRuntime,
 ): AgentNativeEvidenceSource & {
   readonly loadLegacy: AgentNativeEvidenceSource['load'];
 } {
@@ -270,8 +271,9 @@ function createPiNativeEvidence(
         ? { kind: 'provider-reference', value: reference.agentSessionId }
         : null;
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      await runtime.releaseSession(chat.chatId, piReference(chat, nativeSessions).agentSessionId);
     },
   };
 }

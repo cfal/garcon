@@ -17,6 +17,7 @@ export interface PiRuntime {
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null;
   steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
+  releaseSession(chatId: string, agentSessionId: string | null): Promise<void>;
   startPurgeTimer(): void;
   shutdown(): Promise<void>;
 }
@@ -24,6 +25,7 @@ export interface PiRuntime {
 export type PiRuntimeLoader = () => Promise<PiRuntime>;
 
 interface PendingRuntimeOperation {
+  chatId: string;
   agentSessionId: string | null;
   cancelled: boolean;
 }
@@ -42,11 +44,11 @@ export class LazyPiRuntime {
   }
 
   async startSession(request: PiStartRequest): Promise<PiStartedSession> {
-    return this.#runAfterLoad(null, (runtime) => runtime.startSession(request));
+    return this.#runAfterLoad(request.chatId, null, (runtime) => runtime.startSession(request));
   }
 
   async runTurn(request: PiResumeRequest): Promise<void> {
-    return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.runTurn(request));
+    return this.#runAfterLoad(request.chatId, request.agentSessionId, (runtime) => runtime.runTurn(request));
   }
 
   abort(agentSessionId: string): boolean | Promise<boolean> {
@@ -67,7 +69,13 @@ export class LazyPiRuntime {
   }
 
   steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
-    return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.steer(request));
+    return this.#runAfterLoad(request.chatId, request.agentSessionId, (runtime) => runtime.steer(request));
+  }
+
+  async releaseSession(chatId: string, agentSessionId: string | null): Promise<void> {
+    if (!agentSessionId) return;
+    this.#cancelPendingOperations(agentSessionId, chatId);
+    await this.#runtime?.releaseSession(chatId, agentSessionId);
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
@@ -97,12 +105,13 @@ export class LazyPiRuntime {
   }
 
   async #runAfterLoad<T>(
+    chatId: string,
     agentSessionId: string | null,
     operation: (runtime: PiRuntime) => Promise<T>,
   ): Promise<T> {
     if (this.#shutdownRequested) throw this.#cancelledOperationError();
 
-    const pending: PendingRuntimeOperation = { agentSessionId, cancelled: false };
+    const pending: PendingRuntimeOperation = { chatId, agentSessionId, cancelled: false };
     this.#pendingOperations.add(pending);
     let runtime: PiRuntime;
     try {
@@ -116,10 +125,11 @@ export class LazyPiRuntime {
     return operation(runtime);
   }
 
-  #cancelPendingOperations(agentSessionId?: string): boolean {
+  #cancelPendingOperations(agentSessionId?: string, chatId?: string): boolean {
     let cancelled = false;
     for (const operation of this.#pendingOperations) {
       if (agentSessionId !== undefined && operation.agentSessionId !== agentSessionId) continue;
+      if (chatId !== undefined && operation.chatId !== chatId) continue;
       operation.cancelled = true;
       cancelled = true;
     }

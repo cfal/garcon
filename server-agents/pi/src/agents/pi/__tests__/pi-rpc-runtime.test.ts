@@ -556,6 +556,54 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
+  it.each(['idle', 'active'])('releases an %s session without retiring a sibling or replacement', async (phase) => {
+    const runtime = createRuntime();
+    await fs.writeFile(baseResumeRequest().nativePath, 'native history');
+    const turn = runtime.runTurn(baseResumeRequest());
+    await waitForActive(runtime);
+    if (phase === 'idle') {
+      fakes[0].pushEvent({ type: 'agent_settled' });
+      await turn;
+    }
+    spawnOptions.push({ sessionId: 'pi-sibling' });
+    await runtime.startSession(baseStartRequest({ chatId: 'sibling-chat' }));
+    await waitForActive(runtime, 'pi-sibling');
+
+    try {
+      await runtime.releaseSession('different-chat', 'pi-session-1');
+      await runtime.releaseSession('chat-2', null);
+      expect(fakes[0].proc.killed).toBe(false);
+      await runtime.releaseSession('chat-2', 'pi-session-1');
+      await turn;
+      expect(fakes[0].signals).toEqual(['SIGTERM']);
+      expect(fakes[1].proc.killed).toBe(false);
+      expect(runtime.isRunning('pi-sibling')).toBe(true);
+      expect(await fs.readFile(baseResumeRequest().nativePath, 'utf8')).toBe('native history');
+
+      spawnOptions.push({ sessionId: 'pi-replacement' });
+      await runtime.startSession(baseStartRequest({ chatId: 'chat-2' }));
+      await waitForActive(runtime, 'pi-replacement');
+      await runtime.releaseSession('chat-2', 'pi-session-1');
+      expect(fakes[2].proc.killed).toBe(false);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('awaits a session retirement already requested by Stop', async () => {
+    const runtime = createRuntime();
+    spawnOptions.push({ killDelayMs: 30 });
+    await runtime.startSession(baseStartRequest());
+    await waitForActive(runtime);
+    expect(runtime.abort('pi-session-1')).toBe(true);
+    let exited = false;
+    void fakes[0].proc.exited.then(() => { exited = true; });
+    await runtime.releaseSession('chat-1', 'pi-session-1');
+    expect(exited).toBe(true);
+    expect(fakes[0].signals).toEqual(['SIGTERM']);
+    await runtime.shutdown();
+  });
+
   it('keeps active sessions through purge ticks and awaits an idle-purge tombstone', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ killDelayMs: 30 });

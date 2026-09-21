@@ -25,6 +25,9 @@ export interface AgentHistoryImport {
 export interface AgentNativeSessionAccess {
   resolveNativeSession(request: AgentHistoryImportRequest): Promise<AgentNativeSessionRef | null>;
   describeSource(request: AgentHistoryImportRequest): Promise<AgentTranscriptSourceLocation | null>;
+  // Releases retained runtime resources for the captured chat/native session, even when idle.
+  // Idempotent and scoped: never retires a replacement binding or a shared provider server.
+  // Native-history removal remains provider policy; process termination is best-effort.
   release(
     request: AgentHistoryImportRequest & { readonly reason: 'deleted' | 'transferred' },
   ): Promise<void>;

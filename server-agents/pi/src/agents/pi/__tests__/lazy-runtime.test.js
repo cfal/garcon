@@ -9,6 +9,7 @@ class FakePiRuntime {
   getRunningSessions = mock(() => [{ id: 'pi-session' }]);
   captureSteerTarget = mock(() => ({ provider: 'pi-target' }));
   steer = mock(async () => ({ kind: 'accepted' }));
+  releaseSession = mock(async () => {});
   startPurgeTimer = mock(() => {});
   shutdown = mock(async () => {});
 }
@@ -22,6 +23,31 @@ function deferred() {
 }
 
 describe('LazyPiRuntime', () => {
+  it('releases loaded sessions without loading an unused runtime', async () => {
+    const loaded = new FakePiRuntime();
+    const loadRuntime = mock(async () => loaded);
+    const runtime = new LazyPiRuntime(loadRuntime);
+    await runtime.releaseSession('chat-1', 'pi-session');
+    expect(loadRuntime).not.toHaveBeenCalled();
+    await runtime.startSession({ chatId: 'chat-1' });
+    await runtime.releaseSession('chat-1', 'pi-session');
+    expect(loaded.releaseSession).toHaveBeenCalledWith('chat-1', 'pi-session');
+  });
+
+  it('cancels only the released chat binding during a pending load', async () => {
+    const loaded = new FakePiRuntime();
+    const loader = deferred();
+    const runtime = new LazyPiRuntime(() => loader.promise);
+    const deleted = runtime.runTurn({ chatId: 'chat-1', agentSessionId: 'pi-session' });
+    const sibling = runtime.runTurn({ chatId: 'chat-2', agentSessionId: 'pi-session' });
+    const replacement = runtime.runTurn({ chatId: 'chat-1', agentSessionId: 'new-session' });
+    const results = Promise.allSettled([deleted, sibling, replacement]);
+    await runtime.releaseSession('chat-1', 'pi-session');
+    loader.resolve(loaded);
+    expect((await results).map(({ status }) => status)).toEqual(['rejected', 'fulfilled', 'fulfilled']);
+    expect(loaded.runTurn).toHaveBeenCalledTimes(2);
+  });
+
   it('loads Pi only when an asynchronous runtime operation needs it', async () => {
     const loaded = new FakePiRuntime();
     const loadRuntime = mock(async () => loaded);
