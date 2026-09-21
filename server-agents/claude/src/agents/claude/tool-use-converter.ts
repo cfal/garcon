@@ -184,6 +184,7 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
     case 'todoread':
       return new TodoReadToolUseMessage(ts, toolId);
 
+    case 'agent':
     case 'task':
       return new TaskToolUseMessage(ts, toolId,
         asString(input.subagent_type ?? input.subagentType),

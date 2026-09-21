@@ -189,7 +189,7 @@ describe('Claude native user-input conversion', () => {
     });
   });
 
-  it('filters provider task notifications while preserving normal user messages', async () => {
+  it('filters provider-origin messages while preserving human user messages', async () => {
     const entries = [
       {
         sessionId: 'session-1',
@@ -221,8 +221,24 @@ describe('Claude native user-input conversion', () => {
       {
         sessionId: 'session-1',
         type: 'user',
-        uuid: 'fallback-task-user',
+        uuid: 'peer-user',
         timestamp: '2026-07-21T14:00:03.000Z',
+        origin: { kind: 'peer' },
+        message: { role: 'user', content: 'A peer supplied ordinary-looking prose.' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'future-provider-user',
+        timestamp: '2026-07-21T14:00:04.000Z',
+        origin: { kind: 'future-provider-kind' },
+        message: { role: 'user', content: 'A future provider supplied ordinary-looking prose.' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'fallback-task-user',
+        timestamp: '2026-07-21T14:00:05.000Z',
         message: {
           role: 'user',
           content: '<task-notification>fallback notification</task-notification>',
@@ -231,8 +247,16 @@ describe('Claude native user-input conversion', () => {
       {
         sessionId: 'session-1',
         type: 'user',
+        uuid: 'human-user',
+        timestamp: '2026-07-21T14:00:06.000Z',
+        origin: { kind: 'human' },
+        message: { role: 'user', content: 'Explicitly human input.' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
         uuid: 'normal-user',
-        timestamp: '2026-07-21T14:00:04.000Z',
+        timestamp: '2026-07-21T14:00:07.000Z',
         message: { role: 'user', content: 'A task completed with ordinary-looking prose.' },
       },
     ];
@@ -240,13 +264,17 @@ describe('Claude native user-input conversion', () => {
     await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
       const messages = await loadClaudeChatMessages(filePath);
 
-      expect(messages).toMatchObject([{
-        type: 'user-message',
-        content: 'A task completed with ordinary-looking prose.',
-      }]);
+      expect(messages).toMatchObject([
+        { type: 'user-message', content: 'Explicitly human input.' },
+        { type: 'user-message', content: 'A task completed with ordinary-looking prose.' },
+      ]);
       expect(getNativeMessageSource(messages[0])).toEqual({
+        entryId: 'human-user',
+        lineNumber: 7,
+      });
+      expect(getNativeMessageSource(messages[1])).toEqual({
         entryId: 'normal-user',
-        lineNumber: 5,
+        lineNumber: 8,
       });
     });
   });

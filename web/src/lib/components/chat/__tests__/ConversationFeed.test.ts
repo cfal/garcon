@@ -230,6 +230,22 @@ describe('ConversationFeed', () => {
 		expect(viewport.classList.contains('pb-3')).toBe(false);
 	});
 
+	it('bottom-aligns non-empty feeds without changing empty-state alignment', async () => {
+		const populated = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
+		await waitFor(() =>
+			expect(populated.container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy(),
+		);
+		const populatedContent = populated.container.querySelector('[data-chat-feed-content]');
+		expect(populatedContent?.classList.contains('min-h-full')).toBe(true);
+		expect(populatedContent?.classList.contains('justify-end')).toBe(true);
+		populated.unmount();
+
+		const empty = render(ConversationFeedTestHost, { transcriptScenario: 'empty' });
+		const emptyContent = empty.container.querySelector('[data-chat-feed-content]');
+		expect(emptyContent?.classList.contains('min-h-full')).toBe(false);
+		expect(emptyContent?.classList.contains('justify-end')).toBe(false);
+	});
+
 	it('uses fixed transcript typography without CSS zoom', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
 
