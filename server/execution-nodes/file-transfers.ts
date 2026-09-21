@@ -1,4 +1,5 @@
-import * as fs from 'node:fs/promises';
+import { promises as fs } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import type { ExecutionFilesService } from '@garcon/server-agent-interface';
@@ -10,12 +11,13 @@ import { FILE_CHUNK_BYTES, FILE_TRANSFER_TIMEOUT_MS, decodeFileChunk, invalidFil
 interface Transfer {
   readonly ref: FileTransferRef;
   readonly reserved: number;
-  readonly timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout>;
+  retired: boolean;
   readonly bytes?: Uint8Array;
   readonly write?: {
     readonly request: FileRpcMethods['files.beginWrite']['request'];
     readonly directory: string;
-    readonly file: fs.FileHandle;
+    readonly file: FileHandle;
     offset: number;
   };
 }
@@ -60,7 +62,7 @@ export class FileTransfers {
       || typeof request.filePath !== 'string' || !request.filePath || request.filePath.length > 4096) throw invalidFileTransfer();
     const release = this.#reserve(request.size);
     let directory: string | null = null;
-    let file: fs.FileHandle | null = null;
+    let file: FileHandle | null = null;
     try {
       this.#check(signal);
       await this.files.revision(request, { signal });
@@ -109,7 +111,9 @@ export class FileTransfers {
         const bytes = await write.file.readFile();
         if (bytes.length !== write.request.size) throw invalidFileTransfer();
         this.#check(signal);
-        const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+        let content: string;
+        try { content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw invalidFileTransfer(); }
         return await this.files.save({ ...write.request, content }, { signal });
       } finally { await this.#release(entry); }
     });
@@ -133,7 +137,7 @@ export class FileTransfers {
     const ref: FileTransferRef = { ...this.scope, kind, id: crypto.randomUUID() };
     const timer = setTimeout(() => { void this.close(ref).catch(() => undefined); }, this.options.timeoutMs ?? FILE_TRANSFER_TIMEOUT_MS);
     timer.unref();
-    this.#transfers.set(ref.id, { ...value, ref, reserved, timer });
+    this.#transfers.set(ref.id, { ...value, ref, reserved, timer, retired: false });
     return ref;
   }
 
@@ -153,7 +157,7 @@ export class FileTransfers {
   #get(ref: FileTransferRef, kind: FileTransferRef['kind']): Transfer {
     this.#validateRef(ref);
     const entry = this.#transfers.get(ref.id);
-    if (this.#disposed || !entry) throw new DomainError('FILE_TRANSFER_EXPIRED', 'File transfer expired; reopen the file', 409, true);
+    if (this.#disposed || !entry || entry.retired) throw new DomainError('FILE_TRANSFER_EXPIRED', 'File transfer expired; reopen the file', 409, true);
     if (ref.kind !== kind || entry.ref.kind !== kind) throw invalidFileTransfer();
     return entry;
   }
@@ -164,13 +168,21 @@ export class FileTransfers {
   }
 
   async #release(entry: Transfer): Promise<void> {
+    entry.retired = true;
     clearTimeout(entry.timer);
-    this.#transfers.delete(entry.ref.id);
     try {
       if (entry.write) {
         await entry.write.file.close();
         await fs.rm(entry.write.directory, { recursive: true, force: true });
       }
-    } finally { this.#count--; this.#bytes -= entry.reserved; }
+    } catch {
+      // Cleanup never changes a commit outcome; reservations remain until removal succeeds.
+      entry.timer = setTimeout(() => { void this.close(entry.ref).catch(() => undefined); }, this.options.timeoutMs ?? FILE_TRANSFER_TIMEOUT_MS);
+      entry.timer.unref();
+      return;
+    }
+    this.#transfers.delete(entry.ref.id);
+    this.#count--;
+    this.#bytes -= entry.reserved;
   }
 }

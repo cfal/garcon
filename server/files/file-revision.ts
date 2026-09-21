@@ -138,10 +138,14 @@ export async function writeVersionedTextFile(
       ));
   const handle = await openFile(filePath);
   try {
-    await handle.writeFile(content);
-    return revisionForFileStat(await handle.stat({ bigint: true }));
-  } finally {
-    await handle.close();
+    try {
+      await handle.writeFile(content);
+      return revisionForFileStat(await handle.stat({ bigint: true }));
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    throw new DomainError('FILE_SAVE_OUTCOME_UNKNOWN', 'Save could not be confirmed. Reload the file before saving again.', 503, false, { cause: error });
   }
 }
 

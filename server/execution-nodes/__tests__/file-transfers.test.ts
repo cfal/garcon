@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import * as fs from 'node:fs/promises';
+import { afterEach, beforeEach, expect, test, spyOn } from 'bun:test';
+import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { FileTransfers } from '../file-transfers.js';
@@ -79,4 +79,26 @@ test('snapshot reservations bound concurrent reads and release on close', async 
   await expect(transfers.openRead(target(), signal)).rejects.toMatchObject({ code: 'FILE_TRANSFER_LIMIT' });
   await transfers.close(refs[0]);
   expect((await transfers.openRead(target(), signal)).size).toBe(8);
+});
+
+test('cleanup failure preserves the confirmed commit and is retried without recommitting', async () => {
+  const content = 'committed';
+  const transfer = await transfers.beginWrite({ ...target(), size: content.length, expectedRevision: (await files.read(target())).revision, conflictResolution: 'reject' }, signal);
+  await transfers.writeChunk({ transfer, offset: 0, data: Buffer.from(content).toString('base64') }, signal);
+  const remove = spyOn(fs, 'rm').mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+  try {
+    expect((await transfers.commitWrite(transfer, signal)).success).toBe(true);
+    expect(await fs.readFile(path.join(directory, 'example.txt'), 'utf8')).toBe(content);
+    await expect(transfers.commitWrite(transfer, signal)).rejects.toMatchObject({ code: 'FILE_TRANSFER_EXPIRED' });
+    expect(await fs.readdir(path.join(directory, 'staging'))).toHaveLength(1);
+  } finally { remove.mockRestore(); }
+  await transfers.close(transfer);
+  expect(await fs.readdir(path.join(directory, 'staging'))).toEqual([]);
+});
+
+test('malformed UTF-8 is a definite rejection and leaves the destination unchanged', async () => {
+  const transfer = await transfers.beginWrite({ ...target(), size: 1, expectedRevision: 'v1:initial', conflictResolution: 'overwrite' }, signal);
+  await transfers.writeChunk({ transfer, offset: 0, data: '/w==' }, signal);
+  await expect(transfers.commitWrite(transfer, signal)).rejects.toMatchObject({ code: 'FILE_TRANSFER_INVALID' });
+  expect(await fs.readFile(path.join(directory, 'example.txt'), 'utf8')).toBe('original');
 });

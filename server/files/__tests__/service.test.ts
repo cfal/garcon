@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -55,5 +55,52 @@ describe('node files service', () => {
 
   it('observes cancellation before file operations', async () => {
     await expect(service.read(target(), { signal: AbortSignal.abort() })).rejects.toThrow();
+  });
+
+  it('serializes a replacement service behind an already dispatched, cancelled save', async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const originalOpen = fs.open;
+    let held = false;
+    const intercepted = spyOn(fs, 'open').mockImplementation(async (...args) => {
+      if (!held && typeof args[1] === 'number' && (args[1] & 1)) {
+        held = true;
+        entered.resolve();
+        await resume.promise;
+      }
+      return originalOpen(...args);
+    });
+    try {
+      const { revision } = await service.read(target());
+      const abort = new AbortController();
+      const first = service.save({ ...target(), content: 'retired', expectedRevision: revision, conflictResolution: 'reject' }, { signal: abort.signal });
+      await entered.promise;
+      abort.abort();
+      const replacement = new LocalExecutionFilesService({ nodeId: 'synthetic-node', projectBasePath: directory });
+      const second = replacement.save({ ...target(), content: 'replacement', expectedRevision: revision, conflictResolution: 'reject' });
+      resume.resolve();
+      expect((await first).success).toBe(true);
+      await expect(second).rejects.toMatchObject({ code: 'FILE_REVISION_CONFLICT' });
+      const current = await replacement.read(target());
+      await replacement.save({ ...target(), content: 'replacement', expectedRevision: current.revision, conflictResolution: 'reject' });
+      expect(await fs.readFile(path.join(target().projectPath, 'file.txt'), 'utf8')).toBe('replacement');
+    } finally { resume.resolve(); intercepted.mockRestore(); }
+  });
+
+  it('distinguishes a denied open from an uncertain post-open write', async () => {
+    const { revision } = await service.read(target());
+    const request = { ...target(), content: 'replacement', expectedRevision: revision, conflictResolution: 'reject' as const };
+    const originalOpen = fs.open;
+    const intercepted = spyOn(fs, 'open').mockImplementation(async () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); });
+    try {
+      await expect(service.save(request)).rejects.toMatchObject({ code: 'FILE_PERMISSION_DENIED' });
+      expect(await fs.readFile(path.join(target().projectPath, 'file.txt'), 'utf8')).toBe('initial');
+      intercepted.mockImplementation(async (...args) => {
+        const handle = await originalOpen(...args);
+        spyOn(handle, 'writeFile').mockRejectedValue(Object.assign(new Error('full'), { code: 'ENOSPC' }));
+        return handle;
+      });
+      await expect(service.save(request)).rejects.toMatchObject({ code: 'FILE_SAVE_OUTCOME_UNKNOWN' });
+    } finally { intercepted.mockRestore(); }
   });
 });

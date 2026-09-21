@@ -20,9 +20,10 @@ export interface FilesServiceOptions {
   readonly readDirectory?: typeof readFileDirectory;
 }
 
-export class LocalExecutionFilesService implements ExecutionFilesService {
-  readonly #locks = new KeyedPromiseLock();
+// In-flight writes can outlive a serving session, so aliases share process-lifetime locks.
+const saveLocks = new KeyedPromiseLock();
 
+export class LocalExecutionFilesService implements ExecutionFilesService {
   constructor(private readonly options: FilesServiceOptions) {}
 
   async tree(request: Parameters<ExecutionFilesService['tree']>[0], options?: NodeCallOptions) {
@@ -90,18 +91,14 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
       const resolve = this.options.resolveSaveTarget ?? resolveRealWithinBase;
       const target = await resolve(root, toNativePath(request.filePath));
       const key = await getFileLockKey(target);
-      return this.#locks.runExclusive(key, async () => {
+      return saveLocks.runExclusive(key, async () => {
         this.#available(options);
         const locked = await resolve(root, toNativePath(request.filePath));
         if (locked !== target || await getFileLockKey(locked) !== key) throw fileRevisionConflict();
         const current = await getFileRevisionOrMissing(target);
         if (request.conflictResolution === 'reject' && current !== request.expectedRevision) throw fileRevisionConflict();
         this.#available(options);
-        let revision;
-        try { revision = await writeVersionedTextFile(target, request.content); }
-        catch (error) {
-          throw new DomainError('FILE_SAVE_OUTCOME_UNKNOWN', 'Save could not be confirmed. Reload the file before saving again.', 503, false, { cause: error });
-        }
+        const revision = await writeVersionedTextFile(target, request.content);
         return { success: true as const, path: toNodePath(target), message: 'File saved successfully', revision };
       });
     });
