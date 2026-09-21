@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CopyFilePathButton from './CopyFilePathButton.svelte';
+	import FilePathPopover from './FilePathPopover.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -35,7 +36,9 @@
 			<span style:width={`${controlsSize?.width ?? 0}px`}></span>
 		</div>
 	</div>
-	<h2 class="min-w-0 truncate" title={displayPath}>{title}</h2>
+	<h2 class="min-w-0 truncate" title={displayPath} aria-label={displayPath}>
+		<FilePathPopover {path} label={title} class="block max-w-full" />
+	</h2>
 	<div class="flex shrink-0 items-center gap-1.5" bind:contentRect={controlsSize}>
 		<CopyFilePathButton {path} />
 		{#if dirty}

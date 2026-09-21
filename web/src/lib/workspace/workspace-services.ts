@@ -284,6 +284,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
 	const comparisonPreferences = new LocalGitComparisonPreferences();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
+		executionNodes: deps.executionNodes,
 		createTickets: () => new TicketsController({ invalidations: deps.ticketsInvalidations }),
 		createChatBoard: () =>
 			new ChatBoardController({

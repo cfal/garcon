@@ -18,6 +18,17 @@ afterEach(cleanup);
 afterAll(() => restoreResizeObserver());
 
 describe('FilePathTitle', () => {
+	it('reveals a selectable raw path from a compact remote title', async () => {
+		const path = '/workspace/project/src/file.ts';
+		render(FilePathTitle, { path, fileName: 'file.ts', dirty: false, nodeLabel: 'Worker' });
+		await fireEvent.click(screen.getByRole('button', { name: path }));
+		const input = screen.getByRole('textbox', { name: 'File location' }) as HTMLInputElement;
+		expect(input.value).toBe(path);
+		await fireEvent.focus(input);
+		expect(input.selectionStart).toBe(0);
+		expect(input.selectionEnd).toBe(path.length);
+	});
+
 	it('switches between full path and basename as space changes while always copying the full path', async () => {
 		const path = '/workspace/project/src/file.ts';
 		const { container, rerender } = render(FilePathTitle, {
@@ -42,17 +53,17 @@ describe('FilePathTitle', () => {
 			availableWidth = width;
 			ResizeObserverHarness.emit(root, width);
 			await tick();
-			expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(expectedTitle);
+			expect(screen.getByRole('heading', { level: 2 }).textContent?.trim()).toBe(expectedTitle);
 			expect(screen.getByRole('heading', { level: 2 }).title).toBe(path);
 		}
 		fullWidth = 300.421875;
 		ResizeObserverHarness.emit(measure, fullWidth);
 		await tick();
-		expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('file.ts');
+		expect(screen.getByRole('heading', { level: 2 }).textContent?.trim()).toBe('file.ts');
 		availableWidth = fullWidth;
 		ResizeObserverHarness.emit(root, availableWidth);
 		await tick();
-		expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(path);
+		expect(screen.getByRole('heading', { level: 2 }).textContent?.trim()).toBe(path);
 
 		await rerender({ path, fileName: 'file.ts', dirty: true });
 		const controls = screen.getByRole('button', { name: 'Copy file path' }).parentElement!;
@@ -63,7 +74,7 @@ describe('FilePathTitle', () => {
 		ResizeObserverHarness.emit(root, availableWidth);
 		await tick();
 		expect((measure.lastElementChild as HTMLElement).style.width).toBe('41.421875px');
-		expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('file.ts');
+		expect(screen.getByRole('heading', { level: 2 }).textContent?.trim()).toBe('file.ts');
 		expect(screen.getByRole('img', { name: 'Unsaved' })).toBeTruthy();
 		expect(root.classList).toContain('text-xs');
 		expect(container.querySelector('p')).toBeNull();

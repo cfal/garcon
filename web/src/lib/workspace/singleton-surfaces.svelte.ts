@@ -21,6 +21,7 @@ import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.sve
 import { untrack } from 'svelte';
 import { effectiveNodeId } from '$shared/execution-nodes';
 import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
+import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
@@ -28,12 +29,14 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	comparisonPreferences: GitComparisonPreferences;
 	createChatBoard?(): ChatBoardController;
 	createTickets?(): TicketsController;
+	executionNodes?: Pick<ExecutionNodesStore, 'filesAvailable'>;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
 	readonly tree = new FileTreeStore();
 	presentationVisible = $state(false);
-	#projectAvailable = $state(false);
+	#projectState = $state.raw<WorkspaceProjectState>({ kind: 'absent' });
+	#selectedNodeId = $state<string | null>(null);
 	#projectPath: string | null = null;
 	#pendingReveal = $state.raw<{
 		nodeId: string;
@@ -41,11 +44,18 @@ export class FilesSurfaceController implements PortableSingletonController {
 		relativePath: string;
 	} | null>(null);
 
-	constructor() {
+	constructor(private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable'>) {
+		$effect(() => {
+			const nodeId = this.#selectedNodeId;
+			if (nodeId === null) return;
+			const available = this.#filesAvailable(nodeId);
+			untrack(() => this.tree.setNodeAvailable(available));
+		});
 		$effect(() => {
 			const pending = this.#pendingReveal;
 			const response = this.tree.readyResponse;
-			if (!pending || !response || !this.presentationVisible || !this.#projectAvailable) return;
+			if (!pending || !response || !this.presentationVisible) return;
+			if (!this.browsingNode && this.#projectState.kind !== 'available') return;
 			untrack(() => {
 				this.#pendingReveal = null;
 				if (pending.nodeId !== this.tree.nodeId) return;
@@ -59,17 +69,42 @@ export class FilesSurfaceController implements PortableSingletonController {
 		});
 	}
 
+	get browsingNode(): boolean {
+		return this.#selectedNodeId !== null;
+	}
+
+	get canGoToChatProject(): boolean {
+		return this.#projectState.kind === 'available';
+	}
+
+	selectNode(nodeId: string): void {
+		if (!this.#filesAvailable(nodeId)) return;
+		this.#pendingReveal = null;
+		this.#selectedNodeId = nodeId;
+		this.tree.browseNode(nodeId);
+	}
+
+	goToChatProject(): void {
+		const wasBrowsingNode = this.browsingNode;
+		this.#selectedNodeId = null;
+		this.#pendingReveal = null;
+		this.setProjectState(this.#projectState);
+		if (!wasBrowsingNode) void this.tree.goToChatProject();
+	}
+
 	revealFile(fileRootPath: string, relativePath: string, nodeId?: string | null): void {
+		if (effectiveNodeId(nodeId) !== this.tree.nodeId) this.selectNode(effectiveNodeId(nodeId));
 		this.#pendingReveal = { nodeId: effectiveNodeId(nodeId), fileRootPath, relativePath };
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
+		this.#projectState = projectState;
+		if (this.browsingNode) return;
 		let projectPath: string | null = null;
 		if (projectState.kind === 'available') projectPath = projectState.project.projectPath;
 		else if (projectState.kind !== 'absent') projectPath = projectState.context.projectPath;
 		if (projectPath !== this.#projectPath) this.#pendingReveal = null;
 		this.#projectPath = projectPath;
-		this.#projectAvailable = projectState.kind === 'available';
 		this.tree.setProjectState(projectState);
 	}
 
@@ -85,8 +120,13 @@ export class FilesSurfaceController implements PortableSingletonController {
 
 	dispose(): void {
 		this.presentationVisible = false;
+		this.#selectedNodeId = null;
 		this.#pendingReveal = null;
 		this.tree.reset();
+	}
+
+	#filesAvailable(nodeId: string): boolean {
+		return this.nodes?.filesAvailable(nodeId) ?? nodeId === 'local';
 	}
 }
 
@@ -149,7 +189,7 @@ export class SingletonSurfaceRegistry {
 			git: () => new GitWorkbenchSurfaceController(this.deps),
 			'git-history': () => new GitHistorySurfaceController(this.deps),
 			'git-compare': () => new GitCompareSurfaceController(this.deps),
-			files: () => new FilesSurfaceController(),
+			files: () => new FilesSurfaceController(this.deps.executionNodes),
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
 			'chat-canvas': () => new CanvasController(),

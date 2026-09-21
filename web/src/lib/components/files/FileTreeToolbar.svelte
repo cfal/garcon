@@ -14,9 +14,22 @@
 	import FileTreeMenuContent from './FileTreeMenuContent.svelte';
 	import type { FileTreeViewMode } from './file-tree-view-profile.js';
 
-	let { store, viewMode }: { store: FileTreeStore; viewMode: FileTreeViewMode } = $props();
+	let {
+		store,
+		viewMode,
+		onGoToChatProject = () => void store.goToChatProject(),
+		canGoToChatProject = true,
+		isAtChatProject,
+	}: {
+		store: FileTreeStore;
+		viewMode: FileTreeViewMode;
+		onGoToChatProject?: () => void;
+		canGoToChatProject?: boolean;
+		isAtChatProject?: boolean;
+	} = $props();
 	let root = $state<HTMLElement | null>(null);
 	let filterInput = $state<HTMLInputElement | null>(null);
+	const atChatProject = $derived(isAtChatProject ?? store.isAtChatProject);
 
 	function restoreToolbarFocus(): void {
 		queueMicrotask(() => {
@@ -64,12 +77,10 @@
 		{
 			id: 'chat-project',
 			label: m.filetree_go_to_chat_project(),
-			title: store.isAtChatProject
-				? m.filetree_already_at_chat_project()
-				: m.filetree_go_to_chat_project(),
+			title: atChatProject ? m.filetree_already_at_chat_project() : m.filetree_go_to_chat_project(),
 			icon: FolderCode,
-			onclick: () => void store.goToChatProject(),
-			disabled: store.isAtChatProject || store.isNavigationLoading,
+			onclick: onGoToChatProject,
+			disabled: !canGoToChatProject || atChatProject,
 			priority: 2,
 		},
 		{

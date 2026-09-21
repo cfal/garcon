@@ -26,6 +26,19 @@ describe('FileTreeBreadcrumbs', () => {
 		restoreResizeObserver();
 	});
 
+	it('displays the absolute base and reveals the full current path without navigating', async () => {
+		const onNavigate = vi.fn();
+		render(FileTreeBreadcrumbs, { breadcrumbs, onNavigate });
+		expect(screen.getByRole('button', { name: '/workspace' }).textContent?.trim()).toBe(
+			'/workspace',
+		);
+		await fireEvent.click(screen.getByRole('button', { name: '/workspace/team/project/src' }));
+		const input = screen.getByRole('textbox', { name: 'File location' }) as HTMLInputElement;
+		expect(input.value).toBe('/workspace/team/project/src');
+		expect(input.readOnly).toBe(true);
+		expect(onNavigate).not.toHaveBeenCalled();
+	});
+
 	it('moves middle segments into one overflow menu when space contracts', async () => {
 		const onNavigate = vi.fn();
 		const { container } = render(FileTreeBreadcrumbs, { breadcrumbs, onNavigate });

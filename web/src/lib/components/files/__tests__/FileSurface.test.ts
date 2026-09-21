@@ -21,7 +21,9 @@ describe('FileSurface', () => {
 		async (nodeId) => {
 			render(FileSurfaceTestHost, { presentation: 'dialog', nodeId });
 			const prefix = nodeId === 'local' ? '' : 'Worker: ';
-			expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(`${prefix}image.png`);
+			expect(screen.getByRole('heading', { level: 2 }).textContent?.trim()).toBe(
+				`${prefix}image.png`,
+			);
 			expect(screen.getByRole('heading', { level: 2 }).title).toBe(
 				`${prefix}/workspace/assets/image.png`,
 			);

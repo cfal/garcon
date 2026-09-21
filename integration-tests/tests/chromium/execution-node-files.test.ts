@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import type { ServerWsMessage } from '../../../common/ws-events.js';
@@ -66,6 +66,76 @@ test('edits remote files and retains offline buffers without touching controller
     await page.setViewportSize({ width: 390, height: 844 });
     await browserExpect(source).toHaveText('Synthetic offline edit');
     await page.screenshot({ path: join(dirs.root, 'remote-files-mobile.png') });
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-node-dials', projectRoots: 'separate' });
+}, 180_000);
+
+test('switches file nodes from breadcrumbs without changing chat ownership and reveals complete paths', async () => {
+  await withChromiumFixture('execution-node-file-breadcrumbs', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { client, executionDirs, dirs, directAgents } = integration;
+    const nested = join(executionDirs.project, 'nested');
+    await mkdir(nested);
+    const remotePath = join(nested, 'shared.txt');
+    await writeFile(remotePath, 'Synthetic remote content');
+    await writeFile(join(dirs.project, 'local-only.txt'), 'Synthetic local content');
+    const chatId = integration.newChatId();
+    const started = await client.startDirectChat({ chatId, content: 'Synthetic file node navigation', projectPath: nested, agent: directAgents.openAi });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+
+    const breadcrumbs = page.locator('[data-file-tree-breadcrumbs]:visible');
+    const picker = breadcrumbs.locator('[data-file-node-picker]');
+    await browserExpect(picker).toHaveText('Integration worker');
+    await browserExpect(breadcrumbs.getByRole('button', { name: executionDirs.project, exact: true })).toHaveText(executionDirs.project);
+    await breadcrumbs.getByRole('button', { name: nested, exact: true }).click();
+    await browserExpect(page.getByRole('textbox', { name: 'File location', exact: true })).toHaveValue(nested);
+    await page.keyboard.press('Escape');
+
+    await picker.click();
+    await page.screenshot({ path: join(dirs.root, 'file-node-picker-desktop.png') });
+    await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
+    await browserExpect(picker).toHaveText('Local');
+    await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'local-only.txt' })).toBeVisible();
+    await browserExpect(breadcrumbs.getByRole('button', { name: dirs.project, exact: true })).toHaveText(dirs.project);
+    expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({ nodeId: client.nodeId, projectPath: nested });
+    await page.getByRole('button', { name: 'Go to chat project', exact: true }).click();
+    await browserExpect(picker).toHaveText('Integration worker');
+    await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'shared.txt' })).toBeVisible();
+
+    await picker.focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
+    await picker.click();
+    await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
+    await browserExpect(breadcrumbs.getByRole('button', { name: executionDirs.project, exact: true })).toHaveAttribute('aria-current', 'location');
+    await page.locator('[data-file-tree-entry-text]').getByText('nested', { exact: true }).click();
+    await page.locator('[data-file-tree-entry-text]').getByText('shared.txt', { exact: true }).click();
+    const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
+    await browserExpect(surface.locator('.cm-content')).toHaveText('Synthetic remote content');
+    await surface.locator('.cm-content').press('Control+a');
+    await page.keyboard.insertText('Synthetic retained edit');
+    await surface.getByRole('button', { name: remotePath, exact: true }).click();
+    const pathInput = page.getByRole('textbox', { name: 'File location', exact: true });
+    await browserExpect(pathInput).toHaveValue(remotePath);
+    await page.keyboard.press('Escape');
+    await page.screenshot({ path: join(dirs.root, 'file-node-breadcrumbs-desktop.png') });
+    await page.getByRole('tab', { name: 'Files', exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await picker.click();
+    await page.screenshot({ path: join(dirs.root, 'file-node-picker-mobile.png') });
+    await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
+    await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'local-only.txt' })).toBeVisible();
+    await picker.click();
+    await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
+    await page.locator('[data-file-tree-entry-text]').getByText('nested', { exact: true }).click();
+    await page.locator('[data-file-tree-entry-text]').getByText('shared.txt', { exact: true }).click();
+    await browserExpect(surface.locator('.cm-content')).toHaveText('Synthetic retained edit');
+    expect(await readFile(remotePath, 'utf8')).toBe('Synthetic remote content');
+    await surface.getByRole('button', { name: remotePath, exact: true }).click();
+    await browserExpect(pathInput).toHaveValue(remotePath);
+    expect(await pathInput.evaluate((input) => Number.parseFloat(getComputedStyle(input).fontSize))).toBeGreaterThanOrEqual(16);
+    await page.screenshot({ path: join(dirs.root, 'file-full-path-mobile.png') });
+    await page.keyboard.press('Escape');
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-node-dials', projectRoots: 'separate' });
 }, 180_000);

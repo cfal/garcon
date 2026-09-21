@@ -337,6 +337,39 @@ export class FileTreeStore {
 		return this.#materializedRows.flatMap((row) => (row.entry.type === 'file' ? [row.entry] : []));
 	}
 
+	browseNode(nodeId: string): void {
+		this.#resetBrowsingState();
+		this.#nodeId = nodeId;
+		this.#projectPath = null;
+		this.#canonicalChatProjectPath = null;
+		this.#chatProjectBreadcrumbs = [];
+		this.#effectiveProjectKey = `node:${nodeId}`;
+		this.#projectRequestsAllowed = true;
+		this.#resumePendingWork();
+	}
+
+	setNodeAvailable(available: boolean): void {
+		if (available === this.#projectRequestsAllowed) return;
+		this.#projectRequestsAllowed = available;
+		if (!available) {
+			this.#abortRequests();
+			return;
+		}
+		const response = this.readyResponse;
+		if (response) {
+			void this.navigateTo({
+				path: response.directory.path,
+				label: this.currentDirectoryLabel,
+				breadcrumbs: response.directory.breadcrumbs,
+				reason: 'initial',
+			});
+		} else if (this.navigation.kind === 'error') {
+			void this.retryNavigation();
+		} else {
+			this.#resumePendingWork();
+		}
+	}
+
 	setProjectState(projectState: WorkspaceProjectState): void {
 		const target =
 			projectState.kind === 'available'
@@ -736,18 +769,12 @@ export class FileTreeStore {
 			label: path,
 			breadcrumbs: [],
 			reason: 'initial',
-			captureAsChatProject: true,
+			captureAsChatProject: this.#projectPath !== null,
 		};
 	}
 
 	#resumePendingWork(): void {
-		if (
-			!this.#active ||
-			!this.#projectRequestsAllowed ||
-			!this.#effectiveProjectKey ||
-			!this.#projectPath
-		)
-			return;
+		if (!this.#active || !this.#projectRequestsAllowed || !this.#effectiveProjectKey) return;
 		if (this.navigation.kind === 'idle') {
 			void this.navigateTo(this.#initialTarget());
 			return;

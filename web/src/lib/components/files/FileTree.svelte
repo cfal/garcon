@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import AlertCircle from '@lucide/svelte/icons/alert-circle';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -17,11 +18,21 @@
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
+		nodeCrumb,
+		contentGate,
+		onGoToChatProject,
+		canGoToChatProject,
+		isAtChatProject,
 	}: {
 		store: FileTreeStore;
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeEntry) => void;
 		onImageSelect?: (file: FileTreeEntry) => void;
+		nodeCrumb?: Snippet;
+		contentGate?: Snippet<[Snippet]>;
+		onGoToChatProject?: () => void;
+		canGoToChatProject?: boolean;
+		isAtChatProject?: boolean;
 	} = $props();
 
 	let navigationRetryButton = $state<HTMLButtonElement | null>(null);
@@ -50,14 +61,24 @@
 	data-file-tree-layout={viewMode}
 	{@attach observeFileTreeWidth}
 >
-	<FileTreeToolbar {store} {viewMode} />
-	{#if store.showBreadcrumbs && store.currentBreadcrumbs.length > 0}
+	<FileTreeToolbar {store} {viewMode} {onGoToChatProject} {canGoToChatProject} {isAtChatProject} />
+	{#if nodeCrumb || (store.showBreadcrumbs && store.currentBreadcrumbs.length > 0)}
 		<FileTreeBreadcrumbs
-			breadcrumbs={store.currentBreadcrumbs}
+			breadcrumbs={store.showBreadcrumbs ? store.currentBreadcrumbs : []}
+			{nodeCrumb}
 			onNavigate={(index) => void store.navigateToBreadcrumb(index)}
 		/>
 	{/if}
+	<div class="flex min-h-0 flex-1 flex-col">
+		{#if contentGate}
+			{@render contentGate(contents)}
+		{:else}
+			{@render contents()}
+		{/if}
+	</div>
+</div>
 
+{#snippet contents()}
 	{#if store.refreshError && store.navigation.kind === 'ready'}
 		<div
 			class="flex shrink-0 items-center gap-2 border-b border-border bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -98,7 +119,9 @@
 					class="truncate text-sm font-medium text-foreground"
 					title={store.navigation.target.path}
 				>
-					{m.filetree_loading_directory({ name: store.navigation.target.label })}
+					{store.navigation.target.label
+						? m.filetree_loading_directory({ name: store.navigation.target.label })
+						: m.filetree_loading()}
 				</div>
 			</div>
 		</div>
@@ -140,4 +163,4 @@
 			{m.filetree_no_files_found()}
 		</div>
 	{/if}
-</div>
+{/snippet}

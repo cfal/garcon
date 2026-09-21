@@ -653,8 +653,8 @@ describe('FileTree', () => {
 		expect(screen.getByRole('button', { name: '/workspace' })).toBeTruthy();
 		const current = screen.getByTitle('/workspace/project');
 		expect(current.getAttribute('aria-current')).toBe('location');
-		expect(current.textContent).toContain('/workspace/project');
-		expect(current.hasAttribute('aria-label')).toBe(false);
+		expect(current.textContent).toContain('project');
+		expect(current.getAttribute('aria-label')).toBe('/workspace/project');
 	});
 
 	it('announces destination errors and moves focus to Retry', async () => {

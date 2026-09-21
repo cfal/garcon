@@ -1,11 +1,14 @@
 <script lang="ts">
 	import FileTree from './FileTree.svelte';
+	import FileNodeBreadcrumb from './FileNodeBreadcrumb.svelte';
+	import type { Snippet } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import {
 		getFileSessions,
 		getNotifications,
 		getSingletonSurfaces,
 		getWorkspaceCoordinator,
+		getExecutionNodes,
 	} from '$lib/context';
 	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
@@ -33,7 +36,9 @@
 	const files = getFileSessions();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
-	const tree = getSingletonSurfaces().files().tree;
+	const controller = getSingletonSurfaces().files();
+	const tree = controller.tree;
+	const nodes = getExecutionNodes();
 	const selectedPath = $derived.by(() => {
 		const owner = workspace.focusOwner;
 		if (owner.kind === 'chat-list') return null;
@@ -74,6 +79,39 @@
 		}
 	}
 </script>
+
+{#snippet nodeCrumb()}
+	<FileNodeBreadcrumb
+		{nodes}
+		nodeId={tree.nodeId}
+		onSelect={(nodeId) => controller.selectNode(nodeId)}
+	/>
+{/snippet}
+
+{#snippet contentGate(contents: Snippet)}
+	{#if controller.browsingNode}
+		{#if nodes.filesAvailable(tree.nodeId)}
+			{@render contents()}
+		{:else}
+			<div
+				class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground"
+				role="status"
+			>
+				Files unavailable on {nodes.label(tree.nodeId)}.
+			</div>
+		{/if}
+	{:else}
+		<ProjectSurfaceGate
+			{projectState}
+			{target}
+			retainedProjectPath={tree.projectPath}
+			retainedEffectiveProjectKey={tree.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
+		>
+			<div class="flex h-full min-h-0 flex-col">{@render contents()}</div>
+		</ProjectSurfaceGate>
+	{/if}
+{/snippet}
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
 	{#if files.recoveryError}
@@ -119,20 +157,16 @@
 		</section>
 	{/if}
 	<div class="min-h-0 min-w-0 flex-1">
-		<!-- Recovered drafts remain accessible even when their project folder is unavailable. -->
-		<ProjectSurfaceGate
-			{projectState}
-			{target}
-			retainedProjectPath={tree.projectPath}
-			retainedEffectiveProjectKey={tree.effectiveProjectKey}
-			onChooseFolder={onChooseProjectFolder}
-		>
-			<FileTree
-				{selectedPath}
-				store={tree}
-				onFileSelect={handleFileSelect}
-				onImageSelect={handleFileSelect}
-			/>
-		</ProjectSurfaceGate>
+		<FileTree
+			{nodeCrumb}
+			{contentGate}
+			onGoToChatProject={() => controller.goToChatProject()}
+			canGoToChatProject={controller.canGoToChatProject}
+			isAtChatProject={!controller.browsingNode && tree.isAtChatProject}
+			{selectedPath}
+			store={tree}
+			onFileSelect={handleFileSelect}
+			onImageSelect={handleFileSelect}
+		/>
 	</div>
 </div>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import Folder from '@lucide/svelte/icons/folder';
@@ -12,13 +12,16 @@
 	import type { FileTreeBreadcrumb } from '$shared/file-contracts';
 	import * as m from '$lib/paraglide/messages.js';
 	import { selectFileTreeBreadcrumbLayout } from './file-tree-breadcrumb-layout.js';
+	import FilePathPopover from './FilePathPopover.svelte';
 
 	let {
 		breadcrumbs,
 		onNavigate,
+		nodeCrumb,
 	}: {
 		breadcrumbs: readonly FileTreeBreadcrumb[];
 		onNavigate: (index: number) => void;
+		nodeCrumb?: Snippet;
 	} = $props();
 
 	let root = $state<HTMLElement | null>(null);
@@ -91,21 +94,26 @@
 	data-file-tree-breadcrumbs
 >
 	<Folder class="mr-1.5 h-3.5 w-3.5 shrink-0 text-file-icon-folder" aria-hidden="true" />
+	{#if nodeCrumb}
+		{@render nodeCrumb()}
+		{#if breadcrumbs.length > 0}
+			<ChevronRight class="mx-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+		{/if}
+	{/if}
 	<div bind:this={root} class="relative flex min-w-0 flex-1 items-center overflow-hidden">
 		{#each breadcrumbs as breadcrumb, index (breadcrumb.path)}
+			{@const label = index === 0 ? breadcrumb.path : breadcrumb.name}
 			{#if visibleSet.has(index)}
 				{#if index > 0}
 					<ChevronRight class="mx-0.5 h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 				{/if}
 				{#if index === breadcrumbs.length - 1}
-					<span
+					<FilePathPopover
 						class="min-w-0 flex-1 truncate px-1 font-medium text-foreground"
-						aria-current="location"
-						title={breadcrumb.path}
-					>
-						<span aria-hidden="true">{breadcrumb.name}</span>
-						<span class="sr-only">{breadcrumb.path}</span>
-					</span>
+						current="location"
+						path={breadcrumb.path}
+						{label}
+					/>
 				{:else}
 					<button
 						type="button"
@@ -114,7 +122,7 @@
 						title={breadcrumb.path}
 						onclick={() => onNavigate(index)}
 					>
-						{breadcrumb.name}
+						{label}
 					</button>
 				{/if}
 			{:else if layout.overflowIndices[0] === index}
@@ -148,7 +156,7 @@
 		>
 			{#each breadcrumbs as breadcrumb, index (breadcrumb.path)}
 				<span data-breadcrumb-measure={index} class="whitespace-nowrap px-1 text-xs">
-					{breadcrumb.name}
+					{index === 0 ? breadcrumb.path : breadcrumb.name}
 				</span>
 			{/each}
 			<ChevronRight data-breadcrumb-separator-measure class="mx-0.5 h-3 w-3" />
