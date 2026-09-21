@@ -2,7 +2,7 @@
 // model, permission/thinking mode, path validation, image attachments, and
 // the config payload used to start a session.
 
-import { browseDirectory } from '$lib/api/files.js';
+import { ProjectPathCompletionController } from '$lib/chat/project-paths/project-path-completion.js';
 import { effectiveNodeId } from '$shared/execution-nodes';
 import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
@@ -114,6 +114,7 @@ export class NewChatFormState {
 
 	// Injected dependencies
 	readonly #options: NewChatFormStateOptions;
+	readonly #pathCompletion = new ProjectPathCompletionController(this);
 
 	constructor(options: NewChatFormStateOptions) {
 		this.#options = options;
@@ -687,6 +688,7 @@ export class NewChatFormState {
 	}
 
 	dispose(): void {
+		this.#pathCompletion.reset();
 		if (this.#validationTimer) {
 			clearTimeout(this.#validationTimer);
 			this.#validationTimer = null;
@@ -759,6 +761,7 @@ export class NewChatFormState {
 
 	/** Resets form state when the dialog opens. */
 	reseed(prefill: string): void {
+		this.#pathCompletion.reset();
 		this.firstMessage = prefill;
 		this.attachedImages = [];
 		this.error = null;
@@ -942,75 +945,12 @@ export class NewChatFormState {
 		if (this.filesAvailable) this.showBrowser = true;
 	}
 
-	// Tab-completion for the path input
-
-	tabCompletions = $state<string[]>([]);
-	#tabCompletionIndex = 0;
-
-	/** Handles Tab key in the path input. Completes the path like a terminal. */
-	async handleTabCompletion(): Promise<void> {
-		if (!this.filesAvailable) return;
-		const nodeId = this.nodeId;
-		const raw = this.projectPath;
-		if (!raw) return;
-
-		// If we already have multiple completions, cycle through them.
-		if (this.tabCompletions.length > 1) {
-			this.#tabCompletionIndex = (this.#tabCompletionIndex + 1) % this.tabCompletions.length;
-			this.projectPath = this.tabCompletions[this.#tabCompletionIndex];
-			return;
-		}
-
-		// Determine the parent directory and partial name to match.
-		const lastSlash = raw.lastIndexOf('/');
-		const parentDir = lastSlash >= 0 ? raw.slice(0, lastSlash) || '/' : '/';
-		const partial = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
-
-		try {
-			const entries = await browseDirectory(parentDir, undefined, nodeId);
-			if (this.nodeId !== nodeId || !this.filesAvailable || this.projectPath !== raw) return;
-			const matches = partial
-				? entries.filter((e) => e.name.toLowerCase().startsWith(partial))
-				: entries;
-
-			if (matches.length === 0) return;
-
-			const matchPaths = matches.map((e) => e.path);
-
-			if (matches.length === 1) {
-				// Single match — complete it and add trailing slash.
-				this.projectPath = matchPaths[0] + '/';
-				this.tabCompletions = [];
-			} else {
-				// Multiple matches — fill common prefix and open browser.
-				const common = longestCommonPrefix(matchPaths);
-				if (common.length > raw.length) {
-					this.projectPath = common;
-				}
-				this.tabCompletions = matchPaths;
-				this.#tabCompletionIndex = 0;
-				this.showBrowser = true;
-			}
-		} catch {
-			// Silently ignore browse errors on tab.
-		}
+	handleTabCompletion(): Promise<void> {
+		return this.#pathCompletion.complete();
 	}
 
 	/** Resets tab-completion state when the user types. */
 	resetTabCompletions(): void {
-		this.tabCompletions = [];
-		this.#tabCompletionIndex = 0;
+		this.#pathCompletion.reset();
 	}
-}
-
-function longestCommonPrefix(strings: string[]): string {
-	if (strings.length === 0) return '';
-	let prefix = strings[0];
-	for (let i = 1; i < strings.length; i++) {
-		while (!strings[i].startsWith(prefix)) {
-			prefix = prefix.slice(0, -1);
-			if (!prefix) return '';
-		}
-	}
-	return prefix;
 }
