@@ -10,6 +10,7 @@
 		class: className,
 		dotClass,
 		dotSlot = 'chat-processing-indicator-dot',
+		dotSizePx,
 	}: {
 		phase: ChatProcessingPhase | null;
 		label: string;
@@ -17,6 +18,7 @@
 		class?: string;
 		dotClass?: string;
 		dotSlot?: string;
+		dotSizePx?: number;
 	} = $props();
 </script>
 
@@ -30,6 +32,8 @@
 		)}
 		data-phase={phase}
 		data-slot={dotSlot}
+		style:height={dotSizePx === undefined ? undefined : `${dotSizePx}px`}
+		style:width={dotSizePx === undefined ? undefined : `${dotSizePx}px`}
 		aria-hidden="true"
 		{@attach attachProcessingPulse}
 	></span>

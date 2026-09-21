@@ -14,7 +14,7 @@
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindow from './WorkspaceWindow.svelte';
 	import WorkspaceWindowResizer from './WorkspaceWindowResizer.svelte';
-	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
+	import { workspaceWindowTitlebarMetrics } from './workspace-window-chrome.js';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
 		getChatSessions,
@@ -293,8 +293,8 @@
 			rootState.partitionRatio(partitionId, ratio),
 		),
 	);
-	const titlebarHeightPx = $derived(
-		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX + localSettings.workspaceWindowTitlebarHeightDeltaPx,
+	const titlebarMetrics = $derived(
+		workspaceWindowTitlebarMetrics(localSettings.workspaceWindowTitlebarHeightDeltaPx),
 	);
 	const WINDOW_EDGE_EPSILON = 1e-6;
 
@@ -587,7 +587,7 @@
 				panelActions={conversationPanelActions}
 				{composerInsetPx}
 				{subagentToolbar}
-				{titlebarHeightPx}
+				{titlebarMetrics}
 				{surfaceMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
@@ -609,7 +609,7 @@
 					boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
 					minRatio={ratioBounds.min}
 					maxRatio={ratioBounds.max}
-					{titlebarHeightPx}
+					titlebarHeightPx={titlebarMetrics.heightPx}
 					disabled={!ratioBounds.adjustable}
 					onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
 					onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
@@ -660,10 +660,10 @@
 				composerHasLeftSeparator && 'ml-3',
 				composerHasRightSeparator && 'mr-3',
 			)}
-			style:top={composerPlacement && !isMobile ? `${titlebarHeightPx}px` : undefined}
+			style:top={composerPlacement && !isMobile ? `${titlebarMetrics.heightPx}px` : undefined}
 			data-workspace-live-chat-body
 			data-workspace-live-chat-body-top-px={composerPlacement && !isMobile
-				? titlebarHeightPx
+				? titlebarMetrics.heightPx
 				: undefined}
 			data-workspace-surface-id={composerPlacement?.surface.id}
 			onpointerdowncapture={() => {

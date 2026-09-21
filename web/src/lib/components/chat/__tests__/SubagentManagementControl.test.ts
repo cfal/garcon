@@ -52,6 +52,18 @@ describe('SubagentManagementControl', () => {
 		expect(screen.queryByText('Main chat')).toBeNull();
 	});
 
+	it('applies titlebar sizing without changing the popover surface', () => {
+		render(SubagentManagementControl, {
+			model: makeModel(),
+			sizing: { controlHeightPx: 38, iconSizePx: 17, fontSizePx: 16 },
+		});
+
+		const trigger = screen.getByRole('button', { name: /Agents/ });
+		expect(trigger.style.height).toBe('38px');
+		expect(trigger.style.fontSize).toBe('16px');
+		expect(trigger.querySelector('svg')?.getAttribute('style')).toContain('height: 17px');
+	});
+
 	it('reveals root and subagent entries when opened', async () => {
 		render(SubagentManagementControl, { model: makeModel() });
 

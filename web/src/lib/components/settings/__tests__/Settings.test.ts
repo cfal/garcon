@@ -167,11 +167,11 @@ describe('Settings', () => {
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Local Settings' }));
 			expect(appShell.settingsTab).toBe('local');
-			const titlebarSize = screen.getByRole('slider', { name: 'Titlebar height adjustment' });
+			const titlebarSize = screen.getByRole('slider', { name: 'Titlebar size adjustment' });
 			expect((titlebarSize as HTMLInputElement).value).toBe('0');
 			await fireEvent.input(titlebarSize, { target: { value: '6' } });
 			expect(onLocalSet).toHaveBeenCalledWith('workspaceWindowTitlebarHeightDeltaPx', 6);
-			expect(screen.getByText('+6 px')).toBeTruthy();
+			expect(screen.getByText('+6 px').getAttribute('for')).toBe('local-workspace-titlebar-size');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.queryByRole('combobox', { name: 'Chat list position' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();

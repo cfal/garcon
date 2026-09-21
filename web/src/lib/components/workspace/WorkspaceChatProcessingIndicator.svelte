@@ -5,15 +5,19 @@
 
 	let {
 		statusId,
-		class: className = 'h-3.5 w-3.5 shrink-0',
+		sizePx,
+		class: className = sizePx === undefined ? 'h-3.5 w-3.5 shrink-0' : 'shrink-0',
 	}: {
 		statusId: string;
+		sizePx?: number;
 		class?: string;
 	} = $props();
 </script>
 
 <span
 	class={cn('flex items-center justify-center', className)}
+	style:height={sizePx === undefined ? undefined : `${sizePx}px`}
+	style:width={sizePx === undefined ? undefined : `${sizePx}px`}
 	data-slot="workspace-chat-processing-indicator"
 >
 	<ChatProcessingIndicator
@@ -22,5 +26,6 @@
 		{statusId}
 		dotClass="workspace-chat-processing-indicator"
 		dotSlot="workspace-chat-processing-indicator-dot"
+		dotSizePx={sizePx === undefined ? undefined : sizePx - 6}
 	/>
 </span>

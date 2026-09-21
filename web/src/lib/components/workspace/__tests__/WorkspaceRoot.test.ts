@@ -928,45 +928,51 @@ describe('WorkspaceRoot', () => {
 	});
 
 	it.each([
-		['-2 px', -2, 38],
-		['+6 px', 6, 46],
-	] as const)('keeps desktop chrome aligned at a %s adjustment', async (_label, delta, height) => {
-		const { localSettings, layout, windowDnd } = installContext();
-		localSettings.workspaceWindowTitlebarHeightDeltaPx = delta;
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'open-chat-in-new-window',
-					chatId: 'chat-b',
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-2',
-					partitionId: 'partition-1',
-				},
-			]),
-		);
-		const { container } = renderRoot();
-		expect(
-			container.querySelector<HTMLElement>('[data-workspace-window-titlebar]')?.style.height,
-		).toBe(`${height}px`);
-		expect(
-			container.querySelector<HTMLElement>('[data-workspace-window-resize-hit-area]')?.style.top,
-		).toBe(`${height}px`);
-		expect(container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')?.style.top).toBe(
-			`${height}px`,
-		);
-		windowDnd.beginSurfaceTabDrag(
-			chatViewSurfaceId('window-main'),
-			'window-main',
-			0,
-			positionedDragEvent('dragstart', 0, 0),
-		);
-		await tick();
-		expect(
-			container.querySelector<HTMLElement>('[data-workspace-window-drop-layer]')?.style.top,
-		).toBe(`${height}px`);
-	});
+		['-2 px', -2, 38, 26, 11],
+		['+6 px', 6, 46, 34, 14],
+	] as const)(
+		'keeps desktop chrome aligned at a %s adjustment',
+		async (_label, delta, height, controlSize, fontSize) => {
+			const { localSettings, layout, windowDnd } = installContext();
+			localSettings.workspaceWindowTitlebarHeightDeltaPx = delta;
+			layout.publish(
+				layout.revision,
+				reduceWorkspaceLayout(layout.snapshot, [
+					{
+						type: 'open-chat-in-new-window',
+						chatId: 'chat-b',
+						targetWindowId: 'window-main',
+						edge: 'right',
+						newWindowId: 'window-2',
+						partitionId: 'partition-1',
+					},
+				]),
+			);
+			const { container } = renderRoot();
+			expect(
+				container.querySelector<HTMLElement>('[data-workspace-window-titlebar]')?.style.height,
+			).toBe(`${height}px`);
+			const tab = container.querySelector<HTMLElement>('[role="tab"]');
+			expect(tab?.style.height).toBe(`${controlSize}px`);
+			expect(tab?.style.fontSize).toBe(`${fontSize}px`);
+			expect(
+				container.querySelector<HTMLElement>('[data-workspace-window-resize-hit-area]')?.style.top,
+			).toBe(`${height}px`);
+			expect(
+				container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')?.style.top,
+			).toBe(`${height}px`);
+			windowDnd.beginSurfaceTabDrag(
+				chatViewSurfaceId('window-main'),
+				'window-main',
+				0,
+				positionedDragEvent('dragstart', 0, 0),
+			);
+			await tick();
+			expect(
+				container.querySelector<HTMLElement>('[data-workspace-window-drop-layer]')?.style.top,
+			).toBe(`${height}px`);
+		},
+	);
 
 	it('restores a rekeyed Chat panel at its transferred row target', async () => {
 		const { layout, workspace } = installContext();

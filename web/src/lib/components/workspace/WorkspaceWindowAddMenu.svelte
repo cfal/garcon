@@ -31,16 +31,22 @@
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import { WorkspaceWindowAddMenuState } from './workspace-window-add-menu-state.svelte.js';
+	import {
+		DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
+		type WorkspaceWindowTitlebarMetrics,
+	} from './workspace-window-chrome.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
 		windowId,
 		tabs,
 		measure,
+		titlebarMetrics = DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
 	}: {
 		windowId: WorkspaceWindowId;
 		tabs: WorkspaceWindowTabState;
 		measure: WorkspaceWindowTabMeasure | null;
+		titlebarMetrics?: WorkspaceWindowTitlebarMetrics;
 	} = $props();
 
 	interface WorkspaceWindowAddCommand {
@@ -65,7 +71,7 @@
 	];
 
 	const ADD_ACTION_CONTROL_CLASS =
-		'flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
+		'flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
@@ -128,6 +134,9 @@
 		get hasUnplacedTerminalSessions() {
 			return hasUnplacedTerminalSessions;
 		},
+		get controlWidthPx() {
+			return titlebarMetrics.controlSizePx;
+		},
 	});
 	const inlineActions = $derived(eligibleActions.slice(0, menuState.inlineActionCount));
 	const menuActions = $derived(eligibleActions.slice(menuState.inlineActionCount));
@@ -153,6 +162,10 @@
 
 	function notifyFailure(error: unknown): void {
 		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+	}
+
+	function addControlStyle(): string {
+		return `height: ${titlebarMetrics.controlSizePx}px; width: ${titlebarMetrics.controlSizePx}px;`;
 	}
 
 	function openSingleton(kind: PortableSingletonKind): void {
@@ -223,13 +236,14 @@
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					class={ADD_ACTION_CONTROL_CLASS}
+					style={addControlStyle()}
 					aria-label={action.label}
 					title={action.label}
 					data-workspace-window-add-action={action.id}
 					data-workspace-window-add-inline={action.id}
 					data-workspace-window-add-chat-views-trigger={windowId}
 				>
-					<MessagesSquare class="h-3.5 w-3.5" />
+					<MessagesSquare size={titlebarMetrics.iconSizePx} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent
 					align="end"
@@ -244,12 +258,13 @@
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					class={ADD_ACTION_CONTROL_CLASS}
+					style={addControlStyle()}
 					aria-label={m.workspace_terminal_actions()}
 					title={m.workspace_terminal_actions()}
 					data-workspace-window-add-action={action.id}
 					data-workspace-window-add-terminal-trigger={windowId}
 				>
-					<WorkspaceSurfaceIcon kind="terminal" />
+					<WorkspaceSurfaceIcon kind="terminal" size={titlebarMetrics.iconSizePx} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent
 					align="end"
@@ -266,6 +281,7 @@
 			<button
 				type="button"
 				class={ADD_ACTION_CONTROL_CLASS}
+				style={addControlStyle()}
 				aria-label={action.label}
 				title={action.label}
 				disabled={action.disabled}
@@ -275,7 +291,7 @@
 				data-workspace-window-add-inline={action.id}
 				onclick={action.disabled || action.busy ? undefined : action.onclick}
 			>
-				<WorkspaceSurfaceIcon kind={action.kind} />
+				<WorkspaceSurfaceIcon kind={action.kind} size={titlebarMetrics.iconSizePx} />
 			</button>
 		{/if}
 	{/each}
@@ -283,11 +299,12 @@
 		<DropdownMenu bind:open={menuState.overflowMenuOpen}>
 			<DropdownMenuTrigger
 				class={ADD_ACTION_CONTROL_CLASS}
+				style={addControlStyle()}
 				aria-label={m.workspace_add_to_window()}
 				title={m.workspace_add_to_window()}
 				data-workspace-window-add-trigger={windowId}
 			>
-				<Plus class="h-3.5 w-3.5" />
+				<Plus size={titlebarMetrics.iconSizePx} />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent
 				bind:ref={menuState.overflowMenuContent}

@@ -17,9 +17,9 @@
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import { cn } from '$lib/utils/cn';
 	import {
+		DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH,
 		resolveWindowTabCapacity,
 		resolveWindowTabPresentation,
-		WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH,
 		type WindowTabLabelMode,
 		type WindowTabPresentation,
 	} from './workspace-window-tab-layout.js';
@@ -29,6 +29,10 @@
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
+	import {
+		DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
+		type WorkspaceWindowTitlebarMetrics,
+	} from './workspace-window-chrome.js';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -41,6 +45,7 @@
 		onFocus,
 		dnd,
 		isCurrent,
+		titlebarMetrics = DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
 		isChatProcessing = () => false,
 		onVisibleChange,
 		onMeasureChange,
@@ -54,6 +59,7 @@
 		onFocus?: (surfaceId: string) => void;
 		dnd: WorkspaceWindowDndController;
 		isCurrent: boolean;
+		titlebarMetrics?: WorkspaceWindowTitlebarMetrics;
 		isChatProcessing?: (surfaceId: string) => boolean;
 		onVisibleChange?: (ids: readonly string[]) => void;
 		onMeasureChange?: (measure: WorkspaceWindowTabMeasure | null) => void;
@@ -89,6 +95,7 @@
 
 	$effect(() => {
 		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
+		void titlebarMetrics.controlSizePx;
 		const viewport = tabViewport;
 		const rail = measurementRail;
 		if (!viewport || !rail || typeof ResizeObserver === 'undefined') return;
@@ -184,10 +191,11 @@
 			availableWidth: capacity.contentWidth,
 			widths,
 			gap: tabGap,
+			iconWidth: titlebarMetrics.controlSizePx,
 			trailingReservedWidths: new Map(
 				tabs.order.flatMap((surfaceId) =>
 					supportsInlineClose(surfaceId)
-						? [[surfaceId, WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH] as const]
+						? [[surfaceId, titlebarMetrics.inlineCloseReservedWidthPx] as const]
 						: [],
 				),
 			),
@@ -256,14 +264,32 @@
 		return 'bg-workspace-window-tab-selected-inactive text-foreground';
 	}
 
-	function tabFrameClass(mode: WindowTabLabelMode, reservesClose: boolean): string {
+	function tabFrameClass(mode: WindowTabLabelMode): string {
 		return cn(
-			'group/window-tab relative flex h-7 min-w-0 items-stretch',
+			'group/window-tab relative flex min-w-0 items-stretch',
 			mode === 'full' && 'w-max shrink-0',
 			mode === 'truncated' && 'flex-1',
-			mode === 'truncated' && (reservesClose ? 'min-w-[5.5rem]' : 'min-w-16'),
-			mode === 'icon-only' && 'w-7 shrink-0',
+			mode === 'icon-only' && 'shrink-0',
 		);
+	}
+
+	function iconOnlyWidth(mode: WindowTabLabelMode): string | undefined {
+		return mode === 'icon-only' ? `${titlebarMetrics.controlSizePx}px` : undefined;
+	}
+
+	function tabPaddingInlineStart(mode: WindowTabLabelMode): string {
+		return mode === 'icon-only' ? '0px' : '8px';
+	}
+
+	function tabPaddingInlineEnd(mode: WindowTabLabelMode, reservesClose: boolean): string {
+		if (mode === 'icon-only') return '0px';
+		return reservesClose ? `${titlebarMetrics.tabClosePaddingInlineEndPx}px` : '8px';
+	}
+
+	function tabMinimumWidth(mode: WindowTabLabelMode, reservesClose: boolean): string | undefined {
+		if (mode !== 'truncated') return undefined;
+		const closeWidth = reservesClose ? titlebarMetrics.inlineCloseReservedWidthPx : 0;
+		return `${DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH + closeWidth}px`;
 	}
 
 	function rememberCloseFocusReturnTarget(target: EventTarget | null): void {
@@ -397,12 +423,16 @@
 		tabindex={measurement ? -1 : tabs.activeId === surfaceId ? 0 : -1}
 		data-workspace-tab-label-mode={measurement ? undefined : renderedLabelMode}
 		class={cn(
-			'relative flex h-7 w-full min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs',
+			'relative flex w-full min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs',
 			'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			renderedLabelMode !== 'icon-only' && (supportsInlineClose(surfaceId) ? 'pl-2 pr-8' : 'px-2'),
-			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
+			renderedLabelMode === 'icon-only' && 'shrink-0 justify-center',
 			tabTreatment(isSelected, showSelectedBackground),
 		)}
+		style:height={`${titlebarMetrics.controlSizePx}px`}
+		style:width={iconOnlyWidth(renderedLabelMode)}
+		style:font-size={`${titlebarMetrics.labelFontSizePx}px`}
+		style:padding-left={tabPaddingInlineStart(renderedLabelMode)}
+		style:padding-right={tabPaddingInlineEnd(renderedLabelMode, supportsInlineClose(surfaceId))}
 		title={tooltipFor(surfaceId)}
 		draggable={!measurement && canDrag(surfaceId) ? true : undefined}
 		ondragstart={!measurement ? (event) => handleTabDragStart(event, surfaceId) : undefined}
@@ -440,9 +470,12 @@
 			></span>
 		{/if}
 		{#if chatIsProcessing}
-			<WorkspaceChatProcessingIndicator statusId={processingStatusId} />
+			<WorkspaceChatProcessingIndicator
+				statusId={processingStatusId}
+				sizePx={titlebarMetrics.iconSizePx}
+			/>
 		{:else}
-			<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} />
+			<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} size={titlebarMetrics.iconSizePx} />
 		{/if}
 		<span
 			class={cn(
@@ -456,9 +489,11 @@
 				aria-hidden="true"
 				data-workspace-window-tab-close={surfaceId}
 				data-disabled={workspace.isSurfaceCloseBlocked(surfaceId) ? '' : undefined}
-				class="pointer-events-none absolute right-0.5 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-[color,background-color,opacity] group-focus-within/window-tab:pointer-events-auto group-focus-within/window-tab:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:opacity-100 hover:bg-accent hover:text-foreground data-[disabled]:cursor-not-allowed data-[disabled]:text-muted-foreground/40"
+				class="pointer-events-none absolute right-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-[color,background-color,opacity] group-focus-within/window-tab:pointer-events-auto group-focus-within/window-tab:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:opacity-100 hover:bg-accent hover:text-foreground data-[disabled]:cursor-not-allowed data-[disabled]:text-muted-foreground/40"
+				style:height={`${titlebarMetrics.compactControlSizePx}px`}
+				style:width={`${titlebarMetrics.compactControlSizePx}px`}
 			>
-				<X class="h-3.5 w-3.5" />
+				<X size={titlebarMetrics.iconSizePx} />
 			</span>
 		{/if}
 	</button>
@@ -468,7 +503,10 @@
 	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
 	{@const showInlineClose = supportsInlineClose(surfaceId) && renderedLabelMode !== 'icon-only'}
 	<div
-		class={tabFrameClass(renderedLabelMode, showInlineClose)}
+		class={tabFrameClass(renderedLabelMode)}
+		style:height={`${titlebarMetrics.controlSizePx}px`}
+		style:width={iconOnlyWidth(renderedLabelMode)}
+		style:min-width={tabMinimumWidth(renderedLabelMode, showInlineClose)}
 		data-window-tab-measure-id={measurement ? surfaceId : undefined}
 	>
 		{#if measurement || singleTabMenuSurfaceId || !hasContextMenu(surfaceId)}

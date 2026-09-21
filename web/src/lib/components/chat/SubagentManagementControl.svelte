@@ -20,13 +20,24 @@
 	interface Props {
 		model: SubagentManagementModel;
 		onJumpToTool?: (anchorId: string) => void;
+		sizing?: {
+			controlHeightPx: number;
+			iconSizePx: number;
+			fontSizePx: number;
+		};
 	}
 
-	let { model, onJumpToTool }: Props = $props();
+	let { model, onJumpToTool, sizing }: Props = $props();
 
 	let open = $state(false);
 
 	const rootEntry = $derived(model.entries.find((entry) => entry.kind === 'root'));
+	const triggerStyle = $derived(
+		sizing ? `height: ${sizing.controlHeightPx}px; font-size: ${sizing.fontSizePx}px;` : undefined,
+	);
+	const iconStyle = $derived(
+		sizing ? `height: ${sizing.iconSizePx}px; width: ${sizing.iconSizePx}px;` : undefined,
+	);
 
 	// Surfaces the most urgent subagent status while the control is collapsed.
 	const summaryStatus = $derived.by<SubagentManagementStatus>(() => {
@@ -75,14 +86,16 @@
 					FLOATING_TAB_TRIGGER_CLASS,
 					open ? FLOATING_TAB_ACTIVE_CLASS : FLOATING_TAB_IDLE_CLASS,
 				)}
+				style={triggerStyle}
 			>
-				<Users class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+				<Users class="h-3.5 w-3.5 shrink-0" style={iconStyle} aria-hidden="true" />
 				<span class="min-w-0 truncate">Agents</span>
 				<span
 					class={cn(
 						'flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none',
 						statusTone(summaryStatus),
 					)}
+					style:font-size={sizing ? `${Math.max(9, sizing.fontSizePx - 4)}px` : undefined}
 				>
 					<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
 					<span class="text-muted-foreground">{model.subagents.length}</span>
@@ -92,6 +105,7 @@
 						'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
 						open && 'rotate-180',
 					)}
+					style={iconStyle}
 					aria-hidden="true"
 				/>
 			</Popover.Trigger>

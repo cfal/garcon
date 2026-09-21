@@ -13,6 +13,7 @@
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
+	import type { WorkspaceWindowTitlebarMetrics } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -22,7 +23,7 @@
 		labelFor,
 		dnd,
 		isCurrent,
-		titlebarHeightPx,
+		titlebarMetrics,
 		auxiliaryActions,
 		surfaceMenuItems,
 	}: {
@@ -30,7 +31,7 @@
 		labelFor: (surfaceId: string) => string;
 		dnd: WorkspaceWindowDndController;
 		isCurrent: boolean;
-		titlebarHeightPx: number;
+		titlebarMetrics: WorkspaceWindowTitlebarMetrics;
 		auxiliaryActions?: Snippet;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
@@ -102,7 +103,7 @@
 		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
 		showActiveTreatment && 'bg-workspace-window-titlebar-active',
 	)}
-	style:height={`${titlebarHeightPx}px`}
+	style:height={`${titlebarMetrics.heightPx}px`}
 	onfocusin={noteFocus}
 	onpointerdown={handleChromePointerDown}
 >
@@ -116,6 +117,7 @@
 			onFocus={(surfaceId) => workspace.noteWindowChromeFocus(workspaceWindow.id, surfaceId)}
 			{dnd}
 			{isCurrent}
+			{titlebarMetrics}
 			isChatProcessing={isSurfaceChatProcessing}
 			onVisibleChange={(ids) => (visibleSurfaceIds = ids)}
 			onMeasureChange={(measure) => (tabMeasure = measure)}
@@ -128,6 +130,7 @@
 			windowId={workspaceWindow.id}
 			tabs={workspaceWindow.tabs}
 			measure={tabMeasure}
+			{titlebarMetrics}
 		/>
 		<WorkspaceWindowMenu
 			windowId={workspaceWindow.id}
@@ -135,29 +138,38 @@
 			{hiddenSurfaceIds}
 			{labelFor}
 			onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
+			{titlebarMetrics}
 			{surfaceMenuItems}
 		/>
 		<button
 			type="button"
-			class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class="flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			style:height={`${titlebarMetrics.controlSizePx}px`}
+			style:width={`${titlebarMetrics.controlSizePx}px`}
 			aria-label={fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen()}
 			title={fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen()}
 			data-workspace-window-fullscreen={workspaceWindow.id}
 			onclick={toggleFullscreen}
 		>
-			{#if fullscreen}<Minimize2 class="h-3.5 w-3.5" />{:else}<Maximize2 class="h-3.5 w-3.5" />{/if}
+			{#if fullscreen}
+				<Minimize2 size={titlebarMetrics.iconSizePx} />
+			{:else}
+				<Maximize2 size={titlebarMetrics.iconSizePx} />
+			{/if}
 		</button>
 		{#if workspace.windowCount > 1}
 			<button
 				type="button"
-				class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+				class="flex items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+				style:height={`${titlebarMetrics.controlSizePx}px`}
+				style:width={`${titlebarMetrics.controlSizePx}px`}
 				aria-label={m.workspace_close_window()}
 				title={closeTitle}
 				disabled={closeDisabled}
 				data-workspace-window-close={workspaceWindow.id}
 				onclick={closeWindow}
 			>
-				<X class="h-3.5 w-3.5" />
+				<X size={titlebarMetrics.iconSizePx} />
 			</button>
 		{/if}
 	</div>

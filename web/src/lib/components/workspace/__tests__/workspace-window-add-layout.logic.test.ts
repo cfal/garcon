@@ -32,6 +32,17 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 		).toBe(2);
 	});
 
+	it('accounts for enlarged titlebar controls', () => {
+		expect(
+			resolveWorkspaceWindowInlineAddActionCount({
+				measure: { naturalWidth: 200, viewportWidth: 260 },
+				eligibleCount: 4,
+				currentInlineCount: 0,
+				controlWidthPx: 34,
+			}),
+		).toBe(1);
+	});
+
 	it('clamps spare capacity to the eligible action count', () => {
 		expect(
 			resolveWorkspaceWindowInlineAddActionCount({

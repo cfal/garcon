@@ -25,6 +25,7 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindowTitleBar from './WorkspaceWindowTitleBar.svelte';
+	import type { WorkspaceWindowTitlebarMetrics } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -41,7 +42,7 @@
 		panelActions,
 		composerInsetPx,
 		subagentToolbar,
-		titlebarHeightPx,
+		titlebarMetrics,
 		surfaceMenuItems,
 		frameBridge,
 		surfaceStyle,
@@ -59,7 +60,7 @@
 		panelActions: ConversationPanelActions | null;
 		composerInsetPx: number;
 		subagentToolbar: SubagentToolbarState;
-		titlebarHeightPx: number;
+		titlebarMetrics: WorkspaceWindowTitlebarMetrics;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
 		surfaceStyle: string;
@@ -122,7 +123,9 @@
 		if (dnd.payload?.kind === 'chat') return 'inset-0';
 		return 'inset-x-0 bottom-0';
 	});
-	const dropLayerTopPx = $derived(dnd.payload?.kind === 'chat' ? undefined : titlebarHeightPx);
+	const dropLayerTopPx = $derived(
+		dnd.payload?.kind === 'chat' ? undefined : titlebarMetrics.heightPx,
+	);
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
 		switch (zone.zone) {
@@ -273,12 +276,17 @@
 		{dnd}
 		{isCurrent}
 		{surfaceMenuItems}
-		{titlebarHeightPx}
+		{titlebarMetrics}
 	>
 		{#snippet auxiliaryActions()}
 			{#if activeChatIsLive && subagentToolbar.model}
 				<SubagentManagementControl
 					model={subagentToolbar.model}
+					sizing={{
+						controlHeightPx: titlebarMetrics.controlSizePx + 4,
+						iconSizePx: titlebarMetrics.iconSizePx,
+						fontSizePx: titlebarMetrics.labelFontSizePx + 2,
+					}}
 					onJumpToTool={(anchorId) => subagentToolbar.jumpToTool(anchorId)}
 				/>
 			{/if}

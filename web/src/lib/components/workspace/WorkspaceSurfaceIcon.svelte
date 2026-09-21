@@ -16,20 +16,24 @@
 
 	let {
 		kind,
-		class: className = 'h-3.5 w-3.5 shrink-0',
-	}: { kind: ActiveSurfaceKind; class?: string } = $props();
+		size,
+		class: className = size === undefined ? 'h-3.5 w-3.5 shrink-0' : 'shrink-0',
+	}: { kind: ActiveSurfaceKind; size?: number; class?: string } = $props();
 </script>
 
-{#if kind === 'chat'}<MessageSquare class={className} />
-{:else if kind === 'git'}<GitBranch class={className} />
-{:else if kind === 'git-history'}<History class={className} />
-{:else if kind === 'git-compare'}<GitCompareArrows class={className} />
-{:else if kind === 'pull-requests'}<GitPullRequest class={className} />
-{:else if kind === 'files'}<Files class={className} />
-{:else if kind === 'commit'}<GitCommitHorizontal class={className} />
-{:else if kind === 'chat-map'}<Waypoints class={className} />
-{:else if kind === 'chat-canvas'}<PanelsTopLeft class={className} />
-{:else if kind === 'chat-board'}<Columns3 class={className} />
-{:else if kind === 'tickets'}<Tickets class={className} />
-{:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal class={className} />
-{:else}<FileCode class={className} />{/if}
+{#if kind === 'chat'}<MessageSquare class={className} {size} />
+{:else if kind === 'git'}<GitBranch class={className} {size} />
+{:else if kind === 'git-history'}<History class={className} {size} />
+{:else if kind === 'git-compare'}<GitCompareArrows class={className} {size} />
+{:else if kind === 'pull-requests'}<GitPullRequest class={className} {size} />
+{:else if kind === 'files'}<Files class={className} {size} />
+{:else if kind === 'commit'}<GitCommitHorizontal class={className} {size} />
+{:else if kind === 'chat-map'}<Waypoints class={className} {size} />
+{:else if kind === 'chat-canvas'}<PanelsTopLeft class={className} {size} />
+{:else if kind === 'chat-board'}<Columns3 class={className} {size} />
+{:else if kind === 'tickets'}<Tickets class={className} {size} />
+{:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal
+		class={className}
+		{size}
+	/>
+{:else}<FileCode class={className} {size} />{/if}

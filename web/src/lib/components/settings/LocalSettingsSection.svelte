@@ -182,16 +182,16 @@
 		<div class="px-4">
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="min-w-0">
-					<label class="text-sm font-medium text-foreground" for="local-workspace-titlebar-height">
-						{m.settings_workspace_titlebar_height()}
+					<label class="text-sm font-medium text-foreground" for="local-workspace-titlebar-size">
+						{m.settings_workspace_titlebar_size()}
 					</label>
 					<p class="mt-0.5 text-xs text-muted-foreground">
-						{m.settings_workspace_titlebar_height_description()}
+						{m.settings_workspace_titlebar_size_description()}
 					</p>
 				</div>
 				<div class="flex shrink-0 items-center gap-2">
 					<input
-						id="local-workspace-titlebar-height"
+						id="local-workspace-titlebar-size"
 						type="range"
 						min={WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX}
 						max={WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX}
@@ -202,7 +202,7 @@
 						class="w-28 accent-primary"
 					/>
 					<output
-						for="local-workspace-titlebar-height"
+						for="local-workspace-titlebar-size"
 						class="w-12 text-right text-sm tabular-nums text-foreground"
 					>
 						{ls.workspaceWindowTitlebarHeightDeltaPx > 0

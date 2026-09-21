@@ -9,6 +9,7 @@ interface WorkspaceWindowAddMenuOptions {
 	readonly measure: WorkspaceWindowTabMeasure | null;
 	readonly actionIds: readonly string[];
 	readonly hasUnplacedTerminalSessions: boolean;
+	readonly controlWidthPx: number;
 }
 
 export class WorkspaceWindowAddMenuState {
@@ -21,7 +22,7 @@ export class WorkspaceWindowAddMenuState {
 	constructor(private readonly options: WorkspaceWindowAddMenuOptions) {
 		$effect.pre(() => {
 			const focusedElement = this.#focusedControl();
-			const { actionIds, measure } = this.options;
+			const { actionIds, measure, controlWidthPx } = this.options;
 			// Saved terminals replace the inline terminal action with a menu trigger.
 			void this.options.hasUnplacedTerminalSessions;
 			const currentInlineCount = Math.min(
@@ -35,6 +36,7 @@ export class WorkspaceWindowAddMenuState {
 				measure,
 				eligibleCount: actionIds.length,
 				currentInlineCount,
+				controlWidthPx,
 			});
 			const focusedActionId = focusedElement ? this.#actionId(focusedElement) : undefined;
 			const focusedActionWasPromoted =
