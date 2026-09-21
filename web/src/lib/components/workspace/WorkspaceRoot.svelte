@@ -293,7 +293,9 @@
 			rootState.partitionRatio(partitionId, ratio),
 		),
 	);
-	const liveChatBodyTopPx = WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX;
+	const titlebarHeightPx = $derived(
+		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX + localSettings.workspaceWindowTitlebarHeightDeltaPx,
+	);
 	const WINDOW_EDGE_EPSILON = 1e-6;
 
 	function hasLeftSeparator(rect: WorkspaceWindowRect): boolean {
@@ -585,6 +587,7 @@
 				panelActions={conversationPanelActions}
 				{composerInsetPx}
 				{subagentToolbar}
+				{titlebarHeightPx}
 				{surfaceMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
@@ -606,6 +609,7 @@
 					boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
 					minRatio={ratioBounds.min}
 					maxRatio={ratioBounds.max}
+					{titlebarHeightPx}
 					disabled={!ratioBounds.adjustable}
 					onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
 					onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
@@ -656,10 +660,10 @@
 				composerHasLeftSeparator && 'ml-3',
 				composerHasRightSeparator && 'mr-3',
 			)}
-			style:top={composerPlacement && !isMobile ? `${liveChatBodyTopPx}px` : undefined}
+			style:top={composerPlacement && !isMobile ? `${titlebarHeightPx}px` : undefined}
 			data-workspace-live-chat-body
 			data-workspace-live-chat-body-top-px={composerPlacement && !isMobile
-				? liveChatBodyTopPx
+				? titlebarHeightPx
 				: undefined}
 			data-workspace-surface-id={composerPlacement?.surface.id}
 			onpointerdowncapture={() => {

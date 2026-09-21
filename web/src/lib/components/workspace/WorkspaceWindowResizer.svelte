@@ -2,7 +2,6 @@
 	import { onDestroy } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import type { WorkspacePartitionDirection } from '$lib/workspace/surface-types.js';
-	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	// Pixel step applied per arrow-key press when resizing via keyboard.
@@ -18,6 +17,7 @@
 		minRatio: number;
 		maxRatio: number;
 		disabled: boolean;
+		titlebarHeightPx: number;
 		onPreview: (ratio: number | null) => void;
 		onCommit: (ratio: number) => void;
 	}
@@ -30,6 +30,7 @@
 		minRatio,
 		maxRatio,
 		disabled,
+		titlebarHeightPx,
 		onPreview,
 		onCommit,
 	}: WorkspaceWindowResizerProps = $props();
@@ -177,7 +178,7 @@
 			disabled ? 'pointer-events-none' : 'pointer-events-auto',
 			isHorizontal ? '-left-2.5 bottom-0 w-6' : 'inset-x-0 bottom-0 h-6',
 		)}
-		style:top={isHorizontal ? `${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px` : undefined}
+		style:top={isHorizontal ? `${titlebarHeightPx}px` : undefined}
 	></div>
 	<div
 		class={cn(

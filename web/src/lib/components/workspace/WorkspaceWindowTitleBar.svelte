@@ -13,7 +13,6 @@
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
-	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -23,6 +22,7 @@
 		labelFor,
 		dnd,
 		isCurrent,
+		titlebarHeightPx,
 		auxiliaryActions,
 		surfaceMenuItems,
 	}: {
@@ -30,6 +30,7 @@
 		labelFor: (surfaceId: string) => string;
 		dnd: WorkspaceWindowDndController;
 		isCurrent: boolean;
+		titlebarHeightPx: number;
 		auxiliaryActions?: Snippet;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
@@ -101,7 +102,7 @@
 		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
 		showActiveTreatment && 'bg-workspace-window-titlebar-active',
 	)}
-	style:height={`${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px`}
+	style:height={`${titlebarHeightPx}px`}
 	onfocusin={noteFocus}
 	onpointerdown={handleChromePointerDown}
 >

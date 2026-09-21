@@ -392,6 +392,7 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 	};
 	const localSettings = {
 		terminalFontSize: '13',
+		workspaceWindowTitlebarHeightDeltaPx: 0,
 		showQuickCommitTray,
 		set: vi.fn(),
 	};
@@ -924,6 +925,47 @@ describe('WorkspaceRoot', () => {
 		expect(panelB.dataset.ownsComposer).toBe('true');
 		expect(liveChatBody.style.top).toBe('40px');
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(3);
+	});
+
+	it.each([
+		['-2 px', -2, 38],
+		['+6 px', 6, 46],
+	] as const)('keeps desktop chrome aligned at a %s adjustment', async (_label, delta, height) => {
+		const { localSettings, layout, windowDnd } = installContext();
+		localSettings.workspaceWindowTitlebarHeightDeltaPx = delta;
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		const { container } = renderRoot();
+		expect(
+			container.querySelector<HTMLElement>('[data-workspace-window-titlebar]')?.style.height,
+		).toBe(`${height}px`);
+		expect(
+			container.querySelector<HTMLElement>('[data-workspace-window-resize-hit-area]')?.style.top,
+		).toBe(`${height}px`);
+		expect(container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')?.style.top).toBe(
+			`${height}px`,
+		);
+		windowDnd.beginSurfaceTabDrag(
+			chatViewSurfaceId('window-main'),
+			'window-main',
+			0,
+			positionedDragEvent('dragstart', 0, 0),
+		);
+		await tick();
+		expect(
+			container.querySelector<HTMLElement>('[data-workspace-window-drop-layer]')?.style.top,
+		).toBe(`${height}px`);
 	});
 
 	it('restores a rekeyed Chat panel at its transferred row target', async () => {

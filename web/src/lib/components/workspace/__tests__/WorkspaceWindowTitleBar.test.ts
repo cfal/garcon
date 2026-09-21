@@ -262,6 +262,7 @@ function renderTitleBar(
 	node: WorkspaceWindowNode,
 	isCurrent = true,
 	resolveLabel: (surfaceId: string) => string = labelFor,
+	titlebarHeightPx = 40,
 ) {
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
@@ -271,6 +272,7 @@ function renderTitleBar(
 			resolveUnmeasuredWorkspaceSplit,
 		),
 		isCurrent,
+		titlebarHeightPx,
 	});
 }
 
@@ -310,6 +312,13 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.getByRole('button', { name: m.workspace_window_actions() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_fullscreen() })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: m.workspace_close_window() })).toBeNull();
+	});
+
+	it.each([38, 46])('uses the configured %ipx titlebar height', (height) => {
+		const { container } = renderTitleBar(workspaceWindow([chatSurface.id]), true, labelFor, height);
+		expect(
+			container.querySelector<HTMLElement>('[data-workspace-window-titlebar]')?.style.height,
+		).toBe(`${height}px`);
 	});
 
 	it('keeps an empty Chat tab non-draggable', () => {
@@ -657,6 +666,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			labelFor,
 			dnd,
 			isCurrent: true,
+			titlebarHeightPx: 40,
 		});
 		const soleChatTab = screen.getByRole('tab', { name: 'Chat A' });
 		soleChatTab.focus();
@@ -666,6 +676,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			labelFor,
 			dnd,
 			isCurrent: true,
+			titlebarHeightPx: 40,
 		});
 		await waitFor(() =>
 			expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Chat A' })),
@@ -679,6 +690,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			labelFor,
 			dnd,
 			isCurrent: true,
+			titlebarHeightPx: 40,
 		});
 		await waitFor(() =>
 			expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Git' })),
@@ -1023,6 +1035,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			labelFor,
 			dnd,
 			isCurrent: true,
+			titlebarHeightPx: 40,
 		});
 		const tabViewport = rendered.container.querySelector<HTMLElement>(
 			'[data-workspace-window-tabs="window-main"]',

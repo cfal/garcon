@@ -5,7 +5,13 @@ import * as m from '$lib/paraglide/messages.js';
 
 function renderResizer(
 	direction: 'horizontal' | 'vertical' = 'horizontal',
-	options: { minRatio?: number; maxRatio?: number; disabled?: boolean; ratio?: number } = {},
+	options: {
+		minRatio?: number;
+		maxRatio?: number;
+		disabled?: boolean;
+		ratio?: number;
+		titlebarHeightPx?: number;
+	} = {},
 ) {
 	const onPreview = vi.fn();
 	const onCommit = vi.fn();
@@ -17,6 +23,7 @@ function renderResizer(
 		minRatio: options.minRatio ?? 0.15,
 		maxRatio: options.maxRatio ?? 0.85,
 		disabled: options.disabled ?? false,
+		titlebarHeightPx: options.titlebarHeightPx ?? 40,
 		onPreview,
 		onCommit,
 	});
@@ -34,6 +41,13 @@ afterEach(() => {
 });
 
 describe('WorkspaceWindowResizer', () => {
+	it.each([38, 46])('starts the vertical resize target below a %ipx titlebar', (height) => {
+		const { container } = renderResizer('horizontal', { titlebarHeightPx: height });
+		expect(
+			container.querySelector<HTMLElement>('[data-workspace-window-resize-hit-area]')?.style.top,
+		).toBe(`${height}px`);
+	});
+
 	it('exposes the current clamped ratio to assistive technology', () => {
 		const { separator } = renderResizer('horizontal', { minRatio: 0.3, maxRatio: 0.7 });
 

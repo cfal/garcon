@@ -25,7 +25,6 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindowTitleBar from './WorkspaceWindowTitleBar.svelte';
-	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -42,6 +41,7 @@
 		panelActions,
 		composerInsetPx,
 		subagentToolbar,
+		titlebarHeightPx,
 		surfaceMenuItems,
 		frameBridge,
 		surfaceStyle,
@@ -59,6 +59,7 @@
 		panelActions: ConversationPanelActions | null;
 		composerInsetPx: number;
 		subagentToolbar: SubagentToolbarState;
+		titlebarHeightPx: number;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
 		surfaceStyle: string;
@@ -121,9 +122,7 @@
 		if (dnd.payload?.kind === 'chat') return 'inset-0';
 		return 'inset-x-0 bottom-0';
 	});
-	const dropLayerTopPx = $derived(
-		dnd.payload?.kind === 'chat' ? undefined : WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX,
-	);
+	const dropLayerTopPx = $derived(dnd.payload?.kind === 'chat' ? undefined : titlebarHeightPx);
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
 		switch (zone.zone) {
@@ -268,7 +267,14 @@
 	ondragleave={(event) => dnd.handleWindowDragLeave(event)}
 	ondrop={(event) => void handleDrop(event)}
 >
-	<WorkspaceWindowTitleBar {workspaceWindow} {labelFor} {dnd} {isCurrent} {surfaceMenuItems}>
+	<WorkspaceWindowTitleBar
+		{workspaceWindow}
+		{labelFor}
+		{dnd}
+		{isCurrent}
+		{surfaceMenuItems}
+		{titlebarHeightPx}
+	>
 		{#snippet auxiliaryActions()}
 			{#if activeChatIsLive && subagentToolbar.model}
 				<SubagentManagementControl
