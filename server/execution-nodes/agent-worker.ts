@@ -9,6 +9,8 @@ import {
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import { NULLABLE_AGENT_FACETS, type AgentRpcRequest, type IntegrationManifest } from './agent-protocol.js';
 import type { AgentRpc } from './rpc.js';
+import { FileTransfers } from './file-transfers.js';
+import { validateFileRpcRequest, invalidFileTransfer } from './file-protocol.js';
 
 interface HistoryReader {
   readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
@@ -21,12 +23,14 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   let info: ExecutionNodeInfo;
   let disposed = false;
   let cleanup: Promise<void> | null = null;
+  let fileTransfers: FileTransfers | null = null;
   const integrations = new Map<string, AgentIntegration>();
   const readers = new Map<string, AgentResourceTable<'history-reader', HistoryReader>>();
   const readerResources = new Set<HistoryReader>();
   const subscriptions = new Set<() => void>();
   const ready = (async () => {
     info = await node.getInfo();
+    if (info.services.files) fileTransfers = new FileTransfers(await node.getFilesService(), { nodeId: info.nodeId, instanceId: info.instanceId, sessionId: rpc.transport.id });
     for (const id of info.integrationIds) {
       const integration = await node.getAgentIntegration(id);
       if (disposed) throw new AgentCallError('not-dispatched', 'Worker session retired');
@@ -52,7 +56,7 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          node.dispose(),
+          Promise.all([fileTransfers?.dispose(), node.dispose()]),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new Error('Worker session cleanup timed out')), cleanupTimeoutMs);
             timer.unref();
@@ -75,6 +79,23 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
     if (call.method === 'apiProviders.discoverModels') return node.discoverApiProviderModels(call.request, { signal });
     if (call.method === 'projects.inspect') return (await node.getProjectService()).inspect(call.request, { signal });
     if (call.method === 'projects.resolveFileMentions') return (await node.getProjectService()).resolveFileMentions(call.request, { signal });
+    if (call.method.startsWith('files.')) {
+      if (call.integrationId !== '') throw invalidFileTransfer();
+      validateFileRpcRequest(call.method, call.request);
+    }
+    switch (call.method) {
+      case 'files.tree': return (await node.getFilesService()).tree(call.request, { signal });
+      case 'files.browse': return (await node.getFilesService()).browse(call.request, { signal });
+      case 'files.list': return (await node.getFilesService()).list(call.request, { signal });
+      case 'files.identity': return (await node.getFilesService()).identity(call.request, { signal });
+      case 'files.revision': return (await node.getFilesService()).revision(call.request, { signal });
+      case 'files.openRead': return required(fileTransfers).openRead(call.request, signal);
+      case 'files.readChunk': return required(fileTransfers).readChunk(call.request, signal);
+      case 'files.beginWrite': return required(fileTransfers).beginWrite(call.request, signal);
+      case 'files.writeChunk': return required(fileTransfers).writeChunk(call.request, signal);
+      case 'files.commitWrite': return required(fileTransfers).commitWrite(call.request, signal);
+      case 'files.close': return required(fileTransfers).close(call.request);
+    }
     const integration = integrations.get(call.integrationId);
     if (!integration) throw new AgentCallError('not-dispatched', 'Unknown integration', 'OPERATION_UNSUPPORTED');
     const options = { signal };

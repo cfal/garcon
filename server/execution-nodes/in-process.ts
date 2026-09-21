@@ -11,12 +11,14 @@ import { IntegrationHostFactory, type IntegrationHostFactoryOptions } from '../a
 import { IntegrationRegistry } from '../agents/integration-registry.js';
 import { LocalExecutionProjectService } from './project-service.js';
 import { discoverApiProviderModels } from '../api-providers/discovery.js';
+import { LocalExecutionFilesService } from '../files/service.js';
 
 export class InProcessExecutionNode implements ExecutionNode {
   readonly id: string;
   readonly #info: ExecutionNodeInfo;
   readonly #registry: IntegrationRegistry;
   readonly #projects: LocalExecutionProjectService;
+  readonly #files: LocalExecutionFilesService;
   readonly #listeners = new Set<(value: NodeAvailability) => void>();
   #disposed = false;
 
@@ -27,6 +29,7 @@ export class InProcessExecutionNode implements ExecutionNode {
   }) {
     this.id = options.id;
     this.#projects = new LocalExecutionProjectService(options.projectBasePath, (callOptions) => this.#assertAvailable(callOptions));
+    this.#files = new LocalExecutionFilesService({ nodeId: options.id, projectBasePath: options.projectBasePath, assertAvailable: (callOptions) => this.#assertAvailable(callOptions) });
     const instanceId = options.instanceId ?? crypto.randomUUID();
     this.#registry = new IntegrationRegistry({
       integrations: options.integrations,
@@ -37,7 +40,7 @@ export class InProcessExecutionNode implements ExecutionNode {
       instanceId,
       projectBasePath: this.#projects.projectBasePath,
       integrationIds: Object.freeze(this.#registry.list().map((integration) => integration.descriptor.id)),
-      services: Object.freeze({ agents: true, processes: false, files: false, git: false, terminals: false }),
+      services: Object.freeze({ agents: true, processes: false, files: true, git: false, terminals: false }),
     });
   }
 
@@ -62,7 +65,7 @@ export class InProcessExecutionNode implements ExecutionNode {
     this.#assertAvailable(options);
     return this.#projects;
   }
-  async getFilesService(): Promise<never> { throw unavailableService('files'); }
+  async getFilesService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#files; }
   async getGitService(): Promise<never> { throw unavailableService('git'); }
   async getTerminalService(): Promise<never> { throw unavailableService('terminals'); }
 

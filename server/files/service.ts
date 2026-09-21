@@ -54,6 +54,7 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
 
   async identity(request: ExecutionFileTarget, options?: NodeCallOptions) {
     return this.#run(options, async () => {
+      this.#validateTarget(request);
       const input = toNativePath(request.filePath);
       if (!input || path.isAbsolute(input) || path.normalize(input) === '.' || path.normalize(input) === '..' || path.normalize(input).startsWith(`..${path.sep}`)) {
         throw new ValidationDomainError('A valid relative file path is required');
@@ -82,6 +83,7 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
 
   async save(request: Parameters<ExecutionFilesService['save']>[0], options?: NodeCallOptions) {
     return this.#run(options, async () => {
+      this.#validateTarget(request);
       if (!parseSaveTextRequest(request)) throw new ValidationDomainError('Content, expectedRevision, and conflictResolution are required');
       if (Buffer.byteLength(request.content) > MAX_FILE_SAVE_BYTES) throw new FileTooLargeError(MAX_FILE_SAVE_BYTES);
       const root = await this.#root(request.projectPath);
@@ -95,7 +97,11 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
         const current = await getFileRevisionOrMissing(target);
         if (request.conflictResolution === 'reject' && current !== request.expectedRevision) throw fileRevisionConflict();
         this.#available(options);
-        const revision = await writeVersionedTextFile(target, request.content);
+        let revision;
+        try { revision = await writeVersionedTextFile(target, request.content); }
+        catch (error) {
+          throw new DomainError('FILE_SAVE_OUTCOME_UNKNOWN', 'Save could not be confirmed. Reload the file before saving again.', 503, false, { cause: error });
+        }
         return { success: true as const, path: toNodePath(target), message: 'File saved successfully', revision };
       });
     });
@@ -107,8 +113,12 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
   }
 
   async #target(request: ExecutionFileTarget): Promise<string> {
-    if (typeof request.filePath !== 'string' || !request.filePath || request.filePath.length > 4096 || request.filePath.includes('\0')) throw new ValidationDomainError('Invalid file path');
+    this.#validateTarget(request);
     return resolveRealWithinBase(await this.#root(request.projectPath), toNativePath(request.filePath));
+  }
+
+  #validateTarget(request: ExecutionFileTarget): void {
+    if (typeof request.filePath !== 'string' || !request.filePath || request.filePath.length > 4096 || request.filePath.includes('\0')) throw new ValidationDomainError('Invalid file path');
   }
 
   #available(options?: NodeCallOptions): void {

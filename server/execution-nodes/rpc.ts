@@ -5,9 +5,13 @@ import {
 import type { JsonObject } from '@garcon/common/json';
 import type { AgentRpcMethods, AgentRpcRequest, AgentProducerFrame } from './agent-protocol.js';
 import type { SessionTransport } from './session-transport.js';
+import { DomainError } from '../lib/domain-error.js';
+import { isErrorCode, type ErrorCode } from '../../common/error-codes.js';
 
 interface Failure {
-  readonly code: AgentIntegrationErrorCode;
+  readonly code: AgentIntegrationErrorCode | ErrorCode;
+  readonly domain?: 'node';
+  readonly status?: number;
   readonly message: string;
   readonly retryable: boolean;
   readonly details?: JsonObject;
@@ -127,6 +131,7 @@ export class AgentRpc {
 }
 
 function encodeFailure(error: unknown): Failure {
+  if (error instanceof DomainError) return { domain: 'node', code: error.code, message: error.message, status: error.status, retryable: error.retryable };
   if (error instanceof AgentIntegrationError) return {
     code: error.code, message: error.message, retryable: error.retryable,
     ...(error.details ? { details: error.details } : {}),
@@ -141,7 +146,11 @@ function decodeFailure(error: Failure): Error {
     || (error.outcome !== undefined && !['unknown', 'not-dispatched', 'rejected'].includes(error.outcome))) {
     throw new Error('Invalid RPC error');
   }
+  if (error.domain === 'node') {
+    if (!isErrorCode(error.code) || !Number.isInteger(error.status) || error.status! < 400 || error.status! > 599) throw new Error('Invalid node RPC error');
+    return new DomainError(error.code, error.message, error.status, error.retryable);
+  }
   return error.outcome
-    ? new AgentCallError(error.outcome, error.message, error.code)
-    : new AgentIntegrationError(error.code, error.message, error.retryable, error.details);
+    ? new AgentCallError(error.outcome, error.message, error.code as AgentIntegrationErrorCode)
+    : new AgentIntegrationError(error.code as AgentIntegrationErrorCode, error.message, error.retryable, error.details);
 }

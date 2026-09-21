@@ -15,6 +15,7 @@ import type { SessionTransport } from './session-transport.js';
 import type { WebSocketLink } from './websocket-link.js';
 import { unavailableService } from './in-process.js';
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../api-providers/discovery.js';
+import { RemoteExecutionFilesService } from './remote-files.js';
 
 export interface RemoteSessionBacking {
   readonly rpc: AgentRpc;
@@ -36,6 +37,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   #current: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
   #projectBasePath: string | null = null;
+  readonly #files = new RemoteExecutionFilesService(() => this.#backing());
   readonly #projects: ExecutionProjectService = {
     inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
     resolveFileMentions: async (request, options) => this.#backing().rpc.call('', 'projects.resolveFileMentions', request, options),
@@ -112,7 +114,11 @@ export class RemoteExecutionNode implements ExecutionNode {
     this.#backing();
     return this.#projects;
   }
-  async getFilesService(): Promise<never> { throw unavailableService('files'); }
+  async getFilesService(options?: NodeCallOptions) {
+    options?.signal?.throwIfAborted();
+    if (!this.#backing().info.services.files) throw unavailableService('files');
+    return this.#files;
+  }
   async getGitService(): Promise<never> { throw unavailableService('git'); }
   async getTerminalService(): Promise<never> { throw unavailableService('terminals'); }
 

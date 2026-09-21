@@ -38,7 +38,8 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
         await runAgentIntegrationConformance({ integrationClass, integration });
         expect(await node.getAgentIntegration(integrationClass.integrationId)).toBe(integration);
       }
-      for (const service of [node.getFilesService, node.getProcessService, node.getGitService, node.getTerminalService]) {
+      expect((await node.getFilesService()).read).toBeFunction();
+      for (const service of [node.getProcessService, node.getGitService, node.getTerminalService]) {
         await expect(service.call(node)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
       }
       await node.dispose();
