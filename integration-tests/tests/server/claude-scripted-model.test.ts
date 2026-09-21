@@ -149,6 +149,16 @@ describe('Claude against a scripted model', () => {
         afterIndex: cursor,
       });
 
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'task-tool-use')).toContainEqual(
+        expect.objectContaining({
+          toolId: 'toolu_scripted_agent',
+          subagentType: 'Explore',
+          description: 'Inspect the scripted project',
+          prompt: childPrompt,
+        }),
+      );
+
       const requests = testEnvironment.model.requestsSince(requestStart);
       const childRequest = requests.find((candidate) => candidate.lastUserText.includes(childPrompt));
       if (!childRequest) throw new Error('The scripted subagent never reached the fake model.');

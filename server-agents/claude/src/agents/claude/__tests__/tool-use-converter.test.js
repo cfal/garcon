@@ -168,6 +168,20 @@ describe('convertClaudeToolUse', () => {
       expect(msg).toBeInstanceOf(TaskToolUseMessage);
       expect(msg.subagentType).toBe('Explore');
     });
+
+    it('maps Agent to the canonical task tool type', () => {
+      const msg = convertClaudeToolUse(TS, {
+        id: 't12-agent',
+        name: 'Agent',
+        input: {
+          subagent_type: 'Explore',
+          description: 'Inspect the project',
+          prompt: 'Find the relevant files.',
+        },
+      });
+      expect(msg).toBeInstanceOf(TaskToolUseMessage);
+      expect(msg.subagentType).toBe('Explore');
+    });
   });
 
   describe('UpdatePlan / WriteStdin', () => {
