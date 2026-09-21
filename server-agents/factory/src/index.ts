@@ -88,7 +88,7 @@ export default class FactoryAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new FactoryExecution(runtime, nativeSessions);
-    const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions);
+    const nativeEvidence = createFactoryNativeEvidence(transcriptReader, nativeSessions, runtime);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.legacyHistoryImport = createHistoryImport({
@@ -160,6 +160,7 @@ export default class FactoryAgentIntegration implements AgentIntegration {
 function createFactoryNativeEvidence(
   reader: ReturnType<typeof createFactoryTranscriptSource>,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+  runtime: FactoryCliRuntime,
 ): AgentNativeEvidenceSource {
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -195,8 +196,10 @@ function createFactoryNativeEvidence(
       const nativePath = current.nativePath ?? await reader.resolveNativePath(current);
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      const agentSessionId = chat.agentSessionId ?? nativeSessions.decode(chat.nativeSession).agentSessionId;
+      runtime.releaseSession(chat.chatId, agentSessionId);
     },
   };
 }

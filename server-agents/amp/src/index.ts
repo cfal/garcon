@@ -196,8 +196,9 @@ function createAmpNativeEvidence(
       const id = ampThreadId(chat, nativeSessions);
       return id ? { kind: 'provider-reference', value: id } : null;
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      runtime.releaseSession(chat.chatId, ampThreadId(chat, nativeSessions));
     },
   };
 }

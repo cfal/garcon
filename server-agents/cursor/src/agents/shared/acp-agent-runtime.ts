@@ -269,6 +269,12 @@ export class AcpAgentRuntime {
     this.#retireSession(session, 'session-complete');
   }
 
+  releaseSession(chatId: string, agentSessionId: string | null): void {
+    if (!agentSessionId) return;
+    const session = this.#sessions.get(agentSessionId);
+    if (session?.chatId === chatId) this.#retireSession(session, 'cancelled');
+  }
+
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     const turn = session?.activeTurn;
@@ -354,12 +360,18 @@ export class AcpAgentRuntime {
       },
       authenticateMethodId: this.#policy.authenticateMethodId,
     });
-    await client.connect({
-      command,
-      args: this.#policy.args ?? ['acp'],
-      cwd: request.projectPath,
-      env: this.#buildEnv(request),
-    });
+    try {
+      await client.connect({
+        command,
+        args: this.#policy.args ?? ['acp'],
+        cwd: request.projectPath,
+        env: this.#buildEnv(request),
+      });
+      assertAcpExecutionOpen(request);
+    } catch (error) {
+      client.close();
+      throw error;
+    }
     this.#capabilityCache.set({
       command,
       binaryVersion: this.#policy.binaryVersion ?? 'unknown',

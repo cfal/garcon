@@ -4,7 +4,6 @@ import type { PermissionDecisionPayload } from '@garcon/common/chat-command-cont
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
-import { ClaudeCliVersionProbe } from "./cli-version.js";
 import { buildClaudeCLIEnvironment } from './cli-environment.js';
 import { resolveClaudeModel } from './model-context.js';
 import { configureClaudeSessionModel } from './session-model.js';
@@ -71,13 +70,12 @@ import {
 import {
   INTERRUPT_COMPLETION_TIMEOUT_MS,
   INTERRUPT_RECEIPT_TIMEOUT_MS,
-  NOOP_LOGGER,
+  CONVERSATION_RESET_FAILURE,
+  defaultClaudeCliDependencies,
   type ClaudeRunningSession,
   type InterruptFallbackStage,
   type PendingPermission,
 } from './runtime-state.js';
-
-const CONVERSATION_RESET_FAILURE = 'Claude CLI cleared the conversation mid-turn. The chat transcript is unchanged; send the message again to continue from it.';
 
 class ClaudeCliRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
@@ -1447,6 +1445,16 @@ class ClaudeCliRuntime {
       }));
   }
 
+  async releaseSession(chatId: string, agentSessionId: string | null): Promise<void> {
+    if (!agentSessionId) return;
+    const session = this.#runningSessions.get(agentSessionId);
+    if (!session) return this.#processRetirements.wait(agentSessionId, chatId);
+    if (session.chatId !== chatId) return;
+    this.#runningSessions.delete(agentSessionId);
+    this.#resumeOwners.delete(session);
+    await this.#retireSession(session);
+  }
+
   startPurgeTimer(): void {
     this.#idlePurger.start();
   }
@@ -1469,14 +1477,6 @@ class ClaudeCliRuntime {
     this.#runningSessions.clear();
     this.#pendingPermissions.clear();
   }
-}
-
-function defaultClaudeCliDependencies(): ClaudeCliDependencies {
-  return {
-    binary: () => 'claude',
-    logger: NOOP_LOGGER,
-    versionProbe: new ClaudeCliVersionProbe(),
-  };
 }
 
 export { ClaudeCliRuntime, buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, runSingleQuery };

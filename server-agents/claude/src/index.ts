@@ -172,6 +172,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
     const nativeEvidence = createClaudeNativeEvidence({
+      runtime,
       nativeSessions,
       configHomeDir: config.configHomeDir,
       logger,
@@ -271,6 +272,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
 }
 
 function createClaudeNativeEvidence(options: {
+  readonly runtime: ClaudeCliRuntime;
   readonly nativeSessions: ReturnType<typeof createPathNativeSessionCodec>;
   readonly configHomeDir: () => string | null;
   readonly logger: AgentHost['logger'];
@@ -353,8 +355,9 @@ function createClaudeNativeEvidence(options: {
       const nativePath = await derivedPath(chat);
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      await options.runtime.releaseSession(chat.chatId, reference(chat).agentSessionId);
     },
   };
 }

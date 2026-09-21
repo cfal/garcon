@@ -265,6 +265,48 @@ function startOptions(overrides = {}) {
 }
 
 describe('ClaudeCliRuntime stdout protocol handling', () => {
+  it.each(['idle', 'active'])('releases an %s process without retiring another chat or a replacement', async (phase) => {
+    const originalSpawn = Bun.spawn;
+    const first = createFakeClaudeProcess();
+    const sibling = createFakeClaudeProcess();
+    const replacement = createFakeClaudeProcess();
+    Bun.spawn = mock().mockReturnValueOnce(first.proc).mockReturnValueOnce(sibling.proc)
+      .mockReturnValueOnce(replacement.proc);
+    const runtime = createRuntime();
+    try {
+      const start = runtime.startClaudeCliSession(startOptions());
+      await waitForWrittenUserMessage(first);
+      if (phase === 'idle') {
+        await enqueueResult(first);
+        await start;
+      }
+      const siblingStart = runtime.startClaudeCliSession(startOptions({
+        chatId: 'chat-sibling', agentSessionId: 'sibling-session',
+      }));
+      await waitForWrittenUserMessage(sibling);
+      await runtime.releaseSession('wrong-chat', 'expected-session');
+      await runtime.releaseSession('chat-1', null);
+      expect(first.proc.stdin.end).not.toHaveBeenCalled();
+
+      await runtime.releaseSession('chat-1', 'expected-session');
+      await start;
+      expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(sibling.proc.stdin.end).not.toHaveBeenCalled();
+      expect(runtime.isClaudeInternalSessionRunning('sibling-session')).toBe(true);
+
+      const next = runtime.startClaudeCliSession(startOptions({ agentSessionId: 'replacement-session' }));
+      await waitForWrittenUserMessage(replacement);
+      await runtime.releaseSession('chat-1', 'expected-session');
+      expect(replacement.proc.stdin.end).not.toHaveBeenCalled();
+      await enqueueResult(sibling);
+      await enqueueResult(replacement);
+      await Promise.all([siblingStart, next]);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it.each(['Final part A.\n\nFinal part B.\r', '', undefined])('captures only the last correlated terminal result: %j', async (text) => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -2495,6 +2537,31 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     } finally {
       globalThis.setTimeout = originalSetTimeout;
       runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('keeps repeated releases pending until the retired process exits', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess({ onEnd: () => null });
+    Bun.spawn = mock(() => fake.proc);
+    const runtime = createRuntime();
+    try {
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueResult(fake);
+      await start;
+      const completed = [];
+      const first = runtime.releaseSession('chat-1', 'expected-session').then(() => completed.push('first'));
+      const second = runtime.releaseSession('chat-1', 'expected-session').then(() => completed.push('second'));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(completed).toEqual([]);
+      fake.exit(0);
+      await Promise.all([first, second]);
+      expect(completed).toHaveLength(2);
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+    } finally {
+      fake.exit(0);
+      await runtime.shutdown();
       Bun.spawn = originalSpawn;
     }
   });

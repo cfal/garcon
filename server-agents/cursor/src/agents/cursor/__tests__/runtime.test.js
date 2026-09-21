@@ -151,7 +151,7 @@ function createAcpHarness(options = {}) {
       resolveWriteWaiters(message);
 
       if (message.method === 'initialize') {
-        emit({
+        const initialize = () => emit({
           jsonrpc: '2.0',
           id: message.id,
           result: {
@@ -162,6 +162,8 @@ function createAcpHarness(options = {}) {
             },
           },
         });
+        if (options.initializeGate) void options.initializeGate.then(initialize);
+        else initialize();
         return;
       }
 
@@ -361,6 +363,55 @@ function createRuntimeHarness(options = {}) {
 }
 
 describe('Cursor ACP runtime', () => {
+  it('closes a cold reconnect cancelled by chat deletion before registration', async () => {
+    const connected = deferred();
+    const { acp, runtime } = createRuntimeHarness({ initializeGate: connected.promise });
+    const admission = new AbortController();
+    const markStarted = mock();
+    const pending = runtime.runTurn(startRequest({
+      agentSessionId: 'cursor-session',
+      executionAdmission: { signal: admission.signal, markStarted },
+    }));
+    try {
+      await acp.waitForClientMethod('initialize');
+      admission.abort(new Error('chat deleted'));
+      runtime.releaseSession('chat-1', 'cursor-session');
+      connected.resolve();
+      await expect(pending).rejects.toThrow('chat deleted');
+      expect(acp.instance(0).killed).toBe(true);
+      expect(acp.writes.some((message) => message.method === 'session/load')).toBe(false);
+      expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
+      expect(markStarted).not.toHaveBeenCalled();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it.each(['idle', 'active'])('releases an %s session without closing another chat', async (phase) => {
+    const { acp, runtime } = createRuntimeHarness({ sessionIds: ['session-a', 'session-b'] });
+    const published = collectOperation('run-release');
+    try {
+      await runtime.startSession(startRequest({ operation: published.operation }));
+      await acp.instance(0).waitForClientMethod('session/prompt');
+      if (phase === 'idle') {
+        acp.instance(0).finishPrompt();
+        await published.waitForEvent((event) => event.type === 'run-ended');
+      }
+      await runtime.startSession(startRequest({ chatId: 'chat-2' }));
+      await acp.instance(1).waitForClientMethod('session/prompt');
+      runtime.releaseSession('wrong-chat', 'session-a');
+      runtime.releaseSession('chat-1', null);
+      expect(acp.killCount()).toBe(0);
+      runtime.releaseSession('chat-1', 'session-a');
+      runtime.releaseSession('chat-1', 'session-a');
+      expect(acp.instance(0).killed).toBe(true);
+      expect(acp.instance(1).killed).toBe(false);
+      expect(runtime.isRunning('session-b')).toBe(true);
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it('publishes split assistant action envelopes intact for provider-neutral extraction', async () => {
     const { acp, runtime } = createRuntimeHarness();
     const published = collectOperation('run-actions');

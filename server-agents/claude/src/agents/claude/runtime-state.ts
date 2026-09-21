@@ -4,13 +4,25 @@ import type { ClaudeActiveTurn } from './active-turn.js';
 import type { ClaudeProcessTransport } from './cli-process-transport.js';
 import type { ClaudeCLIMessage, ClaudeProviderSessionState } from './cli-protocol.js';
 import type { ClaudeSessionOptions } from './session-options.js';
+import type { ClaudeCliDependencies } from './cli-invocation.js';
+import { ClaudeCliVersionProbe } from './cli-version.js';
 
-export const NOOP_LOGGER: AgentLogger = {
+const NOOP_LOGGER: AgentLogger = {
   debug() {},
   info() {},
   warn() {},
   error() {},
 };
+
+export const CONVERSATION_RESET_FAILURE = 'Claude CLI cleared the conversation mid-turn. The chat transcript is unchanged; send the message again to continue from it.';
+
+export function defaultClaudeCliDependencies(): ClaudeCliDependencies {
+  return {
+    binary: () => 'claude',
+    logger: NOOP_LOGGER,
+    versionProbe: new ClaudeCliVersionProbe(),
+  };
+}
 
 export const INTERRUPT_RECEIPT_TIMEOUT_MS = 5_000;
 export const INTERRUPT_COMPLETION_TIMEOUT_MS = 15_000;

@@ -121,6 +121,40 @@ describe('AmpCliRuntime lifecycle', () => {
     Bun.spawn = originalSpawn;
   });
 
+  it.each(['idle', 'active'])('releases %s session sources without killing a sibling', async (phase) => {
+    const provider = new AmpCliRuntime();
+    const first = createFakeProc();
+    const sibling = createFakeProc();
+    spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(sibling);
+    const request = {
+      chatId: 'chat-1', agentSessionId: 'amp-session-1', command: 'synthetic input',
+      projectPath: '/proj', model: 'medium', permissionMode: 'default', thinkingMode: 'none',
+      operation: noopOperation(),
+    };
+    const turn = provider.runTurn(request);
+    await new Promise((resolve) => setImmediate(resolve));
+    if (phase === 'idle') {
+      first.pushJson({ type: 'result', is_error: false });
+      await turn;
+    }
+    const siblingTurn = provider.runTurn({ ...request, chatId: 'chat-2', agentSessionId: 'amp-session-2' });
+    await new Promise((resolve) => setImmediate(resolve));
+    try {
+      provider.releaseSession('wrong-chat', request.agentSessionId);
+      provider.releaseSession(request.chatId, null);
+      expect(first.killed).toBe(false);
+      provider.releaseSession(request.chatId, request.agentSessionId);
+      provider.releaseSession(request.chatId, request.agentSessionId);
+      await turn;
+      expect(first.killed).toBe(true);
+      expect(sibling.killed).toBe(false);
+      expect(provider.isRunning('amp-session-2')).toBe(true);
+    } finally {
+      provider.shutdown();
+      await siblingTurn;
+    }
+  });
+
   it('passes only the current mode to one-shot Amp execution', async () => {
     spawnMock.mockReturnValue(createFakeCommandProc([
       JSON.stringify({

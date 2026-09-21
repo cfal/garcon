@@ -160,6 +160,40 @@ describe('FactoryCliRuntime lifecycle', () => {
     Bun.spawn = originalSpawn;
   });
 
+  it.each(['idle', 'active'])('releases %s session sources without killing a sibling', async (phase) => {
+    const provider = new FactoryCliRuntime();
+    const first = createFakeProc();
+    const sibling = createFakeProc();
+    spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(sibling);
+    const request = {
+      chatId: 'chat-1', agentSessionId: 'factory-session-1', command: 'synthetic input',
+      projectPath: '/proj', model: 'claude-opus-4-6', permissionMode: 'default', thinkingMode: 'none',
+      operation: noopOperation(),
+    };
+    const turn = provider.runTurn(request);
+    await first.waitForStdoutReadRequests(1);
+    if (phase === 'idle') {
+      first.pushJson({ type: 'completion', session_id: request.agentSessionId });
+      await turn;
+    }
+    const siblingTurn = provider.runTurn({ ...request, chatId: 'chat-2', agentSessionId: 'factory-session-2' });
+    await sibling.waitForStdoutReadRequests(1);
+    try {
+      provider.releaseSession('wrong-chat', request.agentSessionId);
+      provider.releaseSession(request.chatId, null);
+      expect(first.killed).toBe(false);
+      provider.releaseSession(request.chatId, request.agentSessionId);
+      provider.releaseSession(request.chatId, request.agentSessionId);
+      await turn;
+      expect(first.killed).toBe(true);
+      expect(sibling.killed).toBe(false);
+      expect(provider.isRunning('factory-session-2')).toBe(true);
+    } finally {
+      provider.shutdown();
+      await siblingTurn;
+    }
+  });
+
   it('does not spawn after admission closes during asynchronous setup', async () => {
     let releaseMetadata;
     let metadataStarted;

@@ -913,6 +913,12 @@ class AmpCliRuntime {
       }));
   }
 
+  releaseSession(chatId: string, agentSessionId: string | null): void {
+    if (!agentSessionId) return;
+    const session = this.#runningSessions.get(agentSessionId);
+    if (session?.chatId === chatId) this.#retireSession(session);
+  }
+
   startPurgeTimer(): void {
     this.#idlePurger.start();
   }

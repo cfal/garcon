@@ -119,7 +119,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
     this.projectPathUpdates = {
       prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
     };
-    const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions);
+    const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions, runtime);
     this.nativeSessions = nativeEvidence;
     this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
     this.legacyHistoryImport = createHistoryImport({
@@ -194,6 +194,7 @@ function cursorReference(chat: CursorReferenceInput, nativeSessions: NativeSessi
 function createCursorNativeEvidence(
   reader: ReturnType<typeof createCursorTranscriptSource>,
   nativeSessions: NativeSessionCodec,
+  runtime: AcpAgentRuntime,
 ): AgentNativeEvidenceSource {
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -221,8 +222,9 @@ function createCursorNativeEvidence(
         value: reader.sourcePath(reference)!,
       };
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      runtime.releaseSession(chat.chatId, cursorReference(chat, nativeSessions).agentSessionId);
     },
   };
 }
