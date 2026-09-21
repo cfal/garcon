@@ -2,7 +2,7 @@ import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 
 import type { CodexAppServerClient } from './client.js';
-import { cleanupOwnedGoalAttachments, materializeGoalDraft } from './goal-files.js';
+import { cleanupMaterializedGoalDraft, cleanupOwnedGoalAttachments, materializeGoalDraft } from './goal-files.js';
 import { recoverGoalDraftAfterError } from './goal-recovery.js';
 import type { ThreadGoalSetResponse } from './protocol.js';
 
@@ -47,14 +47,24 @@ export class GoalAttachmentOperations {
     this.#queue = options.queue ?? new GoalAttachmentOperationQueue();
   }
 
-  set(
-    client: CodexAppServerClient,
-    objective: string,
-    attachments: readonly AgentAttachment[] | undefined,
-    deliver: (materializedObjective: string) => Promise<ThreadGoalSetResponse>,
-  ): Promise<ThreadGoalSetResponse> {
+  set(options: {
+    client: CodexAppServerClient;
+    objective: string;
+    attachments: readonly AgentAttachment[] | undefined;
+    validateDelivery: () => void;
+    deliver: (materializedObjective: string) => Promise<ThreadGoalSetResponse>;
+  }): Promise<ThreadGoalSetResponse> {
+    const { client, objective, attachments, validateDelivery, deliver } = options;
     return this.#run(async () => {
+      validateDelivery();
       const draft = await materializeGoalDraft(this.#codexHome, this.#threadId, objective, attachments);
+      try {
+        validateDelivery();
+      } catch (error) {
+        // No mutation was sent, so only the unpublished draft is disposable.
+        await cleanupMaterializedGoalDraft(draft.outputDir).catch(this.#onCleanupError);
+        throw error;
+      }
       let response: ThreadGoalSetResponse;
       try {
         response = await deliver(draft.objective);

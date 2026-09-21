@@ -93,6 +93,7 @@ import {
 import {
   adoptTurn,
   cancelTurnStartWaiters,
+  CodexSessionActivationFailure,
   providerOwnsReasoningEffort,
   recordExplicitReasoningEffort,
   sessionForClientThread,
@@ -245,6 +246,10 @@ export class CodexAppServerRuntime {
     const attachments = await writeAttachmentsToTempFiles(request.images);
     session.cleanupAttachments = attachments.cleanup;
     const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
+    if (request.executionAdmission?.signal.aborted || this.#sessions.get(session.threadId) !== session) {
+      await attachments.cleanup();
+      throw new TurnStartWaitCancelledError('Codex session ended before starting the turn');
+    }
     const turnAttemptGeneration = session.turnAttemptGeneration;
     session.nextTurnOperation = operation;
     const turn = await client.startTurn(buildTurnStartParams({
@@ -316,6 +321,7 @@ export class CodexAppServerRuntime {
       const initialized = await client.connect();
       assertCodexExecutionOpen(request);
       const started = await client.startThread(buildThreadStartParams(request));
+      assertCodexExecutionOpen(request);
       const threadId = started.thread.id;
       const session = this.#activateSession({
         chatId: request.chatId,
@@ -332,6 +338,7 @@ export class CodexAppServerRuntime {
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
       await this.#ensureGoalEffort(session, request);
+      assertCodexExecutionOpen(request);
       request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
       await this.#startRequestedTurn(client, session, request, operation);
@@ -351,6 +358,7 @@ export class CodexAppServerRuntime {
           admissionClosed ? { aborted: true } : { failedMessage: message },
           operation,
         );
+        if (admissionClosed) await this.#supersedeSource(activeSession);
       } else {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
@@ -429,6 +437,7 @@ export class CodexAppServerRuntime {
           admissionClosed ? { aborted: true } : { failedMessage: message },
           operation,
         );
+        if (admissionClosed) await this.#supersedeSource(activeSession);
       } else {
         if (!admissionClosed) {
           publishFailed(this.#logger, request.chatId, message, operation);
@@ -1000,6 +1009,7 @@ export class CodexAppServerRuntime {
       const initialized = await client.connect();
       assertCodexExecutionOpen(request);
       const resumed = await client.resumeThread(buildThreadResumeParams(request));
+      assertCodexExecutionOpen(request);
       return {
         session: this.#activateSession({
           chatId: request.chatId,
@@ -1646,7 +1656,6 @@ export class CodexAppServerRuntime {
       this.#publishFinishedOnce(session, operation);
     }
     for (const resolve of [...session.terminalWaiters]) resolve();
-
   }
 
   #flushPendingFinish(session: RunningCodexSession): void {
@@ -1718,22 +1727,23 @@ export class CodexAppServerRuntime {
     cancelPendingApprovals(this.#logger, this.#pendingApprovals, client, 'cancelled');
   }
 
-  #supersedeSource(session: RunningCodexSession): Promise<void> {
-    if (session.superseded) return this.#shutdownClient(session.client);
-    session.superseded = true;
-    cancelTurnStartWaiters(session, 'Codex session was superseded');
-    this.#retireSource(session.client);
-    void session.cleanupAttachments?.();
-    return this.#shutdownClient(session.client);
+  async releaseSession(chatId: string, agentSessionId: string | null): Promise<void> {
+    const sources = [...this.#sources.values()].filter(
+      (session) => session.chatId === chatId && session.threadId === agentSessionId,
+    );
+    await Promise.all(sources.map((session) => this.#supersedeSource(session)));
   }
 
-}
-
-class CodexSessionActivationFailure extends Error {
-  constructor(
-    readonly originalError: unknown,
-    readonly shutdown: Promise<void>,
-  ) {
-    super('Codex session activation failed');
+  #supersedeSource(session: RunningCodexSession): Promise<void> {
+    // Attachment materialization can finish after the source was already retired.
+    const cleanupAttachments = session.cleanupAttachments;
+    session.cleanupAttachments = undefined;
+    void cleanupAttachments?.();
+    if (!session.superseded) {
+      session.superseded = true;
+      cancelTurnStartWaiters(session, 'Codex session was superseded');
+      this.#retireSource(session.client);
+    }
+    return this.#shutdownClient(session.client);
   }
 }

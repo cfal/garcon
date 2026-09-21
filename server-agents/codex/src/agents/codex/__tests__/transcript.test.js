@@ -44,10 +44,14 @@ function createRuntime({ discoveredPath = null } = {}) {
     discover: 0,
     requestDiscoveryRefresh: [],
     load: [],
+    release: [],
   };
   return {
     calls,
     runtime: {
+      async releaseSession(chatId, agentSessionId) {
+        calls.release.push({ chatId, agentSessionId });
+      },
       async resolveNativePath() {
         calls.discover += 1;
         return discoveredPath;
@@ -87,6 +91,32 @@ function createFixture(directory, nativeSession, runtimeOptions) {
 }
 
 describe('createCodexNativeEvidence', () => {
+  it('releases the captured runtime binding without deleting native history or discovering paths', async () => {
+    await withDirectory(async (directory) => {
+      const nativePath = await writeTranscript(directory, 'retained.jsonl');
+      const codec = createPathNativeSessionCodec('codex');
+      const fixture = createFixture(directory, codec.encode({
+        path: nativePath, agentSessionId: 'thread-1', modelEndpointId: null,
+      }));
+      for (const agentSessionId of ['thread-1', null]) {
+        await fixture.transcript.release({
+          chat: { ...fixture.chat, agentSessionId }, reason: 'deleted', signal,
+        });
+      }
+      expect(fixture.calls.release).toEqual([
+        { chatId: 'chat-1', agentSessionId: 'thread-1' },
+        { chatId: 'chat-1', agentSessionId: 'thread-1' },
+      ]);
+      expect(fixture.calls.discover).toBe(0);
+      expect(await fs.readFile(nativePath, 'utf8')).toContain('session_meta');
+      const cancelled = AbortSignal.abort();
+      await expect(fixture.transcript.release({
+        chat: fixture.chat, reason: 'deleted', signal: cancelled,
+      })).rejects.toThrow();
+      expect(fixture.calls.release).toHaveLength(2);
+    });
+  });
+
   it('returns the exact stored reference without consulting discovery', async () => {
     await withDirectory(async (directory) => {
       const nativePath = await writeTranscript(directory, 'stored.jsonl');

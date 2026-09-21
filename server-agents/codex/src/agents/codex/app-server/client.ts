@@ -177,6 +177,7 @@ export class CodexAppServerClient extends EventEmitter {
   #shutdownTerminateMs: number;
   #shutdownKillMs: number;
   #shutdownPromise: Promise<void> | null = null;
+  #shutdownRequested = false;
 
   constructor(options: CodexAppServerClientOptions = {}) {
     super();
@@ -194,6 +195,7 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async connect(): Promise<InitializeResponse> {
+    if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
     if (this.#ready) return this.#ready;
     this.#ready = this.#start().catch((error) => {
       this.#ready = null;
@@ -348,6 +350,7 @@ export class CodexAppServerClient extends EventEmitter {
   async #start(): Promise<InitializeResponse> {
     const startedAt = performance.now();
     const resolved = await this.#resolveCli();
+    if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
     this.#proc = this.#spawn(resolved.command, ['app-server', '--listen', 'stdio://'], { env: this.#env });
 
     void this.#readStdout(this.#proc.stdout ?? null);
@@ -566,6 +569,7 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async shutdown(): Promise<void> {
+    this.#shutdownRequested = true;
     if (this.#shutdownPromise) return this.#shutdownPromise;
     const proc = this.#proc;
     this.#proc = null;

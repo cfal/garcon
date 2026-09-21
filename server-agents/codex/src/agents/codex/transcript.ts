@@ -10,7 +10,7 @@ import { resolveCodexNativePath } from './native-path.js';
 
 type CodexTranscriptRuntime = Pick<
   CodexAppServerRuntime,
-  'loadMessages' | 'requestNativePathDiscoveryRefresh' | 'resolveNativePath'
+  'loadMessages' | 'requestNativePathDiscoveryRefresh' | 'resolveNativePath' | 'releaseSession'
 >;
 
 export function createCodexNativeEvidence(
@@ -120,8 +120,10 @@ export function createCodexNativeEvidence(
       const nativePath = await resolvePath(chat, signal);
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      const agentSessionId = chat.agentSessionId ?? nativeSessions.decode(chat.nativeSession).agentSessionId;
+      await runtime.releaseSession(chat.chatId, agentSessionId);
     },
   };
 }

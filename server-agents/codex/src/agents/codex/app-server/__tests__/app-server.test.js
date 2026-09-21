@@ -353,7 +353,7 @@ function createRpcClientFixture(responder, options = {}) {
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
-    resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
+    resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'bundled' })),
     shutdownGraceMs: options.shutdownGraceMs,
     shutdownTerminateMs: options.shutdownTerminateMs,
     shutdownKillMs: options.shutdownKillMs,
@@ -379,6 +379,45 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it.each(['closing', 'closed'])('does not reconnect an explicitly %s client', async (phase) => {
+    const { client, spawn, finishExit } = createRpcClientFixture(
+      () => initializeResponse,
+      { exitOnEnd: false },
+    );
+    await client.connect();
+    const shutdown = client.shutdown();
+    try {
+      if (phase === 'closed') {
+        finishExit();
+        await shutdown;
+      }
+      await expect(client.connect()).rejects.toThrow('Codex app-server client is shut down');
+      await expect(client.request('turn/start', { threadId: 'thread-1' }))
+        .rejects.toThrow('Codex app-server client is shut down');
+      expect(spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      finishExit();
+      await shutdown;
+    }
+  });
+
+  it('does not spawn after shutdown during CLI resolution', async () => {
+    const resolved = createDeferred();
+    const { client, spawn } = createRpcClientFixture(
+      () => initializeResponse,
+      { resolveCli: () => resolved.promise },
+    );
+    const connecting = client.connect();
+    await client.shutdown();
+    resolved.resolve({ command: '/tmp/codex', source: 'bundled' });
+    try {
+      await expect(connecting).rejects.toThrow('Codex app-server client is shut down');
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      await client.shutdown();
+    }
+  });
+
   it('closes stdin and waits for a clean app-server exit before the fallback kill', async () => {
     const { client, proc, finishExit } = createRpcClientFixture(
       () => initializeResponse,
@@ -2550,6 +2589,230 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).not.toHaveBeenCalled();
     expect(markStarted).not.toHaveBeenCalled();
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['start', 'resume'])('closes a cold client when deletion closes admission during thread %s', async (kind) => {
+    const requested = createDeferred();
+    const response = createDeferred();
+    const fake = new FakeClient({
+      [kind === 'start' ? 'startThread' : 'resumeThread']: async () => {
+        requested.resolve();
+        return response.promise;
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const admission = new AbortController();
+    const markStarted = mock();
+    const onSessionActivated = mock();
+    const request = makeRequest({
+      agentSessionId: 'thread-1', nativePath: null, onSessionActivated,
+      executionAdmission: { signal: admission.signal, markStarted },
+    });
+    const pending = kind === 'start' ? provider.startSession(request) : provider.runTurn(request);
+    try {
+      await requested.promise;
+      admission.abort(new Error('chat deleted'));
+      await provider.releaseSession('chat-1', kind === 'start' ? null : 'thread-1');
+      response.resolve({
+        thread: makeThread(), model: 'gpt-5.4-codex', modelProvider: 'openai',
+        serviceTier: null, cwd: '/repo',
+      });
+      await expect(pending).rejects.toThrow('chat deleted');
+      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      expect(fake.startTurn).not.toHaveBeenCalled();
+      expect(markStarted).not.toHaveBeenCalled();
+      expect(onSessionActivated).not.toHaveBeenCalled();
+      expect(provider.isRunning('thread-1')).toBe(false);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it('retires an activated goal source deleted before its native identity is published', async () => {
+    const settingsStarted = createDeferred();
+    const settingsResponse = createDeferred();
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread(), model: 'gpt-5.4-codex', modelProvider: 'openai',
+        serviceTier: null, cwd: '/repo', reasoningEffort: 'medium',
+      }),
+      updateThreadSettings: async () => {
+        settingsStarted.resolve();
+        await settingsResponse.promise;
+        emitThreadSettings(fake, { effort: 'high' });
+        return {};
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const admission = new AbortController();
+    const onSessionActivated = mock();
+    const markStarted = mock();
+    const pending = provider.startSession(makeRequest({
+      thinkingMode: 'high', codexGoalCommand: { kind: 'set', objective: 'test objective' },
+      executionAdmission: { signal: admission.signal, markStarted }, onSessionActivated,
+    }));
+    try {
+      await settingsStarted.promise;
+      admission.abort(new Error('chat deleted'));
+      await provider.releaseSession('chat-1', null);
+      settingsResponse.resolve();
+      await expect(pending).rejects.toThrow('chat deleted');
+      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      expect(onSessionActivated).not.toHaveBeenCalled();
+      expect(markStarted).not.toHaveBeenCalled();
+      expect(fake.startTurn).not.toHaveBeenCalled();
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each([
+    ['start', 'attachments'], ['resume', 'attachments'],
+    ['start', 'skills'], ['resume', 'skills'],
+    ['goal-control', 'attachments'],
+  ])('does not dispatch a released %s after %s preparation', async (kind, stage) => {
+    const nativePath = path.join(tmpDir, 'release-during-materialization.jsonl');
+    await fs.writeFile(nativePath, '{}\n');
+    const preparationStarted = createDeferred();
+    const continuePreparation = createDeferred();
+    const originalWriteFile = fs.writeFile;
+    let attachmentPath;
+    fs.writeFile = async (filePath, ...args) => {
+      if (String(filePath).includes('codex-attachments-')) {
+        attachmentPath = String(filePath);
+        if (stage === 'attachments') {
+          preparationStarted.resolve();
+          await continuePreparation.promise;
+        }
+      }
+      return originalWriteFile(filePath, ...args);
+    };
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ path: nativePath }), model: 'gpt-5.4-codex',
+        modelProvider: 'openai', serviceTier: null, cwd: '/repo',
+      }),
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      skillDiscovery: {
+        async skillRefs() {
+          preparationStarted.resolve();
+          await continuePreparation.promise;
+          return [];
+        },
+        async clear() {},
+      },
+    });
+    const admission = new AbortController();
+    const request = makeRequest({
+      agentSessionId: 'thread-1', nativePath,
+      command: stage === 'skills' ? '/test-skill' : 'hello',
+      images: [{ name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' }],
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    });
+    let pending;
+    if (kind === 'goal-control') {
+      await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
+      fake.emit('notification', {
+        method: 'thread/goal/updated',
+        params: { threadId: 'thread-1', goal: makeGoal('thread-1', 'test objective') },
+      });
+      fake.startTurn.mockClear();
+      pending = provider.submitGoalControl(request);
+    } else if (kind === 'start') {
+      pending = provider.startSession(request);
+    } else {
+      pending = provider.runTurn(request);
+    }
+    try {
+      await preparationStarted.promise;
+      if (stage === 'attachments') admission.abort(new Error('chat deleted'));
+      await provider.releaseSession('chat-1', 'thread-1');
+      continuePreparation.resolve();
+      await expect(pending).rejects.toThrow(kind === 'goal-control'
+        ? 'Codex session ended before goal control delivery'
+        : 'Codex session ended before starting the turn');
+      await waitForMissingPath(attachmentPath);
+      expect(fake.startTurn).not.toHaveBeenCalled();
+      expect(fake.steerTurn).not.toHaveBeenCalled();
+      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.writeFile = originalWriteFile;
+      continuePreparation.resolve();
+      await pending.catch(() => undefined);
+      await provider.shutdown();
+      if (attachmentPath) await fs.rm(path.dirname(attachmentPath), { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['start', 'set'], ['resume', 'set'], ['resume', 'edit'], ['resume', 'replace'],
+  ])('cancels %s goal %s during materialization without removing existing goal files', async (execution, kind) => {
+    const nativePath = path.join(tmpDir, 'cancelled-goal.jsonl');
+    await fs.writeFile(nativePath, '{}\n');
+    const images = [{ name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' }];
+    const previous = await materializeGoalDraft(tmpDir, 'thread-1', 'Previous objective', images);
+    const sibling = await materializeGoalDraft(tmpDir, 'thread-2', 'Sibling objective', images);
+    const currentGoal = kind === 'set' ? null : makeGoal('thread-1', previous.objective, 'paused');
+    const { client, writes, spawn, proc } = createRpcClientFixture((message) => {
+      switch (message.method) {
+        case 'initialize':
+          return { ...initializeResponse, codexHome: tmpDir };
+        case 'thread/start':
+        case 'thread/resume':
+          return {
+            thread: makeThread({ path: nativePath }), model: 'gpt-5.4-codex',
+            modelProvider: 'openai', serviceTier: null, cwd: '/repo',
+          };
+        case 'thread/goal/get':
+          return { goal: currentGoal };
+        case 'thread/goal/set':
+          return { goal: makeGoal('thread-1', message.params.objective) };
+        case 'thread/goal/clear':
+          return { cleared: true };
+        default:
+          throw new Error(`Unexpected method: ${message.method}`);
+      }
+    });
+    const provider = createRuntime({ createClient: () => client });
+    const writing = createDeferred();
+    const continueWrite = createDeferred();
+    const originalWriteFile = fs.writeFile;
+    const attachmentRoot = path.join(tmpDir, 'attachments');
+    fs.writeFile = async (filePath, ...args) => {
+      if (String(filePath).startsWith(attachmentRoot) && path.basename(String(filePath)).startsWith('image-')) {
+        writing.resolve();
+        await continueWrite.promise;
+      }
+      return originalWriteFile(filePath, ...args);
+    };
+    const admission = new AbortController();
+    const request = makeRequest({
+      agentSessionId: 'thread-1', nativePath, images,
+      codexGoalCommand: { kind, objective: 'New objective' },
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    });
+    const pending = execution === 'start' ? provider.startSession(request) : provider.runTurn(request);
+    try {
+      await writing.promise;
+      if (kind !== 'edit') admission.abort(new Error('chat deleted'));
+      await provider.releaseSession('chat-1', 'thread-1');
+      continueWrite.resolve();
+      await expect(pending).rejects.toThrow('Codex session ended before goal mutation');
+      expect((await fs.readdir(attachmentRoot)).sort()).toEqual(
+        [previous.outputDir, sibling.outputDir].map((directory) => path.basename(directory)).sort(),
+      );
+      expect(writes.filter(({ method }) => method === 'thread/goal/set' || method === 'thread/goal/clear'))
+        .toHaveLength(0);
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(proc.stdin.end).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.writeFile = originalWriteFile;
+      continueWrite.resolve();
+      await pending.catch(() => undefined);
+      await provider.shutdown();
+    }
   });
 
   it('emits pre-session failures before waiting for graceful shutdown', async () => {
@@ -8367,6 +8630,52 @@ describe('CodexAppServerRuntime', () => {
     expect(createClient).toHaveBeenCalledTimes(2);
     expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
     expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['idle', 'active'])('releases an %s source without retiring a sibling or replacement', async (status) => {
+    const nativePaths = [1, 2, 3].map((id) => path.join(tmpDir, `release-${id}.jsonl`));
+    const clients = nativePaths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index + 1}`, path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    }));
+    let nextClient = 0;
+    const provider = createRuntime({ createClient: () => clients[nextClient++] });
+    try {
+      await provider.startSession(makeRequest({ chatId: 'chat-1' }));
+      await provider.startSession(makeRequest({ chatId: 'chat-2' }));
+      if (status === 'idle') {
+        clients[0].emit('notification', {
+          method: 'turn/completed',
+          params: { threadId: 'thread-1', turn: makeTurn() },
+        });
+      }
+
+      await provider.releaseSession('wrong-chat', 'thread-1');
+      await provider.releaseSession('chat-1', null);
+      expect(clients[0].shutdown).not.toHaveBeenCalled();
+      await provider.releaseSession('chat-1', 'thread-1');
+      expect(clients[0].shutdown).toHaveBeenCalledTimes(1);
+      expect(clients[1].shutdown).not.toHaveBeenCalled();
+      expect(provider.isRunning('thread-1')).toBe(false);
+      expect(provider.isRunning('thread-2')).toBe(true);
+      expect(await fs.readFile(nativePaths[0], 'utf8')).toBe('{}\n');
+
+      await provider.startSession(makeRequest({ chatId: 'chat-1' }));
+      await provider.releaseSession('chat-1', 'thread-1');
+      expect(clients[2].shutdown).not.toHaveBeenCalled();
+      expect(provider.isRunning('thread-3')).toBe(true);
+    } finally {
+      await provider.shutdown();
+    }
   });
 
   it('retires an idle retained source and resumes the thread in a fresh process', async () => {

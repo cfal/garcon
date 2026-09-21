@@ -88,6 +88,15 @@ export class RuntimeGoalCoordinator {
       goalSynchronized = false,
       propagateDeliveryFailure = false,
     } = options;
+    const validateDelivery = () => {
+      if (
+        request.executionAdmission?.signal.aborted
+        || this.#port.sessions.get(session.threadId) !== session
+        || hasTerminalPendingFinish(session)
+      ) {
+        throw new TurnStartWaitCancelledError('Codex session ended before goal mutation');
+      }
+    };
     try {
       switch (command.kind) {
         case 'set':
@@ -105,14 +114,15 @@ export class RuntimeGoalCoordinator {
           }
           session.goalOperation = operation;
           session.nextTurnOperation = operation;
-          const response = await session.goalAttachments.set(
+          const response = await session.goalAttachments.set({
             client,
-            command.objective,
-            request.images,
-            (objective) => current.goal
+            objective: command.objective,
+            attachments: request.images,
+            validateDelivery,
+            deliver: (objective) => current.goal
               ? this.#replaceThreadGoal(client, session, current.goal, objective)
               : this.#setNewThreadGoal(client, session, objective),
-          );
+          });
           session.goal = response.goal;
           await waitForTurnStart(this.#port.sessions, session, GOAL_TURN_START_TIMEOUT_MS);
           return;
@@ -193,11 +203,12 @@ export class RuntimeGoalCoordinator {
             session.goalOperation = operation;
             session.nextTurnOperation = operation;
           }
-          const response = await session.goalAttachments.set(
+          const response = await session.goalAttachments.set({
             client,
-            editedObjective,
-            request.images,
-            async (objective) => {
+            objective: editedObjective,
+            attachments: request.images,
+            validateDelivery,
+            deliver: async (objective) => {
               if (status === 'active') session.managesGoalLifecycle = true;
               return client.setThreadGoal(session.threadId, {
                 objective,
@@ -205,7 +216,7 @@ export class RuntimeGoalCoordinator {
                 tokenBudget: current.tokenBudget,
               });
             },
-          );
+          });
           session.goal = response.goal;
           if (response.goal.status === 'active') {
             await waitForTurnStart(this.#port.sessions, session, GOAL_TURN_START_TIMEOUT_MS);
@@ -229,6 +240,7 @@ export class RuntimeGoalCoordinator {
           return;
       }
     } catch (error) {
+      if (request.executionAdmission?.signal.aborted || session.superseded) throw error;
       if (error instanceof TurnStartWaitCancelledError) {
         if (propagateDeliveryFailure) throw error;
         return;
@@ -441,6 +453,10 @@ export class RuntimeGoalCoordinator {
   }
 
   #retainAttachmentCleanup(session: RunningCodexSession, cleanup: () => Promise<void>): void {
+    if (this.#port.sessions.get(session.threadId) !== session) {
+      void cleanup();
+      return;
+    }
     const previous = session.cleanupAttachments;
     session.cleanupAttachments = previous
       ? async () => {

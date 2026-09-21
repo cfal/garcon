@@ -47,6 +47,15 @@ export interface ThreadSettingsWaiter {
 
 export class TurnStartWaitCancelledError extends Error {}
 
+export class CodexSessionActivationFailure extends Error {
+  constructor(
+    readonly originalError: unknown,
+    readonly shutdown: Promise<void>,
+  ) {
+    super('Codex session activation failed');
+  }
+}
+
 export type BufferedClientEvent =
   | { type: 'notification'; notification: JsonRpcNotification }
   | { type: 'serverRequest'; request: JsonRpcServerRequest };
