@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
@@ -198,6 +200,64 @@ describe('scripted Pi steering', () => {
       expect(assistants.some((text) => text.includes(steeredReply))).toBe(true);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
+  }, 120_000);
+
+  test('preserves authored steering when a Pi RPC input handler transforms delivery', async () => {
+    const testEnvironment = requireEnvironment();
+    const original = marker('TRANSFORM_ORIGINAL');
+    const transformed = marker('TRANSFORM_EFFECTIVE');
+    const firstPrompt = marker('TRANSFORM_FIRST_PROMPT');
+    const held = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsToolUse('call_transform', 'bash', { command: 'printf transformed' }),
+    ]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(marker('TRANSFORM_REPLY'))]);
+
+    await withIntegrationFixture('pi-scripted-steer-transform', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: firstPrompt,
+      }));
+      await held.requested;
+
+      expect(await fixture.client.steer({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        content: original,
+      })).toMatchObject({ status: 'accepted', turnId: first.turnId });
+
+      held.release();
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type);
+      expect(testEnvironment.model.requestsSince(0).at(-1)?.userTexts.at(-1)).toBe(transformed);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([
+        firstPrompt,
+        original,
+      ]);
+      testEnvironment.model.assertSettled();
+    }, {
+      ...withScriptedPi(),
+      prepareWorkspace: async (directories) => {
+        await testEnvironment.prepareWorkspace(directories);
+        const extensionDir = join(directories.home, '.pi', 'agent', 'extensions');
+        await mkdir(extensionDir, { recursive: true });
+        await writeFile(join(extensionDir, 'transform-steer.ts'), `
+export default function (pi) {
+  pi.on('input', async (event) => {
+    if (event.source === 'rpc' && event.text === ${JSON.stringify(original)}) {
+      return { action: 'transform', text: ${JSON.stringify(transformed)} };
+    }
+    return { action: 'continue' };
+  });
+}
+`);
+      },
+    });
   }, 120_000);
 });
 

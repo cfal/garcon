@@ -316,10 +316,16 @@ export class PiRpcRuntime {
           return { kind: 'accepted' };
         }
         captured.turn.steerSubmissions.delete(submission);
-        this.#retireInBackground(captured.session, 'steer missed the run', {
+        this.#retireInBackground(captured.session, 'steering delivery unconfirmed after turn changed', {
           turnOutcome: 'preserve',
         });
-        return rejection;
+        // Pi input handlers can transform or consume a steer before the bare RPC success.
+        // https://github.com/earendil-works/pi/blob/13cbf77df2396303013a41646bcfa77b4271ae56/packages/coding-agent/src/core/agent-session.ts#L1507-L1532
+        return {
+          kind: 'failed',
+          outcome: 'unknown',
+          message: 'Pi acknowledged steering, but delivery could not be confirmed before the turn changed',
+        };
       }
       this.#logger.debug('Pi steering accepted', {
         chatId: captured.session.chatId,
