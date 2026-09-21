@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+	setExecutionNodesTestContext([
+		localExecutionNode,
+		{ ...remoteExecutionNode, machineServices: { files: true, git: false, terminals: false } },
+	]);
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
 		setFileSessions,
@@ -25,6 +29,7 @@
 
 	let {
 		presentation,
+		nodeId = 'local',
 		rendererMode = 'image',
 		loading = true,
 		stale = false,
@@ -39,6 +44,7 @@
 		closeDisabled = false,
 	}: {
 		presentation: PresentationHostId;
+		nodeId?: string;
 		rendererMode?: 'code' | 'markdown' | 'image';
 		loading?: boolean;
 		stale?: boolean;
@@ -53,6 +59,7 @@
 		closeDisabled?: boolean;
 	} = $props();
 	const initial = untrack(() => ({
+		nodeId,
 		rendererMode,
 		loading,
 		stale,
@@ -84,7 +91,7 @@
 		resolveFileIdentity: async ({ relativePath }) => ({
 			success: true,
 			identity: {
-				nodeId: 'local',
+				nodeId: initial.nodeId,
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: relativePath,
 			},
@@ -126,7 +133,7 @@
 	}
 	const session = new FileSession(
 		{
-			nodeId: 'local',
+			nodeId: initial.nodeId,
 			canonicalFileRootPath: '/workspace',
 			normalizedRelativePath: relativePath,
 		},

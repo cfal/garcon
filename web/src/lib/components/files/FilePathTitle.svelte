@@ -2,12 +2,21 @@
 	import CopyFilePathButton from './CopyFilePathButton.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { path, fileName, dirty }: { path: string; fileName: string; dirty: boolean } = $props();
+	let {
+		path,
+		fileName,
+		dirty,
+		nodeLabel,
+	}: { path: string; fileName: string; dirty: boolean; nodeLabel?: string } = $props();
+	const displayPath = $derived(nodeLabel ? `${nodeLabel}: ${path}` : path);
+	const displayName = $derived(nodeLabel ? `${nodeLabel}: ${fileName}` : fileName);
 	let availableSize = $state<DOMRectReadOnly>();
 	let requiredSize = $state<DOMRectReadOnly>();
 	let controlsSize = $state<DOMRectReadOnly>();
 	const title = $derived(
-		requiredSize && availableSize && requiredSize.width <= availableSize.width ? path : fileName,
+		requiredSize && availableSize && requiredSize.width <= availableSize.width
+			? displayPath
+			: displayName,
 	);
 </script>
 
@@ -22,11 +31,11 @@
 			bind:contentRect={requiredSize}
 			data-file-path-title-measure
 		>
-			<span>{path}</span>
+			<span>{displayPath}</span>
 			<span style:width={`${controlsSize?.width ?? 0}px`}></span>
 		</div>
 	</div>
-	<h2 class="min-w-0 truncate" title={path}>{title}</h2>
+	<h2 class="min-w-0 truncate" title={displayPath}>{title}</h2>
 	<div class="flex shrink-0 items-center gap-1.5" bind:contentRect={controlsSize}>
 		<CopyFilePathButton {path} />
 		{#if dirty}

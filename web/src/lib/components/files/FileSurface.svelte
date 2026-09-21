@@ -134,8 +134,9 @@
 		style="container-name: surface-toolbar; container-type: inline-size;"
 	>
 		<FilePathTitle
-			path={session.nodeId === 'local' ? session.fullPath : `${nodeLabel}: ${session.fullPath}`}
-			fileName={session.nodeId === 'local' ? session.fileName : `${nodeLabel}: ${session.fileName}`}
+			path={session.fullPath}
+			fileName={session.fileName}
+			nodeLabel={session.nodeId === 'local' ? undefined : nodeLabel}
 			dirty={session.dirty}
 		/>
 		<ResponsiveSurfaceActions

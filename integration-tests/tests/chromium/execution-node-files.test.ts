@@ -21,6 +21,10 @@ test('edits remote files and retains offline buffers without touching controller
     const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
     const source = surface.locator('.cm-content');
     await browserExpect(source).toHaveText('Synthetic worker content');
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await browserExpect(surface.locator('[data-file-path-title] h2')).toHaveAttribute('title', `Integration worker: ${remotePath}`);
+    await surface.getByRole('button', { name: 'Copy file path', exact: true }).click();
+    await page.waitForFunction(async (expected) => (await navigator.clipboard.readText()) === expected, remotePath);
     await source.press('Control+a');
     await page.keyboard.insertText('Synthetic remote edit');
     const saved = page.waitForResponse((response) => response.request().method() === 'PUT' && new URL(response.url()).pathname === '/api/v1/files/text');
