@@ -386,35 +386,32 @@ export class ChatReconnectCoordinator {
 		replayToken: number | null = null,
 	): Promise<boolean | void> | boolean | void {
 		const panels = this.options.panels;
+		if (replayToken === null) {
+			const hasWindow = panels.panelsForChat(chatId).length > 0 || panels.hasInactiveWindow(chatId);
+			if (!hasWindow) {
+				return this.options.onBackgroundMessages?.(
+					chatId,
+					page.transcriptViewId,
+					page.messages,
+					page.firstOrdinal,
+					page.lastOrdinal,
+				);
+			}
+		}
+
+		const batch = {
+			transcriptViewId: page.transcriptViewId,
+			messages: page.messages,
+			firstOrdinal: page.firstOrdinal,
+			lastOrdinal: page.lastOrdinal,
+			resendCandidates: page.resendCandidates,
+			noticeRevision: panels.noticeRevisionFor(chatId),
+		};
 		if (replayToken !== null) {
-			return panels.applyReconnectReplayPage(replayToken, chatId, {
-				transcriptViewId: page.transcriptViewId,
-				messages: page.messages,
-				firstOrdinal: page.firstOrdinal,
-				lastOrdinal: page.lastOrdinal,
-				resendCandidates: page.resendCandidates,
-				noticeRevision: panels.noticeRevisionFor(chatId),
-			}) === 'applied';
+			return panels.applyReconnectReplayPage(replayToken, chatId, batch) === 'applied';
 		}
-		if (panels.panelsForChat(chatId).length > 0 || panels.hasInactiveWindow(chatId)) {
-			const result = panels.applyCommittedBatch({
-				chatId,
-				transcriptViewId: page.transcriptViewId,
-				messages: page.messages,
-				firstOrdinal: page.firstOrdinal,
-				lastOrdinal: page.lastOrdinal,
-				resendCandidates: page.resendCandidates,
-				noticeRevision: panels.noticeRevisionFor(chatId),
-			});
-			return result.kind === 'applied' && result.localRecoverySurfaceIds.length === 0;
-		}
-		return this.options.onBackgroundMessages?.(
-			chatId,
-			page.transcriptViewId,
-			page.messages,
-			page.firstOrdinal,
-			page.lastOrdinal,
-		);
+		const result = panels.applyCommittedBatch({ chatId, ...batch });
+		return result.kind === 'applied' && result.localRecoverySurfaceIds.length === 0;
 	}
 
 	async #refreshChatsQuietly(): Promise<void> {

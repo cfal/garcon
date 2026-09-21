@@ -56,7 +56,10 @@ export class InactiveTranscriptWindowStore {
 	}
 
 	hasChat(chatId: string): boolean {
-		return [...this.#windows.values()].some((window) => window.chatId === chatId);
+		for (const window of this.#windows.values()) {
+			if (window.chatId === chatId) return true;
+		}
+		return false;
 	}
 
 	park(window: InactiveTranscriptWindow): void {
@@ -83,6 +86,10 @@ export class InactiveTranscriptWindowStore {
 			|| cached.lastOrdinal !== window.transcript.lastOrdinal
 		) return null;
 		return window;
+	}
+
+	discard(surfaceId: string, chatId: string): void {
+		this.#windows.delete(this.#key(surfaceId, chatId));
 	}
 
 	applySharedCommit(

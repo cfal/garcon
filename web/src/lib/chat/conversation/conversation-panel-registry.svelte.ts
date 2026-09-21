@@ -222,25 +222,31 @@ class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	async restore(target: ConversationPanelRestoreTarget | null): Promise<void> {
-		return this.#restore(target, false);
-	}
-
-	async restoreRetained(target: ConversationPanelRestoreTarget): Promise<void> {
-		return this.#restore(target, true);
-	}
-
-	async #restore(target: ConversationPanelRestoreTarget | null, retained: boolean): Promise<void> {
 		if (this.#destroyed) return;
-		this.#rowNavigation?.abort();
-		const restoreEpoch = ++this.#restoreEpoch;
-		this.#readyRestoreEpoch = null;
-		this.#lastTarget = target ?? { kind: 'end' };
-		const restored = retained ? { count: this.transcript.entries.length, stale: false }
-			: this.transcript.activateChat(this.chatId);
+		const restoreEpoch = this.#beginRestore(target);
+		const restored = this.transcript.activateChat(this.chatId);
 		if (!restored || restored.stale) {
 			const loadOptions = { minimumLimit: restored?.count ?? 0 };
 			await this.snapshots.load(loadOptions);
 		}
+		await this.#finishRestore(restoreEpoch);
+	}
+
+	async restoreRetained(target: ConversationPanelRestoreTarget): Promise<void> {
+		if (this.#destroyed) return;
+		const restoreEpoch = this.#beginRestore(target);
+		await this.#finishRestore(restoreEpoch);
+	}
+
+	#beginRestore(target: ConversationPanelRestoreTarget | null): number {
+		this.#rowNavigation?.abort();
+		const restoreEpoch = ++this.#restoreEpoch;
+		this.#readyRestoreEpoch = null;
+		this.#lastTarget = target ?? { kind: 'end' };
+		return restoreEpoch;
+	}
+
+	async #finishRestore(restoreEpoch: number): Promise<void> {
 		if (this.#destroyed || restoreEpoch !== this.#restoreEpoch) return;
 		this.#readyRestoreEpoch = restoreEpoch;
 		await this.#applyPendingRestore();
@@ -884,7 +890,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			this.#restoreTargets.delete(transfer.sourceSurfaceId);
 		}
 
-		this.#inactiveWindows.take(item.surfaceId, item.chatId);
+		this.#inactiveWindows.discard(item.surfaceId, item.chatId);
 		return retained;
 	}
 
