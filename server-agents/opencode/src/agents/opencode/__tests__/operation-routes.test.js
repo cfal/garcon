@@ -120,6 +120,34 @@ function taskChildCreatedEvent(childSessionId, parentSessionId) {
 }
 
 describe('OpenCodeOperationRoutes', () => {
+  it('retires all routes and task descendants of only the released chat binding', () => {
+    const { routes } = createFixture();
+    const first = register(routes, { sessionId: 'session-1', chatId: 'chat-1', runId: 'run-1' });
+    const second = register(routes, { sessionId: 'session-1', chatId: 'chat-1', runId: 'run-2' });
+    const replacement = register(routes, { sessionId: 'session-2', chatId: 'chat-1', runId: 'run-3' });
+    const sibling = register(routes, { sessionId: 'session-3', chatId: 'chat-2', runId: 'run-4' });
+    routes.observe(first.route, promptEvent(first.turn, 'user-1', 'event-1'));
+    routes.bindTaskChildSession(first.route, taskPartEvent('child-1'));
+    routes.bindTaskDescendantSession(taskChildCreatedEvent('grandchild-1', 'child-1'));
+
+    routes.retireSession('wrong-chat', 'session-1');
+    expect(routes.isRegistered(first.route)).toBe(true);
+    routes.retireSession('chat-1', 'session-1');
+    routes.retireSession('chat-1', 'session-1');
+
+    for (const entry of [first, second]) {
+      expect(routes.isRegistered(entry.route)).toBe(false);
+      expect(entry.route.requestAbortController.signal.aborted).toBe(true);
+    }
+    expect(routes.resolveTaskChild('child-1')).toBeNull();
+    expect(routes.resolveTaskChild('grandchild-1')).toBeNull();
+    expect(routes.resolveNamed('session-1', assistantEvent('session-1', 'assistant-1', 'user-1', 'late'))).toBeNull();
+    for (const entry of [replacement, sibling]) {
+      expect(routes.isRegistered(entry.route)).toBe(true);
+      expect(entry.route.requestAbortController.signal.aborted).toBe(false);
+    }
+  });
+
   it('does not let a delayed prompt binding replace a newer source route', () => {
     const { routes } = createFixture();
     const first = register(routes, {

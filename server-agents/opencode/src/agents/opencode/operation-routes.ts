@@ -209,6 +209,12 @@ export class OpenCodeOperationRoutes {
     if (route) this.#retireRoute(route);
   }
 
+  retireSession(chatId: string, sessionId: string): void {
+    for (const route of [...this.#byTurn.values()]) {
+      if (route.chatId === chatId && route.sessionId === sessionId) this.#retireRoute(route);
+    }
+  }
+
   cancelRequest(turn: OpenCodeTurnContext, reason: Error): void {
     this.#byTurn.get(turn)?.requestAbortController.abort(reason);
   }

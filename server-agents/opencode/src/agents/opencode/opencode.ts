@@ -83,7 +83,7 @@ import {
   OpenCodeDecisionController,
   mapPermissionMode,
 } from './permissions.js';
-import { createOpenCodeInstance } from './server-instance.js';
+import { normalizeOpenCodeRuntimeOptions, type OpenCodeRuntimeOptions, type NormalizedOpenCodeRuntimeOptions } from './runtime-options.js';
 import {
   configuredProvidersFromResult,
   connectedProvidersFromListResult,
@@ -105,75 +105,11 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
   error() {},
 });
 
-// Matches OpenCode's own subprocess harness: cold starts of the platform binary are
-// dominated by transpile and plugin init, not the listen() call.
-// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/test/lib/cli-process.ts#L363
-const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 15_000;
-const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
-const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
-const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
 const RETAINED_SESSION_DELETION_LIMIT = 256;
-const DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS = 30_000;
-const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
-const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
-const DEFAULT_OPENCODE_SHUTDOWN_FORK_GRACE_MS = 3_000;
 type OpenCodeForkSessionOptions = { projectPath?: string | null; messageId?: string; permissionMode?: string; signal?: AbortSignal };
 interface PendingTurnWaiter {
   promise: Promise<Error | null>;
   settle: (failure: Error | null) => void;
-}
-
-interface OpenCodeRuntimeOptions {
-  config?: OpenCodeConfig;
-  logger?: AgentLogger;
-  startupTimeoutMs?: number;
-  modelDiscoveryTimeoutMs?: number;
-  requestTimeoutMs?: number;
-  unavailableRetryMs?: number;
-  sseRetryDelayMs?: number;
-  sseHeartbeatTimeoutMs?: number;
-  modelCacheTtlMs?: number;
-  shutdownStartupGraceMs?: number;
-  shutdownNativeForkGraceMs?: number;
-  idleRetirementDelayMs?: number;
-  idleRetirementCheckIntervalMs?: number;
-  now?: () => number;
-  createInstance?: (input: { signal: AbortSignal }) => Promise<OpenCodeInstance>;
-}
-
-interface NormalizedOpenCodeRuntimeOptions {
-  startupTimeoutMs: number;
-  modelDiscoveryTimeoutMs: number;
-  requestTimeoutMs: number;
-  unavailableRetryMs: number;
-  sseRetryDelayMs: number;
-  sseHeartbeatTimeoutMs: number;
-  modelCacheTtlMs: number;
-  shutdownStartupGraceMs: number;
-  shutdownNativeForkGraceMs: number;
-  now: () => number;
-  requiresExecutable: boolean;
-  createInstance: (input: { signal: AbortSignal }) => Promise<OpenCodeInstance>;
-}
-
-function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
-  return {
-    startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
-    modelDiscoveryTimeoutMs: options.modelDiscoveryTimeoutMs ?? DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS,
-    requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS,
-    unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
-    sseRetryDelayMs: options.sseRetryDelayMs ?? DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS,
-    sseHeartbeatTimeoutMs: options.sseHeartbeatTimeoutMs ?? DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS,
-    modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
-    shutdownStartupGraceMs:
-      options.shutdownStartupGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS,
-    shutdownNativeForkGraceMs:
-      options.shutdownNativeForkGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_FORK_GRACE_MS,
-    now: options.now ?? (() => Date.now()),
-    requiresExecutable: options.createInstance === undefined,
-    createInstance: options.createInstance ?? createOpenCodeInstance,
-  };
 }
 
 export class OpenCodeRuntime {
@@ -215,7 +151,7 @@ export class OpenCodeRuntime {
     this.#config = options.config ?? { isTestEnvironment: () => false };
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#operationRoutes = new OpenCodeOperationRoutes(this.#logger);
-    this.#options = normalizeOptions(options);
+    this.#options = normalizeOpenCodeRuntimeOptions(options);
     this.#decisions = new OpenCodeDecisionController({
       logger: this.#logger,
       publish: (agentSessionId, operation, event) => this.#publish(
@@ -1689,6 +1625,28 @@ export class OpenCodeRuntime {
     );
     const session = this.#sessions.get(agentSessionId.trim());
     if (session) relocateOpenCodeSession(session, directory.trim());
+  }
+
+  async releaseSession(chatId: string, agentSessionId: string | null): Promise<void> {
+    if (!agentSessionId) return;
+    const session = this.#sessions.get(agentSessionId);
+    if (!session || session.chatId !== chatId) return;
+    await this.#endpointCoordinator.runProtectedNativeCleanup(async () => {
+      await this.#pendingSessionAborts.get(session);
+      if (this.#sessions.get(agentSessionId) !== session) return;
+      const client = this.getClientIfInitialized();
+      if (client) {
+        if (session.status === 'running') session.providerWorkRequiresQuiescence = true;
+        await this.#quiesceRetiredProviderWork(client, agentSessionId, session, {
+          directory: session.directory,
+        });
+      }
+      if (this.#sessions.get(agentSessionId) !== session) return;
+      this.#operationRoutes.retireSession(chatId, agentSessionId);
+      this.#decisions.cancelForSession(agentSessionId, 'cancelled');
+      this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session released'));
+      this.#sessions.delete(agentSessionId);
+    });
   }
 
   abort(agentSessionId: string): Promise<boolean> {

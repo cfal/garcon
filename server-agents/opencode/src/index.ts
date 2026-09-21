@@ -238,8 +238,9 @@ export function createOpenCodeNativeEvidence(
       const id = sessionId(chat);
       return id ? { kind: 'provider-reference', value: id } : null;
     },
-    async release({ signal }) {
+    async release({ chat, signal }) {
       signal.throwIfAborted();
+      await runtime.releaseSession(chat.chatId, sessionId(chat));
     },
   };
 }

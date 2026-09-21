@@ -62,6 +62,8 @@ function createRuntime(sessionIds) {
     void promptAsync(...args);
     return eventStream.prompt(...args);
   });
+  const abort = mock(() => Promise.resolve({ data: true }));
+  const close = mock(() => undefined);
   const runtime = new OpenCodeRuntime({
     createInstance: mock(() => Promise.resolve({
       client: {
@@ -71,13 +73,13 @@ function createRuntime(sessionIds) {
           create: mock(() => Promise.resolve({ data: { id: sessionIds.shift() } })),
           prompt,
           promptAsync,
-          abort: mock(() => Promise.resolve({ data: true })),
+          abort,
         },
       },
-      server: { close: mock(() => undefined) },
+      server: { close },
     })),
   });
-  return { eventStream, promptAsync, runtime };
+  return { eventStream, promptAsync, runtime, abort, close };
 }
 
 function operation(runId, events) {
@@ -108,6 +110,70 @@ function noticeEvents(events) {
 }
 
 describe('OpenCode session status', () => {
+  it.each(['idle', 'active'])('releases an %s session without stopping the shared server', async (status) => {
+    const { eventStream, promptAsync, runtime, abort, close } = createRuntime(['session-1', 'session-2']);
+    const events = [];
+    try {
+      for (const id of [1, 2]) {
+        await runtime.startSession({
+          command: 'hello', chatId: `chat-${id}`, projectPath: '/repo',
+          operation: operation(`run-${id}`, events),
+        });
+      }
+      if (status === 'idle') {
+        eventStream.push({
+          id: 'event-input', type: 'message.part.updated',
+          properties: {
+            sessionID: 'session-1',
+            part: { id: promptAsync.mock.calls[0][0].parts[0].id, messageID: 'user-1', type: 'text', text: 'hello' },
+          },
+        });
+        eventStream.push({
+          id: 'event-result', type: 'message.updated',
+          properties: {
+            sessionID: 'session-1',
+            info: { id: 'assistant-1', parentID: 'user-1', role: 'assistant', finish: 'stop', time: { completed: 1 } },
+          },
+        });
+        await waitFor(() => events.some((event) => event.type === 'run-ended'));
+      }
+      await runtime.releaseSession('wrong-chat', 'session-1');
+      await runtime.releaseSession('chat-1', null);
+      expect(abort).not.toHaveBeenCalled();
+      await runtime.releaseSession('chat-1', 'session-1');
+      await runtime.releaseSession('chat-1', 'session-1');
+      expect(abort).toHaveBeenCalledTimes(status === 'active' ? 1 : 0);
+      if (status === 'active') {
+        expect(abort.mock.calls[0][0]).toMatchObject({ sessionID: 'session-1', directory: '/repo' });
+      }
+      expect(runtime.isRunning('session-1')).toBe(false);
+      expect(runtime.isRunning('session-2')).toBe(true);
+      expect(close).not.toHaveBeenCalled();
+    } finally {
+      eventStream.close();
+      await runtime.shutdown();
+    }
+  });
+
+  it('keeps failed native cleanup retryable without restarting the shared server', async () => {
+    const { eventStream, runtime, abort, close } = createRuntime(['session-1']);
+    try {
+      await runtime.startSession({
+        command: 'hello', chatId: 'chat-1', projectPath: '/repo',
+        operation: operation('run-1', []),
+      });
+      abort.mockRejectedValueOnce(new Error('abort unavailable'));
+      await expect(runtime.releaseSession('chat-1', 'session-1')).rejects.toThrow('abort unavailable');
+      await runtime.releaseSession('chat-1', 'session-1');
+      expect(abort).toHaveBeenCalledTimes(2);
+      expect(runtime.isRunning('session-1')).toBe(false);
+      expect(close).not.toHaveBeenCalled();
+    } finally {
+      eventStream.close();
+      await runtime.shutdown();
+    }
+  });
+
   it('publishes one titled retry notice per scheduled attempt', async () => {
     const { eventStream, runtime } = createRuntime(['session-1']);
     const events = [];
