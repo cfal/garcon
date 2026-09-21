@@ -86,8 +86,13 @@ describe('File editor controls', () => {
       expect(await source.innerText()).toContain('one one');
 
       markPhase('leaving disabled editor shortcuts available in Markdown preview');
-      await surface.getByRole('button', { name: 'View actions', exact: true }).click();
-      await page.getByRole('menuitem', { name: 'View', exact: true }).click();
+      const viewAction = surface.getByRole('button', { name: 'View', exact: true });
+      if (await viewAction.isVisible()) {
+        await viewAction.click();
+      } else {
+        await surface.getByRole('button', { name: 'View actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'View', exact: true }).click();
+      }
       await source.waitFor({ state: 'detached' });
       for (const key of ['f', '/', '[', ']', 's']) {
         const prevented = await surface.evaluate((element, key) => {
