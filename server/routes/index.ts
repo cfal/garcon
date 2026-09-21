@@ -193,8 +193,8 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createTicketRoutes(tickets, resolveTicketProject),
     ...createChatTicketSourceRoutes(registry, ticketSources),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
+    ...createFilesRoutes(registry, { files: (nodeId) => executionNodes.requireNode(nodeId).getFilesService(), inspectProject }),
     ...localMachineRoutes({
-      ...createFilesRoutes(registry),
       ...createGitRoutes(agents, settings),
       ...createGhRoutes(),
       ...createTerminalRoutes(terminals),

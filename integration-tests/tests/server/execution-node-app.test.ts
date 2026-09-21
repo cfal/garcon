@@ -120,7 +120,7 @@ test('Local and two public workers coexist, reject remote machine IO, and retain
         method: 'PUT', headers: { 'Content-Type': 'Application/JSON' },
         body: JSON.stringify({ nodeId: outbound.id, content: 'Do not write', expectedRevision: 'v1:synthetic', conflictResolution: 'overwrite' }),
       });
-      expect(blocked.status).toBe(501);
+      expect(blocked.status).toBe(400);
       expect(await readFile(localFile, 'utf8')).toBe('Controller content');
 
       await client.updateSettings({ ui: { promptRefinement: {

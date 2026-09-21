@@ -92,6 +92,7 @@ describe('file identity route', () => {
         ).json()
       ).identity,
     ).toEqual({
+      nodeId: 'local',
       canonicalFileRootPath: projectPath,
       normalizedRelativePath: 'src/file.ts',
     });
@@ -113,6 +114,7 @@ describe('file identity route', () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).identity).toEqual({
+      nodeId: 'local',
       canonicalFileRootPath: projectBase,
       normalizedRelativePath: 'sibling/src/other.ts',
     });
@@ -132,6 +134,7 @@ describe('file identity route', () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).identity).toEqual({
+      nodeId: 'local',
       canonicalFileRootPath: projectPath,
       normalizedRelativePath: 'src/file.ts',
     });

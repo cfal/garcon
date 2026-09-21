@@ -70,7 +70,8 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       expect(held.releaseText('synthetic answer')).toBe(true);
       await client.waitForTurnTerminal(chatId, started.turnId);
 
-      for (const route of ['files/browse', 'git/status', 'gh/pull-requests', 'terminals']) {
+      expect(await client.get(`/api/v1/files/browse?nodeId=${nodeId}&path=${encodeURIComponent(projectPath)}`)).toBeArray();
+      for (const route of ['git/status', 'gh/pull-requests', 'terminals']) {
         await expect(client.get(`/api/v1/${route}?nodeId=${nodeId}&projectPath=${encodeURIComponent(projectPath)}`))
           .rejects.toMatchObject({ status: 501, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
       }

@@ -4,7 +4,6 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
-import { localMachineRoutes } from '../node-target.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
 import { MAX_ATTACHMENT_UPLOAD_BODY_BYTES } from '../../attachments/validation.ts';
@@ -25,7 +24,7 @@ let originalHome;
 it('rejects a file PUT when the chat moves to a remote node while its body is read', async () => {
   const chat = { projectPath, nodeId: undefined };
   const registry = { getChat: () => chat };
-  const routes = localMachineRoutes(createFilesRoutes(registry), registry);
+  const routes = createFilesRoutes(registry);
   const url = new URL('http://localhost/api/v1/files/text?chatId=1783725900000400&path=src/main.ts');
   const request = new Request(url, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -37,7 +36,8 @@ it('rejects a file PUT when the chat moves to a remote node while its body is re
     return readBody();
   };
   const response = await routes['/api/v1/files/text'].PUT(request, url);
-  expect(response.status).toBe(501);
+  expect(response.status).toBe(409);
+  expect((await response.json()).errorCode).toBe('STALE_CHAT_OWNERSHIP');
   expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe('hello\n');
 });
 
@@ -379,7 +379,7 @@ describe('files route', () => {
     const routes = createFilesRoutes(
       { getChat: () => null },
       {
-        listTreeDirectory: async () => {
+        readDirectory: async () => {
           throw accessError;
         },
       },
