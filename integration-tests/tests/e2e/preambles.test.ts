@@ -120,32 +120,40 @@ describe('Lightpanda preambles', () => {
       await app.clickButton('Add preamble');
       await app.fill('#preamble-title', 'Global UI rules');
       await app.fill(
-        'textarea[placeholder="Write instructions to prepend to matching new chats..."]',
+        'textarea[placeholder="Write preamble instructions..."]',
         'SYNTHETIC_GLOBAL_UI_BODY',
       );
       await app.waitForButton('Save Preamble');
       await app.clickButton('Save Preamble');
       await app.waitForText('Global UI rules');
 
-      await clickPreambleRowAction(fixture, 'Global UI rules', 'Disable Global UI rules');
+      await clickPreambleRowAction(
+        fixture,
+        'Global UI rules',
+        'Exclude Global UI rules from defaults',
+      );
       await fixture.page.waitForFunction(
         () => [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
           .some((element) => element.querySelector('[data-slot="preamble-row-title"]')
-            ?.textContent?.trim() === 'Global UI rules' && element.textContent?.includes('Disabled')),
+            ?.textContent?.trim() === 'Global UI rules' && element.textContent?.includes('Manual only')),
         { timeout: 20_000 },
       );
-      await clickPreambleRowAction(fixture, 'Global UI rules', 'Enable Global UI rules');
+      await clickPreambleRowAction(
+        fixture,
+        'Global UI rules',
+        'Include Global UI rules by default',
+      );
       await fixture.page.waitForFunction(
         () => [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
           .some((element) => element.querySelector('[data-slot="preamble-row-title"]')
-            ?.textContent?.trim() === 'Global UI rules' && !element.textContent?.includes('Disabled')),
+            ?.textContent?.trim() === 'Global UI rules' && !element.textContent?.includes('Manual only')),
         { timeout: 20_000 },
       );
 
       await app.clickButton('Add preamble');
       await app.fill('#preamble-title', 'Project UI rules');
       await app.fill(
-        'textarea[placeholder="Write instructions to prepend to matching new chats..."]',
+        'textarea[placeholder="Write preamble instructions..."]',
         'SYNTHETIC_PROJECT_UI_BODY',
       );
       await fixture.page.$$eval(
