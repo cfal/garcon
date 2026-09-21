@@ -262,7 +262,7 @@
 				{surfaceIdentity}
 				onViewportPortChange={(port) => (conversationViewport = port)}
 				onPresentationPortChange={setFeedPresentation}
-				onInitialEndRestored={() => panel.scroll.completeInitialBottomRestore()}
+				onInitialEndRestored={() => panel.completeInitialBottomRestore()}
 				{isProcessing}
 			/>
 			{#snippet failed(error)}

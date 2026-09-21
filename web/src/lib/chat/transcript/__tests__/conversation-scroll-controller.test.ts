@@ -1656,17 +1656,20 @@ describe('ConversationScrollController', () => {
 		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
 	});
 
-	it('starts viewport filling after initial end restoration completes', async () => {
+	it('starts viewport filling after initial restoration and snapshot validation complete', async () => {
 		let loadedPages = 0;
+		let finishSnapshot!: () => void;
+		let finishFirstPage!: (result: 'loaded') => void;
+		const snapshot = new Promise<void>((resolve) => (finishSnapshot = resolve));
+		const firstPage = new Promise<'loaded'>((resolve) => (finishFirstPage = resolve));
 		const loadEarlierPage = vi.fn(async () => {
 			loadedPages += 1;
+			if (loadedPages === 1) return firstPage;
 			return 'loaded' as const;
 		});
 		const viewport = fakeViewport({
 			hasCollapsedToolGroups: vi.fn(() => true),
-			measureViewportFill: vi.fn(async () =>
-				loadedPages < 3 ? 'underfilled' : 'overflow',
-			),
+			measureViewportFill: vi.fn(async () => (loadedPages < 3 ? 'underfilled' : 'overflow')),
 		});
 		const { controller } = controllerFixture({
 			viewport,
@@ -1675,47 +1678,57 @@ describe('ConversationScrollController', () => {
 		controller.prepareInitialBottomRestore('chat-1');
 		expect(viewport.cancelPendingLayoutMutation).toHaveBeenCalledOnce();
 		expect(controller.isPreparingInitialScroll).toBe(true);
-		controller.completeInitialBottomRestore();
+		controller.completeInitialBottomRestore(() => snapshot);
 		expect(controller.isPreparingInitialScroll).toBe(false);
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		finishSnapshot();
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		finishFirstPage('loaded');
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(3));
 	});
 
+	it('does not start viewport filling after restoring a non-combined feed', async () => {
+		const viewport = fakeViewport();
+		const { controller } = controllerFixture({ viewport });
+		const fill = vi.spyOn(controller, 'fillUnderfilledViewport').mockResolvedValue();
+		controller.prepareInitialBottomRestore('chat-1');
+		controller.completeInitialBottomRestore();
+		await vi.waitFor(() => expect(viewport.hasCollapsedToolGroups).toHaveBeenCalledOnce());
+
+		expect(fill).not.toHaveBeenCalled();
+	});
+
 	it('does not fill when an initial end restore is cancelled by user intent', async () => {
-		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const viewport = fakeViewport({
+			hasCollapsedToolGroups: vi.fn(() => true),
 			cancelForUserIntent: vi.fn<ConversationViewportPort['cancelForUserIntent']>(() => {
 				fixture.controller.completeInitialBottomRestore();
 				return 'cancelled';
 			}),
-			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
-				async () => 'underfilled',
-			),
 		});
-		const fixture = controllerFixture({
-			viewport,
-			state: { canLoadEarlier: true, loadEarlierPage },
-		});
+		const fixture = controllerFixture({ viewport });
+		const fill = vi.spyOn(fixture.controller, 'fillUnderfilledViewport').mockResolvedValue();
 		fixture.controller.prepareInitialBottomRestore('chat-1');
 		fixture.controller.noteUserScrollIntent();
-		await Promise.resolve();
-		expect(loadEarlierPage).not.toHaveBeenCalled();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+		expect(fill).not.toHaveBeenCalled();
 	});
 
 	it('does not start a completed restore for a chat that was switched away', async () => {
-		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const fixture = controllerFixture({
 			viewport: fakeViewport({
-				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
-					async () => 'underfilled',
-				),
+				hasCollapsedToolGroups: vi.fn(() => true),
 			}),
-			state: { canLoadEarlier: true, loadEarlierPage },
 		});
+		const fill = vi.spyOn(fixture.controller, 'fillUnderfilledViewport').mockResolvedValue();
 		fixture.controller.prepareInitialBottomRestore('chat-1');
 		fixture.controller.completeInitialBottomRestore();
 		fixture.sessions.selectedChatId = 'chat-2';
-		await Promise.resolve();
-		expect(loadEarlierPage).not.toHaveBeenCalled();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+		expect(fill).not.toHaveBeenCalled();
 	});
 
 	it('retries initial-end reconciliation after viewport autofill finishes', async () => {

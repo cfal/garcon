@@ -74,6 +74,7 @@ export interface ConversationPanelRegistration {
 	readonly scroll: ConversationScrollController;
 	attachPresentation(port: ConversationPanelPresentationPort): () => void;
 	captureRestoreTarget(): ConversationPanelRestoreTarget;
+	completeInitialBottomRestore(): void;
 	resumePendingRestore(): void;
 	navigateToTranscriptRow(
 		target: TranscriptRowTarget,
@@ -128,6 +129,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 	#destroyed = false;
 	#snapshotAdmission: ConversationPanelSnapshotAdmission;
 	#rowNavigation: AbortController | null = null;
+	#lifetime = new AbortController();
 	#presentationReady: (() => void) | null = null;
 
 	readonly transcript: ActiveTranscriptState;
@@ -208,6 +210,10 @@ class PanelRegistration implements ConversationPanelRegistration {
 			this.#lastTarget = this.#presentation.captureRestoreTarget() ?? this.#lastTarget;
 		}
 		return this.#lastTarget;
+	}
+
+	completeInitialBottomRestore(): void {
+		this.scroll.completeInitialBottomRestore(() => this.snapshots.wait(this.#lifetime.signal));
 	}
 
 	prepareForHide(): ConversationPanelRestoreTarget {
@@ -373,6 +379,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		if (this.#destroyed) return;
 		this.prepareForHide();
 		this.#destroyed = true;
+		this.#lifetime.abort();
 		this.#presentation = null;
 		this.transcript.clearMessages();
 	}
@@ -382,6 +389,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		this.prepareForHide();
 		if (!this.transcript.suspendForParking()) return null;
 		this.#destroyed = true;
+		this.#lifetime.abort();
 		this.#presentation = null;
 		return this.transcript;
 	}

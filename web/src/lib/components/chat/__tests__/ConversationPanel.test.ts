@@ -158,6 +158,7 @@ function makePanel() {
 			lastRestoreTarget = presentation?.captureRestoreTarget() ?? lastRestoreTarget;
 			return lastRestoreTarget;
 		},
+		completeInitialBottomRestore: () => scroll.completeInitialBottomRestore(),
 		resumePendingRestore: () => {},
 		navigateToTranscriptRow: async () => 'cancelled',
 		prepareForInteractionLoss,

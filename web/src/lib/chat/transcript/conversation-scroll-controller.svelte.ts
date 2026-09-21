@@ -249,8 +249,7 @@ export class ConversationScrollController {
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
-		// The next chat's paint gate must not be completed by a deferred end restore
-		// that still belongs to the prior virtual surface.
+		// Prevents a prior surface's deferred restore from completing the next paint gate.
 		this.deps.getViewport()?.cancelPendingLayoutMutation();
 		this.cancelNativeScroll();
 		this.#cancelViewportOperations();
@@ -258,22 +257,23 @@ export class ConversationScrollController {
 		this.#initialBottomRestoreChatId = chatId;
 		this.#initialBottomPaintChatId = chatId;
 	}
-
-	completeInitialBottomRestore(): void {
+	completeInitialBottomRestore(waitForReady: () => Promise<void> = () => Promise.resolve()): void {
 		const chatId = this.deps.getChatId();
 		if (!chatId || this.#initialBottomRestoreChatId !== chatId) return;
-		if (this.deps.chatState.displayMessageCount === 0) return;
+		if (!this.deps.chatState.displayMessageCount) return;
 		this.#initialBottomPaintChatId = null;
 		this.#initialBottomRestoreChatId = null;
 		const intentEpoch = this.#userScrollIntent.epoch;
 		// Defers filling until a cancelling gesture has recorded its intent.
-		queueMicrotask(() => {
+		queueMicrotask(async () => {
+			await waitForReady().catch(() => undefined);
 			if (
 				this.deps.getChatId() === chatId &&
 				this.#isViewportVisible &&
 				this.isPinnedToBottom &&
 				!this.deps.chatState.isUserScrolledUp &&
-				this.#userScrollIntent.epoch === intentEpoch
+				this.#userScrollIntent.epoch === intentEpoch &&
+				this.deps.getViewport()?.hasCollapsedToolGroups()
 			) {
 				void this.fillUnderfilledViewport();
 			}
