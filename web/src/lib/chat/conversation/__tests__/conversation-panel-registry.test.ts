@@ -41,8 +41,9 @@ function fixture(
 			chatId: string,
 			options: ChatLoadMessagesOptions,
 		) => Promise<void>;
-		getComposerAnchorSurfaceId?: () => ChatViewSurfaceId | null;
-		getSelectedChatId?: () => string | null;
+			getComposerAnchorSurfaceId?: () => ChatViewSurfaceId | null;
+			getSelectedChatId?: () => string | null;
+			retainInactiveWindows?: () => boolean;
 	} = {},
 ) {
 	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
@@ -67,6 +68,7 @@ function fixture(
 		lifecycle,
 		getComposerAnchorSurfaceId: options.getComposerAnchorSurfaceId ?? (() => null),
 		getSelectedChatId: options.getSelectedChatId ?? (() => null),
+		retainInactiveWindows: options.retainInactiveWindows,
 		loadTranscriptSnapshot: options.loadTranscriptSnapshot,
 	});
 	return { cache, overlays, lifecycles, registry };
@@ -98,9 +100,125 @@ function port(
 	};
 }
 
+function switchPanel(
+	registry: ConversationPanelRegistry,
+	chatId: string,
+	surfaceId: `chat-view:window-${string}` = 'chat-view:window-left',
+): void {
+	const visible = [presentation(surfaceId, chatId)];
+	registry.prepareForReconcile(visible);
+	registry.reconcile(visible);
+}
+
 describe('ConversationPanelRegistry', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it('restores an expanded transcript immediately after rapid chat switches', () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		const first = registry.panel('chat-view:window-left')?.transcript;
+		if (!first) throw new Error('Expected first transcript');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			messages: Array.from({ length: 249 }, (_, index) => message(index + 2)),
+			firstOrdinal: 2,
+			lastOrdinal: 250,
+			resendCandidates: [],
+			noticeRevision: 0,
+		});
+		first.revealAllLoadedMessages();
+		expect(first.entries).toHaveLength(250);
+		expect(cache.get('chat-1')?.messages).toHaveLength(100);
+
+		switchPanel(registry, 'chat-2');
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+		switchPanel(registry, 'chat-1');
+		const restored = registry.panel('chat-view:window-left')?.transcript;
+		expect(restored).toBe(first);
+		expect(restored?.entries.map((entry) => entry.ordinal)).toEqual(
+			Array.from({ length: 250 }, (_, index) => index + 1),
+		);
+		expect(restored?.visibleRows[0]).toMatchObject({ kind: 'message', ordinal: 1 });
+		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps parked windows current through background commits without changing cache fanout', () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		const first = registry.panel('chat-view:window-left')?.transcript;
+		switchPanel(registry, 'chat-2');
+		const cacheApply = vi.spyOn(cache, 'applyMessages');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			messages: [message(2)],
+			firstOrdinal: 2,
+			lastOrdinal: 2,
+			resendCandidates: [],
+			noticeRevision: 0,
+		});
+		expect(cacheApply).toHaveBeenCalledOnce();
+		switchPanel(registry, 'chat-1');
+		expect(registry.panel('chat-view:window-left')?.transcript).toBe(first);
+		expect(first?.entries.map((entry) => entry.ordinal)).toEqual([1, 2]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps an expanded parked window visible through standalone overlay changes', () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		const first = registry.panel('chat-view:window-left')?.transcript;
+		if (!first) throw new Error('Expected first transcript');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1',
+			messages: Array.from({ length: 249 }, (_, index) => message(index + 2)),
+			firstOrdinal: 2, lastOrdinal: 250, resendCandidates: [], noticeRevision: 0,
+		});
+		first.revealAllLoadedMessages();
+		switchPanel(registry, 'chat-2');
+
+		registry.appendServerNotice('chat-1', 'info', 'background notice');
+		switchPanel(registry, 'chat-1');
+
+		expect(registry.panel('chat-view:window-left')?.transcript).toBe(first);
+		expect(first.visibleRows.find((row) => row.kind === 'message')).toMatchObject({ ordinal: 1 });
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('falls back to the bounded cache when retention is disabled or the view changes', () => {
+		let retainInactive = true;
+		const { cache, registry } = fixture({ retainInactiveWindows: () => retainInactive });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		const first = registry.panel('chat-view:window-left')?.transcript;
+		switchPanel(registry, 'chat-2');
+		registry.handleViewReplacement('chat-1');
+		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
+		cache.replace('chat-1', 'view-2', [message(1)], 1, null);
+		switchPanel(registry, 'chat-1');
+		expect(registry.panel('chat-view:window-left')?.transcript).not.toBe(first);
+		switchPanel(registry, 'chat-2');
+		retainInactive = false;
+		registry.reconcile([presentation('chat-view:window-left', 'chat-2')]);
+		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
+		switchPanel(registry, 'chat-1');
+		expect(registry.panel('chat-view:window-left')?.transcript).not.toBe(first);
+		registry.destroy();
+		cache.flush();
 	});
 
 	it('commits one cache batch and fans it out to duplicate-chat surfaces', () => {
@@ -794,6 +912,128 @@ describe('ConversationPanelRegistry', () => {
 			},
 			{ viewportOffset: -17 },
 		);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('transfers a retained transcript window with its row target when a Chat moves', async () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const source = registry.panel('chat-view:window-left');
+		if (!source) throw new Error('Expected source panel');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1',
+			messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
+			firstOrdinal: 2, lastOrdinal: 150, resendCandidates: [], noticeRevision: 0,
+		});
+		source.transcript.revealAllLoadedMessages();
+		const target = {
+			kind: 'row' as const,
+			transcriptViewId: 'view-1',
+			ordinal: 1,
+			viewportOffset: -17,
+		};
+		source.attachPresentation(port(target));
+		registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-left',
+			destinationSurfaceId: 'chat-view:window-right',
+			chatId: 'chat-1',
+		}).publish();
+		const visible = [presentation('chat-view:window-right', 'chat-1')];
+		registry.prepareForReconcile(visible);
+		registry.reconcile(visible);
+		const destination = registry.panel('chat-view:window-right');
+		if (!destination) throw new Error('Expected destination panel');
+		const jump = vi.spyOn(destination.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		destination.attachPresentation(port({ kind: 'end' }));
+
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledOnce());
+		expect(destination.transcript).toBe(source.transcript);
+		expect(destination.transcript.entries).toHaveLength(150);
+		expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' },
+			{ viewportOffset: -17 },
+		);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('prefers the source window over parked destination state during a Chat move', async () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1', 'chat-view:window-right');
+		switchPanel(registry, 'chat-2', 'chat-view:window-right');
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-2'),
+		]);
+		const source = registry.panel('chat-view:window-left');
+		if (!source) throw new Error('Expected source panel');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1',
+			messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
+			firstOrdinal: 2, lastOrdinal: 150, resendCandidates: [], noticeRevision: 0,
+		});
+		source.transcript.revealAllLoadedMessages();
+		const target = {
+			kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -17,
+		};
+		source.attachPresentation(port(target));
+		registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-left',
+			destinationSurfaceId: 'chat-view:window-right',
+			chatId: 'chat-1',
+		}).publish();
+		const visible = [presentation('chat-view:window-right', 'chat-1')];
+		registry.prepareForReconcile(visible);
+		registry.reconcile(visible);
+		const destination = registry.panel('chat-view:window-right');
+		if (!destination) throw new Error('Expected destination panel');
+		const jump = vi.spyOn(destination.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		destination.attachPresentation(port({ kind: 'end' }));
+
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledOnce());
+		expect(destination.transcript).toBe(source.transcript);
+		expect(destination.transcript.entries).toHaveLength(150);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('reserves a large source window before parking the outgoing destination', () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-2'),
+		]);
+		const source = registry.panel('chat-view:window-left');
+		if (!source) throw new Error('Expected source panel');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1',
+			messages: Array.from({ length: 7_899 }, (_, index) => message(index + 2)),
+			firstOrdinal: 2, lastOrdinal: 7_900, resendCandidates: [], noticeRevision: 0,
+		});
+		registry.applyCommittedBatch({
+			chatId: 'chat-2', transcriptViewId: 'view-1',
+			messages: Array.from({ length: 199 }, (_, index) => message(index + 2)),
+			firstOrdinal: 2, lastOrdinal: 200, resendCandidates: [], noticeRevision: 0,
+		});
+		source.transcript.revealAllLoadedMessages();
+		registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-left',
+			destinationSurfaceId: 'chat-view:window-right',
+			chatId: 'chat-1',
+		}).publish();
+		const visible = [presentation('chat-view:window-right', 'chat-1')];
+		registry.prepareForReconcile(visible);
+		registry.reconcile(visible);
+
+		const destination = registry.panel('chat-view:window-right');
+		expect(destination?.transcript).toBe(source.transcript);
+		expect(destination?.transcript.entries).toHaveLength(7_900);
 		registry.destroy();
 		cache.flush();
 	});

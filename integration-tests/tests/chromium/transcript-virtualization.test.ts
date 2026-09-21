@@ -5450,7 +5450,7 @@ describe('Chromium short transcript alignment', () => {
 });
 
 describe('Chromium combined tool-use presentation', () => {
-  test('refills compressed history on initial load and chat reselection', async () => {
+  test('fills cold compressed history and restores the warm window without paging', async () => {
     await withChromiumFixture('combined-tool-history-refill', async (fixture) => {
       await initializeCombineToolUses(fixture, true);
       const chatId = await seedTranscript(fixture.integration, 1, 'compressed-history');
@@ -5463,41 +5463,62 @@ describe('Chromium combined tool-use presentation', () => {
         message: new AssistantMessage(timestamp, `earlier-context-${index}`),
         providerMeta: null,
       }));
-      const tools: LedgerRowDraft[] = Array.from({ length: 450 }, (_, index) => ({
-        kind: 'provider-row',
-        at: timestamp,
-        message: new BashToolUseMessage(timestamp, `compressed-tool-${index}`, 'pwd'),
-        providerMeta: null,
-      }));
-      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, [...context, ...tools]);
+      const toolRows = Array.from({ length: 600 }, (_, index): LedgerRowDraft[] => {
+        const toolId = `compressed-tool-${index}`;
+        return [
+          {
+            kind: 'provider-row',
+            at: timestamp,
+            message: new BashToolUseMessage(timestamp, toolId, 'pwd'),
+            providerMeta: null,
+          },
+          {
+            kind: 'provider-row',
+            at: timestamp,
+            message: new ToolResultMessage(timestamp, toolId, { raw: 'ok' }, false),
+            providerMeta: null,
+          },
+        ];
+      }).flat();
+      await appendLedgerRows(fixture, chatId, initial.transcriptViewId, [...context, ...toolRows]);
 
-      await prepareTranscript(fixture, chatId, 1);
-      const waitForContext = async () => {
-        await fixture.page.waitForFunction((selector) => {
-          const sizer = document.querySelector<HTMLElement>(selector);
-          return Number(sizer?.dataset.chatTranscriptEntryCount) > 450;
-        }, SIZER_SELECTOR);
-        await fixture.page.locator(FEED_SELECTOR).getByText('earlier-context-19').waitFor({ state: 'visible' });
-        expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
-        expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
-      };
-      await waitForContext();
 
-      await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
-      let earlierRequestCount = 0;
+      const earlierRequestLimits: number[] = [];
       const recordEarlierRequest = (request: Request) => {
         const url = new URL(request.url());
         if (
           url.pathname.endsWith('/chats/messages') &&
           url.searchParams.get('chatId') === chatId &&
           url.searchParams.has('beforeOrdinal')
-        ) earlierRequestCount += 1;
+        ) {
+          earlierRequestLimits.push(Number(url.searchParams.get('limit')));
+        }
       };
       fixture.page.on('request', recordEarlierRequest);
+      await prepareTranscript(fixture, chatId, 1);
+      const waitForContext = async () => {
+        await fixture.page.waitForFunction((selector) => {
+          const sizer = document.querySelector<HTMLElement>(selector);
+          return Number(sizer?.dataset.chatTranscriptEntryCount) > 1_200;
+        }, SIZER_SELECTOR);
+        await fixture.page.locator(FEED_SELECTOR).getByText('earlier-context-19').waitFor({ state: 'visible' });
+        expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
+        expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+      };
+      await waitForContext();
+      expect(earlierRequestLimits).toContain(200);
+
+      await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
+      earlierRequestLimits.length = 0;
       try {
-        await selectSidebarChat(fixture.page, chatId, 'compressed-history-0');
-        await waitForContext();
-        expect(earlierRequestCount).toBeGreaterThan(2);
+        for (let switchIndex = 0; switchIndex < 2; switchIndex += 1) {
+          await selectSidebarChat(fixture.page, chatId, 'compressed-history-0');
+          await waitForContext();
+          if (switchIndex === 0) {
+            await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
+          }
+        }
+        expect(earlierRequestLimits).toEqual([]);
       } finally {
         fixture.page.off('request', recordEarlierRequest);
       }

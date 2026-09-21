@@ -259,6 +259,7 @@ function createReconnectDeps(
 		},
 		visibleChatIds: vi.fn(() => (sessions.selectedChatId ? [sessions.selectedChatId] : [])),
 		panelsForChat: vi.fn((chatId: string) => (chatId === sessions.selectedChatId ? [{}] : [])),
+		hasInactiveWindow: vi.fn((_chatId: string) => false),
 		markChatStale: vi.fn((chatId: string) => chatState.transcriptCache.markStale(chatId)),
 		loadChatSnapshot: vi.fn(async (chatId: string) => {
 			await chatState.loadMessages(chatId);
@@ -354,6 +355,7 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.panels.transcriptCache.readAppliedCursor,
 		deps.panels.visibleChatIds,
 		deps.panels.panelsForChat,
+		deps.panels.hasInactiveWindow,
 		deps.panels.markChatStale,
 		deps.panels.loadChatSnapshot,
 		deps.panels.beginReconnectReplay,
@@ -757,6 +759,64 @@ describe('ChatReconnectCoordinator', () => {
 		} finally {
 			warn.mockRestore();
 		}
+	});
+
+	it('applies background replay through a parked transcript window', async () => {
+		const deps = createReconnectDeps({
+			backgroundCursors: [{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 2 }],
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later')]),
+			},
+		});
+		deps.panels.hasInactiveWindow.mockImplementation((chatId: string) => chatId === 'chat-2');
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.panels.applyReconnectReplayPage).toHaveBeenCalledWith(
+			expect.any(Number),
+			'chat-2',
+			expect.objectContaining({
+				transcriptViewId: 'generation-2', firstOrdinal: 3, lastOrdinal: 3,
+			}),
+		);
+		expect(deps.panels.finishReconnectReplay).toHaveBeenCalledWith(expect.any(Number), 'chat-2');
+		expect(deps.onBackgroundMessages).not.toHaveBeenCalled();
+	});
+
+	it('protects every parked background chat before awaiting the first replay', async () => {
+		const heldFirstReplay = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps({
+			backgroundCursors: [
+				{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 2 },
+				{ chatId: 'chat-3', transcriptViewId: 'generation-3', lastOrdinal: 2 },
+			],
+			subscribeResponses: {
+				'chat-3': deltaResponse('chat-3', 'generation-3', [messageJson(3, 'later-three')]),
+			},
+		});
+		deps.panels.hasInactiveWindow.mockReturnValue(true);
+		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
+			if (request.type === 'reconnect-state-query') return reconnectStateResponse();
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			if (request.chatId === 'chat-2') return heldFirstReplay.promise;
+			return deltaResponse('chat-3', 'generation-3', [messageJson(3, 'later-three')]);
+		});
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		clearConnectionCalls(deps);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+
+		await vi.waitFor(() => {
+			expect(deps.panels.beginReconnectReplay).toHaveBeenCalledWith('chat-2', 'generation-2');
+			expect(deps.panels.beginReconnectReplay).toHaveBeenCalledWith('chat-3', 'generation-3');
+		});
+		heldFirstReplay.resolve(deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later-two')]));
+		await reconnect;
 	});
 
 	it('reconciles running sessions, refreshes chats, and resumes the selected chat', async () => {
@@ -1587,11 +1647,104 @@ describe('ChatReconnectCoordinator', () => {
 		clearConnectionCalls(deps);
 		await coordinator.handleConnectionState(false);
 		await coordinator.handleConnectionState(true);
-
 		expect(deps.onBackgroundMessages).not.toHaveBeenCalled();
 		expect(
 			panels.panel('chat-view:window-background')?.transcript.entries.map((entry) => entry.ordinal),
 		).toEqual([1, 2]);
+		panels.destroy();
+		cache.flush();
+	});
+
+	it('buffers live events behind replay for a parked transcript window', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+		cache.replace(
+			'chat-background',
+			'generation-background',
+			[{ ordinal: 1, message: new AssistantMessage(TS, 'background-one') }],
+			1,
+			null,
+		);
+		cache.replace(
+			'chat-other',
+			'generation-other',
+			[{ ordinal: 1, message: new AssistantMessage(TS, 'other-one') }],
+			1,
+			null,
+		);
+		const lifecycle = new ConversationLifecycleState();
+		const panels = new ConversationPanelRegistry({
+			cache,
+			overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: {
+				forChat: (chatId) => {
+					lifecycle.setCurrentChatId(chatId);
+					return lifecycle;
+				},
+				remove: vi.fn(),
+			},
+			getComposerAnchorSurfaceId: () => null,
+			getSelectedChatId: () => null,
+			retainInactiveWindows: () => true,
+		});
+		panels.reconcile([{
+			surfaceId: 'chat-view:window-background', chatId: 'chat-background',
+			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+		}]);
+		panels.prepareForReconcile([{
+			surfaceId: 'chat-view:window-background', chatId: 'chat-other',
+			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+		}]);
+		panels.reconcile([{
+			surfaceId: 'chat-view:window-background', chatId: 'chat-other',
+			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+		}]);
+		expect(panels.hasInactiveWindow('chat-background')).toBe(true);
+		const deps = createReconnectDeps({
+			selectedChatId: '',
+			backgroundCursors: [{
+				chatId: 'chat-background', transcriptViewId: 'generation-background', lastOrdinal: 1,
+			}],
+		});
+		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
+			if (request.type === 'reconnect-state-query') return reconnectStateResponse();
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			if (request.chatId === 'chat-other') {
+				return deltaResponse('chat-other', 'generation-other', [], 1);
+			}
+			panels.applyCommittedBatch({
+				chatId: 'chat-background', transcriptViewId: 'generation-background',
+				messages: [{ ordinal: 3, message: new AssistantMessage(TS, 'background-three') }],
+				firstOrdinal: 3, lastOrdinal: 3, resendCandidates: [], noticeRevision: 0,
+			});
+			return deltaResponse('chat-background', 'generation-background', [
+				messageJson(2, 'background-two'),
+			]);
+		});
+		const coordinator = new ChatReconnectCoordinator({ ...deps, panels });
+		await coordinator.handleConnectionState(true);
+		expect(panels.hasInactiveWindow('chat-background')).toBe(true);
+		clearConnectionCalls(deps);
+		await coordinator.handleConnectionState(false);
+		expect(panels.hasInactiveWindow('chat-background')).toBe(true);
+		await coordinator.handleConnectionState(true);
+		expect(cache.readAppliedCursor('chat-background')).toMatchObject({ lastOrdinal: 3, stale: false });
+		expect(panels.hasInactiveWindow('chat-background')).toBe(true);
+		panels.prepareForReconcile([{
+			surfaceId: 'chat-view:window-background', chatId: 'chat-background',
+			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+		}]);
+		panels.reconcile([{
+			surfaceId: 'chat-view:window-background', chatId: 'chat-background',
+			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+		}]);
+
+		expect(
+			panels.panel('chat-view:window-background')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2, 3]);
+		expect(deps.onBackgroundMessages).not.toHaveBeenCalled();
 		panels.destroy();
 		cache.flush();
 	});

@@ -427,8 +427,8 @@ export class ConversationScrollController {
 						if (this.deps.chatState.revealEarlierLoadedRows()) return 'loaded';
 					}
 					return direction === 'earlier'
-						? this.deps.chatState.loadEarlierPage(chatId, applicationGate)
-						: this.deps.chatState.loadLaterPage(chatId, applicationGate);
+						? this.deps.chatState.loadEarlierPage(chatId, { applicationGate })
+						: this.deps.chatState.loadLaterPage(chatId, { applicationGate });
 				},
 				reason === 'scroll' ? 'after-native-scroll' : 'immediate',
 			);

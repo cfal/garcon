@@ -36,6 +36,7 @@ export interface ReconnectPanelRegistryPort {
 	readonly transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor' | 'markValidated'>;
 	visibleChatIds(): readonly string[];
 	panelsForChat(chatId: string): readonly unknown[];
+	hasInactiveWindow(chatId: string): boolean;
 	markChatStale(chatId: string): void;
 	loadChatSnapshot(chatId: string): Promise<boolean>;
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
@@ -321,24 +322,44 @@ export class ChatReconnectCoordinator {
 			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
 			.filter((cursor) => cursor.transcriptViewId && cursor.lastOrdinal > 0)
 			.slice(0, BACKGROUND_RESUME_LIMIT);
+		const replayTokens = this.#beginParkedBackgroundReplays(cursors);
 
 		let shouldRefresh = false;
-		for (const cursor of cursors) {
-			if (epoch !== this.#reconnectEpoch) return;
-			try {
-				const message = await this.#replayTranscript({
-					chatId: cursor.chatId,
-					transcriptViewId: cursor.transcriptViewId,
-					afterOrdinal: cursor.lastOrdinal,
-					isCurrent: () => epoch === this.#reconnectEpoch,
-					apply: (page) => this.#applyBackgroundReplayPage(cursor.chatId, page),
-				});
-				if (!message) return;
-				shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
-			} catch {
+		try {
+			for (const cursor of cursors) {
 				if (epoch !== this.#reconnectEpoch) return;
-				this.options.markBackgroundStale(cursor.chatId);
-				shouldRefresh = true;
+				const replayToken = replayTokens.get(cursor.chatId) ?? null;
+				try {
+					const message = await this.#replayTranscript({
+						chatId: cursor.chatId,
+						transcriptViewId: cursor.transcriptViewId,
+						afterOrdinal: cursor.lastOrdinal,
+						isCurrent: () => epoch === this.#reconnectEpoch,
+						apply: (page) => this.#applyBackgroundReplayPage(cursor.chatId, page, replayToken),
+					});
+					if (!message) return;
+					if (replayToken !== null) {
+						const result = this.options.panels.finishReconnectReplay(replayToken, cursor.chatId);
+						replayTokens.delete(cursor.chatId);
+						if (result !== 'applied') {
+							throw new Error('Retained transcript replay could not finish');
+						}
+						this.options.panels.transcriptCache.markValidated(cursor.chatId);
+					}
+					shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
+				} catch {
+					if (replayToken !== null) {
+						this.options.panels.abortReconnectReplay(replayToken, cursor.chatId);
+						replayTokens.delete(cursor.chatId);
+					}
+					if (epoch !== this.#reconnectEpoch) return;
+					this.options.markBackgroundStale(cursor.chatId);
+					shouldRefresh = true;
+				}
+			}
+		} finally {
+			for (const [chatId, replayToken] of replayTokens) {
+				this.options.panels.abortReconnectReplay(replayToken, chatId);
 			}
 		}
 
@@ -347,12 +368,35 @@ export class ChatReconnectCoordinator {
 		}
 	}
 
+	#beginParkedBackgroundReplays(cursors: readonly ChatTranscriptCursor[]): Map<string, number> {
+		const replayTokens = new Map<string, number>();
+		for (const cursor of cursors) {
+			if (!this.options.panels.hasInactiveWindow(cursor.chatId)) continue;
+			replayTokens.set(
+				cursor.chatId,
+				this.options.panels.beginReconnectReplay(cursor.chatId, cursor.transcriptViewId),
+			);
+		}
+		return replayTokens;
+	}
+
 	#applyBackgroundReplayPage(
 		chatId: string,
 		page: ChatSubscribedMessage,
+		replayToken: number | null = null,
 	): Promise<boolean | void> | boolean | void {
 		const panels = this.options.panels;
-		if (panels.panelsForChat(chatId).length > 0) {
+		if (replayToken !== null) {
+			return panels.applyReconnectReplayPage(replayToken, chatId, {
+				transcriptViewId: page.transcriptViewId,
+				messages: page.messages,
+				firstOrdinal: page.firstOrdinal,
+				lastOrdinal: page.lastOrdinal,
+				resendCandidates: page.resendCandidates,
+				noticeRevision: panels.noticeRevisionFor(chatId),
+			}) === 'applied';
+		}
+		if (panels.panelsForChat(chatId).length > 0 || panels.hasInactiveWindow(chatId)) {
 			const result = panels.applyCommittedBatch({
 				chatId,
 				transcriptViewId: page.transcriptViewId,

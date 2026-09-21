@@ -482,6 +482,42 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(total);
 	});
 
+	it('loads a larger logical page when viewport filling requests one', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
+			lastOrdinal: 300,
+			pageOldestOrdinal: 251,
+			pageNewestOrdinal: 300,
+			nextBeforeOrdinal: 251,
+			hasMore: true,
+		});
+		vi.mocked(getChatMessages).mockImplementationOnce(async (request) => ({
+			chatId: 'chat-1',
+			limit: request.limit ?? 50,
+			...page({
+				messages: assistantEntries(51, 250),
+				lastOrdinal: 300,
+				pageOldestOrdinal: 51,
+				pageNewestOrdinal: 250,
+				nextBeforeOrdinal: 51,
+				hasMore: true,
+			}),
+		}));
+
+		await expect(
+			chat.loadEarlierPage('chat-1', { visibleLimit: 200 }),
+		).resolves.toBe('loaded');
+
+		expect(getChatMessages).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			limit: 200,
+			beforeOrdinal: 251,
+			transcriptViewId: 'generation-1',
+		});
+		expect(chat.entries).toHaveLength(250);
+		expect(chat.entries[0]?.ordinal).toBe(51);
+	});
+
 	it('stages a fetched earlier page until its application gate opens', async () => {
 		const chat = new ActiveTranscriptState();
 		const current = assistantEntries(51, 100);
@@ -513,9 +549,11 @@ describe('ActiveTranscriptState', () => {
 		});
 		const revision = chat.feedMutationClock.dataRevision;
 
-		const load = chat.loadEarlierPage('chat-1', async () => {
-			applicationGateStarted();
-			return application;
+		const load = chat.loadEarlierPage('chat-1', {
+			applicationGate: async () => {
+				applicationGateStarted();
+				return application;
+			},
 		});
 		await gateStarted;
 
@@ -565,9 +603,11 @@ describe('ActiveTranscriptState', () => {
 		});
 		const revision = chat.feedMutationClock.dataRevision;
 
-		const load = chat.loadLaterPage('chat-1', async () => {
-			applicationGateStarted();
-			return application;
+		const load = chat.loadLaterPage('chat-1', {
+			applicationGate: async () => {
+				applicationGateStarted();
+				return application;
+			},
 		});
 		await gateStarted;
 
@@ -611,9 +651,11 @@ describe('ActiveTranscriptState', () => {
 			}),
 		});
 
-		await expect(chat.loadEarlierPage('chat-1', async () => 'invalidated')).resolves.toBe(
-			'invalidated',
-		);
+		await expect(
+			chat.loadEarlierPage('chat-1', {
+				applicationGate: async () => 'invalidated',
+			}),
+		).resolves.toBe('invalidated');
 
 		expect(chat.entries).toBe(entriesBeforeLoad);
 		expect(chat.nextBeforeOrdinal).toBe(51);
@@ -4354,6 +4396,31 @@ describe('ActiveTranscriptState', () => {
 		expect(result).toBe('applied');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['first', 'second', 'third', 'fourth']);
 		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([3, 4]);
+	});
+
+	it('parks committed rows buffered by an obsolete snapshot and rejects its late result', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
+		const chat = new ActiveTranscriptState(transcriptCache);
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 1), {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		const snapshotEpoch = chat.beginSnapshotLoad();
+		expect(applyMessages(chat, 'chat-1', 'generation-1', assistantEntries(2, 2))).toBe('applied');
+		expect(chat.entries.map((item) => item.ordinal)).toEqual([1]);
+
+		expect(chat.suspendForParking()).toBe(true);
+		expect(chat.entries.map((item) => item.ordinal)).toEqual([1, 2]);
+		expect(chat.isLoadingMessages).toBe(false);
+		expect(chat.setFromPage('chat-1', page({
+			messages: assistantEntries(1, 1),
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			hasMore: false,
+		}), snapshotEpoch)).toBe('stale');
+		expect(chat.entries.map((item) => item.ordinal)).toEqual([1, 2]);
 	});
 
 	it('[TLV5-UX.17-WEB-UNIT-04] discards an expanded interval on chat switch and restores only the exact bounded tail', () => {

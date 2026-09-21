@@ -179,7 +179,7 @@
 		conversationUi,
 		sessions,
 		getBackgroundCursors: () => transcriptCache.listCursors(20),
-		markBackgroundStale: (chatId) => transcriptCache.markStale(chatId),
+		markBackgroundStale: (chatId) => conversationPanels.markChatStale(chatId),
 		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
 			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {
 				messages,

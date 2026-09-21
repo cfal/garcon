@@ -7,7 +7,7 @@ import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { NATIVE_SCROLL_SETTLE_DELAY_MS } from '../conversation-native-scroll-settlement.js';
 import { AssistantMessage } from '$shared/chat-types';
-import type { TranscriptMessage } from '$shared/chat-view';
+import { CHAT_MESSAGES_MAX_LIMIT, type TranscriptMessage } from '$shared/chat-view';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
 
 const RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS = 180_000;
@@ -621,7 +621,8 @@ describe('ConversationScrollController', () => {
 		let applied = false;
 		const clock = mutationClock();
 		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(
-			async (_chatId, applicationGate) => {
+			async (_chatId, options) => {
+				const applicationGate = options?.applicationGate;
 				expect(applicationGate).toBeDefined();
 				const application = applicationGate?.();
 				expect(applicationGate?.()).toBe(application);
@@ -664,8 +665,8 @@ describe('ConversationScrollController', () => {
 	it('invalidates a staged page when its viewport is hidden', async () => {
 		let applied = false;
 		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(
-			async (_chatId, applicationGate) => {
-				if ((await applicationGate?.()) !== 'apply') return 'invalidated';
+			async (_chatId, options) => {
+				if ((await options?.applicationGate?.()) !== 'apply') return 'invalidated';
 				applied = true;
 				return 'loaded';
 			},
@@ -1265,6 +1266,9 @@ describe('ConversationScrollController', () => {
 		});
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).toHaveBeenCalledTimes(8);
+		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1', {
+			visibleLimit: CHAT_MESSAGES_MAX_LIMIT,
+		});
 	});
 
 	it('does not limit uncompressed viewport filling', async () => {
@@ -1283,6 +1287,7 @@ describe('ConversationScrollController', () => {
 		});
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).toHaveBeenCalledTimes(12);
+		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1');
 	});
 
 	it('does not request another auto page after the reader takes scroll ownership', async () => {
@@ -1319,6 +1324,31 @@ describe('ConversationScrollController', () => {
 		});
 		await controller.fillUnderfilledViewport();
 		expect(loadLaterPage).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('uses larger logical pages for a compressed older window', async () => {
+		const measureViewportFill = vi
+			.fn<ConversationViewportPort['measureViewportFill']>()
+			.mockResolvedValueOnce('underfilled')
+			.mockResolvedValueOnce('overflow');
+		const page = { hasLaterMessages: true };
+		const loadLaterPage = vi.fn(async () => {
+			page.hasLaterMessages = false;
+			return 'loaded' as const;
+		});
+		const { controller } = controllerFixture({
+			viewport: fakeViewport({
+				hasCollapsedToolGroups: vi.fn(() => true),
+				measureViewportFill,
+			}),
+			state: { ...page, loadLaterPage },
+		});
+
+		await controller.fillUnderfilledViewport();
+
+		expect(loadLaterPage).toHaveBeenCalledWith('chat-1', {
+			visibleLimit: CHAT_MESSAGES_MAX_LIMIT,
+		});
 	});
 
 	it('stops autofill when measured geometry cannot settle', async () => {

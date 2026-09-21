@@ -43,6 +43,11 @@ interface TranscriptPageLoaderOptions {
 	): void;
 }
 
+export interface TranscriptPageLoadOptions {
+	applicationGate?: TranscriptPageApplicationGate;
+	visibleLimit?: number;
+}
+
 export class TranscriptPageLoader {
 	#loadPromise: Promise<TranscriptPageLoadResult> | null = null;
 	#loadingChatId: string | null = null;
@@ -57,7 +62,7 @@ export class TranscriptPageLoader {
 	load(
 		direction: TranscriptPageDirection,
 		chatId: string,
-		applicationGate?: TranscriptPageApplicationGate,
+		options: TranscriptPageLoadOptions = {},
 	): Promise<TranscriptPageLoadResult> {
 		if (this.#loadPromise) {
 			if (this.#loadingDirection === direction && this.#loadingChatId === chatId) {
@@ -82,7 +87,7 @@ export class TranscriptPageLoader {
 			operationEpoch,
 			loadedThroughOrdinal,
 			lastOrdinal,
-			applicationGate,
+			options,
 		);
 		this.#loadPromise = loadPromise;
 		this.#loadingChatId = chatId;
@@ -111,7 +116,7 @@ export class TranscriptPageLoader {
 		operationEpoch: number,
 		loadedThroughOrdinal: number,
 		lastOrdinal: number,
-		applicationGate: TranscriptPageApplicationGate | undefined,
+		options: TranscriptPageLoadOptions,
 	): Promise<TranscriptPageLoadResult> {
 		try {
 			if (direction === 'earlier') {
@@ -119,7 +124,7 @@ export class TranscriptPageLoader {
 					chatId,
 					transcriptViewId,
 					operationEpoch,
-					applicationGate,
+					options,
 				);
 			}
 			return await this.#performLaterLoad(
@@ -128,10 +133,15 @@ export class TranscriptPageLoader {
 				operationEpoch,
 				loadedThroughOrdinal,
 				lastOrdinal,
-				applicationGate,
+				options,
 			);
 		} catch (error) {
-			if (await this.#canApply(chatId, transcriptViewId, operationEpoch, applicationGate)) {
+			if (await this.#canApply(
+				chatId,
+				transcriptViewId,
+				operationEpoch,
+				options.applicationGate,
+			)) {
 				this.host.pageStates[direction] = {
 					status: 'error',
 					error: error instanceof Error ? error.message : 'Page load failed',
@@ -146,7 +156,7 @@ export class TranscriptPageLoader {
 		chatId: string,
 		transcriptViewId: string,
 		operationEpoch: number,
-		applicationGate: TranscriptPageApplicationGate | undefined,
+		options: TranscriptPageLoadOptions,
 	): Promise<TranscriptPageLoadResult> {
 		const requestBeforeOrdinal = this.host.nextBeforeOrdinal;
 		if (requestBeforeOrdinal === null) return 'exhausted';
@@ -155,7 +165,7 @@ export class TranscriptPageLoader {
 			chatId,
 			transcriptViewId,
 			beforeOrdinal: requestBeforeOrdinal,
-			visibleLimit: this.options.pageSize,
+			visibleLimit: options.visibleLimit ?? this.options.pageSize,
 			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
 			onPageValidated: (request, page) => {
 				if (request.beforeOrdinal === undefined) {
@@ -165,7 +175,12 @@ export class TranscriptPageLoader {
 			},
 		});
 		if (demand.kind === 'invalidated') return 'invalidated';
-		if (!(await this.#canApply(chatId, transcriptViewId, operationEpoch, applicationGate))) {
+		if (!(await this.#canApply(
+			chatId,
+			transcriptViewId,
+			operationEpoch,
+			options.applicationGate,
+		))) {
 			return 'invalidated';
 		}
 		if (demand.kind === 'unavailable') {
@@ -193,7 +208,7 @@ export class TranscriptPageLoader {
 		operationEpoch: number,
 		loadedThroughOrdinal: number,
 		lastOrdinal: number,
-		applicationGate: TranscriptPageApplicationGate | undefined,
+		options: TranscriptPageLoadOptions,
 	): Promise<TranscriptPageLoadResult> {
 		const demand = await loadTranscriptPageDemand({
 			direction: 'later',
@@ -201,11 +216,16 @@ export class TranscriptPageLoader {
 			transcriptViewId,
 			afterOrdinal: loadedThroughOrdinal,
 			throughOrdinal: lastOrdinal,
-			visibleLimit: this.options.pageSize,
+			visibleLimit: options.visibleLimit ?? this.options.pageSize,
 			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
 		});
 		if (demand.kind === 'invalidated') return 'invalidated';
-		if (!(await this.#canApply(chatId, transcriptViewId, operationEpoch, applicationGate))) {
+		if (!(await this.#canApply(
+			chatId,
+			transcriptViewId,
+			operationEpoch,
+			options.applicationGate,
+		))) {
 			return 'invalidated';
 		}
 		if (demand.kind === 'unavailable') {

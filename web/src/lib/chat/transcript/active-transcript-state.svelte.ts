@@ -25,12 +25,11 @@ import {
 	mergeTranscriptEntriesByOrdinal,
 	retainTranscriptEntries,
 	retainedEarlierPageCursor,
-	type TranscriptPageApplicationGate,
 	type TranscriptPageLoadResult,
 	type TranscriptWindowLoadResult,
 	type TranscriptWindowTarget,
 } from './transcript-page-progress.js';
-import { TranscriptPageLoader } from './transcript-page-loader.js';
+import { TranscriptPageLoader, type TranscriptPageLoadOptions } from './transcript-page-loader.js';
 import {
 	loadTranscriptRowPage,
 	type TranscriptRowTarget,
@@ -356,8 +355,10 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			this.transcriptViewId = restored.transcriptViewId;
 			this.entries = retainTranscriptEntries(restored.messages, 'later');
 			this.lastOrdinal = restored.lastOrdinal;
+			this.loadedThroughOrdinal = restored.lastOrdinal;
 			this.nextBeforeOrdinal = restored.nextBeforeOrdinal;
 			this.hasEarlierMessages = restored.nextBeforeOrdinal !== null;
+			this.hasLaterMessages = false;
 		}
 		if (entriesChanged) {
 			this.clearLocalNotices(noticeRevision);
@@ -716,16 +717,16 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 
 	async loadEarlierPage(
 		chatId: string,
-		applicationGate?: TranscriptPageApplicationGate,
+		options?: TranscriptPageLoadOptions,
 	): Promise<TranscriptPageLoadResult> {
-		return this.#pageLoader.load('earlier', chatId, applicationGate);
+		return this.#pageLoader.load('earlier', chatId, options);
 	}
 
 	async loadLaterPage(
 		chatId: string,
-		applicationGate?: TranscriptPageApplicationGate,
+		options?: TranscriptPageLoadOptions,
 	): Promise<TranscriptPageLoadResult> {
-		return this.#pageLoader.load('later', chatId, applicationGate);
+		return this.#pageLoader.load('later', chatId, options);
 	}
 
 	invalidatePendingHistoryLoad(): void {
@@ -734,6 +735,38 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 
 	invalidatePendingWindowNavigation(): void {
 		this.#windowNavigationEpoch += 1;
+	}
+
+	suspendForParking(): boolean {
+		const chatId = this.activeChatId;
+		if (!chatId || !this.transcriptViewId || this.entries.length === 0) return false;
+		const cached = this.transcriptCache.readAppliedCursor(chatId);
+		if (!cached || cached.stale || cached.transcriptViewId !== this.transcriptViewId) {
+			return false;
+		}
+
+		this.#loadEpoch += 1;
+		this.#windowNavigationEpoch += 1;
+		this.#invalidatePageLoad();
+		const buffered = this.#snapshotBuffer ?? [];
+		this.#snapshotBuffer = null;
+		this.isLoadingMessages = false;
+		for (const batch of buffered) {
+			if (batch.transcriptViewId !== this.transcriptViewId) return false;
+			const result = this.#applyCommittedAppend(
+				chatId,
+				batch.transcriptViewId,
+				batch.messages,
+				batch.firstOrdinal,
+				batch.lastOrdinal,
+				batch.resendCandidates,
+				batch.noticeRevision,
+				{ status: 'applied', changed: true, lastOrdinal: batch.lastOrdinal },
+			);
+			if (result !== 'applied') return false;
+		}
+		this.loadStatus = 'loaded';
+		return this.lastOrdinal === cached.lastOrdinal;
 	}
 
 	#invalidatePageLoad(): void {
