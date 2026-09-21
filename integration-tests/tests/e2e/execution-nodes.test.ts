@@ -114,6 +114,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForButtonEnabled('Save');
       const inboundDirs = await workerDirectories(join(fixture.integration.dirs.root, 'inbound'));
       await writeFile(join(inboundDirs.project, 'context.txt'), 'Synthetic worker-only content');
+      await mkdir(join(inboundDirs.project, 'remote-folder'));
       workers.push(await ExecutionNodeProcess.start({ repoRoot, directories: inboundDirs, environment: {}, connection: { kind: 'dial', url: inboundUrl.href } }));
       await app.clickButton('Back to nodes');
       await app.waitForText('Node connects to controller / Ready');
@@ -155,7 +156,11 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.clickButton('Integration Echo');
       await fixture.page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((button) => button.getAttribute('aria-label')?.startsWith('Inbound Worker / Direct (Chat Completions) /')));
       await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
-      expect(await fixture.page.$('[data-slot="directory-browser-dismiss"]')).toBeNull();
+      const browsing = fixture.page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/files/browse' && new URL(response.url()).searchParams.get('nodeId') === inbound.id);
+      await fixture.page.$eval('input[aria-label="Project Path"]', (element) => (element as HTMLInputElement).focus());
+      expect((await browsing).status()).toBe(200);
+      await app.waitForText('remote-folder');
+      await fixture.page.$eval('[data-slot="directory-browser-dismiss"]', (element) => (element as HTMLElement).click());
       expect(await app.hasButton('Select a different worktree')).toBe(false);
       const prompt = 'Synthetic remote request @context.txt';
       await app.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', prompt);

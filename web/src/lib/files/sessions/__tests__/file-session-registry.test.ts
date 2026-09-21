@@ -2531,6 +2531,60 @@ describe('best-effort file recovery', () => {
 		await harness.registry.destroyAll();
 	});
 
+	it('retains an unconfirmed remote save and reconciles that same node before another write', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const harness = createHarness();
+		const session = (await harness.registry.open({ ...request('file.txt'), nodeId }))!;
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		session.content = 'unconfirmed edit';
+		harness.saveText.mockRejectedValueOnce(
+			new ApiError(503, 'Save outcome unknown', 'FILE_SAVE_OUTCOME_UNKNOWN'),
+		);
+		await expect(harness.registry.save(session.id)).resolves.toBe(false);
+		expect(session.content).toBe('unconfirmed edit');
+		expect(session.dirty).toBe(true);
+		expect(session.isExternallyStale).toBe(true);
+		expect(session.loadedRevision).toBe('v1:initial');
+		expect(session.saveError).toBe('Save outcome unknown');
+		expect(harness.readText).toHaveBeenCalledOnce();
+
+		session.content = 'newer edit';
+		const snapshot = deferred<Awaited<ReturnType<typeof harness.readText>>>();
+		harness.readText.mockReturnValueOnce(snapshot.promise);
+		const retry = harness.registry.save(session.id);
+		await vi.waitFor(() => expect(harness.readText).toHaveBeenCalledTimes(2));
+		expect(harness.readText).toHaveBeenLastCalledWith(
+			{ nodeId, projectPath: '/workspace', filePath: 'file.txt' },
+			{ signal: expect.any(AbortSignal) },
+		);
+		expect(harness.saveText).toHaveBeenCalledOnce();
+		snapshot.resolve({
+			content: 'unconfirmed edit',
+			path: '/workspace/file.txt',
+			revision: 'v1:remote',
+		});
+		await vi.waitFor(() =>
+			expect(harness.registry.overwriteRequest?.diskRevision).toBe('v1:remote'),
+		);
+		expect(harness.saveText).toHaveBeenCalledOnce();
+		harness.registry.resolveOverwrite('save-checked');
+		await expect(retry).resolves.toBe(true);
+		expect(harness.saveText).toHaveBeenLastCalledWith(
+			{
+				nodeId,
+				projectPath: '/workspace',
+				filePath: 'file.txt',
+				content: 'newer edit',
+				expectedRevision: 'v1:remote',
+				conflictResolution: 'reject',
+			},
+			{ signal: expect.any(AbortSignal), timeoutMs: null },
+		);
+		expect(session.content).toBe('newer edit');
+		expect(session.dirty).toBe(false);
+		await harness.registry.destroyAll();
+	});
+
 	it('allows explicitly clearing stored drafts without cross-tab ownership locks', async () => {
 		const repository = createMemoryFileDraftRepository();
 		await repository.putDraft(storedDraft());

@@ -7,7 +7,7 @@ import { SpaDriver } from '../../support/spa-driver.js';
 test('simultaneous Local and remote panels never use the selected chat for file links', async () => {
   await withE2eFixture('execution-node-panel-files', async (fixture) => {
     const { client, directAgents, dirs } = fixture.integration;
-    await writeFile(join(dirs.project, 'panel-file.txt'), 'Synthetic controller file');
+    await writeFile(join(dirs.project, 'panel-file.txt'), 'Synthetic worker snapshot');
     const chats = [];
     for (const nodeId of ['local', client.nodeId]) {
       const chatId = fixture.integration.newChatId();
@@ -34,15 +34,19 @@ test('simultaneous Local and remote panels never use the selected chat for file 
     const fileLink = (chatId: string) => `[data-conversation-panel-chat-id="${chatId}"] [data-chat-message-type="assistant-message"] a[href="./panel-file.txt"]`;
     await fixture.page.waitForSelector(fileLink(remoteId));
     await fixture.page.$eval(fileLink(remoteId), (element) => (element as HTMLElement).click());
-    expect(fileRequests).toEqual([]);
-    expect(await fixture.page.$('[data-file-view-session]')).toBeNull();
+    await app.waitForText('Synthetic worker snapshot');
+    expect(fileRequests.some((request) => new URL(request).searchParams.get('nodeId') === client.nodeId)).toBe(true);
+    // The processes share a filesystem; changing it distinguishes the retained node-owned documents.
+    await writeFile(join(dirs.project, 'panel-file.txt'), 'Synthetic controller snapshot');
+    fileRequests.length = 0;
 
     await app.focusWorkspaceWindow(remoteWindow);
     await app.waitForSelectedChat(remoteId);
     await fixture.page.waitForSelector(fileLink(localId));
     await fixture.page.$eval(fileLink(localId), (element) => (element as HTMLElement).click());
-    await app.waitForText('Synthetic controller file');
-    expect(fileRequests.length).toBeGreaterThan(0);
+    await app.waitForText('Synthetic controller snapshot');
+    expect(fileRequests.some((request) => new URL(request).searchParams.get('nodeId') === 'local')).toBe(true);
+    expect(fileRequests.some((request) => new URL(request).searchParams.get('nodeId') === client.nodeId && new URL(request).pathname.endsWith('/text'))).toBe(false);
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials' });
 }, 60_000);

@@ -26,7 +26,7 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
         expect(listed.some((file) => file.name === 'file.txt')).toBe(true);
       } finally { await chmod(privateDirectory, 0o700); }
       expect(identity.identity).toMatchObject({ nodeId, canonicalFileRootPath: projectPath, normalizedRelativePath: 'file.txt' });
-      expect(await client.get(`/api/v1/files/browse?nodeId=${nodeId}&path=${encodeURIComponent(projectPath)}`)).toContainEqual({ name: 'folder', path: join(projectPath, 'folder'), type: 'directory' });
+      expect(await client.get<Array<{ name: string; path: string; type: string }>>(`/api/v1/files/browse?nodeId=${nodeId}&path=${encodeURIComponent(projectPath)}`)).toContainEqual({ name: 'folder', path: join(projectPath, 'folder'), type: 'directory' });
       const saved = await client.put<SaveTextResponse>(`/api/v1/files/text?${query}`, { content: `${content}saved`, expectedRevision: result.revision, conflictResolution: 'reject' });
       expect(saved.revision).not.toBe(result.revision);
       expect((await readFile(join(projectPath, 'file.txt'), 'utf8')) === `${content}saved`).toBe(true);

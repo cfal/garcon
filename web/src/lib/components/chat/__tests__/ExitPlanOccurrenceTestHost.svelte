@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
 	import { onDestroy } from 'svelte';
 	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
 	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
@@ -18,6 +19,7 @@
 
 	let { pendingPermissionRequests, onExitPlanMode }: Props = $props();
 	setCanonicalWorkspaceLayout();
+	setExecutionNodesTestContext();
 
 	const message = new ExitPlanModeToolUseMessage(
 		'2026-08-15T00:00:00.000Z',
