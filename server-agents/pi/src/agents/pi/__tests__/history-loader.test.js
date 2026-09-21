@@ -139,6 +139,36 @@ describe('Pi history loader', () => {
     expect(messages.map((message) => message.content)).toEqual(['question', 'new branch']);
   });
 
+  it('ignores cache-warming usage entries in native history', async () => {
+    const sessionPath = await writeJsonl('usage.jsonl', [
+      { type: 'session', version: 3, id: 'session-usage', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
+      {
+        type: 'message', id: 'user-1', parentId: null,
+        timestamp: '2026-01-01T00:00:01.000Z',
+        message: { role: 'user', content: 'question', timestamp: 1767225601000 },
+      },
+      {
+        type: 'message', id: 'assistant-1', parentId: 'user-1',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        message: assistantMessage([{ type: 'text', text: 'answer' }]),
+      },
+      {
+        type: 'usage', id: 'usage-1', parentId: 'assistant-1',
+        timestamp: '2026-01-01T00:00:03.000Z',
+        kind: 'cache_warm', provider: 'anthropic', model: 'claude-test',
+        usage: assistantMessage([]).usage,
+      },
+    ]);
+
+    const messages = await loadPiChatMessages(sessionPath);
+
+    expect(messages.map((message) => message.content)).toEqual(['question', 'answer']);
+    expect(messages.map((message) => getNativeMessageRevisionSource(message))).toEqual([
+      { entryId: 'user-1', withinSourceOrdinal: 0 },
+      { entryId: 'assistant-1', withinSourceOrdinal: 0 },
+    ]);
+  });
+
   it('rejects an active-path walk when malformed parent links form a cycle', async () => {
     const sessionPath = await writeJsonl('parent-cycle.jsonl', [
       {

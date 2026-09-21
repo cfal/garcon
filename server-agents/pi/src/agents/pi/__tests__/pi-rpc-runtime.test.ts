@@ -1509,7 +1509,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('rejects a steer that missed the run and retires the process', async () => {
+  it('reports unknown delivery when a successful steer response arrives after settlement', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const turn = runtime.runTurn(baseResumeRequest());
@@ -1530,8 +1530,42 @@ describe('PiRpcRuntime', () => {
     });
     fakes[0].pushEvent({ type: 'agent_settled' });
     const result = await steerPromise;
-    expect(result.kind).toBe('rejected');
-    expect(result.reason).toBe('turn-changed');
+    expect(result).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+    await turn;
+    await settleIo();
+    expect(fakes[0].proc.killed).toBe(true);
+    await runtime.shutdown();
+  });
+
+  it('does not permit replay after transformed steering persists before a delayed acknowledgement', async () => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    spawnOptions.push({ steerResponseDelayMs: 30 });
+    const runtime = createRuntime();
+    const turn = runtime.runTurn(baseResumeRequest());
+    await waitForActive(runtime);
+
+    const steer = runtime.steer({
+      chatId: 'chat-2',
+      projectPath: baseResumeRequest().projectPath,
+      agentSessionId: 'pi-session-1',
+      nativeSession: null,
+      target: runtime.captureSteerTarget('pi-session-1'),
+      input: 'original input',
+      clientMessageId: 'm-transformed',
+      prepareDelivery: () => Promise.resolve(),
+    });
+    await waitForCommand(fakes[0], 'steer');
+    fakes[0].state.steering = ['transformed input'];
+    fakes[0].pushEvent({ type: 'queue_update', steering: ['transformed input'], followUp: [] });
+    fakes[0].state.steering = [];
+    fakes[0].pushEvent({ type: 'queue_update', steering: [], followUp: [] });
+    fakes[0].pushEvent({
+      type: 'message_end',
+      message: { role: 'user', content: [{ type: 'text', text: 'transformed input' }], timestamp: 0 },
+    });
+    fakes[0].pushEvent({ type: 'agent_settled' });
+
+    await expect(steer).resolves.toMatchObject({ kind: 'failed', outcome: 'unknown' });
     await turn;
     await settleIo();
     expect(fakes[0].proc.killed).toBe(true);

@@ -347,11 +347,13 @@ describe('Pi against a scripted model', () => {
 
   test('exposes the scripted model in the catalog and rejects the default model', async () => {
     const testEnvironment = requireEnvironment();
+    testEnvironment.serverEnvironment.RADIUS_API_KEY = 'garcon-test-radius-key';
     await withIntegrationFixture('pi-scripted-catalog', async (fixture) => {
       const catalog = await fixture.client.listAgentCatalog();
       const pi = catalog.agents.find((agent) => agent.id === 'pi');
       if (!pi) throw new Error('Pi agent was not listed in the catalog.');
       expect(pi.models.map((model) => model.value)).toContain(PI_TEST_MODEL);
+      expect(pi.models.some((model) => model.value.startsWith('radius/'))).toBe(true);
       // The catalog derives the capability from the integration facet.
       expect((pi as { supportsSteering?: boolean }).supportsSteering ?? false).toBe(true);
 
