@@ -1,12 +1,12 @@
 import { promises as fs } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import type { ExecutionFilesService } from '@garcon/server-agent-interface';
 import { MAX_FILE_VIEW_BYTES, MAX_FILE_SAVE_BYTES, isFileRevision } from '../../common/file-contracts.js';
 import { DomainError } from '../lib/domain-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { FILE_CHUNK_BYTES, FILE_TRANSFER_TIMEOUT_MS, decodeFileChunk, invalidFileTransfer, isFileSize, type FileRpcMethods, type FileTransferRef } from './file-protocol.js';
+import { createFileStaging } from './file-staging.js';
 
 interface Transfer {
   readonly ref: FileTransferRef;
@@ -67,9 +67,7 @@ export class FileTransfers {
       this.#check(signal);
       await this.files.revision(request, { signal });
       this.#check(signal);
-      const root = this.options.stagingRoot ?? path.join(os.homedir(), '.cache', 'garcon', 'file-transfers');
-      await fs.mkdir(root, { recursive: true, mode: 0o700 });
-      directory = await fs.mkdtemp(path.join(root, 'transfer-'));
+      directory = await createFileStaging(this.options.stagingRoot);
       file = await fs.open(path.join(directory, 'content'), 'wx+', 0o600);
       this.#check(signal);
       return this.#add('file-write', request.size, { write: { request: { ...request }, directory, file, offset: 0 } });

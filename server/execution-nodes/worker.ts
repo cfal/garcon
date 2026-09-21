@@ -4,6 +4,7 @@ import { AgentRpc } from './rpc.js';
 import { serveAgentNode } from './agent-worker.js';
 import { InProcessExecutionNode } from './in-process.js';
 import { WebSocketLink } from './websocket-link.js';
+import { cleanupAbandonedFileStaging } from './file-staging.js';
 
 export interface ExecutionWorkerOptions {
   readonly secret: string;
@@ -40,6 +41,9 @@ export async function runExecutionWorker(
   const onSignal = () => { void stop(); };
   process.on('SIGTERM', onSignal);
   process.on('SIGINT', onSignal);
+  void cleanupAbandonedFileStaging().catch(() => {
+    console.warn('Execution-node file staging cleanup incomplete; uploads will retry cleanup');
+  });
   let lastError: string | null = null;
   link.onError((message) => {
     if (message !== lastError) console.warn(JSON.stringify({ type: 'execution-node-unavailable', message }));
