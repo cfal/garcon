@@ -17,6 +17,26 @@ afterEach(async () => { await fs.rm(directory, { recursive: true, force: true })
 const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 'file.txt' });
 
 describe('node files service', () => {
+  it('skips unreadable descendants without concealing root failures or cancellation', async () => {
+    const child = path.join(target().projectPath, 'private');
+    await fs.mkdir(child);
+    const open = fs.opendir;
+    const intercepted = spyOn(fs, 'opendir').mockImplementation(async (...args) => {
+      if (args[0] === child) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return open(...args);
+    });
+    try {
+      expect((await service.list(target())).files.map((file) => file.name)).toEqual(['file.txt']);
+      await expect(service.list({ projectPath: child })).rejects.toMatchObject({ code: 'FILE_PERMISSION_DENIED' });
+      const abort = new AbortController();
+      intercepted.mockImplementation(async (...args) => {
+        if (args[0] === child) { abort.abort(); throw abort.signal.reason; }
+        return open(...args);
+      });
+      await expect(service.list(target(), { signal: abort.signal })).rejects.toThrow();
+    } finally { intercepted.mockRestore(); }
+  });
+
   it('owns canonical identity, listing, browsing and bytes independently of providers', async () => {
     expect(await service.identity(target())).toEqual({ nodeId: 'synthetic-node', canonicalFileRootPath: target().projectPath, normalizedRelativePath: 'file.txt' });
     expect((await service.browse({})).map((item) => item.name)).toEqual(['project']);

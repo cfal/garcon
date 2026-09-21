@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ReadTextResponse, SaveTextResponse, FileIdentityResponse } from '../../../common/file-contracts.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -11,6 +11,9 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       const nodeId = client.nodeId;
       const projectPath = fixture.executionDirs.project;
       await mkdir(join(projectPath, 'folder'));
+      const privateDirectory = join(projectPath, 'private');
+      await mkdir(privateDirectory);
+      await chmod(privateDirectory, 0);
       const content = 'file contents\n'.repeat(1_300_000);
       await writeFile(join(projectPath, 'file.txt'), content);
       await writeFile(join(fixture.dirs.project, 'file.txt'), 'controller file');
@@ -18,6 +21,10 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       const result = await client.get<ReadTextResponse>(`/api/v1/files/text?${query}`);
       expect(result.content === content).toBe(true);
       const identity = await client.get<FileIdentityResponse>(`/api/v1/files/identity?${query}`);
+      try {
+        const listed = await client.get<Array<{ name: string }>>(`/api/v1/files/list?${query}`);
+        expect(listed.some((file) => file.name === 'file.txt')).toBe(true);
+      } finally { await chmod(privateDirectory, 0o700); }
       expect(identity.identity).toMatchObject({ nodeId, canonicalFileRootPath: projectPath, normalizedRelativePath: 'file.txt' });
       expect(await client.get(`/api/v1/files/browse?nodeId=${nodeId}&path=${encodeURIComponent(projectPath)}`)).toContainEqual({ name: 'folder', path: join(projectPath, 'folder'), type: 'directory' });
       const saved = await client.put<SaveTextResponse>(`/api/v1/files/text?${query}`, { content: `${content}saved`, expectedRevision: result.revision, conflictResolution: 'reject' });

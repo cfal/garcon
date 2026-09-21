@@ -3,7 +3,8 @@ import path from 'node:path';
 import type { ExecutionFileEntry } from '@garcon/server-agent-interface';
 import type { FileTreeBreadcrumb, FileTreeEntry } from '../../common/file-contracts.js';
 import { DomainError } from '../lib/domain-error.js';
-import { resolveRealWithinCanonicalBase } from '../lib/path-boundary.js';
+import { isProjectBoundaryError, resolveRealWithinCanonicalBase } from '../lib/path-boundary.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
 import { toNodePath } from '../execution-nodes/node-path.js';
 
 const MAX_ENTRIES = 10_000;
@@ -72,8 +73,13 @@ export async function listProjectFiles(root: string, signal?: AbortSignal): Prom
       if (SKIP_NAMES.has(entry.name)) continue;
       const candidate = path.join(directory, entry.name);
       if (entry.isDirectory() && depth < 10) {
-        await resolveRealWithinCanonicalBase(root, candidate);
-        await visit(candidate, depth + 1);
+        try {
+          await resolveRealWithinCanonicalBase(root, candidate);
+          await visit(candidate, depth + 1);
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (!isProjectBoundaryError(error) && !['EACCES', 'EPERM', 'ENOENT', 'ENOTDIR'].some((code) => hasNodeErrorCode(error, code))) throw error;
+        }
       } else if (entry.isFile()) {
         const item: ExecutionFileEntry = { name: entry.name, path: toNodePath(candidate), relativePath: relativeFilePath(root, candidate), type: 'file' };
         const length = Buffer.byteLength(JSON.stringify(item));
