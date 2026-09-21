@@ -147,4 +147,37 @@ describe('FileMentionMenu', () => {
 		expect(screen.queryByText('local.ts')).toBeNull();
 		expect(screen.getByText('remote.ts')).toBeTruthy();
 	});
+
+	it('reloads the original node after another node clears its cached files', async () => {
+		const remote = deferred<Awaited<ReturnType<typeof getFileList>>>();
+		vi.mocked(getFileList)
+			.mockResolvedValueOnce([{ name: 'local.ts', path: '/repo/local.ts' }])
+			.mockReturnValueOnce(remote.promise)
+			.mockResolvedValueOnce([{ name: 'fresh-local.ts', path: '/repo/fresh-local.ts' }]);
+		const view = render(FileMentionMenuTestHost, {
+			projectPath: '/repo',
+			isVisible: true,
+			query: '',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		await screen.findByText('local.ts');
+		await view.rerender({ nodeId: '22222222-2222-4222-8222-222222222222' });
+		await waitFor(() => expect(getFileList).toHaveBeenCalledTimes(2));
+		expect(screen.queryByText('local.ts')).toBeNull();
+
+		await view.rerender({ nodeId: 'local' });
+		await screen.findByText('fresh-local.ts');
+		expect(getFileList).toHaveBeenLastCalledWith(
+			{ nodeId: 'local', projectPath: '/repo' },
+			expect.anything(),
+		);
+		remote.resolve([{ name: 'remote.ts', path: '/repo/remote.ts' }]);
+		await tick();
+		expect(screen.queryByText('remote.ts')).toBeNull();
+		await view.rerender({ isVisible: false });
+		await view.rerender({ isVisible: true });
+		expect(screen.getByText('fresh-local.ts')).toBeTruthy();
+		expect(getFileList).toHaveBeenCalledTimes(3);
+	});
 });

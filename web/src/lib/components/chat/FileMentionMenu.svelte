@@ -51,6 +51,7 @@
 		const targetKey = JSON.stringify([nodeId, projectPath]);
 		if (fetchedForProject === targetKey) return;
 		allFiles = [];
+		fetchedForProject = '';
 		isLoading = true;
 		loadFailed = false;
 

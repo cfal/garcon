@@ -8,6 +8,7 @@ import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import type { FilesSurfaceController } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
+import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 
 type CommandMenuWorkspacePort = Pick<
 	WorkspaceCoordinator,
@@ -71,7 +72,8 @@ const files: Pick<WorkbenchCommandRegistryDeps['files'], 'navigation' | 'open'> 
 };
 let knownFiles: FileTreeStore['knownFiles'] = [];
 let fileRootPath: string | null = null;
-const tree: Pick<FileTreeStore, 'knownFiles' | 'fileRootPath'> = {
+const tree: Pick<FileTreeStore, 'knownFiles' | 'fileRootPath' | 'nodeId'> = {
+	nodeId: 'local',
 	get knownFiles() {
 		return knownFiles;
 	},
@@ -161,7 +163,8 @@ describe('CommandMenu', () => {
 		});
 		files.navigation.recents = [
 			{
-				key: JSON.stringify(['/workspace', fileName]),
+				key: fileIdentityKey('/workspace', fileName),
+				nodeId: 'local',
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: fileName,
 				displayPath: fileName,
@@ -185,6 +188,7 @@ describe('CommandMenu', () => {
 		await fireEvent.click(option);
 
 		expect(files.open).toHaveBeenCalledWith({
+			nodeId: 'local',
 			fileRootPath: '/workspace',
 			relativePath: fileName,
 			mode: 'code',

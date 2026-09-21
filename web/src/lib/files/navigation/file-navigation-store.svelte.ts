@@ -47,11 +47,18 @@ export class FileNavigationStore {
 			this.repository.getRecents(this.scope.userNamespace, this.scope.deploymentId),
 			this.repository.getNavigation(this.scope.userNamespace, this.scope.deploymentId),
 		]);
-		this.recents = records
+		const recents = new Map<string, FileLocation>();
+		for (const record of records
 			.filter(isValidRecentRecord)
-			.sort((a, b) => b.timestamp - a.timestamp)
-			.slice(0, FILE_RECENT_LIMIT)
-			.map(toLocation);
+			.sort((a, b) => b.timestamp - a.timestamp)) {
+			const location = toLocation(record);
+			if (!recents.has(location.key)) recents.set(location.key, location);
+		}
+		this.recents = pruneLocations(
+			[...recents.values()],
+			FILE_RECENT_LIMIT,
+			FILE_NAVIGATION_BYTE_LIMIT,
+		);
 		if (history?.schemaVersion === 1) {
 			this.#history = pruneLocations(
 				history.entries.filter(isValidRecentRecord).map(toLocation),
