@@ -1,6 +1,6 @@
 # Files On Execution Nodes
 
-Status: architecture proposal, 2026-09-21. File remoting is not implemented. This document records the working direction; shared-channel traffic scheduling versus a separate file channel remains undecided.
+Status: architecture and design, 2026-09-21. Implementation uses the existing shared Noise WebSocket. No scheduler, pacing, priorities, or second channel is included; congestion isolation is deferred, likely to a second channel if needed.
 
 This follows [Execution Node Interfaces](./interface.md) and [Execution Nodes In The App](./app-integration.md). Current implementation references were checked at `808d869658325b62c60c23782e986f76ded8b7a3`. Earlier documents describe their respective stages; the source now includes mandatory Noise encryption on execution-node connections.
 
@@ -23,7 +23,7 @@ This is not filesystem synchronization, cross-node file copying, a general uploa
 - No worker REST listener or custom Noise-over-HTTP protocol. Both existing connection directions must remain usable, including workers that can only make outbound connections.
 - Small operations use typed RPC. Content transfers use bounded chunks and ephemeral transfer references behind the file-service adapter.
 - Writes stage content before a revision-checked commit. An uncertain commit is not automatically retried.
-- Channel topology is TBD: multiplex with chat traffic and add scheduling, or use a second Noise WebSocket for files. Neither choice changes file identity or save semantics.
+- File RPCs use the existing shared Noise WebSocket. Fragmentation only accommodates message size limits. Traffic scheduling versus a second channel remains a future decision, not implementation scope.
 
 Method names and tuning values below are proposals, not an already implemented protocol.
 
@@ -199,13 +199,13 @@ The exact chunk size, in-flight window, concurrent-transfer count, snapshot/stag
 
 Keep file-size product policy separate from these limits. Retain the existing viewer cap; define an explicit text-save cap rather than accidentally deriving it from base64 size, a generic HTTP body limit, or replay capacity. No larger-file support is implied by chunking.
 
-## Channel Topology: Open
+## Future Congestion Isolation
 
 ### Shared WebSocket With Scheduling
 
 File RPCs share the existing logical session, replay sequence, authenticated connection, and reconnect lifecycle with agent work. This needs no second connection setup or association protocol.
 
-The cost is a real scheduling requirement: reserve capacity for control/chat traffic, pace bulk chunks against socket capacity, and avoid monopolizing pending RPCs and replay retention. The current overflow guard is insufficient. Scheduling must happen before assigning transport ordinals; queued messages already in the ordered stream cannot be overtaken. Preserve ordering within each producer and transfer rather than prioritizing a terminal ahead of its preceding output. Small chunks reduce head-of-line delay but cannot eliminate it or isolate file-induced session failure completely.
+If measurements later justify scheduling, it would reserve capacity for control/chat traffic and pace bulk chunks against socket capacity. That is not part of this implementation. Scheduling would need to happen before assigning transport ordinals; queued messages already in the ordered stream cannot be overtaken. Small chunks alone cannot eliminate head-of-line delay or isolate file-induced session failure completely.
 
 ### Separate Noise WebSocket
 
@@ -217,7 +217,7 @@ The secondary channel's exact association and reconnect policy are not specified
 
 ### Decision Boundary
 
-Neither topology is selected by this document. Keep the file contract, identities, transfer lifecycle, and revision handling independent of it. Compare measured chat/Stop latency during bounded file transfers against the implementation cost of scheduling and secondary-channel ownership before deciding. A second channel still needs bounded buffering and cancellation; shared transport still needs pacing even with small chunks.
+The initial implementation shares the existing WebSocket without traffic scheduling or pacing. Keep the file contract, identities, transfer lifecycle, and revision handling independent of future congestion isolation. If measured chat/Stop latency becomes a problem, reconsider scheduling versus secondary-channel ownership; a second channel is the preferred direction, not a current commitment.
 
 ## Failure And UI Behavior
 
@@ -246,6 +246,6 @@ The implementation must demonstrate these boundaries, not just successful chunk 
 - Consistent read snapshots and revision-aware writes, including two concurrent saves, external changes, and conflict/overwrite behavior.
 - Deterministic disconnects before dispatch, during chunks, and after commit but before its reply. No blind save retry, false-success UI, or stale transfer reuse.
 - Cancellation, expiry, session replacement, and crash-staging cleanup with bounded memory/disk/RPC usage and retained editor buffers.
-- Chat events, permission responses, and Stop remain usable during throttled bulk traffic without overflowing the chat transport.
+- Ordinary bounded file transfers coexist with chat traffic. No congestion isolation or latency guarantee under bulk load is implied.
 
 Use unit/contract tests for parsers and transfer state, isolated real-process controller/worker tests for IO and transport failure, and browser coverage for project selection, file identity, editor conflicts, and buffer preservation. No paid provider calls are needed to validate the file service.
