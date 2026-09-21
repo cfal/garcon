@@ -33,11 +33,21 @@ function permissions(mode: number): string {
 }
 
 export async function readFileDirectory(root: string, directory: string, signal?: AbortSignal): Promise<FileTreeEntry[]> {
+  return readDirectory(root, directory, 'all', signal);
+}
+
+export async function readDirectoryCandidates(root: string, directory: string, signal?: AbortSignal): Promise<ExecutionFileEntry[]> {
+  return (await readDirectory(root, directory, 'directories', signal))
+    .map(({ name, path: itemPath }) => ({ name, path: itemPath, type: 'directory' }));
+}
+
+async function readDirectory(root: string, directory: string, selection: 'all' | 'directories', signal?: AbortSignal): Promise<FileTreeEntry[]> {
   const entries: FileTreeEntry[] = [];
   let bytes = 0;
   const handle = await fs.opendir(directory);
   for await (const entry of handle) {
     signal?.throwIfAborted();
+    if (selection === 'directories' && (SKIP_NAMES.has(entry.name) || (!entry.isDirectory() && !entry.isSymbolicLink()))) continue;
     const candidate = path.join(directory, entry.name);
     let stat;
     try {
@@ -45,6 +55,7 @@ export async function readFileDirectory(root: string, directory: string, signal?
       stat = await fs.stat(candidate);
     } catch { continue; }
     if (!stat.isFile() && !stat.isDirectory()) continue;
+    if (selection === 'directories' && !stat.isDirectory()) continue;
     const item: FileTreeEntry = {
       name: entry.name, path: toNodePath(candidate), relativePath: relativeFilePath(root, candidate),
       type: stat.isDirectory() ? 'directory' : 'file', size: stat.size,
@@ -92,9 +103,4 @@ export async function listProjectFiles(root: string, signal?: AbortSignal): Prom
   await visit(root, 0);
   files.sort((a, b) => a.path.localeCompare(b.path));
   return { files, truncated };
-}
-
-export function directoryCandidates(entries: readonly FileTreeEntry[]): ExecutionFileEntry[] {
-  return entries.filter((entry) => entry.type === 'directory' && !SKIP_NAMES.has(entry.name))
-    .map(({ name, path: itemPath }) => ({ name, path: itemPath, type: 'directory' }));
 }

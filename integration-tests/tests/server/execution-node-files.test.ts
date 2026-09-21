@@ -40,6 +40,14 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       await fixture.crashAndRestartGarcon({ preserveExecutionWorker: true });
       const restarted = await fixture.client.get<ReadTextResponse>(`/api/v1/files/text?${query}`);
       expect(restarted.content === `${content}saved`).toBe(true);
+      const crowded = join(projectPath, 'crowded');
+      await mkdir(join(crowded, 'selectable-project'), { recursive: true });
+      for (let i = 0; i < 1800; i++) await writeFile(join(crowded, `${i}-${'x'.repeat(220)}`), '');
+      await expect(fixture.client.get(`/api/v1/files/tree?nodeId=${nodeId}&path=${encodeURIComponent(crowded)}`))
+        .rejects.toMatchObject({ status: 413, body: { errorCode: 'FILE_LIST_TOO_LARGE' } });
+      expect(await fixture.client.get<Array<{ name: string; path: string; type: string }>>(`/api/v1/files/browse?nodeId=${nodeId}&path=${encodeURIComponent(crowded)}`)).toEqual([
+        { name: 'selectable-project', path: join(crowded, 'selectable-project'), type: 'directory' },
+      ]);
     }, { executionBackend: backend, projectRoots: 'separate' });
   }, 60_000);
 }

@@ -8,7 +8,7 @@ import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { toNativePath, toNodePath } from '../execution-nodes/node-path.js';
 import { readVersionedFile, getFileRevisionOrMissing, getFileLockKey, writeVersionedTextFile, FileTooLargeError } from './file-revision.js';
-import { directoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
+import { readDirectoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
 import { fileOperationError, fileRevisionConflict } from './errors.js';
 
 export interface FilesServiceOptions {
@@ -28,9 +28,7 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
 
   async tree(request: Parameters<ExecutionFilesService['tree']>[0], options?: NodeCallOptions) {
     return this.#run(options, async () => {
-      const root = await this.#root(this.options.projectBasePath);
-      const directory = await assertRealWithinBase(root, toNativePath(request.directoryPath || root));
-      if (!(await fs.stat(directory)).isDirectory()) throw new DomainError('FILE_DIRECTORY_REQUIRED', 'File tree path must identify a directory', 400);
+      const { root, directory } = await this.#directory(request.directoryPath);
       let homeDirectory: FileTreeHomeDirectory | null = null;
       try {
         const home = await assertRealWithinBase(root, this.options.homeDirectory ?? os.homedir());
@@ -46,7 +44,10 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
   }
 
   async browse(request: Parameters<ExecutionFilesService['browse']>[0], options?: NodeCallOptions) {
-    return directoryCandidates((await this.tree(request, options)).entries);
+    return this.#run(options, async () => {
+      const { root, directory } = await this.#directory(request.directoryPath);
+      return readDirectoryCandidates(root, directory, options?.signal);
+    });
   }
 
   async list(request: Parameters<ExecutionFilesService['list']>[0], options?: NodeCallOptions) {
@@ -102,6 +103,13 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
         return { success: true as const, path: toNodePath(target), message: 'File saved successfully', revision };
       });
     });
+  }
+
+  async #directory(input?: string) {
+    const root = await this.#root(this.options.projectBasePath);
+    const directory = await assertRealWithinBase(root, toNativePath(input || root));
+    if (!(await fs.stat(directory)).isDirectory()) throw new DomainError('FILE_DIRECTORY_REQUIRED', 'File tree path must identify a directory', 400);
+    return { root, directory };
   }
 
   async #root(input: string): Promise<string> {

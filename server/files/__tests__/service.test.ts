@@ -17,6 +17,33 @@ afterEach(async () => { await fs.rm(directory, { recursive: true, force: true })
 const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 'file.txt' });
 
 describe('node files service', () => {
+  it('browses directories without collecting or budgeting unrelated file metadata', async () => {
+    const project = target().projectPath;
+    await fs.mkdir(path.join(project, 'folder'));
+    for (let i = 0; i < 1800; i++) await fs.writeFile(path.join(project, `${i}-${'x'.repeat(220)}`), '');
+    await expect(service.tree({ directoryPath: project })).rejects.toMatchObject({ code: 'FILE_LIST_TOO_LARGE' });
+    const stat = spyOn(fs, 'stat');
+    try {
+      expect(await service.browse({ directoryPath: project })).toEqual([
+        { name: 'folder', path: path.join(project, 'folder'), type: 'directory' },
+      ]);
+      expect(stat.mock.calls.map(([file]) => file)).toEqual([project, path.join(project, 'folder')]);
+    } finally { stat.mockRestore(); }
+  });
+
+  it('keeps directory aliases within the root and excludes files and skipped directories', async () => {
+    const project = target().projectPath;
+    await fs.mkdir(path.join(project, 'folder'));
+    await fs.mkdir(path.join(project, 'node_modules'));
+    await fs.symlink(path.join(project, 'folder'), path.join(project, 'alias'));
+    await fs.symlink(path.join(project, 'file.txt'), path.join(project, 'file-alias'));
+    await fs.symlink(path.dirname(directory), path.join(project, 'escape'));
+    expect((await service.browse({ directoryPath: project })).map(({ name }) => name)).toEqual(['alias', 'folder']);
+    await expect(service.browse({ directoryPath: path.join(project, 'file.txt') })).rejects.toMatchObject({ code: 'FILE_DIRECTORY_REQUIRED' });
+    await expect(service.browse({ directoryPath: path.dirname(directory) })).rejects.toMatchObject({ code: 'FILE_OUTSIDE_ROOT' });
+    await expect(service.browse({}, { signal: AbortSignal.abort() })).rejects.toThrow();
+  });
+
   it('skips unreadable descendants without concealing root failures or cancellation', async () => {
     const child = path.join(target().projectPath, 'private');
     await fs.mkdir(child);
