@@ -94,7 +94,7 @@ describe('shared transcript chat rows', () => {
     expect(rendered).not.toContain('CLI Undefined');
   });
 
-  it('formats preamble selection changes from title snapshots including None enabled', () => {
+  it('formats preamble selection changes from title snapshots including None applicable', () => {
     const updated = new TranscriptNoticeMessage(AT, 'Preambles updated', {
       type: 'preamble-selection-changed',
       preambles: [
@@ -117,7 +117,7 @@ describe('shared transcript chat rows', () => {
     });
 
     expect(rendered).toContain('Preambles updated: Repository conventions');
-    expect(rendered).toContain('Preambles updated: None enabled');
+    expect(rendered).toContain('Preambles updated: None applicable');
     expect(JSON.stringify(rendered)).not.toContain('clientMessageId');
     expect(JSON.stringify(rendered)).not.toContain('fingerprint');
   });

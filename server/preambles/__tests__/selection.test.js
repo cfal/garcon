@@ -13,6 +13,7 @@ import {
 const AT = '2026-09-03T10:00:00.000Z';
 const ID_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const ID_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
+const ID_C = 'fd16ec93-5395-4edc-9a57-7808203f73c7';
 const ID_MISSING = '936903ad-8b98-43eb-a7d4-c17ce0dc18d8';
 
 function preamble(id, title, content, overrides = {}) {
@@ -52,7 +53,7 @@ describe('resolvePreambleSelection', () => {
     expect(resolved.unavailable).toEqual([]);
   });
 
-  it('classifies missing, disabled, and out-of-scope IDs without failing', () => {
+  it('applies explicitly selected disabled entries while retaining missing IDs', () => {
     const resolved = resolvePreambleSelection(
       selection([ID_MISSING, ID_A, ID_B]),
       catalog(
@@ -61,17 +62,15 @@ describe('resolvePreambleSelection', () => {
       ),
       '/repo',
     );
-    expect(resolved.eligible.map((entry) => entry.id)).toEqual([ID_A]);
-    expect(resolved.unavailable).toEqual([
-      { id: ID_MISSING, reason: 'missing' },
-      { id: ID_B, reason: 'disabled' },
-    ]);
+    expect(resolved.eligible.map((entry) => entry.id)).toEqual([ID_A, ID_B]);
+    expect(resolved.unavailable).toEqual([{ id: ID_MISSING, reason: 'missing' }]);
   });
 
-  it('reports out-of-scope entries for non-matching project paths', () => {
+  it('keeps project scope authoritative for manual-only entries', () => {
     const resolved = resolvePreambleSelection(
       selection([ID_A]),
       catalog(preamble(ID_A, 'Scoped', 'scoped body', {
+        enabled: false,
         scope: { type: 'project-paths', rules: [{ projectPath: '/other', includeNested: true }] },
       })),
       '/repo',
@@ -104,6 +103,44 @@ describe('resolvePreambleSelection', () => {
       { canonicalProjectPath: '/repo', agentId: 'claude', tags: [] },
     );
     expect(ids).toEqual([ID_A, ID_MISSING]);
+  });
+
+  it('includes a disabled preamble in an explicit new-chat selection', () => {
+    const snapshot = catalog(preamble(ID_B, 'Manual only', 'manual body', { enabled: false }));
+    const selected = resolveNewChatPreambleSelection({
+      catalog: snapshot,
+      canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
+      chatId: '1783725900000200',
+      orderedPreambleIds: [ID_B],
+    });
+    expect(selected.orderedPreambleIds).toEqual([ID_B]);
+    expect(projectPreambleSelection(selected, snapshot, '/repo')).toEqual({
+      catalogRevision: 2,
+      eligiblePreambles: [{ id: ID_B, title: 'Manual only' }],
+      unavailable: [],
+    });
+  });
+
+  it('rejects oversized compositions made entirely of manual-only preambles', () => {
+    const ids = [ID_A, ID_B, ID_C];
+    const snapshot = catalog(...ids.map((id) => preamble(
+      id,
+      `Manual ${id}`,
+      'x'.repeat(24_000),
+      { enabled: false },
+    )));
+    expect(() => resolveNewChatPreambleSelection({
+      catalog: snapshot,
+      canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
+      chatId: '1783725900000200',
+      orderedPreambleIds: ids,
+    })).toThrowError(expect.objectContaining({
+      code: 'PREAMBLE_SELECTION_COMPOSITION_INVALID',
+    }));
   });
 
   it('uses agent and any/all tag filters only for automatic new-chat defaults', () => {

@@ -174,7 +174,7 @@ describe('Markdown transcript export', () => {
     expect(document).not.toContain('structured-base64-secret');
   });
 
-  it('renders preamble selection changes with titles and None enabled', () => {
+  it('renders preamble selection changes with titles and None applicable', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(6, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles updated', {
         type: 'preamble-selection-changed',
@@ -191,7 +191,7 @@ describe('Markdown transcript export', () => {
     expect(document).toContain('## [6] Preambles updated');
     expect(document).toContain('Preambles updated: Repository conventions');
     expect(document).toContain('## [7] Preambles updated');
-    expect(document).toContain('Preambles updated: None enabled');
+    expect(document).toContain('Preambles updated: None applicable');
     expect(document).not.toContain('private body sentinel');
   });
 

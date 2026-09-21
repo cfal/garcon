@@ -25,7 +25,7 @@ function preamble(id: PreambleId, overrides: Partial<Preamble> = {}): Preamble {
 }
 
 describe('projectDraftSelection', () => {
-	it('keeps missing IDs in order and labels each unavailable reason', () => {
+	it('keeps missing IDs in order and treats selected manual-only entries as eligible', () => {
 		const projected = projectDraftSelection({
 			draftIds: [ID_MISSING, ID_A, ID_B],
 			savedProjection: null,
@@ -37,9 +37,9 @@ describe('projectDraftSelection', () => {
 		expect(projected.rows.map((row) => [row.id, row.reason])).toEqual([
 			[ID_MISSING, 'missing'],
 			[ID_A, null],
-			[ID_B, 'disabled'],
+			[ID_B, null],
 		]);
-		expect(projected.eligibleCount).toBe(1);
+		expect(projected.eligibleCount).toBe(2);
 	});
 
 	it('reports out-of-scope rows for non-matching project paths', () => {
@@ -128,7 +128,7 @@ describe('projectDraftSelection', () => {
 });
 
 describe('candidateUnavailableReason', () => {
-	it('distinguishes disabled and out-of-scope candidates', () => {
+	it('allows manual-only candidates but blocks out-of-scope candidates', () => {
 		const scoped = preamble(ID_A, {
 			scope: {
 				type: 'project-paths',
@@ -137,8 +137,6 @@ describe('candidateUnavailableReason', () => {
 		});
 		expect(candidateUnavailableReason(scoped, '/repo/child')).toBeNull();
 		expect(candidateUnavailableReason(scoped, '/other')).toBe('out-of-scope');
-		expect(candidateUnavailableReason(preamble(ID_B, { enabled: false }), '/repo')).toBe(
-			'disabled',
-		);
+		expect(candidateUnavailableReason(preamble(ID_B, { enabled: false }), '/repo')).toBeNull();
 	});
 });

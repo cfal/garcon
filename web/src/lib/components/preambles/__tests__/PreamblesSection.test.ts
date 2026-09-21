@@ -186,7 +186,7 @@ describe('PreamblesSection', () => {
 			deps: { update },
 		});
 
-		await fireEvent.click(screen.getByRole('switch', { name: 'Disable Global conventions' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Exclude Global conventions from defaults' }));
 
 		expect(update).toHaveBeenCalledWith({
 			expectedRevision: 1,
@@ -201,8 +201,8 @@ describe('PreamblesSection', () => {
 				tagFilter: { mode: 'any', tags: [] },
 			},
 		});
-		expect(await screen.findByText('Disabled')).toBeTruthy();
-		expect(screen.getByRole('switch', { name: 'Enable Global conventions' })).toBeTruthy();
+		expect(await screen.findByText('Manual only')).toBeTruthy();
+		expect(screen.getByRole('switch', { name: 'Include Global conventions by default' })).toBeTruthy();
 	});
 
 	it('keeps a short-name conflict editable', async () => {

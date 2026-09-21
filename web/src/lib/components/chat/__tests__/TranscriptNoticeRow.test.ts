@@ -195,7 +195,7 @@ describe('TranscriptNoticeRow', () => {
 		expect(container.textContent).not.toContain('private body');
 	});
 
-	it('renders None enabled for an empty preamble update notice', () => {
+	it('renders None applicable for an empty preamble update notice', () => {
 		render(TranscriptNoticeRow, {
 			message: new TranscriptNoticeMessage(AT, 'Preambles updated', {
 				type: 'preamble-selection-changed',
@@ -203,7 +203,7 @@ describe('TranscriptNoticeRow', () => {
 			}),
 		});
 
-		expect(screen.getByText('None enabled')).toBeTruthy();
+		expect(screen.getByText('None applicable')).toBeTruthy();
 	});
 
 	it('[TLV5-CHAT-ID-DISCOVERY.07-WEB-UNIT-01] renders chat ID discovery failures as error event cards', () => {

@@ -62,8 +62,6 @@
 
 	function reasonLabel(reason: PreambleSelectionUnavailableReason): string {
 		switch (reason) {
-			case 'disabled':
-				return m.preamble_selection_status_disabled();
 			case 'out-of-scope':
 				return m.preamble_selection_status_out_of_scope();
 			case 'missing':
@@ -127,7 +125,7 @@
 	{:else}
 		{#if draftProjection.eligibleCount === 0}
 			<p class="text-sm text-muted-foreground" data-slot="chat-preamble-selection-empty">
-				{m.preamble_selection_none_enabled()}
+				{m.preamble_selection_none_applicable()}
 			</p>
 		{/if}
 		{#if selectionLimitReached}
@@ -159,6 +157,11 @@
 							>
 								{preamble.title}
 							</span>
+							{#if !preamble.enabled}
+								<span class="text-xs text-muted-foreground">
+									{m.preambles_manual_only_badge()}
+								</span>
+							{/if}
 							{#if reason}
 								<span id={reasonDescriptionId(preamble.id)} class="sr-only">
 									{reasonLabel(reason)}

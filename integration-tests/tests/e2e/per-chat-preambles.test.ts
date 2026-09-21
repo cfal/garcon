@@ -42,7 +42,6 @@ describe('Lightpanda per-chat preambles', () => {
       await app.open();
       await fixture.waitForSpaWebSocket();
 
-      // Seed the catalog with two enabled global preambles through the API.
       const initialCatalog = await fixture.integration.client.get<PreamblesSnapshot>(
         '/api/v1/preambles',
       );
@@ -58,7 +57,7 @@ describe('Lightpanda per-chat preambles', () => {
       catalog = await fixture.integration.client.post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
         expectedRevision: catalog.revision,
         preamble: {
-          enabled: true,
+          enabled: false,
           title: 'Beta rules',
           content: 'SYNTHETIC_BETA_BODY',
           scope: { type: 'global' },
@@ -79,14 +78,12 @@ describe('Lightpanda per-chat preambles', () => {
         },
         { timeout: 20_000 },
       );
-      // The defaults preview presents both catalog entries without opening the picker.
       await fixture.page.waitForFunction(
         () => [...document.querySelectorAll<HTMLElement>('[data-slot="new-chat-preamble-pill"]')]
-          .map((element) => element.textContent?.trim()).join('|') === 'Alpha rules|Beta rules',
+          .map((element) => element.textContent?.trim()).join('|') === 'Alpha rules',
         { timeout: 20_000 },
       );
 
-      // Customize to an explicit reversed order through the picker.
       await fixture.page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>(
           '[data-slot="new-chat-preambles-configure"]',
@@ -100,6 +97,20 @@ describe('Lightpanda per-chat preambles', () => {
         { timeout: 20_000 },
         'Alpha rules',
       );
+      await fixture.page.evaluate((title) => {
+        const row = [...document.querySelectorAll<HTMLElement>(
+          '[data-slot="chat-preamble-selection-row"]',
+        )].find((element) => element.querySelector(
+          '[data-slot="chat-preamble-selection-row-title"]',
+        )?.textContent?.trim() === title);
+        const selectionSwitch = row?.querySelector<HTMLButtonElement>(
+          '[data-slot="chat-preamble-selection-checkbox"]',
+        );
+        if (!selectionSwitch || selectionSwitch.disabled) {
+          throw new Error(`Manual-only preamble cannot be selected: ${title}`);
+        }
+        selectionSwitch.click();
+      }, 'Beta rules');
       await fixture.page.evaluate((title) => {
         const row = [...document.querySelectorAll<HTMLElement>(
           '[data-slot="chat-preamble-selection-row"]',
@@ -207,7 +218,7 @@ describe('Lightpanda per-chat preambles', () => {
       const catalog: PreamblesSnapshot = await fixture.integration.client.post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
         expectedRevision: initialCatalog.revision,
         preamble: {
-          enabled: true,
+          enabled: false,
           title: 'Existing rules',
           content: 'SYNTHETIC_EXISTING_BODY',
           scope: { type: 'global' },
@@ -224,7 +235,6 @@ describe('Lightpanda per-chat preambles', () => {
         () => document.querySelector('[data-slot="chat-preamble-selection-save"]') !== null,
         { timeout: 20_000 },
       );
-      // The empty saved selection shows None enabled.
       await fixture.page.waitForFunction(
         () => document.querySelector('[data-slot="chat-preamble-selection-empty"]') !== null,
         { timeout: 20_000 },

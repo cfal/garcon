@@ -70,7 +70,10 @@ describe('per-chat preambles', () => {
   test('[PREAMBLE-SELECTION.02-SERVER-01] saves a changed selection, notices it, and applies it in chat order on the next ordinary input', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
       let catalog = await createPreamble(fixture, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
-      catalog = await createPreamble(fixture, globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'));
+      catalog = await createPreamble(fixture, {
+        ...globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'),
+        enabled: false,
+      });
       const idFirst = preambleId(catalog, 'First');
       const idSecond = preambleId(catalog, 'Second');
       expect(idFirst).not.toEqual(idSecond);
@@ -172,7 +175,7 @@ describe('per-chat preambles', () => {
     });
   });
 
-  test('[PREAMBLE-SELECTION.02-SERVER-02] saving an empty selection notices None enabled and consumes the boundary without an application', async () => {
+  test('[PREAMBLE-SELECTION.02-SERVER-02] saving an empty selection notices None applicable and consumes the boundary without an application', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
       const defaultsCatalog = await createPreamble(fixture, globalDefinition('Global only', 'SYNTHETIC_GLOBAL_BODY'));
 
@@ -400,12 +403,17 @@ describe('per-chat preambles', () => {
         'SYNTHETIC_ALL_TAGS_BODY',
         { tagFilter: { mode: 'all', tags: ['backend', 'reviewed'] } },
       ));
+      await createPreamble(fixture, {
+        ...globalDefinition('Manual only', 'SYNTHETIC_MANUAL_BODY'),
+        enabled: false,
+      });
       const currentPreviewCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       const firstId = preambleId(currentPreviewCatalog, 'First');
       const matchingAgentId = preambleId(currentPreviewCatalog, 'Matching agent');
       const otherAgentId = preambleId(currentPreviewCatalog, 'Other agent');
       const anyTagId = preambleId(currentPreviewCatalog, 'Any tag');
       const allTagsId = preambleId(currentPreviewCatalog, 'All tags');
+      const manualId = preambleId(currentPreviewCatalog, 'Manual only');
 
       const untagged = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
@@ -438,12 +446,12 @@ describe('per-chat preambles', () => {
           projectPath: fixture.dirs.project,
           agentId,
           tags: [],
-          orderedPreambleIds: [allTagsId!, otherAgentId!, MISSING_ID],
+          orderedPreambleIds: [allTagsId!, otherAgentId!, manualId!, MISSING_ID],
         },
       );
-      expect(explicit.orderedPreambleIds).toEqual([allTagsId, otherAgentId, MISSING_ID]);
+      expect(explicit.orderedPreambleIds).toEqual([allTagsId, otherAgentId, manualId, MISSING_ID]);
       expect(explicit.projection.eligiblePreambles.map((entry) => entry.title))
-        .toEqual(['All tags', 'Other agent']);
+        .toEqual(['All tags', 'Other agent', 'Manual only']);
       expect(explicit.projection.unavailable).toEqual([{ id: MISSING_ID, reason: 'missing' }]);
 
       const snapshotBefore = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
@@ -472,6 +480,7 @@ describe('per-chat preambles', () => {
       expect(automaticRequest.lastUserText).toContain('SYNTHETIC_ANY_TAG_BODY');
       expect(automaticRequest.lastUserText).not.toContain('SYNTHETIC_OTHER_AGENT_BODY');
       expect(automaticRequest.lastUserText).not.toContain('SYNTHETIC_ALL_TAGS_BODY');
+      expect(automaticRequest.lastUserText).not.toContain('SYNTHETIC_MANUAL_BODY');
       expect(automaticHeld.releaseText('automatic response')).toBeTrue();
       await fixture.client.waitForTurnTerminal(automaticChatId, automaticStart.turnId);
       expect((await selectionTarget(fixture, automaticChatId)).selection.orderedPreambleIds)
@@ -486,11 +495,12 @@ describe('per-chat preambles', () => {
         content: 'explicit filter bypass prompt',
         projectPath: fixture.dirs.project,
         agent: fixture.directAgents.openAi,
-        orderedPreambleIds: [allTagsId!, otherAgentId!],
+        orderedPreambleIds: [allTagsId!, otherAgentId!, manualId!],
       });
       const explicitRequest = await explicitHeld.received;
       expect(explicitRequest.lastUserText).toContain('SYNTHETIC_ALL_TAGS_BODY');
       expect(explicitRequest.lastUserText).toContain('SYNTHETIC_OTHER_AGENT_BODY');
+      expect(explicitRequest.lastUserText).toContain('SYNTHETIC_MANUAL_BODY');
       expect(explicitHeld.releaseText('explicit response')).toBeTrue();
       await fixture.client.waitForTurnTerminal(explicitChatId, explicitStart.turnId);
     });

@@ -74,7 +74,7 @@
 				{/if}
 				{#if !preamble.enabled}
 					<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-						{m.preambles_disabled_badge()}
+						{m.preambles_manual_only_badge()}
 					</span>
 				{/if}
 			</div>
@@ -135,8 +135,8 @@
 				{disabled}
 				onCheckedChange={onEnabledChange}
 				aria-label={preamble.enabled
-					? m.preambles_disable_toggle({ title: preamble.title })
-					: m.preambles_enable_toggle({ title: preamble.title })}
+					? m.preambles_exclude_from_defaults_toggle({ title: preamble.title })
+					: m.preambles_include_by_default_toggle({ title: preamble.title })}
 			/>
 			<Button
 				variant="ghost"

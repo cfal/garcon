@@ -64,11 +64,8 @@ function snapshot(): PreamblesSnapshot {
 
 const unavailableProjection: PreambleSelectionProjection = {
 	catalogRevision: 4,
-	eligiblePreambles: [],
-	unavailable: [
-		{ id: ID_MISSING, reason: 'missing' },
-		{ id: ID_DISABLED, reason: 'disabled' },
-	],
+	eligiblePreambles: [{ id: ID_DISABLED, title: 'Disabled conventions' }],
+	unavailable: [{ id: ID_MISSING, reason: 'missing' }],
 };
 
 function resolvedProjection(ids: readonly PreambleId[]): PreambleSelectionProjection {
@@ -100,7 +97,7 @@ function automaticPreviewResponse(
 afterEach(() => cleanup());
 
 describe('ChatPreambleSelectionPanel', () => {
-	it('renders retained missing selections and counts only eligible rows', async () => {
+	it('renders retained missing selections and counts manual-only rows as eligible', async () => {
 		const remove = vi.fn();
 		render(ChatPreambleSelectionTestHost, {
 			snapshot: snapshot(),
@@ -109,13 +106,11 @@ describe('ChatPreambleSelectionPanel', () => {
 			onRemove: remove,
 		});
 
-		expect(screen.getByText('None enabled')).toBeTruthy();
+		expect(screen.queryByText('None applicable')).toBeNull();
 		const rows = slots('chat-preamble-selection-row');
 		expect(rows).toHaveLength(3);
 		const disabledRow = rows.find((row) => row.textContent?.includes('Disabled conventions'))!;
-		expect(within(disabledRow).getByText('Disabled conventions').getAttribute('title')).toBe(
-			'Disabled globally',
-		);
+		expect(within(disabledRow).getByText('Manual only')).toBeTruthy();
 		expect(disabledRow.getAttribute('title')).toBeNull();
 		const missingRow = slot('chat-preamble-selection-missing-row');
 		expect(within(missingRow).getByText('Deleted or unavailable')).toBeTruthy();
@@ -123,7 +118,8 @@ describe('ChatPreambleSelectionPanel', () => {
 		expect(remove).toHaveBeenCalledWith(ID_MISSING);
 	});
 
-	it('labels disabled and out-of-scope candidates and prevents adding them', async () => {
+	it('allows manual-only candidates while blocking out-of-scope candidates', async () => {
+		const add = vi.fn();
 		render(ChatPreambleSelectionTestHost, {
 			snapshot: snapshot(),
 			draftIds: [ID_ELIGIBLE],
@@ -132,19 +128,20 @@ describe('ChatPreambleSelectionPanel', () => {
 				eligiblePreambles: [{ id: ID_ELIGIBLE, title: 'Eligible conventions' }],
 				unavailable: [],
 			},
+			onAdd: add,
 		});
 
 		const candidates = slots('chat-preamble-selection-row');
 		const disabled = candidates.find((row) => row.textContent?.includes('Disabled conventions'))!;
 		const scoped = candidates.find((row) => row.textContent?.includes('Scoped conventions'))!;
-		expect(within(disabled).getByText('Disabled conventions').getAttribute('title')).toBe(
-			'Disabled globally',
-		);
+		expect(within(disabled).getByText('Manual only')).toBeTruthy();
 		expect(within(scoped).getByText('Scoped conventions').getAttribute('title')).toBe(
 			'Outside this project',
 		);
 		expect(document.querySelector('[data-slot="chat-preamble-selection-row-status"]')).toBeNull();
-		expect((within(disabled).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
+		expect((within(disabled).getByRole('switch') as HTMLButtonElement).disabled).toBe(false);
+		await fireEvent.click(within(disabled).getByRole('switch'));
+		expect(add).toHaveBeenCalledWith(ID_DISABLED);
 		expect((within(scoped).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 	});
 
@@ -158,13 +155,13 @@ describe('ChatPreambleSelectionPanel', () => {
 		}
 
 		const reasonIds = slots('chat-preamble-selection-row')
-			.filter((row) => row.textContent?.includes('Disabled conventions'))
+			.filter((row) => row.textContent?.includes('Scoped conventions'))
 			.map((row) => within(row).getByRole('switch').getAttribute('aria-describedby'));
 		expect(reasonIds).toHaveLength(2);
 		expect(new Set(reasonIds).size).toBe(2);
 		for (const reasonId of reasonIds) {
 			if (!reasonId) throw new Error('Unavailable switch is missing its reason description');
-			expect(document.getElementById(reasonId)?.textContent?.trim()).toBe('Disabled globally');
+			expect(document.getElementById(reasonId)?.textContent?.trim()).toBe('Outside this project');
 		}
 	});
 
@@ -176,8 +173,11 @@ describe('ChatPreambleSelectionPanel', () => {
 			draftIds: [ID_DISABLED, ID_ELIGIBLE],
 			projection: {
 				catalogRevision: 4,
-				eligiblePreambles: [{ id: ID_ELIGIBLE, title: 'Eligible conventions' }],
-				unavailable: [{ id: ID_DISABLED, reason: 'disabled' }],
+				eligiblePreambles: [
+					{ id: ID_DISABLED, title: 'Disabled conventions' },
+					{ id: ID_ELIGIBLE, title: 'Eligible conventions' },
+				],
+				unavailable: [],
 			},
 			onMove: move,
 			onRemove: remove,

@@ -99,10 +99,7 @@ export interface ChatPreambleSelection {
   readonly orderedPreambleIds: readonly PreambleId[];
 }
 
-export type PreambleSelectionUnavailableReason =
-  | 'missing'
-  | 'disabled'
-  | 'out-of-scope';
+export type PreambleSelectionUnavailableReason = 'missing' | 'out-of-scope';
 
 export interface PreambleSelectionReference {
   readonly id: PreambleId;
@@ -122,7 +119,6 @@ export interface PreambleSelectionProjection {
 
 export const PREAMBLE_SELECTION_UNAVAILABLE_REASONS = [
   'missing',
-  'disabled',
   'out-of-scope',
 ] as const;
 

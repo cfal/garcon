@@ -124,7 +124,7 @@ describe('chat preamble selection contracts', () => {
     const projection = {
       catalogRevision: 2,
       eligiblePreambles: [{ id: ID_A, title: 'Repository conventions' }],
-      unavailable: [{ id: ID_B, reason: 'disabled' }],
+      unavailable: [{ id: ID_B, reason: 'out-of-scope' }],
     };
     expect(parseChatPreambleSelectionTargetResponse({
       success: true,
@@ -160,6 +160,19 @@ describe('chat preamble selection contracts', () => {
       chatId: '1783725900000200',
       transcriptViewId: VIEW,
       canonicalProjectPath: '/repo',
+      selection: { revision: 1, orderedPreambleIds: [ID_A, ID_B] },
+      projection: {
+        catalogRevision: 2,
+        eligiblePreambles: [{ id: ID_A, title: 'Repository conventions' }],
+        unavailable: [{ id: ID_B, reason: 'disabled' }],
+      },
+    })).toBeNull();
+
+    expect(parseChatPreambleSelectionTargetResponse({
+      success: true,
+      chatId: '1783725900000200',
+      transcriptViewId: VIEW,
+      canonicalProjectPath: '/repo',
       selection: { revision: 1, orderedPreambleIds: [ID_A, ID_B, ID_C] },
       projection: {
         catalogRevision: 2,
@@ -181,7 +194,7 @@ describe('chat preamble selection contracts', () => {
     const partitioned = {
       catalogRevision: 2,
       eligiblePreambles: [{ id: ID_A, title: 'Repository conventions' }],
-      unavailable: [{ id: ID_B, reason: 'disabled' }],
+      unavailable: [{ id: ID_B, reason: 'out-of-scope' }],
     };
     expect(parseUpdateChatPreambleSelectionResponse({
       success: true,

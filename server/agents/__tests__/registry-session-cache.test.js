@@ -167,7 +167,7 @@ describe('AgentRegistry session cache', () => {
     );
   });
 
-  it('skips missing, disabled, and out-of-scope selected entries without failing', async () => {
+  it('skips missing entries and applies manual-only selections at admission', async () => {
     armBoundary('epoch-filtered');
     setSelection([
       PREAMBLE_MISSING,
@@ -187,8 +187,14 @@ describe('AgentRegistry session cache', () => {
     const rows = ledger.currentRows(CHAT_ID);
     expect(rows[0].detail).toEqual({
       type: 'preamble-application',
-      preambles: [{ id: PREAMBLE_A, title: 'Enabled' }],
+      preambles: [
+        { id: PREAMBLE_A, title: 'Enabled' },
+        { id: PREAMBLE_B, title: 'Disabled' },
+      ],
     });
+    expect(ledger.takePreparedInput(CHAT_ID, 'filtered').providerPrefix).toContain(
+      'enabled body\n\ndisabled body',
+    );
   });
 
   it('consumes a zero-match boundary and does not apply later catalog changes', async () => {
@@ -468,10 +474,10 @@ describe('AgentRegistry session cache', () => {
 
   it('allows a provider slash command when no selected preamble is eligible', async () => {
     armBoundary('epoch-empty-slash');
-    setSelection([PREAMBLE_B]);
+    setSelection([PREAMBLE_MISSING]);
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      catalog(definition(PREAMBLE_B, 'Disabled', 'disabled body', { enabled: false })),
+      catalog(),
     );
 
     await expect(admit(registry, 'empty-slash', 'agent-run', '/provider-command')).resolves.toEqual({
@@ -491,6 +497,37 @@ describe('AgentRegistry session cache', () => {
       }),
     ]);
   });
+
+  for (const queued of [false, true]) {
+    it(`blocks a ${queued ? 'queued' : 'direct'} slash command after a manual-only selection change`, async () => {
+      setSelection([PREAMBLE_B], 1);
+      armBoundary('epoch-manual-slash', 'selection-change', 1);
+      const registry = createRegistry(
+        { ensure: async () => ledger.currentView(CHAT_ID) },
+        catalog(definition(PREAMBLE_B, 'Manual only', 'manual body', { enabled: false })),
+      );
+
+      await expect(Promise.resolve().then(() => (
+        admit(registry, 'manual-slash', 'agent-run', '/provider-command', queued)
+      )))
+        .rejects.toMatchObject({ code: 'PREAMBLE_SLASH_COMMAND_BLOCKED', status: 422 });
+      expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+        kind: 'selection-change',
+        ownershipEpoch: 'epoch-manual-slash',
+        selectionRevision: 1,
+      });
+      expect(ledger.currentRows(CHAT_ID)).toEqual([]);
+
+      await admit(registry, 'manual-prompt', 'agent-run', 'continue', queued);
+      await admit(registry, 'manual-follow-up', 'agent-run', 'another prompt', queued);
+      expect(ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice').map((row) => row.detail))
+        .toEqual([{
+          type: 'preamble-application',
+          preambles: [{ id: PREAMBLE_B, title: 'Manual only' }],
+        }]);
+      expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    });
+  }
 
   it('rejects an unsafe selected-order composition before the ledger commits', async () => {
     armBoundary('epoch-unsafe');

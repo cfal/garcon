@@ -41,8 +41,6 @@ export function resolvePreambleSelection(
     const preamble = byId.get(id);
     if (!preamble) {
       unavailable.push({ id, reason: 'missing' });
-    } else if (!preamble.enabled) {
-      unavailable.push({ id, reason: 'disabled' });
     } else if (!preambleScopeMatches(preamble, canonicalProjectPath)) {
       unavailable.push({ id, reason: 'out-of-scope' });
     } else {

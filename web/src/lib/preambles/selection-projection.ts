@@ -1,6 +1,6 @@
 // Client-side draft projection. Mirrors the server's ordered selection
-// resolution closely enough to label unsaved rows: missing, disabled, and
-// out-of-scope states keep their ID and position. The server projection stays
+// resolution closely enough to label unsaved rows: missing and out-of-scope
+// states keep their ID and position. The server projection stays
 // authoritative for saved selections; this derives status for added rows.
 import type {
 	Preamble,
@@ -59,10 +59,6 @@ export function projectDraftSelection(input: {
 			});
 			continue;
 		}
-		if (!preamble.enabled) {
-			rows.push({ id, title: preamble.title, reason: 'disabled' });
-			continue;
-		}
 		if (!scopeMatches(preamble, input.canonicalProjectPath)) {
 			rows.push({ id, title: preamble.title, reason: 'out-of-scope' });
 			continue;
@@ -78,7 +74,6 @@ export function projectDraftSelection(input: {
 export function candidateUnavailableReason(
 	preamble: Preamble,
 	canonicalProjectPath: string,
-): Exclude<PreambleSelectionUnavailableReason, 'missing'> | null {
-	if (!preamble.enabled) return 'disabled';
+): 'out-of-scope' | null {
 	return scopeMatches(preamble, canonicalProjectPath) ? null : 'out-of-scope';
 }

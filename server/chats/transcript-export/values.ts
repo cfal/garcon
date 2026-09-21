@@ -87,7 +87,7 @@ export function transcriptExportEntryText(entry: TranscriptExportEntry): string 
       ? 'Preambles applied'
       : 'Preambles updated';
     const titles = snapshot.preambles.length === 0
-      ? 'None enabled'
+      ? 'None applicable'
       : snapshot.preambles.map((preamble) => preamble.title).join('; ');
     return textSafe(`${label}: ${titles}`);
   }

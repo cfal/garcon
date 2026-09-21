@@ -154,9 +154,9 @@
 			<div class="flex items-center justify-between gap-4 rounded-md border border-border p-3">
 				<div class="min-w-0">
 					<label for="preamble-enabled" class="text-sm font-medium text-foreground">
-						{m.preambles_enabled_label()}
+						{m.preambles_default_include_label()}
 					</label>
-					<p class="text-xs text-muted-foreground">{m.preambles_enabled_description()}</p>
+					<p class="text-xs text-muted-foreground">{m.preambles_default_include_description()}</p>
 				</div>
 				<Switch id="preamble-enabled" bind:checked={form.enabled} disabled={form.saving} />
 			</div>

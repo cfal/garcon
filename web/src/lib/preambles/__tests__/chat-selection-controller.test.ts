@@ -19,8 +19,8 @@ const ID_A: PreambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const ID_B: PreambleId = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 
 function projection(
-	eligible: readonly { id: PreambleId; title: string }[] = [],
-	unavailable: readonly { id: PreambleId; reason: 'missing' | 'disabled' | 'out-of-scope' }[] = [],
+	eligible: PreambleSelectionProjection['eligiblePreambles'] = [],
+	unavailable: PreambleSelectionProjection['unavailable'] = [],
 ): PreambleSelectionProjection {
 	return {
 		catalogRevision: 1,

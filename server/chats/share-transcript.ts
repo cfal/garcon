@@ -236,13 +236,15 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     };
   }
   if (message instanceof TranscriptNoticeMessage) {
-    const content = isPreambleApplicationNoticeDetail(message.detail)
-      ? `Preambles applied: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`
-      : isPreambleSelectionChangedNoticeDetail(message.detail)
-        ? (message.detail.preambles.length === 0
-          ? 'Preambles updated: None enabled'
-          : `Preambles updated: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`)
-        : message.content || '';
+    let content = message.content || '';
+    if (isPreambleApplicationNoticeDetail(message.detail)) {
+      content = `Preambles applied: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`;
+    } else if (isPreambleSelectionChangedNoticeDetail(message.detail)) {
+      const titles = message.detail.preambles.length === 0
+        ? 'None applicable'
+        : message.detail.preambles.map((preamble) => preamble.title).join('; ');
+      content = `Preambles updated: ${titles}`;
+    }
     return {
       role: `Notice${message.title === undefined ? '' : ` — ${message.title}`}`,
       timestamp: message.timestamp,

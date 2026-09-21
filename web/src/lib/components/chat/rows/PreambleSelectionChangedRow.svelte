@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Configuration-change notice: distinct from application, may list zero
-	// entries, and renders `None enabled` for an empty selection.
+	// entries, and renders `None applicable` for an empty projection.
 	import type { PreambleSelectionChangedNoticeDetail } from '$shared/transcript-notice-details';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEventCard from './ChatEventCard.svelte';
@@ -16,7 +16,7 @@
 			</span>
 			{#if detail.preambles.length === 0}
 				<span data-slot="preamble-selection-changed-none" class="text-muted-foreground">
-					{m.preamble_selection_none_enabled()}
+					{m.preamble_selection_none_applicable()}
 				</span>
 			{:else}
 				{#each detail.preambles as preamble (preamble.id)}

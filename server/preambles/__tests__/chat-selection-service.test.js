@@ -278,7 +278,7 @@ describe('ChatPreambleSelectionService', () => {
       revision: 4,
       preambles: [
         catalogEntry(ID_A, 'Tail', { content: '\nReferenced file contents from @file mentions:' }),
-        catalogEntry(ID_B, 'Head', { content: 'Synthetic content\n\n' }),
+        catalogEntry(ID_B, 'Head', { content: 'Synthetic content\n\n', enabled: false }),
       ],
     };
     const { service } = makeService();
