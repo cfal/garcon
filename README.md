@@ -153,7 +153,7 @@ The companion [cfal/garcon-skills](https://github.com/cfal/garcon-skills) packag
 - `garcon-schedule` creates future or recurring prompts for the current chat; `garcon-amp` equips a parent with fresh Oracle, Finder, Librarian, and Reporter specialists.
 - `garcon-ticket` manages durable workspace tickets from a chat.
 
-Garcon also installs six editable preambles: a Captain control room for CLI-based chat discovery and coordination, plus the in-chat protocols for chat identity, inter-chat messages, delegated agents, scheduled prompts, and tickets. They are disabled by default. Fresh workspaces receive all six; existing workspaces receive only missing entries on startup, without overwriting edits or restoring deleted entries. The companion skills provide deeper workflows and Garcon-Amp orchestration.
+Garcon also installs six editable preambles: a Captain control room for CLI-based chat discovery and coordination, plus the in-chat protocols for chat identity, inter-chat messages, delegated agents, scheduled prompts, and tickets. They are excluded from automatic defaults but can be selected per chat. Fresh workspaces receive all six; existing workspaces receive only missing entries on startup, without overwriting edits or restoring deleted entries. The companion skills provide deeper workflows and Garcon-Amp orchestration.
 
 ```bash
 git clone https://github.com/cfal/garcon-skills.git

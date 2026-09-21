@@ -1,10 +1,15 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 37 integrated design. Supersedes
+Status: revision 38 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 38 treats catalog `enabled` as an automatic new-chat default flag,
+not a per-chat eligibility gate. An explicitly selected, in-scope preamble
+applies even when automatic inclusion is off. Missing and out-of-scope IDs
+remain selected but are skipped.
 
 Revision 37 reconciles Direct history with the implementation shipped in
 [PR #549, commit `61ebb144a`](https://github.com/cfal/garcon/commit/61ebb144a68a64e5a446fea14b61e2aae2caf962).
@@ -759,7 +764,7 @@ Kind semantics:
   `{type: 'preamble-selection-change', clientMessageId, requestFingerprint,
   selectionRevision, preambles}` for view-local idempotency; presentation
   exposes only `{type: 'preamble-selection-changed', preambles}`. The list may
-  be empty and renders as `None enabled`. It never participates in application
+  be empty and renders as `None applicable`. It never participates in application
   evidence or native prefix sanitation.
 - `agent-switch`: the durable ownership boundary written at in-place
   handoff, carrying `{fromAgentId, toAgentId, fromModel, toModel}` and
@@ -878,10 +883,12 @@ Selection bodies, titles, scopes, paths, and catalog snapshots never enter the
 registry. A `selection-change` pending boundary stores the current ownership
 epoch and selection revision; every registry mutation verifies that binding.
 
-The workspace catalog remains authoritative for definitions and eligibility.
+The workspace catalog remains authoritative for definitions and project scope;
+`enabled` controls only automatic new-chat defaults.
 Its version-2 file stores active ordered definitions plus permanent retired-ID
 tombstones. Resolution iterates the chat list, looks up each active catalog
-record, and classifies it as eligible, missing, disabled, or out of scope.
+record, and classifies it as eligible, missing, or out of scope. An explicitly
+selected in-scope record is eligible regardless of its `enabled` value.
 Unavailable IDs remain in the list and contribute no prefix, application
 notice, or slash-command block. Filtering the catalog through a selection set
 is forbidden because it would restore catalog order instead of chat order.
@@ -2391,7 +2398,8 @@ relevant-entry definition under the 10.2 obligation.
 | Process fails after selection registry commit and before update-notice commit | The new selection and boundary remain authoritative; that one `Preambles updated` row may be absent permanently and is never synthesized. |
 | Update-notice append fails after registry commit | Typed partial failure reports `selectionCommitted: true`; core does not restore the old selection or fabricate a row. |
 | Selection registry rename completes but durability is unknown | The candidate remains installed, another Save fences until reconciliation, and the client must refresh before editing. |
-| Selected ID is missing, disabled, or out of scope | The ID stays saved with its reason and is skipped without failing admission. |
+| Selected ID is missing or out of scope | The ID stays saved with its reason and is skipped without failing admission. |
+| Selected ID has `enabled: false` and is in scope | The ID remains eligible when explicitly selected; `enabled` only affects automatic new-chat defaults. |
 | Selected-order composition is unsafe at Save or explicit creation | Typed `PREAMBLE_SELECTION_COMPOSITION_INVALID`; no selection or target is persisted. |
 | Catalog/path changes make a saved order unsafe at admission | Direct input stores nothing; a prepared target remains available; a queued entry receives the recoverable failure and later entries continue; the boundary stays armed. |
 | Crash after a preamble boundary input commits but before the registry clear is durable | The input's private boundary proof suppresses reapplication and repairs the stale pending boundary only for the matching ownership epoch. |
@@ -3156,13 +3164,14 @@ Direct plan without requiring another implementation or migration.
     operation's visible failure. Session-latest continuation routing stays
     deleted. Native Reload reconstruction and directoryless legacy import
     remain explicit follow-ups.
-25. Preambles are provider-neutral core composition. The current enabled
-    catalog and the chat's explicit ordered selection resolve once at the first
+25. Preambles are provider-neutral core composition. The current catalog
+    and the chat's explicit ordered selection resolve once at the first
     ordinary input after a lifecycle or selection-change boundary. New
     independent chats use server defaults when selection is omitted; explicit
     empty means none; forks and continuations clone source-current IDs at
-    revision zero; agent switches preserve selection. Missing, disabled, and
-    out-of-scope IDs remain selected but are skipped. Each active `{{chat_id}}`
+    revision zero; agent switches preserve selection. `enabled` filters only
+    automatic defaults; selected in-scope entries apply even when it is false.
+    Missing and out-of-scope IDs remain selected but are skipped. Each active `{{chat_id}}`
     in an eligible body expands to that target chat's 16-digit ID, escaped tokens
     become literal, and unsupported variables remain unchanged; catalog
     validation applies the same fixed-length rendering before persistence. A nonempty slash-leading provider
