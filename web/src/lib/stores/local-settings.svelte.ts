@@ -45,6 +45,8 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
+export const WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX = -2;
+export const WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX = 6;
 
 export const SIDEBAR_CHAT_GROUPING_VALUES = [
 	'none',
@@ -145,6 +147,7 @@ export interface LocalSettingsSnapshot {
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
+	workspaceWindowTitlebarHeightDeltaPx: number;
 	chatListAutohide: boolean;
 	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
@@ -211,6 +214,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
+	workspaceWindowTitlebarHeightDeltaPx: 0,
 	chatListAutohide: false,
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
@@ -282,6 +286,16 @@ function parseChatMaxWidth(value: unknown): ChatMaxWidth {
 function parseSidebarWidth(value: unknown): number {
 	if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
 	return DEFAULTS.sidebarWidth;
+}
+
+function parseWorkspaceWindowTitlebarHeightDeltaPx(value: unknown): number {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return DEFAULTS.workspaceWindowTitlebarHeightDeltaPx;
+	}
+	return Math.min(
+		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
+		Math.max(WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX, Math.round(value)),
+	);
 }
 
 function parseSidebarSortMode(value: unknown): SidebarSortMode {
@@ -378,6 +392,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
+		workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx(
+			parsed.workspaceWindowTitlebarHeightDeltaPx,
+		),
 		chatListAutohide: parseBoolean(parsed.chatListAutohide, DEFAULTS.chatListAutohide),
 		chatListDock: normalizeChatListDock(parsed.chatListDock),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
@@ -474,6 +491,7 @@ export class LocalSettingsStore {
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
+	workspaceWindowTitlebarHeightDeltaPx = $state(DEFAULTS.workspaceWindowTitlebarHeightDeltaPx);
 	chatListAutohide = $state(DEFAULTS.chatListAutohide);
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
@@ -543,6 +561,9 @@ export class LocalSettingsStore {
 		if (key === 'themePreference') {
 			next.themePreference = parseThemePreference(value);
 		}
+		if (key === 'workspaceWindowTitlebarHeightDeltaPx') {
+			next.workspaceWindowTitlebarHeightDeltaPx = parseWorkspaceWindowTitlebarHeightDeltaPx(value);
+		}
 		this.#apply(next);
 		persistLocalSettings(next);
 	}
@@ -594,6 +615,7 @@ export class LocalSettingsStore {
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
+			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
 			chatListAutohide: this.chatListAutohide,
 			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
@@ -642,6 +664,7 @@ export class LocalSettingsStore {
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
+		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
 		this.chatListAutohide = snap.chatListAutohide;
 		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;

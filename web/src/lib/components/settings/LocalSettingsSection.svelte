@@ -7,6 +7,8 @@
 		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
 		SIDEBAR_INACTIVITY_DURATION_VALUES,
+		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
+		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX,
 		isChatMaxWidth,
 		isFileOpenPlacement,
 		isSidebarInactivityDuration,
@@ -178,6 +180,37 @@
 		<ThemeSettingsCard />
 
 		<div class="px-4">
+			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
+				<div class="min-w-0">
+					<label class="text-sm font-medium text-foreground" for="local-workspace-titlebar-height">
+						{m.settings_workspace_titlebar_height()}
+					</label>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_workspace_titlebar_height_description()}
+					</p>
+				</div>
+				<div class="flex shrink-0 items-center gap-2">
+					<input
+						id="local-workspace-titlebar-height"
+						type="range"
+						min={WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX}
+						max={WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX}
+						step="1"
+						value={ls.workspaceWindowTitlebarHeightDeltaPx}
+						oninput={(event) =>
+							ls.set('workspaceWindowTitlebarHeightDeltaPx', event.currentTarget.valueAsNumber)}
+						class="w-28 accent-primary"
+					/>
+					<output
+						for="local-workspace-titlebar-height"
+						class="w-12 text-right text-sm tabular-nums text-foreground"
+					>
+						{ls.workspaceWindowTitlebarHeightDeltaPx > 0
+							? '+'
+							: ''}{ls.workspaceWindowTitlebarHeightDeltaPx} px
+					</output>
+				</div>
+			</div>
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select

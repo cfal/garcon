@@ -55,6 +55,66 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('defaults, clamps, and restores the workspace titlebar adjustment', () => {
+		const store = createLocalSettingsStore();
+		expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(0);
+		store.set('workspaceWindowTitlebarHeightDeltaPx', 6);
+		expect(store.snapshot().workspaceWindowTitlebarHeightDeltaPx).toBe(6);
+		const restored = createLocalSettingsStore();
+		expect(restored.workspaceWindowTitlebarHeightDeltaPx).toBe(6);
+		store.set('workspaceWindowTitlebarHeightDeltaPx', -9);
+		expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(-2);
+		store.set('workspaceWindowTitlebarHeightDeltaPx', 9);
+		expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(6);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('normalizes malformed persisted workspace titlebar adjustments', () => {
+		for (const [value, expected] of [
+			[-9, -2],
+			[9, 6],
+			[2.4, 2],
+			['6', 0],
+			[null, 0],
+		] as const) {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ workspaceWindowTitlebarHeightDeltaPx: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(expected);
+			store.destroy();
+		}
+	});
+
+	it('applies workspace titlebar adjustments from another tab and storage clear', () => {
+		const store = createLocalSettingsStore();
+		const changed = JSON.stringify({
+			...store.snapshot(),
+			workspaceWindowTitlebarHeightDeltaPx: -2,
+		});
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, changed);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: changed,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(-2);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(0);
+		store.destroy();
+	});
+
 	it('persists tool-use combination independently of tool expansion', () => {
 		const store = createLocalSettingsStore();
 		store.toggle('combineToolUseMessages');
