@@ -39,7 +39,12 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
         expect(await node.getAgentIntegration(integrationClass.integrationId)).toBe(integration);
       }
       expect((await node.getFilesService()).read).toBeFunction();
-      for (const service of [node.getProcessService, node.getGitService, node.getTerminalService]) {
+      expect(info.services.terminals).toBe(true);
+      const terminals = await node.getTerminalService();
+      expect(await terminals.list({ key: 'synthetic-principal', expiresAtMs: null })).toMatchObject({
+        success: true, terminalRuntimeId: expect.any(String), attachmentEpoch: expect.any(String), terminals: [],
+      });
+      for (const service of [node.getProcessService, node.getGitService]) {
         await expect(service.call(node)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
       }
       await node.dispose();

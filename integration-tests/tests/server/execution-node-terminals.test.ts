@@ -61,6 +61,19 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-node-dia
       expect((await list(client, nodeId)).terminals[0]).toMatchObject({ terminalId, exitCode: 7 });
       await client.delete('/api/v1/terminals', { terminalId, requestId: 'synthetic-terminate' });
       expect((await list(client, nodeId)).terminals).toEqual([]);
+      if (backend !== 'in-process') {
+        await fixture.crashAndRestartExecutionWorker();
+        const replacement = await list(client, nodeId);
+        expect(replacement.terminalRuntimeId).not.toBe(inventory.terminalRuntimeId);
+        expect(replacement.terminals).toEqual([]);
+        await expect(client.post('/api/v1/terminals', request)).rejects.toMatchObject({
+          status: 409, body: { errorCode: 'terminal-runtime-changed' },
+        });
+        await expect(client.delete('/api/v1/terminals', { terminalId, requestId: 'stale-terminate' })).rejects.toMatchObject({
+          status: 409, body: { errorCode: 'terminal-runtime-changed' },
+        });
+        expect((await list(client, nodeId)).terminals).toEqual([]);
+      }
     }, { executionBackend: backend, projectRoots: 'separate', serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' } });
   }, 60_000);
 }
