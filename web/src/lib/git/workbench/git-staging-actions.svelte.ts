@@ -18,6 +18,8 @@ import type {
 import type { GitLineSelectionState } from '$lib/git/review/git-line-selection.svelte.js';
 
 export type GitOperationKey =
+	| 'stage-selected-lines'
+	| 'unstage-selected-lines'
 	| `stage-file:${string}`
 	| `unstage-file:${string}`
 	| `stage-dir:${string}`
@@ -232,13 +234,38 @@ export class GitStagingActions {
 	): Promise<boolean> {
 		const groups = this.deps.lineSelection.groupSelectedLineIndicesByTarget(mode);
 		if (groups.length === 0) return false;
-		const results = [];
-		for (const group of groups) {
-			if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation())
-				return false;
-			results.push(await this.stageSelectionForTarget(project, group.target, group.lineIndices));
-		}
-		return results.every(Boolean);
+		return this.withPendingGitMutation(
+			project,
+			`${mode}-selected-lines`,
+			async () => {
+				for (const { target, lineIndices } of groups) {
+					if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation())
+						return false;
+					const result = await gitStageSelection(
+						project,
+						target.filePath,
+						target.mode,
+						lineIndices,
+						target.contextLines,
+						target.proof,
+					);
+					if (!result.success) return false;
+					if (this.deps.isCurrentTarget(project)) {
+						this.deps.lineSelection.clearSelectionForFile(target.filePath, target.tab);
+					}
+				}
+				if (this.deps.isCurrentTarget(project)) {
+					await this.deps.refreshAfterGitAction(project, {
+						reason: 'git-action',
+						preferSelectedFile: true,
+					});
+				}
+				return true;
+			},
+			mode === 'stage'
+				? m.git_action_stage_selection_failed()
+				: m.git_action_unstage_selection_failed(),
+		);
 	}
 
 	private async stageSelectionForTarget(
