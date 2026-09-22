@@ -1916,7 +1916,7 @@ describe("commit message generation", () => {
           "src/a.ts",
           "src/b.ts",
         ],
-        options: { disableOptionalLocks: true },
+        options: { disableOptionalLocks: true, maxStdoutBytes: 320_000, truncateStdout: true },
       },
     ]);
   });

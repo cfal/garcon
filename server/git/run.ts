@@ -1,6 +1,7 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
+import { assertGitWorkingPath, gitOperationOptions, markGitOutputTruncated, trackGitProcess } from './operation-context.js';
 import type {
   GitCommandOptions,
   GitCommandResult,
@@ -178,12 +179,12 @@ async function runGitProcess(
         }
         return '';
       });
+    const diagnosticOutput = options.truncateStdout === true;
+    const stdoutLimit = diagnosticOutput ? options.maxStdoutBytes ?? 32_768 : options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES;
     const [stdout, stderr, exitCode] = await Promise.all([
-      captureOutput(readGitOutput(
-        proc.stdout,
-        'stdout',
-        options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES,
-      )),
+      captureOutput(diagnosticOutput
+        ? readTextStreamPrefix(proc.stdout, stdoutLimit)
+        : readGitOutput(proc.stdout, 'stdout', stdoutLimit)),
       captureOutput(readTextStreamPrefix(
         proc.stderr,
         options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
@@ -193,6 +194,7 @@ async function runGitProcess(
       abortState.signal?.removeEventListener('abort', abortListener);
       abortState.cleanup();
     });
+    if (diagnosticOutput && Buffer.byteLength(stdout) >= stdoutLimit) markGitOutputTruncated();
     if (outputLimitError) throw outputLimitError;
     if (exitCode === 0) return { stdout, stderr };
 
@@ -225,7 +227,7 @@ export async function runGit(
   args: string[],
   options: GitCommandOptions = {},
 ): Promise<GitCommandResult> {
-  return runGitProcess(cwd, args, options, 'ignore');
+  return trackGitProcess(() => runGitProcess(cwd, args, gitOperationOptions(options), 'ignore'));
 }
 
 // Runs git and appends safe command timing metadata when a trace is provided.
@@ -268,13 +270,48 @@ export async function runGitWithStdin(
   input: string,
   options: GitCommandOptions = {},
 ): Promise<GitCommandResult> {
-  return runGitProcess(cwd, args, options, new Blob([input]));
+  return trackGitProcess(() => runGitProcess(cwd, args, gitOperationOptions(options), new Blob([input])));
+}
+
+export async function runGitCleanup(cwd: string, args: string[]): Promise<void> {
+  await trackGitProcess(() => runGitProcess(cwd, args, { timeoutMs: 2000, env: { GIT_TERMINAL_PROMPT: '0' } }, 'ignore'));
+}
+
+export function readGitBlobPrefix(cwd: string, object: string, signal?: AbortSignal): Promise<Buffer> {
+  return trackGitProcess(async () => {
+    const options = gitOperationOptions(readOnlyGitOptions({ signal }));
+    const abort = createGitAbortState(options, options.timeoutMs ?? GIT_DEFAULT_TIMEOUT_MS);
+    let process: Bun.Subprocess<'ignore', 'pipe', 'ignore'> | undefined;
+    try {
+      process = Bun.spawn(['git', 'show', object], { cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', signal: abort.signal, env: gitCommandEnv(options) });
+      const reader = process.stdout.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (size < 8192) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          const bytes = chunk.value.subarray(0, 8192 - size);
+          chunks.push(bytes);
+          size += bytes.length;
+        }
+        return Buffer.concat(chunks, size);
+      } finally {
+        process.kill();
+        await reader.cancel().catch(() => undefined);
+      }
+    } finally {
+      if (process) { process.kill(); await process.exited; }
+      abort.cleanup();
+    }
+  });
 }
 
 // Detects binary files by checking for null bytes in the first 8KB.
 // This is the same heuristic Git uses in its buffer_is_binary() function.
 export async function isBinaryFile(filePath: string): Promise<boolean> {
   try {
+    await assertGitWorkingPath(filePath);
     const fileHandle = await fs.open(filePath, 'r');
     try {
       const buf = Buffer.alloc(8192);

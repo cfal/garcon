@@ -33,6 +33,7 @@ const WORKTREE_STAT_CONCURRENCY = 32;
 const logger = createLogger("git:worktrees");
 
 interface WorktreeOperationOptions {
+  assertProjectPathAllowed?: (projectPath: string) => Promise<string>;
   // Forces the Git-backed source for differential parity tests.
   source?: "auto" | "git";
 }
@@ -79,6 +80,7 @@ function normalizeWorktreeRecords(
 async function collectWorktrees(
   { projectPath, trace }: ProjectOptions,
   source: "auto" | "git",
+  assertProjectPathAllowed?: (projectPath: string) => Promise<string>,
 ): Promise<{
   currentWorktreePath: string;
   worktrees: WorktreeInfo[];
@@ -110,7 +112,14 @@ async function collectWorktrees(
   }
 
   records ??= await readPorcelainWorktreeRecords(projectPath, trace);
-  const worktrees = normalizeWorktreeRecords(records, projectPath);
+  const worktrees: WorktreeInfo[] = [];
+  for (const worktree of normalizeWorktreeRecords(records, projectPath)) {
+    if (assertProjectPathAllowed) {
+      try { await assertProjectPathAllowed(worktree.path); }
+      catch { continue; }
+    }
+    worktrees.push(worktree);
+  }
   await mapWithConcurrency(
     worktrees,
     WORKTREE_STAT_CONCURRENCY,
@@ -121,7 +130,7 @@ async function collectWorktrees(
 }
 
 export function createWorktreeOperations(
-  { source = "auto" }: WorktreeOperationOptions = {},
+  { source = "auto", assertProjectPathAllowed }: WorktreeOperationOptions = {},
 ) {
   // Lightweight git capability probe. Reports whether a path is inside a
   // git repository and, if so, the repository root and current worktree path.
@@ -158,7 +167,7 @@ export function createWorktreeOperations(
     projectPath,
     trace,
   }: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }> {
-    const { worktrees } = await collectWorktrees({ projectPath, trace }, source);
+    const { worktrees } = await collectWorktrees({ projectPath, trace }, source, assertProjectPathAllowed);
     return { worktrees };
   }
 
@@ -169,6 +178,7 @@ export function createWorktreeOperations(
     const { currentWorktreePath, worktrees } = await collectWorktrees(
       { projectPath, trace },
       source,
+      assertProjectPathAllowed,
     );
     const targets: TargetCandidate[] = [];
     const seen = new Set<string>();

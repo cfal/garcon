@@ -38,6 +38,7 @@ function registration(
 function patchBody(path = 'src/file.ts') {
   return {
     path,
+    patchDigest: '282a2db76b7b6a37366d552d1d46808d923519b79e25291603bb4556d8960e4e',
     bodyFingerprint: `fingerprint:${path}`,
     bodyState: 'loaded',
     category: 'normal',

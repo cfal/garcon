@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { GitDomainError } from './git-types.js';
 import type {
   GitCommitFileStatus,
@@ -108,6 +108,7 @@ export interface RegisteredGitReviewDocument {
   source: GitReviewDocumentSource;
   filesByPath: ReadonlyMap<string, RegisteredGitReviewFile>;
   workingPathTokens: ReadonlyMap<string, GitWorkingPathToken>;
+  patchDigests: Map<string, string>;
   createdAt: number;
   lastAccessedAt: number;
 }
@@ -220,6 +221,7 @@ export class GitReviewDocumentRegistry {
       source: input.source,
       filesByPath: new Map(input.files.map((file) => [file.path, file])),
       workingPathTokens: new Map(input.workingPathTokens),
+      patchDigests: new Map(),
       createdAt: now,
       lastAccessedAt: now,
       leaseCount: 0,
@@ -236,7 +238,7 @@ export class GitReviewDocumentRegistry {
   acquire(projectPath: string, documentId: string): GitReviewDocumentLease | null {
     this.prune();
     const document = this.documents.get(documentId);
-    if (!document || document.projectPath !== projectPath) return null;
+    if (!document || document.superseded || document.projectPath !== projectPath) return null;
     document.leaseCount += 1;
     document.lastAccessedAt = this.now();
     let released = false;
@@ -251,8 +253,15 @@ export class GitReviewDocumentRegistry {
           if (!file || file.bodyFingerprint !== body.bodyFingerprint) {
             throw new Error(`Refusing to cache an invalid review body for ${body.path}.`);
           }
+          if (body.patch !== null) {
+            const digest = createHash('sha256').update(body.patch, 'utf8').digest('hex');
+            const previous = document.patchDigests.get(body.path);
+            if (previous && previous !== digest) throw new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
+            body.patchDigest = digest;
+          }
         }
         for (const body of validatedBodies) {
+          if (body.patchDigest) document.patchDigests.set(body.path, body.patchDigest);
           const previous = document.bodies.get(body.path);
           if (previous) {
             document.bodyBytes -= previous.patchBytes;

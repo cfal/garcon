@@ -1,3 +1,4 @@
+import { assertGitWorkingPath } from './operation-context.js';
 import { promises as fs } from 'fs';
 import {
   assertGitRepository,
@@ -145,6 +146,7 @@ async function readStageBlob(
 async function readWorkingConflictContent(projectPath: string, file: string): Promise<GitConflictContent> {
   try {
     const workingPath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(workingPath);
     const stats = await fs.stat(workingPath);
     if (stats.size > MAX_CONFLICT_CONTENT_BYTES) {
       return {
@@ -236,6 +238,7 @@ async function markConflictResolved({
 }: FileOptions): Promise<{ success: boolean }> {
   await assertGitRepository(projectPath);
   const workingPath = resolvePathWithinProject(projectPath, file);
+  await assertGitWorkingPath(workingPath);
   const working = await fs.readFile(workingPath, 'utf-8');
   if (/^(<<<<<<<|=======|>>>>>>>)/m.test(working)) {
     throw new GitDomainError(

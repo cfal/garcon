@@ -22,6 +22,7 @@ export interface GitCommandResult {
 }
 
 export interface GitCommandOptions {
+  truncateStdout?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   disableOptionalLocks?: boolean;
@@ -171,8 +172,13 @@ export type GitComparisonFreshnessOptions = LocalGitOptions<SharedGit.GitCompari
 export type GitWorkbenchSnapshotOptions = LocalGitOptions<SharedGit.GitWorkbenchSnapshotOptions>;
 export type GitWorkingTreeFingerprintOptions = LocalGitOptions<SharedGit.GitWorkingTreeFingerprintOptions>;
 export type GitQuickSummaryOptions = LocalGitOptions<SharedGit.GitQuickSummaryOptions>;
-export type StageSelectionOptions = LocalGitOptions<SharedGit.StageSelectionOptions>;
-export type StageHunkOptions = LocalGitOptions<SharedGit.StageHunkOptions>;
+export type StageSelectionOptions = LocalGitOptions<SharedGit.StageSelectionOptions> & GitStageProvenance;
+export type StageHunkOptions = LocalGitOptions<SharedGit.StageHunkOptions> & GitStageProvenance;
+export interface GitStageProvenance {
+  documentId?: string;
+  bodyFingerprint?: string;
+  patchDigest?: string;
+}
 export type ConflictDetailsOptions = LocalGitOptions<SharedGit.ConflictDetailsOptions>;
 export type ConflictAcceptOptions = LocalGitOptions<SharedGit.ConflictAcceptOptions>;
 export type StashCreateOptions = LocalGitOptions<SharedGit.StashCreateOptions>;
@@ -187,7 +193,7 @@ export type StagePathsOptions = LocalGitOptions<SharedGit.StagePathsOptions>;
 export type RevertCommitOptions = LocalGitOptions<SharedGit.RevertCommitOptions>;
 export type MutableTreeNode = Omit<TreeNode, 'children'> & { children?: TreeMap | TreeNode[] };
 export type TreeMap = Map<string, MutableTreeNode>;
-export type GitOperations = { [K in SharedGit.GitMethod]: (options: LocalGitOptions<SharedGit.GitRequests[K]>) => Promise<SharedGit.GitResults[K]> };
+export type GitOperations = { [K in SharedGit.GitMethod]: (options: LocalGitOptions<SharedGit.GitRequests[K]> & GitStageProvenance) => Promise<SharedGit.GitResults[K]> };
 export interface GitService extends GitOperations {
   generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<CommitMessageGenerationResult>;
   toHttpError(error: unknown): Response;

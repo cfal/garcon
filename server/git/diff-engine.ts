@@ -1,3 +1,4 @@
+import { assertGitWorkingPath } from './operation-context.js';
 import type { GitMutationResult } from '../../common/git.js';
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
@@ -7,6 +8,7 @@ import {
   GIT_WORKING_TREE_FINGERPRINT_VERSION,
 } from './types.js';
 import { GitDomainError } from './git-types.js';
+import { createReviewDocumentOperations } from './review-document-service.js';
 import type {
   ChangeEntry,
   ChangeFacet,
@@ -36,8 +38,9 @@ import type {
 } from './types.js';
 import {
   assertGitRepository,
-  gitCommandEnv,
   isBinaryFile,
+  readGitBlobPrefix,
+  runGitCleanup,
   isFileUntracked,
   readOnlyGitOptions,
   resolvePathWithinProject,
@@ -441,6 +444,7 @@ function hashString(input: string): string {
 }
 
 async function hashFilePrefix(filePath: string): Promise<string> {
+  await assertGitWorkingPath(filePath);
   const handle = await fs.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(65_536);
@@ -484,6 +488,7 @@ async function worktreeFingerprint(
 ): Promise<string> {
   try {
     const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
     if (!stats.isFile()) return `not-file:${stats.size}:${stats.mtimeMs}`;
     const parts: Array<string | number> = [
@@ -568,6 +573,7 @@ async function loadFingerprintIndexEntryMap(
 async function worktreeStatFingerprint(projectPath: string, file: string): Promise<string> {
   try {
     const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
     const kind = stats.isFile() ? 'file' : 'not-file';
     return [
@@ -749,6 +755,7 @@ async function buildBodyFingerprint(
 async function isBinaryWorktreeFile(projectPath: string, file: string): Promise<boolean> {
   try {
     const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
     return stats.isFile() && await isBinaryFile(filePath);
   } catch {
@@ -761,42 +768,8 @@ async function isBinaryIndexBlobPrefix(
   file: string,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  let proc: Bun.Subprocess<'ignore', 'pipe', 'ignore'> | null = null;
-  try {
-    proc = Bun.spawn(['git', 'show', `:${file}`], {
-      cwd: projectPath,
-      stdout: 'pipe',
-      stderr: 'ignore',
-      signal,
-      env: gitCommandEnv(readOnlyGitOptions({ signal })),
-    });
-    const reader = proc.stdout?.getReader();
-    if (!reader) {
-      await proc.exited.catch(() => {});
-      return false;
-    }
-
-    const chunks: Buffer[] = [];
-    let bytesRead = 0;
-    while (bytesRead < 8192) {
-      const next = await reader.read();
-      if (next.done || !next.value) break;
-      const remaining = 8192 - bytesRead;
-      const chunk = next.value.byteLength > remaining
-        ? next.value.subarray(0, remaining)
-        : next.value;
-      chunks.push(Buffer.from(chunk));
-      bytesRead += chunk.byteLength;
-      if (next.value.byteLength > remaining) break;
-    }
-
-    if (bytesRead >= 8192) proc.kill();
-    await proc.exited.catch(() => {});
-    return bytesRead > 0 && Buffer.concat(chunks, bytesRead).includes(0x00);
-  } catch {
-    proc?.kill();
-    return false;
-  }
+  try { return (await readGitBlobPrefix(projectPath, `:${file}`, signal)).includes(0x00); }
+  catch { return false; }
 }
 
 async function isSummaryBinaryFile(
@@ -1343,7 +1316,7 @@ async function stageSelection({
   mode,
   selection,
   contextLines = 5,
-}: StageSelectionOptions): Promise<GitMutationResult> {
+}: StageSelectionOptions, displayedPatch?: string): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const reverse = mode === 'unstage';
@@ -1360,7 +1333,7 @@ async function stageSelection({
     // operates on, so no translation is needed. Unstaged tab uses
     // `git diff`, staged tab uses `git diff --cached`.
     const diffArgs = tabDiffArgs(contextLines, file, reverse);
-    const { stdout: patchText } = await runGit(projectPath, diffArgs, readOnlyGitOptions());
+    const patchText = displayedPatch ?? (await runGit(projectPath, diffArgs, readOnlyGitOptions())).stdout;
 
     if (!patchText.trim()) {
       throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
@@ -1403,7 +1376,7 @@ async function stageSelection({
     return { success: true };
   } catch (err) {
     if (didIntentToAdd) {
-      try { await runGit(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
+      try { await runGitCleanup(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
     }
     throw err;
   }
@@ -1418,7 +1391,7 @@ async function stageHunk({
   mode,
   hunkIndex,
   contextLines = 5,
-}: StageHunkOptions): Promise<GitMutationResult> {
+}: StageHunkOptions, displayedPatch?: string): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const isUnstage = mode === 'unstage';
@@ -1431,7 +1404,7 @@ async function stageHunk({
 
   try {
     const diffArgs = tabDiffArgs(contextLines, file, isUnstage);
-    const { stdout: fullPatch } = await runGit(projectPath, diffArgs, readOnlyGitOptions());
+    const fullPatch = displayedPatch ?? (await runGit(projectPath, diffArgs, readOnlyGitOptions())).stdout;
     if (!fullPatch.trim()) {
       throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
     }
@@ -1452,7 +1425,7 @@ async function stageHunk({
     return { success: true };
   } catch (err) {
     if (didIntentToAdd) {
-      try { await runGit(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
+      try { await runGitCleanup(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
     }
     throw err;
   }
@@ -1460,12 +1433,30 @@ async function stageHunk({
 
 
 export function createDiffEngine(registry: GitReviewDocumentRegistry) {
+  const documents = createReviewDocumentOperations(registry);
+  async function displayedPatch(options: StageSelectionOptions | StageHunkOptions): Promise<string | undefined> {
+    if (!options.documentId) return undefined;
+    const stale = () => new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
+    const lease = registry.acquire(options.projectPath, options.documentId);
+    if (!lease) throw stale();
+    try {
+      const expectedMode = options.mode === 'stage' ? 'working' : 'staged';
+      if (lease.document.source.kind !== 'workbench' || lease.document.source.mode !== expectedMode
+        || lease.document.context !== options.contextLines
+        || lease.document.patchDigests.get(options.file) !== options.patchDigest) throw stale();
+      const response = await documents.getReviewDocumentFileBodies({ projectPath: options.projectPath, documentId: options.documentId, files: [options.file], purpose: 'visible', signal: options.signal });
+      if (response.status !== 'ready') throw stale();
+      const body = response.files[options.file];
+      if (!body?.patch || body.bodyState !== 'loaded' || body.bodyFingerprint !== options.bodyFingerprint || body.patchDigest !== options.patchDigest) throw stale();
+      return body.patch;
+    } finally { lease.release(); }
+  }
   return {
     getWorkbenchSnapshot: (options: GitWorkbenchSnapshotOptions) =>
       getWorkbenchSnapshot(options, registry),
     getWorkingTreeFingerprint,
-    stageSelection,
-    stageHunk,
+    stageSelection: async (options: StageSelectionOptions) => stageSelection(options, await displayedPatch(options)),
+    stageHunk: async (options: StageHunkOptions) => stageHunk(options, await displayedPatch(options)),
   };
 }
 

@@ -1,3 +1,4 @@
+import { assertGitWorkingPath } from './operation-context.js';
 import type { GitMutationResult } from '../../common/git.js';
 import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
@@ -71,6 +72,7 @@ export async function discard({ projectPath, file }: FileOptions): Promise<GitMu
 
   if (status === '??') {
     const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
     if (stats.isDirectory()) {
       await fs.rm(filePath, { recursive: true, force: true });

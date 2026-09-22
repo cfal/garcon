@@ -95,17 +95,18 @@ export function ghHttpError(error: unknown): Response {
   return classifiedGhErrorToResponse(classifyGhError(error));
 }
 
-export function createGhOperations(): GhOperations {
+export function createGhOperations(statusDirectory = process.cwd()): GhOperations {
   return {
     async getStatus(signal): Promise<GhStatusResponse> {
       try {
         const raw = await runGhJson<GhAuthStatusJson>(
-          process.cwd(),
+          statusDirectory,
           ['auth', 'status', '--json', 'hosts'],
           { signal, timeoutMs: STATUS_TIMEOUT_MS },
         );
         return deriveGhStatus(raw);
       } catch (error) {
+        signal?.throwIfAborted();
         const status = deriveGhStatus(null, error);
         if (status.reason === 'unknown') logger.warn('[gh] failed to resolve gh auth status', error);
         return status;

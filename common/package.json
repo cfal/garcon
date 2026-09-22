@@ -47,6 +47,7 @@
     "./gh": "./gh.ts",
     "./git-refs": "./git-refs.ts",
     "./git": "./git.ts",
+    "./git-execution": "./git-execution.ts",
     "./handoff-sizing": "./handoff-sizing.ts",
     "./hidden-bash-command-patterns": "./hidden-bash-command-patterns.ts",
     "./http-error": "./http-error.ts",

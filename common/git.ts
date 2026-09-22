@@ -214,6 +214,7 @@ export interface GitReviewDocumentSummary {
 
 export interface GitReviewFilePatchBody {
   path: string;
+  patchDigest?: string;
   bodyFingerprint: string;
   bodyState: GitReviewBodyState;
   category: GitFileReviewCategory;

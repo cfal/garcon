@@ -1,3 +1,4 @@
+import { assertGitWorkingPath } from './operation-context.js';
 import { promises as fs } from 'fs';
 import { resolvePathWithinProject } from './run.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from './types.js';
@@ -58,6 +59,7 @@ async function inspectUntrackedFile(
     };
   }
 
+  await assertGitWorkingPath(resolvedPath);
   const handle = await fs.open(resolvedPath, 'r');
   try {
     const stats = await handle.stat();

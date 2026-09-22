@@ -1,9 +1,10 @@
-import type { GitMethod, GitRequests, GitResults } from '@garcon/common/git';
+import type { GitMethod } from '@garcon/common/git';
+import type { ExecutionGitRequests, ExecutionGitResults } from '@garcon/common/git-execution';
 import type { GhStatusResponse, PullRequestListResult, PullRequestDetail } from '@garcon/common/gh';
 import type { NodeCallOptions } from './resources.js';
 
 export type ExecutionGitService = {
-  [K in GitMethod]: (request: GitRequests[K], options?: NodeCallOptions) => Promise<GitResults[K]>;
+  [K in GitMethod]: (request: ExecutionGitRequests[K], options?: NodeCallOptions) => Promise<ExecutionGitResults[K]>;
 };
 
 export interface ExecutionGhService {

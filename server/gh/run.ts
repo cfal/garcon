@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { gitOperationOptions, trackGitProcess } from '../git/operation-context.js';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
 import type { GhCommandOptions, GhCommandResult, GhProcessError } from './gh-types.js';
 
@@ -57,6 +58,10 @@ export async function runGh(
   args: string[],
   options: GhCommandOptions = {},
 ): Promise<GhCommandResult> {
+  return trackGitProcess(() => runGhProcess(cwd, args, gitOperationOptions({ ...options, disableOptionalLocks: true })));
+}
+
+async function runGhProcess(cwd: string, args: string[], options: GhCommandOptions): Promise<GhCommandResult> {
   const timeoutMs = options.timeoutMs ?? GH_DEFAULT_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = options.signal

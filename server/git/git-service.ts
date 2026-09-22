@@ -65,15 +65,14 @@ export function gitHttpError(error: unknown, classifyGitError: CreateGitServiceO
   return classifiedGitErrorToResponse(classifyGitError(error));
 }
 
-export function createGitOperations({ assertProjectPathAllowed }: Pick<CreateGitServiceOptions, 'assertProjectPathAllowed'> = {}): GitOperations {
+export function createGitOperations({ assertProjectPathAllowed, reviewRegistry = new GitReviewDocumentRegistry() }: Pick<CreateGitServiceOptions, 'assertProjectPathAllowed'> & { reviewRegistry?: GitReviewDocumentRegistry } = {}): GitOperations {
   const status = createStatusOperations();
-  const reviewRegistry = new GitReviewDocumentRegistry();
   const diff = createDiffEngine(reviewRegistry);
   const commitHistory = createCommitHistoryOperations(reviewRegistry);
   const comparison = createComparisonOperations(reviewRegistry, assertProjectPathAllowed);
   const reviewDocuments = createReviewDocumentOperations(reviewRegistry);
   const porcelain = createPorcelainOperations();
-  const worktrees = createWorktreeOperations();
+  const worktrees = createWorktreeOperations({ assertProjectPathAllowed });
   const quickSummary = createQuickSummaryOperations();
 
   return {

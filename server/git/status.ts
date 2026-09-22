@@ -1,16 +1,15 @@
+import { assertGitWorkingPath } from './operation-context.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { GitDomainError } from './git-types.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
-import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS, type GitCommandOptions } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
-import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { probeWorktreeLayout } from './worktree-layout.js';
 import { isExpectedMissingGitResult } from './comparison-errors.js';
 import { commitSelectedFiles } from './selected-file-commit.js';
+import { withRepositoryMutation } from './repository-coordination.js';
 import { discard } from './discard.js';
 import type {
   BranchOptions,
@@ -68,26 +67,16 @@ export function resolveNetworkGitTimeoutMs(idleSeconds: number): number {
 
 function networkGitOptions(): GitCommandOptions {
   return {
-    timeoutMs: resolveNetworkGitTimeoutMs(getHttpIdleTimeoutSeconds()),
+    timeoutMs: NETWORK_GIT_DEFAULT_TIMEOUT_MS,
     // Fails fast on credential prompts instead of hanging until the timeout.
     env: { GIT_TERMINAL_PROMPT: '0' },
   };
 }
-const repositoryCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
-  options?: { disableOptionalLocks?: boolean },
+  options?: GitCommandOptions,
 ) => Promise<{ stdout: string }>;
-
-async function runWithRepositoryCommitLock<T>(
-  projectPath: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const layout = await probeWorktreeLayout(projectPath);
-  const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
-  return repositoryCommitLock.runExclusive(lockKey, operation);
-}
 
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
@@ -339,9 +328,10 @@ export async function collectCommitMessageDiffContext(
         `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
         '--',
         ...chunk,
-        ], readOnlyGitOptions({ signal }));
+        ], readOnlyGitOptions({ signal, maxStdoutBytes: 320_000, truncateStdout: true }));
       if (stdout) {
-        diffContext += `${diffContext ? '\n' : ''}${stdout}`;
+        diffContext = `${diffContext}${diffContext ? '\n' : ''}${stdout}`.slice(0, 80_000);
+        if (diffContext.length === 80_000) break;
       }
       } catch (error) {
         if (signal?.aborted) throw error;
@@ -462,7 +452,7 @@ export function createStatusOperations() {
         );
       }
     }
-    return runWithRepositoryCommitLock(projectPath, async () => {
+    return withRepositoryMutation(projectPath, async () => {
       if (!(await requiresWholeIndexCommit(projectPath))) {
         const result = await commitSelectedFiles(projectPath, message, files);
         return { success: true, ...result, commitScope: 'selected-files' };
@@ -753,6 +743,7 @@ export function createStatusOperations() {
     }
 
     const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
     if (stats.isDirectory()) {
       await fs.rm(filePath, { recursive: true, force: true });
@@ -765,7 +756,7 @@ export function createStatusOperations() {
 
   async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
-    return runWithRepositoryCommitLock(projectPath, async () => {
+    return withRepositoryMutation(projectPath, async () => {
       const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
       return { success: true, output: stdout };
     });
