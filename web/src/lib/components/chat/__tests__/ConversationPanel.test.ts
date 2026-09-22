@@ -15,6 +15,9 @@ import type { ChatQueueState } from '$lib/types/chat.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
+import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+
+const executionNodes = new ExecutionNodesStore();
 
 const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
@@ -25,6 +28,7 @@ const runtime = vi.hoisted(() => ({
 }));
 
 vi.mock('$lib/context', () => ({
+	getExecutionNodes: () => executionNodes,
 	getAppShell: () => ({ isMobile: false }),
 	getChatSessions: () => ({ isChatProcessing: () => runtime.processing }),
 	getConversationUi: () => ({

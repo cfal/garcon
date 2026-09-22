@@ -18,6 +18,8 @@ function makeStartup(modelSelectionError: string | null = null): NewChatFormStat
 	return {
 		nodeId: 'local',
 		localMachine: true,
+		gitAvailable: true,
+		filesAvailable: true,
 		agentId: 'claude',
 		modelValue: 'opus',
 		modelSelectionTarget: null,

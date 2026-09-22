@@ -25,6 +25,8 @@ import {
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import * as m from '$lib/paraglide/messages.js';
 import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
+import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
+import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 
 const {
 	closeSurface,
@@ -140,7 +142,15 @@ vi.mock('$lib/context', () => ({
 			return runtime.terminalSessions;
 		},
 	}),
-	getGhCapability: () => ({ hasChecked: true, available: true }),
+	getGhCapability: () => ({
+		forNode: (_nodeId: string) =>
+			({ hasChecked: true, available: true }) satisfies Pick<
+				ReturnType<GhCapabilityStore['forNode']>,
+				'hasChecked' | 'available'
+			>,
+	}),
+	getWorkspaceContext: () =>
+		({ currentTarget: null }) satisfies Pick<WorkspaceContextStore, 'currentTarget'>,
 	getOptionalTransientLayers: () => null,
 }));
 

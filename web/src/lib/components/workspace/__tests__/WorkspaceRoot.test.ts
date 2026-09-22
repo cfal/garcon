@@ -33,6 +33,9 @@ import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { findWorkspaceChatPlacement } from '$lib/workspace/workspace-chat-placement.js';
 import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
+import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
+import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -45,6 +48,9 @@ vi.mock('$lib/context', () => ({
 	getChatSessions: () => testContext.current?.sessions,
 	getFileSessions: () => testContext.current?.fileSessions,
 	getGhCapability: () => testContext.current?.ghCapability,
+	getExecutionNodes: () => testContext.current?.executionNodes,
+	getWorkspaceContext: () =>
+		({ currentTarget: null }) satisfies Pick<WorkspaceContextStore, 'currentTarget'>,
 	getGitBranchActions: () => testContext.current?.gitBranchActions,
 	getLocalSettings: () => testContext.current?.localSettings,
 	getGitQuickSummary: () => testContext.current?.gitQuickSummary,
@@ -450,7 +456,14 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 			setVisibleProjects: vi.fn(),
 			reconcilePolling: vi.fn(),
 		},
-		ghCapability: { hasChecked: true, available: true },
+		executionNodes: new ExecutionNodesStore(),
+		ghCapability: {
+			forNode: (_nodeId: string) =>
+				({ hasChecked: true, available: true }) satisfies Pick<
+					ReturnType<GhCapabilityStore['forNode']>,
+					'hasChecked' | 'available'
+				>,
+		},
 		notifications: { error: vi.fn() },
 		projectResolution,
 	};
