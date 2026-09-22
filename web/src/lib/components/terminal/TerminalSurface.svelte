@@ -256,10 +256,13 @@
 			<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
 				<select
 					bind:this={sessionPicker}
-					class="select-native select-native-surface min-w-24 max-w-56 truncate text-base md:pointer-fine:text-xs"
+					class="select-native select-native-surface min-w-0 max-w-56 flex-1 truncate text-base md:pointer-fine:text-xs"
 					value={terminalId}
 					onchange={(event) => selectTerminal(event.currentTarget.value)}
 					aria-label={m.terminal_session()}
+					title={session
+						? `${terminals.displayName(session.metadata)} - ${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory} - ${attachmentLabel(session.attachmentState)}`
+						: undefined}
 				>
 					{#each terminals.orderedSessions as item (item.metadata.terminalId)}
 						{@const placement = placementLabel(item.metadata.terminalId)}
@@ -273,7 +276,7 @@
 				</select>
 				{#if session}
 					<span
-						class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+						class="terminal-context min-w-0 flex-1 truncate text-xs text-muted-foreground"
 						title={m.terminal_initial_working_directory({
 							path: `${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory}`,
 						})}
@@ -282,7 +285,7 @@
 							path: `${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory}`,
 						})}
 					</span>
-					<span class="shrink-0 text-[11px] text-muted-foreground"
+					<span class="terminal-context shrink-0 text-[11px] text-muted-foreground"
 						>{attachmentLabel(session.attachmentState)}</span
 					>
 				{/if}
@@ -294,11 +297,12 @@
 				defaultNodeId={terminals.nodeIdFor(terminalId)}
 				oncreate={(nodeId) => void createTerminal(nodeId)}
 			/>
-			<ResponsiveSurfaceActions
-				actions={toolbarActions}
-				menuLabel={m.workspace_surface_actions()}
-				class="max-w-28"
-			/>
+			<div class="terminal-actions">
+				<ResponsiveSurfaceActions
+					actions={toolbarActions}
+					menuLabel={m.workspace_surface_actions()}
+				/>
+			</div>
 			<TerminalSettingsMenu />
 			<button
 				type="button"
@@ -388,6 +392,23 @@
 />
 
 <style>
+	.terminal-context {
+		display: none;
+	}
+	.terminal-actions {
+		display: flex;
+		flex: 0 0 auto;
+		width: 2rem;
+	}
+	@container surface-toolbar (min-width: 36rem) {
+		.terminal-context {
+			display: block;
+		}
+		.terminal-actions {
+			width: 7rem;
+		}
+	}
+
 	.mobile-terminal-host :global(.xterm) {
 		padding-inline-start: max(0.5rem, var(--safe-area-inset-left, 0px));
 		padding-inline-end: max(0.5rem, var(--safe-area-inset-right, 0px));

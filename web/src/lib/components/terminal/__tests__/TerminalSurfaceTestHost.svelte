@@ -34,6 +34,7 @@
 		runtimeDelay?: Promise<void>;
 		runtimeDelays?: Readonly<Record<string, Promise<void>>>;
 		runtimeError?: string | null;
+		attachmentState?: TerminalClientSession['attachmentState'];
 		createError?: Error | null;
 		closeError?: Error | null;
 	}
@@ -55,6 +56,7 @@
 		runtimeDelay,
 		runtimeDelays,
 		runtimeError = null,
+		attachmentState = 'attached',
 		createError = null,
 		closeError = null,
 	}: Props = $props();
@@ -76,7 +78,7 @@
 				exitCode: null,
 				latestOutputSequence: 0,
 			},
-			attachmentState: 'attached',
+			attachmentState,
 			runtimeState: runtimeError ? 'failed' : 'ready',
 			runtimeError,
 			runtimeErrorRequiresPageReload: false,

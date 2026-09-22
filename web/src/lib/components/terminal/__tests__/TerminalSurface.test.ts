@@ -26,6 +26,14 @@ describe('TerminalSurface', () => {
 		expect(screen.getByRole('option', { name: 'Build logs - running' })).toBeTruthy();
 	});
 
+	it('keeps attachment status in the mobile session picker title', async () => {
+		const view = render(TerminalSurfaceTestHost, { host: 'mobile' });
+		const picker = screen.getByRole('combobox', { name: 'Terminal session' });
+		expect(picker.getAttribute('title')).toBe('Local 1 - Local: /workspace/project - Attached');
+		await view.rerender({ attachmentState: 'taken-over' });
+		expect(picker.getAttribute('title')).toBe('Local 1 - Local: /workspace/project - Taken over');
+	});
+
 	it('shows input helpers on a coarse-pointer desktop', async () => {
 		const originalMatchMedia = window.matchMedia;
 		Object.defineProperty(window, 'matchMedia', {
