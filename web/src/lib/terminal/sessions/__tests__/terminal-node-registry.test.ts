@@ -139,6 +139,21 @@ function setup(options: { realTransport?: boolean } = {}) {
 }
 
 describe('node-qualified terminal registry', () => {
+	it('restores terminals without Promise.withResolvers support', async () => {
+		const unsupported = vi.spyOn(Promise, 'withResolvers').mockImplementation(() => {
+			throw new TypeError('Promise.withResolvers is not a function');
+		});
+		try {
+			const { registry, sent } = setup({ realTransport: true });
+			await registry.initialize();
+			await vi.waitFor(() =>
+				expect(sent.filter((message) => message.type === 'terminal-attach')).toHaveLength(2),
+			);
+		} finally {
+			unsupported.mockRestore();
+		}
+	});
+
 	it.each(['initial connection', 'browser reconnect'])(
 		'restores each ready host independently on %s',
 		async (phase) => {
@@ -177,6 +192,118 @@ describe('node-qualified terminal registry', () => {
 			await vi.waitFor(() => expect(attachmentCount(remoteId)).toBe(remoteAttachments + 1));
 		},
 	);
+
+	it('restores a successful reconnect retry while another host inventory remains pending', async () => {
+		vi.useFakeTimers();
+		const { registry, list, sent, setConnected } = setup({ realTransport: true });
+		const attachments = (nodeId: string) =>
+			sent.filter(
+				(message) =>
+					message.type === 'terminal-attach' && message.terminalId === terminal(nodeId).terminalId,
+			);
+		await registry.initialize();
+		await vi.waitFor(() => expect(attachments('local')).toHaveLength(1));
+		await vi.waitFor(() => expect(attachments(remoteId)).toHaveLength(1));
+		setConnected(false);
+		const remote = Promise.withResolvers<TerminalListResponse>();
+		let localAttempts = 0;
+		list.mockImplementation(async (id = 'local') => {
+			if (id === remoteId) return remote.promise;
+			if (++localAttempts === 1) throw new Error('Transient inventory failure');
+			return inventory([terminal(id)]);
+		});
+		setConnected(true);
+		try {
+			await vi.waitFor(() => expect(registry.nodeInventories.local.status).toBe('failed'));
+			expect(registry.transportStatus).toBe('reconciling');
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(localAttempts).toBe(2);
+			expect(registry.nodeInventories.local.status).toBe('ready');
+			expect(registry.nodeInventories[remoteId].status).toBe('loading');
+			expect(registry.transportStatus).toBe('connected');
+			expect(attachments('local')).toHaveLength(2);
+			expect(attachments(remoteId)).toHaveLength(1);
+		} finally {
+			remote.resolve(inventory([terminal(remoteId)]));
+		}
+		await vi.waitFor(() => expect(attachments(remoteId)).toHaveLength(2));
+		expect(attachments('local')).toHaveLength(2);
+	});
+
+	it.each(['disconnect', 'logout', 'node loss', 'destroy'])(
+		'does not restore an interrupted inventory retry after %s',
+		async (interruption) => {
+			vi.useFakeTimers();
+			const { registry, nodes, list, sent, setConnected } = setup({ realTransport: true });
+			const attachments = () => sent.filter((message) => message.type === 'terminal-attach');
+			await registry.initialize();
+			await vi.waitFor(() => expect(attachments()).toHaveLength(2));
+			setConnected(false);
+			const remote = Promise.withResolvers<TerminalListResponse>();
+			const retry = Promise.withResolvers<TerminalListResponse>();
+			let localAttempts = 0;
+			list.mockImplementation(async (id = 'local') => {
+				if (id === remoteId) return remote.promise;
+				localAttempts += 1;
+				if (localAttempts === 1) throw new Error('Transient inventory failure');
+				if (localAttempts === 2) return retry.promise;
+				return inventory([terminal(id)]);
+			});
+			setConnected(true);
+			try {
+				await vi.waitFor(() => expect(registry.nodeInventories.local.status).toBe('failed'));
+				await vi.advanceTimersByTimeAsync(5_000);
+				expect(localAttempts).toBe(2);
+				if (interruption === 'disconnect') setConnected(false);
+				else if (interruption === 'logout') registry.authChanged(false);
+				else if (interruption === 'node loss') {
+					nodes.applySnapshot([node('local', 'offline'), node(remoteId)]);
+				} else registry.destroy();
+				retry.resolve(inventory([terminal('local')]));
+				await vi.advanceTimersByTimeAsync(0);
+				expect(attachments()).toHaveLength(2);
+				expect(registry.transportStatus).not.toBe('connected');
+
+				if (interruption === 'destroy') return;
+				if (interruption === 'disconnect') setConnected(true);
+				else if (interruption === 'logout') registry.authChanged(true);
+				else nodes.applySnapshot([node('local'), node(remoteId)]);
+				await vi.waitFor(() => expect(registry.transportStatus).toBe('connected'));
+				await vi.waitFor(() => expect(attachments()).toHaveLength(3));
+				expect(attachments()[2].terminalId).toBe(terminal('local').terminalId);
+			} finally {
+				retry.resolve(inventory([terminal('local')]));
+				remote.resolve(inventory([terminal(remoteId)]));
+			}
+			await vi.waitFor(() => expect(attachments()).toHaveLength(4));
+		},
+	);
+
+	it('retains reconciliation backoff when every reconnect inventory fails', async () => {
+		vi.useFakeTimers();
+		const { registry, list, sent, setConnected } = setup({ realTransport: true });
+		const attachments = () => sent.filter((message) => message.type === 'terminal-attach');
+		await registry.initialize();
+		await vi.waitFor(() => expect(attachments()).toHaveLength(2));
+		setConnected(false);
+		list.mockRejectedValue(new Error('Transient inventory failure'));
+		setConnected(true);
+		await vi.waitFor(() =>
+			expect(
+				Object.values(registry.nodeInventories).every(({ status }) => status === 'failed'),
+			).toBe(true),
+		);
+		expect(registry.transportStatus).toBe('reconciling');
+		expect(attachments()).toHaveLength(2);
+		list.mockImplementation(async (id = 'local') => {
+			if (id === remoteId) throw new Error('Remote inventory still unavailable');
+			return inventory([terminal(id)]);
+		});
+		await vi.advanceTimersByTimeAsync(500);
+		expect(registry.transportStatus).toBe('connected');
+		expect(attachments()).toHaveLength(3);
+		expect(attachments()[2].terminalId).toBe(terminal('local').terminalId);
+	});
 
 	it('restores confirmed attachments after logout and login clear their authority', async () => {
 		const { registry, sent, callbacks } = setup({ realTransport: true });

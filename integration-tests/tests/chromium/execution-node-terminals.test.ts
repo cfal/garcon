@@ -6,9 +6,22 @@ import { parseTerminalStreamServerMessage, type TerminalCreateResponse, type Ter
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 
-test('Local terminals attach while a remote inventory is pending', async () => {
-  await withChromiumFixture('terminal-independent-inventories', async ({ page, integration, assertNoBrowserErrors }) => {
+type TerminalReconnectScope = typeof globalThis & { __terminalSocket?: WebSocket };
+
+test('Local terminals attach and retry reconnect while a remote inventory is pending', async () => {
+  await withChromiumFixture('terminal-independent-inventories', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
     const { client } = integration;
+    await page.addInitScript(() => {
+      globalThis.WebSocket = new Proxy(globalThis.WebSocket, {
+        construct(Target, args: ConstructorParameters<typeof WebSocket>) {
+          const socket = new Target(...args);
+          if (new URL(String(args[0]), location.href).pathname === '/ws') {
+            (globalThis as TerminalReconnectScope).__terminalSocket = socket;
+          }
+          return socket;
+        },
+      });
+    });
     const ids: string[] = [];
     for (const nodeId of ['local', client.nodeId]) {
       const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?nodeId=${nodeId}`);
@@ -23,7 +36,7 @@ test('Local terminals attach while a remote inventory is pending', async () => {
       const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
       if (message) events.push(message);
     }));
-    const remoteInventory = Promise.withResolvers<void>();
+    let remoteInventory = Promise.withResolvers<void>();
     let remoteRequested = false;
     await page.route(`**/api/v1/terminals?nodeId=${client.nodeId}`, async route => {
       remoteRequested = true;
@@ -39,6 +52,31 @@ test('Local terminals attach while a remote inventory is pending', async () => {
     } finally { remoteInventory.resolve(); }
     await browserExpect.poll(() => attachments(ids[1]!).length).toBe(1);
     expect(attachments(ids[0]!)).toHaveLength(1);
+
+    markPhase('retrying Local inventory while the reconnect remote inventory remains pending');
+    remoteInventory = Promise.withResolvers<void>();
+    remoteRequested = false;
+    let localRequests = 0;
+    await page.route('**/api/v1/terminals?nodeId=local', async route => {
+      if (++localRequests > 1) return route.continue();
+      await route.fulfill({ status: 503, json: { success: false, error: 'Synthetic inventory interruption', code: 'terminal-unavailable' } });
+    });
+    await page.evaluate(() => {
+      const socket = (globalThis as TerminalReconnectScope).__terminalSocket;
+      if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Primary socket is not open');
+      socket.close(1000, 'Synthetic browser reconnect');
+    });
+    try {
+      await browserExpect.poll(() => remoteRequested).toBe(true);
+      await browserExpect.poll(() => attachments(ids[0]!).length, { timeout: 15_000 }).toBe(2);
+      expect(localRequests).toBe(2);
+      expect(attachments(ids[1]!)).toHaveLength(1);
+    } finally { remoteInventory.resolve(); }
+    await browserExpect.poll(() => attachments(ids[1]!).length).toBe(2);
+    expect(attachments(ids[0]!)).toHaveLength(2);
+    const expectedError = browserErrors.findIndex(error => error.includes('503 (Service Unavailable)'));
+    expect(expectedError).toBeGreaterThanOrEqual(0);
+    browserErrors.splice(expectedError, 1);
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate', serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' } });
 }, 60_000);

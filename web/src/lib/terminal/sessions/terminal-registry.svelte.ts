@@ -94,6 +94,7 @@ export class TerminalRegistry {
 	readonly #stopNodes: () => void;
 	#initialized = false;
 	#inventoryRetry: ReturnType<typeof setTimeout> | null = null;
+	#onInventoryReady: (() => void) | null = null;
 	sessions = $state<Record<string, TerminalClientSession>>({});
 	listStatus = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
 	listError = $state<string | null>(null);
@@ -210,16 +211,19 @@ export class TerminalRegistry {
 	}
 
 	async #reconcileConnection(): Promise<void> {
-		const hosts = this.hosts.filter((host) => host.available);
+		// Accepted inventories, including retries, release readiness; discarded replies do not.
+		let onInventoryReady!: () => void;
+		const readiness = new Promise<void>((resolve, reject) => {
+			onInventoryReady = resolve;
+			this.#onInventoryReady = resolve;
+			void Promise.allSettled(
+				this.hosts.filter((host) => host.available).map((host) => this.#refreshNode(host.id)),
+			).then(() => reject(new Error(this.listError ?? m.terminal_list_failed())));
+		});
 		try {
-			await Promise.any(
-				hosts.map(async (host) => {
-					await this.#listNode(host.id);
-					this.#restoreAttachments(host.id);
-				}),
-			);
-		} catch {
-			throw new Error(this.listError ?? m.terminal_list_failed());
+			await readiness;
+		} finally {
+			if (this.#onInventoryReady === onInventoryReady) this.#onInventoryReady = null;
 		}
 	}
 
@@ -289,6 +293,7 @@ export class TerminalRegistry {
 					this.orderedSessions.map((session) => session.metadata.terminalId),
 					nodeId,
 				);
+				this.#onInventoryReady?.();
 			} catch (error) {
 				if (this.#destroyed || version !== this.#nodeVersions.get(nodeId)) return;
 				this.nodeInventories[nodeId] = {
@@ -855,6 +860,7 @@ export class TerminalRegistry {
 	}
 
 	#invalidateAttachments(): void {
+		this.#onInventoryReady = null;
 		this.#attachmentRequests.clear();
 		this.#attachmentIds.clear();
 	}
