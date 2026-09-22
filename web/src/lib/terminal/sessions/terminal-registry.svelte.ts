@@ -128,9 +128,7 @@ export class TerminalRegistry {
 		this.#transport = (deps.createTransport ?? ((options) => new TerminalTransport(options)))({
 			connection: deps.connection,
 			onMessage: (message) => this.#handleMessage(message),
-			onConnected: async () => {
-				await this.list();
-			},
+			onConnected: () => this.#reconcileConnection(),
 			onReady: () => this.#restoreAttachments(),
 			onDisconnected: () => this.#markDisconnected(),
 		});
@@ -209,6 +207,20 @@ export class TerminalRegistry {
 		const results = await Promise.allSettled(hosts.map((host) => this.#listNode(host.id)));
 		if (!results.some((result) => result.status === 'fulfilled'))
 			throw new Error(this.listError ?? m.terminal_list_failed());
+	}
+
+	async #reconcileConnection(): Promise<void> {
+		const hosts = this.hosts.filter((host) => host.available);
+		try {
+			await Promise.any(
+				hosts.map(async (host) => {
+					await this.#listNode(host.id);
+					this.#restoreAttachments(host.id);
+				}),
+			);
+		} catch {
+			throw new Error(this.listError ?? m.terminal_list_failed());
+		}
 	}
 
 	async #listNode(nodeId: string): Promise<void> {
@@ -681,11 +693,24 @@ export class TerminalRegistry {
 		this.#sessionMutationVersions.set(terminalId, this.#sessionMutationVersion);
 	}
 
-	#restoreAttachments(): void {
-		if (this.#authSuspended) return;
+	#restoreAttachments(nodeId?: string): void {
+		if (this.#authSuspended || this.#transport.status !== 'connected') return;
 		for (const session of Object.values(this.sessions)) {
-			if (session.attachmentState === 'taken-over') continue;
-			void this.attach(session.metadata.terminalId, 'restore');
+			const id = session.metadata.terminalId;
+			const host = this.nodeIdFor(id);
+			if (nodeId !== undefined && nodeId !== host) continue;
+			if (
+				this.nodeInventories[host]?.status !== 'ready' ||
+				session.attachmentState === 'taken-over' ||
+				this.#attachmentRequests.has(id)
+			)
+				continue;
+			if (
+				this.#attachmentIds.has(id) &&
+				(session.attachmentState === 'attached' || session.attachmentState === 'connecting')
+			)
+				continue;
+			void this.attach(id, 'restore');
 		}
 	}
 
@@ -914,12 +939,7 @@ export class TerminalRegistry {
 		} catch {
 			return;
 		}
-		for (const session of this.orderedSessions)
-			if (
-				this.nodeIdFor(session.metadata.terminalId) === nodeId &&
-				!['attached', 'taken-over'].includes(session.attachmentState)
-			)
-				void this.attach(session.metadata.terminalId, 'restore');
+		this.#restoreAttachments(nodeId);
 	}
 
 	#scheduleInventoryRetry(): void {

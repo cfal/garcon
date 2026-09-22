@@ -2,9 +2,46 @@ import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
-import type { TerminalListResponse } from '../../../common/terminal.js';
+import { parseTerminalStreamServerMessage, type TerminalCreateResponse, type TerminalListResponse, type TerminalStreamServerMessage } from '../../../common/terminal.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
+
+test('Local terminals attach while a remote inventory is pending', async () => {
+  await withChromiumFixture('terminal-independent-inventories', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { client } = integration;
+    const ids: string[] = [];
+    for (const nodeId of ['local', client.nodeId]) {
+      const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?nodeId=${nodeId}`);
+      const { terminal } = await client.post<TerminalCreateResponse>('/api/v1/terminals', {
+        nodeId, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
+        requestId: `synthetic-create-${nodeId}`, requestedInitialWorkingDirectory: null,
+      });
+      ids.push(terminal.terminalId);
+    }
+    const events: TerminalStreamServerMessage[] = [];
+    page.on('websocket', socket => socket.on('framereceived', frame => {
+      const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
+      if (message) events.push(message);
+    }));
+    const remoteInventory = Promise.withResolvers<void>();
+    let remoteRequested = false;
+    await page.route(`**/api/v1/terminals?nodeId=${client.nodeId}`, async route => {
+      remoteRequested = true;
+      await remoteInventory.promise;
+      await route.continue();
+    });
+    const attachments = (id: string) => events.filter(message => message.type === 'terminal-attached' && message.terminal.terminalId === id);
+    try {
+      await page.goto(integration.garcon.baseUrl);
+      await browserExpect.poll(() => remoteRequested).toBe(true);
+      await browserExpect.poll(() => attachments(ids[0]!).length).toBe(1);
+      expect(attachments(ids[1]!)).toHaveLength(0);
+    } finally { remoteInventory.resolve(); }
+    await browserExpect.poll(() => attachments(ids[1]!).length).toBe(1);
+    expect(attachments(ids[0]!)).toHaveLength(1);
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate', serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' } });
+}, 60_000);
 
 test('remote terminals keep their renderer and job through host reconnect and responsive moves', async () => {
   await withChromiumFixture('execution-node-terminals', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {

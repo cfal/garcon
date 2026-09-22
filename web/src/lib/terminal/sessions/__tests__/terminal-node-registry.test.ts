@@ -13,7 +13,7 @@ import type {
 } from '$shared/terminal';
 import type { TerminalTransportOptions } from '$lib/ws/terminal-transport.svelte.js';
 import { TerminalTransport } from '$lib/ws/terminal-transport.svelte.js';
-import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
+import type { PrimaryWsConnectionPort, WsConnectionListener } from '$lib/ws/connection.svelte.js';
 import { ApiError } from '$lib/api/client.js';
 import { parseTerminalStreamClientMessage } from '$shared/terminal';
 
@@ -88,15 +88,24 @@ function setup(options: { realTransport?: boolean } = {}) {
 		inputControls: { ctrlMode: 'inactive', altMode: 'inactive', toggleModifier() {} },
 	} satisfies TerminalSessionRuntime;
 	const sent: TerminalStreamClientMessage[] = [];
+	const connectionListeners = new Set<WsConnectionListener>();
+	let isConnected = true;
 	const connection = {
-		isConnected: true,
+		get isConnected() {
+			return isConnected;
+		},
 		sendMessage(message) {
 			const parsed = parseTerminalStreamClientMessage(message);
 			if (parsed) sent.push(parsed);
 			return true;
 		},
 		addMessageConsumer: () => () => {},
-		onConnectionChange: () => () => {},
+		onConnectionChange(listener) {
+			connectionListeners.add(listener);
+			return () => {
+				connectionListeners.delete(listener);
+			};
+		},
 	} satisfies PrimaryWsConnectionPort;
 	let callbacks!: TerminalTransportOptions;
 	const transport = {
@@ -122,10 +131,82 @@ function setup(options: { realTransport?: boolean } = {}) {
 		createRuntime: () => renderer,
 	});
 	registries.push(registry);
-	return { registry, nodes, list, create, sent, callbacks, renderer, write, dispose };
+	function setConnected(connected: boolean): void {
+		isConnected = connected;
+		for (const listener of connectionListeners) listener(connected);
+	}
+	return { registry, nodes, list, create, sent, callbacks, renderer, write, dispose, setConnected };
 }
 
 describe('node-qualified terminal registry', () => {
+	it.each(['initial connection', 'browser reconnect'])(
+		'restores each ready host independently on %s',
+		async (phase) => {
+			const { registry, list, sent, setConnected } = setup({ realTransport: true });
+			const attachmentCount = (nodeId: string) =>
+				sent.filter(
+					(message) =>
+						message.type === 'terminal-attach' &&
+						message.terminalId === terminal(nodeId).terminalId,
+				).length;
+			if (phase === 'browser reconnect') {
+				await registry.initialize();
+				await vi.waitFor(() =>
+					expect(sent.filter((message) => message.type === 'terminal-attach')).toHaveLength(2),
+				);
+				setConnected(false);
+			}
+			const localAttachments = attachmentCount('local');
+			const remoteAttachments = attachmentCount(remoteId);
+			const remote = Promise.withResolvers<TerminalListResponse>();
+			list.mockImplementation(async (id = 'local') =>
+				id === remoteId ? remote.promise : inventory([terminal(id)]),
+			);
+			const initializing =
+				phase === 'initial connection' ? registry.initialize() : Promise.resolve();
+			if (phase === 'browser reconnect') setConnected(true);
+			try {
+				await vi.waitFor(() => expect(attachmentCount('local')).toBe(localAttachments + 1));
+				expect(registry.transportStatus).toBe('connected');
+				expect(registry.nodeInventories[remoteId].status).toBe('loading');
+				expect(attachmentCount(remoteId)).toBe(remoteAttachments);
+			} finally {
+				remote.resolve(inventory([terminal(remoteId)]));
+				await initializing;
+			}
+			await vi.waitFor(() => expect(attachmentCount(remoteId)).toBe(remoteAttachments + 1));
+		},
+	);
+
+	it('restores confirmed attachments after logout and login clear their authority', async () => {
+		const { registry, sent, callbacks } = setup({ realTransport: true });
+		await registry.initialize();
+		const attachments = () => sent.filter((message) => message.type === 'terminal-attach');
+		await vi.waitFor(() => expect(attachments()).toHaveLength(2));
+		for (const message of attachments()) {
+			callbacks.onMessage({
+				type: 'terminal-attached',
+				attachmentId: message.attachmentId,
+				terminal: registry.sessions[message.terminalId].metadata,
+				replay: [],
+			});
+		}
+		registry.authChanged(false);
+		expect(registry.transportStatus).toBe('idle');
+		expect(
+			registry.orderedSessions.every((session) => session.attachmentState === 'attached'),
+		).toBe(true);
+		registry.authChanged(true);
+		await vi.waitFor(() => expect(attachments()).toHaveLength(4));
+		for (const nodeId of ['local', remoteId]) {
+			const requests = attachments().filter(
+				(message) => message.terminalId === terminal(nodeId).terminalId,
+			);
+			expect(requests).toHaveLength(2);
+			expect(requests[1].attachmentId).not.toBe(requests[0].attachmentId);
+		}
+	});
+
 	it('keeps Local first and preserves configured remote host order', () => {
 		const { registry, nodes } = setup();
 		const otherRemoteId = '00000000-0000-4000-8000-000000000004';
