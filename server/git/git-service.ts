@@ -9,7 +9,8 @@ import { createWorktreeOperations } from './worktrees.js';
 import { createQuickSummaryOperations } from './quick-summary.js';
 import { GitReviewDocumentRegistry } from './review-document-registry.js';
 import { createReviewDocumentOperations } from './review-document-service.js';
-import type { ClassifiedGitError, CreateGitServiceOptions, GitService } from './types.js';
+import type { ClassifiedGitError, CreateGitServiceOptions, GitService, GitOperations } from './types.js';
+import { generateCommitMessageForFiles } from './commit-generation.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('git:git-service');
@@ -50,7 +51,22 @@ export function createGitService({
   classifyGitError,
   assertProjectPathAllowed,
 }: CreateGitServiceOptions): GitService {
-  const status = createStatusOperations(agents);
+  const git = createGitOperations({ assertProjectPathAllowed });
+  return {
+    ...git,
+    generateCommitMessageForFiles: (options) => generateCommitMessageForFiles(agents, git, options),
+    toHttpError: (error) => gitHttpError(error, classifyGitError),
+  };
+}
+
+export function gitHttpError(error: unknown, classifyGitError: CreateGitServiceOptions['classifyGitError']): Response {
+  logger.error('[git]', error);
+  if (error instanceof GitDomainError) return gitDomainErrorToResponse(error);
+  return classifiedGitErrorToResponse(classifyGitError(error));
+}
+
+export function createGitOperations({ assertProjectPathAllowed }: Pick<CreateGitServiceOptions, 'assertProjectPathAllowed'> = {}): GitOperations {
+  const status = createStatusOperations();
   const reviewRegistry = new GitReviewDocumentRegistry();
   const diff = createDiffEngine(reviewRegistry);
   const commitHistory = createCommitHistoryOperations(reviewRegistry);
@@ -69,12 +85,5 @@ export function createGitService({
     ...porcelain,
     ...worktrees,
     ...quickSummary,
-    toHttpError(error: unknown): Response {
-      logger.error('[git]', error);
-      if (error instanceof GitDomainError) {
-        return gitDomainErrorToResponse(error);
-      }
-      return classifiedGitErrorToResponse(classifyGitError(error));
-    },
   };
 }

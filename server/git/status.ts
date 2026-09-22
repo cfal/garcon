@@ -1,12 +1,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { GitDomainError } from './git-types.js';
-import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { getHttpIdleTimeoutSeconds } from '../config.js';
-import { createGenerationRequestSignal } from '../settings/generation-limits.js';
-import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS, type GitCommandOptions } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
@@ -19,11 +16,12 @@ import type {
   BranchOptions,
   CheckoutOptions,
   CommitIndexOptions,
-  CommitMessageGenerationResult,
-  CommitMessageFileOptions,
+  CommitMessageContextOptions,
+  GitStatus,
+  GitRemoteStatus,
+  GitMutationResult,
   CommitOptions,
   FileOptions,
-  GitAgentRunner,
   GitCommitResult,
   GitRefOption,
   GitRefsResponse,
@@ -33,7 +31,6 @@ import type {
   PushOptions,
   RemoteInfo,
   RevertCommitOptions,
-  RunSingleQueryOptions,
   StagePathsOptions,
 } from './types.js';
 import {
@@ -382,8 +379,8 @@ async function resolveStatusBranch(projectPath: string): Promise<{ branch: strin
   }
 }
 
-export function createStatusOperations(agents: GitAgentRunner) {
-  async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
+export function createStatusOperations() {
+  async function getStatus({ projectPath }: ProjectOptions): Promise<GitStatus> {
     await assertGitRepository(projectPath);
 
     // Branch resolution and the working-tree scan are independent reads;
@@ -433,7 +430,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { branch, hasCommits, modified, added, deleted, untracked };
   }
 
-  async function initialCommit({ projectPath }: ProjectOptions): Promise<unknown> {
+  async function initialCommit({ projectPath }: ProjectOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
     try {
@@ -525,7 +522,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { refs };
   }
 
-  async function getBranches(options: ProjectOptions): Promise<unknown> {
+  async function getBranches(options: ProjectOptions): Promise<{ branches: string[] }> {
     const { refs } = await getRefs(options);
     const branches = refs
       .filter((ref) => ref.kind === 'local-branch')
@@ -534,7 +531,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { branches };
   }
 
-  async function checkout({ projectPath, ref, refKind, signal }: CheckoutOptions): Promise<unknown> {
+  async function checkout({ projectPath, ref, refKind, signal }: CheckoutOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     await assertExistingCommitRef(projectPath, ref, 'checkout', signal);
     const localBranch = refKind === undefined || refKind === 'local-branch'
@@ -550,7 +547,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout };
   }
 
-  async function createBranch({ projectPath, branch, baseRef, signal }: BranchOptions): Promise<unknown> {
+  async function createBranch({ projectPath, branch, baseRef, signal }: BranchOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     await assertSafeBranchName(projectPath, branch, 'branch name', signal);
     if (baseRef) await assertExistingCommitRef(projectPath, baseRef, 'base', signal);
@@ -560,60 +557,12 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout };
   }
 
-  async function generateCommitMessageForFiles({
-    nodeId,
-    projectPath,
-    files,
-    agentId,
-    model,
-    apiProviderId,
-    modelEndpointId,
-    modelProtocol,
-    thinkingMode,
-      customPrompt,
-      useCommonDirPrefix,
-      signal,
-    }: CommitMessageFileOptions): Promise<CommitMessageGenerationResult> {
-    if (!Array.isArray(files) || files.length === 0) {
-      throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
-    }
-
-      const generationSignal = signal ?? createGenerationRequestSignal();
-      const diffContext = await collectCommitMessageDiffContext(
-        projectPath,
-        files,
-        runGit,
-        generationSignal,
-      );
-
-    if (!diffContext.trim()) {
-      throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');
-    }
-
-    const message = await generateCommitMessage(
-      files,
-      diffContext,
-      agentId,
-      (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
-        {
-          nodeId,
-          model,
-          apiProviderId,
-          modelEndpointId,
-          modelProtocol,
-          thinkingMode,
-          customPrompt,
-          signal: generationSignal,
-        },
-    );
-    const directoryPrefix = useCommonDirPrefix ? computeCommonDirPrefix(files) : '';
-    return {
-      message: directoryPrefix ? applyDirPrefix(message, directoryPrefix) : message,
-      directoryPrefix,
-    };
+  async function collectCommitMessageContext({ projectPath, files, signal }: CommitMessageContextOptions) {
+    const diff = await collectCommitMessageDiffContext(projectPath, files, runGit, signal);
+    return { diff };
   }
 
-  async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<unknown> {
+  async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<GitRemoteStatus> {
     await assertGitRepository(projectPath);
 
     const { stdout: currentBranch } = await runGit(
@@ -673,7 +622,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     };
   }
 
-  async function fetch({ projectPath }: ProjectOptions): Promise<unknown> {
+  async function fetch({ projectPath }: ProjectOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
     const { stdout: fetchBranch } = await runGit(
@@ -699,7 +648,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
-  async function pull({ projectPath }: ProjectOptions): Promise<unknown> {
+  async function pull({ projectPath }: ProjectOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
     const { stdout: pullBranch } = await runGit(
@@ -738,7 +687,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
   }
 
   // Returns list of configured remotes with their fetch URLs.
-  async function getRemotes({ projectPath }: ProjectOptions): Promise<unknown> {
+  async function getRemotes({ projectPath }: ProjectOptions): Promise<{ remotes: RemoteInfo[] }> {
     await assertGitRepository(projectPath);
 
     const { stdout } = await runGit(projectPath, ['remote', '-v'], readOnlyGitOptions());
@@ -754,7 +703,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
   }
 
   // Pushes to a specific remote. Never sets upstream tracking.
-  async function push({ projectPath, remote, remoteBranch }: PushOptions): Promise<unknown> {
+  async function push({ projectPath, remote, remoteBranch }: PushOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
     const { stdout: headBranch } = await runGit(
@@ -786,7 +735,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     };
   }
 
-  async function deleteUntracked({ projectPath, file }: FileOptions): Promise<unknown> {
+  async function deleteUntracked({ projectPath, file }: FileOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(
@@ -814,7 +763,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, message: `Untracked file ${file} deleted successfully` };
   }
 
-  async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<unknown> {
+  async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     return runWithRepositoryCommitLock(projectPath, async () => {
       const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
@@ -826,7 +775,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return paths.map((filePath) => `${filePath}\0`).join('');
   }
 
-  async function stagePaths({ projectPath, paths, mode }: StagePathsOptions): Promise<unknown> {
+  async function stagePaths({ projectPath, paths, mode }: StagePathsOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     if (paths.length === 0) {
       throw new GitDomainError('INVALID_INPUT', 'At least one path is required.');
@@ -855,7 +804,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true };
   }
 
-  async function revertCommit({ projectPath, commit }: RevertCommitOptions): Promise<unknown> {
+  async function revertCommit({ projectPath, commit }: RevertCommitOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     await assertExistingCommitRef(projectPath, commit, 'commit');
 
@@ -882,7 +831,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     getRefs,
     checkout,
     createBranch,
-    generateCommitMessageForFiles,
+    collectCommitMessageContext,
     getRemoteStatus,
     getRemotes,
     fetch,

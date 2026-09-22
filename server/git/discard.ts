@@ -1,3 +1,4 @@
+import type { GitMutationResult } from '../../common/git.js';
 import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
 import { literalGitPathspec } from './pathspecs.js';
@@ -23,7 +24,7 @@ async function headHasPath(projectPath: string, file: string): Promise<boolean> 
   return stdout.length > 0;
 }
 
-export async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
+export async function discard({ projectPath, file }: FileOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const [rootResult, prefixResult] = await Promise.all([

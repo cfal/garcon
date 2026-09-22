@@ -42,6 +42,8 @@ export interface GhService {
   toHttpError(error: unknown): Response;
 }
 
+export type GhOperations = Omit<GhService, 'toHttpError'>;
+
 function ghDomainErrorToResponse(error: GhDomainError): Response {
   const status =
     error.code === 'INVALID_INPUT'
@@ -84,6 +86,16 @@ async function loadReviewThreads(
 }
 
 export function createGhService(): GhService {
+  return { ...createGhOperations(), toHttpError: ghHttpError };
+}
+
+export function ghHttpError(error: unknown): Response {
+  logger.error('[gh]', error);
+  if (error instanceof GhDomainError) return ghDomainErrorToResponse(error);
+  return classifiedGhErrorToResponse(classifyGhError(error));
+}
+
+export function createGhOperations(): GhOperations {
   return {
     async getStatus(signal): Promise<GhStatusResponse> {
       try {
@@ -148,12 +160,5 @@ export function createGhService(): GhService {
       return buildDetail(raw, patches, threads);
     },
 
-    toHttpError(error: unknown): Response {
-      logger.error('[gh]', error);
-      if (error instanceof GhDomainError) {
-        return ghDomainErrorToResponse(error);
-      }
-      return classifiedGhErrorToResponse(classifyGhError(error));
-    },
   };
 }

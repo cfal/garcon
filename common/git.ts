@@ -1,0 +1,906 @@
+import type { GitRefKind, GitRefsResponse, GitRefSort } from './git-refs.js';
+
+export type { GitRefKind, GitRefOption, GitRefsResponse, GitRefSort } from './git-refs.js';
+export { GIT_REF_RESULT_LIMITS } from './git-refs.js';
+
+export const GIT_DIFF_LIMITS = Object.freeze({
+  maxBatchFiles: 64,
+  maxContextLines: 50,
+  maxPatchBytes: 1_000_000,
+  maxRenderedRows: 20_000,
+  maxLineBytes: 20_000,
+});
+
+export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
+  maxSummaryFiles: 10_000,
+  maxBodyBatchFiles: 24,
+  maxLoadedRows: 100_000,
+  maxLoadedPatchBytes: 10_000_000,
+  maxFileRows: 50_000,
+  maxFilePatchBytes: 5_000_000,
+  maxLineBytes: GIT_DIFF_LIMITS.maxLineBytes,
+  maxContextLines: GIT_DIFF_LIMITS.maxContextLines,
+  bodyConcurrency: 4,
+});
+
+export const GIT_WORKING_TREE_FINGERPRINT_VERSION = 1;
+export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
+
+export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+
+export type GitReviewMode = 'working' | 'staged';
+
+export type GitStageMode = 'stage' | 'unstage';
+
+export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
+
+export type GitDiffLimitReason =
+  'patch-too-large' | 'too-many-rows' | 'line-too-long' | 'binary' | 'unsupported-file-kind';
+
+export type GitReviewBodyState =
+  'unloaded' | 'loading' | 'loaded' | 'binary' | 'too-large' | 'error';
+
+export type GitReviewLimitReason =
+  | 'collection-too-many-files'
+  | 'collection-too-many-rows'
+  | 'collection-too-many-bytes'
+  | 'file-too-many-rows'
+  | 'file-too-many-bytes'
+  | 'line-too-long'
+  | 'binary'
+  | 'unsupported-file-kind'
+  | 'git-timeout';
+
+export interface DiffStats {
+  additions: number;
+  deletions: number;
+  isBinary?: boolean;
+}
+
+export interface ChangeFacet {
+  status: string;
+  changeKind: GitChangeKind;
+  stats: DiffStats;
+  originalPath?: string;
+  category?: GitFileReviewCategory;
+}
+
+export interface CompatibleTreeFields {
+  staged: boolean;
+  hasUnstaged: boolean;
+  changeKind?: GitChangeKind;
+  additions: number;
+  deletions: number;
+  category?: GitFileReviewCategory;
+}
+
+export interface TreeNode extends Partial<CompatibleTreeFields> {
+  path: string;
+  name: string;
+  kind: 'file' | 'directory';
+  indexStatus: string;
+  workTreeStatus: string;
+  stagedFacet?: ChangeFacet;
+  unstagedFacet?: ChangeFacet;
+  children?: TreeNode[];
+  category?: GitFileReviewCategory;
+}
+
+export interface ProjectOptions {
+  projectPath: string;
+}
+
+export type GitTreeStatsState = 'pending' | 'loaded';
+
+export interface ChangesTreeResult {
+  root: TreeNode[];
+  hasCommits: boolean;
+  statsState: GitTreeStatsState;
+}
+
+export interface FileOptions extends ProjectOptions {
+  file: string;
+}
+
+export interface CommitOptions extends ProjectOptions {
+  message: string;
+  files: string[];
+}
+
+export interface GitCommitResult {
+  success: true;
+  output: string;
+  commitScope: 'selected-files' | 'whole-index';
+  indexSynchronized: boolean;
+}
+
+export interface GitRefsOptions extends ProjectOptions {
+  query?: string;
+  limit?: number;
+  sort?: GitRefSort;
+}
+
+export interface CheckoutOptions extends ProjectOptions {
+  ref: string;
+  refKind?: GitRefKind;
+}
+
+export interface BranchOptions extends ProjectOptions {
+  branch: string;
+  baseRef?: string;
+}
+
+export interface CommitMessageGenerationResult {
+  message: string;
+  directoryPrefix: string;
+}
+
+export interface PushOptions extends ProjectOptions {
+  remote?: string;
+  remoteBranch?: string;
+}
+
+export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
+
+export interface GitRenderedDiffRow {
+  key: string;
+  kind: GitRenderedDiffRowKind;
+  hunkIndex: number;
+  hunkId: string;
+  beforeLine: number | null;
+  afterLine: number | null;
+  text: string;
+  diffLineIndex: number;
+}
+
+export interface GitRenderedHunk {
+  id: string;
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  rowStartIndex: number;
+  rowEndIndex: number;
+}
+
+export interface GitReviewDocumentLimits {
+  maxSummaryFiles: number;
+  maxBodyBatchFiles: number;
+  maxLoadedRows: number;
+  maxLoadedPatchBytes: number;
+  maxFileRows: number;
+  maxFilePatchBytes: number;
+  maxLineBytes: number;
+  maxContextLines: number;
+  bodyConcurrency: number;
+}
+
+export interface GitReviewCollectionLimit {
+  reason: GitReviewLimitReason;
+  message: string;
+  visibleFiles: number;
+  totalFilesKnown: number;
+}
+
+export interface GitReviewFileSummary {
+  path: string;
+  originalPath?: string;
+  indexStatus: string;
+  workTreeStatus: string;
+  category: GitFileReviewCategory;
+  additions: number;
+  deletions: number;
+  statsKnown?: boolean;
+  estimatedRows: number;
+  bodyState: GitReviewBodyState;
+  bodyFingerprint: string;
+  isGenerated: boolean;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+}
+
+export interface GitReviewDocumentSummary {
+  documentId: string;
+  project: string;
+  mode: GitReviewMode;
+  context: number;
+  files: GitReviewFileSummary[];
+  limits: GitReviewDocumentLimits;
+  collectionLimit?: GitReviewCollectionLimit;
+}
+
+export interface GitReviewFilePatchBody {
+  path: string;
+  bodyFingerprint: string;
+  bodyState: GitReviewBodyState;
+  category: GitFileReviewCategory;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  renderedRowCount: number;
+  patchBytes: number;
+  patch: string | null;
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+  error?: string;
+}
+
+export type GitReviewBodyPurpose = 'visible' | 'prefetch';
+
+export interface GitReviewDocumentFileBodiesOptions extends ProjectOptions {
+  documentId: string;
+  files: string[];
+  purpose: GitReviewBodyPurpose;
+}
+
+export interface GitReviewDocumentFileBodiesReady {
+  status: 'ready';
+  documentId: string;
+  files: Record<string, GitReviewFilePatchBody>;
+  errors: Record<string, string>;
+}
+
+export interface GitReviewDocumentFileBodiesStale {
+  status: 'stale';
+  documentId: string;
+  changedPaths: string[];
+  message: string;
+}
+
+export interface GitReviewDocumentFileBodiesExpired {
+  status: 'document-expired';
+  documentId: string;
+  message: string;
+}
+
+export type GitReviewDocumentFileBodiesResponse =
+  | GitReviewDocumentFileBodiesReady
+  | GitReviewDocumentFileBodiesStale
+  | GitReviewDocumentFileBodiesExpired;
+
+export interface GitHistoryCommitListOptions extends ProjectOptions {
+  ref?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface GitHistoryCommitListResponse {
+  project: string;
+  ref: string;
+  commits: GitHistoryCommitListItem[];
+  nextOffset: number | null;
+}
+
+export interface GitHistoryCommitListItem {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  authorDate: string;
+  committer: string;
+  committerEmail: string;
+  committerDate: string;
+  subject: string;
+  refs: string[];
+}
+
+export interface GitCommitDetails {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  authorDate: string;
+  committer: string;
+  committerEmail: string;
+  committerDate: string;
+  subject: string;
+  body: string;
+  refs: string[];
+}
+
+export interface GitCommitParentOption {
+  hash: string;
+  shortHash: string;
+  label: string;
+}
+
+export type GitCommitFileStatus =
+  'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed' | 'unknown';
+
+export interface GitCommitFileSummary {
+  path: string;
+  originalPath?: string;
+  status: GitCommitFileStatus;
+  rawStatus: string;
+  category: GitFileReviewCategory;
+  additions: number;
+  deletions: number;
+  statsKnown?: boolean;
+  estimatedRows: number;
+  bodyState: GitReviewBodyState;
+  bodyFingerprint: string;
+  isGenerated: boolean;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+}
+
+export interface GitCommitSnapshotReady {
+  status: 'ready';
+  project: string;
+  documentId: string;
+  commit: GitCommitDetails;
+  selectedParent: string | null;
+  parentOptions: GitCommitParentOption[];
+  files: GitCommitFileSummary[];
+  limits: GitReviewDocumentLimits;
+  collectionLimit?: GitReviewCollectionLimit;
+  firstBodyCandidates: string[];
+}
+
+export interface GitCommitSnapshotNotFound {
+  status: 'not-found';
+  project: string;
+  commit: string;
+  message: string;
+}
+
+export type GitCommitSnapshotResponse = GitCommitSnapshotReady | GitCommitSnapshotNotFound;
+
+export interface GitCommitSnapshotOptions extends ProjectOptions {
+  commit: string;
+  parent?: string | null;
+  context?: number;
+  bodyCandidateCount?: number;
+}
+
+export interface GitDiffFileRequest {
+  path: string;
+  originalPath?: string;
+}
+
+export type GitComparisonMode = 'direct' | 'merge-base';
+
+export interface GitComparisonRevisionEndpoint {
+  kind: 'revision';
+  revision: string;
+}
+
+export interface GitComparisonWorkingTreeEndpoint {
+  kind: 'working-tree';
+}
+
+export type GitComparisonFromEndpoint = GitComparisonRevisionEndpoint;
+
+export type GitComparisonToEndpoint =
+  GitComparisonRevisionEndpoint | GitComparisonWorkingTreeEndpoint;
+
+export interface GitResolvedComparisonRevision {
+  kind: 'revision';
+  requestedRevision: string;
+  label: string;
+  hash: string;
+  shortHash: string;
+}
+
+export interface GitResolvedComparisonWorkingTree {
+  kind: 'working-tree';
+  label: string;
+  branch: string;
+  headHash: string | null;
+  fingerprint: string;
+  shortFingerprint: string;
+}
+
+export type GitResolvedComparisonTo =
+  GitResolvedComparisonRevision | GitResolvedComparisonWorkingTree;
+
+export interface GitComparisonSnapshotReady {
+  status: 'ready';
+  project: string;
+  repoRoot: string;
+  documentId: string;
+  mode: GitComparisonMode;
+  from: GitResolvedComparisonRevision;
+  to: GitResolvedComparisonTo;
+  effectiveFromHash: string;
+  mergeBaseHash?: string;
+  files: GitCommitFileSummary[];
+  limits: GitReviewDocumentLimits;
+  collectionLimit?: GitReviewCollectionLimit;
+  firstBodyCandidates: string[];
+}
+
+export interface GitComparisonSnapshotNotFound {
+  status: 'not-found';
+  project: string;
+  endpoint: 'from' | 'to';
+  revision: string;
+  message: string;
+}
+
+export interface GitComparisonSnapshotNoMergeBase {
+  status: 'no-merge-base';
+  project: string;
+  from: GitResolvedComparisonRevision;
+  to: GitResolvedComparisonRevision;
+  message: string;
+}
+
+export interface GitComparisonSnapshotWorkingTreeChanging {
+  status: 'working-tree-changing';
+  project: string;
+  message: string;
+}
+
+export type GitComparisonSnapshotResponse =
+  | GitComparisonSnapshotReady
+  | GitComparisonSnapshotNotFound
+  | GitComparisonSnapshotNoMergeBase
+  | GitComparisonSnapshotWorkingTreeChanging;
+
+export interface GitComparisonSnapshotOptions extends ProjectOptions {
+  from: GitComparisonFromEndpoint;
+  to: GitComparisonToEndpoint;
+  mode: GitComparisonMode;
+  context?: number;
+  bodyCandidateCount?: number;
+}
+
+export interface GitComparisonRevisionExpectation {
+  kind: 'revision';
+  revision: string;
+  hash: string;
+}
+
+export interface GitComparisonWorkingTreeExpectation {
+  kind: 'working-tree';
+  fingerprint: string;
+}
+
+export type GitComparisonFreshnessToExpectation =
+  | GitComparisonRevisionExpectation
+  | GitComparisonWorkingTreeExpectation;
+
+export interface GitComparisonFreshnessOptions extends ProjectOptions {
+  from: GitComparisonRevisionExpectation;
+  to: GitComparisonFreshnessToExpectation;
+}
+
+export interface GitComparisonFreshnessReady {
+  status: 'ready';
+  project: string;
+  changedEndpoints: Array<'from' | 'to'>;
+  fromHash: string;
+  to: { kind: 'revision'; hash: string } | { kind: 'working-tree'; fingerprint: string };
+}
+
+export interface GitComparisonFreshnessNotFound {
+  status: 'not-found';
+  project: string;
+  endpoint: 'from' | 'to';
+  revision: string;
+  message: string;
+}
+
+export type GitComparisonFreshnessResponse =
+  | GitComparisonFreshnessReady
+  | GitComparisonFreshnessNotFound;
+
+export type GitComparisonFileRequest = GitDiffFileRequest;
+
+export interface GitWorkbenchSnapshotTarget {
+  projectPath: string;
+  repoRoot: string;
+  worktreePath: string;
+  label: string;
+  branch: string;
+  source: 'chat-project' | 'worktree';
+}
+
+export interface GitWorkbenchSnapshotReady {
+  status: 'ready';
+  project: string;
+  target: GitWorkbenchSnapshotTarget;
+  tree: ChangesTreeResult & { statsState: 'loaded' };
+  reviewSummary: GitReviewDocumentSummary;
+  selectedFile: string | null;
+  firstBodyCandidates: string[];
+  snapshotId: string;
+  workbenchFingerprint: string;
+}
+
+export interface GitWorkbenchSnapshotNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  target: null;
+  tree: null;
+  reviewSummary: null;
+  selectedFile: null;
+  firstBodyCandidates: [];
+  message: string;
+}
+
+export type GitWorkbenchSnapshotResponse =
+  GitWorkbenchSnapshotReady | GitWorkbenchSnapshotNotRepository;
+
+export interface GitWorkbenchSnapshotOptions extends ProjectOptions {
+  mode: GitReviewMode;
+  context: number;
+  selectedFile?: string | null;
+  bodyCandidateCount?: number;
+}
+
+export type GitWorkingTreeFingerprintResponse =
+  | GitWorkingTreeFingerprintReady
+  | GitWorkingTreeFingerprintNotRepository
+  | GitWorkingTreeFingerprintUnknown;
+
+export interface GitWorkingTreeFingerprintReady {
+  status: 'ready';
+  project: string;
+  fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
+  fingerprint: string;
+  changedPathCount: number;
+}
+
+export interface GitWorkingTreeFingerprintNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitWorkingTreeFingerprintUnknown {
+  status: 'unknown';
+  project: string;
+  fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitWorkingTreeFingerprintOptions extends ProjectOptions {
+}
+
+export type GitQuickSummaryResponse =
+  GitQuickSummaryReady | GitQuickSummaryNotRepository | GitQuickSummaryUnknown;
+
+export interface GitQuickSummaryReady {
+  status: 'ready';
+  project: string;
+  repoRoot: string;
+  branch: string;
+  hasCommits: boolean;
+  changedFiles: number;
+  trackedChangedFiles: number;
+  untrackedFiles: number;
+  stagedFiles: number;
+  unstagedFiles: number;
+  additions: number;
+  deletions: number;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: string;
+}
+
+export interface GitQuickSummaryNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitQuickSummaryUnknown {
+  status: 'unknown';
+  project: string;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitQuickSummaryOptions extends ProjectOptions {
+}
+
+export interface StageSelectionOptions extends FileOptions {
+  mode: GitStageMode;
+  selection: { lineIndices: number[] };
+  contextLines?: number;
+}
+
+export interface StageHunkOptions extends FileOptions {
+  mode: GitStageMode;
+  hunkIndex: number;
+  contextLines?: number;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  name: string;
+  isCurrent: boolean;
+  isMain: boolean;
+  isPathMissing: boolean;
+  /** Reports the worktree root directory mtime as ISO-8601, or null when unavailable. */
+  lastModifiedAt: string | null;
+}
+
+export interface RepoInfo {
+  isGitRepository: boolean;
+  repoRoot?: string;
+  currentWorktreePath?: string;
+}
+
+export interface TargetCandidate {
+  projectPath: string;
+  repoRoot: string;
+  worktreePath: string;
+  label: string;
+  branch: string;
+  source: 'chat-project' | 'worktree';
+  isCurrent: boolean;
+  isMissing: boolean;
+}
+
+export type GitConflictStatus = 'UU' | 'AA' | 'DD' | 'AU' | 'UA' | 'DU' | 'UD';
+
+export interface GitConflictFile {
+  path: string;
+  status: GitConflictStatus;
+  baseAvailable: boolean;
+  oursAvailable: boolean;
+  theirsAvailable: boolean;
+}
+
+export type GitConflictContentLimitReason = 'content-too-large' | 'too-many-lines';
+
+export interface GitConflictContent {
+  content: string | null;
+  truncated: boolean;
+  byteLength: number;
+  lineCount: number;
+  limitReason?: GitConflictContentLimitReason;
+}
+
+export interface GitConflictDetails {
+  path: string;
+  base: GitConflictContent;
+  ours: GitConflictContent;
+  theirs: GitConflictContent;
+  working: GitConflictContent;
+  truncated: boolean;
+}
+
+export interface GitStashEntry {
+  index: number;
+  ref: string;
+  hash: string;
+  message: string;
+  date: string;
+}
+
+export interface GitFileHistoryEntry {
+  hash: string;
+  author: string;
+  email: string;
+  date: string;
+  subject: string;
+}
+
+export interface GitBlameLine {
+  line: number;
+  originalLine: number;
+  finalLine: number;
+  commit: string;
+  author: string;
+  authorMail: string;
+  authorTime: string;
+  summary: string;
+  content: string;
+}
+
+export interface GitGraphCommit {
+  graph: string;
+  hash: string;
+  parents: string[];
+  decorations: string[];
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface ConflictDetailsOptions extends FileOptions {}
+
+export interface ConflictAcceptOptions extends FileOptions {
+  side: 'ours' | 'theirs';
+}
+
+export interface StashCreateOptions extends ProjectOptions {
+  message?: string;
+  includeUntracked?: boolean;
+}
+
+export interface StashRefOptions extends ProjectOptions {
+  stashRef: string;
+}
+
+export interface FileHistoryOptions extends FileOptions {
+  limit?: number;
+}
+
+export interface BlameOptions extends FileOptions {
+  ref?: string;
+  limit?: number;
+}
+
+export interface GraphOptions extends ProjectOptions {
+  limit?: number;
+}
+
+export interface RemoteInfo {
+  name: string;
+  url: string;
+}
+
+export interface CreateWorktreeOptions extends ProjectOptions {
+  baseRef?: string;
+  worktreePath: string;
+  branch?: string;
+  detach?: boolean;
+}
+
+export interface RemoveWorktreeOptions extends ProjectOptions {
+  worktreePath: string;
+  force?: boolean;
+}
+
+export interface CommitIndexOptions extends ProjectOptions {
+  message: string;
+}
+
+export interface StagePathsOptions extends ProjectOptions {
+  paths: string[];
+  mode: GitStageMode;
+}
+
+export interface RevertCommitOptions extends ProjectOptions {
+  commit: string;
+}
+
+export interface GitStatus {
+  branch: string;
+  hasCommits: boolean;
+  modified: string[];
+  added: string[];
+  deleted: string[];
+  untracked: string[];
+}
+
+export interface GitRemoteStatus {
+  hasRemote: boolean;
+  hasUpstream: boolean;
+  branch: string;
+  remoteName: string | null;
+  remoteBranch?: string;
+  ahead?: number;
+  behind?: number;
+  isUpToDate?: boolean;
+  message?: string;
+}
+
+export interface GitMutationResult {
+  success: boolean;
+  output?: string;
+  outputTruncated?: boolean;
+  message?: string;
+  remoteName?: string;
+  remoteBranch?: string;
+  worktreePath?: string;
+}
+
+export interface CommitMessageContextOptions extends ProjectOptions {
+  files: string[];
+}
+
+export interface GitRequests {
+  getStatus: ProjectOptions;
+  initialCommit: ProjectOptions;
+  commit: CommitOptions;
+  getBranches: ProjectOptions;
+  getRefs: GitRefsOptions;
+  checkout: CheckoutOptions;
+  createBranch: BranchOptions;
+  getRemoteStatus: ProjectOptions;
+  getRemotes: ProjectOptions;
+  fetch: ProjectOptions;
+  pull: ProjectOptions;
+  push: PushOptions;
+  discard: FileOptions;
+  deleteUntracked: FileOptions;
+  getWorkbenchSnapshot: GitWorkbenchSnapshotOptions;
+  getWorkingTreeFingerprint: GitWorkingTreeFingerprintOptions;
+  getQuickSummary: GitQuickSummaryOptions;
+  getReviewDocumentFileBodies: GitReviewDocumentFileBodiesOptions;
+  getHistoryCommits: GitHistoryCommitListOptions;
+  getCommitSnapshot: GitCommitSnapshotOptions;
+  getComparisonSnapshot: GitComparisonSnapshotOptions;
+  getComparisonFreshness: GitComparisonFreshnessOptions;
+  stageSelection: StageSelectionOptions;
+  stageHunk: StageHunkOptions;
+  getConflicts: ProjectOptions;
+  getConflictDetails: ConflictDetailsOptions;
+  acceptConflictSide: ConflictAcceptOptions;
+  markConflictResolved: FileOptions;
+  getStashes: ProjectOptions;
+  createStash: StashCreateOptions;
+  applyStash: StashRefOptions;
+  popStash: StashRefOptions;
+  dropStash: StashRefOptions;
+  getFileHistory: FileHistoryOptions;
+  getBlame: BlameOptions;
+  getGraph: GraphOptions;
+  getRepoInfo: ProjectOptions;
+  getWorktrees: ProjectOptions;
+  getTargetCandidates: ProjectOptions;
+  createWorktree: CreateWorktreeOptions;
+  removeWorktree: RemoveWorktreeOptions;
+  commitIndex: CommitIndexOptions;
+  stagePaths: StagePathsOptions;
+  revertCommit: RevertCommitOptions;
+  collectCommitMessageContext: CommitMessageContextOptions;
+}
+
+export interface GitResults {
+  getStatus: GitStatus;
+  initialCommit: GitMutationResult;
+  commit: GitCommitResult;
+  getBranches: { branches: string[] };
+  getRefs: GitRefsResponse;
+  checkout: GitMutationResult;
+  createBranch: GitMutationResult;
+  getRemoteStatus: GitRemoteStatus;
+  getRemotes: { remotes: RemoteInfo[] };
+  fetch: GitMutationResult;
+  pull: GitMutationResult;
+  push: GitMutationResult;
+  discard: GitMutationResult;
+  deleteUntracked: GitMutationResult;
+  getWorkbenchSnapshot: GitWorkbenchSnapshotResponse;
+  getWorkingTreeFingerprint: GitWorkingTreeFingerprintResponse;
+  getQuickSummary: GitQuickSummaryResponse;
+  getReviewDocumentFileBodies: GitReviewDocumentFileBodiesResponse;
+  getHistoryCommits: GitHistoryCommitListResponse;
+  getCommitSnapshot: GitCommitSnapshotResponse;
+  getComparisonSnapshot: GitComparisonSnapshotResponse;
+  getComparisonFreshness: GitComparisonFreshnessResponse;
+  stageSelection: GitMutationResult;
+  stageHunk: GitMutationResult;
+  getConflicts: { conflicts: GitConflictFile[] };
+  getConflictDetails: GitConflictDetails;
+  acceptConflictSide: GitMutationResult;
+  markConflictResolved: GitMutationResult;
+  getStashes: { stashes: GitStashEntry[] };
+  createStash: GitMutationResult;
+  applyStash: GitMutationResult;
+  popStash: GitMutationResult;
+  dropStash: GitMutationResult;
+  getFileHistory: { commits: GitFileHistoryEntry[] };
+  getBlame: { lines: GitBlameLine[]; truncated: boolean };
+  getGraph: { commits: GitGraphCommit[] };
+  getRepoInfo: RepoInfo;
+  getWorktrees: { worktrees: WorktreeInfo[] };
+  getTargetCandidates: { targets: TargetCandidate[] };
+  createWorktree: GitMutationResult;
+  removeWorktree: GitMutationResult;
+  commitIndex: GitMutationResult;
+  stagePaths: GitMutationResult;
+  revertCommit: GitMutationResult;
+  collectCommitMessageContext: { diff: string };
+}
+
+export type GitMethod = keyof GitRequests;

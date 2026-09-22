@@ -1,3 +1,4 @@
+import type { GitMutationResult } from '../../common/git.js';
 import path from "path";
 import { promises as fs } from "fs";
 import type {
@@ -228,7 +229,7 @@ export function createWorktreeOperations(
     worktreePath,
     branch,
     detach,
-  }: CreateWorktreeOptions): Promise<unknown> {
+  }: CreateWorktreeOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     if (baseRef) await assertExistingCommitRef(projectPath, baseRef, "base");
     if (branch) await assertSafeBranchName(projectPath, branch, "branch name");
@@ -271,7 +272,7 @@ export function createWorktreeOperations(
     projectPath,
     worktreePath,
     force,
-  }: RemoveWorktreeOptions): Promise<unknown> {
+  }: RemoveWorktreeOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
     const args: string[] = ["worktree", "remove"];

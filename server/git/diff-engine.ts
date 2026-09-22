@@ -1,3 +1,4 @@
+import type { GitMutationResult } from '../../common/git.js';
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -126,10 +127,7 @@ function buildChangeEntry(
 function mapTreeToArray(map: TreeMap): TreeNode[] {
   const result: TreeNode[] = [];
   for (const [, node] of map) {
-    const entry: TreeNode = { ...node };
-    if (entry.children instanceof Map) {
-      entry.children = mapTreeToArray(entry.children);
-    }
+    const entry: TreeNode = { ...node, children: node.children instanceof Map ? mapTreeToArray(node.children) : node.children };
     result.push(entry);
   }
   result.sort((a, b) => {
@@ -1345,7 +1343,7 @@ async function stageSelection({
   mode,
   selection,
   contextLines = 5,
-}: StageSelectionOptions): Promise<unknown> {
+}: StageSelectionOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const reverse = mode === 'unstage';
@@ -1420,7 +1418,7 @@ async function stageHunk({
   mode,
   hunkIndex,
   contextLines = 5,
-}: StageHunkOptions): Promise<unknown> {
+}: StageHunkOptions): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const isUnstage = mode === 'unstage';
