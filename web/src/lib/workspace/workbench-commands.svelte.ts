@@ -71,10 +71,7 @@ export class WorkbenchCommandRegistry {
 				category: 'Workspace' as const,
 				isEnabled: () => this.deps.terminals.canCreate(host.id),
 				run: () =>
-					this.deps.workspace.createTerminalInAvailableSpace(
-						`command-menu:new-terminal:${host.id}`,
-						host.id,
-					),
+					this.deps.workspace.createTerminalInAvailableSpace('command-menu:new-terminal', host.id),
 			})),
 		];
 	}

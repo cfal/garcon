@@ -169,6 +169,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			commitDestroyedRemoval: (surfaceId, mutations) =>
 				this.#presentation.commitDestroyedRemovals([surfaceId], mutations),
 			resolveCurrentProjectPath: (nodeId) => resolveProjectPath(deps, nodeId),
+			currentProjectNodeId: () => deps.workspaceContext.currentTarget?.nodeId ?? 'local',
 			isMobile: () => this.isMobile,
 			cancelWorkspaceDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
 			windowOf: (surfaceId) => this.#presentation.windowOf(surfaceId),

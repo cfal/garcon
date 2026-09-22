@@ -57,11 +57,15 @@ vi.mock('$lib/context', async (importOriginal) => ({
 import CommandMenu from '../CommandMenu.svelte';
 
 const workspace: CommandMenuWorkspacePort = mocks.workspace;
+let remoteHosts = false;
 const terminals: Pick<
 	WorkbenchCommandRegistryDeps['terminals'],
-	'listStatus' | 'orderedSessions' | 'hasRemoteHosts' | 'canCreate'
+	'listStatus' | 'orderedSessions' | 'hasRemoteHosts' | 'canCreate' | 'hosts'
 > = {
-	hasRemoteHosts: false,
+	get hasRemoteHosts() {
+		return remoteHosts;
+	},
+	hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
 	canCreate: (nodeId) => nodeId === 'local',
 	listStatus: 'ready',
 	orderedSessions: [],
@@ -102,6 +106,7 @@ const commandRegistry = new WorkbenchCommandRegistry({
 
 afterEach(() => {
 	cleanup();
+	remoteHosts = false;
 	mocks.workspace.isMobile = false;
 	files.navigation = null;
 	knownFiles = [];
@@ -111,6 +116,18 @@ afterEach(() => {
 });
 
 describe('CommandMenu', () => {
+	it('uses the same creation entry point when host discovery changes command presentation', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+		await fireEvent.click(await screen.findByText(m.workspace_new_terminal()));
+		remoteHosts = true;
+		component.toggle();
+		await fireEvent.click(await screen.findByText(`${m.workspace_new_terminal()}: Local`));
+		expect(mocks.workspace.createTerminalInAvailableSpace.mock.calls).toEqual([
+			['command-menu:new-terminal'],
+			['command-menu:new-terminal', 'local'],
+		]);
+	});
 	it('refreshes known files on reopening without requiring reactive controller creation', async () => {
 		const { component } = render(CommandMenu);
 		component.toggle();

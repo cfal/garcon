@@ -45,6 +45,7 @@ interface TerminalPlacementServiceDeps {
 	commit: WorkspaceCommit;
 	commitDestroyedRemoval(surfaceId: string, mutations: WorkspaceMutationPlan): Promise<boolean>;
 	resolveCurrentProjectPath(nodeId?: string): Promise<TerminalCreationTarget>;
+	currentProjectNodeId(): string;
 	isMobile(): boolean;
 	cancelWorkspaceDrag(): void;
 	windowOf(surfaceId: string): WorkspaceWindowId | null;
@@ -143,8 +144,9 @@ export class TerminalPlacementService {
 		nodeId?: string,
 	): Promise<string> {
 		if (this.deps.isMobile()) return this.create(this.deps.defaultWindowId(), requestKey, nodeId);
+		const target = this.#windowCreationTarget(anchorWindowId, nodeId);
 		this.deps.cancelWorkspaceDrag();
-		if (!requestKey || !this.#hasPendingCreate(`${requestKey}:${nodeId ?? 'context'}`)) {
+		if (!requestKey || !this.#hasPendingCreate(this.#createKey(requestKey, nodeId, target))) {
 			const snapshot = this.deps.layout.snapshot;
 			const currentAnchorWindowId = this.#resolveWindowId(snapshot, anchorWindowId);
 			const edge = requireWorkspaceNewWindowEdge(
@@ -155,16 +157,8 @@ export class TerminalPlacementService {
 			if (!edge) throw new Error('The target window is no longer available');
 		}
 		const terminalId = requestKey
-			? await this.#retryCreate(
-					requestKey,
-					nodeId,
-					this.#windowCreationTarget(anchorWindowId, nodeId),
-				)
-			: await this.#createWithRequestId(
-					createRandomId(),
-					nodeId,
-					this.#windowCreationTarget(anchorWindowId, nodeId),
-				);
+			? await this.#retryCreate(requestKey, nodeId, target)
+			: await this.#createWithRequestId(createRandomId(), nodeId, target);
 		const surfaceId = terminalSurfaceId(terminalId);
 		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
@@ -670,7 +664,10 @@ export class TerminalPlacementService {
 		nodeId?: string,
 	): TerminalCreationTarget | undefined {
 		const window = windowNodeById(this.deps.layout.snapshot.desktopRoot, windowId);
-		const surface = window && this.deps.layout.surface(window.tabs.activeId);
+		const activeId = this.deps.isMobile()
+			? this.deps.layout.snapshot.mobileActiveSurfaceId
+			: window?.tabs.activeId;
+		const surface = activeId ? this.deps.layout.surface(activeId) : null;
 		if (surface?.type !== 'terminal') return undefined;
 		const sourceNode = this.deps.terminals.nodeIdFor(surface.terminalId);
 		const source = this.deps.terminals.sessions[surface.terminalId]?.metadata;
@@ -681,12 +678,17 @@ export class TerminalPlacementService {
 		};
 	}
 
+	#createKey(requestKey: string, nodeId?: string, target?: TerminalCreationTarget): string {
+		return `${requestKey}:${nodeId ?? target?.nodeId ?? this.deps.currentProjectNodeId()}`;
+	}
+
 	#retryCreate(
 		requestKey: string,
 		nodeId?: string,
 		target?: TerminalCreationTarget,
 	): Promise<string> {
-		requestKey = `${requestKey}:${nodeId ?? 'context'}`;
+		nodeId ??= target?.nodeId ?? this.deps.currentProjectNodeId();
+		requestKey = this.#createKey(requestKey, nodeId, target);
 		const pending = this.#terminalCreatePromises.get(requestKey);
 		if (pending) return pending;
 		const creating = this.#performRetriableCreate(requestKey, nodeId, target);

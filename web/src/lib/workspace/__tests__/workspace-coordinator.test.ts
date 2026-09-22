@@ -2775,6 +2775,68 @@ describe('WorkspaceCoordinator', () => {
 		expect(terminals.create).toHaveBeenCalledWith(null, expect.any(String), 'local');
 	});
 
+	it.each([undefined, 'remote'])(
+		'uses the visible mobile terminal directory for command creation on %s',
+		async (nodeId) => {
+			const { coordinator, layout, terminals } = createHarness();
+			terminals.nodeIdFor.mockImplementation((id) =>
+				id === 'remote-terminal' ? 'remote' : 'local',
+			);
+			for (const id of ['remote-terminal', 'local-terminal']) {
+				terminals.sessions[id] = {
+					metadata: { ...terminalMetadata(id), initialWorkingDirectory: `/${id}/project` },
+					attachmentState: 'attached',
+				};
+				await coordinator.openTerminalSession(id, 'window-main');
+			}
+			await coordinator.enterMobilePresentation();
+			await coordinator.switchTerminalSurface('local-terminal', 'remote-terminal');
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(
+				terminalSurfaceId('local-terminal'),
+			);
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe(terminalSurfaceId('remote-terminal'));
+			expect(coordinator.terminalCreationNodeId).toBe('remote');
+			terminals.create.mockResolvedValue('new-terminal');
+			await coordinator.createTerminalInAvailableSpace('command-menu:new-terminal', nodeId);
+			expect(terminals.create).toHaveBeenCalledWith(
+				'/remote-terminal/project',
+				expect.any(String),
+				'remote',
+			);
+		},
+	);
+
+	it.each([
+		{ firstNode: undefined, retryNode: 'local' },
+		{ firstNode: 'local', retryNode: undefined },
+	])(
+		'retains create identity when direct/menu selection changes $firstNode to $retryNode',
+		async ({ firstNode, retryNode }) => {
+			const { coordinator, terminals } = createHarness();
+			terminals.create
+				.mockImplementationOnce(
+					async (directory: string | null, requestId: string, nodeId: string) => {
+						terminals.pendingCreates[requestId] = {
+							requestedInitialWorkingDirectory: directory,
+							nodeId,
+						};
+						throw new Error('Lost response');
+					},
+				)
+				.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
+					delete terminals.pendingCreates[requestId];
+					return 'recovered-terminal';
+				});
+			await expect(
+				coordinator.createTerminalInAvailableSpace('entry-point', firstNode),
+			).rejects.toThrow('Lost response');
+			await expect(
+				coordinator.createTerminalInAvailableSpace('entry-point', retryNode),
+			).resolves.toBe('recovered-terminal');
+			expect(terminals.create.mock.calls[1]).toEqual(terminals.create.mock.calls[0]);
+		},
+	);
+
 	it('opens a singleton in a new window and focuses it', async () => {
 		const { coordinator, layout } = createHarness();
 
