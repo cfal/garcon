@@ -1,10 +1,22 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 38 integrated design. Supersedes
+Status: revision 39 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 39 keeps a bounded in-memory transcript window for recently inactive
+chat surfaces when combined tool use is enabled. A warm return restores the
+loaded interval and reading target without fetching that history again. At
+most four inactive windows share limits of 8,000 messages and 24 MiB of
+estimated payload; an oversized or evicted window falls back to the existing
+bounded recent cache. Parked windows receive committed background and replay
+updates, while view replacement, stale continuity, deletion, and browser
+reload invalidate them. Cold combined feeds may request larger logical pages
+only while measured content remains underfilled; non-combined paging and
+switch-time restoration keep their previous behavior. Tool grouping remains
+a client-only projection: each member keeps its ledger address and order.
 
 Revision 38 treats catalog `enabled` as an automatic new-chat default flag,
 not a per-chat eligibility gate. An explicitly selected, in-scope preamble
@@ -293,8 +305,9 @@ HTTP history reads perform one bounded raw-row scan and return an ordinal
 continuation even when that scan renders no messages; the client requests
 further ranges. This preserves the existing `(transcriptViewId, ordinal)`
 addressing and adds no opaque cursor. Expanded browser history is never
-trimmed under a reader, is discarded on chat switch, and restores from the
-bounded cache; the three-minute live-edge prune timer is deleted. Pinned
+trimmed under a reader; revision 39 supersedes the original switch-time
+discard policy with bounded inactive windows for combined tool use. The
+three-minute live-edge prune timer is deleted. Pinned
 OpenCode V1 automatic compaction is disabled because its continuation has no
 immutable operation carrier; session-latest routing is deleted, context
 exhaustion fails visibly, and V2/improved compaction support is deferred.
@@ -582,10 +595,12 @@ The decisions:
   admission and producer publication; transcript, search, and other read
   surfaces remain available throughout. The browser never trims either edge
   of the active interval while a user reads or a page/scroll mutation is in
-  flight. Expanded state belongs only to the selected chat: chat switch or
-  reload discards it, and returning restores the bounded recent cache. No
-  live-edge timer participates in correctness, and memory eviction never
-  truncates the ledger.
+  flight. With combined tool use enabled, a bounded inactive window may keep
+  the loaded interval and reading target across chat switches. A browser
+  reload, an evicted window, or a non-combined switch uses the bounded recent
+  cache instead; a replaced transcript view requires its new snapshot.
+  Section 4.4 defines that lifecycle. No live-edge timer participates in
+  correctness, and memory eviction never truncates the ledger.
 - **L8 View stability.** `transcriptViewId` changes only through manual
   full reload. Every page, event, search result, and cursor is qualified
   by it; requests qualified by a replaced view receive a typed
@@ -1054,12 +1069,34 @@ CREATE UNIQUE INDEX transcript_submission
   `ledger.sqlite` while the WAL may contain commits is not a valid
   backup.
 - The durable ledger is paged from disk. The selected chat may hold an
-  expanded active interval without mutation-time trimming; switching chats
-  discards that interval and a later return restores only the bounded recent
-  cache. The cache persists the raw earlier-page continuation independently of
-  its oldest visible ordinal, so an all-hidden page remains resumable after a
-  switch or browser-cache hydration. Evicting memory never truncates the
-  ledger — scrolling reloads older pages.
+  expanded active interval without mutation-time trimming. With combined tool
+  use enabled, the browser parks the transcript data and semantic reading
+  target for a recently inactive `(surfaceId, chatId)` window, not its panel,
+  DOM, or virtual measurements. Up to four parked windows share limits of
+  8,000 messages and 24 MiB of estimated payload. Whole-window eviction does
+  not trim a retained interval down to a misleading tool-only tail. Collapsing
+  a tool run changes only presentation; each member retains its distinct
+  view-qualified ordinal address and returns as an individual row on expansion.
+  Parked windows receive background commits and ordered reconnect replay.
+  Activation validates the chat, view, and cached frontier before restoring
+  the loaded interval. Disabling combination, view replacement, stale
+  continuity, chat deletion, permanent surface removal, and root teardown
+  discard parked state.
+  A manual transcript Reload has no old parked state to restore. With
+  combination disabled, or after a cache miss, switch-time restoration still
+  uses the bounded recent cache.
+  That cache persists the raw earlier-page continuation independently of its
+  oldest visible ordinal, so an all-hidden page remains resumable. Evicting
+  memory never truncates the ledger: older rows remain pageable.
+- An initially underfilled feed with collapsed tool groups starts measured
+  refill after its activation snapshot settles. Each compressed logical page
+  demands at most 200 presented messages, with at most ten automatic demands
+  per panel controller and chat/view; a logical demand may require multiple
+  bounded raw HTTP reads.
+  Cached-row reveals do not consume that allowance. The loop stops when
+  measured content fills the viewport, history ends, ownership changes, or the
+  allowance is exhausted. Manual paging remains available. Non-combined
+  initial restoration and its page size are unchanged.
 
 ## 5. Producer Boundary
 
@@ -2828,8 +2865,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   independently of visible rows; a hidden-only page remains resumable after
   switch-away/back and storage hydration. Active append, prepend, append-page,
   and programmatic scroll mutations never trim either edge under a reader.
-  Switching chats discards the expanded interval; returning restores at most
-  the bounded recent cache in exact order and can page earlier rows again. A
+  Combined-tool chat switching preserves an eligible bounded inactive window
+  and its reading target without fetching already-loaded history. An evicted,
+  invalidated, reloaded, or non-combined chat restores the bounded recent cache
+  in exact order and can page earlier rows again. A
   fake-time case retains a bottom-pinned expanded transcript beyond the old
   180-second interval, and a static assertion proves the timer,
   `history-pruned`, and immediate-compaction machinery are absent. Compact and
@@ -2952,8 +2991,9 @@ Direct plan without requiring another implementation or migration.
    relational validation, make the client continue across empty rendered
    pages, and persist the raw earlier cursor through bounded cache restoration.
    Remove the three-minute prune timer and timer-only cases; preserve
-   non-destructive active mutations, then discard expanded state on chat switch
-   and prove bounded-cache restoration.
+   non-destructive active mutations and prove bounded-cache restoration for a
+   cold return. Revision 39 adds bounded inactive combined-tool windows without
+   changing that cache fallback.
 6. **Route OpenCode V1 automatic compaction through the owning turn.** Keep
    the session-latest compaction plugin/map deleted, adopt OpenCode's marked
    compaction control and continuation parts into the active turn's route
@@ -3151,11 +3191,12 @@ Direct plan without requiring another implementation or migration.
     null. No opaque cursor, presentation-sized server scan, second existence
     query, or third transcript identity exists.
 23. The selected browser transcript never trims either edge during active
-    append, paging, or scroll mutations. Expanded state is selected-chat-only
-    and is discarded on chat switch or reload; returning restores the bounded
-    recent cache, including its raw earlier-page continuation, and pages older
-    rows from the ledger. The three-minute live-edge prune timer and its state
-    machine are deleted.
+    append, paging, or scroll mutations. Combined-tool mode may park bounded
+    inactive transcript windows and their reading targets for warm chat
+    returns. Browser reload, an ineligible or invalidated window, and
+    non-combined mode restore the bounded recent cache, including its raw
+    earlier-page continuation, and page older rows from the ledger. The
+    three-minute live-edge prune timer and its state machine are deleted.
 24. Pinned OpenCode V1 automatic compaction is marker-routed: OpenCode marks
     its compaction control and continuation parts, the runtime adopts them
     into the owning turn's route, and a successful summary publishes one

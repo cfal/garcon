@@ -222,17 +222,23 @@ interface ExpectedTranscriptRow {
 
 The required browser assertions are:
 
-- DOM row order equals ordinal order.
-- Every inspected row has the expected address, type, and exact text.
-- Equal-content occurrences retain separate addresses and DOM rows.
-- The final conversational ordinal is mounted and visible at the live edge.
+- Visible DOM rows preserve ledger ordinal order. A collapsed client-only tool
+  summary represents its member interval; expanding it restores individually
+  addressed rows in that order.
+- Every inspected row has the expected address, type, and exact text; a group
+  summary is checked against its exact member interval instead.
+- Equal-content occurrences retain separate addresses and, when expanded,
+  separate DOM rows.
+- The final conversational row, or its containing collapsed summary, is
+  mounted and visible at the live edge.
 - A sampled reading anchor stays connected and within one pixel on every
   animation frame during a claimed stable operation.
 - A null anchor frame, unmounted wrapper, ordinal inversion, or unexpected row
   removal fails immediately.
-- No ordinary earlier-page button appears except explicit error retry.
-- Bash uses remain individual rows and render `$ <command>` without a group
-  header or copy wrapper.
+- An ordinary earlier-page boundary appears only for a collapsed combined-tool
+  run with more history available; explicit error retry remains available.
+- With combination disabled or a group expanded, Bash uses remain individual
+  rows and render `$ <command>` without a copy wrapper.
 
 Compact and wide are environments for the same semantic requirement. They are
 separate cases only where layout, touch input, custom scrollbar behavior, or
@@ -515,8 +521,8 @@ routine local testing.
 
 ### Active Transcript and Browser Geometry
 
-Revision 18 L7 and section 4.4 define active-window retention and bounded
-cache restoration.
+Revision 39 L7 and section 4.4 distinguish untrimmed active intervals,
+bounded inactive combined-tool windows, and cold bounded-cache restoration.
 
 | ID         | Obligation                                                                                                               | Required evidence                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
@@ -527,10 +533,11 @@ cache restoration.
 | TLV5-UX.05 | Mutation-time retention never trims expanded active history.                                                             | State unit, static                |
 | TLV5-UX.06 | Page publication preserves an address-keyed reading anchor on every sampled frame.                                       | Chromium geometry                 |
 | TLV5-UX.07 | Directional intent, error retry, reversal, and programmatic ownership cannot cause runaway or unauthorized paging.       | Controller unit, browser behavior |
-| TLV5-UX.08 | Every renderable message remains an individual row in exact ordinal order.                                               | Logic unit, Chromium              |
-| TLV5-UX.09 | The final conversational ordinal is mounted and visible at the live edge.                                                | Chromium geometry, release replay |
+| TLV5-UX.08 | Every message retains its distinct view-qualified ordinal address and exact order; a collapsed combined-tool summary represents its member interval without changing the ledger. | Logic unit, Chromium |
+| TLV5-UX.09 | The final conversational message, or its containing collapsed summary, is mounted and visible at the live edge.         | Chromium geometry, release replay |
 | TLV5-UX.11 | Chat switch, reconnect, reload, visibility change, and navigation cannot apply stale work or move a detached reader.     | State unit, Chromium              |
-| TLV5-UX.17 | Active mutations and the retired 180-second boundary never trim under a reader; chat switch discards expansion and return restores only the bounded cache and raw continuation. | State, controller, static, Chromium |
+| TLV5-UX.17 | Active mutations and the retired 180-second boundary never trim under a reader; cold restoration uses the bounded cache and raw continuation. | State, controller, static, Chromium |
+| TLV5-UX.18 | Combined-tool switching restores an eligible parked interval and reading target without refetching it; whole-window limits, invalidation, and background replay preserve a bounded fallback to the cold cache. Non-combined switching is unchanged. | Store, registry, reconnect, Chromium |
 
 ### Paging and Reconnect Replay
 
@@ -758,7 +765,8 @@ the input and geometry paths without multiplying every dimension blindly.
 | held earlier page during keyboard paging                       | Chromium            | Chromium            | Covered                        |
 | held earlier page during wheel input                           | Required            | Required            | Partial                        |
 | direction reversal on publication frame                        | Scrollbar case      | Scrollbar case      | Partial explicit frame barrier |
-| switch away from expanded history and return to bounded cache  | State unit          | State unit          | Covered, layout-independent    |
+| switch away from expanded combined history and return warm     | State unit          | Chromium            | Covered                        |
+| return after eviction, invalidation, or with combination off   | State unit          | State unit          | Covered, layout-independent    |
 | chat switch during page load                                   | Chromium            | Chromium            | Covered                        |
 | idle detached native reload                                    | Chromium            | Chromium            | Covered                        |
 | reconnect replay while detached                                | Chromium            | Chromium            | Covered across separate cases  |
@@ -846,7 +854,7 @@ Static negative guards should reject reintroduction of:
 - durable future-turn queue recovery;
 - content, timestamp, or fuzzy transcript identity;
 - mutation-time trimming of the active reading interval;
-- grouped transcript feed items.
+- server-side grouped ledger rows or grouping while combination is disabled.
 
 ## Failure Injection Matrix
 
@@ -1058,11 +1066,16 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.06-COMPACT-TOUCH-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact touch prepend cases                                                         | R4                          |
 | TLV5-UX.06-WIDE-TOUCH-01       | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide touch prepend cases                                                            | R4                          |
 | TLV5-UX.08-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `renders mixed paged transcripts in exact ledger order on compact and wide layouts` | L02.03, final-row order     |
+| TLV5-UX.08-WEB-GROUP-01        | `web/src/lib/components/chat/__tests__/conversation-feed-virtual-items.test.ts`: collapsed summaries index every member and expansion restores individual order | UX.08 client projection |
 | TLV5-UX.17-WEB-STATIC-01       | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: timer and history-pruned machinery are absent                    | R4 timer architecture, supplementary |
 | TLV5-UX.17-WEB-UNIT-01         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: an active earlier-page request retains both loaded edges beyond 180 seconds | R4 active reader            |
 | TLV5-UX.17-WEB-UNIT-02         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: viewport-owned programmatic scrolling retains both loaded edges           | R4 active reader            |
 | TLV5-UX.17-WEB-UNIT-03         | `web/src/lib/chat/transcript/__tests__/conversation-scroll-controller.test.ts`: a bottom-pinned expanded interval survives beyond the retired timer       | R4 timer discriminator      |
-| TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switching discards expansion and restores the exact bounded tail with earlier paging available | R4 switch restoration |
+| TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: direct cold activation restores the exact bounded tail with earlier paging available | R4 cold restoration |
+| TLV5-UX.18-WEB-STORE-01       | `web/src/lib/chat/transcript/__tests__/inactive-transcript-window-store.test.ts`: whole-window count, message, payload, and stale-view limits | UX.18 memory bounds |
+| TLV5-UX.18-WEB-REGISTRY-01    | `web/src/lib/chat/conversation/__tests__/conversation-panel-registry.test.ts`: rapid warm switching restores the expanded interval, while invalidation and combination-off use the cold cache | UX.18 restoration |
+| TLV5-UX.18-WEB-REPLAY-01      | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: parked windows receive ordered replay and buffer concurrent live rows | UX.18 replay |
+| TLV5-UX.18-CHROMIUM-01        | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: cold compressed history fills, then repeated warm returns show context without earlier-page requests | UX.18 browser |
 | TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact live-edge expansion survives the retired delay and later growth in canonical order with the final row visible | R4 compact geometry |
 | TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide live-edge expansion survives the retired delay and later growth in canonical order with the final row visible    | R4 wide geometry    |
 | TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: threshold compaction shows a boundary and pins native markers              | OPENCODE.01                 |
