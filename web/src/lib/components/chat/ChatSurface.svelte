@@ -5,6 +5,7 @@
 		getConversationPanels,
 		getGitViewLauncher,
 		getGhCapability,
+		getExecutionNodes,
 		getWorkspaceCoordinator,
 		getModelCatalog,
 		type WorkspaceChatActions,
@@ -67,7 +68,8 @@
 	const conversationPanels = getConversationPanels();
 	const rootModelCatalog = getModelCatalog();
 	const gitViews = getGitViewLauncher();
-	const ghCapability = getGhCapability();
+	const ghCapabilities = getGhCapability();
+	const nodes = getExecutionNodes();
 	const workspace = getWorkspaceCoordinator();
 	const transcriptCache =
 		untrack(() => providedTranscriptCache) ??
@@ -77,7 +79,18 @@
 
 	const selectedChat = $derived(sessions.selectedChat);
 	const modelCatalog = $derived(rootModelCatalog.forNode(selectedChat?.nodeId));
-	const localMachine = $derived((selectedChat?.nodeId ?? 'local') === 'local');
+	const gitAvailable = $derived(nodes.gitAvailable(selectedChat?.nodeId));
+	const ghCapability = $derived(ghCapabilities.forNode(selectedChat?.nodeId ?? 'local'));
+	$effect(() => {
+		if (
+			!isMobile ||
+			!isVisible ||
+			!nodes.ghAvailable(selectedChat?.nodeId) ||
+			ghCapability.hasChecked
+		)
+			return;
+		untrack(() => void ghCapability.ensureChecked());
+	});
 	const mobileToolbarChat = $derived(isVisible ? selectedChat : null);
 	const hasUsableChatContext = $derived(Boolean(selectedChat));
 	const chatSurfacePresentation = $derived(
@@ -147,12 +160,16 @@
 					canForkNow={canForkSelectedChatNow}
 					shadow
 					onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
-					onOpenGitHistory={localMachine ? () => void gitViews.openHistory({ presentation: 'mobile' }) : undefined}
-					onOpenGitCompare={localMachine ? () => void gitViews.openCompare({ presentation: 'mobile' }) : undefined}
+					onOpenGitHistory={gitAvailable
+						? () => void gitViews.openHistory({ presentation: 'mobile' })
+						: undefined}
+					onOpenGitCompare={gitAvailable
+						? () => void gitViews.openCompare({ presentation: 'mobile' })
+						: undefined}
 					onOpenTickets={() => void workspace.focusMobileSingleton('tickets')}
 					onOpenChatMap={() => void workspace.focusMobileSingleton('chat-map')}
 					onOpenCanvas={() => void workspace.focusMobileSingleton('chat-canvas')}
-					onOpenPullRequests={localMachine && ghCapability.available
+					onOpenPullRequests={gitAvailable && ghCapability.available
 						? () => void workspace.focusMobileSingleton('pull-requests')
 						: undefined}
 					onRename={() => selectedChat && chatActions.requestRename(selectedChat)}

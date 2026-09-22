@@ -20,6 +20,7 @@
 		getConversationUi,
 		getGitBranchActions,
 		getGitQuickSummary,
+		getExecutionNodes,
 		getLocalSettings,
 		getModelCatalog,
 	} from '$lib/context';
@@ -67,6 +68,7 @@
 	const appShell = getAppShell();
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
+	const nodes = getExecutionNodes();
 
 	const chatId = $derived(chat.id);
 	const queue = $derived(conversationUi.getExecutionControl(chatId)?.queue ?? null);
@@ -76,17 +78,21 @@
 		isProcessing && panel.lifecycle.loadingStatus?.can_interrupt !== false,
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
-	const projectPath = $derived((chat.nodeId ?? 'local') === 'local' ? chat.projectPath || null : null);
-	const quickGitSummary = $derived(quickGit.summaryFor(projectPath));
+	const nodeId = $derived(chat.nodeId ?? 'local');
+	const projectPath = $derived(nodes.gitAvailable(nodeId) ? chat.projectPath || null : null);
+	const gitProject = $derived(projectPath ? { nodeId, projectPath } : null);
+	const quickGitSummary = $derived(quickGit.summaryFor(gitProject));
 	const quickGitBranchError = $derived(
-		projectPath && quickGitBranches.currentProjectPath === projectPath
+		projectPath &&
+			quickGitBranches.nodeId === nodeId &&
+			quickGitBranches.currentProjectPath === projectPath
 			? quickGitBranches.lastError
 			: null,
 	);
-	const quickGitError = $derived(quickGit.lastErrorFor(projectPath) ?? quickGitBranchError);
-	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(projectPath));
+	const quickGitError = $derived(quickGit.lastErrorFor(gitProject) ?? quickGitBranchError);
+	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(gitProject));
 	const quickGitTrayVisible = $derived(
-		!isProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
+		!isProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject),
 	);
 	const reserveStatusCap = $derived(
 		shouldReserveComposerCapSlot({
@@ -113,7 +119,9 @@
 	const branchSelector = $derived.by<GitQuickBranchSelectorControls | null>(() => {
 		if (!projectPath || !quickGitSummary) return null;
 		const exposesCurrentBranchState =
-			isCommandOwner && quickGitBranches.currentProjectPath === projectPath;
+			isCommandOwner &&
+			quickGitBranches.nodeId === nodeId &&
+			quickGitBranches.currentProjectPath === projectPath;
 		return {
 			refs: exposesCurrentBranchState ? quickGitBranches.refs : [],
 			sort: quickGitBranches.branchSort,

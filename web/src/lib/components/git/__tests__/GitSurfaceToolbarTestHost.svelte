@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
+	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context.js';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitSurfaceToolbar from '../GitSurfaceToolbar.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
@@ -23,6 +24,7 @@
 		showMenuLeadingContent?: boolean;
 	} = $props();
 
+	setExecutionNodesTestContext();
 	setRemoteSettings(createRemoteSettingsStore());
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));
 

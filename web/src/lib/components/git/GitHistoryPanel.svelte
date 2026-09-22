@@ -67,7 +67,7 @@
 		if (!presentationVisible) return;
 		const key = controller.target.effectiveProjectKey;
 		if (!key) return;
-		const version = gitProjectInvalidations.version(key);
+		const version = gitProjectInvalidations.version(controller.target.nodeId, key);
 		untrack(() => void controller.refreshForInvalidation(key, version));
 	});
 
@@ -80,16 +80,18 @@
 	}
 
 	function refreshHistory(): void {
-		if (controller.history.screen === 'comparison' && projectPath) {
-			void controller.history.comparison.refresh(projectPath);
+		if (controller.target.projectIdentityPending || !activeTarget) return;
+		if (controller.history.screen === 'comparison' && activeTarget) {
+			void controller.history.comparison.refresh(activeTarget);
 			return;
 		}
-		void controller.target.refreshTargets();
+		controller.history.refreshSession(activeTarget);
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
-		if (!projectPath) return;
+		if (!projectPath || !activeTarget) return;
 		void fileSessions.open({
+			nodeId: activeTarget.nodeId,
 			fileRootPath: resolveGitEditorRoot({
 				activeProjectPath: projectPath,
 				targetRepoRoot: activeTarget?.repoRoot,
@@ -137,7 +139,7 @@
 	<GitHistoryView
 		history={controller.history}
 		comparisonSelection={controller.comparisonSelection}
-		{projectPath}
+		project={activeTarget}
 		{presentation}
 		active={presentationVisible}
 		diffMode={reviewDisplay.diffMode}

@@ -15,6 +15,9 @@ const VALIDATION_DELAY_MS = 150;
 
 interface GitTargetDialogOptions {
 	readonly initialPath: string;
+	readonly nodeId: string;
+	readonly nodeContextKey: string;
+	readonly available: boolean;
 }
 
 export class GitTargetDialogState {
@@ -35,8 +38,9 @@ export class GitTargetDialogState {
 	#worktreeGeneration = 0;
 	#worktreeAbort: AbortController | null = null;
 	#targetAbort: AbortController | null = null;
+	#disposed = false;
 
-	constructor(options: GitTargetDialogOptions) {
+	constructor(private readonly options: GitTargetDialogOptions) {
 		this.candidatePath = options.initialPath;
 	}
 
@@ -45,11 +49,16 @@ export class GitTargetDialogState {
 	}
 
 	get canConfirm(): boolean {
-		return this.validationStatus === 'valid' && Boolean(this.trimmedPath) && !this.isConfirming;
+		return (
+			this.options.available &&
+			this.validationStatus === 'valid' &&
+			Boolean(this.trimmedPath) &&
+			!this.isConfirming
+		);
 	}
 
 	get canSelectWorktree(): boolean {
-		return this.validationStatus === 'valid' && Boolean(this.trimmedPath);
+		return this.options.available && this.validationStatus === 'valid' && Boolean(this.trimmedPath);
 	}
 
 	setCandidatePath(path: string): void {
@@ -60,11 +69,15 @@ export class GitTargetDialogState {
 
 	scheduleValidation(): void {
 		const path = this.trimmedPath;
+		const nodeId = this.options.nodeId;
+		const contextKey = this.options.nodeContextKey;
+		this.#cancelWorktreeLoad();
+		this.#targetAbort?.abort();
 		this.#validationAbort?.abort();
 		this.#validationAbort = null;
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
 
-		if (!path) {
+		if (!path || !this.options.available) {
 			this.#validationGeneration += 1;
 			this.validationStatus = 'idle';
 			this.validationError = null;
@@ -76,7 +89,7 @@ export class GitTargetDialogState {
 		const generation = ++this.#validationGeneration;
 
 		this.#validationTimer = setTimeout(() => {
-			void this.#validatePath(path, generation);
+			void this.#validatePath(path, generation, nodeId, contextKey);
 		}, VALIDATION_DELAY_MS);
 	}
 
@@ -93,6 +106,7 @@ export class GitTargetDialogState {
 	}
 
 	selectWorktree(worktreePath: string): void {
+		if (!this.options.available) return;
 		this.#cancelWorktreeLoad();
 		this.setCandidatePath(worktreePath);
 		this.validationStatus = 'valid';
@@ -102,7 +116,9 @@ export class GitTargetDialogState {
 
 	async loadWorktrees(): Promise<void> {
 		const path = this.trimmedPath;
-		if (!path) return;
+		const nodeId = this.options.nodeId;
+		const current = this.#captureContext();
+		if (!path || !this.options.available) return;
 
 		this.#worktreeAbort?.abort();
 		const abort = new AbortController();
@@ -112,11 +128,16 @@ export class GitTargetDialogState {
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees(path, { signal: abort.signal });
-			if (!this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
+			const result = await getGitWorktrees({ nodeId, projectPath: path }, { signal: abort.signal });
+			if (!current() || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
-			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
+			if (
+				isAbortError(error) ||
+				!current() ||
+				!this.#isCurrentWorktreeLoad(generation, abort.signal)
+			)
+				return;
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
 		} finally {
@@ -126,23 +147,31 @@ export class GitTargetDialogState {
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
 		const projectPath = this.trimmedPath;
-		if (!projectPath) return;
+		const nodeId = this.options.nodeId;
+		const current = this.#captureContext();
+		const generation = this.#worktreeGeneration;
+		if (!projectPath || !this.options.available || this.isCreatingWorktree) return;
 
 		this.isCreatingWorktree = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree(projectPath, worktreePath, { branch, baseRef });
+			const result = await gitCreateWorktree({ nodeId, projectPath }, worktreePath, {
+				branch,
+				baseRef,
+			});
+			if (!current() || generation !== this.#worktreeGeneration) return;
 			if (!result.success) {
 				this.worktreeError = result.error || result.message || m.git_target_load_worktrees_failed();
 				return;
 			}
 			this.selectWorktree(result.worktreePath || worktreePath);
 		} catch (error) {
+			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.worktreeError =
 				error instanceof Error ? error.message : m.git_target_load_worktrees_failed();
 		} finally {
-			this.isCreatingWorktree = false;
+			if (generation === this.#worktreeGeneration) this.isCreatingWorktree = false;
 		}
 	}
 
@@ -153,12 +182,17 @@ export class GitTargetDialogState {
 		const abort = new AbortController();
 		this.#targetAbort = abort;
 		const path = this.trimmedPath;
+		const nodeId = this.options.nodeId;
+		const current = this.#captureContext();
 		this.isConfirming = true;
 		this.validationError = null;
 
 		try {
-			const result = await getGitTargetCandidates(path, { signal: abort.signal });
-			if (abort.signal.aborted) return null;
+			const result = await getGitTargetCandidates(
+				{ nodeId, projectPath: path },
+				{ signal: abort.signal },
+			);
+			if (abort.signal.aborted || !current()) return null;
 			const target = this.#targetForPath(result.targets, path);
 			if (!target) {
 				this.validationStatus = 'invalid';
@@ -167,7 +201,7 @@ export class GitTargetDialogState {
 			}
 			return target;
 		} catch (error) {
-			if (isAbortError(error) || abort.signal.aborted) return null;
+			if (isAbortError(error) || abort.signal.aborted || !current()) return null;
 			this.validationStatus = 'invalid';
 			this.validationError = error instanceof Error ? error.message : m.git_target_switch_failed();
 			return null;
@@ -180,6 +214,7 @@ export class GitTargetDialogState {
 	}
 
 	dispose(): void {
+		this.#disposed = true;
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
 		this.#validationTimer = null;
 		this.#validationAbort?.abort();
@@ -187,13 +222,20 @@ export class GitTargetDialogState {
 		this.#targetAbort?.abort();
 	}
 
-	async #validatePath(path: string, generation: number): Promise<void> {
+	async #validatePath(
+		path: string,
+		generation: number,
+		nodeId: string,
+		contextKey: string,
+	): Promise<void> {
+		if (nodeId !== this.options.nodeId || contextKey !== this.options.nodeContextKey) return;
 		const abort = new AbortController();
 		this.#validationAbort = abort;
+		const current = this.#captureContext();
 
 		try {
-			const data = await validateStart(path, { signal: abort.signal });
-			if (!this.#isCurrentValidation(path, generation, abort.signal)) return;
+			const data = await validateStart(path, { nodeId, signal: abort.signal });
+			if (!current() || !this.#isCurrentValidation(path, generation, abort.signal)) return;
 
 			if (!data.valid) {
 				this.validationStatus = 'invalid';
@@ -210,7 +252,11 @@ export class GitTargetDialogState {
 			this.validationStatus = 'valid';
 			this.validationError = null;
 		} catch (error) {
-			if (isAbortError(error) || !this.#isCurrentValidation(path, generation, abort.signal)) {
+			if (
+				isAbortError(error) ||
+				!current() ||
+				!this.#isCurrentValidation(path, generation, abort.signal)
+			) {
 				return;
 			}
 			this.validationStatus = 'invalid';
@@ -234,6 +280,18 @@ export class GitTargetDialogState {
 		this.#worktreeAbort = null;
 		this.#worktreeGeneration += 1;
 		this.isLoadingWorktrees = false;
+		this.isCreatingWorktree = false;
+	}
+
+	#captureContext(): () => boolean {
+		const { nodeId, nodeContextKey } = this.options;
+		const path = this.trimmedPath;
+		return () =>
+			!this.#disposed &&
+			this.options.available &&
+			nodeId === this.options.nodeId &&
+			nodeContextKey === this.options.nodeContextKey &&
+			path === this.trimmedPath;
 	}
 
 	#targetForPath(targets: GitTargetCandidate[], path: string): GitTargetCandidate | null {

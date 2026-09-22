@@ -180,16 +180,18 @@
 	};
 
 	setGhCapability({
-		available: true,
-		authenticated: true,
-		reason: 'authenticated',
-		login: 'octocat',
-		host: 'github.com',
-		isLoading: false,
-		hasChecked: true,
-		lastError: null,
-		ensureChecked: async () => {},
-		refresh: async () => {},
+		forNode: () => ({
+			available: true,
+			authenticated: true,
+			reason: 'authenticated',
+			login: 'octocat',
+			host: 'github.com',
+			isLoading: false,
+			hasChecked: true,
+			lastError: null,
+			ensureChecked: async () => {},
+			refresh: async () => {},
+		}),
 	});
 
 	setAppShell(untrack(() => appShell));
@@ -205,7 +207,9 @@
 		},
 	});
 	setModelCatalog({
-		forNode() { return this; },
+		forNode() {
+			return this;
+		},
 		version: 0,
 		apiProviderCatalog: [],
 		getModels() {

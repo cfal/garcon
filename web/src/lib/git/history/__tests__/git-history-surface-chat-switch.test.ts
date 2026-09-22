@@ -49,7 +49,7 @@ function resolvingProject(chatId: string, projectPath: string) {
 }
 
 function installCandidateRouter(pending?: Map<string, Array<(v: unknown) => void>>) {
-	api.getGitTargetCandidates.mockImplementation((projectPath: string) => {
+	api.getGitTargetCandidates.mockImplementation(({ projectPath }) => {
 		if (pending) {
 			return new Promise((resolve) => {
 				const list = pending.get(projectPath) ?? [];
@@ -62,7 +62,7 @@ function installCandidateRouter(pending?: Map<string, Array<(v: unknown) => void
 }
 
 function historyCalls(): string[] {
-	return api.getGitHistoryCommits.mock.calls.map(([projectPath]) => projectPath as string);
+	return api.getGitHistoryCommits.mock.calls.map(([{ projectPath }]) => projectPath);
 }
 
 describe('git chat-switch desync repro', () => {

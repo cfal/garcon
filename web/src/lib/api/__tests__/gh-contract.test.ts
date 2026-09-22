@@ -23,6 +23,8 @@ describe('gh API contract', () => {
 		fetchMock.mockResolvedValue(
 			new Response(
 				JSON.stringify({
+					nodeId: 'remote-node',
+					instanceId: 'test-instance',
 					available: true,
 					authenticated: true,
 					reason: 'authenticated',
@@ -33,9 +35,9 @@ describe('gh API contract', () => {
 			),
 		);
 
-		const result = await getGhStatus();
+		const result = await getGhStatus('remote-node');
 
 		expect(result.available).toBe(true);
-		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/gh/status');
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/gh/status?nodeId=remote-node');
 	});
 });

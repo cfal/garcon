@@ -1,3 +1,5 @@
+import type { GitProjectTarget } from '$lib/api/git-client.js';
+import { gitProjectKey, sameGitProject } from '$lib/git/targets/git-target.js';
 import {
 	getGitQuickSummary,
 	type GitQuickSummaryReady,
@@ -44,7 +46,7 @@ type QuickSummaryNow = () => number;
 type GitQuickCachedStatus = 'unknown' | 'ready' | 'not-git-repository' | 'error';
 
 interface GitQuickSummaryCacheEntry {
-	projectPath: string;
+	project: GitProjectTarget;
 	status: GitQuickCachedStatus;
 	summary: GitQuickSummaryReady | null;
 	lastError: string | null;
@@ -54,8 +56,8 @@ interface GitQuickSummaryCacheEntry {
 	lastUpdatedAt: number;
 }
 
-export interface GitQuickProjectLease {
-	readonly projectPath: string;
+export interface GitQuickProjectLease extends GitProjectTarget {
+	readonly nodeContextKey?: string;
 	readonly isProcessing: boolean;
 }
 
@@ -94,12 +96,13 @@ function systemNow(): number {
 }
 
 export class GitQuickSummaryStore {
-	projectPath = $state<string | null>(null);
+	project = $state<GitProjectTarget | null>(null);
 	visibleProjects = $state.raw<readonly GitQuickProjectLease[]>([]);
 	entries = $state<Record<string, GitQuickSummaryCacheEntry>>({});
 	isEnabled = $state(true);
 
 	private readonly requestGenerationByProject = new Map<string, number>();
+	private requestSequence = 0;
 	private readonly inFlightByProject = new Map<string, AbortController>();
 	private readonly pendingRefreshByProject = new Map<string, GitQuickRefreshReason>();
 	private readonly debounceTimerByProject = new Map<string, QuickSummaryTimeoutHandle>();
@@ -118,7 +121,7 @@ export class GitQuickSummaryStore {
 	}
 
 	get activeEntry(): GitQuickSummaryCacheEntry | null {
-		return this.entryFor(this.projectPath);
+		return this.entryFor(this.project);
 	}
 
 	get summary(): GitQuickSummaryReady | null {
@@ -127,7 +130,7 @@ export class GitQuickSummaryStore {
 
 	get lastNonRepoProject(): string | null {
 		const entry = this.activeEntry;
-		return entry?.status === 'not-git-repository' ? entry.projectPath : null;
+		return entry?.status === 'not-git-repository' ? entry.project.projectPath : null;
 	}
 
 	get isLoading(): boolean {
@@ -143,12 +146,12 @@ export class GitQuickSummaryStore {
 	}
 
 	get canShowTray(): boolean {
-		return this.canShowTrayFor(this.projectPath);
+		return this.canShowTrayFor(this.project);
 	}
 
-	canShowTrayFor(projectPath: string | null): boolean {
-		if (!this.isEnabled || !projectPath) return false;
-		const entry = this.entryFor(projectPath);
+	canShowTrayFor(project: GitProjectTarget | null): boolean {
+		if (!this.isEnabled || !project) return false;
+		const entry = this.entryFor(project);
 		if (!entry) return true;
 		if (entry.status === 'not-git-repository') return false;
 		if (entry.summary) return true;
@@ -160,30 +163,26 @@ export class GitQuickSummaryStore {
 		return Boolean(this.summary && this.summary.changedFiles > 0);
 	}
 
-	summaryFor(projectPath: string | null): GitQuickSummaryReady | null {
-		return this.entryFor(projectPath)?.summary ?? null;
+	summaryFor(project: GitProjectTarget | null): GitQuickSummaryReady | null {
+		return this.entryFor(project)?.summary ?? null;
 	}
 
-	lastErrorFor(projectPath: string | null): string | null {
-		return this.entryFor(projectPath)?.lastError ?? null;
+	lastErrorFor(project: GitProjectTarget | null): string | null {
+		return this.entryFor(project)?.lastError ?? null;
 	}
 
-	isRefreshingFor(projectPath: string | null): boolean {
-		return Boolean(this.entryFor(projectPath)?.isRefreshing);
+	isRefreshingFor(project: GitProjectTarget | null): boolean {
+		return Boolean(this.entryFor(project)?.isRefreshing);
 	}
 
-	setProject(projectPath: string | null): void {
-		if (projectPath === this.projectPath) return;
-		this.projectPath = projectPath;
-		if (projectPath) {
-			this.touchProject(projectPath);
+	setProject(project: GitProjectTarget | null): void {
+		if (sameGitProject(project, this.project)) return;
+		this.project = project;
+		if (project) {
+			this.touchProject(project);
 			this.pruneCache();
-			if (this.#hasVisibleProject(projectPath) && this.isEnabled) {
-				this.scheduleRefreshFor(
-					projectPath,
-					'project-change',
-					QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS,
-				);
+			if (this.#hasVisibleProject(project) && this.isEnabled) {
+				this.scheduleRefreshFor(project, 'project-change', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
 			}
 		}
 	}
@@ -192,22 +191,25 @@ export class GitQuickSummaryStore {
 		const deduplicated = new Map<string, GitQuickProjectLease>();
 		for (const project of projects) {
 			if (!project.projectPath) continue;
-			const previous = deduplicated.get(project.projectPath);
-			deduplicated.set(project.projectPath, {
-				projectPath: project.projectPath,
+			const previous = deduplicated.get(gitProjectKey(project));
+			deduplicated.set(gitProjectKey(project), {
+				...project,
 				isProcessing: Boolean(previous?.isProcessing || project.isProcessing),
 			});
 		}
 		const next = [...deduplicated.values()].sort((left, right) =>
-			left.projectPath.localeCompare(right.projectPath),
+			gitProjectKey(left).localeCompare(gitProjectKey(right)),
 		);
-		const previous = new Map(this.visibleProjects.map((project) => [project.projectPath, project]));
+		const previous = new Map(
+			this.visibleProjects.map((project) => [gitProjectKey(project), project]),
+		);
 		if (
 			next.length === this.visibleProjects.length &&
 			next.every((project, index) => {
 				const current = this.visibleProjects[index];
 				return (
-					current?.projectPath === project.projectPath &&
+					sameGitProject(current, project) &&
+					current.nodeContextKey === project.nodeContextKey &&
 					current.isProcessing === project.isProcessing
 				);
 			})
@@ -215,30 +217,24 @@ export class GitQuickSummaryStore {
 			return;
 		}
 
-		const nextPaths = new Set(next.map((project) => project.projectPath));
+		const nextPaths = new Set(next.map(gitProjectKey));
 		for (const project of this.visibleProjects) {
-			if (nextPaths.has(project.projectPath)) continue;
-			this.#cancelProjectWork(project.projectPath);
-			this.updateEntry(project.projectPath, { isRefreshing: false });
+			if (nextPaths.has(gitProjectKey(project))) continue;
+			this.#cancelProjectWork(project);
+			this.updateEntry(project, { isRefreshing: false });
 		}
 
 		this.visibleProjects = next;
 		for (const project of next) {
-			this.touchProject(project.projectPath);
-			const previousLease = previous.get(project.projectPath);
+			this.touchProject(project);
+			const previousLease = previous.get(gitProjectKey(project));
 			if (!this.isEnabled) continue;
-			if (!previousLease) {
-				this.scheduleRefreshFor(
-					project.projectPath,
-					'project-change',
-					QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS,
-				);
+			if (!previousLease || previousLease.nodeContextKey !== project.nodeContextKey) {
+				this.#cancelProjectWork(project);
+				this.updateEntry(project, { isRefreshing: false });
+				this.scheduleRefreshFor(project, 'project-change', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
 			} else if (previousLease.isProcessing && !project.isProcessing) {
-				this.scheduleRefreshFor(
-					project.projectPath,
-					'agent-stopped',
-					QUICK_GIT_STOPPED_DEBOUNCE_MS,
-				);
+				this.scheduleRefreshFor(project, 'agent-stopped', QUICK_GIT_STOPPED_DEBOUNCE_MS);
 			}
 		}
 		this.pruneCache();
@@ -249,71 +245,71 @@ export class GitQuickSummaryStore {
 		this.isEnabled = enabled;
 		if (!enabled) {
 			for (const project of this.visibleProjects) {
-				this.#cancelProjectWork(project.projectPath);
-				this.updateEntry(project.projectPath, { isRefreshing: false });
+				this.#cancelProjectWork(project);
+				this.updateEntry(project, { isRefreshing: false });
 			}
 			return;
 		}
 		for (const project of this.visibleProjects) {
-			this.touchProject(project.projectPath);
-			this.scheduleRefreshFor(
-				project.projectPath,
-				'tray-visible',
-				QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS,
-			);
+			this.touchProject(project);
+			this.scheduleRefreshFor(project, 'tray-visible', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
 		}
 		this.pruneCache();
 	}
 
 	scheduleRefresh(reason: GitQuickRefreshReason, delayMs = 300): void {
-		if (!this.projectPath) return;
-		this.scheduleRefreshFor(this.projectPath, reason, delayMs);
+		if (!this.project) return;
+		this.scheduleRefreshFor(this.project, reason, delayMs);
 	}
 
-	scheduleRefreshFor(projectPath: string, reason: GitQuickRefreshReason, delayMs = 300): void {
-		if (!this.isEnabled || !this.#hasVisibleProject(projectPath)) return;
-		this.pendingRefreshByProject.set(projectPath, reason);
-		this.#clearProjectDebounce(projectPath);
+	scheduleRefreshFor(
+		project: GitProjectTarget,
+		reason: GitQuickRefreshReason,
+		delayMs = 300,
+	): void {
+		if (!this.isEnabled || !this.#hasVisibleProject(project)) return;
+		this.pendingRefreshByProject.set(gitProjectKey(project), reason);
+		this.#clearProjectDebounce(project);
 		const timer = this.setTimeoutFn(() => {
-			this.debounceTimerByProject.delete(projectPath);
-			const pendingReason = this.pendingRefreshByProject.get(projectPath) ?? reason;
-			this.pendingRefreshByProject.delete(projectPath);
-			void this.refreshFor(projectPath, pendingReason);
+			this.debounceTimerByProject.delete(gitProjectKey(project));
+			const pendingReason = this.pendingRefreshByProject.get(gitProjectKey(project)) ?? reason;
+			this.pendingRefreshByProject.delete(gitProjectKey(project));
+			void this.refreshFor(project, pendingReason);
 		}, delayMs);
-		this.debounceTimerByProject.set(projectPath, timer);
+		this.debounceTimerByProject.set(gitProjectKey(project), timer);
 	}
 
 	async refresh(reason: GitQuickRefreshReason): Promise<void> {
-		if (!this.projectPath) return;
-		await this.refreshFor(this.projectPath, reason);
+		if (!this.project) return;
+		await this.refreshFor(this.project, reason);
 	}
 
-	async refreshFor(projectPath: string, _reason: GitQuickRefreshReason): Promise<void> {
-		if (!this.isEnabled || !this.#hasVisibleProject(projectPath)) return;
-		this.#clearProjectDebounce(projectPath);
-		this.pendingRefreshByProject.delete(projectPath);
-		const generation = (this.requestGenerationByProject.get(projectPath) ?? 0) + 1;
-		this.requestGenerationByProject.set(projectPath, generation);
-		this.inFlightByProject.get(projectPath)?.abort();
+	async refreshFor(project: GitProjectTarget, _reason: GitQuickRefreshReason): Promise<void> {
+		if (!this.isEnabled || !this.#hasVisibleProject(project)) return;
+		this.#clearProjectDebounce(project);
+		this.pendingRefreshByProject.delete(gitProjectKey(project));
+		const generation = ++this.requestSequence;
+		this.requestGenerationByProject.set(gitProjectKey(project), generation);
+		this.inFlightByProject.get(gitProjectKey(project))?.abort();
 		const controller = new AbortController();
-		this.inFlightByProject.set(projectPath, controller);
-		this.updateEntry(projectPath, { isRefreshing: true, lastAccessedAt: this.now() });
+		this.inFlightByProject.set(gitProjectKey(project), controller);
+		this.updateEntry(project, { isRefreshing: true, lastAccessedAt: this.now() });
 
 		try {
-			const result = await this.getSummary(projectPath, { signal: controller.signal });
-			if (!this.isCurrentResponse(projectPath, generation)) return;
-			this.applyResponse(projectPath, result);
+			const result = await this.getSummary(project, { signal: controller.signal });
+			if (!this.isCurrentResponse(project, generation)) return;
+			this.applyResponse(project, result);
 			this.pruneCache();
 		} catch (error) {
-			if (isAbortError(error) || !this.isCurrentResponse(projectPath, generation)) return;
-			this.applyRefreshError(projectPath, error);
+			if (isAbortError(error) || !this.isCurrentResponse(project, generation)) return;
+			this.applyRefreshError(project, error);
 			this.pruneCache();
 		} finally {
-			if (this.inFlightByProject.get(projectPath) === controller) {
-				this.inFlightByProject.delete(projectPath);
+			if (this.inFlightByProject.get(gitProjectKey(project)) === controller) {
+				this.inFlightByProject.delete(gitProjectKey(project));
 			}
-			if (this.isCurrentResponse(projectPath, generation)) {
-				this.updateEntry(projectPath, { isRefreshing: false });
+			if (this.isCurrentResponse(project, generation)) {
+				this.updateEntry(project, { isRefreshing: false });
 			}
 		}
 	}
@@ -333,8 +329,7 @@ export class GitQuickSummaryStore {
 				if (
 					reason !== 'visibility' &&
 					project.isProcessing &&
-					this.now() - (this.entryFor(project.projectPath)?.lastUpdatedAt ?? 0) <
-						QUICK_GIT_PROCESSING_POLL_MS
+					this.now() - (this.entryFor(project)?.lastUpdatedAt ?? 0) < QUICK_GIT_PROCESSING_POLL_MS
 				) {
 					continue;
 				}
@@ -342,7 +337,7 @@ export class GitQuickSummaryStore {
 				if (reason === 'visibility') refreshReason = reason;
 				else if (project.isProcessing) refreshReason = 'agent-processing-poll';
 				else refreshReason = 'idle-poll';
-				void this.refreshFor(project.projectPath, refreshReason);
+				void this.refreshFor(project, refreshReason);
 			}
 		};
 		const intervalId = setIntervalFn(() => tick('idle-poll'), intervalMs);
@@ -372,15 +367,28 @@ export class GitQuickSummaryStore {
 		this.#stopOwnedPolling?.();
 		this.#stopOwnedPolling = null;
 		this.#ownedPollingKey = '';
-		for (const project of this.visibleProjects) this.#cancelProjectWork(project.projectPath);
+		for (const project of this.visibleProjects) this.#cancelProjectWork(project);
 		this.visibleProjects = [];
 		this.entries = {};
+		this.requestGenerationByProject.clear();
 	}
 
-	private applyResponse(projectPath: string, result: GitQuickSummaryResponse): void {
+	pruneNodes(nodeIds: ReadonlySet<string>): void {
+		this.setVisibleProjects(this.visibleProjects.filter((project) => nodeIds.has(project.nodeId)));
+		for (const entry of Object.values(this.entries)) {
+			if (!nodeIds.has(entry.project.nodeId)) this.#cancelProjectWork(entry.project);
+		}
+		if (this.project && !nodeIds.has(this.project.nodeId)) this.project = null;
+		this.entries = Object.fromEntries(
+			Object.entries(this.entries).filter(([, entry]) => nodeIds.has(entry.project.nodeId)),
+		);
+		this.pruneCache();
+	}
+
+	private applyResponse(project: GitProjectTarget, result: GitQuickSummaryResponse): void {
 		const now = this.now();
 		if (result.status === 'ready') {
-			this.updateEntry(projectPath, {
+			this.updateEntry(project, {
 				status: 'ready',
 				summary: result,
 				lastError: null,
@@ -393,7 +401,7 @@ export class GitQuickSummaryStore {
 		}
 
 		if (result.status === 'not-git-repository') {
-			this.updateEntry(projectPath, {
+			this.updateEntry(project, {
 				status: 'not-git-repository',
 				summary: null,
 				lastError: null,
@@ -405,25 +413,25 @@ export class GitQuickSummaryStore {
 			return;
 		}
 
-		this.applySummaryError(projectPath, result.message, now);
+		this.applySummaryError(project, result.message, now);
 	}
 
-	private isCurrentResponse(projectPath: string, generation: number): boolean {
+	private isCurrentResponse(project: GitProjectTarget, generation: number): boolean {
 		return (
-			generation === this.requestGenerationByProject.get(projectPath) &&
-			this.#hasVisibleProject(projectPath) &&
+			generation === this.requestGenerationByProject.get(gitProjectKey(project)) &&
+			this.#hasVisibleProject(project) &&
 			this.isEnabled
 		);
 	}
 
-	private applyRefreshError(projectPath: string, error: unknown): void {
+	private applyRefreshError(project: GitProjectTarget, error: unknown): void {
 		const message = error instanceof Error ? error.message : String(error);
-		this.applySummaryError(projectPath, message, this.now());
+		this.applySummaryError(project, message, this.now());
 	}
 
-	private applySummaryError(projectPath: string, message: string, now: number): void {
-		const existing = this.entryFor(projectPath);
-		this.updateEntry(projectPath, {
+	private applySummaryError(project: GitProjectTarget, message: string, now: number): void {
+		const existing = this.entryFor(project);
+		this.updateEntry(project, {
 			status: existing?.summary ? 'ready' : 'error',
 			lastError: message,
 			hasResponse: true,
@@ -433,31 +441,31 @@ export class GitQuickSummaryStore {
 		});
 	}
 
-	private entryFor(projectPath: string | null): GitQuickSummaryCacheEntry | null {
-		if (!projectPath) return null;
-		return this.entries[projectPath] ?? null;
+	private entryFor(project: GitProjectTarget | null): GitQuickSummaryCacheEntry | null {
+		if (!project) return null;
+		return this.entries[gitProjectKey(project)] ?? null;
 	}
 
-	private touchProject(projectPath: string): void {
-		this.updateEntry(projectPath, { lastAccessedAt: this.now() });
+	private touchProject(project: GitProjectTarget): void {
+		this.updateEntry(project, { lastAccessedAt: this.now() });
 	}
 
-	private updateEntry(projectPath: string, patch: Partial<GitQuickSummaryCacheEntry>): void {
-		const existing = this.entryFor(projectPath) ?? this.createEntry(projectPath);
+	private updateEntry(project: GitProjectTarget, patch: Partial<GitQuickSummaryCacheEntry>): void {
+		const existing = this.entryFor(project) ?? this.createEntry(project);
 		this.entries = {
 			...this.entries,
-			[projectPath]: {
+			[gitProjectKey(project)]: {
 				...existing,
 				...patch,
-				projectPath,
+				project,
 			},
 		};
 	}
 
-	private createEntry(projectPath: string): GitQuickSummaryCacheEntry {
+	private createEntry(project: GitProjectTarget): GitQuickSummaryCacheEntry {
 		const now = this.now();
 		return {
-			projectPath,
+			project,
 			status: 'unknown',
 			summary: null,
 			lastError: null,
@@ -470,42 +478,45 @@ export class GitQuickSummaryStore {
 
 	private pruneCache(): void {
 		const now = this.now();
-		const protectedPaths = new Set(this.visibleProjects.map((project) => project.projectPath));
-		if (this.projectPath) protectedPaths.add(this.projectPath);
-		const protectedEntries = [...protectedPaths].flatMap((projectPath) => {
-			const entry = this.entryFor(projectPath);
+		const protectedPaths = new Set(this.visibleProjects.map(gitProjectKey));
+		if (this.project) protectedPaths.add(gitProjectKey(this.project));
+		const protectedEntries = [...protectedPaths].flatMap((key) => {
+			const entry = this.entries[key];
 			return entry ? [entry] : [];
 		});
 		const retained = Object.values(this.entries)
 			.filter((entry) => {
-				if (protectedPaths.has(entry.projectPath)) return false;
+				if (protectedPaths.has(gitProjectKey(entry.project))) return false;
 				return now - entry.lastAccessedAt <= QUICK_GIT_CACHE_MAX_AGE_MS;
 			})
 			.sort((left, right) => right.lastAccessedAt - left.lastAccessedAt);
 		const bounded = [...protectedEntries, ...retained].slice(0, QUICK_GIT_CACHE_MAX_ENTRIES);
 
-		this.entries = Object.fromEntries(bounded.map((entry) => [entry.projectPath, entry]));
-	}
-
-	#hasVisibleProject(projectPath: string): boolean {
-		return this.visibleProjects.some((project) => project.projectPath === projectPath);
-	}
-
-	#cancelProjectWork(projectPath: string): void {
-		this.#clearProjectDebounce(projectPath);
-		this.pendingRefreshByProject.delete(projectPath);
-		this.requestGenerationByProject.set(
-			projectPath,
-			(this.requestGenerationByProject.get(projectPath) ?? 0) + 1,
+		this.entries = Object.fromEntries(
+			bounded.map((entry) => [gitProjectKey(entry.project), entry]),
 		);
-		this.inFlightByProject.get(projectPath)?.abort();
-		this.inFlightByProject.delete(projectPath);
+		for (const key of this.requestGenerationByProject.keys()) {
+			if (!this.entries[key] && !this.inFlightByProject.has(key))
+				this.requestGenerationByProject.delete(key);
+		}
 	}
 
-	#clearProjectDebounce(projectPath: string): void {
-		const timer = this.debounceTimerByProject.get(projectPath);
+	#hasVisibleProject(target: GitProjectTarget): boolean {
+		return this.visibleProjects.some((project) => sameGitProject(project, target));
+	}
+
+	#cancelProjectWork(project: GitProjectTarget): void {
+		this.#clearProjectDebounce(project);
+		this.pendingRefreshByProject.delete(gitProjectKey(project));
+		this.requestGenerationByProject.delete(gitProjectKey(project));
+		this.inFlightByProject.get(gitProjectKey(project))?.abort();
+		this.inFlightByProject.delete(gitProjectKey(project));
+	}
+
+	#clearProjectDebounce(project: GitProjectTarget): void {
+		const timer = this.debounceTimerByProject.get(gitProjectKey(project));
 		if (timer === undefined) return;
 		this.clearTimeoutFn(timer);
-		this.debounceTimerByProject.delete(projectPath);
+		this.debounceTimerByProject.delete(gitProjectKey(project));
 	}
 }

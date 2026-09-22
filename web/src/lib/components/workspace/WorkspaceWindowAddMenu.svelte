@@ -14,6 +14,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import {
 		getGhCapability,
+		getWorkspaceContext,
 		getNotifications,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
@@ -74,7 +75,11 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
-	const ghCapability = getGhCapability();
+	const ghCapabilities = getGhCapability();
+	const workspaceContext = getWorkspaceContext();
+	const ghCapability = $derived(
+		ghCapabilities.forNode(workspaceContext.currentTarget?.nodeId ?? 'local'),
+	);
 	const notifications = getNotifications();
 	let creatingTerminal = $state(false);
 	let menuChoosesTerminalHost = $state(false);

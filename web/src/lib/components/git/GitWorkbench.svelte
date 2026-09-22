@@ -45,8 +45,7 @@
 	} from '$lib/git/surface/git-file-tree-preferences.js';
 
 	interface GitWorkbenchProps {
-		projectPath?: string | null;
-		target?: GitWorkbenchTarget | null;
+		target: GitWorkbenchTarget | null;
 		presentation: WorkspaceWindowId | 'mobile';
 		active?: boolean;
 		wb: GitWorkbenchStore;
@@ -57,7 +56,6 @@
 	}
 
 	let {
-		projectPath = null,
 		target = null,
 		presentation,
 		active = true,
@@ -68,27 +66,17 @@
 		onOpenInEditor,
 	}: GitWorkbenchProps = $props();
 	let isMobile = $derived(presentation === 'mobile');
-	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
-		projectPath
-			? {
-					projectPath,
-					repoRoot: projectPath,
-					worktreePath: projectPath,
-					label: projectPath.split('/').pop() || projectPath,
-					source: 'chat-project',
-				}
-			: null,
-	);
-	let activeTarget = $derived(target ?? fallbackTarget);
+	let activeTarget = $derived(target);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
 	let viewportLayoutIdentity = $derived(
 		activeTarget
-			? `workbench:${JSON.stringify([activeTarget.repoRoot, activeTarget.worktreePath])}`
+			? `workbench:${JSON.stringify([activeTarget.nodeId, activeTarget.repoRoot, activeTarget.worktreePath])}`
 			: null,
 	);
 	let isWorkbenchTargetCurrent = $derived(
 		Boolean(
 			activeTarget &&
+			wb.target?.nodeId === activeTarget.nodeId &&
 			wb.target?.projectPath === activeTarget.projectPath &&
 			wb.target?.worktreePath === activeTarget.worktreePath,
 		),
@@ -135,16 +123,16 @@
 	}
 
 	function handleSelectFile(path: string): void {
-		if (!activeProjectPath) return;
-		void wb.selectFile(activeProjectPath, path);
+		if (!activeTarget) return;
+		void wb.selectFile(activeTarget, path);
 		if (containerPresentation === 'narrow') singlePane = 'diff';
 	}
 
 	function handleSelectDirectory(path: string): void {
-		if (!activeProjectPath) return;
+		if (!activeTarget) return;
 		const firstFile = files.firstVisibleFileInDirectory(path);
 		if (!firstFile) return;
-		void wb.selectFile(activeProjectPath, firstFile);
+		void wb.selectFile(activeTarget, firstFile);
 		if (containerPresentation === 'narrow') singlePane = 'diff';
 	}
 
@@ -179,48 +167,48 @@
 	}
 
 	function handleInitialCommit(): void {
-		if (!activeProjectPath) return;
-		initialCommit.create(activeProjectPath);
+		if (!activeTarget) return;
+		initialCommit.create(activeTarget);
 	}
 
 	function handleStageFile(filePath: string): void {
-		if (!activeProjectPath) return;
-		staging.stageFile(activeProjectPath, filePath);
+		if (!activeTarget) return;
+		staging.stageFile(activeTarget, filePath);
 	}
 
 	function handleUnstageFile(filePath: string): void {
-		if (!activeProjectPath) return;
-		staging.unstageFile(activeProjectPath, filePath);
+		if (!activeTarget) return;
+		staging.unstageFile(activeTarget, filePath);
 	}
 
 	function handleStageDir(dirPath: string): void {
-		if (!activeProjectPath) return;
-		staging.stageDirectory(activeProjectPath, dirPath);
+		if (!activeTarget) return;
+		staging.stageDirectory(activeTarget, dirPath);
 	}
 
 	function handleUnstageDir(dirPath: string): void {
-		if (!activeProjectPath) return;
-		staging.unstageDirectory(activeProjectPath, dirPath);
+		if (!activeTarget) return;
+		staging.unstageDirectory(activeTarget, dirPath);
 	}
 
 	function handleStageHunk(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
-		if (!activeProjectPath) return;
-		staging.stageHunk(activeProjectPath, actionTarget, hunkIndex);
+		if (!activeTarget) return;
+		staging.stageHunk(activeTarget, actionTarget, hunkIndex);
 	}
 
 	function handleUnstageHunk(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
-		if (!activeProjectPath) return;
-		staging.unstageHunk(activeProjectPath, actionTarget, hunkIndex);
+		if (!activeTarget) return;
+		staging.unstageHunk(activeTarget, actionTarget, hunkIndex);
 	}
 
 	function handleStageLine(actionTarget: GitDiffActionTarget, diffLineIndex: number): void {
-		if (!activeProjectPath) return;
-		staging.stageLine(activeProjectPath, actionTarget, diffLineIndex);
+		if (!activeTarget) return;
+		staging.stageLine(activeTarget, actionTarget, diffLineIndex);
 	}
 
 	function handleUnstageLine(actionTarget: GitDiffActionTarget, diffLineIndex: number): void {
-		if (!activeProjectPath) return;
-		staging.unstageLine(activeProjectPath, actionTarget, diffLineIndex);
+		if (!activeTarget) return;
+		staging.unstageLine(activeTarget, actionTarget, diffLineIndex);
 	}
 
 	function handleDiscardFile(filePath: string): void {
@@ -228,13 +216,13 @@
 	}
 
 	function handlePreviousFile(): void {
-		if (!activeProjectPath) return;
-		void wb.selectPreviousFile(activeProjectPath);
+		if (!activeTarget) return;
+		void wb.selectPreviousFile(activeTarget);
 	}
 
 	function handleNextFile(): void {
-		if (!activeProjectPath) return;
-		void wb.selectNextFile(activeProjectPath);
+		if (!activeTarget) return;
+		void wb.selectNextFile(activeTarget);
 	}
 
 	function isTextInputTarget(target: EventTarget | null): boolean {
@@ -416,11 +404,12 @@
 			</div>
 		</div>
 	{/if}
-	<GitPorcelainPanel
-		projectPath={activeProjectPath ?? ''}
-		selectedFile={files.selectedFile}
-		{porcelain}
-	/>
+	{#if activeTarget}<GitPorcelainPanel
+			project={activeTarget}
+			selectedFile={files.selectedFile}
+			{porcelain}
+		/>
+	{/if}
 	<GitVirtualDiffSurface
 		layoutIdentity={viewportLayoutIdentity}
 		reviewDocumentId={review.summary?.documentId ?? null}
@@ -436,8 +425,9 @@
 		{overscan}
 		onBodyDemand={handleBodyDemand}
 		onSelectFile={handleSelectFile}
-		onToggleLineSelection={(key) => selection.toggleLineSelection(key)}
-		onSelectLineRange={(start, end, selectAll) => selection.selectLineRange(start, end, selectAll)}
+		onToggleLineSelection={(key, target) => selection.toggleLineSelection(key, target)}
+		onSelectLineRange={(start, end, selectAll, target) =>
+			selection.selectLineRange(start, end, selectAll, target)}
 		onStageHunk={handleStageHunk}
 		onUnstageHunk={handleUnstageHunk}
 		onStageLine={handleStageLine}
@@ -466,7 +456,7 @@
 				<button
 					type="button"
 					onclick={() => {
-						if (activeProjectPath) staging.stageSelectedLines(activeProjectPath);
+						if (activeTarget) staging.stageSelectedLines(activeTarget);
 					}}
 					disabled={staging.hasPendingOperations || wb.isExternallyStale}
 					class="flex-1 rounded bg-git-added/20 px-2 py-1.5 text-xs text-git-added transition-colors hover:bg-git-added/30 disabled:opacity-50"
@@ -478,7 +468,7 @@
 				<button
 					type="button"
 					onclick={() => {
-						if (activeProjectPath) staging.unstageSelectedLines(activeProjectPath);
+						if (activeTarget) staging.unstageSelectedLines(activeTarget);
 					}}
 					disabled={staging.hasPendingOperations || wb.isExternallyStale}
 					class="flex-1 rounded bg-git-deleted/20 px-2 py-1.5 text-xs text-git-deleted transition-colors hover:bg-git-deleted/30 disabled:opacity-50"
@@ -656,7 +646,7 @@
 		<GitConfirmModal
 			confirmAction={discardConfirmAction}
 			onConfirm={() => {
-				if (activeProjectPath) staging.confirmDiscard(activeProjectPath);
+				if (activeTarget) staging.confirmDiscard(activeTarget);
 			}}
 			onCancel={() => staging.cancelDiscard()}
 		/>

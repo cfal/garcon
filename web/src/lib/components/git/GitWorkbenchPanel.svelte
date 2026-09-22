@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import type { GitProjectTarget } from '$lib/api/git-client.js';
+	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import type { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
@@ -48,11 +50,12 @@
 	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
 
 	$effect(() => {
-		if (!presentationVisible || !activeProjectPath) return;
+		const target = activeTarget;
+		if (!presentationVisible || !target) return;
 		return startGitFreshnessPolling({
-			projectPath: activeProjectPath,
-			checkFreshness: (projectPath) => {
-				untrack(() => void wb.checkFreshness(projectPath));
+			projectPath: target.projectPath,
+			checkFreshness: () => {
+				untrack(() => void wb.checkFreshness(target));
 			},
 		});
 	});
@@ -61,28 +64,34 @@
 		if (!presentationVisible) return;
 		const key = controller.target.effectiveProjectKey;
 		if (!key) return;
-		const version = gitProjectInvalidations.version(key);
+		const version = gitProjectInvalidations.version(controller.target.nodeId, key);
 		untrack(() => void controller.refreshForInvalidation(key, version));
 	});
 
 	async function refresh(): Promise<void> {
-		if (!activeProjectPath) return;
+		const target = activeTarget;
+		if (!target) return;
 		await controller.target.refreshTargets();
-		repository.refreshDeferredMetadata(activeProjectPath);
+		if (!sameGitProject(target, activeTarget)) return;
+		repository.refreshDeferredMetadata(target);
 		await wb.refresh({ reason: 'manual' });
 	}
 
 	async function refreshStale(): Promise<void> {
-		if (!activeProjectPath) return;
-		repository.refreshDeferredMetadata(activeProjectPath);
+		const target = activeTarget;
+		if (!target) return;
+		repository.refreshDeferredMetadata(target);
 		await wb.refreshStaleWorkbench();
+		if (!sameGitProject(target, activeTarget)) return;
 		await controller.target.refreshTargets();
 	}
 
-	async function runMutation<T>(action: (projectPath: string) => Promise<T>): Promise<T | null> {
-		const projectPath = activeProjectPath;
-		if (!projectPath || !wb.ensureFreshForGitMutation()) return null;
-		return wb.runLocalGitMutation(projectPath, () => action(projectPath));
+	async function runMutation<T>(
+		action: (project: GitProjectTarget) => Promise<T>,
+	): Promise<T | null> {
+		const target = activeTarget;
+		if (!target || !wb.ensureFreshForGitMutation()) return null;
+		return wb.runLocalGitMutation(target, () => action(target));
 	}
 
 	function openCommit(): void {
@@ -93,15 +102,16 @@
 	}
 
 	async function openPush(): Promise<void> {
-		const projectPath = activeProjectPath;
-		if (!projectPath || !(await repository.prepareToolbarPush(projectPath))) return;
-		if (projectPath === activeProjectPath) repository.showPushModal = true;
+		const target = activeTarget;
+		if (!target || !(await repository.prepareToolbarPush(target))) return;
+		if (sameGitProject(target, activeTarget)) repository.showPushModal = true;
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
 		const projectPath = activeProjectPath;
-		if (!projectPath) return;
+		if (!projectPath || !activeTarget) return;
 		void fileSessions.open({
+			nodeId: activeTarget.nodeId,
 			fileRootPath: resolveGitEditorRoot({
 				activeProjectPath: projectPath,
 				targetRepoRoot: activeTarget?.repoRoot,

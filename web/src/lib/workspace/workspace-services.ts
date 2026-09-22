@@ -3,7 +3,7 @@ import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { FileRendererMode } from '$lib/files/sessions/file-view-session.svelte.js';
-import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
@@ -26,6 +26,8 @@ import { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelt
 import type { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 import type { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { chatBoardApi } from '$lib/api/chat-boards.js';
+import { saveText } from '$lib/api/files.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
@@ -265,14 +267,21 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const surfaceFrames = new SurfaceFrameRegistry();
 	const gitQuickSummary = new GitQuickSummaryStore();
 	const gitMutations = new GitMutationCoordinator({
-		onChanged: async (effectiveProjectKey, projectPath) => {
-			gitProjectInvalidations.markChanged(effectiveProjectKey);
-			await gitQuickSummary.refreshFor(projectPath, 'invalidation');
+		onChanged: async (nodeId, effectiveProjectKey, projectPath) => {
+			gitProjectInvalidations.markChanged(nodeId, effectiveProjectKey);
+			if (projectPath !== effectiveProjectKey)
+				gitProjectInvalidations.markChanged(nodeId, projectPath);
+			await gitQuickSummary.refreshFor({ nodeId, projectPath }, 'invalidation');
 		},
-		onInvalidationError: (error, _effectiveProjectKey, projectPath) => {
+		onMutationError: (error, nodeId, projectPath) => {
+			deps.notifications.error(
+				`${deps.executionNodes?.label(nodeId) ?? nodeId}: ${projectPath}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		},
+		onInvalidationError: (error, nodeId, _effectiveProjectKey, projectPath) => {
 			deps.notifications.error(
 				m.git_related_refresh_failed({
-					projectPath,
+					projectPath: `${deps.executionNodes?.label(nodeId) ?? nodeId}: ${projectPath}`,
 					detail: error instanceof Error ? error.message : String(error),
 				}),
 			);
@@ -281,13 +290,13 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const createGitBranchSelector = () =>
 		new GitBranchSelectorState({
 			openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-			runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
+			runMutation: (surfaceId, nodeId, projectPath, effectiveProjectKey, execute) =>
 				gitMutations.run({
+					nodeId,
 					surfaceId,
 					effectiveProjectKey,
 					projectPath,
 					execute,
-					didMutate: (result) => result.success,
 				}),
 		});
 	const gitBranchActions = createGitBranchSelector();
@@ -331,8 +340,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			new CommitController({
 				createGitBranchSelector,
 				gitMutations,
-				invalidationVersion: (effectiveProjectKey) =>
-					gitProjectInvalidations.version(effectiveProjectKey),
+				invalidationVersion: (nodeId, effectiveProjectKey) =>
+					gitProjectInvalidations.version(nodeId, effectiveProjectKey),
 				reviewDisplay: gitReviewDisplay,
 				runMutation: (request) =>
 					gitMutations.run({
@@ -346,8 +355,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createGitBranchSelector,
 		gitMutations,
-		invalidationVersion: (effectiveProjectKey) =>
-			gitProjectInvalidations.version(effectiveProjectKey),
+		invalidationVersion: (nodeId, effectiveProjectKey) =>
+			gitProjectInvalidations.version(nodeId, effectiveProjectKey),
 		reviewDisplay: gitReviewDisplay,
 		comparisonPreferences,
 	});
@@ -362,6 +371,23 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 
 	const files: FileSessionRegistry = new FileSessionRegistry({
+		saveText: async (request, options) => {
+			try {
+				return await saveText(request, options);
+			} finally {
+				if (request.projectPath) {
+					const nodeId = effectiveNodeId(request.nodeId);
+					const version = gitProjectInvalidations.markChanged(nodeId, request.projectPath);
+					for (const project of gitQuickSummary.visibleProjects) {
+						if (
+							project.nodeId === nodeId &&
+							gitProjectInvalidations.version(nodeId, project.projectPath) === version
+						)
+							gitQuickSummary.scheduleRefreshFor(project, 'invalidation', 100);
+					}
+				}
+			}
+		},
 		isNodeAvailable: (nodeId) => deps.executionNodes?.filesAvailable(nodeId) ?? nodeId === 'local',
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
@@ -456,6 +482,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 	});
 	const commands = new WorkbenchCommandRegistry({
+		projectNodeId: () => context.currentTarget?.nodeId ?? 'local',
 		workspace: coordinator,
 		files,
 		terminals,
@@ -474,6 +501,12 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		navigation: deps.navigation,
 		commands,
 		localSettings: deps.localSettings,
+	});
+	const stopGitNodeBinding = deps.executionNodes?.onChanged(() => {
+		const ids = new Set(deps.executionNodes!.nodes.map((node) => node.id));
+		gitProjectInvalidations.pruneNodes(ids);
+		gitQuickSummary.pruneNodes(ids);
+		singletonSurfaces.pruneGitNodes(ids);
 	});
 
 	return {
@@ -498,6 +531,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		shortcuts,
 		commands,
 		destroy() {
+			stopGitNodeBinding?.();
 			windowDnd.endDrag();
 			unregisterWorkspaceInteraction();
 			domainBindings.destroy();

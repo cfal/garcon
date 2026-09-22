@@ -1,3 +1,5 @@
+import type { GitProjectTarget } from '$lib/api/git-client.js';
+import { sameGitProject } from './git-target.js';
 // Owns repository status, branch and remote metadata, and repository actions
 // used by the Git surface.
 
@@ -58,7 +60,7 @@ export class GitRepositoryController {
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
 	private contextGeneration = 0;
-	private projectPath: string | null = null;
+	private project: GitProjectTarget | null = null;
 	private statusGeneration = 0;
 	private remoteStatusGeneration = 0;
 	private readonly branchSelector: GitBranchSelectorState;
@@ -109,9 +111,9 @@ export class GitRepositoryController {
 		this.branchSelector.showBranchDropdown = value;
 	}
 
-	openNewBranchDialog(projectPath: string, effectiveProjectKey: string): void {
+	openNewBranchDialog(project: GitProjectTarget, effectiveProjectKey: string): void {
 		this.branchSelector.openNewBranchDialog(
-			projectPath,
+			project.projectPath,
 			this.surfaceId,
 			effectiveProjectKey,
 		);
@@ -130,15 +132,15 @@ export class GitRepositoryController {
 		this.lastError = null;
 	}
 
-	async fetchGitStatus(projectPath: string): Promise<void> {
-		const contextGeneration = this.captureContext(projectPath);
+	async fetchGitStatus(project: GitProjectTarget): Promise<void> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return;
 		const requestGeneration = ++this.statusGeneration;
 		this.isLoading = true;
 		try {
-			const data = await getGitStatus(projectPath);
+			const data = await getGitStatus(project);
 			if (
-				!this.isCurrentContext(projectPath, contextGeneration) ||
+				!this.isCurrentContext(project, contextGeneration) ||
 				requestGeneration !== this.statusGeneration
 			)
 				return;
@@ -153,7 +155,7 @@ export class GitRepositoryController {
 			}
 		} catch (err) {
 			if (
-				!this.isCurrentContext(projectPath, contextGeneration) ||
+				!this.isCurrentContext(project, contextGeneration) ||
 				requestGeneration !== this.statusGeneration
 			)
 				return;
@@ -167,7 +169,7 @@ export class GitRepositoryController {
 			this.selectedFiles = new Set();
 		} finally {
 			if (
-				this.isCurrentContext(projectPath, contextGeneration) &&
+				this.isCurrentContext(project, contextGeneration) &&
 				requestGeneration === this.statusGeneration
 			) {
 				this.isLoading = false;
@@ -175,15 +177,15 @@ export class GitRepositoryController {
 		}
 	}
 
-	async fetchRemoteStatus(projectPath: string): Promise<void> {
-		const contextGeneration = this.captureContext(projectPath);
+	async fetchRemoteStatus(project: GitProjectTarget): Promise<void> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return;
 		const generation = ++this.remoteStatusGeneration;
 		try {
-			const data = await fetchRemoteStatusApi(projectPath);
+			const data = await fetchRemoteStatusApi(project);
 			if (
 				generation !== this.remoteStatusGeneration ||
-				!this.isCurrentContext(projectPath, contextGeneration)
+				!this.isCurrentContext(project, contextGeneration)
 			)
 				return;
 			this.remoteStatus = !data.error ? data : null;
@@ -191,7 +193,7 @@ export class GitRepositoryController {
 		} catch (err) {
 			if (
 				generation !== this.remoteStatusGeneration ||
-				!this.isCurrentContext(projectPath, contextGeneration)
+				!this.isCurrentContext(project, contextGeneration)
 			)
 				return;
 			console.error('[Git] Error fetching remote status:', err);
@@ -199,18 +201,30 @@ export class GitRepositoryController {
 		}
 	}
 
-	refreshAll(projectPath: string): void {
-		this.fetchGitStatus(projectPath);
-		this.fetchRemoteStatus(projectPath);
+	refreshAll(project: GitProjectTarget): void {
+		this.fetchGitStatus(project);
+		this.fetchRemoteStatus(project);
 	}
 
-	refreshDeferredMetadata(projectPath: string): void {
-		this.fetchRemoteStatus(projectPath);
+	refreshDeferredMetadata(project: GitProjectTarget): void {
+		this.fetchRemoteStatus(project);
+	}
+
+	suspend(): void {
+		this.contextGeneration++;
+		this.statusGeneration++;
+		this.remoteStatusGeneration++;
+		this.isLoading = false;
+		this.isFetching = false;
+		this.isPulling = false;
+		this.isPushing = false;
+		this.showPushModal = false;
+		this.confirmAction = null;
 	}
 
 	// Resets transient state when the project path changes.
 	resetForProject(
-		projectPath: string | null,
+		project: GitProjectTarget | null,
 		options: {
 			deferMetadata?: boolean;
 			currentBranch?: string;
@@ -218,7 +232,7 @@ export class GitRepositoryController {
 		} = {},
 	): void {
 		this.contextGeneration += 1;
-		this.projectPath = projectPath;
+		this.project = project;
 		this.statusGeneration += 1;
 		this.remoteStatusGeneration += 1;
 		this.gitStatus = null;
@@ -236,82 +250,82 @@ export class GitRepositoryController {
 		this.isFetching = false;
 		this.isPulling = false;
 		this.isPushing = false;
-		if (!projectPath) return;
+		if (!project) return;
 		if (options.deferMetadata) return;
-		this.refreshAll(projectPath);
+		this.refreshAll(project);
 	}
 
-	async openBranchDropdown(projectPath: string): Promise<void> {
-		await this.branchSelector.openBranchDropdown(projectPath);
+	async openBranchDropdown(project: GitProjectTarget): Promise<void> {
+		await this.branchSelector.openBranchDropdown(project.projectPath);
 	}
 
 	// Remote action helper that refreshes status after completion.
 	private async postGitAction(
-		projectPath: string,
+		project: GitProjectTarget,
 		action: () => Promise<{ success?: boolean; error?: string }>,
 		setLoading: (v: boolean) => void,
 	): Promise<boolean> {
-		const contextGeneration = this.captureContext(projectPath);
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return false;
 		setLoading(true);
 		try {
 			const data = await action();
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
+			if (!this.isCurrentContext(project, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
-				await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+				await Promise.all([this.fetchGitStatus(project), this.fetchRemoteStatus(project)]);
 				return true;
 			}
 			this.surfaceError(data.error ?? 'Git action failed');
 			return false;
 		} catch (err) {
-			if (this.isCurrentContext(projectPath, contextGeneration)) {
+			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Git action failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return false;
 		} finally {
-			if (this.isCurrentContext(projectPath, contextGeneration)) setLoading(false);
+			if (this.isCurrentContext(project, contextGeneration)) setLoading(false);
 		}
 	}
 
 	// Git actions
 
-	handleFetch(projectPath: string): Promise<boolean> {
+	handleFetch(project: GitProjectTarget): Promise<boolean> {
 		return this.postGitAction(
-			projectPath,
-			() => gitFetch(projectPath),
+			project,
+			() => gitFetch(project),
 			(v) => (this.isFetching = v),
 		);
 	}
 
-	handlePull(projectPath: string): Promise<boolean> {
+	handlePull(project: GitProjectTarget): Promise<boolean> {
 		return this.postGitAction(
-			projectPath,
-			() => gitPull(projectPath),
+			project,
+			() => gitPull(project),
 			(v) => (this.isPulling = v),
 		);
 	}
 
-	handlePush(projectPath: string, remote?: string): Promise<boolean> {
-		if (this.captureContext(projectPath) === null) return Promise.resolve(false);
+	handlePush(project: GitProjectTarget, remote?: string): Promise<boolean> {
+		if (this.captureContext(project) === null) return Promise.resolve(false);
 		this.showPushModal = false;
 		return this.postGitAction(
-			projectPath,
-			() => gitPush(projectPath, remote),
+			project,
+			() => gitPush(project, remote),
 			(v) => (this.isPushing = v),
 		);
 	}
 
-	async prepareToolbarPush(projectPath: string): Promise<boolean> {
-		const contextGeneration = this.captureContext(projectPath);
+	async prepareToolbarPush(project: GitProjectTarget): Promise<boolean> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return false;
 		if (!this.remoteStatus?.hasRemote) return false;
 
 		try {
-			const data = await getGitRemotes(projectPath);
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return false;
+			const data = await getGitRemotes(project);
+			if (!this.isCurrentContext(project, contextGeneration)) return false;
 			this.pushRemotes = data.remotes ?? [];
 		} catch {
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return false;
+			if (!this.isCurrentContext(project, contextGeneration)) return false;
 			this.pushRemotes = [];
 		}
 
@@ -319,121 +333,119 @@ export class GitRepositoryController {
 	}
 
 	async handleSwitchBranch(
-		projectPath: string,
+		project: GitProjectTarget,
 		branch: string,
 		refKind: GitRefKind | undefined,
 		effectiveProjectKey: string,
 	): Promise<boolean> {
 		const ok = await this.branchSelector.switchBranch(
-			projectPath,
+			project.projectPath,
 			branch,
 			refKind,
 			this.surfaceId,
 			effectiveProjectKey,
 		);
-		if (ok)
-			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+		if (ok) await Promise.all([this.fetchGitStatus(project), this.fetchRemoteStatus(project)]);
 		return ok;
 	}
 
-	async handleCommit(projectPath: string): Promise<boolean> {
-		const contextGeneration = this.captureContext(projectPath);
+	async handleCommit(project: GitProjectTarget): Promise<boolean> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return false;
 		if (!this.commitMessage.trim() || this.selectedFiles.size === 0) return false;
 		this.isCommitting = true;
 		try {
-			const data = await gitCommit(projectPath, this.commitMessage, Array.from(this.selectedFiles));
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
+			const data = await gitCommit(project, this.commitMessage, Array.from(this.selectedFiles));
+			if (!this.isCurrentContext(project, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				this.commitMessage = '';
 				this.selectedFiles = new Set();
-				this.fetchGitStatus(projectPath);
-				this.fetchRemoteStatus(projectPath);
+				this.fetchGitStatus(project);
+				this.fetchRemoteStatus(project);
 				return true;
 			} else {
 				this.surfaceError(data.error ?? 'Commit failed');
 				return false;
 			}
 		} catch (err) {
-			if (this.isCurrentContext(projectPath, contextGeneration)) {
+			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return false;
 		} finally {
-			if (this.isCurrentContext(projectPath, contextGeneration)) this.isCommitting = false;
+			if (this.isCurrentContext(project, contextGeneration)) this.isCommitting = false;
 		}
 	}
 
-	async handleCreateInitialCommit(projectPath: string): Promise<boolean> {
-		const contextGeneration = this.captureContext(projectPath);
+	async handleCreateInitialCommit(project: GitProjectTarget): Promise<boolean> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return false;
 		this.isCreatingInitialCommit = true;
 		try {
-			const data = await gitInitialCommit(projectPath);
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
+			const data = await gitInitialCommit(project);
+			if (!this.isCurrentContext(project, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
-				this.fetchGitStatus(projectPath);
-				this.fetchRemoteStatus(projectPath);
+				this.fetchGitStatus(project);
+				this.fetchRemoteStatus(project);
 				return true;
 			} else {
 				this.surfaceError(data.error ?? 'Initial commit failed');
 				return false;
 			}
 		} catch (err) {
-			if (this.isCurrentContext(projectPath, contextGeneration)) {
+			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(
 					`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 			return false;
 		} finally {
-			if (this.isCurrentContext(projectPath, contextGeneration))
-				this.isCreatingInitialCommit = false;
+			if (this.isCurrentContext(project, contextGeneration)) this.isCreatingInitialCommit = false;
 		}
 	}
 
-	async handleDiscardChanges(projectPath: string, filePath: string): Promise<boolean> {
-		const contextGeneration = this.captureContext(projectPath);
+	async handleDiscardChanges(project: GitProjectTarget, filePath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return false;
 		try {
-			const data = await gitDiscard(projectPath, filePath);
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
+			const data = await gitDiscard(project, filePath);
+			if (!this.isCurrentContext(project, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				const next = new Set(this.selectedFiles);
 				next.delete(filePath);
 				this.selectedFiles = next;
-				this.fetchGitStatus(projectPath);
+				this.fetchGitStatus(project);
 				return true;
 			} else {
 				this.surfaceError(data.error ?? 'Discard failed');
 				return false;
 			}
 		} catch (err) {
-			if (this.isCurrentContext(projectPath, contextGeneration)) {
+			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Discard failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return false;
 		}
 	}
 
-	async handleDeleteUntracked(projectPath: string, filePath: string): Promise<boolean> {
-		const contextGeneration = this.captureContext(projectPath);
+	async handleDeleteUntracked(project: GitProjectTarget, filePath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(project);
 		if (contextGeneration === null) return false;
 		try {
-			const data = await gitDeleteUntracked(projectPath, filePath);
-			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
+			const data = await gitDeleteUntracked(project, filePath);
+			if (!this.isCurrentContext(project, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				const next = new Set(this.selectedFiles);
 				next.delete(filePath);
 				this.selectedFiles = next;
-				this.fetchGitStatus(projectPath);
+				this.fetchGitStatus(project);
 				return true;
 			} else {
 				this.surfaceError(data.error ?? 'Delete failed');
 				return false;
 			}
 		} catch (err) {
-			if (this.isCurrentContext(projectPath, contextGeneration)) {
+			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return false;
@@ -441,21 +453,21 @@ export class GitRepositoryController {
 	}
 
 	// Dispatches the pending confirm action and clears it.
-	async confirmAndExecute(projectPath: string): Promise<boolean> {
+	async confirmAndExecute(project: GitProjectTarget): Promise<boolean> {
 		if (!this.confirmAction) return false;
 		const { type, file } = this.confirmAction;
 		this.confirmAction = null;
 		switch (type) {
 			case 'discard':
-				return file ? this.handleDiscardChanges(projectPath, file) : false;
+				return file ? this.handleDiscardChanges(project, file) : false;
 			case 'delete':
-				return file ? this.handleDeleteUntracked(projectPath, file) : false;
+				return file ? this.handleDeleteUntracked(project, file) : false;
 			case 'commit':
-				return this.handleCommit(projectPath);
+				return this.handleCommit(project);
 			case 'pull':
-				return this.handlePull(projectPath);
+				return this.handlePull(project);
 			case 'push':
-				return this.handlePush(projectPath);
+				return this.handlePush(project);
 		}
 		return false;
 	}
@@ -506,11 +518,11 @@ export class GitRepositoryController {
 		}
 	}
 
-	private captureContext(projectPath: string): number | null {
-		return this.projectPath === projectPath ? this.contextGeneration : null;
+	private captureContext(project: GitProjectTarget): number | null {
+		return sameGitProject(this.project, project) ? this.contextGeneration : null;
 	}
 
-	private isCurrentContext(projectPath: string, generation: number): boolean {
-		return this.projectPath === projectPath && this.contextGeneration === generation;
+	private isCurrentContext(project: GitProjectTarget, generation: number): boolean {
+		return sameGitProject(this.project, project) && this.contextGeneration === generation;
 	}
 }

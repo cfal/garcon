@@ -68,7 +68,7 @@ describe('GitHistorySurfaceController', () => {
 		await controller.target.activate();
 		await vi.waitFor(() => expect(api.getGitHistoryCommits).toHaveBeenCalledOnce());
 		expect(api.getGitHistoryCommits).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			expect.objectContaining({ offset: 0 }),
 		);
 	});
@@ -90,7 +90,7 @@ describe('GitHistorySurfaceController', () => {
 
 		expect(controller.openSelectedComparison()).toBe(true);
 		expect(openComparison).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			{
 				fromRevision: 'older',
 				toKind: 'revision',
@@ -185,29 +185,29 @@ describe('GitHistorySurfaceController', () => {
 		const invalidations = new GitProjectInvalidationStore();
 		const context: { controller?: GitHistorySurfaceController } = {};
 		const gitMutations = new GitMutationCoordinator({
-			onChanged: async (effectiveProjectKey) => {
-				invalidations.markChanged(effectiveProjectKey);
+			onChanged: async (nodeId, effectiveProjectKey) => {
+				invalidations.markChanged(nodeId, effectiveProjectKey);
 				await context.controller?.refreshForInvalidation(
 					effectiveProjectKey,
-					invalidations.version(effectiveProjectKey),
+					invalidations.version(nodeId, effectiveProjectKey),
 				);
 			},
 		});
 		const deps = {
 			createGitBranchSelector: () =>
 				new GitBranchSelectorState({
-					runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
+					runMutation: (surfaceId, nodeId, projectPath, effectiveProjectKey, execute) =>
 						gitMutations.run({
 							surfaceId,
+							nodeId,
 							projectPath,
 							effectiveProjectKey,
 							execute,
-							didMutate: (result) => result.success,
 						}),
 				}),
 			gitMutations,
-			invalidationVersion: (effectiveProjectKey: string) =>
-				invalidations.version(effectiveProjectKey),
+			invalidationVersion: (nodeId: string, effectiveProjectKey: string) =>
+				invalidations.version(nodeId, effectiveProjectKey),
 			reviewDisplay: new GitReviewDisplaySettingsStore(),
 		} satisfies GitSurfaceControllerDeps;
 		const controller = new GitHistorySurfaceController(deps);

@@ -1,23 +1,26 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import type { GitProjectTarget } from '$lib/api/git-client.js';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitPorcelainPanelProps {
-		projectPath: string;
+		project: GitProjectTarget;
 		selectedFile: string | null;
 		porcelain: GitPorcelainState;
 	}
 
-	let { projectPath, selectedFile, porcelain }: GitPorcelainPanelProps = $props();
+	let { project, selectedFile, porcelain }: GitPorcelainPanelProps = $props();
 	let pendingConfirmation = $state<
 		| { type: 'accept-conflict'; scopeKey: string; filePath: string; side: 'ours' | 'theirs' }
 		| { type: 'drop-stash'; scopeKey: string; stashRef: string }
 		| null
 	>(null);
-	let loadKey = $derived(`${projectPath}|${porcelain.inspectorView}|${selectedFile ?? ''}`);
+	let loadKey = $derived(
+		JSON.stringify([project.nodeId, project.projectPath, porcelain.inspectorView, selectedFile]),
+	);
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'
 			? 'Conflicts'
@@ -43,11 +46,11 @@
 
 	$effect(() => {
 		loadKey;
-		if (!projectPath || porcelain.inspectorView === 'none') {
+		if (!project || porcelain.inspectorView === 'none') {
 			untrack(() => porcelain.cancelActiveLoad());
 			return;
 		}
-		untrack(() => void porcelain.loadCurrentView(projectPath));
+		untrack(() => void porcelain.loadCurrentView(project));
 		return () => porcelain.cancelActiveLoad();
 	});
 
@@ -64,10 +67,10 @@
 		if (!confirmation) return;
 		pendingConfirmation = null;
 		if (confirmation.type === 'accept-conflict') {
-			await porcelain.acceptConflictSide(projectPath, confirmation.filePath, confirmation.side);
+			await porcelain.acceptConflictSide(project, confirmation.filePath, confirmation.side);
 			return;
 		}
-		await porcelain.dropStash(projectPath, confirmation.stashRef);
+		await porcelain.dropStash(project, confirmation.stashRef);
 	}
 </script>
 
@@ -85,7 +88,7 @@
 			<button
 				type="button"
 				class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-				onclick={() => porcelain.loadCurrentView(projectPath)}
+				onclick={() => porcelain.loadCurrentView(project)}
 				title="Refresh"
 				aria-label="Refresh"
 			>
@@ -93,10 +96,7 @@
 			</button>
 		</div>
 
-		<div
-			class="max-h-56 overflow-auto px-3 pb-3 text-xs"
-			{@attach contextualScrollRegion}
-		>
+		<div class="max-h-56 overflow-auto px-3 pb-3 text-xs" {@attach contextualScrollRegion}>
 			{#if porcelain.inspectorView === 'conflicts'}
 				{#if porcelain.conflicts.length === 0}
 					<p class="py-3 text-muted-foreground">No conflicts</p>
@@ -110,7 +110,7 @@
 										.conflictDetails?.path === conflict.path
 										? 'bg-muted text-foreground'
 										: 'text-muted-foreground'}"
-									onclick={() => porcelain.selectConflict(projectPath, conflict.path)}
+									onclick={() => porcelain.selectConflict(project, conflict.path)}
 								>
 									<span class="truncate font-mono">{conflict.path}</span>
 									<span class="shrink-0 text-[10px]">{conflict.status}</span>
@@ -139,7 +139,7 @@
 									<button
 										type="button"
 										class="rounded bg-interactive-accent px-2 py-1 text-interactive-accent-foreground"
-										onclick={() => porcelain.markConflictResolved(projectPath, detail.path)}
+										onclick={() => porcelain.markConflictResolved(project, detail.path)}
 									>
 										Mark resolved
 									</button>
@@ -198,7 +198,7 @@
 					<button
 						type="button"
 						class="rounded bg-interactive-accent px-2 py-1 text-interactive-accent-foreground"
-						onclick={() => porcelain.createStash(projectPath)}
+						onclick={() => porcelain.createStash(project)}
 					>
 						Create
 					</button>
@@ -216,14 +216,14 @@
 								<button
 									type="button"
 									class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-									onclick={() => porcelain.applyStash(projectPath, stash.ref)}
+									onclick={() => porcelain.applyStash(project, stash.ref)}
 								>
 									Apply
 								</button>
 								<button
 									type="button"
 									class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-									onclick={() => porcelain.popStash(projectPath, stash.ref)}
+									onclick={() => porcelain.popStash(project, stash.ref)}
 								>
 									Pop
 								</button>

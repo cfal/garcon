@@ -29,8 +29,8 @@ function summary(number: number): PullRequestSummary {
 
 function makeController(): PullRequestsStore {
 	const controller = new PullRequestsStore();
-	controller.setCapability(true, true);
-	controller.setProject('/project', 'project-key');
+	controller.setCapability('local', true, true);
+	controller.setProject({ nodeId: 'local', projectPath: '/project' }, 'project-key');
 	controller.pulls = [summary(1), summary(2)];
 	controller.hasLoaded = true;
 	return controller;

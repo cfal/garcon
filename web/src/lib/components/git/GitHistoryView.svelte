@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { GitProjectTarget } from '$lib/api/git-client.js';
 	import History from '@lucide/svelte/icons/history';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -15,7 +16,7 @@
 	interface GitHistoryViewProps {
 		history: GitHistoryController;
 		comparisonSelection: GitHistoryComparisonSelectionState;
-		projectPath: string | null;
+		project: GitProjectTarget | null;
 		presentation: WorkspaceWindowId | 'mobile';
 		active?: boolean;
 		diffMode: DiffMode;
@@ -34,7 +35,7 @@
 	let {
 		history,
 		comparisonSelection,
-		projectPath,
+		project,
 		presentation,
 		active = true,
 		diffMode,
@@ -60,7 +61,7 @@
 	}
 </script>
 
-{#if !projectPath}
+{#if !project}
 	<div class="flex flex-1 flex-col items-center justify-center text-muted-foreground">
 		<History class="mb-2 h-12 w-12 opacity-50" />
 		<p class="text-sm">No repository selected.</p>
@@ -74,8 +75,8 @@
 		{isMobile}
 		position={history.listPosition}
 		collectionChange={history.listChange}
-		onOpenCommit={(hash) => history.openCommit(projectPath, hash)}
-		onLoadMore={() => history.loadMore(projectPath)}
+		onOpenCommit={(hash) => history.openCommit(project, hash)}
+		onLoadMore={() => history.loadMore(project)}
 		onPositionSave={(position) => history.saveListPosition(position)}
 		comparisonSelectionActive={comparisonSelection.active}
 		comparisonSelectionSlot={comparisonSelection.slot}
@@ -104,15 +105,15 @@
 		{contextLines}
 		diffFontSize={String(diffFontSize)}
 		onBack={() => history.backToList()}
-		onRetry={() => history.retryCommit(projectPath)}
-		onSelectParent={(parent) => history.selectParent(projectPath, parent)}
+		onRetry={() => history.retryCommit(project)}
+		onSelectParent={(parent) => history.selectParent(project, parent)}
 		onRevertCommit={() => {
 			if (history.commitSnapshot) requestRevertCommit(history.commitSnapshot.commit);
 		}}
 		{onSetDiffMode}
 		{onSetContextLines}
 		{onSetDiffFontSize}
-		onSelectFile={(file) => history.focusFile(projectPath, file)}
+		onSelectFile={(file) => history.focusFile(project, file)}
 		onFileFilterChange={(value) => history.setFileFilter(value)}
 		onBodyDemand={(demand) => history.handleBodyDemand(demand)}
 		{onOpenInEditor}
@@ -138,7 +139,7 @@
 		fontSize={Number(diffFontSize) || 12}
 		onBack={() => history.backToList()}
 		onRefresh={() => {
-			if (projectPath) void history.comparison.refresh(projectPath);
+			if (project) void history.comparison.refresh(project);
 		}}
 		{onOpenInEditor}
 		{onAppendToChatDraft}

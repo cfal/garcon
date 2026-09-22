@@ -69,6 +69,7 @@ function buildRows(diffMode: 'unified' | 'split', highlighted = false): DiffCont
 	const patch =
 		'diff --git a/src/example.ts b/src/example.ts\n@@ -1,2 +1,2 @@\n-old line\n+new line\n shared line\n';
 	const body: GitReviewFileBody = {
+		patchDigest: 'a'.repeat(64),
 		path: file.path,
 		bodyFingerprint: file.bodyFingerprint,
 		bodyState: 'loaded',
@@ -82,6 +83,7 @@ function buildRows(diffMode: 'unified' | 'split', highlighted = false): DiffCont
 	};
 	return buildVirtualRows({
 		summary: {
+			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'document-1' },
 			documentId: 'document-1',
 			project: '/project',
 			context: 5,
@@ -226,7 +228,10 @@ describe('GitVirtualDiffRow', () => {
 
 		await fireEvent.click(screen.getByText('+new line'), { ctrlKey: true });
 
-		expect(onToggleLineSelection).toHaveBeenCalledWith(addedRow.view.selectionKey);
+		expect(onToggleLineSelection).toHaveBeenCalledWith(
+			addedRow.view.selectionKey,
+			addedRow.actionTarget,
+		);
 		expect(onAddCommentForFile).not.toHaveBeenCalled();
 	});
 

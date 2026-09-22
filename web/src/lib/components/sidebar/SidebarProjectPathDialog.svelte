@@ -37,8 +37,8 @@
 		onTogglePinnedProjectPath,
 	}: SidebarProjectPathDialogProps = $props();
 
-	const projectPathDialogState = new ProjectPathDialogState();
 	const nodes = getExecutionNodes();
+	const projectPathDialogState = new ProjectPathDialogState(nodes);
 	const filesAvailable = $derived(nodes.filesAvailable(projectPathDialogState.nodeId));
 	let activeDialogKey = $state('');
 	let pathInputRef = $state<HTMLInputElement | null>(null);
@@ -269,7 +269,7 @@
 						</div>
 
 						<div class="min-h-5">
-							{#if projectPathDialogState.nodeId === 'local' && projectPathDialogState.gitRepoStatus === 'git' && projectPathDialogState.validationStatus === 'valid'}
+							{#if projectPathDialogState.gitAvailable && projectPathDialogState.gitRepoStatus === 'git' && projectPathDialogState.validationStatus === 'valid'}
 								<button
 									type="button"
 									disabled={!canOpenWorktreePicker}

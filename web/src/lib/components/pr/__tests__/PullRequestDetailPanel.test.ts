@@ -51,6 +51,7 @@ function makeDetail(withThread = false): PullRequestDetail {
 		: [];
 
 	return {
+		documentId: 'local-pr-document',
 		number: 257,
 		title: 'Add pull request viewer',
 		body: '',
@@ -72,6 +73,7 @@ function makeDetail(withThread = false): PullRequestDetail {
 		fileBodies: withThread
 			? {
 					'src/app.ts': {
+						patchDigest: 'a'.repeat(64),
 						path: 'src/app.ts',
 						bodyFingerprint: 'fp-app',
 						bodyState: 'loaded',

@@ -1,5 +1,6 @@
 import { untrack } from 'svelte';
-import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+import { effectiveNodeId } from '$shared/execution-nodes';
+import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
@@ -64,9 +65,12 @@ export class WorkspaceDomainBindings {
 			});
 
 			$effect(() => {
+				const nodeId = effectiveNodeId(deps.workspaceContext.currentTarget?.nodeId);
+				const capability = deps.ghCapability.forNode(nodeId);
 				deps.singletons.setPullRequestsCapability(
-					deps.ghCapability.hasChecked,
-					deps.ghCapability.available,
+					nodeId,
+					capability.hasChecked,
+					capability.available,
 				);
 			});
 
@@ -79,19 +83,23 @@ export class WorkspaceDomainBindings {
 				}
 				const currentProject = projectState.kind === 'available' ? projectState.project : null;
 				const projectPath = currentProject?.projectPath ?? null;
-				deps.gitQuickSummary.setProject(projectPath);
+				const nodeId = effectiveNodeId(currentProject?.nodeId);
+				const project = projectPath ? { nodeId, projectPath } : null;
+				deps.gitQuickSummary.setProject(project);
 				deps.gitBranchActions.setProject(
 					projectPath,
-					deps.gitQuickSummary.summaryFor(projectPath)?.branch,
+					deps.gitQuickSummary.summaryFor(project)?.branch,
 					currentProject?.effectiveProjectKey ?? null,
+					nodeId,
 				);
 			});
 
 			$effect(() => {
 				const currentProject = deps.workspaceContext.currentProject;
 				if (!currentProject) return;
-				const version = gitProjectInvalidations.version(currentProject.effectiveProjectKey);
-				const key = `${currentProject.effectiveProjectKey}:${version}`;
+				const nodeId = effectiveNodeId(currentProject.nodeId);
+				const version = gitProjectInvalidations.version(nodeId, currentProject.effectiveProjectKey);
+				const key = JSON.stringify([nodeId, currentProject.effectiveProjectKey, version]);
 				if (version === 0 || key === lastCommitInvalidationKey) return;
 				lastCommitInvalidationKey = key;
 				untrack(() => deps.gitQuickSummary.scheduleRefresh('invalidation', 100));

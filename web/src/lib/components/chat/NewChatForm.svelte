@@ -707,7 +707,7 @@
 						<p class="text-xs text-destructive transition-colors">
 							{form.validationError}
 						</p>
-					{:else if form.localMachine && form.gitRepoStatus === 'git'}
+					{:else if form.gitAvailable && form.gitRepoStatus === 'git'}
 						<button
 							type="button"
 							disabled={form.isUpdatingPinnedPath}

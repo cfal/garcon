@@ -85,11 +85,15 @@ function setProject(
 	session: GitTargetSessionController,
 	projectPath: string,
 	effectiveProjectKey = projectPath,
+	nodeId = 'local',
+	nodeContextKey = 'session-a',
 ): void {
 	session.setProjectState({
 		kind: 'available',
 		project: {
 			chatId: effectiveProjectKey,
+			nodeId,
+			nodeContextKey,
 			projectPath,
 			effectiveProjectKey,
 		},
@@ -99,8 +103,52 @@ function setProject(
 describe('GitTargetSessionController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		api.getGitTargetCandidates.mockReset();
 		api.getGitTargetCandidates.mockResolvedValue({ targets: [] });
 	});
+
+	it('fences held same-path discovery when switching nodes', async () => {
+		const local = deferred<{ targets: GitTargetCandidate[] }>();
+		api.getGitTargetCandidates
+			.mockReturnValueOnce(local.promise)
+			.mockResolvedValueOnce({ targets: [candidate('/repo', { branch: 'remote' })] });
+		const { session } = createSession({});
+		setProject(session, '/repo', 'chat', 'local');
+		session.setPresentationVisible(true);
+		const localActivation = session.activate();
+		setProject(session, '/repo', 'chat', 'remote');
+		await session.activate();
+		local.resolve({ targets: [candidate('/repo', { branch: 'local' })] });
+		await localActivation;
+		expect(session.activeTarget).toMatchObject({ nodeId: 'remote', branch: 'remote' });
+		expect(api.getGitTargetCandidates.mock.calls.map(([target]) => target.nodeId)).toEqual([
+			'local',
+			'remote',
+		]);
+		session.dispose();
+	});
+
+	it.each([true, false])(
+		'reloads a replacement node session without changing target (visible=%s)',
+		async (visible) => {
+			const { session, changes } = createSession({});
+			setProject(session, '/repo', 'chat', 'remote', 'instance-a');
+			session.setPresentationVisible(true);
+			await session.activate();
+			const identity = session.identity;
+			session.setPresentationVisible(visible);
+			setProject(session, '/repo', 'chat', 'remote', 'instance-b');
+			if (!visible) {
+				expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(1);
+				session.setPresentationVisible(true);
+			}
+			await session.activate();
+			expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
+			expect(session.identity).toBe(identity);
+			expect(changes.at(-1)).toMatchObject({ reason: 'session', identityChanged: false });
+			session.dispose();
+		},
+	);
 
 	it('keeps discovery gated by visibility and applies the chat fallback once', async () => {
 		const { session, changes } = createSession({});
@@ -221,7 +269,7 @@ describe('GitTargetSessionController', () => {
 		await session.activate();
 
 		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
-		expect(changes.filter((change) => change.reason === 'project')).toHaveLength(1);
+		expect(changes.filter((change) => change.reason === 'session')).toHaveLength(1);
 	});
 
 	it.each(['unavailable', 'request-failed'] as const)(
@@ -296,7 +344,7 @@ describe('GitTargetSessionController', () => {
 		expect(changes.map((change) => change.reason)).toEqual(['project']);
 		recovery.resolve({ targets: [candidate('/recovered')] });
 		await recoveryActivation;
-		expect(changes.map((change) => change.reason)).toEqual(['project', 'project']);
+		expect(changes.map((change) => change.reason)).toEqual(['project', 'session']);
 		expect(session.activeProjectPath).toBe('/recovered');
 	});
 
@@ -344,7 +392,7 @@ describe('GitTargetSessionController', () => {
 	it('keeps an explicitly selected repository as the discovery anchor', async () => {
 		const chatTarget = candidate('/chat', { repoRoot: '/chat' });
 		const selectedTarget = candidate('/selected', { repoRoot: '/selected' });
-		api.getGitTargetCandidates.mockImplementation(async (projectPath) => ({
+		api.getGitTargetCandidates.mockImplementation(async ({ projectPath }) => ({
 			targets: projectPath === '/selected' ? [selectedTarget] : [chatTarget],
 		}));
 		const { session } = createSession({});
@@ -356,7 +404,7 @@ describe('GitTargetSessionController', () => {
 		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
 		await vi.waitFor(() => expect(session.isLoadingTargets).toBe(false));
 
-		expect(api.getGitTargetCandidates.mock.calls.map(([projectPath]) => projectPath)).toEqual([
+		expect(api.getGitTargetCandidates.mock.calls.map(([{ projectPath }]) => projectPath)).toEqual([
 			'/chat',
 			'/selected',
 		]);
@@ -364,7 +412,7 @@ describe('GitTargetSessionController', () => {
 
 		await session.refreshForInvalidation('chat', 1);
 
-		expect(api.getGitTargetCandidates.mock.calls.map(([projectPath]) => projectPath)).toEqual([
+		expect(api.getGitTargetCandidates.mock.calls.map(([{ projectPath }]) => projectPath)).toEqual([
 			'/chat',
 			'/selected',
 			'/selected',
@@ -400,6 +448,7 @@ describe('GitTargetSessionController', () => {
 		const runMutation = vi.fn(
 			async (
 				surfaceId: string,
+				_nodeId: string,
 				projectPath: string,
 				effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,
@@ -420,6 +469,7 @@ describe('GitTargetSessionController', () => {
 
 		expect(runMutation).toHaveBeenCalledWith(
 			'singleton:git-compare',
+			'local',
 			'/chat',
 			'chat',
 			expect.any(Function),
@@ -434,6 +484,7 @@ describe('GitTargetSessionController', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
+				_nodeId: string,
 				_projectPath: string,
 				effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,
@@ -486,6 +537,7 @@ describe('GitTargetSessionController', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
+				_nodeId: string,
 				_projectPath: string,
 				_effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,

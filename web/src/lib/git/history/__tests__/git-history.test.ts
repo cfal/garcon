@@ -87,6 +87,7 @@ function snapshot(
 ) {
 	const files = overrides.files ?? [commitFile('a.ts', fingerprint)];
 	return {
+		document: { nodeId: 'local', instanceId: 'test-instance', documentId: `doc-${hash}` },
 		status: 'ready' as const,
 		project: '/project',
 		documentId: `doc-${hash}`,
@@ -122,6 +123,7 @@ function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => 
 				(() => {
 					const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+next\n`;
 					return {
+						patchDigest: 'a'.repeat(64),
 						path,
 						bodyFingerprint: fingerprintForPath(path),
 						bodyState: 'loaded' as const,
@@ -146,6 +148,7 @@ function body(fingerprint = 'fp-a') {
 
 function comparisonSnapshot(): GitComparisonSnapshotReady {
 	return {
+		document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'comparison-doc' },
 		status: 'ready',
 		project: '/project',
 		repoRoot: '/repo',
@@ -203,13 +206,13 @@ describe('GitHistoryController', () => {
 		});
 		const history = new GitHistoryController();
 
-		history.loadInitial('/project');
+		history.loadInitial({ nodeId: 'local', projectPath: '/project' });
 		await flushPromises();
 
 		expect(history.listLoading).toBe(false);
 		expect(history.commits[0].subject).toBe('initial');
 		expect(getGitHistoryCommits).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			expect.objectContaining({
 				limit: 50,
 				offset: 0,
@@ -233,11 +236,11 @@ describe('GitHistoryController', () => {
 				nextOffset: null,
 			});
 		const history = new GitHistoryController();
-		history.loadInitial('/project');
+		history.loadInitial({ nodeId: 'local', projectPath: '/project' });
 		await flushPromises();
 		const replacementRevision = history.listChange.revision;
 
-		history.loadMore('/project');
+		history.loadMore({ nodeId: 'local', projectPath: '/project' });
 		await flushPromises();
 
 		expect(history.commits.map((entry) => entry.subject)).toEqual(['newest', 'older']);
@@ -246,7 +249,7 @@ describe('GitHistoryController', () => {
 			kind: 'append',
 		});
 		expect(getGitHistoryCommits).toHaveBeenLastCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			expect.objectContaining({ limit: 50, offset: 50 }),
 		);
 	});
@@ -268,7 +271,7 @@ describe('GitHistoryController', () => {
 		});
 		const revision = history.listChange.revision;
 
-		history.resetForProject('/next-project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/next-project' });
 
 		expect(history.listPosition).toEqual({
 			scrollTop: 0,
@@ -288,11 +291,11 @@ describe('GitHistoryController', () => {
 		});
 		const history = new GitHistoryController();
 
-		history.ensureInitialLoaded('/project');
+		history.ensureInitialLoaded({ nodeId: 'local', projectPath: '/project' });
 		await flushPromises();
 		history.commits = [...history.commits, commit('older1234', 'older page')];
 
-		history.ensureInitialLoaded('/project');
+		history.ensureInitialLoaded({ nodeId: 'local', projectPath: '/project' });
 
 		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
 		expect(history.commits.map((entry) => entry.subject)).toEqual(['initial', 'older page']);
@@ -301,17 +304,17 @@ describe('GitHistoryController', () => {
 	it('opens a commit screen and loads first body candidates', async () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 
-		history.openCommit('/project', 'abcdef123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'abcdef123');
 		await flushPromises();
 		await flushPromises();
 
 		expect(history.screen).toBe('commit');
 		expect(history.commitSnapshot?.commit.hash).toBe('abcdef123');
 		expect(getGitCommitFileBodies).toHaveBeenCalledWith(
-			'/project',
-			'doc-abcdef123',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			{ nodeId: 'local', instanceId: 'test-instance', documentId: 'doc-abcdef123' },
 			'abcdef123',
 			[{ path: 'a.ts' }],
 			expect.objectContaining({ parent: 'parent', context: 5 }),
@@ -334,9 +337,9 @@ describe('GitHistoryController', () => {
 			message: 'This review expired.',
 		});
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 
-		history.openCommit('/project', 'abcdef123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'abcdef123');
 
 		await vi.waitFor(() => expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2));
 		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
@@ -347,15 +350,15 @@ describe('GitHistoryController', () => {
 	it('keeps an open comment when a context change is requested', async () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
-		history.openCommit('/project', 'abcdef123');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'abcdef123');
 		await flushPromises();
 		await flushPromises();
 		history.document.openCommentComposer('a.ts', 'after', 1);
 		history.document.setCommentBody('Keep this draft');
 		history.document.setCommentSeverity('warning');
 
-		history.setDisplayOptions('/project', 'unified', 12);
+		history.setDisplayOptions({ nodeId: 'local', projectPath: '/project' }, 'unified', 12);
 
 		expect(getGitCommitSnapshot).toHaveBeenCalledOnce();
 		expect(history.contextLines).toBe(5);
@@ -382,9 +385,9 @@ describe('GitHistoryController', () => {
 			.mockReturnValueOnce(prefetch.promise)
 			.mockResolvedValueOnce(bodiesForPaths(['file-8.ts']));
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 
-		history.openCommit('/project', 'abcdef123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'abcdef123');
 		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
 		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[3]).toEqual([{ path: 'file-0.ts' }]);
 		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.purpose).toBe('visible');
@@ -412,12 +415,12 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
 		vi.mocked(getGitCommitFileBodies).mockReturnValueOnce(pendingBody.promise);
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 
-		history.openCommit('/project', 'abcdef123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'abcdef123');
 		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledOnce());
 		const signal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
-		history.focusFile('/project', 'a.ts');
+		history.focusFile({ nodeId: 'local', projectPath: '/project' }, 'a.ts');
 		expect(history.scrollRequest?.filePath).toBe('a.ts');
 
 		history.backToList();
@@ -433,7 +436,7 @@ describe('GitHistoryController', () => {
 	it('opens a selected revision comparison locally and preserves list state on back', async () => {
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(comparisonSnapshot());
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 		history.saveListPosition({
 			scrollTop: 320,
 			anchorHash: 'anchor',
@@ -442,7 +445,7 @@ describe('GitHistoryController', () => {
 		});
 
 		history.openComparison(
-			'/project',
+			{ nodeId: 'local', projectPath: '/project' },
 			{
 				fromRevision: 'older',
 				toKind: 'revision',
@@ -454,7 +457,7 @@ describe('GitHistoryController', () => {
 		expect(history.screen).toBe('comparison');
 		await vi.waitFor(() => expect(history.comparison.snapshot).not.toBeNull());
 		expect(getGitComparisonSnapshot).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			{ kind: 'revision', revision: 'older' },
 			{ kind: 'revision', revision: 'newer' },
 			'direct',
@@ -502,9 +505,9 @@ describe('GitHistoryController', () => {
 		const pending = deferred<GitComparisonSnapshotReady>();
 		vi.mocked(getGitComparisonSnapshot).mockReturnValueOnce(pending.promise);
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 		history.openComparison(
-			'/project',
+			{ nodeId: 'local', projectPath: '/project' },
 			{
 				fromRevision: 'older',
 				toKind: 'revision',
@@ -530,10 +533,10 @@ describe('GitHistoryController', () => {
 			.mockResolvedValueOnce(snapshot('bbbbbbb123', 'fp-b'));
 		vi.mocked(getGitCommitFileBodies).mockResolvedValue(body('fp-b'));
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 
-		history.openCommit('/project', 'aaaaaaa123');
-		history.openCommit('/project', 'bbbbbbb123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'aaaaaaa123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'bbbbbbb123');
 		await flushPromises();
 		stale.resolve(snapshot('aaaaaaa123'));
 		await flushPromises();
@@ -546,7 +549,7 @@ describe('GitHistoryController', () => {
 		const commitSnapshot = snapshot('abcdef123');
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(commitSnapshot);
 		const history = new GitHistoryController();
-		history.resetForProject('/project');
+		history.resetForProject({ nodeId: 'local', projectPath: '/project' });
 		history.saveListPosition({
 			scrollTop: 320,
 			anchorHash: 'anchor',
@@ -554,7 +557,7 @@ describe('GitHistoryController', () => {
 			activeHash: 'active',
 		});
 
-		history.openCommit('/project', 'abcdef123');
+		history.openCommit({ nodeId: 'local', projectPath: '/project' }, 'abcdef123');
 		await flushPromises();
 		history.handleBodyDemand({
 			kind: 'viewport',

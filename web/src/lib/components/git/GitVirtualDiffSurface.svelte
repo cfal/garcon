@@ -29,8 +29,13 @@
 		overscan?: number;
 		onBodyDemand: (demand: GitReviewBodyDemand) => void;
 		onSelectFile: (filePath: string) => void;
-		onToggleLineSelection: (key: string) => void;
-		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
+		onToggleLineSelection: (key: string, target: GitDiffActionTarget) => void;
+		onSelectLineRange: (
+			startKey: string,
+			endKey: string,
+			allKeys: string[],
+			target: GitDiffActionTarget,
+		) => void;
 		onStageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
 		onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
 		onStageLine: (target: GitDiffActionTarget, diffLineIndex: number) => void;

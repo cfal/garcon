@@ -13,6 +13,7 @@ export interface WorkspaceContext {
 
 export interface AvailableWorkspaceProject extends WorkspaceContext {
 	effectiveProjectKey: string;
+	nodeContextKey?: string;
 }
 
 export type WorkspaceProjectState =
@@ -28,7 +29,10 @@ export class WorkspaceContextStore {
 		private readonly sessions: Pick<ChatSessionsStore, 'selectedChat'>,
 		private readonly modelCatalog: Pick<ModelCatalogStore, 'forNode'>,
 		private readonly projectResolution: Pick<ProjectResolutionStore, 'snapshotFor'>,
-		private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable'>,
+		private readonly nodes?: Pick<
+			ExecutionNodesStore,
+			'filesAvailable' | 'gitAvailable' | 'gitContextKey'
+		>,
 	) {}
 
 	get current(): WorkspaceContext | null {
@@ -42,25 +46,32 @@ export class WorkspaceContextStore {
 	}
 
 	get currentProject(): AvailableWorkspaceProject | null {
-		const current = this.current;
-		const target = this.currentTarget;
-		if (!current || !target) return null;
-		if (effectiveNodeId(current.nodeId) !== 'local') return null;
-		const resolution = this.projectResolution.snapshotFor(target);
-		if (resolution.kind !== 'available') return null;
-		return { ...current, effectiveProjectKey: resolution.effectiveProjectKey };
+		const project = this.projectState;
+		return project.kind === 'available' ? project.project : null;
 	}
 
 	get projectState(): WorkspaceProjectState {
 		const current = this.current;
-		if (current && effectiveNodeId(current.nodeId) !== 'local') {
+		if (
+			current &&
+			!(this.nodes?.gitAvailable(current.nodeId) ?? effectiveNodeId(current.nodeId) === 'local')
+		) {
 			return {
 				kind: 'request-failed',
 				context: current,
-				message: 'Git and terminals are unavailable on remote execution nodes.',
+				message: 'Git is unavailable on this execution node.',
 			};
 		}
-		return this.#resolvedProjectState();
+		const project = this.#resolvedProjectState();
+		return project.kind === 'available'
+			? {
+					...project,
+					project: {
+						...project.project,
+						nodeContextKey: this.nodes?.gitContextKey(current?.nodeId),
+					},
+				}
+			: project;
 	}
 
 	get filesProjectState(): WorkspaceProjectState {
@@ -124,7 +135,7 @@ export function createWorkspaceContextStore(
 	sessions: Pick<ChatSessionsStore, 'selectedChat'>,
 	modelCatalog: Pick<ModelCatalogStore, 'forNode'>,
 	projectResolution: Pick<ProjectResolutionStore, 'snapshotFor'>,
-	nodes?: Pick<ExecutionNodesStore, 'filesAvailable'>,
+	nodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'gitAvailable' | 'gitContextKey'>,
 ): WorkspaceContextStore {
 	return new WorkspaceContextStore(sessions, modelCatalog, projectResolution, nodes);
 }

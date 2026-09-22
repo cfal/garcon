@@ -89,6 +89,7 @@ function fileNode(path: string): GitTreeNode {
 
 function summaryFor(project: string, paths: string[]): GitReviewDocumentSummary {
 	return {
+		document: { nodeId: 'local', instanceId: 'test-instance', documentId: `doc:${project}` },
 		documentId: `doc:${project}`,
 		project,
 		mode: 'working',
@@ -116,6 +117,7 @@ function snapshotFor(project: string, paths: string[]): GitWorkbenchSnapshotResp
 		status: 'ready',
 		project,
 		target: {
+			nodeId: 'local',
 			projectPath: project,
 			repoRoot: project,
 			worktreePath: project,
@@ -147,14 +149,15 @@ function resolvingProject(chatId: string, projectPath: string) {
 }
 
 function installRouters(): void {
-	api.getGitTargetCandidates.mockImplementation((projectPath: string) =>
+	api.getGitTargetCandidates.mockImplementation(({ projectPath }) =>
 		Promise.resolve({ targets: [candidate(projectPath)] }),
 	);
-	api.getGitWorkbenchSnapshot.mockImplementation((projectPath: string) =>
+	api.getGitWorkbenchSnapshot.mockImplementation(({ projectPath }) =>
 		Promise.resolve(snapshotFor(projectPath, [`${projectPath.slice(1)}.ts`])),
 	);
-	comparisonApi.getGitComparisonSnapshot.mockImplementation((projectPath: string) =>
+	comparisonApi.getGitComparisonSnapshot.mockImplementation(({ projectPath }) =>
 		Promise.resolve({
+			document: { nodeId: 'local', instanceId: 'test-instance', documentId: `cmp:${projectPath}` },
 			status: 'ready',
 			project: projectPath,
 			repoRoot: projectPath,
@@ -189,6 +192,27 @@ async function settle(): Promise<void> {
 }
 
 describe('workbench surface chat-switch repro', () => {
+	it('does not restore old metadata after a held target application finishes', async () => {
+		const surface = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
+		let finishOld!: () => void;
+		const old = new Promise<void>((resolve) => {
+			finishOld = resolve;
+		});
+		vi.spyOn(surface.workbench, 'setTarget').mockReturnValueOnce(old).mockResolvedValue(undefined);
+		const metadata = vi.spyOn(surface.repository, 'fetchRemoteStatus').mockResolvedValue(undefined);
+		surface.setProjectState(availableProject('old', '/old'));
+		surface.setPresentationVisible(true);
+		await vi.waitFor(() => expect(surface.workbench.setTarget).toHaveBeenCalledOnce());
+		surface.setProjectState(availableProject('new', '/new'));
+		await surface.target.activate();
+		expect(metadata).toHaveBeenCalledOnce();
+		finishOld();
+		await old;
+		await Promise.resolve();
+		expect(metadata).toHaveBeenCalledOnce();
+		expect(metadata).toHaveBeenCalledWith(expect.objectContaining({ projectPath: '/new' }));
+		surface.dispose();
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 		installRouters();
@@ -225,7 +249,7 @@ describe('workbench surface chat-switch repro', () => {
 		expect(controller.workbench.files.filePaths).not.toContain('project-b.ts');
 	});
 
-	it('W2: selecting chat B\'s repo in chat A, then visiting B and returning, stays coherent', async () => {
+	it("W2: selecting chat B's repo in chat A, then visiting B and returning, stays coherent", async () => {
 		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
 		controller.setProjectState(availableProject('chat-a', '/project-a'));
 		controller.setPresentationVisible(true);

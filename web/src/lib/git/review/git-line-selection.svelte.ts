@@ -35,31 +35,43 @@ export function makeLineSelectionKey(
 
 export class GitLineSelectionState {
 	selectedLineKeys = $state(new Set<string>());
+	private targets = new Map<string, GitDiffActionTarget>();
 
 	get hasSelection(): boolean {
 		return this.selectedLineKeys.size > 0;
 	}
 
-	toggleLineSelection(key: string): void {
+	toggleLineSelection(key: string, target: GitDiffActionTarget): void {
+		if (!this.captureTarget(key, target)) return;
 		const next = new Set(this.selectedLineKeys);
 		if (next.has(key)) next.delete(key);
 		else next.add(key);
 		this.selectedLineKeys = next;
+		this.pruneTargets();
 	}
 
-	selectLineRange(startKey: string, endKey: string, allKeys: string[]): void {
+	selectLineRange(
+		startKey: string,
+		endKey: string,
+		allKeys: string[],
+		target: GitDiffActionTarget,
+	): void {
 		const startIndex = allKeys.indexOf(startKey);
 		const endIndex = allKeys.indexOf(endKey);
 		if (startIndex === -1 || endIndex === -1) return;
 		const from = Math.min(startIndex, endIndex);
 		const to = Math.max(startIndex, endIndex);
+		if (!this.captureTarget(endKey, target)) return;
 		const next = new Set(this.selectedLineKeys);
-		for (let index = from; index <= to; index++) next.add(allKeys[index]);
+		for (let index = from; index <= to; index++) {
+			if (this.captureTarget(allKeys[index], target)) next.add(allKeys[index]);
+		}
 		this.selectedLineKeys = next;
 	}
 
 	clearSelection(): void {
 		this.selectedLineKeys = new Set();
+		this.targets.clear();
 	}
 
 	pruneToFilePaths(paths: Set<string>): void {
@@ -69,6 +81,7 @@ export class GitLineSelectionState {
 				return parsed ? paths.has(parsed.filePath) : false;
 			}),
 		);
+		this.pruneTargets();
 	}
 
 	clearSelectionForFile(filePath: string, tab: GitDiffTab): void {
@@ -78,12 +91,10 @@ export class GitLineSelectionState {
 				return !parsed || parsed.filePath !== filePath || parsed.tab !== tab;
 			}),
 		);
+		this.targets.delete(JSON.stringify([filePath, tab]));
 	}
 
-	groupSelectedLineIndicesByTarget(
-		mode: GitDiffActionMode,
-		contextLines: number,
-	): Array<{
+	groupSelectedLineIndicesByTarget(mode: GitDiffActionMode): Array<{
 		target: GitDiffActionTarget;
 		lineIndices: number[];
 	}> {
@@ -91,14 +102,11 @@ export class GitLineSelectionState {
 		for (const rawKey of this.selectedLineKeys) {
 			const parsed = decodeLineSelectionKey(rawKey);
 			if (!parsed) continue;
+			const target = this.targets.get(JSON.stringify([parsed.filePath, parsed.tab]));
+			if (!target || target.mode !== mode) continue;
 			const groupKey = `${parsed.filePath}|${parsed.tab}|${mode}`;
 			const existing = grouped.get(groupKey) ?? {
-				target: {
-					filePath: parsed.filePath,
-					tab: parsed.tab,
-					mode,
-					contextLines,
-				},
+				target,
 				lineIndices: [],
 			};
 			existing.lineIndices.push(parsed.diffLineIndex);
@@ -108,6 +116,28 @@ export class GitLineSelectionState {
 	}
 
 	reset(): void {
-		this.selectedLineKeys = new Set();
+		this.clearSelection();
+	}
+
+	private pruneTargets(): void {
+		const retained = new Set(
+			Array.from(this.selectedLineKeys).flatMap((key) => {
+				const parsed = decodeLineSelectionKey(key);
+				return parsed ? [JSON.stringify([parsed.filePath, parsed.tab])] : [];
+			}),
+		);
+		for (const key of this.targets.keys()) if (!retained.has(key)) this.targets.delete(key);
+	}
+
+	private captureTarget(key: string, target: GitDiffActionTarget): boolean {
+		const parsed = decodeLineSelectionKey(key);
+		if (!parsed || parsed.filePath !== target.filePath || parsed.tab !== target.tab) return false;
+		const id = JSON.stringify([parsed.filePath, parsed.tab]);
+		const previous = this.targets.get(id);
+		if (previous && JSON.stringify(previous) !== JSON.stringify(target)) {
+			this.clearSelectionForFile(parsed.filePath, parsed.tab);
+		}
+		this.targets.set(id, target);
+		return true;
 	}
 }

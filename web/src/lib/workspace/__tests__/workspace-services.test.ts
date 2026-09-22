@@ -3,7 +3,7 @@ import { tick } from 'svelte';
 import { ApiError } from '$lib/api/client.js';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+import { createGhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import {
 	createLocalSettingsStore,
 	type LocalSettingsStore,
@@ -113,8 +113,8 @@ function assembleWorkspaceServices(
 	const notifications = createNotificationsStore();
 	const ghCapability = createGhCapabilityStore();
 	const chatSessions = createChatSessionsStore();
-	ghCapability.hasChecked = true;
-	ghCapability.available = true;
+	ghCapability.forNode('local').hasChecked = true;
+	ghCapability.forNode('local').available = true;
 	const ws = {
 		isConnected: false,
 		sendMessage: () => false,
@@ -531,7 +531,7 @@ describe('createWorkspaceServices', () => {
 		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('available');
 
 		rootLocalSettings.showQuickCommitTray = true;
-		ghCapability.available = false;
+		ghCapability.forNode('local').available = false;
 		await tick();
 
 		expect(services.gitQuickSummary.isEnabled).toBe(true);

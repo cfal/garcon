@@ -23,6 +23,7 @@ const limits = {
 
 function file(path: string) {
 	return {
+		patchDigest: 'a'.repeat(64),
 		path,
 		status: 'modified' as const,
 		rawStatus: 'M',

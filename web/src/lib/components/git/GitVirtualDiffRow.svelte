@@ -40,13 +40,14 @@
 		selectionKey: string | null,
 		selectableLineKeys: string[],
 	): void {
-		if (interaction.kind !== 'workbench' || !selectionKey) return;
+		if (interaction.kind !== 'workbench' || !selectionKey || !row.actionTarget) return;
 		if (event.shiftKey && interaction.selectedLineKeys.size > 0) {
 			const last = Array.from(interaction.selectedLineKeys).at(-1);
-			if (last) interaction.onSelectLineRange(last, selectionKey, selectableLineKeys);
+			if (last)
+				interaction.onSelectLineRange(last, selectionKey, selectableLineKeys, row.actionTarget);
 			return;
 		}
-		interaction.onToggleLineSelection(selectionKey);
+		interaction.onToggleLineSelection(selectionKey, row.actionTarget);
 	}
 
 	function hasSelectedText(container: EventTarget | null): boolean {

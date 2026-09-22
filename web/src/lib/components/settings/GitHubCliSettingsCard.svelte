@@ -1,19 +1,28 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { getGhCapability } from '$lib/context';
+	import { getGhCapability, getExecutionNodes } from '$lib/context';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
-	const ghCapability = getGhCapability();
+	const capabilities = getGhCapability();
+	const nodes = getExecutionNodes();
+	let nodeId = $state('local');
+	const ghCapability = $derived(capabilities.forNode(nodeId));
+	$effect(() => {
+		if (!nodes.ghAvailable(nodeId) || ghCapability.hasChecked) return;
+		untrack(() => void ghCapability.ensureChecked());
+	});
 
 	const connectedAccount = $derived(
 		ghCapability.login && ghCapability.host ? `${ghCapability.login}@${ghCapability.host}` : null,
 	);
 
 	const statusLabel = $derived.by(() => {
+		if (!nodes.ghAvailable(nodeId)) return 'Unavailable';
 		if (!ghCapability.hasChecked || ghCapability.isLoading) return m.settings_gh_status_checking();
 		if (ghCapability.lastError) return m.settings_gh_status_error();
 		if (ghCapability.available) {
@@ -59,13 +68,25 @@
 			</div>
 		</div>
 
-		<div class="flex shrink-0 items-center gap-2">
-			<Badge variant="outline" class={cn('text-xs', badgeClass)}>{statusLabel}</Badge>
+		<div class="flex min-w-0 flex-wrap items-center gap-2">
+			<select
+				aria-label="Execution node"
+				bind:value={nodeId}
+				class="min-w-0 max-w-full rounded border border-border bg-background px-2 py-1 text-base sm:max-w-56 sm:pointer-fine:text-sm"
+			>
+				{#each nodes.nodes as node (node.id)}
+					<option value={node.id}>{node.label}</option>
+				{/each}
+			</select>
+			<Badge
+				variant="outline"
+				class={cn('min-w-0 whitespace-normal break-words text-xs', badgeClass)}>{statusLabel}</Badge
+			>
 			<Button
 				variant="outline"
 				size="sm"
 				onclick={refreshGhStatus}
-				disabled={ghCapability.isLoading}
+				disabled={ghCapability.isLoading || !nodes.ghAvailable(nodeId)}
 				aria-label={m.settings_gh_refresh_aria()}
 			>
 				<RefreshCw class={cn('size-3.5', ghCapability.isLoading && 'animate-spin')} />
@@ -75,7 +96,9 @@
 	</div>
 
 	<div class="space-y-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-		{#if !ghCapability.hasChecked || ghCapability.isLoading}
+		{#if !nodes.ghAvailable(nodeId)}
+			<p>{nodes.label(nodeId)} is unavailable.</p>
+		{:else if !ghCapability.hasChecked || ghCapability.isLoading}
 			<p>{m.settings_gh_instructions_checking()}</p>
 		{:else if ghCapability.lastError}
 			<p class="text-destructive">

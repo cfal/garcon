@@ -276,9 +276,12 @@
 		lifecycleForChat: (chatId) => conversationLifecycles.forChat(chatId),
 		conversationUi,
 		startupCoordinator,
-		get modelCatalog() { return modelCatalog; },
+		get modelCatalog() {
+			return modelCatalog;
+		},
 		modelCatalogForNode: (nodeId) => rootModelCatalog.forNode(nodeId),
-		canSubmitToNode: (nodeId) => nodes.isReady(nodeId) && rootModelCatalog.forNode(nodeId).isValidated,
+		canSubmitToNode: (nodeId) =>
+			nodes.isReady(nodeId) && rootModelCatalog.forNode(nodeId).isValidated,
 		getExecutionDefaults: (agentId, nodeId) => {
 			const modelCatalog = rootModelCatalog.forNode(nodeId ?? agentState.nodeId);
 			const defaults = executionDefaultsForAgent(
@@ -627,9 +630,10 @@
 	}
 
 	function openCommitForPanel(surfaceId: ChatViewSurfaceId, chatId: string): void {
-		if ((sessions.byId[chatId]?.nodeId ?? 'local') !== 'local') return;
+		const nodeId = sessions.byId[chatId]?.nodeId ?? 'local';
+		if (!nodes.gitAvailable(nodeId)) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
-		if (!projectPath || !quickGit.summaryFor(projectPath)) return;
+		if (!projectPath || !quickGit.summaryFor({ nodeId, projectPath })) return;
 		const targetWindowId = workspace.windowOf(surfaceId);
 		let opening: Promise<void> | null = null;
 		if (appShell.isMobile) {
@@ -652,6 +656,7 @@
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
 		if (
+			quickGitBranches.nodeId === command.nodeId &&
 			quickGitBranches.currentProjectPath === projectPath &&
 			quickGitBranches.showBranchDropdown
 		) {
@@ -662,8 +667,9 @@
 		if (!project || !ownsBranchCommand(command)) return;
 		quickGitBranches.setProject(
 			project.projectPath,
-			quickGit.summaryFor(project.projectPath)?.branch,
+			quickGit.summaryFor(project)?.branch,
 			project.effectiveProjectKey,
+			project.nodeId,
 		);
 		await quickGitBranches.openBranchDropdown(project.projectPath, project.effectiveProjectKey);
 		if (command.generation === branchCommandGeneration && !ownsBranchCommand(command)) {
@@ -672,6 +678,8 @@
 	}
 
 	type BranchCommand = {
+		readonly nodeId: string;
+		readonly projectPath: string;
 		readonly generation: number;
 		readonly surfaceId: ChatViewSurfaceId;
 		readonly chatId: string;
@@ -684,7 +692,9 @@
 		chatId: string,
 		opensDropdown = false,
 	): BranchCommand | null {
-		if ((sessions.byId[chatId]?.nodeId ?? 'local') !== 'local') return null;
+		const chat = sessions.byId[chatId];
+		const nodeId = chat?.nodeId ?? 'local';
+		if (!chat?.projectPath || !nodes.gitAvailable(nodeId)) return null;
 		const panel = conversationPanels.panel(surfaceId);
 		const owner = workspace.focusOwner;
 		if (
@@ -698,6 +708,8 @@
 		const generation = ++branchCommandGeneration;
 		if (opensDropdown) branchDropdownGeneration = generation;
 		return {
+			nodeId,
+			projectPath: chat.projectPath,
 			generation,
 			surfaceId,
 			chatId,
@@ -708,6 +720,9 @@
 
 	function ownsBranchCommand(command: BranchCommand): boolean {
 		return (
+			(sessions.byId[command.chatId]?.nodeId ?? 'local') === command.nodeId &&
+			sessions.byId[command.chatId]?.projectPath === command.projectPath &&
+			nodes.gitAvailable(command.nodeId) &&
 			command.generation === branchCommandGeneration &&
 			workspace.focusOwnerRevision === command.focusOwnerRevision &&
 			workspace.focusOwner.kind !== 'chat-list' &&
@@ -728,6 +743,12 @@
 		if (!command) return;
 		const project = await resolveChatProject(chatId);
 		if (!project || !ownsBranchCommand(command)) return;
+		quickGitBranches.setProject(
+			project.projectPath,
+			quickGit.summaryFor(project)?.branch,
+			project.effectiveProjectKey,
+			project.nodeId,
+		);
 		quickGitBranches.openNewBranchDialog(
 			project.projectPath,
 			surfaceId,
@@ -744,6 +765,12 @@
 		if (!command) return;
 		const project = await resolveChatProject(chatId);
 		if (!project || !ownsBranchCommand(command)) return;
+		quickGitBranches.setProject(
+			project.projectPath,
+			quickGit.summaryFor(project)?.branch,
+			project.effectiveProjectKey,
+			project.nodeId,
+		);
 		await quickGitBranches.switchBranch(
 			project.projectPath,
 			branch,
@@ -754,21 +781,31 @@
 	}
 
 	async function resolveChatProject(chatId: string): Promise<{
+		nodeId: string;
 		projectPath: string;
 		effectiveProjectKey: string;
 	} | null> {
 		const chat = sessions.byId[chatId];
-		if (!chat?.projectPath || (chat.nodeId ?? 'local') !== 'local') return null;
+		const nodeId = chat?.nodeId ?? 'local';
+		const nodeContextKey = nodes.gitContextKey(nodeId);
+		if (!chat?.projectPath || !nodes.gitAvailable(nodeId)) return null;
 		const target =
 			chat.status === 'draft'
-				? { kind: 'path' as const, projectPath: chat.projectPath }
-				: { kind: 'chat' as const, chatId, projectPath: chat.projectPath };
+				? { kind: 'path' as const, nodeId, projectPath: chat.projectPath }
+				: { kind: 'chat' as const, nodeId, chatId, projectPath: chat.projectPath };
 		const lease = projectResolution.retain(target);
 		try {
 			await lease.resolve();
-			if (sessions.byId[chatId]?.projectPath !== target.projectPath || (sessions.byId[chatId]?.nodeId ?? 'local') !== 'local') return null;
+			if (
+				sessions.byId[chatId]?.projectPath !== target.projectPath ||
+				(sessions.byId[chatId]?.nodeId ?? 'local') !== nodeId ||
+				nodeContextKey !== nodes.gitContextKey(nodeId) ||
+				!nodes.gitAvailable(nodeId)
+			)
+				return null;
 			return lease.snapshot.kind === 'available'
 				? {
+						nodeId,
 						projectPath: target.projectPath,
 						effectiveProjectKey: lease.snapshot.effectiveProjectKey,
 					}

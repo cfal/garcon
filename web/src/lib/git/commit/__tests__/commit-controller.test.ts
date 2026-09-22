@@ -10,6 +10,7 @@ import type {
 	GitWorkbenchSnapshotReady,
 } from '$lib/api/git.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
+import { ApiError } from '$lib/api/client.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitTargetCandidates: vi.fn().mockResolvedValue({ targets: [] }),
@@ -105,6 +106,7 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 		status: 'ready',
 		project: '/project',
 		target: {
+			nodeId: 'local',
 			projectPath: '/project',
 			repoRoot: '/project',
 			worktreePath: '/project',
@@ -114,6 +116,7 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 		},
 		tree,
 		reviewSummary: {
+			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'doc' },
 			documentId: 'doc',
 			project: '/project',
 			mode: 'working',
@@ -284,13 +287,20 @@ describe('CommitController', () => {
 		controller.message = 'test: commit';
 		const commitPromise = controller.commit();
 
-		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['unstaged.ts'], 'stage');
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			['unstaged.ts'],
+			'stage',
+		);
 		expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
 
 		stage.resolve({ success: true });
 		await commitPromise;
 
-		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith('/project', 'test: commit');
+		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			'test: commit',
+		);
 		expect(controller.isPresentationVisible).toBe(true);
 	});
 
@@ -305,9 +315,94 @@ describe('CommitController', () => {
 
 		await controller.generateMessage();
 
-		expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']);
+		expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			['staged.ts'],
+		);
 		expect(controller.message).toBe('src/app: feat: generated');
 		expect(controller.lastError).toBeNull();
+	});
+
+	it('does not overwrite a user edit while generating on the captured node', async () => {
+		const generated = deferred<{ message: string }>();
+		mockedApi.generateCommitMessage.mockReturnValueOnce(generated.promise);
+		const controller = makeController();
+		await controller.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat',
+				nodeId: 'remote',
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+			},
+		});
+		await controller.setPresentationVisible(true);
+		const pending = controller.generateMessage();
+		await vi.waitFor(() => expect(mockedApi.generateCommitMessage).toHaveBeenCalledOnce());
+		controller.message = 'User-authored commit';
+		generated.resolve({ message: 'Generated commit' });
+		await pending;
+		expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
+			{ nodeId: 'remote', projectPath: '/project' },
+			['staged.ts'],
+		);
+		expect(controller.message).toBe('User-authored commit');
+		controller.dispose();
+	});
+
+	it('retains commit text after an uncertain mutation without replaying it', async () => {
+		const controller = makeController();
+		await controller.setContext('/project', '/project');
+		await controller.setPresentationVisible(true);
+		controller.message = 'Preserved commit';
+		mockedApi.gitCommitIndex.mockRejectedValueOnce(
+			new ApiError(
+				503,
+				'Inspect the repository before trying again.',
+				'GIT_MUTATION_OUTCOME_UNKNOWN',
+			),
+		);
+		await expect(controller.commit()).resolves.toBe(false);
+		expect(controller.message).toBe('Preserved commit');
+		expect(controller.lastError).toContain('Inspect the repository');
+		expect(mockedApi.gitCommitIndex).toHaveBeenCalledOnce();
+		controller.dispose();
+	});
+
+	it('stops queued staging after uncertainty while retaining selections and commit text', async () => {
+		const staging = deferred<{ success: boolean }>();
+		mockedApi.gitStagePaths.mockReturnValueOnce(staging.promise);
+		const controller = makeController();
+		await controller.setContext('/project', '/project');
+		await controller.setPresentationVisible(true);
+		controller.message = 'Preserved commit';
+		controller.togglePath('unstaged.ts', true);
+		controller.togglePath('loose.ts', true);
+		staging.reject(new ApiError(503, 'Inspect the repository.', 'GIT_MUTATION_OUTCOME_UNKNOWN'));
+		await expect(controller.waitForQueue()).resolves.toBe(false);
+		await controller.refreshTree();
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
+		expect(controller.desiredSelectedFiles).toEqual(['staged.ts', 'unstaged.ts', 'loose.ts']);
+		expect(controller.hasPendingStageOperations).toBe(false);
+		expect(controller.hasErrors).toBe(true);
+		expect(controller.message).toBe('Preserved commit');
+		controller.dispose();
+	});
+
+	it('preserves the mutation failure when summary reconciliation also fails', async () => {
+		const refreshSummary = vi.fn().mockResolvedValue(undefined);
+		const controller = makeController({ refreshSummary });
+		await controller.setContext('/project', '/project');
+		await controller.setPresentationVisible(true);
+		controller.message = 'Preserved commit';
+		mockedApi.gitCommitIndex.mockRejectedValueOnce(
+			new ApiError(503, 'Inspect the repository.', 'GIT_MUTATION_OUTCOME_UNKNOWN'),
+		);
+		refreshSummary.mockRejectedValue(new Error('Summary unavailable'));
+		await expect(controller.commit()).resolves.toBe(false);
+		expect(controller.lastError).toContain('Inspect the repository.');
+		expect(controller.message).toBe('Preserved commit');
+		controller.dispose();
 	});
 
 	it('does not publish a generated message into a newly selected project', async () => {
@@ -319,7 +414,10 @@ describe('CommitController', () => {
 
 		const generation = controller.generateMessage();
 		await vi.waitFor(() => {
-			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project-a', ['staged.ts']);
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ nodeId: 'local', projectPath: '/project-a' }),
+				['staged.ts'],
+			);
 		});
 		await controller.setContext('/project-b', '/project-b');
 		generated.resolve({ message: 'message for project A' });
@@ -363,7 +461,10 @@ describe('CommitController', () => {
 		await expect(controller.commit()).resolves.toBe(true);
 
 		expect(controller.isPresentationVisible).toBe(true);
-		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith('/project', 'test: commit');
+		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			'test: commit',
+		);
 		expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
 		expect(controller.tree).toEqual([]);
 		expect(refreshSummary).toHaveBeenCalledOnce();
@@ -454,7 +555,10 @@ describe('CommitController', () => {
 
 		stage.resolve({ success: true });
 		await vi.waitFor(() => {
-			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['unstaged.ts']);
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				['unstaged.ts'],
+			);
 		});
 		expect(controller.isRefreshingTree).toBe(true);
 
@@ -492,7 +596,7 @@ describe('CommitController', () => {
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			['src/a.ts', 'src/b.ts'],
 			'stage',
 		);
@@ -526,7 +630,7 @@ describe('CommitController', () => {
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			['src/a.ts', 'src/b.ts'],
 			'unstage',
 		);
@@ -550,7 +654,11 @@ describe('CommitController', () => {
 		expect(await controller.waitForQueue()).toBe(true);
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
-		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src/unstaged.ts'], 'stage');
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			['src/unstaged.ts'],
+			'stage',
+		);
 	});
 
 	it('keeps the existing tree visible during manual refresh', async () => {
@@ -587,7 +695,7 @@ describe('CommitController', () => {
 		mockedApi.getGitTargetCandidates.mockResolvedValue({
 			targets: [project, worktree],
 		});
-		mockedApi.getGitWorkbenchSnapshot.mockImplementation(async (projectPath) =>
+		mockedApi.getGitWorkbenchSnapshot.mockImplementation(async ({ projectPath }) =>
 			snapshot([
 				fileNode(projectPath === '/project' ? 'project.ts' : 'worktree.ts', {
 					staged: true,
@@ -632,7 +740,10 @@ describe('CommitController', () => {
 
 		const pending = controller.generateMessage();
 		await vi.waitFor(() =>
-			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/repo/worktree', ['staged.ts']),
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ nodeId: 'local', projectPath: '/repo/worktree' }),
+				['staged.ts'],
+			),
 		);
 		mockedApi.getGitTargetCandidates.mockResolvedValueOnce({
 			targets: [project],

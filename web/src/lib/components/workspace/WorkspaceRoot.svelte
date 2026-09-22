@@ -25,6 +25,7 @@
 		getFileSessions,
 		getGitBranchActions,
 		getGitQuickSummary,
+		getExecutionNodes,
 		getChatProcessingReconciler,
 		getModelCatalog,
 		getLocalSettings,
@@ -109,6 +110,7 @@
 	const projectResolution = getProjectResolution();
 	const gitBranchActions = getGitBranchActions();
 	const gitQuickSummary = getGitQuickSummary();
+	const executionNodes = getExecutionNodes();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
 	const processingReconciler = getChatProcessingReconciler();
@@ -208,11 +210,18 @@
 		if (!localSettings.showQuickCommitTray) return [];
 		return chatPresentations.flatMap(({ chatId }) => {
 			const chat = sessions.byId[chatId];
-			if (!chat?.projectPath || (chat.nodeId ?? 'local') !== 'local') return [];
+			if (!chat?.projectPath || !executionNodes.gitAvailable(chat.nodeId)) return [];
 			const target = targetForChat(chat);
 			const resolution = projectResolution.snapshotFor(target);
 			return resolution.kind === 'available'
-				? [{ projectPath: chat.projectPath, isProcessing: chat.isProcessing }]
+				? [
+						{
+							nodeId: chat.nodeId ?? 'local',
+							nodeContextKey: executionNodes.gitContextKey(chat.nodeId),
+							projectPath: chat.projectPath,
+							isProcessing: chat.isProcessing,
+						},
+					]
 				: [];
 		});
 	});

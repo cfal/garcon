@@ -3,6 +3,7 @@
 	// only the pending path; the active target changes after OK.
 
 	import { onDestroy } from 'svelte';
+	import { getExecutionNodes } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
@@ -19,6 +20,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitTargetDialogProps {
+		nodeId: string;
 		initialPath: string;
 		projectBasePath: string;
 		pinnedProjectPaths?: string[];
@@ -29,6 +31,7 @@
 	}
 
 	let {
+		nodeId,
 		initialPath,
 		projectBasePath,
 		pinnedProjectPaths = [],
@@ -38,7 +41,17 @@
 		onClose,
 	}: GitTargetDialogProps = $props();
 
+	const nodes = getExecutionNodes();
 	const dialog = new GitTargetDialogState({
+		get nodeId() {
+			return nodeId;
+		},
+		get nodeContextKey() {
+			return nodes.gitContextKey(nodeId);
+		},
+		get available() {
+			return nodes.gitAvailable(nodeId);
+		},
 		get initialPath() {
 			return initialPath;
 		},
@@ -54,6 +67,7 @@
 
 	$effect(() => {
 		void dialog.candidatePath;
+		void nodes.gitContextKey(nodeId);
 		dialog.scheduleValidation();
 	});
 
@@ -142,6 +156,7 @@
 										bind:value={dialog.candidatePath}
 										readonly={isUpdatingPinnedProjectPath}
 										onfocus={(event: FocusEvent & { currentTarget: HTMLInputElement }) => {
+											if (!nodes.filesAvailable(nodeId)) return;
 											if (isMobile) event.currentTarget.blur();
 											if (isUpdatingPinnedProjectPath) return;
 											dialog.showBrowser = true;
@@ -185,7 +200,7 @@
 								/>
 								<button
 									type="button"
-									disabled={isUpdatingPinnedProjectPath}
+									disabled={isUpdatingPinnedProjectPath || !nodes.filesAvailable(nodeId)}
 									onclick={() => {
 										dialog.showBrowser = true;
 									}}
@@ -197,8 +212,9 @@
 								</button>
 							</div>
 
-							{#if dialog.showBrowser && !isUpdatingPinnedProjectPath}
+							{#if dialog.showBrowser && !isUpdatingPinnedProjectPath && nodes.filesAvailable(nodeId)}
 								<DirectoryBrowser
+									{nodeId}
 									currentPath={dialog.trimmedPath || projectBasePath}
 									basePath={projectBasePath}
 									onSelect={(path) => {

@@ -1,9 +1,4 @@
-import type {
-	GitChangeStats,
-	GitFileChangeFacet,
-	GitStatusCode,
-	GitTreeNode,
-} from '$lib/api/git.js';
+import type { GitChangeStats, GitFileChangeFacet, GitTreeNode } from '$lib/api/git.js';
 
 export type QuickCommitStageMode = 'stage' | 'unstage';
 
@@ -19,10 +14,7 @@ export function flattenCommitFileNodes(nodes: GitTreeNode[]): GitTreeNode[] {
 	return result;
 }
 
-export function findCommitTreeNode(
-	nodes: GitTreeNode[],
-	path: string,
-): GitTreeNode | null {
+export function findCommitTreeNode(nodes: GitTreeNode[], path: string): GitTreeNode | null {
 	for (const node of nodes) {
 		if (node.path === path) return node;
 		if (node.children) {
@@ -98,7 +90,7 @@ function facetForUnstage(node: GitTreeNode): GitFileChangeFacet | undefined {
 	if (!source) return undefined;
 	const addedOnly = stagedFacet?.changeKind === 'added' && !unstagedFacet;
 	const changeKind = addedOnly ? 'untracked' : source.changeKind;
-	const status: GitStatusCode = addedOnly ? '?' : source.status;
+	const status = addedOnly ? '?' : source.status;
 	return {
 		...source,
 		status,
@@ -107,10 +99,7 @@ function facetForUnstage(node: GitTreeNode): GitFileChangeFacet | undefined {
 	};
 }
 
-function reconcileFileNodeAfterStage(
-	node: GitTreeNode,
-	staged: boolean,
-): GitTreeNode {
+function reconcileFileNodeAfterStage(node: GitTreeNode, staged: boolean): GitTreeNode {
 	if (staged) {
 		const stagedFacet = facetForStage(node);
 		return {
@@ -144,10 +133,7 @@ function reconcileFileNodeAfterStage(
 	};
 }
 
-function aggregateDirectoryNode(
-	node: GitTreeNode,
-	children: GitTreeNode[],
-): GitTreeNode {
+function aggregateDirectoryNode(node: GitTreeNode, children: GitTreeNode[]): GitTreeNode {
 	let staged = false;
 	let hasUnstaged = false;
 	let additions = 0;
@@ -155,8 +141,8 @@ function aggregateDirectoryNode(
 	let stagedFacet: GitFileChangeFacet | undefined;
 	let unstagedFacet: GitFileChangeFacet | undefined;
 	for (const child of children) {
-		staged = staged || child.staged;
-		hasUnstaged = hasUnstaged || child.hasUnstaged;
+		staged = staged || Boolean(child.staged);
+		hasUnstaged = hasUnstaged || Boolean(child.hasUnstaged);
 		additions += child.additions ?? 0;
 		deletions += child.deletions ?? 0;
 		stagedFacet = stagedFacet ?? child.stagedFacet;

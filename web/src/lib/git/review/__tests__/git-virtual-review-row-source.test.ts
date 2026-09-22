@@ -50,6 +50,7 @@ function options(
 ): BuildVirtualRowsOptions {
 	return {
 		summary: {
+			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'document' },
 			documentId: 'document',
 			project: '/project',
 			context: 3,
@@ -188,6 +189,7 @@ describe('Git virtual review row source', () => {
 `;
 		const patchIndex = createGitPatchIndex(patch, 6);
 		const body: GitReviewFileBody = {
+			patchDigest: 'a'.repeat(64),
 			path: 'file.txt',
 			bodyFingerprint: 'fingerprint:file.txt',
 			bodyState: 'loaded',
@@ -337,6 +339,7 @@ describe('Git virtual review row source', () => {
 `;
 		const patchIndex = createGitPatchIndex(patch);
 		const body: GitReviewFileBody = {
+			patchDigest: 'a'.repeat(64),
 			path: file.path,
 			bodyFingerprint: file.bodyFingerprint,
 			bodyState: 'loaded',

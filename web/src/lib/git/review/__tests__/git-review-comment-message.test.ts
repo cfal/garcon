@@ -22,11 +22,7 @@ describe('buildGitReviewCommentMessage', () => {
 			originalPath: 'src/old.ts',
 			side: 'after',
 			line: 42,
-			contextLines: [
-				'@@ -40,3 +40,3 @@',
-				' const before = true;',
-				'+const answer = 42;',
-			],
+			contextLines: ['@@ -40,3 +40,3 @@', ' const before = true;', '+const answer = 42;'],
 			body: 'Please name this value.',
 			severity: 'note',
 		});
@@ -62,7 +58,16 @@ describe('buildGitReviewCommentMessage', () => {
 
 	it('caps deterministic context to the hunk header and two nearby rows per side', () => {
 		const rows = [
-			{ key: 'h', kind: 'hunk' as const, hunkIndex: 0, hunkId: 'h0', beforeLine: null, afterLine: null, text: '@@ -1,5 +1,5 @@', diffLineIndex: -1 },
+			{
+				key: 'h',
+				kind: 'hunk' as const,
+				hunkIndex: 0,
+				hunkId: 'h0',
+				beforeLine: null,
+				afterLine: null,
+				text: '@@ -1,5 +1,5 @@',
+				diffLineIndex: -1,
+			},
 			...Array.from({ length: 6 }, (_, index) => ({
 				key: `c${index}`,
 				kind: 'context' as const,
@@ -89,6 +94,7 @@ describe('buildGitReviewCommentMessage', () => {
 		const patch =
 			'diff --git a/a.ts b/a.ts\n@@ -1,6 +1,6 @@\n line 1\n line 2\n line 3\n line 4\n line 5\n line 6\n';
 		const body = {
+			patchDigest: 'a'.repeat(64),
 			path: 'a.ts',
 			bodyFingerprint: 'fp',
 			bodyState: 'loaded',

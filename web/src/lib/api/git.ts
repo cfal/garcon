@@ -1,11 +1,17 @@
-// Typed API client for git operations. All functions require the `project`
-// parameter (the project path on disk) to scope operations.
-
+import type * as Wire from '$shared/git';
+import { apiPost, type ApiFetchOptions } from './client.js';
 import {
-	apiGet,
-	apiPost,
-	type ApiFetchOptions,
-} from './client.js';
+	gitApiGet,
+	gitApiPost,
+	gitApiMutation,
+	gitProjectFields,
+	gitProjectQuery,
+	gitDocumentRef,
+	gitDocumentKey,
+	type GitProjectTarget,
+	type GitReviewDocumentRef,
+	type GitSelectionProof,
+} from './git-client.js';
 import {
 	DEFAULT_GIT_REF_SORT,
 	type GitRefKind,
@@ -25,12 +31,8 @@ export {
 import {
 	getGitReviewDocumentFileBodies,
 	type GitReviewBodyPurpose,
-	type GitReviewBodyState,
-	type GitReviewCollectionLimit,
 	type GitReviewDocumentIndexedFileBodiesResponse,
-	type GitReviewDocumentLimits,
 	type GitReviewFileBody,
-	type GitReviewLimitReason,
 	type GitReviewDocumentSummary,
 } from './git-review-documents.js';
 export {
@@ -61,291 +63,107 @@ import {
 
 // Workbench contract types
 
-export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+export type GitChangeKind = Wire.GitChangeKind;
 export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | 'U' | '?' | '!';
-export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
-export type GitStageMode = 'stage' | 'unstage';
+export type GitFileReviewCategory = Wire.GitFileReviewCategory;
+export type GitStageMode = Wire.GitStageMode;
 export const GIT_FRESHNESS_POLL_MS = 15_000;
-export const GIT_WORKING_TREE_FINGERPRINT_VERSION = 1;
-export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
-export interface GitChangeStats {
-	additions: number;
-	deletions: number;
-	isBinary?: boolean;
-}
+export {
+	GIT_WORKING_TREE_FINGERPRINT_VERSION,
+	GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
+} from '$shared/git';
+export type GitChangeStats = Wire.DiffStats;
 
-export type GitTreeStatsState = 'pending' | 'loaded';
+export type GitTreeStatsState = Wire.GitTreeStatsState;
 
-export interface GitFileChangeFacet {
-	status: GitStatusCode;
-	changeKind: GitChangeKind;
-	stats: GitChangeStats;
-	originalPath?: string;
-	category?: GitFileReviewCategory;
-}
+export type GitFileChangeFacet = Wire.ChangeFacet;
 
-export interface GitTreeNode {
-	path: string;
-	name: string;
-	kind: 'file' | 'directory';
-	indexStatus?: GitStatusCode;
-	workTreeStatus?: GitStatusCode;
-	stagedFacet?: GitFileChangeFacet;
-	unstagedFacet?: GitFileChangeFacet;
-	changeKind?: GitChangeKind;
-	staged: boolean;
-	hasUnstaged: boolean;
+export interface GitTreeNode extends Omit<
+	Wire.TreeNode,
+	'indexStatus' | 'workTreeStatus' | 'children'
+> {
+	indexStatus?: string;
+	workTreeStatus?: string;
 	children?: GitTreeNode[];
-	additions?: number;
-	deletions?: number;
-	category?: GitFileReviewCategory;
 }
 
-export interface GitChangesTreeResult {
+export interface GitChangesTreeResult extends Omit<Wire.ChangesTreeResult, 'root' | 'statsState'> {
 	root: GitTreeNode[];
-	hasCommits: boolean;
 	statsState?: GitTreeStatsState;
 }
 
 export type GitDiffTab = 'unstaged' | 'staged';
 
-export interface GitWorkbenchSnapshotTarget {
-	projectPath: string;
-	repoRoot: string;
-	worktreePath: string;
-	label: string;
-	branch: string;
-	source: 'chat-project' | 'worktree';
+export interface GitWorkbenchSnapshotTarget extends Wire.GitWorkbenchSnapshotTarget {
+	nodeId: string;
 }
 
-export interface GitWorkbenchSnapshotReady {
-	status: 'ready';
-	project: string;
+export interface GitWorkbenchSnapshotReady extends Omit<
+	Wire.GitWorkbenchSnapshotReady,
+	'target' | 'tree' | 'reviewSummary'
+> {
 	target: GitWorkbenchSnapshotTarget;
 	tree: GitChangesTreeResult & { statsState: 'loaded' };
 	reviewSummary: GitReviewDocumentSummary;
-	selectedFile: string | null;
-	firstBodyCandidates: string[];
-	snapshotId: string;
-	workbenchFingerprint: string;
 }
 
-export interface GitWorkbenchSnapshotNotRepository {
-	status: 'not-git-repository';
-	project: string;
-	target: null;
-	tree: null;
-	reviewSummary: null;
-	selectedFile: null;
-	firstBodyCandidates: [];
-	message: string;
-}
+export type GitWorkbenchSnapshotNotRepository = Wire.GitWorkbenchSnapshotNotRepository;
 
 export type GitWorkbenchSnapshotResponse =
 	GitWorkbenchSnapshotReady | GitWorkbenchSnapshotNotRepository;
 
-export type GitWorkingTreeFingerprintResponse =
-	| GitWorkingTreeFingerprintReady
-	| GitWorkingTreeFingerprintNotRepository
-	| GitWorkingTreeFingerprintUnknown;
+export type GitWorkingTreeFingerprintResponse = Wire.GitWorkingTreeFingerprintResponse;
 
-export interface GitWorkingTreeFingerprintReady {
-	status: 'ready';
-	project: string;
-	fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
-	fingerprint: string;
-	changedPathCount: number;
-}
+export type GitWorkingTreeFingerprintReady = Wire.GitWorkingTreeFingerprintReady;
 
-export interface GitWorkingTreeFingerprintNotRepository {
-	status: 'not-git-repository';
-	project: string;
-	fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
-	fingerprint: null;
-	message: string;
-}
+export type GitWorkingTreeFingerprintNotRepository = Wire.GitWorkingTreeFingerprintNotRepository;
 
-export interface GitWorkingTreeFingerprintUnknown {
-	status: 'unknown';
-	project: string;
-	fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
-	fingerprint: null;
-	message: string;
-}
+export type GitWorkingTreeFingerprintUnknown = Wire.GitWorkingTreeFingerprintUnknown;
 
-export type GitQuickSummaryResponse =
-	GitQuickSummaryReady | GitQuickSummaryNotRepository | GitQuickSummaryUnknown;
+export type GitQuickSummaryResponse = Wire.GitQuickSummaryResponse;
 
-export interface GitQuickSummaryReady {
-	status: 'ready';
-	project: string;
-	repoRoot: string;
-	branch: string;
-	hasCommits: boolean;
-	changedFiles: number;
-	trackedChangedFiles: number;
-	untrackedFiles: number;
-	stagedFiles: number;
-	unstagedFiles: number;
-	additions: number;
-	deletions: number;
-	fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
-	fingerprint: string;
-}
+export type GitQuickSummaryReady = Wire.GitQuickSummaryReady;
 
-export interface GitQuickSummaryNotRepository {
-	status: 'not-git-repository';
-	project: string;
-	fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
-	fingerprint: null;
-	message: string;
-}
+export type GitQuickSummaryNotRepository = Wire.GitQuickSummaryNotRepository;
 
-export interface GitQuickSummaryUnknown {
-	status: 'unknown';
-	project: string;
-	fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
-	fingerprint: null;
-	message: string;
-}
+export type GitQuickSummaryUnknown = Wire.GitQuickSummaryUnknown;
 
-export interface GitWorktreeItem {
-	name: string;
-	path: string;
-	branch: string;
-	isCurrent: boolean;
-	isMain: boolean;
-	isPathMissing: boolean;
-	lastModifiedAt: string | null;
-}
+export type GitWorktreeItem = Wire.WorktreeInfo;
 
-export interface GitTargetCandidate {
-	projectPath: string;
-	repoRoot: string;
-	worktreePath: string;
-	label: string;
-	branch: string;
-	source: 'chat-project' | 'repo-root' | 'worktree';
-	isCurrent: boolean;
-	isMissing: boolean;
-}
+export type GitTargetCandidate = Wire.TargetCandidate;
 
-export interface GitStatus {
-	branch: string;
-	hasCommits: boolean;
-	modified: string[];
-	added: string[];
-	deleted: string[];
-	untracked: string[];
+export interface GitStatus extends Wire.GitStatus {
 	error?: string;
 	details?: string;
 }
 
-export interface GitRemoteStatus {
-	hasRemote: boolean;
-	hasUpstream: boolean;
-	branch: string;
-	remoteName: string | null;
-	remoteBranch?: string;
-	ahead: number;
-	behind: number;
-	isUpToDate: boolean;
-	message?: string;
+export interface GitRemoteStatus extends Wire.GitRemoteStatus {
 	error?: string;
 }
 
-export interface GitHistoryCommitListResponse {
-	project: string;
-	ref: string;
-	commits: GitHistoryCommitListItem[];
-	nextOffset: number | null;
-}
+export type GitHistoryCommitListResponse = Wire.GitHistoryCommitListResponse;
 
-export interface GitHistoryCommitListItem {
-	hash: string;
-	shortHash: string;
-	parents: string[];
-	author: string;
-	authorEmail: string;
-	authorDate: string;
-	committer: string;
-	committerEmail: string;
-	committerDate: string;
-	subject: string;
-	refs: string[];
-}
+export type GitHistoryCommitListItem = Wire.GitHistoryCommitListItem;
 
-export interface GitCommitDetails {
-	hash: string;
-	shortHash: string;
-	parents: string[];
-	author: string;
-	authorEmail: string;
-	authorDate: string;
-	committer: string;
-	committerEmail: string;
-	committerDate: string;
-	subject: string;
-	body: string;
-	refs: string[];
-}
+export type GitCommitDetails = Wire.GitCommitDetails;
 
-export interface GitCommitParentOption {
-	hash: string;
-	shortHash: string;
-	label: string;
-}
+export type GitCommitParentOption = Wire.GitCommitParentOption;
 
-export type GitCommitFileStatus =
-	'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed' | 'unknown';
+export type GitCommitFileStatus = Wire.GitCommitFileStatus;
 
-export interface GitCommitFileSummary {
-	path: string;
-	originalPath?: string;
-	status: GitCommitFileStatus;
-	rawStatus: string;
-	category: GitFileReviewCategory;
-	additions: number;
-	deletions: number;
-	statsKnown?: boolean;
-	estimatedRows: number;
-	bodyState: GitReviewBodyState;
-	bodyFingerprint: string;
-	isGenerated: boolean;
-	isBinary: boolean;
-	isTooLarge: boolean;
-	limitReason?: GitReviewLimitReason;
-	limitMessage?: string;
-}
+export type GitCommitFileSummary = Wire.GitCommitFileSummary;
 
 export type GitCommitFileBody = GitReviewFileBody;
 
-export interface GitCommitSnapshotReady {
-	status: 'ready';
-	project: string;
-	documentId: string;
-	commit: GitCommitDetails;
-	selectedParent: string | null;
-	parentOptions: GitCommitParentOption[];
-	files: GitCommitFileSummary[];
-	limits: GitReviewDocumentLimits;
-	collectionLimit?: GitReviewCollectionLimit;
-	firstBodyCandidates: string[];
+export interface GitCommitSnapshotReady extends Wire.GitCommitSnapshotReady {
+	document: GitReviewDocumentRef;
 }
 
-export interface GitCommitSnapshotNotFound {
-	status: 'not-found';
-	project: string;
-	commit: string;
-	message: string;
-}
+export type GitCommitSnapshotNotFound = Wire.GitCommitSnapshotNotFound;
 
 export type GitCommitSnapshotResponse = GitCommitSnapshotReady | GitCommitSnapshotNotFound;
 
-export interface GitDiffFileRequest {
-	path: string;
-	originalPath?: string;
-}
+export type GitDiffFileRequest = Wire.GitDiffFileRequest;
 
 export interface ConfirmAction {
 	type: 'discard' | 'delete' | 'commit' | 'pull' | 'push';
@@ -353,74 +171,26 @@ export interface ConfirmAction {
 	message?: string;
 }
 
-export type GitConflictStatus = 'UU' | 'AA' | 'DD' | 'AU' | 'UA' | 'DU' | 'UD';
+export type GitConflictStatus = Wire.GitConflictStatus;
 
-export interface GitConflictFile {
-	path: string;
-	status: GitConflictStatus;
-	baseAvailable: boolean;
-	oursAvailable: boolean;
-	theirsAvailable: boolean;
-}
+export type GitConflictFile = Wire.GitConflictFile;
 
-export type GitConflictContentLimitReason = 'content-too-large' | 'too-many-lines';
+export type GitConflictContentLimitReason = Wire.GitConflictContentLimitReason;
 
-export interface GitConflictContent {
-	content: string | null;
-	truncated: boolean;
-	byteLength: number;
-	lineCount: number;
-	limitReason?: GitConflictContentLimitReason;
-}
+export type GitConflictContent = Wire.GitConflictContent;
 
-export interface GitConflictDetails {
-	path: string;
-	base: GitConflictContent;
-	ours: GitConflictContent;
-	theirs: GitConflictContent;
-	working: GitConflictContent;
-	truncated: boolean;
-}
+export type GitConflictDetails = Wire.GitConflictDetails;
 
-export interface GitStashEntry {
-	index: number;
-	ref: string;
-	hash: string;
-	message: string;
-	date: string;
-}
+export type GitStashEntry = Wire.GitStashEntry;
 
-export interface GitFileHistoryEntry {
-	hash: string;
-	author: string;
-	email: string;
-	date: string;
-	subject: string;
-}
+export type GitFileHistoryEntry = Wire.GitFileHistoryEntry;
 
-export interface GitBlameLine {
-	line: number;
-	originalLine: number;
-	finalLine: number;
-	commit: string;
-	author: string;
-	authorMail: string;
-	authorTime: string;
-	summary: string;
-	content: string;
-}
+export type GitBlameLine = Wire.GitBlameLine;
 
-export interface GitGraphCommit {
-	graph: string;
-	hash: string;
-	parents: string[];
-	decorations: string[];
-	author: string;
-	date: string;
-	subject: string;
-}
+export type GitGraphCommit = Wire.GitGraphCommit;
 
 interface SuccessResponse {
+	outputTruncated?: boolean;
 	success: boolean;
 	output?: string;
 	message?: string;
@@ -440,30 +210,36 @@ export interface GenerateCommitMessageResponse {
 	directoryPrefix?: string;
 }
 
-function projectParam(project: string): string {
-	return `project=${encodeURIComponent(project)}`;
+function projectParam(target: GitProjectTarget): string {
+	return gitProjectQuery(target);
 }
 
-export async function getGitStatus(project: string): Promise<GitStatus> {
-	return apiGet<GitStatus>(`/api/v1/git/status?${projectParam(project)}`);
+export async function getGitStatus(target: GitProjectTarget): Promise<GitStatus> {
+	return gitApiGet<GitStatus>(target, `/api/v1/git/status?${projectParam(target)}`);
 }
 
 export async function gitCommit(
-	project: string,
+	target: GitProjectTarget,
 	message: string,
 	files: string[],
 ): Promise<GitCommitResponse> {
-	return apiPost<GitCommitResponse>('/api/v1/git/commit', { project, message, files });
+	return gitApiMutation<GitCommitResponse>(target, '/api/v1/git/commit', {
+		...gitProjectFields(target),
+		message,
+		files,
+	});
 }
 
-export async function gitInitialCommit(project: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/initial-commit', { project });
+export async function gitInitialCommit(target: GitProjectTarget): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/initial-commit', {
+		...gitProjectFields(target),
+	});
 }
 
 export async function getBranches(
-	project: string,
+	target: GitProjectTarget,
 ): Promise<{ branches?: string[]; error?: string }> {
-	return apiGet(`/api/v1/git/branches?${projectParam(project)}`);
+	return gitApiGet(target, `/api/v1/git/branches?${projectParam(target)}`);
 }
 
 export type GetGitRefsOptions = ApiFetchOptions & {
@@ -473,46 +249,53 @@ export type GetGitRefsOptions = ApiFetchOptions & {
 };
 
 export async function getGitRefs(
-	project: string,
+	target: GitProjectTarget,
 	options: GetGitRefsOptions = {},
 ): Promise<GitRefsResponse & { error?: string }> {
 	const { query, limit, sort = DEFAULT_GIT_REF_SORT, ...fetchOptions } = options;
 	const params = new URLSearchParams({
-		project,
+		...gitProjectFields(target),
 		sort: sort.key,
 		direction: sort.direction,
 	});
 	if (query) params.set('query', query);
 	if (limit) params.set('limit', String(limit));
-	return apiGet(`/api/v1/git/refs?${params.toString()}`, fetchOptions);
+	return gitApiGet(target, `/api/v1/git/refs?${params.toString()}`, fetchOptions);
 }
 
 export async function gitCheckoutRef(
-	project: string,
+	target: GitProjectTarget,
 	ref: string,
 	refKind?: GitRefKind,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/checkout', { project, ref, refKind });
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/checkout', {
+		...gitProjectFields(target),
+		ref,
+		refKind,
+	});
 }
 
-export async function gitCheckout(project: string, branch: string): Promise<SuccessResponse> {
-	return gitCheckoutRef(project, branch);
+export async function gitCheckout(
+	target: GitProjectTarget,
+	branch: string,
+): Promise<SuccessResponse> {
+	return gitCheckoutRef(target, branch);
 }
 
 export async function gitCreateBranch(
-	project: string,
+	target: GitProjectTarget,
 	branch: string,
 	options: { baseRef?: string } = {},
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/create-branch', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/create-branch', {
+		...gitProjectFields(target),
 		branch,
 		baseRef: options.baseRef,
 	});
 }
 
 export async function getGitHistoryCommits(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions & {
 		ref?: string;
 		limit?: number;
@@ -520,15 +303,16 @@ export async function getGitHistoryCommits(
 	},
 ): Promise<GitHistoryCommitListResponse> {
 	const { ref = 'HEAD', limit = 50, offset = 0, ...fetchOptions } = options ?? {};
-	return apiPost<GitHistoryCommitListResponse>(
+	return gitApiPost<GitHistoryCommitListResponse>(
+		target,
 		'/api/v1/git/history/commits',
-		{ project, ref, limit, offset },
+		{ ...gitProjectFields(target), ref, limit, offset },
 		fetchOptions,
 	);
 }
 
 export async function getGitCommitSnapshot(
-	project: string,
+	target: GitProjectTarget,
 	commit: string,
 	options?: ApiFetchOptions & {
 		parent?: string | null;
@@ -539,21 +323,24 @@ export async function getGitCommitSnapshot(
 	const { parent = null, context = 5, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
 	const span = startGitReviewPerformanceSpan('snapshot');
 	try {
-		const response = await apiPost<GitCommitSnapshotResponse>(
+		const response = await gitApiPost<Wire.GitCommitSnapshotResponse>(
+			target,
 			'/api/v1/git/history/commit/snapshot',
-			{ project, commit, parent, context, bodyCandidateCount },
+			{ ...gitProjectFields(target), commit, parent, context, bodyCandidateCount },
 			fetchOptions,
 		);
-		if (response.status === 'ready') registerGitReviewDocument(response.documentId, span);
-		return response;
+		if (response.status !== 'ready') return response;
+		const document = gitDocumentRef(response, response.documentId);
+		registerGitReviewDocument(gitDocumentKey(document), span);
+		return { ...response, document, documentId: gitDocumentKey(document) };
 	} finally {
 		finishGitReviewPerformanceSpan(span);
 	}
 }
 
 export async function getGitCommitFileBodies(
-	project: string,
-	documentId: string,
+	target: GitProjectTarget,
+	document: GitReviewDocumentRef,
 	commit: string,
 	files: GitDiffFileRequest[],
 	options?: ApiFetchOptions & {
@@ -569,8 +356,8 @@ export async function getGitCommitFileBodies(
 		...fetchOptions
 	} = options ?? {};
 	return getGitReviewDocumentFileBodies(
-		project,
-		documentId,
+		target,
+		document,
 		files.map((file) => file.path),
 		purpose,
 		fetchOptions,
@@ -578,57 +365,76 @@ export async function getGitCommitFileBodies(
 }
 
 export async function generateCommitMessage(
-	project: string,
+	target: GitProjectTarget,
 	files: string[],
 ): Promise<GenerateCommitMessageResponse> {
-	return apiPost('/api/v1/git/generate-commit-message', { project, files }, { timeoutMs: 120_000 });
-}
-
-export async function getRemoteStatus(project: string): Promise<GitRemoteStatus> {
-	return apiGet<GitRemoteStatus>(`/api/v1/git/remote-status?${projectParam(project)}`);
-}
-
-export async function gitFetch(project: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/fetch', { project });
-}
-
-export async function gitPull(project: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/pull', { project });
-}
-
-export async function gitPush(
-	project: string,
-	remote?: string,
-	remoteBranch?: string,
-): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/push', { project, remote, remoteBranch });
-}
-
-export interface GitRemoteEntry {
-	name: string;
-	url: string;
-}
-
-export async function getGitRemotes(
-	project: string,
-): Promise<{ remotes: GitRemoteEntry[]; error?: string }> {
-	return apiGet<{ remotes: GitRemoteEntry[]; error?: string }>(
-		`/api/v1/git/remotes?${projectParam(project)}`,
+	return apiPost(
+		'/api/v1/git/generate-commit-message',
+		{ ...gitProjectFields(target), files },
+		{ timeoutMs: 120_000 },
 	);
 }
 
-export async function gitDiscard(project: string, file: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/discard', { project, file });
+export async function getRemoteStatus(target: GitProjectTarget): Promise<GitRemoteStatus> {
+	return gitApiGet<GitRemoteStatus>(target, `/api/v1/git/remote-status?${projectParam(target)}`);
 }
 
-export async function gitDeleteUntracked(project: string, file: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/delete-untracked', { project, file });
+export async function gitFetch(target: GitProjectTarget): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/fetch', {
+		...gitProjectFields(target),
+	});
+}
+
+export async function gitPull(target: GitProjectTarget): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/pull', {
+		...gitProjectFields(target),
+	});
+}
+
+export async function gitPush(
+	target: GitProjectTarget,
+	remote?: string,
+	remoteBranch?: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/push', {
+		...gitProjectFields(target),
+		remote,
+		remoteBranch,
+	});
+}
+
+export type GitRemoteEntry = Wire.RemoteInfo;
+
+export async function getGitRemotes(
+	target: GitProjectTarget,
+): Promise<{ remotes: GitRemoteEntry[]; error?: string }> {
+	return gitApiGet<{ remotes: GitRemoteEntry[]; error?: string }>(
+		target,
+		`/api/v1/git/remotes?${projectParam(target)}`,
+	);
+}
+
+export async function gitDiscard(target: GitProjectTarget, file: string): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/discard', {
+		...gitProjectFields(target),
+		file,
+	});
+}
+
+export async function gitDeleteUntracked(
+	target: GitProjectTarget,
+	file: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/delete-untracked', {
+		...gitProjectFields(target),
+		file,
+	});
 }
 
 // Workbench API
 
 export async function getGitWorkbenchSnapshot(
-	project: string,
+	target: GitProjectTarget,
 	tab: GitDiffTab,
 	context = 5,
 	options?: ApiFetchOptions & {
@@ -640,10 +446,11 @@ export async function getGitWorkbenchSnapshot(
 	const { selectedFile = null, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
 	const span = startGitReviewPerformanceSpan('snapshot');
 	try {
-		const response = await apiPost<GitWorkbenchSnapshotResponse>(
+		const response = await gitApiPost<Wire.GitWorkbenchSnapshotResponse>(
+			target,
 			'/api/v1/git/workbench/snapshot',
 			{
-				project,
+				...gitProjectFields(target),
 				mode,
 				context,
 				selectedFile,
@@ -652,7 +459,17 @@ export async function getGitWorkbenchSnapshot(
 			fetchOptions,
 		);
 		if (response.status === 'ready') {
-			registerGitReviewDocument(response.reviewSummary.documentId, span);
+			const document = gitDocumentRef(response, response.reviewSummary.documentId);
+			registerGitReviewDocument(gitDocumentKey(document), span);
+			return {
+				...response,
+				target: { ...response.target, nodeId: target.nodeId },
+				reviewSummary: {
+					...response.reviewSummary,
+					document,
+					documentId: gitDocumentKey(document),
+				},
+			};
 		}
 		return response;
 	} finally {
@@ -661,26 +478,32 @@ export async function getGitWorkbenchSnapshot(
 }
 
 export async function getGitWorkingTreeFingerprint(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<GitWorkingTreeFingerprintResponse> {
-	return apiPost<GitWorkingTreeFingerprintResponse>(
+	return gitApiPost<GitWorkingTreeFingerprintResponse>(
+		target,
 		'/api/v1/git/working-tree/fingerprint',
-		{ project },
+		{ ...gitProjectFields(target) },
 		options,
 	);
 }
 
 export async function getGitQuickSummary(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<GitQuickSummaryResponse> {
-	return apiPost<GitQuickSummaryResponse>('/api/v1/git/quick-summary', { project }, options);
+	return gitApiPost<GitQuickSummaryResponse>(
+		target,
+		'/api/v1/git/quick-summary',
+		{ ...gitProjectFields(target) },
+		options,
+	);
 }
 
 export async function getGitReviewFileBodies(
-	project: string,
-	documentId: string,
+	target: GitProjectTarget,
+	document: GitReviewDocumentRef,
 	files: string[],
 	tab: GitDiffTab,
 	context = 5,
@@ -689,212 +512,255 @@ export async function getGitReviewFileBodies(
 	void tab;
 	void context;
 	const { purpose = 'prefetch', ...fetchOptions } = options ?? {};
-	return getGitReviewDocumentFileBodies(project, documentId, files, purpose, fetchOptions);
+	return getGitReviewDocumentFileBodies(target, document, files, purpose, fetchOptions);
 }
 
 export async function getGitConflicts(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<{ conflicts: GitConflictFile[] }> {
-	return apiGet<{ conflicts: GitConflictFile[] }>(
-		`/api/v1/git/conflicts?${projectParam(project)}`,
+	return gitApiGet<{ conflicts: GitConflictFile[] }>(
+		target,
+		`/api/v1/git/conflicts?${projectParam(target)}`,
 		options,
 	);
 }
 
 export async function getGitConflictDetails(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 	options?: ApiFetchOptions,
 ): Promise<GitConflictDetails> {
-	return apiGet<GitConflictDetails>(
-		`/api/v1/git/conflict-details?${projectParam(project)}&file=${encodeURIComponent(file)}`,
+	return gitApiGet<GitConflictDetails>(
+		target,
+		`/api/v1/git/conflict-details?${projectParam(target)}&file=${encodeURIComponent(file)}`,
 		options,
 	);
 }
 
 export async function gitAcceptConflictSide(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 	side: 'ours' | 'theirs',
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/conflict/accept', { project, file, side });
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/conflict/accept', {
+		...gitProjectFields(target),
+		file,
+		side,
+	});
 }
 
 export async function gitMarkConflictResolved(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/conflict/resolve', { project, file });
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/conflict/resolve', {
+		...gitProjectFields(target),
+		file,
+	});
 }
 
 export async function getGitStashes(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<{ stashes: GitStashEntry[] }> {
-	return apiGet<{ stashes: GitStashEntry[] }>(
-		`/api/v1/git/stashes?${projectParam(project)}`,
+	return gitApiGet<{ stashes: GitStashEntry[] }>(
+		target,
+		`/api/v1/git/stashes?${projectParam(target)}`,
 		options,
 	);
 }
 
 export async function gitCreateStash(
-	project: string,
+	target: GitProjectTarget,
 	message = '',
 	includeUntracked = false,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stash/create', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/create', {
+		...gitProjectFields(target),
 		message,
 		includeUntracked,
 	});
 }
 
-export async function gitApplyStash(project: string, stashRef: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stash/apply', { project, stashRef });
+export async function gitApplyStash(
+	target: GitProjectTarget,
+	stashRef: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/apply', {
+		...gitProjectFields(target),
+		stashRef,
+	});
 }
 
-export async function gitPopStash(project: string, stashRef: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stash/pop', { project, stashRef });
+export async function gitPopStash(
+	target: GitProjectTarget,
+	stashRef: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/pop', {
+		...gitProjectFields(target),
+		stashRef,
+	});
 }
 
-export async function gitDropStash(project: string, stashRef: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stash/drop', { project, stashRef });
+export async function gitDropStash(
+	target: GitProjectTarget,
+	stashRef: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/drop', {
+		...gitProjectFields(target),
+		stashRef,
+	});
 }
 
 export async function getGitFileHistory(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 	limit = 50,
 	options?: ApiFetchOptions,
 ): Promise<{ commits: GitFileHistoryEntry[] }> {
-	return apiGet<{ commits: GitFileHistoryEntry[] }>(
-		`/api/v1/git/file-history?${projectParam(project)}&file=${encodeURIComponent(file)}&limit=${limit}`,
+	return gitApiGet<{ commits: GitFileHistoryEntry[] }>(
+		target,
+		`/api/v1/git/file-history?${projectParam(target)}&file=${encodeURIComponent(file)}&limit=${limit}`,
 		options,
 	);
 }
 
 export async function getGitBlame(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 	ref = 'HEAD',
 	limit = 2000,
 	options?: ApiFetchOptions,
 ): Promise<{ lines: GitBlameLine[]; truncated: boolean }> {
-	return apiGet<{ lines: GitBlameLine[]; truncated: boolean }>(
-		`/api/v1/git/blame?${projectParam(project)}&file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}&limit=${limit}`,
+	return gitApiGet<{ lines: GitBlameLine[]; truncated: boolean }>(
+		target,
+		`/api/v1/git/blame?${projectParam(target)}&file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}&limit=${limit}`,
 		options,
 	);
 }
 
 export async function getGitGraph(
-	project: string,
+	target: GitProjectTarget,
 	limit = 200,
 	options?: ApiFetchOptions,
 ): Promise<{ commits: GitGraphCommit[] }> {
-	return apiGet<{ commits: GitGraphCommit[] }>(
-		`/api/v1/git/graph?${projectParam(project)}&limit=${limit}`,
+	return gitApiGet<{ commits: GitGraphCommit[] }>(
+		target,
+		`/api/v1/git/graph?${projectParam(target)}&limit=${limit}`,
 		options,
 	);
 }
 
 export async function getGitTargetCandidates(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<{ targets: GitTargetCandidate[] }> {
-	return apiGet<{ targets: GitTargetCandidate[] }>(
-		`/api/v1/git/targets?${projectParam(project)}`,
+	return gitApiGet<{ targets: GitTargetCandidate[] }>(
+		target,
+		`/api/v1/git/targets?${projectParam(target)}`,
 		options,
 	);
 }
 
 export async function gitStageSelection(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 	mode: 'stage' | 'unstage',
 	lineIndices: number[],
 	contextLines: number,
+	proof: GitSelectionProof,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stage-selection', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stage-selection', {
+		...gitProjectFields(target),
 		file,
 		mode,
 		selection: { lineIndices },
 		contextLines,
+		...proof,
 	});
 }
 
 export async function gitStageHunk(
-	project: string,
+	target: GitProjectTarget,
 	file: string,
 	mode: 'stage' | 'unstage',
 	hunkIndex: number,
 	contextLines: number,
+	proof: GitSelectionProof,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stage-hunk', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stage-hunk', {
+		...gitProjectFields(target),
 		file,
 		mode,
 		hunkIndex,
 		contextLines,
+		...proof,
 	});
 }
 
 export async function getGitWorktrees(
-	project: string,
+	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<{ worktrees: GitWorktreeItem[] }> {
-	return apiGet<{ worktrees: GitWorktreeItem[] }>(
-		`/api/v1/git/worktrees?${projectParam(project)}`,
+	return gitApiGet<{ worktrees: GitWorktreeItem[] }>(
+		target,
+		`/api/v1/git/worktrees?${projectParam(target)}`,
 		options,
 	);
 }
 
 export async function gitCreateWorktree(
-	project: string,
+	target: GitProjectTarget,
 	worktreePath: string,
 	options: { baseRef?: string; branch?: string; detach?: boolean } = {},
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/worktrees/create', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/worktrees/create', {
+		...gitProjectFields(target),
 		worktreePath,
 		...options,
 	});
 }
 
 export async function gitRemoveWorktree(
-	project: string,
+	target: GitProjectTarget,
 	worktreePath: string,
 	force = false,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/worktrees/remove', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/worktrees/remove', {
+		...gitProjectFields(target),
 		worktreePath,
 		force,
 	});
 }
 
-export async function gitRevertCommit(project: string, commit: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/revert-commit', {
-		project,
+export async function gitRevertCommit(
+	target: GitProjectTarget,
+	commit: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/revert-commit', {
+		...gitProjectFields(target),
 		commit,
 	});
 }
 
-export async function gitCommitIndex(project: string, message: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/commit-index', {
-		project,
+export async function gitCommitIndex(
+	target: GitProjectTarget,
+	message: string,
+): Promise<SuccessResponse> {
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/commit-index', {
+		...gitProjectFields(target),
 		message,
 	});
 }
 
 export async function gitStagePaths(
-	project: string,
+	target: GitProjectTarget,
 	paths: string[],
 	mode: GitStageMode,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stage-paths', {
-		project,
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stage-paths', {
+		...gitProjectFields(target),
 		paths,
 		mode,
 	});

@@ -11,7 +11,7 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitWorktrees: vi.fn().mockResolvedValue({ worktrees: [] }),
 }));
 
-function target(): GitTargetSessionController {
+async function target(): Promise<GitTargetSessionController> {
 	const controller = new GitTargetSessionController({
 		kind: 'git-history',
 		createBranchSelector: () => new GitBranchSelectorState(),
@@ -27,31 +27,33 @@ function target(): GitTargetSessionController {
 			effectiveProjectKey: 'chat',
 		},
 	});
+	controller.setPresentationVisible(true);
+	await controller.activate();
 	return controller;
 }
 
 afterEach(cleanup);
 
-describe('GitSurfaceToolbar', () => {
-	it('exposes the full target path while visually truncating it', () => {
+describe('GitSurfaceToolbar', async () => {
+	it('exposes the full target path while visually truncating it', async () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
-				target: target(),
+				target: await target(),
 				presentation: 'window-sidebar',
 			},
 		});
 		const folder = screen.getByRole('button', {
-			name: '/very/long/workspace/project/path',
+			name: 'Local: /very/long/workspace/project/path',
 		});
 
-		expect(folder.getAttribute('title')).toBe('/very/long/workspace/project/path');
+		expect(folder.getAttribute('title')).toBe('Local: /very/long/workspace/project/path');
 		expect(folder.textContent).toContain('...');
 		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
 	});
 
-	it('expands the branch control on wide screens without wrapping on narrow screens', () => {
+	it('expands the branch control on wide screens without wrapping on narrow screens', async () => {
 		const longBranch = 'feature/a-long-current-branch-name';
-		const controller = target();
+		const controller = await target();
 		controller.branches.currentBranch = longBranch;
 		render(GitSurfaceToolbarTestHost, {
 			props: {
@@ -72,7 +74,7 @@ describe('GitSurfaceToolbar', () => {
 	});
 
 	it('forwards branch sort intent with the current query', async () => {
-		const controller = target();
+		const controller = await target();
 		controller.branches.refs = [
 			{
 				name: 'feature/sort',
@@ -107,14 +109,14 @@ describe('GitSurfaceToolbar', () => {
 	it('opens the shared target dialog from the folder control', async () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
-				target: target(),
+				target: await target(),
 				presentation: 'window-main',
 			},
 		});
 
 		await fireEvent.click(
 			screen.getByRole('button', {
-				name: '/very/long/workspace/project/path',
+				name: 'Local: /very/long/workspace/project/path',
 			}),
 		);
 		expect(screen.getByRole('dialog', { name: m.git_target() })).toBeTruthy();
@@ -124,7 +126,7 @@ describe('GitSurfaceToolbar', () => {
 		const onClose = vi.fn();
 		const rendered = render(GitSurfaceToolbarTestHost, {
 			props: {
-				target: target(),
+				target: await target(),
 				presentation: 'mobile',
 				onClose,
 			},
@@ -141,7 +143,7 @@ describe('GitSurfaceToolbar', () => {
 		const onClose = vi.fn();
 		const rendered = render(GitSurfaceToolbarTestHost, {
 			props: {
-				target: target(),
+				target: await target(),
 				presentation: 'mobile',
 				onClose,
 				closeDisabled: true,
@@ -152,7 +154,7 @@ describe('GitSurfaceToolbar', () => {
 		).toBe(true);
 
 		await rendered.rerender({
-			target: target(),
+			target: await target(),
 			presentation: 'window-sidebar',
 			onClose,
 			closeDisabled: false,
@@ -163,7 +165,7 @@ describe('GitSurfaceToolbar', () => {
 	it('places persistent Git controls in the responsive action menu', async () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
-				target: target(),
+				target: await target(),
 				presentation: 'window-main',
 				showMenuLeadingContent: true,
 			},

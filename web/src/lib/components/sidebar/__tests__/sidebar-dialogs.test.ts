@@ -10,6 +10,7 @@ import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
 import { ProjectPathDialogState } from '../project-path-dialog-state.svelte.js';
 import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
 import { tick } from 'svelte';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
@@ -60,35 +61,94 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
+	it('fences remote worktree list and creation across node replacement and dialog retargeting', async () => {
+		const nodes = new ExecutionNodesStore();
+		const remote = {
+			...remoteExecutionNode,
+			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+		};
+		nodes.applySnapshot([localExecutionNode, remote]);
+		const dialog = new ProjectPathDialogState(nodes);
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		dialog.open('/worker/project', remote.id);
+		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
+		const loading = dialog.loadWorktrees();
+		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
+			{ nodeId: remote.id, projectPath: '/worker/project' },
+			expect.any(Object),
+		);
+		nodes.applySnapshot([localExecutionNode, { ...remote, instanceId: 'replacement' }]);
+		listing.resolve({ worktrees: [makeWorktree('/worker/old', 'old')] });
+		await loading;
+		expect(dialog.worktrees).toEqual([]);
+
+		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+		const creating = dialog.createWorktree('/worker/feature', 'feature');
+		dialog.open('/local/project', 'local');
+		creation.resolve({ success: true, worktreePath: '/worker/feature' });
+		await creating;
+		expect(dialog.candidatePath).toBe('/local/project');
+		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
+			{ nodeId: remote.id, projectPath: '/worker/project' },
+			'/worker/feature',
+			{ branch: 'feature', baseRef: undefined },
+		);
+		dialog.close();
+	});
 	it('revalidates the unchanged chat path after replacement and dialog reopening', async () => {
 		vi.useFakeTimers();
-		vi.mocked(chatsApi.validateStart).mockReset()
+		vi.mocked(chatsApi.validateStart)
+			.mockReset()
 			.mockResolvedValueOnce({ valid: true, isGitRepo: false })
 			.mockResolvedValue({ valid: false, errorCode: 'outside_base_dir' });
 		const nodes = [localExecutionNode, remoteExecutionNode];
 		const projectPathDialog = {
-			chatId: 'chat-1', chatTitle: 'Synthetic project',
-			nodeId: remoteExecutionNode.id, currentProjectPath: '/worker/project',
+			chatId: 'chat-1',
+			chatTitle: 'Synthetic project',
+			nodeId: remoteExecutionNode.id,
+			currentProjectPath: '/worker/project',
 		};
 		const rendered = render(SidebarProjectPathDialog, {
 			nodes,
 			projectPathDialog,
-			projectBasePath: '/local', isMobile: false, onClose: vi.fn(), onConfirm: vi.fn(),
+			projectBasePath: '/local',
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
 		});
 		try {
 			await tick();
 			await vi.advanceTimersByTimeAsync(250);
 			expect(chatsApi.validateStart).toHaveBeenCalledTimes(1);
-			await rendered.rerender({ nodes: [localExecutionNode, {
-				...remoteExecutionNode, instanceId: 'narrower', projectBasePath: '/worker/project/narrow',
-			}] });
+			await rendered.rerender({
+				nodes: [
+					localExecutionNode,
+					{
+						...remoteExecutionNode,
+						instanceId: 'narrower',
+						projectBasePath: '/worker/project/narrow',
+					},
+				],
+			});
 			await vi.advanceTimersByTimeAsync(250);
 			await tick();
 			expect(screen.getByText('Path is outside the allowed base directory.')).toBeTruthy();
-			expect(screen.getByRole('textbox', { name: /new path/i })).toHaveProperty('value', '/worker/project');
-			await rendered.rerender({ nodes: [{ ...localExecutionNode, instanceId: 'unrelated' }, {
-				...remoteExecutionNode, instanceId: 'narrower', projectBasePath: '/worker/project/narrow',
-			}] });
+			expect(screen.getByRole('textbox', { name: /new path/i })).toHaveProperty(
+				'value',
+				'/worker/project',
+			);
+			await rendered.rerender({
+				nodes: [
+					{ ...localExecutionNode, instanceId: 'unrelated' },
+					{
+						...remoteExecutionNode,
+						instanceId: 'narrower',
+						projectBasePath: '/worker/project/narrow',
+					},
+				],
+			});
 			await vi.advanceTimersByTimeAsync(250);
 			expect(screen.getByText('Path is outside the allowed base directory.')).toBeTruthy();
 			expect(chatsApi.validateStart).toHaveBeenCalledTimes(2);
@@ -100,15 +160,20 @@ describe('Sidebar dialogs', () => {
 			await tick();
 			expect(screen.getByText('Path is outside the allowed base directory.')).toBeTruthy();
 			expect(chatsApi.validateStart).toHaveBeenCalledTimes(3);
-		} finally { await unmountDialog(rendered); }
+		} finally {
+			await unmountDialog(rendered);
+		}
 	});
 
 	it('revalidates an unchanged path against a new serving context without losing the candidate', async () => {
 		vi.useFakeTimers();
 		const dialog = new ProjectPathDialogState();
 		const old = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
-		vi.mocked(chatsApi.validateStart).mockReset().mockResolvedValueOnce({ valid: true, isGitRepo: false })
-			.mockReturnValueOnce(old.promise).mockResolvedValueOnce({ valid: false, errorCode: 'outside_base_dir' });
+		vi.mocked(chatsApi.validateStart)
+			.mockReset()
+			.mockResolvedValueOnce({ valid: true, isGitRepo: false })
+			.mockReturnValueOnce(old.promise)
+			.mockResolvedValueOnce({ valid: false, errorCode: 'outside_base_dir' });
 		try {
 			dialog.open('/worker/project', '22222222-2222-4222-8222-222222222222');
 			dialog.scheduleValidation('first');
@@ -122,7 +187,10 @@ describe('Sidebar dialogs', () => {
 			await vi.advanceTimersByTimeAsync(250);
 			expect(dialog.validationStatus).toBe('invalid');
 			expect(dialog.candidatePath).toBe('/worker/project');
-		} finally { dialog.dispose(); vi.useRealTimers(); }
+		} finally {
+			dialog.dispose();
+			vi.useRealTimers();
+		}
 	});
 
 	it('explains rejected and unconfirmed project path updates', () => {
@@ -298,7 +366,7 @@ describe('Sidebar dialogs', () => {
 			const worktreeDialog = await screen.findByRole('dialog', { name: 'Select worktree' });
 			expect(worktreeDialog).toBeTruthy();
 			expect(gitApi.getGitWorktrees).toHaveBeenCalledWith(
-				'/workspace/repo',
+				{ nodeId: 'local', projectPath: '/workspace/repo' },
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			);
 			await fireEvent.click(await screen.findByRole('option', { name: /feature/ }));

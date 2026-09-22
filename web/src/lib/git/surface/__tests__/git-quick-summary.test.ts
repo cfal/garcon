@@ -9,6 +9,7 @@ import {
 } from '$lib/git/surface/git-quick-summary.svelte.js';
 import type { GitQuickSummaryReady, GitQuickSummaryResponse } from '$lib/api/git.js';
 import type { ApiFetchOptions } from '$lib/api/client.js';
+import type { GitProjectTarget } from '$lib/api/git-client.js';
 
 function readySummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummaryReady {
 	return {
@@ -40,15 +41,14 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-type GetSummary = (project: string, options?: ApiFetchOptions) => Promise<GitQuickSummaryResponse>;
+type GetSummary = (
+	project: GitProjectTarget,
+	options?: ApiFetchOptions,
+) => Promise<GitQuickSummaryResponse>;
 
-function showProject(
-	store: GitQuickSummaryStore,
-	projectPath: string,
-	isProcessing = false,
-): void {
-	store.setProject(projectPath);
-	store.setVisibleProjects([{ projectPath, isProcessing }]);
+function showProject(store: GitQuickSummaryStore, projectPath: string, isProcessing = false): void {
+	store.setProject({ nodeId: 'local', projectPath });
+	store.setVisibleProjects([{ nodeId: 'local', projectPath, isProcessing }]);
 }
 
 describe('GitQuickSummaryStore', () => {
@@ -72,7 +72,7 @@ describe('GitQuickSummaryStore', () => {
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(getSummary).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			expect.objectContaining({
 				signal: expect.any(AbortSignal),
 			}),
@@ -138,7 +138,9 @@ describe('GitQuickSummaryStore', () => {
 		showProject(store, '/second');
 		await vi.advanceTimersByTimeAsync(100);
 		expect(store.summary?.fingerprint).toBe('v1:second');
-		expect(store.summaryFor('/first')?.fingerprint).toBe('v1:first');
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/first' })?.fingerprint).toBe(
+			'v1:first',
+		);
 
 		showProject(store, '/first');
 		expect(store.summary?.fingerprint).toBe('v1:first');
@@ -156,7 +158,7 @@ describe('GitQuickSummaryStore', () => {
 		showProject(store, '/first');
 		await vi.advanceTimersByTimeAsync(100);
 
-		expect(store.canShowTrayFor('/second')).toBe(true);
+		expect(store.canShowTrayFor({ nodeId: 'local', projectPath: '/second' })).toBe(true);
 		expect(store.summary?.project).toBe('/first');
 	});
 
@@ -177,58 +179,68 @@ describe('GitQuickSummaryStore', () => {
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(store.summary?.project).toBe('/second');
-		expect(store.summaryFor('/first')?.fingerprint).toBe('v1:first');
-		expect(store.canShowTrayFor('/first')).toBe(true);
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/first' })?.fingerprint).toBe(
+			'v1:first',
+		);
+		expect(store.canShowTrayFor({ nodeId: 'local', projectPath: '/first' })).toBe(true);
 	});
 
 	it('deduplicates rendered project leases and refreshes every project once', async () => {
-		const getSummary = vi.fn<GetSummary>((project) =>
+		const getSummary = vi.fn<GetSummary>(({ projectPath: project }) =>
 			Promise.resolve(readySummary({ project, repoRoot: project })),
 		);
 		const store = new GitQuickSummaryStore({ getSummary });
 
 		store.setVisibleProjects([
-			{ projectPath: '/first', isProcessing: false },
-			{ projectPath: '/first', isProcessing: true },
-			{ projectPath: '/second', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/first', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/first', isProcessing: true },
+			{ nodeId: 'local', projectPath: '/second', isProcessing: false },
 		]);
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(store.visibleProjects).toEqual([
-			{ projectPath: '/first', isProcessing: true },
-			{ projectPath: '/second', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/first', isProcessing: true },
+			{ nodeId: 'local', projectPath: '/second', isProcessing: false },
 		]);
 		expect(getSummary).toHaveBeenCalledTimes(2);
-		expect(getSummary.mock.calls.map(([project]) => project)).toEqual(['/first', '/second']);
+		expect(getSummary.mock.calls.map(([{ projectPath: project }]) => project)).toEqual([
+			'/first',
+			'/second',
+		]);
 	});
 
 	it('aborts only work whose final rendered project lease disappears', async () => {
 		const first = deferred<GitQuickSummaryResponse>();
 		const second = deferred<GitQuickSummaryResponse>();
-		const getSummary = vi.fn<GetSummary>((project) =>
+		const getSummary = vi.fn<GetSummary>(({ projectPath: project }) =>
 			project === '/first' ? first.promise : second.promise,
 		);
 		const store = new GitQuickSummaryStore({ getSummary });
 
 		store.setVisibleProjects([
-			{ projectPath: '/first', isProcessing: false },
-			{ projectPath: '/second', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/first', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/second', isProcessing: false },
 		]);
 		await vi.advanceTimersByTimeAsync(100);
-		const firstSignal = getSummary.mock.calls.find(([project]) => project === '/first')?.[1]?.signal;
-		const secondSignal = getSummary.mock.calls.find(([project]) => project === '/second')?.[1]
-			?.signal;
+		const firstSignal = getSummary.mock.calls.find(
+			([{ projectPath: project }]) => project === '/first',
+		)?.[1]?.signal;
+		const secondSignal = getSummary.mock.calls.find(
+			([{ projectPath: project }]) => project === '/second',
+		)?.[1]?.signal;
 
-		store.setVisibleProjects([{ projectPath: '/second', isProcessing: false }]);
+		store.setVisibleProjects([{ nodeId: 'local', projectPath: '/second', isProcessing: false }]);
 
 		expect(firstSignal?.aborted).toBe(true);
 		expect(secondSignal?.aborted).toBe(false);
 		first.resolve(readySummary({ project: '/first', repoRoot: '/first' }));
 		second.resolve(readySummary({ project: '/second', repoRoot: '/second' }));
 		await vi.waitFor(() => {
-			expect(store.summaryFor('/second')?.project).toBe('/second');
+			expect(store.summaryFor({ nodeId: 'local', projectPath: '/second' })?.project).toBe(
+				'/second',
+			);
 		});
-		expect(store.summaryFor('/first')).toBeNull();
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/first' })).toBeNull();
 	});
 
 	it('aborts stale work and keeps the pending tray for the next project path', async () => {
@@ -298,7 +310,7 @@ describe('GitQuickSummaryStore', () => {
 
 	it('prunes least recently accessed inactive projects when the cache exceeds the limit', async () => {
 		let now = 0;
-		const getSummary = vi.fn<GetSummary>((project) =>
+		const getSummary = vi.fn<GetSummary>(({ projectPath: project }) =>
 			Promise.resolve(readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` })),
 		);
 		const store = new GitQuickSummaryStore({ getSummary, nowFn: () => now });
@@ -310,28 +322,30 @@ describe('GitQuickSummaryStore', () => {
 		}
 
 		expect(Object.keys(store.entries)).toHaveLength(QUICK_GIT_CACHE_MAX_ENTRIES);
-		expect(store.summaryFor('/project-0')).toBeNull();
-		expect(store.summaryFor('/project-1')).toBeNull();
-		expect(store.summaryFor('/project-2')?.fingerprint).toBe('v1:/project-2');
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/project-0' })).toBeNull();
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/project-1' })).toBeNull();
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/project-2' })?.fingerprint).toBe(
+			'v1:/project-2',
+		);
 		expect(store.summary?.project).toBe(`/project-${QUICK_GIT_CACHE_MAX_ENTRIES + 1}`);
 	});
 
 	it('prunes inactive projects after the cache age window', async () => {
 		let now = 0;
-		const getSummary = vi.fn<GetSummary>((project) =>
+		const getSummary = vi.fn<GetSummary>(({ projectPath: project }) =>
 			Promise.resolve(readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` })),
 		);
 		const store = new GitQuickSummaryStore({ getSummary, nowFn: () => now });
 
 		showProject(store, '/old');
 		await vi.advanceTimersByTimeAsync(100);
-		expect(store.summaryFor('/old')?.fingerprint).toBe('v1:/old');
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/old' })?.fingerprint).toBe('v1:/old');
 
 		now = QUICK_GIT_CACHE_MAX_AGE_MS + 1;
 		showProject(store, '/active');
 		await vi.advanceTimersByTimeAsync(100);
 
-		expect(store.summaryFor('/old')).toBeNull();
+		expect(store.summaryFor({ nodeId: 'local', projectPath: '/old' })).toBeNull();
 		expect(store.summary?.project).toBe('/active');
 	});
 
@@ -342,8 +356,8 @@ describe('GitQuickSummaryStore', () => {
 		await vi.advanceTimersByTimeAsync(100);
 		getSummary.mockClear();
 
-		store.setVisibleProjects([{ projectPath: '/project', isProcessing: true }]);
-		store.setVisibleProjects([{ projectPath: '/project', isProcessing: false }]);
+		store.setVisibleProjects([{ nodeId: 'local', projectPath: '/project', isProcessing: true }]);
+		store.setVisibleProjects([{ nodeId: 'local', projectPath: '/project', isProcessing: false }]);
 
 		await vi.advanceTimersByTimeAsync(QUICK_GIT_STOPPED_DEBOUNCE_MS - 1);
 		expect(getSummary).not.toHaveBeenCalled();
@@ -410,8 +424,8 @@ describe('GitQuickSummaryStore', () => {
 		const setIntervalFn = vi.fn(() => 7 as unknown as ReturnType<typeof setInterval>);
 
 		store.setVisibleProjects([
-			{ projectPath: '/processing', isProcessing: true },
-			{ projectPath: '/idle', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/processing', isProcessing: true },
+			{ nodeId: 'local', projectPath: '/idle', isProcessing: false },
 		]);
 		const cleanup = store.startPolling({
 			documentRef: {
@@ -441,18 +455,18 @@ describe('GitQuickSummaryStore', () => {
 			clearIntervalFn,
 		};
 
-		store.setVisibleProjects([{ projectPath: '/project', isProcessing: false }]);
+		store.setVisibleProjects([{ nodeId: 'local', projectPath: '/project', isProcessing: false }]);
 		store.reconcilePolling(pollingOptions);
 		store.setVisibleProjects([
-			{ projectPath: '/project', isProcessing: false },
-			{ projectPath: '/project', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/project', isProcessing: false },
+			{ nodeId: 'local', projectPath: '/project', isProcessing: false },
 		]);
 		store.reconcilePolling(pollingOptions);
 
 		expect(setIntervalFn).toHaveBeenCalledOnce();
 		expect(clearIntervalFn).not.toHaveBeenCalled();
 
-		store.setVisibleProjects([{ projectPath: '/project', isProcessing: true }]);
+		store.setVisibleProjects([{ nodeId: 'local', projectPath: '/project', isProcessing: true }]);
 		store.reconcilePolling(pollingOptions);
 		expect(clearIntervalFn).toHaveBeenCalledOnce();
 		expect(setIntervalFn).toHaveBeenCalledTimes(2);
@@ -463,7 +477,7 @@ describe('GitQuickSummaryStore', () => {
 		const getSummary = vi.fn<GetSummary>();
 		const store = new GitQuickSummaryStore({ getSummary });
 		const setIntervalFn = vi.fn(() => 7 as unknown as ReturnType<typeof setInterval>);
-		store.setProject('/hidden');
+		store.setProject({ nodeId: 'local', projectPath: '/hidden' });
 
 		const cleanup = store.startPolling({ setIntervalFn });
 		await store.refresh('dialog-open');

@@ -14,6 +14,7 @@ describe('createIndexedGitReviewFileBody', () => {
 +new
 `;
 		const body: GitReviewFilePatchBody = {
+			patchDigest: 'a'.repeat(64),
 			path: 'file.txt',
 			bodyFingerprint: 'fingerprint',
 			bodyState: 'loaded',
@@ -27,9 +28,13 @@ describe('createIndexedGitReviewFileBody', () => {
 
 		const indexed = createIndexedGitReviewFileBody(body);
 
-		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(0);
+		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(
+			0,
+		);
 		expect(indexed.patchIndex?.rowCount).toBe(4);
-		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(1);
+		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(
+			1,
+		);
 		expect(indexed.patchIndex?.rowAt(2)).toMatchObject({
 			key: 'line:1:del:2',
 			beforeLine: 2,
@@ -49,6 +54,7 @@ describe('createIndexedGitReviewFileBody', () => {
 
 	it('preserves terminal body metadata without indexing', () => {
 		const body: GitReviewFilePatchBody = {
+			patchDigest: 'a'.repeat(64),
 			path: 'image.png',
 			bodyFingerprint: 'fingerprint',
 			bodyState: 'binary',

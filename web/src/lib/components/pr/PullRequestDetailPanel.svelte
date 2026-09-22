@@ -64,7 +64,7 @@
 		if (!detail) return null;
 		const baseSource = buildGitVirtualReviewRowSource({
 			summary: {
-				documentId: `pr:${detail.number}:${detail.updatedAt}`,
+				documentId: detail.documentId,
 				project: '',
 				context: 3,
 				files: detail.files,
@@ -181,7 +181,7 @@
 			</div>
 		{:else if diffSource}
 			<PullRequestVirtualDiffSurface
-				documentId={`pr:${detail.number}:${detail.updatedAt}`}
+				documentId={detail.documentId}
 				source={diffSource}
 				{viewedFiles}
 				{collapsedFiles}

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import GitTargetDialog from '../GitTargetDialog.svelte';
+import GitTargetDialog from './GitTargetDialogTestHost.svelte';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitTargetCandidate, GitWorktreeItem } from '$lib/api/git';
@@ -17,6 +17,7 @@ vi.mock('$lib/api/git', () => ({
 
 function renderDialog(overrides: Record<string, unknown> = {}) {
 	return render(GitTargetDialog, {
+		nodeId: 'local',
 		initialPath: '/workspace/repo',
 		projectBasePath: '/workspace',
 		isMobile: false,

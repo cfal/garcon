@@ -23,8 +23,8 @@ function installTree(controller: CommitController, tree: GitTreeNode[]): void {
 				node.path,
 				{
 					path: node.path,
-					desiredSelected: node.staged,
-					actualSelected: node.staged,
+					desiredSelected: Boolean(node.staged),
+					actualSelected: Boolean(node.staged),
 					isRunning: false,
 					runningMode: null,
 					error: null,
@@ -69,7 +69,7 @@ describe('CommitSurface', () => {
 			presentation: 'window-main',
 		});
 
-		const folder = screen.getByRole('button', { name: '/project' });
+		const folder = screen.getByRole('button', { name: 'Local: /project' });
 		const toolbar = container.querySelector('[data-git-surface-toolbar]');
 		expect(toolbar?.querySelector('button')).toBe(folder);
 		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();

@@ -9,6 +9,7 @@ import type { FilesSurfaceController } from '$lib/workspace/singleton-surfaces.s
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
+import { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 
 type CommandMenuWorkspacePort = Pick<
 	WorkspaceCoordinator,
@@ -74,8 +75,8 @@ const appShell: Pick<
 	WorkbenchCommandRegistryDeps['appShell'],
 	'openNewChatDialog' | 'openSettings'
 > = mocks.appShell;
-const ghCapability: Pick<WorkbenchCommandRegistryDeps['ghCapability'], 'available' | 'hasChecked'> =
-	mocks.ghCapability;
+const ghCapability = new GhCapabilityStore();
+Object.assign(ghCapability.forNode('local'), mocks.ghCapability);
 const files: Pick<WorkbenchCommandRegistryDeps['files'], 'navigation' | 'open'> = {
 	navigation: null,
 	open: vi.fn(async () => null),
@@ -96,7 +97,8 @@ const commandRegistry = new WorkbenchCommandRegistry({
 	workspace: workspace as WorkbenchCommandRegistryDeps['workspace'],
 	terminals: terminals as WorkbenchCommandRegistryDeps['terminals'],
 	appShell: appShell as WorkbenchCommandRegistryDeps['appShell'],
-	ghCapability: ghCapability as WorkbenchCommandRegistryDeps['ghCapability'],
+	ghCapability,
+	projectNodeId: () => 'local',
 	files: files as WorkbenchCommandRegistryDeps['files'],
 	filesSurface: () => filesSurface as FilesSurfaceController,
 	filesSurfaceIfPresent: () => filesSurface as FilesSurfaceController,

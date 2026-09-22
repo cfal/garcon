@@ -39,6 +39,12 @@ import {
 	getGitComparisonSnapshot,
 } from '../git-comparison';
 
+const scope = { nodeId: 'remote-node', instanceId: 'test-instance' };
+const proof = {
+	document: { ...scope, documentId: 'doc' },
+	bodyFingerprint: 'fingerprint',
+	patchDigest: 'a'.repeat(64),
+};
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
 	setItem: () => {},
@@ -49,10 +55,13 @@ describe('git API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
 
 	function jsonResponse(body: unknown, status = 200) {
-		return new Response(JSON.stringify(body), {
-			status,
-			headers: { 'Content-Type': 'application/json' },
-		});
+		return new Response(
+			JSON.stringify(status === 200 ? { ...scope, ...(body as Record<string, unknown>) } : body),
+			{
+				status,
+				headers: { 'Content-Type': 'application/json' },
+			},
+		);
 	}
 
 	beforeEach(() => {
@@ -75,7 +84,7 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitStatus('/project');
+		const result = await getGitStatus({ nodeId: 'remote-node', projectPath: '/project' });
 
 		expect(result.branch).toBe('main');
 		expect(result.modified).toEqual(['a.txt']);
@@ -94,9 +103,13 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await gitCommit('/project', 'fix bug', ['a.txt', 'b.txt']);
+		const result = await gitCommit({ nodeId: 'remote-node', projectPath: '/project' }, 'fix bug', [
+			'a.txt',
+			'b.txt',
+		]);
 
 		expect(result).toEqual({
+			...scope,
 			success: true,
 			output: 'committed',
 			commitScope: 'selected-files',
@@ -114,7 +127,11 @@ describe('git API contract', () => {
 	it('gitCheckoutRef sends POST with project, ref, and refKind', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCheckoutRef('/project', 'refs/remotes/origin/main', 'remote-branch');
+		await gitCheckoutRef(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'refs/remotes/origin/main',
+			'remote-branch',
+		);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.project).toBe('/project');
@@ -125,7 +142,7 @@ describe('git API contract', () => {
 	it('gitCheckout keeps the legacy helper as a ref checkout wrapper', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCheckout('/project', 'feature');
+		await gitCheckout({ nodeId: 'remote-node', projectPath: '/project' }, 'feature');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.ref).toBe('feature');
@@ -134,7 +151,9 @@ describe('git API contract', () => {
 	it('gitCreateBranch sends POST with project, branch, and optional baseRef', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateBranch('/project', 'new-branch', { baseRef: 'refs/remotes/origin/main' });
+		await gitCreateBranch({ nodeId: 'remote-node', projectPath: '/project' }, 'new-branch', {
+			baseRef: 'refs/remotes/origin/main',
+		});
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.branch).toBe('new-branch');
@@ -144,7 +163,7 @@ describe('git API contract', () => {
 	it('getBranches calls GET with project param', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ branches: ['main', 'dev'] }));
 
-		const result = await getBranches('/project');
+		const result = await getBranches({ nodeId: 'remote-node', projectPath: '/project' });
 
 		expect(result.branches).toEqual(['main', 'dev']);
 	});
@@ -171,12 +190,15 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await getGitRefs('/project', {
-			query: 'origin/main',
-			limit: 50,
-			sort: { key: 'updated', direction: 'desc' },
-			signal: controller.signal,
-		});
+		const result = await getGitRefs(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			{
+				query: 'origin/main',
+				limit: 50,
+				sort: { key: 'updated', direction: 'desc' },
+				signal: controller.signal,
+			},
+		);
 
 		expect(result.refs[1].name).toBe('origin/main');
 		const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -194,7 +216,7 @@ describe('git API contract', () => {
 	it('getGitRefs sends the default sort pair', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ refs: [] }));
 
-		await getGitRefs('/project');
+		await getGitRefs({ nodeId: 'remote-node', projectPath: '/project' });
 
 		const [url] = fetchMock.mock.calls[0] as [string];
 		expect(url).toContain('sort=name');
@@ -213,7 +235,7 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getRemoteStatus('/project');
+		const result = await getRemoteStatus({ nodeId: 'remote-node', projectPath: '/project' });
 
 		expect(result.hasRemote).toBe(true);
 		expect(result.ahead).toBe(1);
@@ -222,7 +244,7 @@ describe('git API contract', () => {
 	it('gitFetch sends POST with project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitFetch('/project');
+		await gitFetch({ nodeId: 'remote-node', projectPath: '/project' });
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/fetch');
@@ -232,7 +254,7 @@ describe('git API contract', () => {
 	it('gitPull sends POST with project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitPull('/project');
+		await gitPull({ nodeId: 'remote-node', projectPath: '/project' });
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/git/pull');
 	});
@@ -240,7 +262,7 @@ describe('git API contract', () => {
 	it('gitPush sends POST with project, remote, and remoteBranch', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitPush('/project', 'origin', 'feature');
+		await gitPush({ nodeId: 'remote-node', projectPath: '/project' }, 'origin', 'feature');
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/push');
@@ -254,7 +276,7 @@ describe('git API contract', () => {
 		const payload = { remotes: [{ name: 'origin', url: 'git@github.com:user/repo.git' }] };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitRemotes('/project');
+		const result = await getGitRemotes({ nodeId: 'remote-node', projectPath: '/project' });
 
 		expect(result.remotes).toHaveLength(1);
 		expect(result.remotes[0].name).toBe('origin');
@@ -266,7 +288,7 @@ describe('git API contract', () => {
 	it('gitDiscard sends POST with project and file', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitDiscard('/project', 'a.txt');
+		await gitDiscard({ nodeId: 'remote-node', projectPath: '/project' }, 'a.txt');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.file).toBe('a.txt');
@@ -275,7 +297,7 @@ describe('git API contract', () => {
 	it('gitDeleteUntracked sends POST with project and file', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitDeleteUntracked('/project', 'temp.txt');
+		await gitDeleteUntracked({ nodeId: 'remote-node', projectPath: '/project' }, 'temp.txt');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.file).toBe('temp.txt');
@@ -284,7 +306,9 @@ describe('git API contract', () => {
 	it('propagates ApiError on server error', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ error: 'Not a git repo' }, 400));
 
-		await expect(getGitStatus('/bad')).rejects.toMatchObject({
+		await expect(
+			getGitStatus({ nodeId: 'remote-node', projectPath: '/bad' }),
+		).rejects.toMatchObject({
 			message: 'Not a git repo',
 		});
 	});
@@ -294,6 +318,7 @@ describe('git API contract', () => {
 	it('getGitWorkbenchSnapshot posts the first-paint workbench request', async () => {
 		const payload = {
 			status: 'ready',
+			nodeId: scope.nodeId,
 			project: '/project',
 			target: {
 				projectPath: '/project',
@@ -306,6 +331,7 @@ describe('git API contract', () => {
 			tree: { root: [], hasCommits: true, statsState: 'loaded' },
 			reviewSummary: {
 				documentId: 'doc',
+				nodeId: scope.nodeId,
 				project: '/project',
 				mode: 'working',
 				context: 5,
@@ -319,10 +345,15 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitWorkbenchSnapshot('/project', 'unstaged', 5, {
-			selectedFile: 'a.ts',
-			bodyCandidateCount: 4,
-		});
+		const result = await getGitWorkbenchSnapshot(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'unstaged',
+			5,
+			{
+				selectedFile: 'a.ts',
+				bodyCandidateCount: 4,
+			},
+		);
 
 		expect(result.status).toBe('ready');
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -332,6 +363,7 @@ describe('git API contract', () => {
 		expect(opts.bodyCandidateCount).toBeUndefined();
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
 			mode: 'working',
 			context: 5,
@@ -341,18 +373,21 @@ describe('git API contract', () => {
 	});
 
 	it('getGitWorkbenchSnapshot maps staged tab to staged mode', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			status: 'not-git-repository',
-			project: '/project',
-			target: null,
-			tree: null,
-			reviewSummary: null,
-			selectedFile: null,
-			firstBodyCandidates: [],
-			message: 'Git is not initialized in this directory.',
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'not-git-repository',
+				nodeId: scope.nodeId,
+				project: '/project',
+				target: null,
+				tree: null,
+				reviewSummary: null,
+				selectedFile: null,
+				firstBodyCandidates: [],
+				message: 'Git is not initialized in this directory.',
+			}),
+		);
 
-		await getGitWorkbenchSnapshot('/project', 'staged', 3);
+		await getGitWorkbenchSnapshot({ nodeId: 'remote-node', projectPath: '/project' }, 'staged', 3);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.mode).toBe('staged');
@@ -362,15 +397,21 @@ describe('git API contract', () => {
 	});
 
 	it('getGitWorkingTreeFingerprint posts the current Working Tree fingerprint request', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			status: 'ready',
-			project: '/project',
-			fingerprintVersion: 1,
-			fingerprint: 'v1:current',
-			changedPathCount: 2,
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'ready',
+				nodeId: scope.nodeId,
+				project: '/project',
+				fingerprintVersion: 1,
+				fingerprint: 'v1:current',
+				changedPathCount: 2,
+			}),
+		);
 
-		const result = await getGitWorkingTreeFingerprint('/project');
+		const result = await getGitWorkingTreeFingerprint({
+			nodeId: 'remote-node',
+			projectPath: '/project',
+		});
 
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
@@ -380,13 +421,14 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/working-tree/fingerprint');
 		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
+		expect(JSON.parse(opts.body)).toEqual({ nodeId: scope.nodeId, project: '/project' });
 	});
 
 	it('getGitQuickSummary posts the quick summary request', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'ready',
+				nodeId: scope.nodeId,
 				project: '/project',
 				repoRoot: '/project',
 				branch: 'main',
@@ -403,7 +445,7 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await getGitQuickSummary('/project');
+		const result = await getGitQuickSummary({ nodeId: 'remote-node', projectPath: '/project' });
 
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
@@ -413,7 +455,7 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/quick-summary');
 		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
+		expect(JSON.parse(opts.body)).toEqual({ nodeId: scope.nodeId, project: '/project' });
 	});
 
 	it('getGitConflictDetails returns bounded conflict content metadata', async () => {
@@ -433,7 +475,10 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitConflictDetails('/project', 'a.txt');
+		const result = await getGitConflictDetails(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'a.txt',
+		);
 
 		expect(result.ours.content).toBeNull();
 		expect(result.ours.limitReason).toBe('content-too-large');
@@ -446,7 +491,14 @@ describe('git API contract', () => {
 	it('gitStageSelection sends POST with selection payload', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		const result = await gitStageSelection('/project', 'a.ts', 'stage', [1, 2, 3], 5);
+		const result = await gitStageSelection(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'a.ts',
+			'stage',
+			[1, 2, 3],
+			5,
+			proof,
+		);
 
 		expect(result.success).toBe(true);
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -462,7 +514,14 @@ describe('git API contract', () => {
 	it('gitStageHunk sends POST with hunkIndex', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		const result = await gitStageHunk('/project', 'a.ts', 'stage', 0, 5);
+		const result = await gitStageHunk(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'a.ts',
+			'stage',
+			0,
+			5,
+			proof,
+		);
 
 		expect(result.success).toBe(true);
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -486,7 +545,10 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 		const controller = new AbortController();
 
-		const result = await getGitWorktrees('/project', { signal: controller.signal });
+		const result = await getGitWorktrees(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ signal: controller.signal },
+		);
 
 		expect(result.worktrees).toHaveLength(1);
 		expect(result.worktrees[0].name).toBe('main');
@@ -498,7 +560,10 @@ describe('git API contract', () => {
 	it('gitCreateWorktree sends POST with worktreePath and options', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateWorktree('/project', '/tmp/wt', { branch: 'feat', baseRef: 'main' });
+		await gitCreateWorktree({ nodeId: 'remote-node', projectPath: '/project' }, '/tmp/wt', {
+			branch: 'feat',
+			baseRef: 'main',
+		});
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.worktreePath).toBe('/tmp/wt');
@@ -509,7 +574,7 @@ describe('git API contract', () => {
 	it('gitRemoveWorktree sends POST with worktreePath and force', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitRemoveWorktree('/project', '/tmp/wt', true);
+		await gitRemoveWorktree({ nodeId: 'remote-node', projectPath: '/project' }, '/tmp/wt', true);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.worktreePath).toBe('/tmp/wt');
@@ -519,7 +584,7 @@ describe('git API contract', () => {
 	it('gitRevertCommit sends POST with commit hash', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitRevertCommit('/project', 'abcdef123');
+		await gitRevertCommit({ nodeId: 'remote-node', projectPath: '/project' }, 'abcdef123');
 
 		const [url] = fetchMock.mock.calls[0];
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -530,7 +595,10 @@ describe('git API contract', () => {
 	it('gitCommitIndex sends POST with project and message', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, output: 'commit abc123' }));
 
-		const result = await gitCommitIndex('/project', 'feat: add login');
+		const result = await gitCommitIndex(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'feat: add login',
+		);
 
 		expect(result.success).toBe(true);
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -549,7 +617,9 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await generateCommitMessage('/project', ['src/app/login.ts']);
+		const result = await generateCommitMessage({ nodeId: 'remote-node', projectPath: '/project' }, [
+			'src/app/login.ts',
+		]);
 
 		expect(result.message).toBe('src/app: feat: add login');
 		expect(result.directoryPrefix).toBe('src/app');
@@ -557,60 +627,78 @@ describe('git API contract', () => {
 		expect(url).toBe('/api/v1/git/generate-commit-message');
 		expect(opts.method).toBe('POST');
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
 			files: ['src/app/login.ts'],
 		});
 	});
 
-		it('gitStagePaths sends POST with project, paths, and mode', async () => {
-			fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	it('gitStagePaths sends POST with project, paths, and mode', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-			const result = await gitStagePaths('/project', ['new-file.ts'], 'stage');
+		const result = await gitStagePaths(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			['new-file.ts'],
+			'stage',
+		);
 
-			expect(result.success).toBe(true);
-			const [url, opts] = fetchMock.mock.calls[0];
-			expect(url).toBe('/api/v1/git/stage-paths');
-			expect(opts.method).toBe('POST');
-			const body = JSON.parse(opts.body);
-			expect(body.project).toBe('/project');
-			expect(body.paths).toEqual(['new-file.ts']);
-			expect(body.mode).toBe('stage');
-		});
+		expect(result.success).toBe(true);
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/stage-paths');
+		expect(opts.method).toBe('POST');
+		const body = JSON.parse(opts.body);
+		expect(body.project).toBe('/project');
+		expect(body.paths).toEqual(['new-file.ts']);
+		expect(body.mode).toBe('stage');
+	});
 
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
 		);
 
-		await getGitReviewFileBodies('/project', 'doc', ['a.ts', 'b.ts'], 'staged', 3);
+		await getGitReviewFileBodies(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ ...scope, documentId: 'doc' },
+			['a.ts', 'b.ts'],
+			'staged',
+			3,
+		);
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
-			documentId: 'doc',
+			document: { ...scope, documentId: 'doc' },
 			files: ['a.ts', 'b.ts'],
 			purpose: 'prefetch',
 		});
 	});
 
 	it('getGitHistoryCommits posts paginated history requests', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			project: '/project',
-			ref: 'main',
-			commits: [],
-			nextOffset: null,
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				nodeId: scope.nodeId,
+				project: '/project',
+				ref: 'main',
+				commits: [],
+				nextOffset: null,
+			}),
+		);
 		const controller = new AbortController();
 
-		const result = await getGitHistoryCommits('/project', {
-			ref: 'main',
-			limit: 25,
-			offset: 50,
-			signal: controller.signal,
-		});
+		const result = await getGitHistoryCommits(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			{
+				ref: 'main',
+				limit: 25,
+				offset: 50,
+				signal: controller.signal,
+			},
+		);
 
 		expect(result.ref).toBe('main');
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -618,6 +706,7 @@ describe('git API contract', () => {
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
 			ref: 'main',
 			limit: 25,
@@ -626,20 +715,27 @@ describe('git API contract', () => {
 	});
 
 	it('getGitCommitSnapshot posts commit details requests', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			status: 'not-found',
-			project: '/project',
-			commit: 'abc',
-			message: 'Commit was not found in this repository.',
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'not-found',
+				nodeId: scope.nodeId,
+				project: '/project',
+				commit: 'abc',
+				message: 'Commit was not found in this repository.',
+			}),
+		);
 		const controller = new AbortController();
 
-		const result = await getGitCommitSnapshot('/project', 'abc', {
-			parent: 'parent',
-			context: 7,
-			bodyCandidateCount: 3,
-			signal: controller.signal,
-		});
+		const result = await getGitCommitSnapshot(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			'abc',
+			{
+				parent: 'parent',
+				context: 7,
+				bodyCandidateCount: 3,
+				signal: controller.signal,
+			},
+		);
 
 		expect(result.status).toBe('not-found');
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -647,6 +743,7 @@ describe('git API contract', () => {
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
 			commit: 'abc',
 			parent: 'parent',
@@ -661,34 +758,44 @@ describe('git API contract', () => {
 		);
 		const controller = new AbortController();
 
-		await getGitCommitFileBodies('/project', 'doc', 'abc', [{ path: 'renamed.ts', originalPath: 'a.ts' }], {
-			parent: null,
-			context: 4,
-			signal: controller.signal,
-		});
+		await getGitCommitFileBodies(
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ ...scope, documentId: 'doc' },
+			'abc',
+			[{ path: 'renamed.ts', originalPath: 'a.ts' }],
+			{
+				parent: null,
+				context: 4,
+				signal: controller.signal,
+			},
+		);
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
-			documentId: 'doc',
+			document: { ...scope, documentId: 'doc' },
 			files: ['renamed.ts'],
 			purpose: 'prefetch',
 		});
 	});
 
 	it('getGitComparisonSnapshot posts typed comparison endpoints', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			status: 'working-tree-changing',
-			project: '/project',
-			message: 'The Working Tree is changing.',
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'working-tree-changing',
+				nodeId: scope.nodeId,
+				project: '/project',
+				message: 'The Working Tree is changing.',
+			}),
+		);
 		const controller = new AbortController();
 
 		await getGitComparisonSnapshot(
-			'/project',
+			{ nodeId: 'remote-node', projectPath: '/project' },
 			{ kind: 'revision', revision: 'main' },
 			{ kind: 'working-tree' },
 			'direct',
@@ -699,6 +806,7 @@ describe('git API contract', () => {
 		expect(url).toBe('/api/v1/git/comparisons/snapshot');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
 			from: { kind: 'revision', revision: 'main' },
 			to: { kind: 'working-tree' },
@@ -709,16 +817,18 @@ describe('git API contract', () => {
 	});
 
 	it('getGitComparisonFileBodies posts frozen endpoint identity and rename paths', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			status: 'stale',
-			documentId: 'comparison-doc',
-			changedPaths: ['new.ts'],
-			message: 'The Working Tree changed.',
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'stale',
+				documentId: 'comparison-doc',
+				changedPaths: ['new.ts'],
+				message: 'The Working Tree changed.',
+			}),
+		);
 
 		const result = await getGitComparisonFileBodies(
-			'/project',
-			'comparison-doc',
+			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ ...scope, documentId: 'comparison-doc' },
 			'from-hash',
 			{ kind: 'working-tree', fingerprint: 'v1:old' },
 			[{ path: 'new.ts', originalPath: 'old.ts' }],
@@ -729,8 +839,9 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
-			documentId: 'comparison-doc',
+			document: { ...scope, documentId: 'comparison-doc' },
 			files: ['new.ts'],
 			purpose: 'prefetch',
 		});
@@ -740,6 +851,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'ready',
+				nodeId: scope.nodeId,
 				project: '/project',
 				changedEndpoints: ['to'],
 				fromHash: 'a'.repeat(40),
@@ -749,7 +861,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		await getGitComparisonFreshness(
-			'/project',
+			{ nodeId: 'remote-node', projectPath: '/project' },
 			{ kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
 			{ kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
 			{ signal: controller.signal },
@@ -759,6 +871,7 @@ describe('git API contract', () => {
 		expect(url).toBe('/api/v1/git/comparisons/freshness');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
+			nodeId: scope.nodeId,
 			project: '/project',
 			from: { kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
 			to: { kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
@@ -769,12 +882,15 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ targets: [] }));
 		const controller = new AbortController();
 
-		const result = await getGitTargetCandidates('/repo with space', { signal: controller.signal });
+		const result = await getGitTargetCandidates(
+			{ nodeId: 'remote-node', projectPath: '/repo with space' },
+			{ signal: controller.signal },
+		);
 
 		expect(result.targets).toEqual([]);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/targets');
-		expect(url).toContain('project=%2Frepo%20with%20space');
+		expect(url).toContain('project=%2Frepo+with+space');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
 });

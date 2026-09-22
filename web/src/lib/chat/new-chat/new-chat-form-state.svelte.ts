@@ -133,13 +133,18 @@ export class NewChatFormState {
 		return this.nodeId === 'local';
 	}
 	get projectBasePath(): string {
-		return this.localMachine ? this.#localProjectBasePath : (this.#options.executionNodes?.get(this.nodeId)?.projectBasePath ?? '');
+		return this.localMachine
+			? this.#localProjectBasePath
+			: (this.#options.executionNodes?.get(this.nodeId)?.projectBasePath ?? '');
 	}
 	get pathContextKey(): string {
 		return this.#options.executionNodes?.pathContextKey(this.nodeId) ?? this.nodeId;
 	}
 	get filesAvailable(): boolean {
 		return this.#options.executionNodes?.filesAvailable(this.nodeId) ?? this.localMachine;
+	}
+	get gitAvailable(): boolean {
+		return this.#options.executionNodes?.gitAvailable(this.nodeId) ?? this.localMachine;
 	}
 	get nodeReady(): boolean {
 		return this.#options.executionNodes?.isReady(this.nodeId) ?? true;
@@ -487,7 +492,7 @@ export class NewChatFormState {
 	// Worktree modal
 
 	openWorktreeModal(): void {
-		if (!this.localMachine) return;
+		if (!this.gitAvailable) return;
 		this.worktreeModalOpen = true;
 		this.worktreeError = null;
 		this.worktreeItems = [];
@@ -501,8 +506,10 @@ export class NewChatFormState {
 	}
 
 	async loadWorktrees(): Promise<void> {
-		if (!this.localMachine) return;
+		if (!this.gitAvailable) return;
 		const projectPath = this.trimmedPath;
+		const nodeId = this.nodeId;
+		const contextKey = this.pathContextKey;
 		if (!projectPath) return;
 
 		this.#worktreeAbort?.abort();
@@ -513,11 +520,23 @@ export class NewChatFormState {
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees(projectPath, { signal: abort.signal });
+			const result = await getGitWorktrees({ nodeId, projectPath }, { signal: abort.signal });
+			if (
+				nodeId !== this.nodeId ||
+				projectPath !== this.trimmedPath ||
+				contextKey !== this.pathContextKey
+			)
+				return;
 			if (!this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) return;
 			this.worktreeItems = result.worktrees;
 		} catch (error) {
-			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) {
+			if (
+				isAbortError(error) ||
+				!this.#isCurrentWorktreeLoad(requestVersion, abort.signal) ||
+				nodeId !== this.nodeId ||
+				projectPath !== this.trimmedPath ||
+				contextKey !== this.pathContextKey
+			) {
 				return;
 			}
 			this.worktreeError = m.git_target_load_worktrees_failed();
@@ -535,6 +554,7 @@ export class NewChatFormState {
 		this.#worktreeAbort = null;
 		this.#worktreeRequestVersion += 1;
 		this.isLoadingWorktrees = false;
+		this.isCreatingWorktree = false;
 	}
 
 	#isCurrentWorktreeLoad(requestVersion: number, signal: AbortSignal): boolean {
@@ -542,6 +562,7 @@ export class NewChatFormState {
 	}
 
 	selectWorktree(worktreePath: string): void {
+		if (!this.gitAvailable) return;
 		this.#cancelWorktreeLoad();
 		this.projectPath = worktreePath;
 		this.worktreeModalOpen = false;
@@ -549,27 +570,40 @@ export class NewChatFormState {
 	}
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
-		if (!this.localMachine) return false;
-		if (!this.trimmedPath) return false;
+		if (!this.gitAvailable || this.isCreatingWorktree) return false;
+		const projectPath = this.trimmedPath;
+		const nodeId = this.nodeId;
+		const contextKey = this.pathContextKey;
+		if (!projectPath) return false;
+		const generation = this.#worktreeRequestVersion;
+		const current = () =>
+			generation === this.#worktreeRequestVersion &&
+			nodeId === this.nodeId &&
+			projectPath === this.trimmedPath &&
+			contextKey === this.pathContextKey;
 		this.isCreatingWorktree = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree(this.trimmedPath, worktreePath, { branch, baseRef });
+			const result = await gitCreateWorktree({ nodeId, projectPath }, worktreePath, {
+				branch,
+				baseRef,
+			});
+			if (!current()) return false;
 			if (!result.success) {
 				this.worktreeError =
 					result.error || result.message || m.chat_new_chat_create_worktree_failed();
 				return false;
 			}
-			await this.loadWorktrees();
 			this.selectWorktree(result.worktreePath || worktreePath);
 			return true;
 		} catch (err) {
+			if (!current()) return false;
 			this.worktreeError =
 				err instanceof Error ? err.message : m.chat_new_chat_create_worktree_failed();
 			return false;
 		} finally {
-			this.isCreatingWorktree = false;
+			if (generation === this.#worktreeRequestVersion) this.isCreatingWorktree = false;
 		}
 	}
 
@@ -596,7 +630,8 @@ export class NewChatFormState {
 		this.#validationTimer = setTimeout(async () => {
 			try {
 				const data = await validateStart(path, { nodeId });
-				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey) return;
+				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey)
+					return;
 				if (data.valid) {
 					this.validationStatus = 'valid';
 					this.validationError = null;
@@ -609,7 +644,8 @@ export class NewChatFormState {
 					this.preambles.invalidatePreview();
 				}
 			} catch (err) {
-				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey) return;
+				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey)
+					return;
 				this.validationStatus = 'invalid';
 				this.validationError =
 					err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();

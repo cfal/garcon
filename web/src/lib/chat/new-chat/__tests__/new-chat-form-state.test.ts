@@ -305,11 +305,15 @@ describe('NewChatFormState', () => {
 		formState.firstMessage = 'Synthetic preserved prompt';
 		const previous = formState.pathContextKey;
 		const old = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
-		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(old.promise)
+		vi.mocked(chatsApi.validateStart)
+			.mockReturnValueOnce(old.promise)
 			.mockResolvedValueOnce({ valid: false, errorCode: 'outside_base_dir' });
 		formState.validatePath();
 		vi.advanceTimersByTime(300);
-		executionNodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, instanceId: 'replacement', projectBasePath: '/narrow' }]);
+		executionNodes.applySnapshot([
+			localExecutionNode,
+			{ ...remoteExecutionNode, instanceId: 'replacement', projectBasePath: '/narrow' },
+		]);
 		expect(formState.pathContextKey).not.toBe(previous);
 		expect(formState.projectBasePath).toBe('/narrow');
 		expect(formState.projectPath).toBe('/worker/typed');
@@ -409,6 +413,53 @@ describe('NewChatFormState', () => {
 		expect(formState.worktreeModalOpen).toBe(false);
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
+	});
+
+	it('routes worktrees to the draft node and rejects publication from a replaced instance', async () => {
+		const remote = {
+			...remoteExecutionNode,
+			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+		};
+		executionNodes.applySnapshot([localExecutionNode, remote]);
+		formState.selectNode(remote.id);
+		formState.projectPath = '/worker/project';
+		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
+		const loading = formState.loadWorktrees();
+		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
+			{ nodeId: remote.id, projectPath: '/worker/project' },
+			expect.any(Object),
+		);
+		executionNodes.applySnapshot([localExecutionNode, { ...remote, instanceId: 'replacement' }]);
+		listing.resolve({
+			worktrees: [
+				{
+					name: 'old',
+					path: '/worker/old',
+					branch: 'old',
+					isCurrent: false,
+					isMain: false,
+					isPathMissing: false,
+					lastModifiedAt: null,
+				},
+			],
+		});
+		await loading;
+		expect(formState.worktreeItems).toEqual([]);
+
+		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+		const creating = formState.createWorktree('/worker/feature', 'feature');
+		formState.selectNode('local');
+		formState.projectPath = '/local/draft';
+		creation.resolve({ success: true, worktreePath: '/worker/feature' });
+		await expect(creating).resolves.toBe(false);
+		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
+			{ nodeId: remote.id, projectPath: '/worker/project' },
+			'/worker/feature',
+			{ branch: 'feature', baseRef: undefined },
+		);
+		expect(formState.projectPath).toBe('/local/draft');
 	});
 
 	it('ignores a worktree load superseded after the modal closes', async () => {

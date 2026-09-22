@@ -71,7 +71,10 @@
 		...(startup.modelSelectionTarget ?? {}),
 	});
 	function getRecents(nodeId: string) {
-		return buildModelSelectorRecents(modelCatalog.forNode(nodeId), remoteSettings.snapshot?.recentAgentSettings ?? []);
+		return buildModelSelectorRecents(
+			modelCatalog.forNode(nodeId),
+			remoteSettings.snapshot?.recentAgentSettings ?? [],
+		);
 	}
 
 	function handlePathKeydown(event: KeyboardEvent): void {
@@ -161,7 +164,7 @@
 		<div class="-mt-1 min-h-5">
 			{#if startup.validationStatus === 'invalid' && startup.validationError}
 				<p class="text-xs text-destructive">{startup.validationError}</p>
-			{:else if startup.localMachine && startup.gitRepoStatus === 'git'}
+			{:else if startup.gitAvailable && startup.gitRepoStatus === 'git'}
 				<button
 					type="button"
 					disabled={startup.isUpdatingPinnedPath}
@@ -197,7 +200,11 @@
 			<div role="status" class="flex items-center gap-2 text-sm text-destructive">
 				<span>{startup.modelSelectionError}</span>
 				{#if startup.nodeReady && modelCatalog.error}
-					<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button>
+					<button
+						type="button"
+						class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button
+					>
 				{/if}
 			</div>
 		{:else if startup.modelSelectionPending}
@@ -276,7 +283,7 @@
 	</ScheduledPromptField>
 </div>
 
-{#if startup.localMachine && startup.worktreeModalOpen}
+{#if startup.gitAvailable && startup.worktreeModalOpen}
 	<GitWorktreePickerModal
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}

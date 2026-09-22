@@ -7,27 +7,27 @@
 	}
 </script>
 
-	<script lang="ts">
-		import ChevronDown from '@lucide/svelte/icons/chevron-down';
-		import GitBranch from '@lucide/svelte/icons/git-branch';
-		import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-		import Plus from '@lucide/svelte/icons/plus';
-		import Search from '@lucide/svelte/icons/search';
-		import * as Popover from '$lib/components/ui/popover';
-		import * as Dialog from '$lib/components/ui/dialog/index.js';
-		import type {
-			GitRefKind,
-			GitRefOption,
-			GitRefSort,
-			GitRefSortKey,
-			GitRemoteStatus,
-		} from '$lib/api/git';
-		import * as m from '$lib/paraglide/messages.js';
-		import { cn } from '$lib/utils/cn';
-		import GitBranchRefList from './GitBranchRefList.svelte';
+<script lang="ts">
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Plus from '@lucide/svelte/icons/plus';
+	import Search from '@lucide/svelte/icons/search';
+	import * as Popover from '$lib/components/ui/popover';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import type {
+		GitRefKind,
+		GitRefOption,
+		GitRefSort,
+		GitRefSortKey,
+		GitRemoteStatus,
+	} from '$lib/api/git';
+	import * as m from '$lib/paraglide/messages.js';
+	import { cn } from '$lib/utils/cn';
+	import GitBranchRefList from './GitBranchRefList.svelte';
 
-		type DropdownSide = 'top' | 'bottom';
-		type DropdownAlign = 'start' | 'end';
+	type DropdownSide = 'top' | 'bottom';
+	type DropdownAlign = 'start' | 'end';
 
 	interface Props {
 		currentBranch: string;
@@ -84,19 +84,19 @@
 		onSwitchDialogClose,
 	}: Props = $props();
 
-		let searchInput = $state<HTMLInputElement | null>(null);
-		let triggerRef = $state<HTMLElement | null>(null);
-		let searchQuery = $state('');
-		let searchRequestTimeout: ReturnType<typeof setTimeout> | null = null;
-		let pendingSwitchRef = $state<GitRefOption | null>(null);
-		let isSwitchingBranch = $state(false);
-		const isSwitchDialogOpen = $derived(pendingSwitchRef !== null);
-		let wasOpen = false;
+	let searchInput = $state<HTMLInputElement | null>(null);
+	let triggerRef = $state<HTMLElement | null>(null);
+	let searchQuery = $state('');
+	let searchRequestTimeout: ReturnType<typeof setTimeout> | null = null;
+	let pendingSwitchRef = $state<GitRefOption | null>(null);
+	let isSwitchingBranch = $state(false);
+	const isSwitchDialogOpen = $derived(pendingSwitchRef !== null);
+	let wasOpen = false;
 
 	const listboxId = createBranchSelectorListboxId();
 	const currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
-		const resolvedTriggerClass = $derived(
-			cn(
+	const resolvedTriggerClass = $derived(
+		cn(
 			'min-w-0 flex items-center hover:bg-accent rounded-lg transition-colors duration-150',
 			isMobile ? 'gap-1.5 px-2 py-1' : 'gap-1.5 px-3 py-1.5',
 			triggerClass,
@@ -154,11 +154,11 @@
 		searchQuery = '';
 	});
 
-		$effect(() => {
-			return () => {
-				if (searchRequestTimeout) clearTimeout(searchRequestTimeout);
-			};
-		});
+	$effect(() => {
+		return () => {
+			if (searchRequestTimeout) clearTimeout(searchRequestTimeout);
+		};
+	});
 
 	function handleOpenChange(open: boolean): void {
 		if (open === isOpen) return;
@@ -289,10 +289,10 @@
 		<span class={resolvedLabelClass}>{currentBranchLabel}</span>
 		{#if remoteStatus?.hasRemote}
 			<div class="flex items-center gap-0.5 text-xs">
-				{#if remoteStatus.ahead > 0}
+				{#if (remoteStatus.ahead ?? 0) > 0}
 					<span class="text-status-success-foreground">↑{remoteStatus.ahead}</span>
 				{/if}
-				{#if remoteStatus.behind > 0}
+				{#if (remoteStatus.behind ?? 0) > 0}
 					<span class="text-interactive-accent">↓{remoteStatus.behind}</span>
 				{/if}
 				{#if remoteStatus.isUpToDate}

@@ -4,6 +4,7 @@ import { getGitWorktrees, gitCreateWorktree, type GitWorktreeItem } from '$lib/a
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { effectiveNodeId } from '$shared/execution-nodes';
+import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 
 export type ProjectPathValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
@@ -34,6 +35,14 @@ export class ProjectPathDialogState {
 	#worktreeGeneration = 0;
 	#worktreeAbort: AbortController | null = null;
 
+	constructor(
+		private readonly nodes?: Pick<ExecutionNodesStore, 'gitAvailable' | 'gitContextKey'>,
+	) {}
+
+	get gitAvailable(): boolean {
+		return this.nodes?.gitAvailable(this.nodeId) ?? this.nodeId === 'local';
+	}
+
 	get trimmedPath(): string {
 		return this.candidatePath.trim();
 	}
@@ -53,7 +62,7 @@ export class ProjectPathDialogState {
 
 	get canSelectWorktree(): boolean {
 		return (
-			this.nodeId === 'local' &&
+			this.gitAvailable &&
 			this.validationStatus === 'valid' &&
 			this.gitRepoStatus === 'git' &&
 			Boolean(this.trimmedPath) &&
@@ -147,6 +156,7 @@ export class ProjectPathDialogState {
 	}
 
 	selectWorktree(worktreePath: string): void {
+		if (!this.gitAvailable) return;
 		this.#clearPendingWorktreeLoad();
 		this.isLoadingWorktrees = false;
 		this.setCandidatePath(worktreePath);
@@ -158,23 +168,30 @@ export class ProjectPathDialogState {
 	}
 
 	async loadWorktrees(): Promise<void> {
-		if (this.nodeId !== 'local') return;
+		if (!this.gitAvailable) return;
 		const path = this.trimmedPath;
+		const nodeId = this.nodeId;
+		const contextKey = this.nodes?.gitContextKey(nodeId);
 		if (!path) return;
 
 		this.#clearPendingWorktreeLoad();
 		const abort = new AbortController();
 		this.#worktreeAbort = abort;
 		const generation = ++this.#worktreeGeneration;
+		const current = () =>
+			this.#isCurrentWorktreeLoad(generation, abort.signal) &&
+			nodeId === this.nodeId &&
+			path === this.trimmedPath &&
+			contextKey === this.nodes?.gitContextKey(nodeId);
 		this.isLoadingWorktrees = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees(path, { signal: abort.signal });
-			if (!this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
+			const result = await getGitWorktrees({ nodeId, projectPath: path }, { signal: abort.signal });
+			if (!current()) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
-			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
+			if (isAbortError(error) || !current()) return;
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
 		} finally {
@@ -185,15 +202,27 @@ export class ProjectPathDialogState {
 	}
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
-		if (this.nodeId !== 'local') return;
+		if (!this.gitAvailable || this.isCreatingWorktree) return;
 		const projectPath = this.trimmedPath;
+		const nodeId = this.nodeId;
+		const contextKey = this.nodes?.gitContextKey(nodeId);
+		const generation = this.#worktreeGeneration;
+		const current = () =>
+			generation === this.#worktreeGeneration &&
+			nodeId === this.nodeId &&
+			projectPath === this.trimmedPath &&
+			contextKey === this.nodes?.gitContextKey(nodeId);
 		if (!projectPath) return;
 
 		this.isCreatingWorktree = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree(projectPath, worktreePath, { branch, baseRef });
+			const result = await gitCreateWorktree({ nodeId, projectPath }, worktreePath, {
+				branch,
+				baseRef,
+			});
+			if (!current()) return;
 			if (!result.success) {
 				this.worktreeError =
 					result.error || result.message || m.chat_new_chat_create_worktree_failed();
@@ -201,10 +230,11 @@ export class ProjectPathDialogState {
 			}
 			this.selectWorktree(result.worktreePath || worktreePath);
 		} catch (error) {
+			if (!current()) return;
 			this.worktreeError =
 				error instanceof Error ? error.message : m.chat_new_chat_create_worktree_failed();
 		} finally {
-			this.isCreatingWorktree = false;
+			if (generation === this.#worktreeGeneration) this.isCreatingWorktree = false;
 		}
 	}
 
@@ -260,6 +290,8 @@ export class ProjectPathDialogState {
 	}
 
 	#clearPendingWorktreeLoad(): void {
+		this.#worktreeGeneration++;
+		this.isCreatingWorktree = false;
 		this.#worktreeAbort?.abort();
 		this.#worktreeAbort = null;
 	}

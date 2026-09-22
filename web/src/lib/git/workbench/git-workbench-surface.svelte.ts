@@ -3,9 +3,7 @@ import type { PortableSingletonController } from '$lib/workspace/portable-single
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
-import type {
-	GitTarget,
-} from '$lib/git/targets/git-target.js';
+import type { GitTarget } from '$lib/git/targets/git-target.js';
 import {
 	GitTargetSessionController,
 	type GitTargetChangeReason,
@@ -28,15 +26,19 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 
 	#selectionByTarget = new Map<string, GitWorkbenchSelectionSnapshot>();
 	#loadedIdentity: string | null = null;
+	#applicationGeneration = 0;
 	#unregisterReviewDisplay: () => void;
 
 	constructor(private readonly deps: GitSurfaceControllerDeps) {
 		this.workbench = new GitWorkbenchStore({
-			runMutation: (projectPath, execute) =>
+			canMutate: () =>
+				!this.target.projectIdentityPending && this.target.identity === this.target.appliedIdentity,
+			runMutation: (project, execute) =>
 				deps.gitMutations.run({
 					surfaceId: singletonSurfaceId('git'),
-					effectiveProjectKey: this.target.effectiveProjectKey ?? projectPath,
-					projectPath,
+					effectiveProjectKey: this.target.effectiveProjectKey ?? project.projectPath,
+					nodeId: project.nodeId,
+					projectPath: project.projectPath,
 					execute,
 				}),
 		});
@@ -44,8 +46,12 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 			kind: 'git',
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
-			canChangeTarget: () =>
-				deps.gitMutations.pendingCount(singletonSurfaceId('git')) === 0,
+			onUnavailable: () => {
+				this.#applicationGeneration++;
+				this.workbench.suspend();
+				this.repository.suspend();
+			},
+			canChangeTarget: () => deps.gitMutations.pendingCount(singletonSurfaceId('git')) === 0,
 			beforeCheckout: () => this.workbench.ensureFreshForGitMutation(),
 			runCheckoutReconciliation: (projectPath, execute) =>
 				this.workbench.runLocalGitReconciliation(projectPath, execute),
@@ -62,17 +68,13 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 			branches: this.target.branches,
 			surfaceId: singletonSurfaceId('git'),
 		});
-		this.#unregisterReviewDisplay = deps.reviewDisplay.register(
-			singletonSurfaceId('git'),
-			{
-				isVisible: () => this.presentationVisible,
-				hasOpenCommentComposer: () => this.workbench.drafts.commentComposer.open,
-				markContextChangeBlocked: () =>
-					this.workbench.drafts.markContextChangeBlocked(),
-				apply: (diffMode, contextLines) =>
-					this.workbench.setDisplayOptions(diffMode, contextLines, { refresh: true }),
-			},
-		);
+		this.#unregisterReviewDisplay = deps.reviewDisplay.register(singletonSurfaceId('git'), {
+			isVisible: () => this.presentationVisible,
+			hasOpenCommentComposer: () => this.workbench.drafts.commentComposer.open,
+			markContextChangeBlocked: () => this.workbench.drafts.markContextChangeBlocked(),
+			apply: (diffMode, contextLines) =>
+				this.workbench.setDisplayOptions(diffMode, contextLines, { refresh: true }),
+		});
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
@@ -92,6 +94,7 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 	}
 
 	dispose(): void {
+		this.#applicationGeneration++;
 		this.#saveSelection();
 		this.#unregisterReviewDisplay();
 		this.target.dispose();
@@ -101,45 +104,59 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 		this.#loadedIdentity = null;
 	}
 
+	pruneNodes(nodeIds: ReadonlySet<string>): void {
+		this.target.pruneNodes(nodeIds);
+		for (const key of this.#selectionByTarget.keys()) {
+			if (!nodeIds.has(JSON.parse(key)[0])) this.#selectionByTarget.delete(key);
+		}
+	}
+
 	async #applyTarget(
 		target: GitTarget | null,
 		identity: string | null,
 		reason: GitTargetChangeReason,
 		identityChanged: boolean,
 	): Promise<void> {
-		const projectPath = target?.projectPath ?? null;
+		const generation = ++this.#applicationGeneration;
+		const current = () =>
+			generation === this.#applicationGeneration && identity === this.target.identity;
 		if (identityChanged) {
 			this.#saveSelection();
+			this.#loadedIdentity = identity;
 			const snapshot = identity ? takeMostRecent(this.#selectionByTarget, identity) : null;
 			this.workbench.setDisplayOptions(
 				this.deps.reviewDisplay.diffMode,
 				this.deps.reviewDisplay.contextLines,
 				{ refresh: false },
 			);
-			this.repository.resetForProject(projectPath, { deferMetadata: true });
+			this.repository.resetForProject(target, { deferMetadata: true });
 			// A retained same-path document must not carry the previous surface
 			// identity's open composer or line selection into the new identity.
 			this.workbench.resetReviewInteraction();
 			await this.workbench.setTarget(target, snapshot?.diffTab ?? 'unstaged');
-			this.#loadedIdentity = identity;
+			if (!current()) return;
 			if (
-				projectPath &&
+				target &&
 				snapshot?.selectedFile &&
 				this.workbench.files.filePaths.includes(snapshot.selectedFile)
 			) {
-				await this.workbench.selectFile(projectPath, snapshot.selectedFile);
+				await this.workbench.selectFile(target, snapshot.selectedFile);
 			}
-			if (projectPath) void this.repository.fetchRemoteStatus(projectPath);
+			if (target && current()) void this.repository.fetchRemoteStatus(target);
 			return;
 		}
 
-		if (!projectPath) {
+		if (!target) {
 			this.repository.resetForProject(null);
 			await this.workbench.setTarget(null);
 			return;
 		}
-		this.repository.refreshDeferredMetadata(projectPath);
-		if (reason === 'invalidation') {
+		this.repository.refreshDeferredMetadata(target);
+		if (reason === 'session' && this.workbench.drafts.commentComposer.open) {
+			this.workbench.drafts.markContextChangeBlocked();
+			return;
+		}
+		if (reason === 'invalidation' || reason === 'session') {
 			await this.workbench.refresh({
 				reason: 'git-action',
 				preserveSelection: true,

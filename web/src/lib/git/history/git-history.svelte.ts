@@ -1,3 +1,5 @@
+import type { GitProjectTarget } from '$lib/api/git-client.js';
+import { sameGitProject } from '$lib/git/targets/git-target.js';
 import {
 	getGitCommitFileBodies,
 	getGitCommitSnapshot,
@@ -49,7 +51,7 @@ export const EMPTY_GIT_HISTORY_LIST_POSITION: GitHistoryListPosition = {
 
 interface HistoryLoadGuard {
 	generation: number;
-	projectPath: string;
+	project: GitProjectTarget;
 	commitHash: string | null;
 	parentHash: string | null;
 	contextLines: number;
@@ -79,8 +81,25 @@ export class GitHistoryController {
 	private commitAbort: AbortController | null = null;
 	private listGeneration = 0;
 	private commitGeneration = 0;
-	private loadedProjectPath: string | null = null;
+	private loadedProject: GitProjectTarget | null = null;
 	private listInitialized = false;
+
+	suspend(): void {
+		this.pauseListLoading();
+		this.commitAbort?.abort();
+		this.commitGeneration++;
+		this.commitLoading = false;
+		this.document.markStale();
+		this.comparison.suspend();
+	}
+
+	refreshSession(project: GitProjectTarget): void {
+		this.suspend();
+		this.loadInitial(project);
+		if (this.activeDocument.commentComposer.open) return;
+		if (this.screen === 'commit') this.retryCommit(project);
+		if (this.screen === 'comparison') this.comparison.refreshSession(project);
+	}
 	private documentRecoveryAttempted = false;
 
 	get visibleFiles(): GitCommitFileSummary[] {
@@ -125,7 +144,11 @@ export class GitHistoryController {
 		return this.document.contextLines;
 	}
 
-	setDisplayOptions(projectPath: string | null, diffMode: DiffMode, contextLines: number): void {
+	setDisplayOptions(
+		project: GitProjectTarget | null,
+		diffMode: DiffMode,
+		contextLines: number,
+	): void {
 		const normalizedContext = Number.isFinite(contextLines)
 			? Math.max(0, Math.round(contextLines))
 			: DEFAULT_CONTEXT_LINES;
@@ -136,17 +159,17 @@ export class GitHistoryController {
 			return;
 		}
 		this.document.setDisplayOptions(diffMode, normalizedContext);
-		if (projectPath && this.screen === 'comparison') {
-			this.comparison.setDisplayOptions(projectPath, diffMode, normalizedContext);
+		if (project && this.screen === 'comparison') {
+			this.comparison.setDisplayOptions(project, diffMode, normalizedContext);
 			return;
 		}
-		if (contextChanged && projectPath && this.screen === 'commit' && this.selectedCommitHash) {
-			this.loadCommitSnapshot(projectPath, this.selectedCommitHash, this.selectedParentHash);
+		if (contextChanged && project && this.screen === 'commit' && this.selectedCommitHash) {
+			this.loadCommitSnapshot(project, this.selectedCommitHash, this.selectedParentHash);
 		}
 	}
 
-	loadInitial(projectPath: string): void {
-		if (this.loadedProjectPath !== projectPath) this.resetForProject(projectPath);
+	loadInitial(project: GitProjectTarget): void {
+		if (!sameGitProject(this.loadedProject, project)) this.resetForProject(project);
 		this.listAbort?.abort();
 		const controller = new AbortController();
 		const generation = ++this.listGeneration;
@@ -156,13 +179,13 @@ export class GitHistoryController {
 		this.nextOffset = 0;
 		this.listInitialized = false;
 
-		void getGitHistoryCommits(projectPath, {
+		void getGitHistoryCommits(project, {
 			limit: DEFAULT_HISTORY_LIMIT,
 			offset: 0,
 			signal: controller.signal,
 		})
 			.then((result) => {
-				if (!this.isCurrentListRequest(generation, projectPath, controller.signal)) return;
+				if (!this.isCurrentListRequest(generation, project, controller.signal)) return;
 				this.commits = result.commits;
 				this.nextOffset = result.nextOffset;
 				this.markListChange('replace');
@@ -171,7 +194,7 @@ export class GitHistoryController {
 			.catch((error) => {
 				if (
 					isAbortError(error) ||
-					!this.isCurrentListRequest(generation, projectPath, controller.signal)
+					!this.isCurrentListRequest(generation, project, controller.signal)
 				) {
 					return;
 				}
@@ -184,17 +207,17 @@ export class GitHistoryController {
 				this.listInitialized = true;
 			})
 			.finally(() => {
-				if (this.isCurrentListRequest(generation, projectPath, controller.signal)) {
+				if (this.isCurrentListRequest(generation, project, controller.signal)) {
 					this.listLoading = false;
 				}
 			});
 	}
 
-	ensureInitialLoaded(projectPath: string): void {
-		if (this.loadedProjectPath === projectPath && (this.listInitialized || this.listLoading)) {
+	ensureInitialLoaded(project: GitProjectTarget): void {
+		if (sameGitProject(this.loadedProject, project) && (this.listInitialized || this.listLoading)) {
 			return;
 		}
-		this.loadInitial(projectPath);
+		this.loadInitial(project);
 	}
 
 	pauseListLoading(): void {
@@ -205,7 +228,7 @@ export class GitHistoryController {
 		this.listLoading = false;
 	}
 
-	loadMore(projectPath: string): void {
+	loadMore(project: GitProjectTarget): void {
 		if (this.listLoading || this.nextOffset === null) return;
 		this.listAbort?.abort();
 		const controller = new AbortController();
@@ -215,13 +238,13 @@ export class GitHistoryController {
 		this.listLoading = true;
 		this.listError = null;
 
-		void getGitHistoryCommits(projectPath, {
+		void getGitHistoryCommits(project, {
 			limit: DEFAULT_HISTORY_LIMIT,
 			offset,
 			signal: controller.signal,
 		})
 			.then((result) => {
-				if (!this.isCurrentListRequest(generation, projectPath, controller.signal)) return;
+				if (!this.isCurrentListRequest(generation, project, controller.signal)) return;
 				const existing = new Set(this.commits.map((commit) => commit.hash));
 				this.commits = [
 					...this.commits,
@@ -233,7 +256,7 @@ export class GitHistoryController {
 			.catch((error) => {
 				if (
 					isAbortError(error) ||
-					!this.isCurrentListRequest(generation, projectPath, controller.signal)
+					!this.isCurrentListRequest(generation, project, controller.signal)
 				) {
 					return;
 				}
@@ -242,22 +265,22 @@ export class GitHistoryController {
 				});
 			})
 			.finally(() => {
-				if (this.isCurrentListRequest(generation, projectPath, controller.signal)) {
+				if (this.isCurrentListRequest(generation, project, controller.signal)) {
 					this.listLoading = false;
 				}
 			});
 	}
 
-	openCommit(projectPath: string, commitHash: string): void {
+	openCommit(project: GitProjectTarget, commitHash: string): void {
 		this.comparison.reset();
 		this.screen = 'commit';
 		this.selectedCommitHash = commitHash;
 		this.selectedParentHash = null;
-		this.loadCommitSnapshot(projectPath, commitHash, null);
+		this.loadCommitSnapshot(project, commitHash, null);
 	}
 
 	openComparison(
-		projectPath: string,
+		project: GitProjectTarget,
 		defaults: GitComparisonDialogDefaults,
 		displayOptions: GitComparisonDisplayOptions,
 	): void {
@@ -268,7 +291,7 @@ export class GitHistoryController {
 		this.commitLoading = false;
 		this.screen = 'comparison';
 		this.comparison.setSpecification(defaults, displayOptions);
-		void this.comparison.compare(projectPath);
+		void this.comparison.compare(project);
 	}
 
 	backToList(): void {
@@ -281,13 +304,13 @@ export class GitHistoryController {
 		this.documentRecoveryAttempted = false;
 	}
 
-	selectParent(projectPath: string, parentHash: string | null): void {
+	selectParent(project: GitProjectTarget, parentHash: string | null): void {
 		if (!this.selectedCommitHash || parentHash === this.selectedParentHash) return;
 		this.selectedParentHash = parentHash;
-		this.loadCommitSnapshot(projectPath, this.selectedCommitHash, parentHash);
+		this.loadCommitSnapshot(project, this.selectedCommitHash, parentHash);
 	}
 
-	focusFile(_projectPath: string, filePath: string): void {
+	focusFile(_project: GitProjectTarget, filePath: string): void {
 		this.document.focusFile(filePath);
 	}
 
@@ -308,12 +331,12 @@ export class GitHistoryController {
 		};
 	}
 
-	retryCommit(projectPath: string): void {
+	retryCommit(project: GitProjectTarget): void {
 		if (!this.selectedCommitHash) return;
-		this.loadCommitSnapshot(projectPath, this.selectedCommitHash, this.selectedParentHash);
+		this.loadCommitSnapshot(project, this.selectedCommitHash, this.selectedParentHash);
 	}
 
-	resetForProject(projectPath: string | null = null): void {
+	resetForProject(project: GitProjectTarget | null = null): void {
 		this.listAbort?.abort();
 		this.commitAbort?.abort();
 		this.listAbort = null;
@@ -322,7 +345,7 @@ export class GitHistoryController {
 		this.comparison.reset();
 		this.listGeneration += 1;
 		this.commitGeneration += 1;
-		this.loadedProjectPath = projectPath;
+		this.loadedProject = project;
 		this.listInitialized = false;
 		this.screen = 'list';
 		this.commits = [];
@@ -347,7 +370,7 @@ export class GitHistoryController {
 	}
 
 	private loadCommitSnapshot(
-		projectPath: string,
+		project: GitProjectTarget,
 		commitHash: string,
 		parentHash: string | null,
 		isDocumentRecovery = false,
@@ -360,10 +383,10 @@ export class GitHistoryController {
 		this.commitLoading = true;
 		const controller = new AbortController();
 		const generation = ++this.commitGeneration;
-		const guard = this.createGuard(projectPath, generation);
+		const guard = this.createGuard(project, generation);
 		this.commitAbort = controller;
 
-		void getGitCommitSnapshot(projectPath, commitHash, {
+		void getGitCommitSnapshot(project, commitHash, {
 			parent: parentHash,
 			context: this.contextLines,
 			bodyCandidateCount: BODY_CANDIDATE_COUNT,
@@ -393,7 +416,7 @@ export class GitHistoryController {
 							: 'the empty tree',
 					},
 					loadBodies: (_snapshot, files, purpose, signal) =>
-						getGitCommitFileBodies(projectPath, result.documentId, result.commit.hash, files, {
+						getGitCommitFileBodies(project, result.document, result.commit.hash, files, {
 							parent: result.selectedParent,
 							context: this.contextLines,
 							purpose,
@@ -408,7 +431,7 @@ export class GitHistoryController {
 							return;
 						}
 						this.documentRecoveryAttempted = true;
-						this.loadCommitSnapshot(projectPath, result.commit.hash, result.selectedParent, true);
+						this.loadCommitSnapshot(project, result.commit.hash, result.selectedParent, true);
 					},
 				});
 			})
@@ -424,10 +447,10 @@ export class GitHistoryController {
 			});
 	}
 
-	private createGuard(projectPath: string, generation: number): HistoryLoadGuard {
+	private createGuard(project: GitProjectTarget, generation: number): HistoryLoadGuard {
 		return {
 			generation,
-			projectPath,
+			project,
 			commitHash: this.selectedCommitHash,
 			parentHash: this.selectedParentHash,
 			contextLines: this.contextLines,
@@ -438,7 +461,7 @@ export class GitHistoryController {
 		return (
 			!signal?.aborted &&
 			guard.generation === this.commitGeneration &&
-			guard.projectPath === this.loadedProjectPath &&
+			sameGitProject(guard.project, this.loadedProject) &&
 			guard.commitHash === this.selectedCommitHash &&
 			guard.parentHash === this.selectedParentHash &&
 			guard.contextLines === this.contextLines
@@ -447,13 +470,13 @@ export class GitHistoryController {
 
 	private isCurrentListRequest(
 		generation: number,
-		projectPath: string,
+		project: GitProjectTarget,
 		signal: AbortSignal,
 	): boolean {
 		return (
 			!signal.aborted &&
 			generation === this.listGeneration &&
-			projectPath === this.loadedProjectPath
+			sameGitProject(project, this.loadedProject)
 		);
 	}
 }

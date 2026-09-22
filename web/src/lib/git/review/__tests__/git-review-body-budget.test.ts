@@ -19,6 +19,7 @@ const limits = {
 
 function body(path: string, rows: number, bytes: number): GitReviewFileBody {
 	return {
+		patchDigest: 'a'.repeat(64),
 		path,
 		bodyFingerprint: `fingerprint:${path}`,
 		bodyState: 'loaded',

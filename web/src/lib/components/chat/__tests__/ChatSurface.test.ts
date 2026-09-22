@@ -5,11 +5,15 @@ import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-stat
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 import * as m from '$lib/paraglide/messages.js';
 import ChatSurface from '../ChatSurface.svelte';
-import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte';
+import type { GhNodeCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 
 const { sessions, ghCapability, workspace } = vi.hoisted(() => ({
-	ghCapability: { available: true as boolean } satisfies Pick<GhCapabilityStore, 'available'>,
+	ghCapability: {
+		available: true as boolean,
+		hasChecked: true,
+		ensureChecked: vi.fn(),
+	} satisfies Pick<GhNodeCapabilityContext, 'available' | 'hasChecked' | 'ensureChecked'>,
 	workspace: { focusMobileSingleton: vi.fn(async () => {}) } satisfies Pick<
 		WorkspaceCoordinator,
 		'focusMobileSingleton'
@@ -26,14 +30,17 @@ vi.mock('$lib/context', () => ({
 	getAppShell: () => ({ requestComposerFocus: vi.fn() }),
 	getConversationPanels: () => ({ composerPanel: null }),
 	getModelCatalog: () => ({
-		forNode() { return this; },
+		forNode() {
+			return this;
+		},
 		supportsFork: () => true,
 		supportsForkWhileRunning: () => false,
 		supportsUpdateProjectPath: () => true,
 	}),
 	getOptionalTransientLayers: () => null,
 	getWorkspaceCoordinator: () => workspace,
-	getGhCapability: () => ghCapability,
+	getGhCapability: () => ({ forNode: () => ghCapability }),
+	getExecutionNodes: () => ({ gitAvailable: () => true, ghAvailable: () => true }),
 	getGitViewLauncher: () => ({
 		openHistory: vi.fn(),
 		openCompare: vi.fn(),

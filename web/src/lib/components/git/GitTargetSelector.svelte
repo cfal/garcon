@@ -4,10 +4,7 @@
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import NewBranchModal from './NewBranchModal.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
-	import {
-		getRemoteSettings,
-		getTransientLayers,
-	} from '$lib/context';
+	import { getRemoteSettings, getTransientLayers, getExecutionNodes } from '$lib/context';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -23,13 +20,20 @@
 
 	const remoteSettings = getRemoteSettings();
 	const transientLayers = getTransientLayers();
+	const nodes = getExecutionNodes();
+	const nodeLabel = $derived(nodes.label(target.nodeId));
 	const activePath = $derived(target.activeWorktreePath ?? target.activeProjectPath ?? '');
 	const displayPath = $derived(formatFrontEllipsisPath(activePath, isMobile ? 22 : 32));
 	const projectBasePath = $derived(
-		remoteSettings.snapshot?.projectBasePath ?? target.baseProjectPath ?? '/',
+		nodes.get(target.nodeId)?.projectBasePath ??
+			(target.nodeId === 'local' ? remoteSettings.snapshot?.projectBasePath : null) ??
+			target.baseProjectPath ??
+			'/',
 	);
 	const pinnedProjectPaths = $derived(
-		remoteSettings.snapshot?.paths.pinnedProjectPaths ?? [],
+		(target.nodeId === 'local'
+			? remoteSettings.snapshot?.paths.pinnedProjectPaths
+			: remoteSettings.snapshot?.paths.byNode?.[target.nodeId]?.pinnedPaths) ?? [],
 	);
 
 	function openTargetDialog(): void {
@@ -79,11 +83,11 @@
 		class="inline-flex h-8 min-w-0 max-w-48 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 		onclick={openTargetDialog}
 		disabled={disabled || !activePath}
-		aria-label={activePath || m.git_panel_select_project()}
-		title={activePath || m.git_panel_select_project()}
+		aria-label={`${nodeLabel}: ${activePath || m.git_panel_select_project()}`}
+		title={`${nodeLabel}: ${activePath || m.git_panel_select_project()}`}
 	>
 		<Folder class="h-4 w-4 shrink-0" />
-		<span class="min-w-0 truncate">{displayPath || m.git_panel_select_project()}</span>
+		<span class="min-w-0 truncate">{nodeLabel}: {displayPath || m.git_panel_select_project()}</span>
 	</button>
 	<GitBranchSelector
 		currentBranch={target.branches.currentBranch || 'HEAD'}
@@ -114,13 +118,14 @@
 
 {#if target.showTargetDialog && target.activeProjectPath}
 	<GitTargetDialog
+		nodeId={target.nodeId}
 		initialPath={target.activeProjectPath}
 		{projectBasePath}
 		{pinnedProjectPaths}
 		{isMobile}
 		onConfirm={(candidate) => void target.selectTarget(candidate)}
 		onTogglePinnedProjectPath={(path) =>
-			void togglePinnedProjectPathOptimistically(remoteSettings, path)}
+			void togglePinnedProjectPathOptimistically(remoteSettings, path, { nodeId: target.nodeId })}
 		onClose={() => (target.showTargetDialog = false)}
 	/>
 {/if}

@@ -70,7 +70,7 @@
 		if (!controller.isPresentationVisible) return;
 		const key = controller.target.effectiveProjectKey;
 		if (!key) return;
-		const version = gitProjectInvalidations.version(key);
+		const version = gitProjectInvalidations.version(controller.target.nodeId, key);
 		untrack(() => void controller.target.refreshForInvalidation(key, version));
 	});
 

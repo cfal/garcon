@@ -1,14 +1,20 @@
 export interface GitMutationRequest<T> {
+	nodeId: string;
 	surfaceId: string;
 	effectiveProjectKey: string;
 	projectPath: string;
 	execute(): Promise<T>;
-	didMutate?: (result: T) => boolean;
 }
 
 export interface GitMutationCoordinatorOptions {
-	onChanged(effectiveProjectKey: string, projectPath: string): void | Promise<void>;
-	onInvalidationError?(error: unknown, effectiveProjectKey: string, projectPath: string): void;
+	onChanged(nodeId: string, effectiveProjectKey: string, projectPath: string): void | Promise<void>;
+	onMutationError?(error: unknown, nodeId: string, projectPath: string): void;
+	onInvalidationError?(
+		error: unknown,
+		nodeId: string,
+		effectiveProjectKey: string,
+		projectPath: string,
+	): void;
 }
 
 export class GitMutationCoordinator {
@@ -23,22 +29,28 @@ export class GitMutationCoordinator {
 	async run<T>(request: GitMutationRequest<T>): Promise<T> {
 		this.#changePending(request.surfaceId, 1);
 		try {
-			const result = await request.execute();
-			const didMutate = request.didMutate?.(result) ?? result !== false;
-			if (didMutate) {
-				try {
-					await this.options.onChanged(request.effectiveProjectKey, request.projectPath);
-				} catch (error) {
-					this.options.onInvalidationError?.(
-						error,
-						request.effectiveProjectKey,
-						request.projectPath,
-					);
-				}
-			}
-			return result;
+			return await request.execute();
+		} catch (error) {
+			this.options.onMutationError?.(error, request.nodeId, request.projectPath);
+			throw error;
 		} finally {
-			this.#changePending(request.surfaceId, -1);
+			// Failed multi-command operations can still change refs or the index.
+			try {
+				await this.options.onChanged(
+					request.nodeId,
+					request.effectiveProjectKey,
+					request.projectPath,
+				);
+			} catch (error) {
+				this.options.onInvalidationError?.(
+					error,
+					request.nodeId,
+					request.effectiveProjectKey,
+					request.projectPath,
+				);
+			} finally {
+				this.#changePending(request.surfaceId, -1);
+			}
 		}
 	}
 

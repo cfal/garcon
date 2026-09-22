@@ -1,3 +1,5 @@
+import type { GitProjectTarget } from '$lib/api/git-client.js';
+import { sameGitProject } from '$lib/git/targets/git-target.js';
 import {
 	getGitWorkingTreeFingerprint,
 	getGitWorkbenchSnapshot,
@@ -26,6 +28,7 @@ import { readGarconDebugFlag } from '$lib/utils/debug-flags.js';
 
 export interface GitWorkbenchStoreOptions {
 	runMutation?: GitWorkbenchMutationRunner;
+	canMutate?: () => boolean;
 }
 
 interface WorkbenchLoadTrace {
@@ -61,7 +64,8 @@ export class GitWorkbenchStore {
 	private freshnessGeneration = 0;
 	private freshnessAbort: AbortController | null = null;
 	private localGitMutationDepth = 0;
-	private localGitMutationProjectPath: string | null = null;
+	private mutationContextGeneration = 0;
+	private localGitMutationTarget: GitProjectTarget | null = null;
 	private localGitMutationSnapshotApplied = false;
 	private documentRecoveryAttempted = false;
 	private scrollPositions = new Map<string, number>();
@@ -96,6 +100,7 @@ export class GitWorkbenchStore {
 			composerState: () => this.reviewDrafts.commentComposer,
 			surfaceError: (message) => this.surfaceError(message),
 			markExternallyStale: (reason) => this.markExternallyStale(reason),
+			invalidateSelections: () => this.lineSelection.clearSelection(),
 		});
 		this.lineSelection = new GitLineSelectionState();
 		this.stagingActions = new GitStagingActions({
@@ -108,38 +113,35 @@ export class GitWorkbenchStore {
 			setSelectedFile: (filePath) => {
 				this.treeState.selectedFile = filePath;
 			},
-			invalidateReviewData: (projectPath) => this.invalidateReviewData(projectPath),
-			refreshFileAfterStage: (projectPath, filePath) =>
-				this.refreshFileAfterStage(projectPath, filePath),
-			refreshAfterGitAction: (projectPath, options) =>
-				this.refreshAfterGitAction(projectPath, options),
+			invalidateReviewData: (project) => this.invalidateReviewData(project),
+			refreshFileAfterStage: (project, filePath) => this.refreshFileAfterStage(project, filePath),
+			refreshAfterGitAction: (project, options) => this.refreshAfterGitAction(project, options),
 			surfaceError: (message) => this.surfaceError(message),
 			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
-			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
+			isCurrentTarget: (project) => this.isCurrentTarget(project),
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.initialCommitController = new GitInitialCommitController({
-			refreshAfterGitAction: (projectPath, options) =>
-				this.refreshAfterGitAction(projectPath, options),
+			refreshAfterGitAction: (project, options) => this.refreshAfterGitAction(project, options),
 			setHasCommits: (hasCommits) => {
 				this.treeState.hasCommits = hasCommits;
 			},
 			surfaceError: (message) => this.surfaceError(message),
 			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
-			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
+			isCurrentTarget: (project) => this.isCurrentTarget(project),
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.reviewDrafts = new GitReviewDrafts();
 		this.porcelainController = new GitPorcelainState({
 			selectedFile: () => this.treeState.selectedFile,
-			refreshAfterMutation: (projectPath) =>
-				this.refreshAfterGitAction(projectPath, {
+			refreshAfterMutation: (project) =>
+				this.refreshAfterGitAction(project, {
 					reason: 'git-action',
 					preferSelectedFile: true,
 				}),
 			surfaceError: (message) => this.surfaceError(message),
 			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
-			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
+			isCurrentTarget: (project) => this.isCurrentTarget(project),
 			runGitMutation: this.runLocalGitMutation,
 		});
 
@@ -206,10 +208,7 @@ export class GitWorkbenchStore {
 	// Applies the target and owns tab coherence: a retained same-path document
 	// switching tabs runs the full tab transition so the loaded tree and review
 	// document always correspond to the active tab.
-	async setTarget(
-		nextTarget: GitWorkbenchTarget | null,
-		activeTab?: GitDiffTab,
-	): Promise<void> {
+	async setTarget(nextTarget: GitWorkbenchTarget | null, activeTab?: GitDiffTab): Promise<void> {
 		const nextKey = targetKey(nextTarget);
 		if (nextKey === this.lastTargetKey) {
 			this.target = nextTarget;
@@ -288,16 +287,29 @@ export class GitWorkbenchStore {
 		});
 	}
 
-	async checkFreshness(projectPath: string): Promise<void> {
-		if (!projectPath || !this.loadedWorkbenchFingerprint || this.isExternallyStale) return;
+	suspend(): void {
+		this.cancelScheduledRefresh();
+		this.snapshotLoadAbort?.abort();
+		this.refreshGeneration++;
+		this.treeState.isLoadingTree = false;
+		this.abortFreshnessCheck();
+		this.virtualReview.suspend();
+		this.porcelain.cancelActiveLoad();
+		this.initialCommit.reset();
+		this.lineSelection.clearSelection();
+		this.isExternallyStale = true;
+	}
+
+	async checkFreshness(project: GitProjectTarget): Promise<void> {
+		if (!project || !this.loadedWorkbenchFingerprint || this.isExternallyStale) return;
 		if (this.isReconcilingLocalGitMutation || this.refreshPromise || this.isCheckingFreshness)
 			return;
 
 		const target = this.target;
-		if (!target || target.projectPath !== projectPath) return;
+		if (!target || !sameGitProject(target, project)) return;
 
 		const requestTargetKey = targetKey(target);
-		const requestProjectPath = target.projectPath;
+		const requestProject = target;
 		const generation = ++this.freshnessGeneration;
 		this.freshnessAbort?.abort();
 		const controller = new AbortController();
@@ -305,8 +317,8 @@ export class GitWorkbenchStore {
 		this.isCheckingFreshness = true;
 
 		try {
-			const result = await getGitWorkingTreeFingerprint(projectPath, { signal: controller.signal });
-			if (!this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)) return;
+			const result = await getGitWorkingTreeFingerprint(project, { signal: controller.signal });
+			if (!this.isCurrentFreshnessLoad(requestTargetKey, requestProject, generation)) return;
 			if (this.isReconcilingLocalGitMutation) return;
 			if (result.status !== 'ready') {
 				this.freshnessError = result.status === 'unknown' ? result.message : null;
@@ -318,14 +330,14 @@ export class GitWorkbenchStore {
 		} catch (error) {
 			if (
 				isAbortError(error) ||
-				!this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)
+				!this.isCurrentFreshnessLoad(requestTargetKey, requestProject, generation)
 			) {
 				return;
 			}
 			this.freshnessError = error instanceof Error ? error.message : String(error);
 		} finally {
 			if (this.freshnessAbort === controller) this.freshnessAbort = null;
-			if (this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)) {
+			if (this.isCurrentFreshnessLoad(requestTargetKey, requestProject, generation)) {
 				this.isCheckingFreshness = false;
 			}
 		}
@@ -345,53 +357,55 @@ export class GitWorkbenchStore {
 	}
 
 	ensureFreshForGitMutation(): boolean {
-		if (!this.isExternallyStale) return true;
+		if (this.target && !this.isExternallyStale && (this.options.canMutate?.() ?? true)) return true;
 		this.surfaceError('Refresh the Git workbench before modifying changes.');
 		return false;
 	}
 
-	runLocalGitMutation: GitWorkbenchMutationRunner = async (projectPath, action) => {
-		return this.runLocalGitReconciliation(projectPath, () =>
-			this.options.runMutation?.(projectPath, action) ?? action(),
+	runLocalGitMutation: GitWorkbenchMutationRunner = async (project, action) => {
+		return this.runLocalGitReconciliation(
+			project,
+			() => this.options.runMutation?.(project, action) ?? action(),
 		);
 	};
 
 	async runLocalGitReconciliation<T>(
-		projectPath: string,
+		project: GitProjectTarget,
 		action: () => Promise<T>,
 	): Promise<T> {
-		this.beginLocalGitMutation(projectPath);
+		const generation = this.mutationContextGeneration;
+		this.beginLocalGitMutation(project);
 		try {
 			return await action();
 		} finally {
-			this.endLocalGitMutation(projectPath);
+			if (generation === this.mutationContextGeneration) this.endLocalGitMutation(project);
 		}
 	}
 
-	async openFile(projectPath: string, filePath: string): Promise<void> {
-		if (!this.isCurrentTarget(projectPath)) return;
+	async openFile(project: GitProjectTarget, filePath: string): Promise<void> {
+		if (!this.isCurrentTarget(project)) return;
 		this.treeState.selectedFile = filePath;
 		this.lineSelection.clearSelection();
-		this.virtualReview.focusFile(projectPath, filePath);
+		this.virtualReview.focusFile(project.projectPath, filePath);
 	}
 
-	async selectFile(projectPath: string, filePath: string): Promise<void> {
-		if (!this.isCurrentTarget(projectPath)) return;
+	async selectFile(project: GitProjectTarget, filePath: string): Promise<void> {
+		if (!this.isCurrentTarget(project)) return;
 		const nextTab = this.treeState.preferredTabForFile(filePath);
 		if (!nextTab) {
 			this.surfaceError(`File is not available in the current Git target: ${filePath}`);
 			return;
 		}
 		if (this.treeState.activeTab !== nextTab) this.setActiveTab(nextTab);
-		await this.openFile(projectPath, filePath);
+		await this.openFile(project, filePath);
 	}
 
 	handleReviewBodyDemand(demand: GitReviewBodyDemand): void {
 		this.virtualReview.handleBodyDemand(demand);
 	}
 
-	private invalidateReviewData(projectPath: string): void {
-		if (!this.isCurrentTarget(projectPath)) return;
+	private invalidateReviewData(project: GitProjectTarget): void {
+		if (!this.isCurrentTarget(project)) return;
 		this.virtualReview.refreshAllData();
 	}
 
@@ -404,6 +418,7 @@ export class GitWorkbenchStore {
 		this.treeState.activeTab = tab;
 		this.lineSelection.clearSelection();
 		this.reviewDrafts.closeCommentComposer();
+		this.lineSelection.clearSelection();
 		this.virtualReview.clearForDisplayChange();
 		this.selectFirstVisibleFileForActiveTab();
 		if (this.target)
@@ -424,17 +439,17 @@ export class GitWorkbenchStore {
 		this.ensureSelectedFileIsVisible();
 	}
 
-	async selectNextFile(projectPath: string): Promise<boolean> {
+	async selectNextFile(project: GitProjectTarget): Promise<boolean> {
 		const next = this.treeState.nextVisibleFile();
 		if (!next || next === this.treeState.selectedFile) return false;
-		await this.selectFile(projectPath, next);
+		await this.selectFile(project, next);
 		return true;
 	}
 
-	async selectPreviousFile(projectPath: string): Promise<boolean> {
+	async selectPreviousFile(project: GitProjectTarget): Promise<boolean> {
 		const previous = this.treeState.previousVisibleFile();
 		if (!previous || previous === this.treeState.selectedFile) return false;
-		await this.selectFile(projectPath, previous);
+		await this.selectFile(project, previous);
 		return true;
 	}
 
@@ -442,11 +457,7 @@ export class GitWorkbenchStore {
 		this.setDisplayOptions(this.virtualReview.diffMode, lines, { refresh: true });
 	}
 
-	setDisplayOptions(
-		diffMode: DiffMode,
-		contextLines: number,
-		options: { refresh: boolean },
-	): void {
+	setDisplayOptions(diffMode: DiffMode, contextLines: number, options: { refresh: boolean }): void {
 		const normalizedContext = Math.max(0, Math.round(contextLines));
 		const contextChanged = normalizedContext !== this.virtualReview.contextLines;
 		this.virtualReview.diffMode = diffMode;
@@ -478,7 +489,7 @@ export class GitWorkbenchStore {
 
 	private async refreshNow(options: GitWorkbenchRefreshOptions): Promise<void> {
 		const target = this.target;
-		if (!target) return;
+		if (!target || !(this.options.canMutate?.() ?? true)) return;
 		const effective: Required<GitWorkbenchRefreshOptions> = {
 			...DEFAULT_REFRESH_OPTIONS,
 			...options,
@@ -501,16 +512,11 @@ export class GitWorkbenchStore {
 
 		try {
 			const snapshotStartedAt = performance.now();
-			const snapshot = await getGitWorkbenchSnapshot(
-				target.projectPath,
-				requestTab,
-				requestContext,
-				{
-					signal: controller.signal,
-					selectedFile: effective.preferSelectedFile ? previousSelectedFile : null,
-					bodyCandidateCount: 8,
-				},
-			);
+			const snapshot = await getGitWorkbenchSnapshot(target, requestTab, requestContext, {
+				signal: controller.signal,
+				selectedFile: effective.preferSelectedFile ? previousSelectedFile : null,
+				bodyCandidateCount: 8,
+			});
 			trace.snapshotMs = elapsedMs(snapshotStartedAt);
 			if (!this.isCurrentSnapshotLoad(target, generation, requestTab, requestContext)) {
 				trace.firstRenderableMs = elapsedMs(loadStartedAt);
@@ -576,7 +582,7 @@ export class GitWorkbenchStore {
 
 		const paths = new Set(this.treeState.filePaths);
 		this.virtualReview.pruneToFilePaths(paths);
-		this.lineSelection.pruneToFilePaths(paths);
+		this.lineSelection.clearSelection();
 
 		const visible = this.treeState.visibleFilePaths;
 		const selectedFromSnapshot =
@@ -608,33 +614,33 @@ export class GitWorkbenchStore {
 			this.virtualReview.requestInitialBodies(target.projectPath, bodyCandidates);
 	}
 
-	private async refreshFileAfterStage(projectPath: string, filePath: string): Promise<void> {
-		if (!this.isCurrentTarget(projectPath)) return;
+	private async refreshFileAfterStage(project: GitProjectTarget, filePath: string): Promise<void> {
+		if (!this.isCurrentTarget(project)) return;
 		this.virtualReview.invalidateFile(filePath);
-		await this.refreshAfterGitAction(projectPath, {
+		await this.refreshAfterGitAction(project, {
 			reason: 'git-action',
 			preferSelectedFile: true,
 		});
-		if (!this.isCurrentTarget(projectPath)) return;
+		if (!this.isCurrentTarget(project)) return;
 		const visibleFilePaths = this.treeState.visibleFilePaths;
 		if (this.treeState.selectedFile === filePath && !visibleFilePaths.includes(filePath)) {
 			this.treeState.selectedFile = visibleFilePaths[0] ?? null;
 			return;
 		}
 		if (this.treeState.selectedFile === filePath && this.treeState.hasFile(filePath)) {
-			this.virtualReview.focusFile(projectPath, filePath);
+			this.virtualReview.focusFile(project.projectPath, filePath);
 		}
 	}
 
 	private async refreshAfterGitAction(
-		projectPath: string,
+		project: GitProjectTarget,
 		options: GitWorkbenchRefreshOptions,
 	): Promise<void> {
-		if (this.isCurrentTarget(projectPath)) await this.refresh(options);
+		if (this.isCurrentTarget(project)) await this.refresh(options);
 	}
 
-	private isCurrentTarget(projectPath: string): boolean {
-		return this.target?.projectPath === projectPath;
+	private isCurrentTarget(project: GitProjectTarget): boolean {
+		return sameGitProject(this.target, project);
 	}
 
 	private findTreeNode(filePath: string): GitTreeNode | undefined {
@@ -663,12 +669,12 @@ export class GitWorkbenchStore {
 
 	private isCurrentFreshnessLoad(
 		requestTargetKey: string,
-		projectPath: string,
+		project: GitProjectTarget,
 		generation: number,
 	): boolean {
 		if (generation !== this.freshnessGeneration) return false;
 		if (targetKey(this.target) !== requestTargetKey) return false;
-		return this.target?.projectPath === projectPath;
+		return sameGitProject(this.target, project);
 	}
 
 	private selectFirstVisibleFileForActiveTab(): void {
@@ -690,6 +696,7 @@ export class GitWorkbenchStore {
 	}
 
 	private resetForTargetChange(): void {
+		this.mutationContextGeneration++;
 		this.cancelScheduledRefresh();
 		this.clearLocalGitMutationState();
 		this.clearFreshnessState();
@@ -732,9 +739,9 @@ export class GitWorkbenchStore {
 		this.freshnessError = null;
 	}
 
-	private beginLocalGitMutation(projectPath: string): void {
+	private beginLocalGitMutation(project: GitProjectTarget): void {
 		if (this.localGitMutationDepth === 0) {
-			this.localGitMutationProjectPath = projectPath;
+			this.localGitMutationTarget = project;
 			this.localGitMutationSnapshotApplied = false;
 			this.isReconcilingLocalGitMutation = true;
 			this.abortFreshnessCheck();
@@ -742,20 +749,20 @@ export class GitWorkbenchStore {
 		this.localGitMutationDepth += 1;
 	}
 
-	private endLocalGitMutation(projectPath: string): void {
+	private endLocalGitMutation(project: GitProjectTarget): void {
 		if (this.localGitMutationDepth === 0) return;
 		this.localGitMutationDepth -= 1;
 		if (this.localGitMutationDepth > 0) return;
 
 		const hadSnapshot = this.localGitMutationSnapshotApplied;
-		const mutationProjectPath = this.localGitMutationProjectPath ?? projectPath;
+		const mutationProjectPath = this.localGitMutationTarget ?? project;
 		this.clearLocalGitMutationState();
 
 		if (
 			!hadSnapshot &&
 			!this.isExternallyStale &&
 			this.loadedWorkbenchFingerprint !== null &&
-			this.target?.projectPath === mutationProjectPath
+			sameGitProject(this.target, mutationProjectPath)
 		) {
 			void this.checkFreshness(mutationProjectPath);
 		}
@@ -763,7 +770,7 @@ export class GitWorkbenchStore {
 
 	private clearLocalGitMutationState(): void {
 		this.localGitMutationDepth = 0;
-		this.localGitMutationProjectPath = null;
+		this.localGitMutationTarget = null;
 		this.localGitMutationSnapshotApplied = false;
 		this.isReconcilingLocalGitMutation = false;
 	}

@@ -28,12 +28,15 @@ function expectRefRequest(
 	query: string,
 	sort: { key: 'name' | 'updated'; direction: 'asc' | 'desc' },
 ): void {
-	expect(getGitRefs).toHaveBeenLastCalledWith(projectPath, {
-		query,
-		limit: 200,
-		sort,
-		signal: expect.any(AbortSignal),
-	});
+	expect(getGitRefs).toHaveBeenLastCalledWith(
+		expect.objectContaining({ nodeId: 'local', projectPath }),
+		{
+			query,
+			limit: 200,
+			sort,
+			signal: expect.any(AbortSignal),
+		},
+	);
 }
 
 function requestSignal(index: number): AbortSignal {
@@ -335,9 +338,13 @@ describe('GitBranchSelectorState', () => {
 		);
 
 		expect(ok).toBe(true);
-		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature', 'local-branch');
+		expect(gitCheckoutRef).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			'refs/heads/feature',
+			'local-branch',
+		);
 		expectRefRequest('/project', '', UPDATED_DESC);
-		expect(onMutation).toHaveBeenCalledWith('/project', 'switch', '/project');
+		expect(onMutation).toHaveBeenCalledWith('local', '/project', 'switch', '/project');
 		expect(branchSelector.currentBranch).toBe('feature');
 		expect(branchSelector.showBranchDropdown).toBe(false);
 	});
@@ -394,7 +401,7 @@ describe('GitBranchSelectorState', () => {
 
 		expect(ok).toBe(true);
 		expect(gitCheckoutRef).toHaveBeenCalledWith(
-			'/project',
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
 			'refs/remotes/origin/main',
 			'remote-branch',
 		);
@@ -425,11 +432,15 @@ describe('GitBranchSelectorState', () => {
 		const ok = await branchSelector.createBranch();
 
 		expect(ok).toBe(true);
-		expect(gitCreateBranch).toHaveBeenCalledWith('/project', 'feature/new-ui', {
-			baseRef: 'refs/remotes/origin/main',
-		});
+		expect(gitCreateBranch).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			'feature/new-ui',
+			{
+				baseRef: 'refs/remotes/origin/main',
+			},
+		);
 		expectRefRequest('/project', '', UPDATED_DESC);
-		expect(onMutation).toHaveBeenCalledWith('/project', 'create', '/project');
+		expect(onMutation).toHaveBeenCalledWith('local', '/project', 'create', '/project');
 		expect(branchSelector.currentBranch).toBe('feature/new-ui');
 		expect(branchSelector.showNewBranchModal).toBe(false);
 		expect(branchSelector.newBranchName).toBe('');
@@ -444,6 +455,7 @@ describe('GitBranchSelectorState', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
+				_nodeId: string,
 				_projectPath: string,
 				_effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean; error?: string }>,
@@ -464,17 +476,25 @@ describe('GitBranchSelectorState', () => {
 		resolveCreate({ success: true });
 		await expect(pendingCreate).resolves.toBe(true);
 
-		expect(getGitRefs).toHaveBeenCalledWith('/project/worktrees/feature', {
-			query: 'origin',
-			limit: 200,
-			sort: NAME_ASC,
-			signal: expect.any(AbortSignal),
-		});
-		expect(gitCreateBranch).toHaveBeenCalledWith('/project/worktrees/feature', 'captured-target', {
-			baseRef: undefined,
-		});
+		expect(getGitRefs).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project/worktrees/feature' }),
+			{
+				query: 'origin',
+				limit: 200,
+				sort: NAME_ASC,
+				signal: expect.any(AbortSignal),
+			},
+		);
+		expect(gitCreateBranch).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project/worktrees/feature' }),
+			'captured-target',
+			{
+				baseRef: undefined,
+			},
+		);
 		expect(runMutation).toHaveBeenCalledWith(
 			'singleton:git',
+			'local',
 			'/project/worktrees/feature',
 			'/canonical/project',
 			expect.any(Function),
@@ -505,18 +525,22 @@ describe('GitBranchSelectorState', () => {
 		await expect(pending).resolves.toBe(true);
 		expect(branchSelector.currentProjectPath).toBe('/worktree-b');
 		expect(branchSelector.currentBranch).toBe('develop');
-		expect(getGitRefs).not.toHaveBeenCalledWith('/worktree-a', {
-			query: '',
-			limit: 200,
-			sort: NAME_ASC,
-			signal: expect.any(AbortSignal),
-		});
+		expect(getGitRefs).not.toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/worktree-a' }),
+			{
+				query: '',
+				limit: 200,
+				sort: NAME_ASC,
+				signal: expect.any(AbortSignal),
+			},
+		);
 	});
 
 	it('uses the invoking effective key after another surface retargets shared branch state', async () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
+				_nodeId: string,
 				_projectPath: string,
 				_effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean; error?: string }>,
@@ -536,6 +560,7 @@ describe('GitBranchSelectorState', () => {
 
 		expect(runMutation).toHaveBeenCalledWith(
 			'chat-view:window-main',
+			'local',
 			'/project-a',
 			'/canonical/a',
 			expect.any(Function),

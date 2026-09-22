@@ -28,7 +28,7 @@
 	import { installCompletionSoundUnlockListeners } from '$lib/notifications/completion-sound.js';
 	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
-	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+	import { createGhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
 	import {
@@ -133,7 +133,7 @@
 		const nodes = executionNodes.nodes;
 		if (executionNodes.hasSnapshot) untrack(() => modelCatalog.reconcileNodes(nodes));
 	});
-	const ghCapability = createGhCapabilityStore();
+	const ghCapability = createGhCapabilityStore(executionNodes);
 	const workspaceServices = createWorkspaceServices({
 		executionNodes,
 		appShell,
@@ -415,9 +415,7 @@
 	// Checks host GitHub CLI readiness once after app authentication.
 	$effect(() => {
 		if (!auth.isAuthenticated) return;
-		untrack(() => {
-			void ghCapability.ensureChecked();
-		});
+		untrack(() => {});
 	});
 
 	// Keeps root-global remote values synchronized after both HTTP refreshes
@@ -440,6 +438,7 @@
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		executionNodesRouter.destroy();
+		ghCapability.destroy();
 		chatBoardsRouter.destroy();
 		ticketsRouter.destroy();
 		localSettings.destroy();

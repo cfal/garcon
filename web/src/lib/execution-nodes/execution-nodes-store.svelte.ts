@@ -54,6 +54,27 @@ export class ExecutionNodesStore {
 		return this.isReady(id) && this.get(id)?.machineServices.files === true;
 	}
 
+	gitAvailable(id?: string | null): boolean {
+		return this.isReady(id) && this.get(id)?.machineServices.git === true;
+	}
+
+	ghAvailable(id?: string | null): boolean {
+		return this.gitAvailable(id) && this.get(id)?.machineServices.gh === true;
+	}
+
+	gitContextKey(id?: string | null): string {
+		const node = this.get(id);
+		return JSON.stringify([
+			effectiveNodeId(id),
+			node?.instanceId,
+			node?.projectBasePath,
+			node?.enabled,
+			node?.availability,
+			node?.machineServices.git,
+			node?.machineServices.gh,
+		]);
+	}
+
 	pathContextKey(id?: string | null): string {
 		const node = this.get(id);
 		return JSON.stringify([

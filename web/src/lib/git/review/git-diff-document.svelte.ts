@@ -648,7 +648,12 @@ export class GitDiffDocumentController {
 	}
 
 	private cacheKey(file: GitCommitFileSummary): string {
-		return `${this.contextLines}|${file.bodyFingerprint}|${file.path}`;
+		return JSON.stringify([
+			this.snapshot?.documentId,
+			this.contextLines,
+			file.bodyFingerprint,
+			file.path,
+		]);
 	}
 
 	private cacheBody(file: GitCommitFileSummary, body: GitReviewFileBody, byteLimit: number): void {

@@ -87,6 +87,7 @@ function source(
 ) {
 	const baseSource = buildGitVirtualReviewRowSource({
 		summary: {
+			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'pull-request:1' },
 			documentId: 'pull-request:1',
 			project: '',
 			context: 3,
@@ -125,6 +126,7 @@ describe('pull request virtual row source', () => {
 		const reviewBody = body(reviewFile.path);
 		const base = buildGitVirtualReviewRowSource({
 			summary: {
+				document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'pull-request:1' },
 				documentId: 'pull-request:1',
 				project: '',
 				context: 3,
@@ -168,11 +170,9 @@ describe('pull request virtual row source', () => {
 	it('inserts a thread after its matching diff line', () => {
 		const reviewFile = file('src/app.ts');
 		const reviewBody = body(reviewFile.path);
-		const rowSource = source(
-			[reviewFile],
-			{ [reviewFile.path]: reviewBody },
-			[thread(reviewFile.path, 2)],
-		);
+		const rowSource = source([reviewFile], { [reviewFile.path]: reviewBody }, [
+			thread(reviewFile.path, 2),
+		]);
 
 		expect(rowSource.rowAt(4)).toMatchObject({
 			kind: 'unified-row',
@@ -200,11 +200,10 @@ describe('pull request virtual row source', () => {
 	it('places unmatched threads at file end and labels only the first one', () => {
 		const reviewFile = file('src/app.ts');
 		const reviewBody = body(reviewFile.path);
-		const rowSource = source(
-			[reviewFile],
-			{ [reviewFile.path]: reviewBody },
-			[thread(reviewFile.path, 98, 'orphan-1'), thread(reviewFile.path, 99, 'orphan-2')],
-		);
+		const rowSource = source([reviewFile], { [reviewFile.path]: reviewBody }, [
+			thread(reviewFile.path, 98, 'orphan-1'),
+			thread(reviewFile.path, 99, 'orphan-2'),
+		]);
 
 		expect(rowSource.rowsInRange(5, 7)).toMatchObject([
 			{ kind: 'review-thread', threadId: 'orphan-1', showUnanchoredLabel: true },
@@ -219,11 +218,7 @@ describe('pull request virtual row source', () => {
 			[first.path]: body(first.path),
 			[second.path]: body(second.path),
 		};
-		const visible = source(
-			[first, second],
-			fileBodies,
-			[thread(first.path, 2)],
-		);
+		const visible = source([first, second], fileBodies, [thread(first.path, 2)]);
 		const collapsed = source(
 			[first],
 			{ [first.path]: fileBodies[first.path] },

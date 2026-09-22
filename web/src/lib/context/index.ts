@@ -26,7 +26,7 @@ import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-stor
 import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
 import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
-import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
+import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { ChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';

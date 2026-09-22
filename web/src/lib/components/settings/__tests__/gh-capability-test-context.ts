@@ -1,10 +1,13 @@
-import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
+import type {
+	GhCapabilityContext,
+	GhNodeCapabilityContext,
+} from '$lib/git/pull-requests/gh-capability.svelte';
 
-let ghCapability: GhCapabilityContext | null = null;
+let ghCapability: GhNodeCapabilityContext | null = null;
 
 export function makeTestGhCapability(
-	overrides: Partial<GhCapabilityContext> = {},
-): GhCapabilityContext {
+	overrides: Partial<GhNodeCapabilityContext> = {},
+): GhNodeCapabilityContext {
 	return {
 		available: true,
 		authenticated: true,
@@ -20,11 +23,11 @@ export function makeTestGhCapability(
 	};
 }
 
-export function setTestGhCapability(capability: GhCapabilityContext): void {
+export function setTestGhCapability(capability: GhNodeCapabilityContext): void {
 	ghCapability = capability;
 }
 
 export function getTestGhCapability(): GhCapabilityContext {
-	if (!ghCapability) return makeTestGhCapability();
-	return ghCapability;
+	const capability = ghCapability ?? makeTestGhCapability();
+	return { forNode: () => capability };
 }

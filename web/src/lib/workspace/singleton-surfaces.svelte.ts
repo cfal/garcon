@@ -9,8 +9,8 @@ import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-
 import { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
 import { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 import type { GitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
-import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
-import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
+import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
 import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
 import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
@@ -44,7 +44,9 @@ export class FilesSurfaceController implements PortableSingletonController {
 		relativePath: string;
 	} | null>(null);
 
-	constructor(private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'pathContextKey'>) {
+	constructor(
+		private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'pathContextKey'>,
+	) {
 		let previous: { nodeId: string; key: string } | null = null;
 		$effect(() => {
 			const nodeId = this.tree.nodeId;
@@ -165,9 +167,10 @@ export class SingletonSurfaceRegistry {
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
 	#filesProjectState: WorkspaceProjectState = { kind: 'absent' };
 	#pullRequestsCapability: {
+		nodeId: string;
 		hasChecked: boolean;
 		available: boolean;
-	} = { hasChecked: false, available: false };
+	} = { nodeId: 'local', hasChecked: false, available: false };
 	#visible: Record<PortableSingletonKind, boolean> = {
 		git: false,
 		'git-history': false,
@@ -207,6 +210,7 @@ export class SingletonSurfaceRegistry {
 			'pull-requests': () => {
 				const controller = this.deps.createPullRequests();
 				controller.setCapability(
+					this.#pullRequestsCapability.nodeId,
 					this.#pullRequestsCapability.hasChecked,
 					this.#pullRequestsCapability.available,
 				);
@@ -282,11 +286,27 @@ export class SingletonSurfaceRegistry {
 		}
 	}
 
-	setPullRequestsCapability(hasChecked: boolean, available: boolean): void {
-		this.#pullRequestsCapability = { hasChecked, available };
+	setPullRequestsCapability(nodeId: string, hasChecked: boolean, available: boolean): void {
+		this.#pullRequestsCapability = { nodeId, hasChecked, available };
 		const controller = this.#controllers.get('pull-requests')?.controller as
 			PullRequestsStore | undefined;
-		controller?.setCapability(hasChecked, available);
+		controller?.setCapability(nodeId, hasChecked, available);
+	}
+
+	pruneGitNodes(nodeIds: ReadonlySet<string>): void {
+		for (const { controller } of this.#controllers.values()) {
+			if (
+				controller instanceof GitWorkbenchSurfaceController ||
+				controller instanceof CommitController ||
+				controller instanceof PullRequestsStore
+			)
+				controller.pruneNodes(nodeIds);
+			else if (
+				controller instanceof GitHistorySurfaceController ||
+				controller instanceof GitCompareSurfaceController
+			)
+				controller.target.pruneNodes(nodeIds);
+		}
 	}
 
 	setPresentationVisible(kind: PortableSingletonKind, visible: boolean): void {

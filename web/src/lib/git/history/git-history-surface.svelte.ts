@@ -5,10 +5,7 @@ import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.sve
 import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
 import { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
-import {
-	GitHistoryController,
-	type GitHistoryRevertTarget,
-} from './git-history.svelte.js';
+import { GitHistoryController, type GitHistoryRevertTarget } from './git-history.svelte.js';
 import { GitHistoryComparisonSelectionState } from './git-history-comparison-selection.svelte.js';
 
 export class GitHistorySurfaceController implements PortableSingletonController {
@@ -27,48 +24,45 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 			kind: 'git-history',
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
+			onUnavailable: () => this.history.suspend(),
 			canChangeTarget: () =>
 				!this.isRevertingCommit &&
 				deps.gitMutations.pendingCount(singletonSurfaceId('git-history')) === 0,
 			onTargetChanged: (target, _identity, reason, identityChanged) => {
+				if (reason === 'session' && !identityChanged && target) {
+					this.history.refreshSession(target);
+					return;
+				}
 				if (reason === 'invalidation' && !identityChanged) {
 					if (target && this.presentationVisible) {
-						this.history.loadInitial(target.projectPath);
+						this.history.loadInitial(target);
 					}
 					return;
 				}
 				this.comparisonSelection.cancel();
 				this.pendingRevertCommit = null;
 				this.lastError = null;
-				this.history.resetForProject(target?.projectPath ?? null);
+				this.history.resetForProject(target);
 				if (target && this.presentationVisible) {
 					this.deps.reviewDisplay.reconcile(singletonSurfaceId('git-history'));
-					this.history.loadInitial(target.projectPath);
+					this.history.loadInitial(target);
 				}
 			},
 		});
-		this.#unregisterReviewDisplay = deps.reviewDisplay.register(
-			singletonSurfaceId('git-history'),
-			{
-				isVisible: () => this.presentationVisible,
-				hasOpenCommentComposer: () => this.history.activeDocument.commentComposer.open,
-				markContextChangeBlocked: () =>
-					this.history.activeDocument.markContextChangeBlocked(),
-				apply: (diffMode, contextLines) =>
-					this.history.setDisplayOptions(
-						this.target.activeProjectPath,
-						diffMode,
-						contextLines,
-					),
-			},
-		);
+		this.#unregisterReviewDisplay = deps.reviewDisplay.register(singletonSurfaceId('git-history'), {
+			isVisible: () => this.presentationVisible,
+			hasOpenCommentComposer: () => this.history.activeDocument.commentComposer.open,
+			markContextChangeBlocked: () => this.history.activeDocument.markContextChangeBlocked(),
+			apply: (diffMode, contextLines) =>
+				this.history.setDisplayOptions(this.target.requestTarget, diffMode, contextLines),
+		});
 	}
 
 	openSelectedComparison(): boolean {
-		const projectPath = this.target.activeProjectPath;
+		const project = this.target.requestTarget;
 		const comparison = this.comparisonSelection.comparison();
-		if (!projectPath || !comparison) return false;
-		this.history.openComparison(projectPath, comparison, {
+		if (!project || !comparison) return false;
+		this.history.openComparison(project, comparison, {
 			diffMode: this.deps.reviewDisplay.diffMode,
 			contextLines: this.deps.reviewDisplay.contextLines,
 		});
@@ -86,9 +80,9 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 			this.history.pauseListLoading();
 			return;
 		}
-		const projectPath = this.target.activeProjectPath;
-		if (projectPath && this.target.appliedIdentity) {
-			this.history.ensureInitialLoaded(projectPath);
+		const project = this.target.requestTarget;
+		if (project && this.target.appliedIdentity) {
+			this.history.ensureInitialLoaded(project);
 		}
 		if (this.target.appliedIdentity === this.target.identity) {
 			this.deps.reviewDisplay.reconcile(singletonSurfaceId('git-history'));
@@ -101,9 +95,15 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 
 	async revertPendingCommit(): Promise<boolean> {
 		const target = this.pendingRevertCommit;
-		const projectPath = this.target.activeProjectPath;
+		const project = this.target.requestTarget;
 		const effectiveProjectKey = this.target.effectiveProjectKey;
-		if (!target || !projectPath || !effectiveProjectKey || this.isRevertingCommit) {
+		if (
+			!target ||
+			!project ||
+			!effectiveProjectKey ||
+			this.isRevertingCommit ||
+			!this.target.canChangeTarget
+		) {
 			return false;
 		}
 		const identity = this.target.identity;
@@ -112,9 +112,9 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 			const result = await this.deps.gitMutations.run({
 				surfaceId: singletonSurfaceId('git-history'),
 				effectiveProjectKey,
-				projectPath,
-				execute: () => gitRevertCommit(projectPath, target.hash),
-				didMutate: (response) => response.success,
+				nodeId: project.nodeId,
+				projectPath: project.projectPath,
+				execute: () => gitRevertCommit(project, target.hash),
 			});
 			if (identity !== this.target.identity) return false;
 			if (!result.success) {

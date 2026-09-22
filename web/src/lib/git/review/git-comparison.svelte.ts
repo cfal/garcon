@@ -1,3 +1,5 @@
+import type { GitProjectTarget } from '$lib/api/git-client.js';
+import { sameGitProject } from '$lib/git/targets/git-target.js';
 import {
 	getGitComparisonFreshness,
 	getGitComparisonFileBodies,
@@ -80,8 +82,20 @@ export class GitComparisonController {
 	private diffMode: DiffMode = 'unified';
 	private contextLines = 5;
 	private loadedContextLines = 5;
-	private activeProjectPath: string | null = null;
+	private activeProject: GitProjectTarget | null = null;
 	private documentRecoveryAttempted = false;
+
+	suspend(): void {
+		this.snapshotAbort?.abort();
+		this.generation++;
+		this.isLoading = false;
+		this.document.markStale();
+	}
+
+	refreshSession(project: GitProjectTarget): void {
+		this.suspend();
+		if (!this.document.commentComposer.open && !this.dialogOpen) void this.refresh(project);
+	}
 
 	openDialog(
 		defaults: GitComparisonDialogDefaults,
@@ -149,7 +163,7 @@ export class GitComparisonController {
 		this.toRevision = from;
 	}
 
-	setDisplayOptions(projectPath: string, diffMode: DiffMode, contextLines: number): void {
+	setDisplayOptions(project: GitProjectTarget, diffMode: DiffMode, contextLines: number): void {
 		const contextChanged = this.contextLines !== contextLines;
 		if (contextChanged && this.document.commentComposer.open) {
 			this.document.markContextChangeBlocked();
@@ -163,7 +177,7 @@ export class GitComparisonController {
 		);
 		if (!contextChanged) return;
 		if (this.isLoading) {
-			void this.compare(projectPath);
+			void this.compare(project);
 			return;
 		}
 		if (!this.snapshot) return;
@@ -177,10 +191,10 @@ export class GitComparisonController {
 			}
 			return;
 		}
-		void this.refresh(projectPath);
+		void this.refresh(project);
 	}
 
-	async compare(projectPath: string, isDocumentRecovery = false): Promise<boolean> {
+	async compare(project: GitProjectTarget, isDocumentRecovery = false): Promise<boolean> {
 		if (!isDocumentRecovery) this.documentRecoveryAttempted = false;
 		this.clearError();
 		const fromRevision = this.fromRevision.trim();
@@ -193,7 +207,7 @@ export class GitComparisonController {
 		this.snapshotAbort?.abort();
 		const controller = new AbortController();
 		const generation = ++this.generation;
-		this.activeProjectPath = projectPath;
+		this.activeProject = project;
 		this.snapshotAbort = controller;
 		this.isLoading = true;
 		const to =
@@ -205,13 +219,13 @@ export class GitComparisonController {
 
 		try {
 			const result = await getGitComparisonSnapshot(
-				projectPath,
+				project,
 				{ kind: 'revision', revision: fromRevision },
 				to,
 				mode,
 				{ context: requestContextLines, bodyCandidateCount: 8, signal: controller.signal },
 			);
-			if (!this.isCurrent(generation, projectPath, controller.signal)) return false;
+			if (!this.isCurrent(generation, project, controller.signal)) return false;
 			if (result.status !== 'ready') {
 				this.error = result.message;
 				this.errorStatus = result.status;
@@ -239,8 +253,8 @@ export class GitComparisonController {
 				},
 				loadBodies: (_snapshot, files, purpose, signal) =>
 					getGitComparisonFileBodies(
-						projectPath,
-						result.documentId,
+						project,
+						result.document,
 						result.effectiveFromHash,
 						result.to.kind === 'revision'
 							? { kind: 'revision', hash: result.to.hash }
@@ -263,12 +277,12 @@ export class GitComparisonController {
 						return;
 					}
 					this.documentRecoveryAttempted = true;
-					void this.refresh(projectPath, true);
+					void this.refresh(project, true);
 				},
 			});
 			return true;
 		} catch (error) {
-			if (isAbortError(error) || !this.isCurrent(generation, projectPath, controller.signal)) {
+			if (isAbortError(error) || !this.isCurrent(generation, project, controller.signal)) {
 				return false;
 			}
 			this.error = error instanceof Error ? error.message : String(error);
@@ -276,21 +290,21 @@ export class GitComparisonController {
 			this.errorEndpoint = null;
 			return false;
 		} finally {
-			if (this.isCurrent(generation, projectPath, controller.signal)) {
+			if (this.isCurrent(generation, project, controller.signal)) {
 				this.isLoading = false;
 				this.snapshotAbort = null;
 			}
 		}
 	}
 
-	async refresh(projectPath: string, isDocumentRecovery = false): Promise<void> {
+	async refresh(project: GitProjectTarget, isDocumentRecovery = false): Promise<void> {
 		this.restoreInputsFromSnapshot();
-		await this.compare(projectPath, isDocumentRecovery);
+		await this.compare(project, isDocumentRecovery);
 	}
 
-	async checkFreshness(projectPath: string): Promise<void> {
+	async checkFreshness(project: GitProjectTarget): Promise<void> {
 		const snapshot = this.snapshot;
-		if (!snapshot || this.activeProjectPath !== projectPath || this.document.isStale) return;
+		if (!snapshot || !sameGitProject(this.activeProject, project) || this.document.isStale) return;
 		if (
 			snapshot.to.kind === 'revision' &&
 			snapshot.from.requestedRevision === snapshot.from.hash &&
@@ -299,7 +313,7 @@ export class GitComparisonController {
 			return;
 		try {
 			const result = await getGitComparisonFreshness(
-				snapshot.repoRoot,
+				{ nodeId: project.nodeId, projectPath: snapshot.repoRoot },
 				{
 					kind: 'revision',
 					revision: snapshot.from.requestedRevision,
@@ -349,7 +363,7 @@ export class GitComparisonController {
 		this.snapshotAbort?.abort();
 		this.snapshotAbort = null;
 		this.generation += 1;
-		this.activeProjectPath = null;
+		this.activeProject = null;
 		this.dialogOpen = false;
 		this.snapshot = null;
 		this.isLoading = false;
@@ -368,9 +382,11 @@ export class GitComparisonController {
 		if (!this.dialogOpen) this.clearError();
 	}
 
-	private isCurrent(generation: number, projectPath: string, signal: AbortSignal): boolean {
+	private isCurrent(generation: number, project: GitProjectTarget, signal: AbortSignal): boolean {
 		return (
-			!signal.aborted && generation === this.generation && this.activeProjectPath === projectPath
+			!signal.aborted &&
+			generation === this.generation &&
+			sameGitProject(this.activeProject, project)
 		);
 	}
 

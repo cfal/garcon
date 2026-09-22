@@ -35,6 +35,7 @@
 </script>
 
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		getChatSessions,
 		getTicketSourceNavigation,
@@ -42,6 +43,7 @@
 		getRemoteSettings,
 		getFileSessions,
 		getGhCapability,
+		getExecutionNodes,
 		getSingletonSurfaces,
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
@@ -77,7 +79,22 @@
 	setSurfaceFrameBridge(() => frameBridge);
 	const workspace = getWorkspaceCoordinator();
 	const workspaceContext = getWorkspaceContext();
-	const ghCapability = getGhCapability();
+	const ghCapabilities = getGhCapability();
+	const nodes = getExecutionNodes();
+	const ghCapability = $derived(
+		ghCapabilities.forNode(workspaceContext.currentTarget?.nodeId ?? 'local'),
+	);
+	$effect(() => {
+		if (
+			!visible ||
+			surface.type !== 'singleton' ||
+			surface.kind !== 'pull-requests' ||
+			!nodes.ghAvailable(workspaceContext.currentTarget?.nodeId) ||
+			ghCapability.hasChecked
+		)
+			return;
+		untrack(() => void ghCapability.ensureChecked());
+	});
 	const singletonSurfaces = getSingletonSurfaces();
 	const files = getFileSessions();
 	const sessions = getChatSessions();
@@ -158,7 +175,10 @@
 			{projectState}
 			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
-			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			retainedNodeId={controller.target.nodeId}
+			retainedEffectiveProjectKey={controller.target.appliedIdentity === controller.target.identity
+				? controller.target.effectiveProjectKey
+				: null}
 			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await gitWorkbenchRenderer() then GitWorkbenchPanel}
@@ -171,7 +191,10 @@
 			{projectState}
 			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
-			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			retainedNodeId={controller.target.nodeId}
+			retainedEffectiveProjectKey={controller.target.appliedIdentity === controller.target.identity
+				? controller.target.effectiveProjectKey
+				: null}
 			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await gitHistoryRenderer() then GitHistoryPanel}
@@ -184,7 +207,10 @@
 			{projectState}
 			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
-			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			retainedNodeId={controller.target.nodeId}
+			retainedEffectiveProjectKey={controller.target.appliedIdentity === controller.target.identity
+				? controller.target.effectiveProjectKey
+				: null}
 			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await gitCompareRenderer() then GitComparePanel}
@@ -197,6 +223,7 @@
 			{projectState}
 			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.projectPath}
+			retainedNodeId={controller.nodeId}
 			retainedEffectiveProjectKey={controller.effectiveProjectKey}
 			onChooseFolder={onChooseProjectFolder}
 		>
@@ -216,7 +243,10 @@
 			{projectState}
 			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
-			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			retainedNodeId={controller.target.nodeId}
+			retainedEffectiveProjectKey={controller.target.appliedIdentity === controller.target.identity
+				? controller.target.effectiveProjectKey
+				: null}
 			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await commitRenderer() then CommitSurface}

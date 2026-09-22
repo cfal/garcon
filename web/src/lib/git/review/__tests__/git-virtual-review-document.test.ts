@@ -24,6 +24,7 @@ function buildVirtualRows(options: Parameters<typeof buildGitVirtualReviewRowSou
 
 function makeSummary(files: GitReviewFileSummary[], documentId = 'doc'): GitReviewDocumentSummary {
 	return {
+		document: { nodeId: 'local', instanceId: 'test-instance', documentId },
 		documentId,
 		project: '/project',
 		mode: 'working',
@@ -64,6 +65,7 @@ function makeFile(path: string, patch: Partial<GitReviewFileSummary> = {}): GitR
 function makeBody(path: string): GitReviewFileBody {
 	const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+new line\n`;
 	return {
+		patchDigest: 'a'.repeat(64),
 		path,
 		bodyFingerprint: `fingerprint:${path}`,
 		bodyState: 'loaded',
@@ -143,6 +145,7 @@ function documentDeps(visibleFilePaths: () => string[]): GitVirtualReviewDocumen
 		}),
 		surfaceError: vi.fn(),
 		markExternallyStale: vi.fn(),
+		invalidateSelections: vi.fn(),
 	};
 }
 
@@ -292,6 +295,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			syntax,
 		);
 		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
+		controller.summary = summary;
 		controller.fileBodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
 		controller.applySummary(summary);
 
@@ -314,6 +318,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		const controller = new GitVirtualReviewDocumentController(deps, syntax);
 		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
 		const bodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
+		controller.summary = summary;
 		controller.fileBodies = bodies;
 		controller.applySummary(summary);
 
@@ -349,6 +354,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			syntax,
 		);
 		const summary = makeSummary([makeFile('a.ts')]);
+		controller.summary = summary;
 		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
 		controller.applySummary(summary);
 
@@ -367,12 +373,14 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 
 		controller.clearForDisplayChange();
 		expect(controller.rowSource.rowCount).toBe(0);
+		controller.summary = summary;
 		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
 		controller.applySummary(summary);
 		await vi.waitFor(() => expect(addedSyntaxSegments(controller)).toBeDefined());
 		expect(highlighter).toHaveBeenCalledOnce();
 
 		controller.refreshAllData();
+		controller.summary = summary;
 		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
 		controller.applySummary(summary);
 		controller.handleBodyDemand({

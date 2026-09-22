@@ -2,7 +2,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Minus from '@lucide/svelte/icons/minus';
 	import Plus from '@lucide/svelte/icons/plus';
-	import type { GitDiffTab, GitStatusCode } from '$lib/api/git.js';
+	import type { GitDiffTab } from '$lib/api/git.js';
 	import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -24,11 +24,11 @@
 		onUnstageFile,
 	}: GitVirtualFileHeaderProps = $props();
 
-	function hasIndexChange(status: GitStatusCode): boolean {
+	function hasIndexChange(status: string): boolean {
 		return status !== ' ' && status !== '?' && status !== '!' && Boolean(status);
 	}
 
-	function hasWorkTreeChange(status: GitStatusCode): boolean {
+	function hasWorkTreeChange(status: string): boolean {
 		return status !== ' ' && status !== '!' && Boolean(status);
 	}
 

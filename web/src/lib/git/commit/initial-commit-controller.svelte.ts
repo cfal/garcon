@@ -1,3 +1,4 @@
+import type { GitProjectTarget } from '$lib/api/git-client.js';
 import { gitInitialCommit } from '$lib/api/git.js';
 import type {
 	GitWorkbenchMutationRunner,
@@ -7,29 +8,38 @@ import type {
 export interface GitInitialCommitControllerDeps {
 	setHasCommits: (hasCommits: boolean) => void;
 	refreshAfterGitAction: (
-		projectPath: string,
+		project: GitProjectTarget,
 		options: GitWorkbenchRefreshOptions,
 	) => Promise<void>;
 	surfaceError: (message: string) => void;
 	ensureFreshForGitMutation: () => boolean;
-	isCurrentTarget: (projectPath: string) => boolean;
+	isCurrentTarget: (project: GitProjectTarget) => boolean;
 	runGitMutation: GitWorkbenchMutationRunner;
 }
 
 export class GitInitialCommitController {
 	isCreating = $state(false);
+	#generation = 0;
 
 	constructor(private readonly deps: GitInitialCommitControllerDeps) {}
 
-	async create(projectPath: string): Promise<boolean> {
-		if (!this.deps.ensureFreshForGitMutation()) return false;
+	async create(project: GitProjectTarget): Promise<boolean> {
+		if (
+			this.isCreating ||
+			!this.deps.isCurrentTarget(project) ||
+			!this.deps.ensureFreshForGitMutation()
+		)
+			return false;
+		const generation = this.#generation;
+		const isCurrent = () => generation === this.#generation && this.deps.isCurrentTarget(project);
 		this.isCreating = true;
 		try {
-			return await this.deps.runGitMutation(projectPath, async () => {
-				const result = await gitInitialCommit(projectPath);
-				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+			return await this.deps.runGitMutation(project, async () => {
+				const result = await gitInitialCommit(project);
+				if (!isCurrent()) return result.success ?? false;
+				if (result.success) {
 					this.deps.setHasCommits(true);
-					await this.deps.refreshAfterGitAction(projectPath, {
+					await this.deps.refreshAfterGitAction(project, {
 						reason: 'git-action',
 						preserveSelection: false,
 					});
@@ -39,16 +49,18 @@ export class GitInitialCommitController {
 				return result.success ?? false;
 			});
 		} catch (error) {
-			this.deps.surfaceError(
-				`Initial commit failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			if (isCurrent())
+				this.deps.surfaceError(
+					`Initial commit failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			return false;
 		} finally {
-			this.isCreating = false;
+			if (isCurrent()) this.isCreating = false;
 		}
 	}
 
 	reset(): void {
+		this.#generation++;
 		this.isCreating = false;
 	}
 }

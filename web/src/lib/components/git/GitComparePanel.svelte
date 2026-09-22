@@ -44,11 +44,12 @@
 	);
 
 	$effect(() => {
-		if (!presentationVisible || !projectPath) return;
+		const target = activeTarget;
+		if (!presentationVisible || !target) return;
 		return startGitFreshnessPolling({
-			projectPath,
-			checkFreshness: (path) => {
-				untrack(() => void comparison.checkFreshness(path));
+			projectPath: target.projectPath,
+			checkFreshness: () => {
+				untrack(() => void comparison.checkFreshness(target));
 			},
 		});
 	});
@@ -57,7 +58,7 @@
 		if (!presentationVisible) return;
 		const key = controller.target.effectiveProjectKey;
 		if (!key) return;
-		const version = gitProjectInvalidations.version(key);
+		const version = gitProjectInvalidations.version(controller.target.nodeId, key);
 		untrack(() => void controller.refreshForInvalidation(key, version));
 	});
 
@@ -67,12 +68,13 @@
 	}
 
 	function refreshComparison(): void {
-		if (projectPath) void comparison.refresh(projectPath);
+		if (activeTarget) void comparison.refresh(activeTarget);
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
-		if (!projectPath) return;
+		if (!projectPath || !activeTarget) return;
 		void fileSessions.open({
+			nodeId: activeTarget.nodeId,
 			fileRootPath: resolveGitEditorRoot({
 				activeProjectPath: projectPath,
 				targetRepoRoot: activeTarget?.repoRoot,

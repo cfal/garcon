@@ -1,5 +1,6 @@
 import type { GitDiffTab } from '$lib/api/git.js';
 import type { GitTarget } from '$lib/git/targets/git-target.js';
+import type { GitProjectTarget, GitSelectionProof } from '$lib/api/git-client.js';
 
 export type DiffMode = 'unified' | 'split';
 
@@ -12,6 +13,7 @@ export interface GitDiffActionTarget {
 	tab: GitDiffTab;
 	mode: GitDiffActionMode;
 	contextLines: number;
+	proof: GitSelectionProof;
 }
 
 export interface GitLineSelectionKey {
@@ -37,7 +39,7 @@ export interface GitWorkbenchRefreshOptions {
 }
 
 export type GitWorkbenchMutationRunner = <T>(
-	projectPath: string,
+	project: GitProjectTarget,
 	action: () => Promise<T>,
 ) => Promise<T>;
 
@@ -55,5 +57,5 @@ export const DEFAULT_REFRESH_OPTIONS = {
 };
 
 export function targetKey(target: GitWorkbenchTarget | null): string {
-	return target?.projectPath ?? '';
+	return target ? JSON.stringify([target.nodeId, target.projectPath, target.worktreePath]) : '';
 }
