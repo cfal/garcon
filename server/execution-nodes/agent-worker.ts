@@ -84,6 +84,10 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   let unsubscribe = () => {};
   unsubscribe = rpc.transport.onFailure(() => { void dispose(); });
   void ready.catch((error: unknown) => rpc.transport.close(error instanceof Error ? error : new Error(String(error))));
+  rpc.onTerminalDetach(async (request) => {
+    await ready;
+    if (!disposed) await terminalWorker?.handle({ method: 'terminals.detach', request });
+  });
   rpc.handle(async (call, signal) => {
     await ready;
     if (disposed || signal.aborted) throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');

@@ -33,10 +33,9 @@ export class TerminalWorker {
               if (this.#attachments.get(request.attachmentId) !== attachment) return;
               if (!this.rpc.publishTerminal({ type: 'terminal', attachmentId: request.attachmentId, message: part })) {
                 this.#detach(request.attachmentId);
-                // Small control notification may fit after a large output was declined.
-                if (!this.rpc.publishTerminal({ type: 'terminal', attachmentId: request.attachmentId, message: {
+                this.rpc.publishTerminalControl({ type: 'terminal', attachmentId: request.attachmentId, message: {
                   type: 'terminal-error', terminalId: request.terminalId, code: 'terminal-backpressure', message: 'Terminal output detached; reattach to resume.',
-                } })) this.rpc.transport.close(new Error('Terminal delivery capacity exhausted'));
+                } });
                 return;
               }
             }

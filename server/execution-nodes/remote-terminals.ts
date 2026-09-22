@@ -97,6 +97,8 @@ export class RemoteExecutionTerminalService implements ExecutionTerminalService 
     if (!attachment) return;
     this.#attachments.delete(id);
     attachment.peer.ownedTerminalIds.delete(attachment.terminalId);
-    void attachment.rpc.call('', 'terminals.detach', { authority: attachment.authority, terminalId: attachment.terminalId, attachmentId: id, type: 'terminal-detach' }).catch(() => undefined);
+    try {
+      attachment.rpc.detachTerminal({ authority: attachment.authority, terminalId: attachment.terminalId, attachmentId: id, type: 'terminal-detach' });
+    } catch { /* Transport failure retires all worker attachments. */ }
   }
 }

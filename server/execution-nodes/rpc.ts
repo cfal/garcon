@@ -22,6 +22,7 @@ interface Failure {
 }
 
 type RpcFrame = AgentRpcRequest | AgentProducerFrame | TerminalNotification
+  | { readonly type: 'terminal-detach'; readonly request: AgentRpcMethods['terminals.detach']['request'] }
   | { readonly type: 'result'; readonly id: string; readonly value: unknown }
   | { readonly type: 'error'; readonly id: string; readonly error: Failure }
   | { readonly type: 'cancel'; readonly id: string };
@@ -32,6 +33,7 @@ export class AgentRpc {
   #handler: ((request: AgentRpcRequest, signal: AbortSignal) => Promise<unknown>) | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
   #terminal: ((frame: TerminalNotification) => void) | null = null;
+  #terminalDetach: ((request: AgentRpcMethods['terminals.detach']['request']) => Promise<unknown>) | null = null;
   #retired = false;
   readonly #unsubscribe: () => void;
 
@@ -47,6 +49,7 @@ export class AgentRpc {
     this.#handler = null;
     this.#producer = null;
     this.#terminal = null;
+    this.#terminalDetach = null;
     for (const call of this.#pending.values()) {
       call.cleanup();
       call.reject(new AgentCallError('unknown', 'Execution-node continuity lost after possible dispatch'));
@@ -61,6 +64,14 @@ export class AgentRpc {
   onTerminal(handler: (frame: TerminalNotification) => void): void { this.#terminal = handler; }
   publishTerminal(frame: TerminalNotification): boolean {
     return !this.#retired && this.transport.channel.trySend(JSON.stringify(frame));
+  }
+  publishTerminalControl(frame: TerminalNotification): void {
+    if (!this.#retired && this.transport.connected) this.transport.send(JSON.stringify(frame));
+  }
+  onTerminalDetach(handler: (request: AgentRpcMethods['terminals.detach']['request']) => Promise<unknown>): void { this.#terminalDetach = handler; }
+  detachTerminal(request: AgentRpcMethods['terminals.detach']['request']): void {
+    // Cleanup does not consume the RPC budget held by the work it is releasing.
+    if (!this.#retired && this.transport.connected) this.transport.send(JSON.stringify({ type: 'terminal-detach', request } satisfies RpcFrame));
   }
   publish(frame: AgentProducerFrame): void {
     if (!this.#retired) this.transport.send(JSON.stringify(frame));
@@ -100,6 +111,11 @@ export class AgentRpc {
     const frame: RpcFrame = JSON.parse(payload);
     if (!frame || typeof frame !== 'object' || typeof frame.type !== 'string') throw new Error('Invalid execution-node RPC frame');
     if (frame.type === 'terminal') { this.#terminal?.(parseTerminalNotification(frame)); return; }
+    if (frame.type === 'terminal-detach') {
+      const handler = this.#terminalDetach;
+      void Promise.resolve().then(() => !this.#retired && handler?.(frame.request)).catch(() => undefined);
+      return;
+    }
     if (frame.type === 'producer') {
       if (!this.#producer) throw new Error('Producer receiver is not installed');
       this.#producer(frame);
