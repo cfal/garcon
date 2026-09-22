@@ -21,6 +21,7 @@ const localFallback: readonly ExecutionNodeSnapshot[] = [
 ];
 
 export class ExecutionNodesStore {
+	readonly #listeners = new Set<() => void>();
 	#snapshot = $state.raw<readonly ExecutionNodeSnapshot[] | null>(null);
 	error = $state<string | null>(null);
 	loading = $state(false);
@@ -55,8 +56,14 @@ export class ExecutionNodesStore {
 
 	pathContextKey(id?: string | null): string {
 		const node = this.get(id);
-		return JSON.stringify([effectiveNodeId(id), node?.instanceId, node?.projectBasePath,
-			node?.enabled, node?.availability, node?.machineServices.files]);
+		return JSON.stringify([
+			effectiveNodeId(id),
+			node?.instanceId,
+			node?.projectBasePath,
+			node?.enabled,
+			node?.availability,
+			node?.machineServices.files,
+		]);
 	}
 
 	applySnapshot(value: unknown): void {
@@ -65,6 +72,14 @@ export class ExecutionNodesStore {
 		this.#snapshot = nodes;
 		this.error = null;
 		this.#version += 1;
+		for (const listener of this.#listeners) listener();
+	}
+
+	onChanged(listener: () => void): () => void {
+		this.#listeners.add(listener);
+		return () => {
+			this.#listeners.delete(listener);
+		};
 	}
 
 	async refresh(): Promise<void> {

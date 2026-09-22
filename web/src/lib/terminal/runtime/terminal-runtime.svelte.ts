@@ -24,11 +24,9 @@ function loadTerminalStylesheet(): Promise<void> {
 	link.dataset.terminalRuntimeStylesheet = '';
 	stylesheetPromise = new Promise<void>((resolve, reject) => {
 		link.addEventListener('load', () => resolve(), { once: true });
-		link.addEventListener(
-			'error',
-			() => reject(new Error(m.terminal_unavailable())),
-			{ once: true },
-		);
+		link.addEventListener('error', () => reject(new Error(m.terminal_unavailable())), {
+			once: true,
+		});
 		document.head.append(link);
 	}).catch((error) => {
 		stylesheetPromise = null;
@@ -73,6 +71,7 @@ export class TerminalRuntime {
 	#pasteCleanup: (() => void) | null = null;
 	#focusCleanup: (() => void) | null = null;
 	#disposed = false;
+	#queuedOutputBytes = 0;
 
 	isFocused = $state(false);
 	clipboardMessage = $state('');
@@ -172,7 +171,13 @@ export class TerminalRuntime {
 	}
 
 	write(data: string): void {
-		this.terminal.write(data);
+		const bytes = data.length * 2;
+		if (this.#disposed || this.#queuedOutputBytes + bytes > 2 * 1024 * 1024)
+			throw new Error('Terminal renderer capacity exceeded');
+		this.#queuedOutputBytes += bytes;
+		this.terminal.write(data, () => {
+			this.#queuedOutputBytes -= bytes;
+		});
 	}
 
 	applyTheme(theme: ITheme): void {

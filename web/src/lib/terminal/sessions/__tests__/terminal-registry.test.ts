@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
-import type { TerminalMetadata, TerminalStreamClientMessage } from '$shared/terminal';
+import type {
+	TerminalMetadata,
+	TerminalStreamClientMessage,
+	TerminalStreamServerMessage,
+} from '$shared/terminal';
 import type {
 	TerminalRuntime,
 	TerminalRuntimeOptions,
@@ -59,6 +63,19 @@ class FakeTransport implements TerminalTransportPort {
 	destroyCount = 0;
 
 	constructor(readonly options: TerminalTransportOptions) {}
+
+	emit(message: TerminalStreamServerMessage): void {
+		const id =
+			'terminal' in message
+				? message.terminal.terminalId
+				: 'terminalId' in message
+					? message.terminalId
+					: undefined;
+		const attachment = this.sent.findLast(
+			(item) => item.type === 'terminal-attach' && item.terminalId === id,
+		);
+		this.options.onMessage({ ...message, attachmentId: attachment?.attachmentId });
+	}
 
 	connect(): void {
 		this.connectCount += 1;
@@ -164,7 +181,11 @@ describe('TerminalRegistry', () => {
 			connection,
 			getClientId: () => 'client-1',
 			now: () => now,
-			listTerminals,
+			listTerminals: async () => ({
+				...(await listTerminals()),
+				terminalRuntimeId: 'runtime',
+				attachmentEpoch: 'epoch',
+			}),
 			createTerminal: createTerminal as NonNullable<TerminalRegistryDeps['createTerminal']>,
 			terminateTerminal: terminateTerminal as NonNullable<
 				TerminalRegistryDeps['terminateTerminal']
@@ -204,7 +225,7 @@ describe('TerminalRegistry', () => {
 		await registry.list();
 
 		expect(onSuccessfulList).toHaveBeenCalledOnce();
-		expect(onSuccessfulList).toHaveBeenCalledWith(['terminal-1', 'terminal-2']);
+		expect(onSuccessfulList).toHaveBeenCalledWith(['terminal-1', 'terminal-2'], 'local');
 
 		transport.options.onMessage({
 			type: 'terminal-status',
@@ -325,11 +346,13 @@ describe('TerminalRegistry', () => {
 		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
 		expect(transport.sent).toEqual([
 			{
-					type: 'terminal-attach',
-					terminalId: 'terminal-1',
-					clientId: 'client-1',
-					afterSequence: 4,
-					intent: 'takeover',
+				type: 'terminal-attach',
+				terminalId: 'terminal-1',
+				clientId: 'client-1',
+				afterSequence: 0,
+				intent: 'takeover',
+				attachmentId: expect.any(String),
+				attachmentEpoch: 'epoch',
 			},
 		]);
 	});
@@ -372,6 +395,8 @@ describe('TerminalRegistry', () => {
 				clientId: 'client-1',
 				afterSequence: 0,
 				intent: 'restore',
+				attachmentId: expect.any(String),
+				attachmentEpoch: 'epoch',
 			},
 		]);
 	});
@@ -425,6 +450,8 @@ describe('TerminalRegistry', () => {
 				clientId: 'client-1',
 				afterSequence: 0,
 				intent: 'takeover',
+				attachmentId: expect.any(String),
+				attachmentEpoch: 'epoch',
 			},
 		]);
 	});
@@ -514,10 +541,8 @@ describe('TerminalRegistry', () => {
 
 		const firstRequest = registry.ensureRuntime('terminal-1');
 		registry.disposeTerminatedSession('terminal-1');
-		transport.options.onMessage({
-			type: 'terminal-status',
-			terminal: metadata('terminal-1', 2),
-		});
+		listTerminals.mockResolvedValue({ success: true, terminals: [metadata('terminal-1', 2)] });
+		await registry.list();
 		const secondRequest = registry.ensureRuntime('terminal-1');
 		const firstRuntime = new FakeRuntime(runtimeOptions[0]);
 		const secondRuntime = new FakeRuntime(runtimeOptions[1]);
@@ -547,11 +572,13 @@ describe('TerminalRegistry', () => {
 		await vi.waitFor(() =>
 			expect(transport.sent).toEqual([
 				{
-						type: 'terminal-attach',
-						terminalId: 'terminal-1',
-						clientId: 'client-1',
-						afterSequence: 0,
-						intent: 'restore',
+					type: 'terminal-attach',
+					terminalId: 'terminal-1',
+					clientId: 'client-1',
+					afterSequence: 0,
+					intent: 'restore',
+					attachmentId: expect.any(String),
+					attachmentEpoch: 'epoch',
 				},
 			]),
 		);
@@ -569,10 +596,12 @@ describe('TerminalRegistry', () => {
 
 	it('keeps a delayed initialization failure suspended after logout', async () => {
 		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
-		listTerminals.mockImplementationOnce(() => pendingList.promise).mockResolvedValue({
-			success: true,
-			terminals: [metadata('terminal-1', 1)],
-		});
+		listTerminals
+			.mockImplementationOnce(() => pendingList.promise)
+			.mockResolvedValue({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			});
 		const registry = createRegistry();
 
 		const initialization = registry.initialize();
@@ -667,7 +696,7 @@ describe('TerminalRegistry', () => {
 		expect(transport.status).toBe('connecting');
 	});
 
-	it('preserves stream upserts that arrive after a List snapshot starts', async () => {
+	it('preserves stream updates and creates that arrive after a List snapshot starts', async () => {
 		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
 		listTerminals
 			.mockResolvedValueOnce({
@@ -677,19 +706,22 @@ describe('TerminalRegistry', () => {
 			.mockImplementationOnce(() => pendingList.promise);
 		const registry = createRegistry();
 		await registry.list();
+		transport.status = 'connected';
+		await registry.attach('terminal-1', 'restore');
 
+		const pendingCreate = deferred<{ success: true; terminal: TerminalMetadata }>();
+		createTerminal.mockImplementationOnce(() => pendingCreate.promise);
+		const creating = registry.create('/workspace/2', 'create-2');
 		const reconciliation = registry.list();
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-status',
 			terminal: metadata('terminal-1', 1, {
 				processStatus: 'exited',
 				exitCode: 7,
 			}),
 		});
-		transport.options.onMessage({
-			type: 'terminal-status',
-			terminal: metadata('terminal-2', 2),
-		});
+		pendingCreate.resolve({ success: true, terminal: metadata('terminal-2', 2) });
+		await creating;
 		pendingList.resolve({
 			success: true,
 			terminals: [metadata('terminal-1', 1)],
@@ -808,8 +840,10 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
+		transport.status = 'connected';
+		await registry.attach('terminal-1', 'restore');
 
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-status',
 			terminal: metadata('terminal-1', 1, { title: 'Remote title' }),
 		});
@@ -825,8 +859,10 @@ describe('TerminalRegistry', () => {
 		const registry = createRegistry();
 		await registry.list();
 		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
+		transport.status = 'connected';
+		await registry.attach('terminal-1', 'restore');
 
-		transport.options.onMessage({ type: 'terminal-terminated', terminalId: 'terminal-1' });
+		transport.emit({ type: 'terminal-terminated', terminalId: 'terminal-1' });
 
 		expect(registry.sessions['terminal-1']).toBeUndefined();
 		expect(runtime.disposeCount).toBe(1);
@@ -853,10 +889,12 @@ describe('TerminalRegistry', () => {
 					clientId: 'client-1',
 					afterSequence: 0,
 					intent: 'restore',
+					attachmentId: expect.any(String),
+					attachmentEpoch: 'epoch',
 				},
 			]),
 		);
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-error',
 			code: 'terminal-takeover-required',
 			message: 'Terminal is attached in another browser tab.',
@@ -876,6 +914,8 @@ describe('TerminalRegistry', () => {
 		await expect(registry.create('/workspace', 'request-1')).resolves.toBe('terminal-1');
 		expect(createTerminal).toHaveBeenCalledWith({
 			requestId: 'request-1',
+			nodeId: 'local',
+			expectedTerminalRuntimeId: 'runtime',
 			requestedInitialWorkingDirectory: '/workspace',
 		});
 		expect(registry.pendingCreates).toEqual({});
@@ -953,12 +993,13 @@ describe('TerminalRegistry', () => {
 		await registry.list();
 		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
 		transport.status = 'connected';
-		transport.options.onMessage({
+		await registry.attach('terminal-1', 'restore');
+		transport.emit({
 			type: 'terminal-replay-truncated',
 			terminalId: 'terminal-1',
 			firstSequence: 2,
 		});
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-attached',
 			terminal: metadata('terminal-1', 1, { latestOutputSequence: 3 }),
 			replay: [
@@ -967,13 +1008,13 @@ describe('TerminalRegistry', () => {
 				{ sequence: 3, data: 'three' },
 			],
 		});
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-output',
 			terminalId: 'terminal-1',
 			sequence: 3,
 			data: 'duplicate',
 		});
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-taken-over',
 			terminalId: 'terminal-1',
 			replacementClientId: 'client-2',
@@ -990,16 +1031,29 @@ describe('TerminalRegistry', () => {
 		expect(runtime.writes).toEqual(['two', 'three']);
 		expect(transport.sent).toEqual([]);
 
-		transport.options.onMessage({
+		await registry.attach('terminal-1', 'takeover');
+		transport.emit({
 			type: 'terminal-attached',
 			terminal: metadata('terminal-1', 1, { latestOutputSequence: 3 }),
 			replay: [],
 		});
+		transport.sent = [];
 		runtime.options.onInput('allowed');
 		runtime.options.onResize({ cols: 120, rows: 40 });
 		expect(transport.sent).toEqual([
-			{ type: 'terminal-input', terminalId: 'terminal-1', data: 'allowed' },
-			{ type: 'terminal-resize', terminalId: 'terminal-1', cols: 120, rows: 40 },
+			{
+				type: 'terminal-input',
+				terminalId: 'terminal-1',
+				data: 'allowed',
+				attachmentId: expect.any(String),
+			},
+			{
+				type: 'terminal-resize',
+				terminalId: 'terminal-1',
+				cols: 120,
+				rows: 40,
+				attachmentId: expect.any(String),
+			},
 		]);
 	});
 
@@ -1011,17 +1065,19 @@ describe('TerminalRegistry', () => {
 		const registry = createRegistry();
 		await registry.list();
 		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
-		transport.options.onMessage({
+		transport.status = 'connected';
+		await registry.attach('terminal-1', 'restore');
+		transport.emit({
 			type: 'terminal-attached',
 			terminal: metadata('terminal-1', 1, { latestOutputSequence: 2 }),
 			replay: [],
 		});
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-replay-batch',
 			terminalId: 'terminal-1',
 			chunks: [{ sequence: 1, dataBase64: 'b25l' }],
 		});
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-output-fragment',
 			terminalId: 'terminal-1',
 			sequence: 2,
@@ -1033,7 +1089,7 @@ describe('TerminalRegistry', () => {
 		expect(runtime.writes).toEqual(['one']);
 		expect(registry.sessions['terminal-1'].lastReceivedSequence).toBe(1);
 
-		transport.options.onMessage({
+		transport.emit({
 			type: 'terminal-output-fragment',
 			terminalId: 'terminal-1',
 			sequence: 2,

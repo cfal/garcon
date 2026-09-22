@@ -10,7 +10,10 @@ describe('terminal display names', () => {
 	});
 
 	it('uses the numbered default when the title is clear', () => {
-		expect(terminalDisplayName({ displaySequence: 4, title: null })).toBe('Terminal 4');
-		expect(defaultTerminalDisplayName({ displaySequence: 4 })).toBe('Terminal 4');
+		expect(terminalDisplayName({ displaySequence: 4, title: null })).toBe('Local 4');
+		expect(defaultTerminalDisplayName({ displaySequence: 4 })).toBe('Local 4');
+		expect(terminalDisplayName({ displaySequence: 4, title: null }, 'Build Server')).toBe(
+			'Build Server 4',
+		);
 	});
 });

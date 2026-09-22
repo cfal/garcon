@@ -180,7 +180,20 @@ describe('TerminalRuntime', () => {
 		runtime.write('output');
 
 		expect(onInput).toHaveBeenCalledWith('echo test');
-		expect(fakes.terminals[0].write).toHaveBeenCalledWith('output');
+		expect(fakes.terminals[0].write).toHaveBeenCalledWith('output', expect.any(Function));
+	});
+
+	it('bounds pending renderer bytes until xterm acknowledges consumption', () => {
+		const runtime = createRuntime();
+		const chunk = 'x'.repeat(512 * 1024);
+		runtime.write(chunk);
+		runtime.write(chunk);
+		expect(() => runtime.write('overflow')).toThrow();
+		expect(fakes.terminals[0].write).toHaveBeenCalledTimes(2);
+		fakes.terminals[0].write.mock.calls[0][1]();
+		expect(() => runtime.write(chunk)).not.toThrow();
+		runtime.dispose();
+		expect(() => runtime.write('retired')).toThrow();
 	});
 
 	it('applies themes and disposes browser resources explicitly', async () => {

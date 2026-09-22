@@ -1,4 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './client.js';
+import { parseTerminalReference } from '$shared/terminal-identity';
 import {
 	parseTerminalCreateResponse,
 	parseTerminalListResponse,
@@ -15,10 +16,18 @@ import type {
 	TerminalTerminateResponse,
 } from '$shared/terminal';
 
-export async function listTerminals(): Promise<TerminalListResponse> {
-	const value = await apiGet<unknown>('/api/v1/terminals');
+export async function listTerminals(nodeId = 'local'): Promise<TerminalListResponse> {
+	const value = await apiGet<unknown>(`/api/v1/terminals?${new URLSearchParams({ nodeId })}`);
 	const parsed = parseTerminalListResponse(value);
-	if (!parsed) throw new Error('Invalid terminal list response');
+	if (
+		!parsed?.terminalRuntimeId ||
+		!parsed.attachmentEpoch ||
+		parsed.terminals.some((terminal) => {
+			const ref = parseTerminalReference(terminal.terminalId);
+			return !ref || ref.nodeId !== nodeId || ref.terminalRuntimeId !== parsed.terminalRuntimeId;
+		})
+	)
+		throw new Error('Invalid terminal list response');
 	return parsed;
 }
 
@@ -27,7 +36,14 @@ export async function createTerminal(
 ): Promise<TerminalCreateResponse> {
 	const value = await apiPost<unknown>('/api/v1/terminals', request);
 	const parsed = parseTerminalCreateResponse(value);
-	if (!parsed) throw new Error('Invalid terminal create response');
+	const reference = parsed && parseTerminalReference(parsed.terminal.terminalId);
+	if (
+		!parsed ||
+		!reference ||
+		reference.nodeId !== (request.nodeId ?? 'local') ||
+		reference.terminalRuntimeId !== request.expectedTerminalRuntimeId
+	)
+		throw new Error('Invalid terminal create response');
 	return parsed;
 }
 

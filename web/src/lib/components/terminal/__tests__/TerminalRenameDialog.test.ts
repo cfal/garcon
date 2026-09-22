@@ -32,7 +32,7 @@ describe('TerminalRenameDialog', () => {
 		const input = await screen.findByRole('textbox', { name: 'Terminal name' });
 		expect((input as HTMLInputElement).value).toBe('Build logs');
 		expect(input.getAttribute('maxlength')).toBe(String(TERMINAL_TITLE_MAX_LENGTH));
-		expect(screen.getByText('Leave blank to use Terminal 4.')).toBeTruthy();
+		expect(screen.getByText('Leave blank to use Local 4.')).toBeTruthy();
 
 		await fireEvent.input(input, { target: { value: '' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));

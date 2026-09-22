@@ -149,23 +149,27 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 	});
 	const bindingRefreshes = new Map<string, Promise<void>>();
-	const projectResolution = new ProjectResolutionStore(undefined, (target) => {
-		if (deps.chatSessions.byId[target.chatId]?.projectPath !== target.projectPath) return;
-		if (bindingRefreshes.has(target.chatId)) return;
-		const refresh = (async () => {
-			try {
-				await deps.chatSessions.quietRefreshChats();
-			} catch {
-				// Resolution feedback remains authoritative when metadata refresh fails.
-			}
-		})();
-		bindingRefreshes.set(target.chatId, refresh);
-		void refresh.then(() => {
-			if (bindingRefreshes.get(target.chatId) === refresh) {
-				bindingRefreshes.delete(target.chatId);
-			}
-		});
-	}, deps.executionNodes);
+	const projectResolution = new ProjectResolutionStore(
+		undefined,
+		(target) => {
+			if (deps.chatSessions.byId[target.chatId]?.projectPath !== target.projectPath) return;
+			if (bindingRefreshes.has(target.chatId)) return;
+			const refresh = (async () => {
+				try {
+					await deps.chatSessions.quietRefreshChats();
+				} catch {
+					// Resolution feedback remains authoritative when metadata refresh fails.
+				}
+			})();
+			bindingRefreshes.set(target.chatId, refresh);
+			void refresh.then(() => {
+				if (bindingRefreshes.get(target.chatId) === refresh) {
+					bindingRefreshes.delete(target.chatId);
+				}
+			});
+		},
+		deps.executionNodes,
+	);
 	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
 		(chatId, projectPath, nodeId) => {
 			if (projectPath === null) projectResolution.removeChatTargets(chatId);
@@ -186,6 +190,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
+		nodes: deps.executionNodes,
 		connection: deps.ws,
 		getClientId: () => {
 			if (!deps.terminalIdentity.clientId) {
@@ -200,7 +205,18 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				deps.notifications.error(m.terminal_session_cleanup_failed());
 			});
 		},
-		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
+		onSuccessfulList: (terminalIds, nodeId) => {
+			const unaffected = Object.values(layout.snapshot.surfaces)
+				.filter(
+					(surface) =>
+						surface.type === 'terminal' && terminals.nodeIdFor(surface.terminalId) !== nodeId,
+				)
+				.flatMap((surface) => (surface.type === 'terminal' ? [surface.terminalId] : []));
+			unaffected.push(
+				...layout.snapshot.unplacedTerminalIds.filter((id) => terminals.nodeIdFor(id) !== nodeId),
+			);
+			terminalLayoutBinding?.handleSuccessfulList([...new Set([...terminalIds, ...unaffected])]);
+		},
 	});
 	const workspaceInteractionGate = new WorkspaceInteractionGate();
 	const hostGeometry: WorkspaceHostGeometryState = new WorkspaceHostGeometryState({
