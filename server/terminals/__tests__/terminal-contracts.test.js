@@ -111,6 +111,7 @@ describe('terminal contracts', () => {
         intent: 'restore',
       },
       { type: 'terminal-input', terminalId: 'terminal-1', data: 'pwd\n' },
+      { type: 'terminal-detach', terminalId: 'terminal-1', attachmentId: 'attachment' },
       {
         type: 'terminal-resize',
         terminalId: 'terminal-1',
@@ -130,6 +131,7 @@ describe('terminal contracts', () => {
       'terminal-attach',
       'terminal-input',
       'terminal-resize',
+      'terminal-detach',
     ]);
     for (const type of TERMINAL_STREAM_CLIENT_MESSAGE_TYPES) {
       expect(isTerminalStreamClientMessageType(type)).toBe(true);

@@ -1,7 +1,7 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ServerWsMessage } from '../../../common/ws-events.js';
+import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
 import {
   assistantContents,
   messagesOfType,

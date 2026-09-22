@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ServerWsMessage } from '../../../common/ws-events.js';
+import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
 import {
   assistantContents,
   messagesOfType,

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type {
   ChatMessagesMessage,
   ChatSessionStoppedMessage,
-  ServerWsMessage,
 } from '../../../common/ws-events.js';
+import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
 import {
   assistantContents,

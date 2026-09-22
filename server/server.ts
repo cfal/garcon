@@ -29,7 +29,7 @@ import {
 } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
 import { queueDrainOptions } from './chats/chat-execution-options.js';
-import { TerminalManager } from './terminals/terminal-manager.js';
+import { TerminalController } from './terminals/controller.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
 import {
@@ -214,8 +214,6 @@ export async function startServer(): Promise<void> {
       }
     });
 
-    const terminalManager = new TerminalManager();
-    const terminalStream = new TerminalStreamHandler(terminalManager);
     const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
 
     await initAuthStore();
@@ -240,6 +238,8 @@ export async function startServer(): Promise<void> {
       },
     });
     const retainNodeReferences = executionNodes.retainReferences;
+    const terminalManager = new TerminalController(executionNodes);
+    const terminalStream = new TerminalStreamHandler(terminalManager);
     const chatRegistry = new ChatRegistry(workspaceDir, { retainNodeReferences });
     const settings = new SettingsStore(workspaceDir, { retainNodeReferences });
     const recentTitleIcons = new RecentTitleIconStore();

@@ -13,6 +13,14 @@ function enqueue(queue, message) {
 }
 
 describe("TerminalOutputQueue", () => {
+  it('does not clear replacement-attachment output during stale cleanup', () => {
+    const queue = new TerminalOutputQueue();
+    enqueue(queue, { ...output('terminal', 1), attachmentId: 'old' });
+    enqueue(queue, { ...output('terminal', 2), attachmentId: 'new' });
+    queue.clearSession('terminal', 'old');
+    expect(JSON.parse(queue.next().payload).attachmentId).toBe('new');
+    expect(queue.next()).toBeNull();
+  });
   it("clears only one terminal and preserves fair delivery for the others", () => {
     const queue = new TerminalOutputQueue();
     enqueue(queue, output("terminal-1", 1));

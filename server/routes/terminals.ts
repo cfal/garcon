@@ -2,31 +2,16 @@ import {
   parseTerminalCreateRequest,
   parseTerminalRenameRequest,
   parseTerminalTerminateRequest,
-  type TerminalListResponse,
 } from '../../common/terminal.js';
 import { jsonError } from '../lib/http-error.js';
 import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
-import {
-  TerminalManager,
-  TerminalManagerError,
-} from '../terminals/terminal-manager.js';
+import { type TerminalController, terminalOperationError } from '../terminals/controller.js';
+import { parseNodeId } from '../../common/execution-nodes.js';
 
 function terminalError(error: unknown): Response {
-  if (error instanceof TerminalManagerError) {
-    return jsonError(
-      error.message,
-      error.status,
-      error.code,
-      error.status >= 500,
-    );
-  }
-  return jsonError(
-    'Terminal operation failed.',
-    500,
-    'terminal-internal',
-    true,
-  );
+  const failure = terminalOperationError(error);
+  return jsonError(failure.message, failure.status, failure.code, failure.status >= 500);
 }
 
 function requirePrincipal(context?: HttpRouteContext) {
@@ -34,11 +19,11 @@ function requirePrincipal(context?: HttpRouteContext) {
 }
 
 export default function createTerminalRoutes(
-  manager: TerminalManager,
+  manager: Pick<TerminalController, 'list' | 'create' | 'rename' | 'terminate'>,
 ): RouteMap {
   return {
     '/api/v1/terminals': {
-      GET: (_request, _url, _server, context) => {
+      GET: async (_request, url, _server, context) => {
         const principal = requirePrincipal(context);
         if (!principal)
           return jsonError(
@@ -46,10 +31,10 @@ export default function createTerminalRoutes(
             401,
             'terminal-validation',
           );
-        return Response.json({
-          success: true,
-          terminals: manager.list(principal),
-        } satisfies TerminalListResponse);
+        const nodeId = parseNodeId(url.searchParams.get('nodeId'));
+        if (!nodeId) return jsonError('Invalid terminal node.', 400, 'terminal-validation');
+        try { return Response.json(await manager.list(principal, nodeId)); }
+        catch (error) { return terminalError(error); }
       },
       POST: withJsonBody(
         async (body: unknown, _request, _url, _server, context) => {
@@ -94,7 +79,7 @@ export default function createTerminalRoutes(
             );
           try {
             return Response.json(
-              manager.rename(principal, input.terminalId, input.title),
+              await manager.rename(principal, input.terminalId, input.title),
             );
           } catch (error) {
             return terminalError(error);

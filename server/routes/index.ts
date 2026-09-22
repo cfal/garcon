@@ -51,7 +51,7 @@ import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
-import type { TerminalManager } from '../terminals/terminal-manager.js';
+import type { TerminalController } from '../terminals/controller.js';
 import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
@@ -138,7 +138,7 @@ export default function createAllRoutes(workspaceDir: string, {
   resolveTicketProject: Parameters<typeof createTicketRoutes>[1];
   chatTags: ChatTagMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
-  terminals: TerminalManager;
+  terminals: TerminalController;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
   runtimeState: ServerRuntimeState;
@@ -194,10 +194,10 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createChatTicketSourceRoutes(registry, ticketSources),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry, { files: (nodeId) => executionNodes.requireNode(nodeId).getFilesService(), inspectProject }),
+    ...createTerminalRoutes(terminals),
     ...localMachineRoutes({
       ...createGitRoutes(agents, settings),
       ...createGhRoutes(),
-      ...createTerminalRoutes(terminals),
     }, registry),
     ...createCommandsRoutes({ registry, agents, inspectProject }),
     ...createWorkspaceRoutes(

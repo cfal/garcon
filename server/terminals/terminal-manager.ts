@@ -14,6 +14,7 @@ import {
 import { getProjectBasePath, getUserShell } from "../config.js";
 import { KeyedPromiseLock } from "../lib/keyed-lock.js";
 import { assertRealWithinBase } from "../lib/path-boundary.js";
+import { toNativePath, toNodePath } from '../execution-nodes/node-path.js';
 import type { TerminalAuthority as ServerPrincipal, TerminalPeer } from '@garcon/server-agent-interface';
 import { terminalId as qualifiedTerminalId } from '../../common/terminal-identity.js';
 import { TerminalError as TerminalManagerError } from '../../common/terminal-error.js';
@@ -57,7 +58,7 @@ interface TerminalSession {
 
 interface CachedCreateResult {
   expiresAt: number;
-  target?: string | null;
+  target: string | null;
   response?: TerminalCreateResponse;
   error?: { code: TerminalErrorCode; message: string; status: number };
 }
@@ -199,7 +200,7 @@ export class TerminalManager {
         .get(principal.key)
         ?.get(request.requestId);
       if (cached && cached.expiresAt > this.#now()) {
-        if (cached.target !== undefined && cached.target !== request.requestedInitialWorkingDirectory) {
+        if (cached.target !== request.requestedInitialWorkingDirectory) {
           throw new TerminalManagerError('terminal-validation', 'A terminal request ID cannot change its directory.', 409);
         }
         if (cached.response)
@@ -221,6 +222,7 @@ export class TerminalManager {
         return this.#cacheCreateError(
           principal.key,
           request.requestId,
+          request.requestedInitialWorkingDirectory,
           "terminal-limit",
           "Close a terminal before creating another one.",
           409,
@@ -237,6 +239,7 @@ export class TerminalManager {
         return this.#cacheCreateError(
           principal.key,
           request.requestId,
+          request.requestedInitialWorkingDirectory,
           "terminal-validation",
           "Initial terminal directory is unavailable.",
           422,
@@ -266,6 +269,7 @@ export class TerminalManager {
         return this.#cacheCreateError(
           principal.key,
           request.requestId,
+          request.requestedInitialWorkingDirectory,
           "terminal-internal",
           "Unable to start terminal.",
           500,
@@ -281,7 +285,7 @@ export class TerminalManager {
         terminalId,
         displaySequence,
         title: null,
-        initialWorkingDirectory: cwd,
+        initialWorkingDirectory: toNodePath(cwd),
         processStatus: "running",
         attachmentStatus: "detached",
         createdAt: new Date(this.#now()).toISOString(),
@@ -715,8 +719,8 @@ export class TerminalManager {
   }
 
   async #resolveInitialDirectory(requested: string | null): Promise<string> {
-    const target = requested ?? this.#projectBasePath;
-    const realPath = await assertRealWithinBase(this.#projectBasePath, target);
+    const target = toNativePath(requested ?? this.#projectBasePath);
+    const realPath = await assertRealWithinBase(toNativePath(this.#projectBasePath), target);
     const stat = await fs.stat(realPath);
     if (!stat.isDirectory())
       throw new Error("Terminal path is not a directory");
@@ -727,12 +731,14 @@ export class TerminalManager {
   #cacheCreateError(
     principalKey: string,
     requestId: string,
+    target: string | null,
     code: TerminalErrorCode,
     message: string,
     status: number,
   ): never {
     this.#setRequestResult(this.#createResults, principalKey, requestId, {
       expiresAt: this.#now() + this.#createResultTtlMs,
+      target,
       error: { code, message, status },
     });
     throw new TerminalManagerError(code, message, status);

@@ -4,7 +4,6 @@ import {
 } from "../../common/terminal.js";
 import type { PrimaryWebSocket } from "./primary-delivery.js";
 import {
-  TerminalManager,
   TerminalManagerError,
   type TerminalStreamPeer,
 } from "../terminals/terminal-manager.js";
@@ -69,13 +68,7 @@ export class TerminalStreamHandler {
   readonly #runtimeBySocket = new WeakMap<TerminalSocket, SocketRuntime>();
 
   constructor(
-    readonly manager: {
-      attach: TerminalManager['attach'] | TerminalController['attach'];
-      input(principal: Parameters<TerminalManager['input']>[0], peer: TerminalStreamPeer, terminalId: string, data: string, attachmentId?: string): void | Promise<void>;
-      resize(principal: Parameters<TerminalManager['resize']>[0], peer: TerminalStreamPeer, terminalId: string, cols: number, rows: number, attachmentId?: string): void | Promise<void>;
-      detachPeer: TerminalManager['detachPeer'];
-      detachTerminal(principal: Parameters<TerminalManager['detachTerminal']>[0], peer: TerminalStreamPeer, terminalId: string, attachmentId?: string): void;
-    },
+    readonly manager: Pick<TerminalController, 'attach' | 'input' | 'resize' | 'detachPeer' | 'detachTerminal'>,
     readonly now: () => number = Date.now,
   ) {}
 
@@ -188,7 +181,7 @@ export class TerminalStreamHandler {
     if (runtime.closed || !runtime.terminalAuthorized) return;
     for (const deliveryMessage of expandTerminalMessageForDelivery(message)) {
       if (runtime.closed) return;
-      this.#sendDeliveryMessage(socket, runtime, deliveryMessage);
+      if (!this.#sendDeliveryMessage(socket, runtime, deliveryMessage)) return;
     }
   }
 
@@ -196,13 +189,13 @@ export class TerminalStreamHandler {
     socket: TerminalSocket,
     runtime: SocketRuntime,
     message: TerminalStreamServerMessage,
-  ): void {
+  ): boolean {
     const pending = serializeTerminalMessage(message);
     if (runtime.outputQueue.shouldEnqueue) {
       if (runtime.outputQueue.enqueue(message, pending) === "overflow") {
         const terminalId = terminalIdForMessage(message);
         if (terminalId) {
-          runtime.outputQueue.clearSession(terminalId);
+          runtime.outputQueue.clearSession(terminalId, message.attachmentId);
           this.manager.detachTerminal(
             socket.data.principal,
             runtime.peer,
@@ -237,10 +230,12 @@ export class TerminalStreamHandler {
             TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
           );
         }
+        return false;
       }
-      return;
+      return true;
     }
     this.#sendPayload(socket, runtime, pending.payload);
+    return !runtime.closed;
   }
 
   #flushPendingMessages(socket: TerminalSocket, runtime: SocketRuntime): void {

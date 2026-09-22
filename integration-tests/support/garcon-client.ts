@@ -4,6 +4,8 @@ import {
 } from '../../common/agents.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import { isRecord } from '../../common/json.js';
+import type { TerminalStreamClientMessage } from '../../common/terminal.js';
+import { parsePrimaryWsServerMessage as parseServerWsMessage, type PrimaryWsServerMessage as ServerWsMessage } from '../../common/ws-protocol.js';
 import type { ApiProtocol, ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import type {
   AgentInterruptAndSendCommandRequest,
@@ -90,7 +92,6 @@ import type {
 } from '../../common/settings.js';
 import {
   ChatTransientFeedMutationMessage,
-  parseServerWsMessage,
   type AgentRunFailedMessage,
   type AgentRunFinishedMessage,
   type ChatMessagesMessage,
@@ -99,7 +100,6 @@ import {
   type ChatSubscribedMessage,
   type ClientRequestErrorMessage,
   type ReconnectStateMessage,
-  type ServerWsMessage,
   type WsPongMessage,
 } from '../../common/ws-events.js';
 import {
@@ -1195,6 +1195,11 @@ export class GarconTestClient {
       responseBody: redact(parsed, this.#redactSensitiveDiagnostics),
     });
     return { response, parsed };
+  }
+
+  sendTerminal(message: TerminalStreamClientMessage): void {
+    if (!this.#socket || this.#socket.readyState !== WEB_SOCKET_OPEN) throw new Error('Garcon WebSocket is not connected');
+    this.#socket.send(JSON.stringify(message));
   }
 
   private sendWs(message: ClientWsMessage): void {

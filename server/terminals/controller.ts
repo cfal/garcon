@@ -3,6 +3,11 @@ import type { TerminalCreateRequest, TerminalStreamClientMessage } from '../../c
 import { TerminalError } from '../../common/terminal-error.js';
 import { parseTerminalReference } from '../../common/terminal-identity.js';
 import { effectiveNodeId } from '../../common/execution-nodes.js';
+import type { ServerPrincipal } from '../lib/http-route-types.js';
+
+function delegatedAuthority(principal: ServerPrincipal): TerminalAuthority {
+  return { key: JSON.stringify([principal.mode, principal.key]), expiresAtMs: principal.expiresAtMs };
+}
 
 interface Attachment {
   readonly id: string;
@@ -16,22 +21,23 @@ export class TerminalController {
   readonly #attachments = new Map<TerminalPeer, Map<string, Attachment>>();
   constructor(private readonly nodes: { requireNode(id: string): ExecutionNode }) {}
 
-  async list(authority: TerminalAuthority, nodeId = 'local') {
-    return (await this.#service(nodeId)).list(authority);
+  async list(principal: ServerPrincipal, nodeId = 'local') {
+    return (await this.#service(nodeId)).list(delegatedAuthority(principal));
   }
-  async create(authority: TerminalAuthority, request: TerminalCreateRequest) {
-    return (await this.#service(effectiveNodeId(request.nodeId))).create(authority, request);
+  async create(principal: ServerPrincipal, request: TerminalCreateRequest) {
+    return (await this.#service(effectiveNodeId(request.nodeId))).create(delegatedAuthority(principal), request);
   }
-  async rename(authority: TerminalAuthority, terminalId: string, title: string | null) {
-    return (await this.#service(this.#nodeId(terminalId))).rename(authority, terminalId, title);
+  async rename(principal: ServerPrincipal, terminalId: string, title: string | null) {
+    return (await this.#service(this.#nodeId(terminalId))).rename(delegatedAuthority(principal), terminalId, title);
   }
-  async terminate(authority: TerminalAuthority, terminalId: string, requestId: string) {
-    return (await this.#service(this.#nodeId(terminalId))).terminate(authority, terminalId, requestId);
+  async terminate(principal: ServerPrincipal, terminalId: string, requestId: string) {
+    return (await this.#service(this.#nodeId(terminalId))).terminate(delegatedAuthority(principal), terminalId, requestId);
   }
-  async attach(authority: TerminalAuthority, peer: TerminalPeer, request: Extract<TerminalStreamClientMessage, { type: 'terminal-attach' }>) {
+  async attach(principal: ServerPrincipal, peer: TerminalPeer, request: Extract<TerminalStreamClientMessage, { type: 'terminal-attach' }>) {
+    const authority = delegatedAuthority(principal);
     if (!request.attachmentId) throw new TerminalError('terminal-validation', 'Terminal attachment identity is required.');
     const nodeId = this.#nodeId(request.terminalId);
-    this.detachTerminal(authority, peer, request.terminalId);
+    this.#detach(authority, peer, request.terminalId);
     let entries = this.#attachments.get(peer);
     if (!entries) { entries = new Map(); this.#attachments.set(peer, entries); }
     if (entries.size >= 256) throw new TerminalError('terminal-backpressure', 'Too many terminal subscriptions.', 429);
@@ -42,7 +48,7 @@ export class TerminalController {
         if (message.type === 'terminal-attached') peer.ownedTerminalIds.add(request.terminalId);
         if (message.type === 'terminal-taken-over' || message.type === 'terminal-terminated') peer.ownedTerminalIds.delete(request.terminalId);
         peer.sendTerminalMessage({ ...message, attachmentId: attachment.id });
-        if (message.type === 'terminal-terminated') this.detachTerminal(authority, peer, request.terminalId, attachment.id);
+        if (message.type === 'terminal-terminated' || (message.type === 'terminal-error' && ['terminal-unavailable', 'terminal-backpressure', 'terminal-auth-expired'].includes(message.code))) this.#detach(authority, peer, request.terminalId, attachment.id);
       },
     } };
     entries.set(request.terminalId, attachment);
@@ -52,19 +58,24 @@ export class TerminalController {
       attachment.service = service;
       await service.attach(authority, attachment.peer, request);
     } catch (error) {
-      if (!(error instanceof TerminalError && error.code === 'terminal-takeover-required')) this.detachTerminal(authority, peer, request.terminalId, attachment.id);
+      if (!(error instanceof TerminalError && error.code === 'terminal-takeover-required')) this.#detach(authority, peer, request.terminalId, attachment.id);
       throw error;
     }
   }
-  input(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, data: string, attachmentId?: string) {
+  input(principal: ServerPrincipal, peer: TerminalPeer, terminalId: string, data: string, attachmentId?: string) {
+    const authority = delegatedAuthority(principal);
     const attachment = this.#require(authority, peer, terminalId, attachmentId);
     return attachment.service!.input(authority, attachment.peer, terminalId, data);
   }
-  resize(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, cols: number, rows: number, attachmentId?: string) {
+  resize(principal: ServerPrincipal, peer: TerminalPeer, terminalId: string, cols: number, rows: number, attachmentId?: string) {
+    const authority = delegatedAuthority(principal);
     const attachment = this.#require(authority, peer, terminalId, attachmentId);
     return attachment.service!.resize(authority, attachment.peer, terminalId, cols, rows);
   }
-  detachTerminal(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, attachmentId?: string): void {
+  detachTerminal(principal: ServerPrincipal, peer: TerminalPeer, terminalId: string, attachmentId?: string): void {
+    this.#detach(delegatedAuthority(principal), peer, terminalId, attachmentId);
+  }
+  #detach(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, attachmentId?: string): void {
     const entries = this.#attachments.get(peer);
     const attachment = entries?.get(terminalId);
     if (!attachment || (attachmentId !== undefined && attachment.id !== attachmentId) || attachment.authority.key !== authority.key) return;
@@ -74,11 +85,11 @@ export class TerminalController {
     peer.ownedTerminalIds.delete(terminalId);
     attachment.service?.detachPeer(authority, attachment.peer);
   }
-  detachPeer(authority: TerminalAuthority, peer: TerminalPeer): void {
-    for (const id of this.#attachments.get(peer)?.keys() ?? []) this.detachTerminal(authority, peer, id);
+  detachPeer(principal: ServerPrincipal, peer: TerminalPeer): void {
+    for (const id of this.#attachments.get(peer)?.keys() ?? []) this.#detach(delegatedAuthority(principal), peer, id);
   }
   shutdown(): void {
-    for (const [peer, entries] of this.#attachments) for (const [id, attachment] of entries) this.detachTerminal(attachment.authority, peer, id);
+    for (const [peer, entries] of this.#attachments) for (const [id, attachment] of entries) this.#detach(attachment.authority, peer, id);
   }
   #require(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, id?: string): Attachment {
     const attachment = this.#attachments.get(peer)?.get(terminalId);

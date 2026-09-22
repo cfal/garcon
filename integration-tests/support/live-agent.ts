@@ -1,5 +1,5 @@
 import { expect } from 'bun:test';
-import type { ServerWsMessage } from '../../common/ws-events.js';
+import type { PrimaryWsServerMessage as ServerWsMessage } from '../../common/ws-protocol.js';
 import { assistantContents } from './chat-assertions.js';
 import { GarconWsRequestError } from './garcon-client.js';
 import type { IntegrationFixture } from './integration-fixture.js';

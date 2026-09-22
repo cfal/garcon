@@ -80,6 +80,15 @@ describe('process-owned terminals', () => {
     expect(ptys[0].killed).toBe(false);
   });
 
+  it('binds failed create results to the original directory', async () => {
+    const { runtime, ptys } = setup();
+    const service = runtime.service('local');
+    const request = { requestId: 'invalid', expectedTerminalRuntimeId: runtime.id, requestedInitialWorkingDirectory: '/synthetic-missing-directory' };
+    await expect(service.create(authority, request)).rejects.toMatchObject({ code: 'terminal-validation', status: 422 });
+    await expect(service.create(authority, { ...request, requestedInitialWorkingDirectory: null })).rejects.toMatchObject({ code: 'terminal-validation', status: 409 });
+    expect(ptys).toHaveLength(0);
+  });
+
   it('round trips node creation and attachment identity', () => {
     const request = { requestId: 'request', nodeId: 'local', expectedTerminalRuntimeId: crypto.randomUUID(), requestedInitialWorkingDirectory: null };
     expect(parseTerminalCreateRequest(request)).toEqual(request);

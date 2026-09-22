@@ -220,11 +220,12 @@ export class TerminalOutputQueue {
     this.#backpressured = false;
   }
 
-  clearSession(terminalId: string): void {
-    const queue = this.#queues.get(terminalId);
+  clearSession(terminalId: string, attachmentId?: string): void {
+    const key = JSON.stringify([terminalId, attachmentId]);
+    const queue = this.#queues.get(key);
     if (!queue) return;
-    this.#queues.delete(terminalId);
-    const index = this.#queueOrder.indexOf(terminalId);
+    this.#queues.delete(key);
+    const index = this.#queueOrder.indexOf(key);
     if (index >= 0) {
       this.#queueOrder.splice(index, 1);
       if (index < this.#nextQueueIndex) this.#nextQueueIndex -= 1;
@@ -237,12 +238,12 @@ export class TerminalOutputQueue {
 
   #queueKey(message: TerminalStreamServerMessage): string {
     if ("terminalId" in message && message.terminalId)
-      return message.terminalId;
+      return JSON.stringify([message.terminalId, message.attachmentId]);
     if (
       message.type === "terminal-attached" ||
       message.type === "terminal-status"
     ) {
-      return message.terminal.terminalId;
+      return JSON.stringify([message.terminal.terminalId, message.attachmentId]);
     }
     return CONTROL_QUEUE_KEY;
   }

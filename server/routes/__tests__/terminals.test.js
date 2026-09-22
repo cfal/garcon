@@ -53,9 +53,9 @@ describe('terminal routes', () => {
   it('passes the server-derived principal through every control operation', async () => {
     const calls = [];
     const manager = {
-      list(receivedPrincipal) {
-        calls.push(['list', receivedPrincipal]);
-        return [metadata];
+      list(receivedPrincipal, nodeId) {
+        calls.push(['list', receivedPrincipal, nodeId]);
+        return { success: true, terminals: [metadata], terminalRuntimeId: 'runtime', attachmentEpoch: 'epoch' };
       },
       async create(receivedPrincipal, input) {
         calls.push(['create', receivedPrincipal, input]);
@@ -109,11 +109,12 @@ describe('terminal routes', () => {
     );
 
     expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toMatchObject({ terminals: [metadata], terminalRuntimeId: 'runtime', attachmentEpoch: 'epoch' });
     expect(createResponse.status).toBe(201);
     expect(terminateResponse.status).toBe(200);
     expect(renameResponse.status).toBe(200);
     expect(calls).toEqual([
-      ['list', principal],
+      ['list', principal, 'local'],
       [
         'create',
         principal,

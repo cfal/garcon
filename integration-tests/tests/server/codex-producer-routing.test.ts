@@ -4,7 +4,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentCatalogEntry } from '../../../common/agents.js';
-import type { ServerWsMessage } from '../../../common/ws-events.js';
+import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';

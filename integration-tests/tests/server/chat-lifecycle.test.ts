@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type {
   ChatMessagesMessage,
   ChatTitleUpdatedMessage,
-  ServerWsMessage,
 } from '../../../common/ws-events.js';
+import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
