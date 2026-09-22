@@ -9,6 +9,49 @@ import { RemoteExecutionTerminalService } from '../remote-terminals.ts';
 const authority = { key: 'synthetic-user', expiresAtMs: null };
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
+test('reliable saturation cannot escape PTY delivery or stop retained output and exit tracking', async () => {
+  let onData;
+  let onExit;
+  const runtime = new TerminalRuntime({ projectBasePath: homedir(), spawnPty: () => ({
+    onData(callback) { onData = callback; }, onExit(callback) { onExit = callback; },
+    kill() {}, write() {}, resize() {},
+  }) });
+  const service = runtime.service('local');
+  const failures = [];
+  const transport = new SessionTransport('session', 'runtime', error => failures.push(error), { maxRetainedFrames: 4 });
+  const socket = transport.attach({ send() {}, close() {} }, 0);
+  socket.receive(JSON.stringify({ kind: 'receipt', through: 0 }));
+  const worker = new TerminalWorker(service, new AgentRpc(transport));
+  try {
+    const inventory = await service.list(authority);
+    const { terminal } = await service.create(authority, {
+      expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: 'create', requestedInitialWorkingDirectory: null,
+    });
+    await worker.handle({ method: 'terminals.attach', request: {
+      authority, attachmentId: 'attachment', attachmentEpoch: inventory.attachmentEpoch,
+      type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'browser', intent: 'restore', afterSequence: 0,
+    } });
+    while (transport.channel.retainedFrames < 4) transport.send('reliable traffic');
+    expect(() => onData('pressure\n')).not.toThrow();
+    expect(failures).toHaveLength(1);
+    expect(transport.connected).toBe(false);
+    expect((await service.list(authority)).terminals[0].attachmentStatus).toBe('detached');
+
+    onData('after detachment\n');
+    onExit({ exitCode: 7 });
+    expect((await service.list(authority)).terminals[0]).toMatchObject({ processStatus: 'exited', exitCode: 7, latestOutputSequence: 2 });
+    const messages = [];
+    await service.attach(authority, {
+      connectionId: 'replacement', ownedTerminalIds: new Set(), sendTerminalMessage: message => messages.push(message),
+    }, {
+      type: 'terminal-attach', terminalId: terminal.terminalId, attachmentEpoch: inventory.attachmentEpoch,
+      clientId: 'browser', intent: 'restore', afterSequence: 0,
+    });
+    expect(messages.find(message => message.type === 'terminal-attached').replay.map(chunk => chunk.data).join(''))
+      .toBe('pressure\nafter detachment\n');
+  } finally { worker.disconnect(); transport.close(); service.dispose(); runtime.shutdown(); }
+});
+
 test('terminal output pressure reserves reliable control capacity for unrelated calls', async () => {
   const frames = [];
   const failures = [];

@@ -66,7 +66,9 @@ export class AgentRpc {
     return !this.#retired && this.transport.channel.trySend(JSON.stringify(frame));
   }
   publishTerminalControl(frame: TerminalNotification): void {
-    if (!this.#retired && this.transport.connected) this.transport.send(JSON.stringify(frame));
+    if (this.#retired || !this.transport.connected) return;
+    try { this.transport.send(JSON.stringify(frame)); }
+    catch { /* Continuity failure retires delivery, but must not interrupt native PTY draining. */ }
   }
   onTerminalDetach(handler: (request: AgentRpcMethods['terminals.detach']['request']) => Promise<unknown>): void { this.#terminalDetach = handler; }
   detachTerminal(request: AgentRpcMethods['terminals.detach']['request']): void {

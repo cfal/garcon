@@ -23,6 +23,7 @@
     "@openai/codex": "0.156.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/bun": "1.4.2",
+    "bun-pty": "0.4.10",
     "opencode-ai": "1.18.31",
     "playwright": "1.63.0",
     "puppeteer-core": "25.11.0",
