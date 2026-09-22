@@ -19,7 +19,10 @@ import {
 import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
 import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
 import type { TerminalMetadata } from '$shared/terminal';
-import type { TerminalAttachmentState } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type {
+	TerminalAttachmentState,
+	TerminalRegistry,
+} from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher, type WorkspaceShortcutDeps } from '../workspace-shortcuts';
@@ -158,6 +161,10 @@ function createHarness(
 				: null,
 		),
 	};
+	let createdTerminals = 0;
+	const createTerminal = vi.fn<TerminalRegistry['create']>(
+		async () => `terminal-${++createdTerminals}`,
+	);
 	const terminals = {
 		displayName: (metadata: TerminalMetadata) =>
 			metadata.title ?? `Local ${metadata.displaySequence}`,
@@ -171,7 +178,14 @@ function createHarness(
 		>,
 		requestTermination: options.terminate ?? vi.fn(async () => undefined),
 		disposeTerminatedSession: vi.fn(),
-		create: vi.fn(),
+		async create(...args: Parameters<TerminalRegistry['create']>): Promise<string> {
+			const terminalId = await createTerminal(...args);
+			terminals.sessions[terminalId] ??= {
+				metadata: terminalMetadata(terminalId),
+				attachmentState: 'detached',
+			};
+			return terminalId;
+		},
 		pendingCreates: {} as Record<string, unknown>,
 		prepareRendererTransfer:
 			options.terminalPrepareRendererTransfer ?? vi.fn((_terminalId: string) => undefined),
@@ -240,7 +254,7 @@ function createHarness(
 		files,
 		fileCloseReleases,
 		layout,
-		terminals,
+		terminals: { ...terminals, create: createTerminal },
 		appShell,
 		singletons,
 		workspaceInteractionGate,
@@ -2815,7 +2829,7 @@ describe('WorkspaceCoordinator', () => {
 			const { coordinator, terminals } = createHarness();
 			terminals.create
 				.mockImplementationOnce(
-					async (directory: string | null, requestId: string, nodeId: string) => {
+					async (directory: string | null, requestId: string, nodeId = 'local') => {
 						terminals.pendingCreates[requestId] = {
 							requestedInitialWorkingDirectory: directory,
 							nodeId,

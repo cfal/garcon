@@ -83,6 +83,7 @@ export class TerminalPlacementService {
 		try {
 			current = await this.deps.commit(
 				(latest) => {
+					this.#assertRetainedTerminal(terminalId);
 					const destinationWindowId = this.#resolveWindowId(latest, windowId);
 					if (latest.surfaces[surfaceId]) {
 						const existingWindowId = this.#windowOf(latest, surfaceId);
@@ -166,6 +167,7 @@ export class TerminalPlacementService {
 		try {
 			current = await this.deps.commit(
 				(latest) => {
+					this.#assertRetainedTerminal(terminalId);
 					const currentAnchorWindowId = this.#resolveWindowId(latest, anchorWindowId);
 					const mutations: WorkspaceLayoutMutation[] = [];
 					if (
@@ -262,6 +264,7 @@ export class TerminalPlacementService {
 			try {
 				current = await this.deps.commit(
 					(latest) => {
+						this.#assertRetainedTerminal(terminalId);
 						const latestSurface = latest.surfaces[currentSurfaceId];
 						if (latestSurface?.type !== 'terminal') {
 							throw new Error('The current terminal tab changed before it could be replaced');
@@ -599,14 +602,17 @@ export class TerminalPlacementService {
 			let current = false;
 			try {
 				current = await this.deps.commit(
-					[
-						{
-							type: 'replace-surface',
-							previousId: launcherId,
-							surface: { id: surfaceId, type: 'terminal', terminalId },
-						},
-						{ type: 'activate-window-tab', windowId, surfaceId },
-					],
+					() => {
+						this.#assertRetainedTerminal(terminalId);
+						return [
+							{
+								type: 'replace-surface',
+								previousId: launcherId,
+								surface: { id: surfaceId, type: 'terminal', terminalId },
+							},
+							{ type: 'activate-window-tab', windowId, surfaceId },
+						];
+					},
 					{ requiredPublication: true },
 				);
 			} catch (error) {
@@ -739,6 +745,11 @@ export class TerminalPlacementService {
 		return this.deps.terminals.create(target.projectPath, requestId, target.nodeId);
 	}
 
+	#assertRetainedTerminal(terminalId: string): void {
+		if (!this.deps.terminals.sessions[terminalId])
+			throw new Error('Terminal is no longer available');
+	}
+
 	#placementResolved(terminalId: string): boolean {
 		return (
 			Boolean(this.deps.layout.surface(terminalSurfaceId(terminalId))) ||
@@ -764,7 +775,8 @@ export class TerminalPlacementService {
 	}
 
 	async #rollbackUnplaced(terminalId: string, placementError: unknown): Promise<never> {
-		if (this.#placementResolved(terminalId)) throw placementError;
+		if (!this.deps.terminals.sessions[terminalId] || this.#placementResolved(terminalId))
+			throw placementError;
 		try {
 			await this.#requestTermination(terminalId);
 			this.deps.terminals.disposeTerminatedSession(terminalId);
