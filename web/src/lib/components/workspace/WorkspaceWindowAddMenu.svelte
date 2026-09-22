@@ -26,8 +26,6 @@
 		type WorkspaceWindowId,
 		type WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
-	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import { WorkspaceWindowAddMenuState } from './workspace-window-add-menu-state.svelte.js';
@@ -36,6 +34,7 @@
 		type WorkspaceWindowTitlebarMetrics,
 	} from './workspace-window-chrome.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import TerminalCreateAction from '$lib/components/terminal/TerminalCreateAction.svelte';
 
 	let {
 		windowId,
@@ -78,7 +77,10 @@
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
 	let creatingTerminal = $state(false);
-	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
+	const creationNodeId = $derived(workspace.terminalCreationNodeIdFor(windowId));
+	const terminalLimitReached = $derived(
+		!terminals.hasRemoteHosts && !terminals.canCreate(creationNodeId),
+	);
 	const unplacedTerminalSessions = $derived(
 		terminals.orderedSessions.filter(
 			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
@@ -181,11 +183,11 @@
 		return m.workspace_open_surface({ surface: singletonLabels[kind]() });
 	}
 
-	async function createTerminal(): Promise<void> {
+	async function createTerminal(nodeId?: string): Promise<void> {
 		if (creatingTerminal) return;
 		creatingTerminal = true;
 		try {
-			await workspace.createTerminal(windowId, `workspace-window:${windowId}`);
+			await workspace.createTerminal(windowId, `workspace-window:${windowId}`, nodeId);
 		} catch (error) {
 			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
 		} finally {
@@ -195,17 +197,27 @@
 </script>
 
 {#snippet addActionMenuItem(action: WorkspaceWindowAddCommand, group?: string)}
-	<DropdownMenuItem
-		data-workspace-window-add-action={action.id}
-		data-workspace-window-add-group={group}
-		disabled={action.disabled || action.busy}
-		aria-busy={action.busy || undefined}
-		title={action.disabled ? action.label : undefined}
-		onSelect={action.onclick}
-	>
-		<WorkspaceSurfaceIcon kind={action.kind} />
-		{action.label}
-	</DropdownMenuItem>
+	{#if action.kind === 'terminal'}
+		<TerminalCreateAction
+			{terminals}
+			mode="menu"
+			busy={creatingTerminal}
+			defaultNodeId={creationNodeId}
+			oncreate={(nodeId) => void createTerminal(nodeId)}
+		/>
+	{:else}
+		<DropdownMenuItem
+			data-workspace-window-add-action={action.id}
+			data-workspace-window-add-group={group}
+			disabled={action.disabled || action.busy}
+			aria-busy={action.busy || undefined}
+			title={action.disabled ? action.label : undefined}
+			onSelect={action.onclick}
+		>
+			<WorkspaceSurfaceIcon kind={action.kind} />
+			{action.label}
+		</DropdownMenuItem>
+	{/if}
 {/snippet}
 
 {#snippet chatViewMenuItems()}
@@ -221,7 +233,7 @@
 			onSelect={() => void workspace.openTerminalSession(session.metadata.terminalId, windowId)}
 		>
 			<WorkspaceSurfaceIcon kind="terminal" />
-			{terminalDisplayName(session.metadata)}
+			{terminals.displayName(session.metadata)}
 		</DropdownMenuItem>
 	{/each}
 {/snippet}
@@ -277,6 +289,16 @@
 					{@render unplacedTerminalMenuItems()}
 				</DropdownMenuContent>
 			</DropdownMenu>
+		{:else if action.kind === 'terminal'}
+			<TerminalCreateAction
+				{terminals}
+				{windowId}
+				busy={creatingTerminal}
+				defaultNodeId={creationNodeId}
+				controlClass={ADD_ACTION_CONTROL_CLASS}
+				controlStyle={addControlStyle()}
+				oncreate={(nodeId) => void createTerminal(nodeId)}
+			/>
 		{:else}
 			<button
 				type="button"

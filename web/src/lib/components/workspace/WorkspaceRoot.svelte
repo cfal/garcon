@@ -85,7 +85,6 @@
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
-	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
 
@@ -262,10 +261,20 @@
 		];
 	}
 
-	function targetForChat(chat: { id: string; nodeId?: string | null; status: string; projectPath: string }): ProjectTarget {
+	function targetForChat(chat: {
+		id: string;
+		nodeId?: string | null;
+		status: string;
+		projectPath: string;
+	}): ProjectTarget {
 		return chat.status === 'draft'
 			? { kind: 'path', nodeId: chat.nodeId ?? 'local', projectPath: chat.projectPath }
-			: { kind: 'chat', nodeId: chat.nodeId ?? 'local', chatId: chat.id, projectPath: chat.projectPath };
+			: {
+					kind: 'chat',
+					nodeId: chat.nodeId ?? 'local',
+					chatId: chat.id,
+					projectPath: chat.projectPath,
+				};
 	}
 	const rootState = new WorkspaceRootState({
 		get snapshot() {
@@ -442,7 +451,7 @@
 		}
 		if (surface.type === 'terminal') {
 			const metadata = terminals.sessions[surface.terminalId]?.metadata;
-			return metadata ? terminalDisplayName(metadata) : m.workspace_surface_terminal();
+			return metadata ? terminals.displayName(metadata) : m.workspace_surface_terminal();
 		}
 		if (surface.type === 'file') {
 			const session = fileSessions.get(surface.fileSessionId);
@@ -552,9 +561,9 @@
 				style={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
-				onChooseProjectFolder={modelCatalog.forNode(sessions.selectedChat?.nodeId).supportsUpdateProjectPath(
-					sessions.selectedChat?.agentId ?? '',
-				) && sessions.selectedChat
+				onChooseProjectFolder={modelCatalog
+					.forNode(sessions.selectedChat?.nodeId)
+					.supportsUpdateProjectPath(sessions.selectedChat?.agentId ?? '') && sessions.selectedChat
 					? () => chatActions.requestProjectPath(sessions.selectedChat!)
 					: undefined}
 				frameBridge={rootState.frameBridge(surface.id)}
@@ -727,6 +736,9 @@
 
 <TerminalRenameDialog
 	terminal={terminalToRename}
+	hostLabel={terminalToRename
+		? terminals.nodeLabel(terminals.nodeIdFor(terminalToRename.terminalId))
+		: 'Local'}
 	onClose={() => (renamingTerminalId = null)}
 	onRename={(terminalId, title) => terminals.rename(terminalId, title)}
 />

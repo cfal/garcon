@@ -10,8 +10,6 @@
 	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 	import type { TerminalToolbarKey } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
-	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { ApiError } from '$lib/api/client.js';
@@ -20,6 +18,7 @@
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
 	import TerminalRenameDialog from './TerminalRenameDialog.svelte';
+	import TerminalCreateAction from './TerminalCreateAction.svelte';
 	import type {
 		TerminalSurfaceRegistryPort,
 		TerminalSurfaceWorkspacePort,
@@ -46,6 +45,7 @@
 	let observer: ResizeObserver | null = null;
 	let actionError = $state<string | null>(null);
 	let renameDialogOpen = $state(false);
+	let creating = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
 	let runtime = $state<Awaited<ReturnType<typeof terminals.ensureRuntime>> | null>(null);
@@ -53,16 +53,6 @@
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [
-			{
-				id: 'new',
-				label: m.terminal_new(),
-				icon: Plus,
-				onclick: () => void createTerminal(),
-				disabled:
-					terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
-					terminals.listStatus !== 'ready',
-				priority: 0,
-			},
 			{
 				id: 'rename',
 				label: m.terminal_rename(),
@@ -210,15 +200,23 @@
 		void workspace.switchTerminalSurface(terminalId, value);
 	}
 
-	async function createTerminal(): Promise<void> {
+	async function createTerminal(nodeId?: string): Promise<void> {
+		if (creating) return;
+		creating = true;
 		actionError = null;
 		try {
-			await workspace.createTerminalReplacing(terminalId, `terminal-surface:${terminalId}:${host}`);
+			await workspace.createTerminalReplacing(
+				terminalId,
+				`terminal-surface:${terminalId}:${host}`,
+				nodeId,
+			);
 		} catch (error) {
 			actionError = error instanceof Error ? error.message : m.terminal_create_failed();
 			if (error instanceof ApiError && error.errorCode === 'terminal-limit') {
 				queueMicrotask(() => sessionPicker?.focus());
 			}
+		} finally {
+			creating = false;
 		}
 	}
 
@@ -267,7 +265,7 @@
 						{@const placement = placementLabel(item.metadata.terminalId)}
 						<option value={item.metadata.terminalId}>
 							{m.terminal_session_status({
-								name: terminalDisplayName(item.metadata),
+								name: terminals.displayName(item.metadata),
 								status: item.metadata.processStatus,
 							})}{placement ? ` - ${placement}` : ''}
 						</option>
@@ -277,11 +275,11 @@
 					<span
 						class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
 						title={m.terminal_initial_working_directory({
-							path: session.metadata.initialWorkingDirectory,
+							path: `${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory}`,
 						})}
 					>
 						{m.terminal_initial_working_directory({
-							path: session.metadata.initialWorkingDirectory,
+							path: `${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory}`,
 						})}
 					</span>
 					<span class="shrink-0 text-[11px] text-muted-foreground"
@@ -289,6 +287,13 @@
 					>
 				{/if}
 			</div>
+			<TerminalCreateAction
+				{terminals}
+				icon={Plus}
+				busy={creating}
+				defaultNodeId={terminals.nodeIdFor(terminalId)}
+				oncreate={(nodeId) => void createTerminal(nodeId)}
+			/>
 			<ResponsiveSurfaceActions
 				actions={toolbarActions}
 				menuLabel={m.workspace_surface_actions()}
@@ -377,6 +382,7 @@
 
 <TerminalRenameDialog
 	terminal={host === 'mobile' && renameDialogOpen ? (session?.metadata ?? null) : null}
+	hostLabel={terminals.nodeLabel(terminals.nodeIdFor(terminalId))}
 	onClose={() => (renameDialogOpen = false)}
 	onRename={(selectedTerminalId, title) => terminals.rename(selectedTerminalId, title)}
 />

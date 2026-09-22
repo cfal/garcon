@@ -15,6 +15,7 @@
 	} from '../terminal-surface-ports.js';
 	import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 	import TerminalSurface from '../TerminalSurface.svelte';
+	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 
 	interface Props {
 		host: WorkspaceWindowId | 'mobile';
@@ -125,6 +126,12 @@
 		},
 		listStatus: 'ready',
 		listError: null,
+		nodeLabel: () => 'Local',
+		nodeIdFor: () => 'local',
+		displayName: terminalDisplayName,
+		hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
+		hasRemoteHosts: false,
+		canCreate: () => true,
 		ensureRuntime: async (selectedTerminalId: string) => {
 			await (runtimeDelays?.[selectedTerminalId] ?? runtimeDelay);
 			return runtime;

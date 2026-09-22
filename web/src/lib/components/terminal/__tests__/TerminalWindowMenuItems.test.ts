@@ -23,6 +23,8 @@ const fakes = vi.hoisted(() => ({
 
 vi.mock('$lib/context', () => ({
 	getTerminalRegistry: () => ({
+		nodeIdFor: () => 'local',
+		nodeLabel: () => 'Local',
 		get sessions() {
 			return fakes.sessions;
 		},

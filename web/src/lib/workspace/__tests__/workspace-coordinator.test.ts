@@ -158,6 +158,9 @@ function createHarness(
 		),
 	};
 	const terminals = {
+		displayName: (metadata: TerminalMetadata) =>
+			metadata.title ?? `Local ${metadata.displaySequence}`,
+		nodeIdFor: vi.fn(() => 'local'),
 		sessions: {} as Record<
 			string,
 			{
@@ -2709,6 +2712,66 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.unplacedTerminalIds).toContain('one');
 		expect(terminals.sessions.one).toBeDefined();
 		expect(terminals.requestTermination).not.toHaveBeenCalled();
+	});
+
+	it.each(['window', 'replace'] as const)(
+		'captures the source terminal host/directory for %s creation',
+		async (mode) => {
+			const { coordinator, layout, terminals } = createHarness();
+			terminals.nodeIdFor.mockReturnValue('remote');
+			terminals.sessions.one = {
+				metadata: { ...terminalMetadata('one'), initialWorkingDirectory: '/remote/project' },
+				attachmentState: 'attached',
+			};
+			terminals.create.mockResolvedValue('two');
+			layout.publish(
+				layout.revision,
+				reduceWorkspaceLayout(layout.snapshot, [
+					{
+						type: 'register-surface',
+						surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
+						windowId: 'window-main',
+					},
+					{
+						type: 'activate-window-tab',
+						windowId: 'window-main',
+						surfaceId: terminalSurfaceId('one'),
+					},
+				]),
+			);
+			expect(coordinator.terminalCreationNodeIdFor('window-main')).toBe('remote');
+			if (mode === 'window') await coordinator.createTerminal('window-main');
+			else await coordinator.createTerminalReplacing('one');
+			expect(terminals.create).toHaveBeenCalledWith(
+				'/remote/project',
+				expect.any(String),
+				'remote',
+			);
+		},
+	);
+
+	it('uses the destination base when an existing terminal chooses a different host', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		terminals.nodeIdFor.mockReturnValue('remote');
+		terminals.sessions.one = { metadata: terminalMetadata('one'), attachmentState: 'attached' };
+		terminals.create.mockResolvedValue('two');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
+					windowId: 'window-main',
+				},
+				{
+					type: 'activate-window-tab',
+					windowId: 'window-main',
+					surfaceId: terminalSurfaceId('one'),
+				},
+			]),
+		);
+		await coordinator.createTerminal('window-main', 'synthetic-create', 'local');
+		expect(terminals.create).toHaveBeenCalledWith(null, expect.any(String), 'local');
 	});
 
 	it('opens a singleton in a new window and focuses it', async () => {

@@ -7,10 +7,12 @@
 
 	let {
 		terminal,
+		hostLabel = 'Local',
 		onClose,
 		onRename,
 	}: {
 		terminal: TerminalMetadata | null;
+		hostLabel?: string;
 		onClose: () => void;
 		onRename: (terminalId: string, title: string) => Promise<void>;
 	} = $props();
@@ -22,7 +24,7 @@
 	let renameError = $state<string | null>(null);
 	const open = $derived(terminal !== null);
 	const defaultName = $derived(
-		terminal ? defaultTerminalDisplayName(terminal) : m.workspace_surface_terminal(),
+		terminal ? defaultTerminalDisplayName(terminal, hostLabel) : m.workspace_surface_terminal(),
 	);
 
 	$effect(() => {

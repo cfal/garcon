@@ -10,15 +10,25 @@ interface ProjectPathResolutionDeps {
 	projectResolution: ProjectResolver;
 }
 
-export async function resolveProjectPath(deps: ProjectPathResolutionDeps): Promise<string | null> {
+export interface TerminalCreationTarget {
+	nodeId: string;
+	projectPath: string | null;
+}
+
+export async function resolveProjectPath(
+	deps: ProjectPathResolutionDeps,
+	nodeId?: string,
+): Promise<TerminalCreationTarget> {
 	const target = deps.workspaceContext.currentTarget;
-	if (!target) return null;
-	if (effectiveNodeId(target.nodeId) !== 'local') throw new Error('Terminals are unavailable on remote execution nodes.');
+	const selectedNode = nodeId ?? effectiveNodeId(target?.nodeId);
+	if (!target || selectedNode !== effectiveNodeId(target.nodeId))
+		return { nodeId: selectedNode, projectPath: null };
 	const lease = deps.projectResolution.retain(target);
 	try {
 		await lease.resolve();
 		const snapshot = lease.snapshot;
-		if (snapshot.kind === 'available') return target.projectPath;
+		if (snapshot.kind === 'available')
+			return { nodeId: selectedNode, projectPath: target.projectPath };
 		if (snapshot.kind === 'request-failed') throw new Error(snapshot.message);
 		throw new Error(m.workspace_project_unavailable());
 	} finally {

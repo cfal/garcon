@@ -81,7 +81,7 @@ describe('Lightpanda terminal window lifecycle', () => {
 
         expect(
           await fixture.integration.client.get<TerminalListResponse>('/api/v1/terminals'),
-        ).toEqual({ success: true, terminals: [] });
+        ).toMatchObject({ success: true, terminals: [] });
         expect(
           await fixture.page.$(`[data-workspace-surface-id="terminal:${terminalId}"]`),
         ).toBeNull();

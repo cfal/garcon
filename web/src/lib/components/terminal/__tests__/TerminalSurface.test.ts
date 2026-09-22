@@ -16,13 +16,13 @@ describe('TerminalSurface', () => {
 	it('labels the terminal path as its initial directory rather than its current directory', () => {
 		render(TerminalSurfaceTestHost, { host: 'mobile' });
 
-		expect(screen.getByText('Started in /workspace/project')).toBeTruthy();
+		expect(screen.getByText('Started in Local: /workspace/project')).toBeTruthy();
 	});
 
 	it('labels placed sessions with their workspace window number', () => {
 		render(TerminalSurfaceTestHost, { host: 'mobile' });
 
-		expect(screen.getByRole('option', { name: 'Terminal 1 - running - Window 1' })).toBeTruthy();
+		expect(screen.getByRole('option', { name: 'Local 1 - running - Window 1' })).toBeTruthy();
 		expect(screen.getByRole('option', { name: 'Build logs - running' })).toBeTruthy();
 	});
 
@@ -138,7 +138,7 @@ describe('TerminalSurface', () => {
 			createError: new ApiError(409, 'Limit reached', 'terminal-limit'),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'New terminal' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'New Terminal' }));
 		await Promise.resolve();
 		expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Terminal session' }));
 	});
@@ -158,7 +158,7 @@ describe('TerminalSurface', () => {
 		const onCreateReplacing = vi.fn();
 		render(TerminalSurfaceTestHost, { host: 'mobile', onCreateReplacing });
 
-		await fireEvent.click(screen.getByRole('button', { name: 'New terminal' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'New Terminal' }));
 
 		expect(onCreateReplacing).toHaveBeenCalledWith('terminal-1');
 	});

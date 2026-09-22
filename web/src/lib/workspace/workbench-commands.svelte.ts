@@ -13,7 +13,6 @@ import {
 } from '$lib/files/sessions/file-open-mode.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
-import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import type { FilesSurfaceController } from './singleton-surfaces.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
@@ -56,10 +55,28 @@ export interface WorkbenchCommandRegistryDeps {
 
 export class WorkbenchCommandRegistry {
 	readonly #surfacePorts = new Map<string, FileCommandSurfacePort>();
-	readonly commands: readonly WorkbenchCommand[];
+	readonly #baseCommands: readonly WorkbenchCommand[];
 
 	constructor(private readonly deps: WorkbenchCommandRegistryDeps) {
-		this.commands = this.#createCommands();
+		this.#baseCommands = this.#createCommands();
+	}
+
+	get commands(): readonly WorkbenchCommand[] {
+		if (!this.deps.terminals.hasRemoteHosts) return this.#baseCommands;
+		return [
+			...this.#baseCommands,
+			...this.deps.terminals.hosts.map((host) => ({
+				id: `workspace-new-terminal:${host.id}`,
+				label: `${m.workspace_new_terminal()}: ${host.label}`,
+				category: 'Workspace' as const,
+				isEnabled: () => this.deps.terminals.canCreate(host.id),
+				run: () =>
+					this.deps.workspace.createTerminalInAvailableSpace(
+						`command-menu:new-terminal:${host.id}`,
+						host.id,
+					),
+			})),
+		];
 	}
 
 	get knownFileLocations(): readonly FileLocation[] {
@@ -373,9 +390,9 @@ export class WorkbenchCommandRegistry {
 				label: m.workspace_new_terminal(),
 				category: 'Workspace',
 				isVisible: () =>
-					this.deps.terminals.listStatus === 'ready' &&
-					this.deps.terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT,
-				isEnabled: always,
+					!this.deps.terminals.hasRemoteHosts &&
+					this.deps.terminals.canCreate(this.deps.workspace.terminalCreationNodeId),
+				isEnabled: () => this.deps.terminals.canCreate(this.deps.workspace.terminalCreationNodeId),
 				run: () => this.deps.workspace.createTerminalInAvailableSpace('command-menu:new-terminal'),
 			},
 			open('workspace-git', m.command_switch_to_git(), 'git'),
