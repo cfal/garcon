@@ -164,6 +164,20 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir) {
     if (!inspection.ok || !(await inspection.json()).valid) {
       throw new Error('Compiled worker project inspection failed');
     }
+    const terminalsUrl = `${url}/api/v1/terminals`;
+    const inventory = await fetch(`${terminalsUrl}?nodeId=${configured.id}`).then(result => result.json());
+    const created = await fetch(terminalsUrl, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nodeId: configured.id, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
+        requestId: 'compiled-terminal', requestedInitialWorkingDirectory: workspaceDir }),
+    });
+    const terminal = await created.json();
+    if (!created.ok || !terminal.terminal?.terminalId) throw new Error(`Compiled worker PTY failed: ${JSON.stringify(terminal)}`);
+    const removed = await fetch(terminalsUrl, {
+      method: 'DELETE', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ terminalId: terminal.terminal.terminalId, requestId: 'compiled-terminal-stop' }),
+    });
+    if (!removed.ok) throw new Error('Compiled worker PTY cleanup failed');
   } finally {
     await stopProcess(worker);
   }
