@@ -77,6 +77,7 @@
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
 	let creatingTerminal = $state(false);
+	let menuChoosesTerminalHost = $state(false);
 	const creationNodeId = $derived(workspace.terminalCreationNodeIdFor(windowId));
 	const terminalLimitReached = $derived(
 		!terminals.hasRemoteHosts && !terminals.canCreate(creationNodeId),
@@ -194,6 +195,10 @@
 			creatingTerminal = false;
 		}
 	}
+
+	function captureTerminalMenu(open: boolean): void {
+		if (open) menuChoosesTerminalHost = terminals.hasRemoteHosts;
+	}
 </script>
 
 {#snippet addActionMenuItem(action: WorkspaceWindowAddCommand, group?: string)}
@@ -201,6 +206,7 @@
 		<TerminalCreateAction
 			{terminals}
 			mode="menu"
+			menuChoosesHost={menuChoosesTerminalHost}
 			busy={creatingTerminal}
 			defaultNodeId={creationNodeId}
 			oncreate={(nodeId) => void createTerminal(nodeId)}
@@ -267,7 +273,7 @@
 				</DropdownMenuContent>
 			</DropdownMenu>
 		{:else if action.kind === 'terminal' && hasUnplacedTerminalSessions}
-			<DropdownMenu>
+			<DropdownMenu onOpenChange={captureTerminalMenu}>
 				<DropdownMenuTrigger
 					class={ADD_ACTION_CONTROL_CLASS}
 					style={addControlStyle()}
@@ -318,7 +324,7 @@
 		{/if}
 	{/each}
 	{#if showOverflowMenu}
-		<DropdownMenu bind:open={menuState.overflowMenuOpen}>
+		<DropdownMenu bind:open={menuState.overflowMenuOpen} onOpenChange={captureTerminalMenu}>
 			<DropdownMenuTrigger
 				class={ADD_ACTION_CONTROL_CLASS}
 				style={addControlStyle()}

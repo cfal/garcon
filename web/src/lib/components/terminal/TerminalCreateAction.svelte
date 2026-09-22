@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Component } from 'svelte';
+	import type { HTMLButtonAttributes } from 'svelte/elements';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import {
 		DropdownMenu,
@@ -17,6 +18,7 @@
 		terminals,
 		oncreate,
 		mode = 'inline',
+		menuChoosesHost = false,
 		busy = false,
 		defaultNodeId = 'local',
 		showLabel = false,
@@ -28,6 +30,7 @@
 		terminals: Pick<TerminalRegistry, 'hosts' | 'hasRemoteHosts' | 'canCreate'>;
 		oncreate: (nodeId?: string) => void;
 		mode?: 'inline' | 'menu';
+		menuChoosesHost?: boolean;
 		busy?: boolean;
 		defaultNodeId?: string;
 		showLabel?: boolean;
@@ -37,7 +40,7 @@
 		windowId?: string;
 	} = $props();
 	let open = $state(false);
-	const chooseHost = $derived(terminals.hasRemoteHosts || open);
+	const chooseHost = $derived(mode === 'menu' ? menuChoosesHost : terminals.hasRemoteHosts || open);
 	const disabled = $derived(busy || (!chooseHost && !terminals.canCreate(defaultNodeId)));
 	const buttonClass = $derived(
 		controlClass ||
@@ -84,35 +87,37 @@
 			<SquareTerminal />{m.workspace_new_terminal()}
 		</DropdownMenuItem>
 	{/if}
-{:else if chooseHost}
+{:else}
 	<DropdownMenu bind:open>
 		<DropdownMenuTrigger
 			class={buttonClass}
 			style={controlStyle}
-			disabled={busy}
+			aria-disabled={disabled || undefined}
+			aria-busy={busy || undefined}
 			aria-label={m.workspace_new_terminal()}
 			title={m.workspace_new_terminal()}
 			data-workspace-window-add-inline={windowId ? 'new-terminal' : undefined}
 			data-workspace-window-add-action={windowId ? 'new-terminal' : undefined}
 		>
-			<Icon class="h-4 w-4" />{#if showLabel}{m.workspace_new_terminal()}{/if}
+			{#snippet child({ props })}
+				{@const buttonProps = props as HTMLButtonAttributes}
+				<button
+					{...props}
+					aria-haspopup={chooseHost ? 'menu' : undefined}
+					aria-expanded={chooseHost ? open : undefined}
+					onpointerdown={chooseHost && !busy ? buttonProps.onpointerdown : undefined}
+					onpointerup={chooseHost && !busy ? buttonProps.onpointerup : undefined}
+					onkeydown={chooseHost && !busy ? buttonProps.onkeydown : undefined}
+					onclick={(event) => {
+						if (busy) return;
+						if (chooseHost) buttonProps.onclick?.(event);
+						else create();
+					}}
+				>
+					<Icon class="h-4 w-4" />{#if showLabel}{m.workspace_new_terminal()}{/if}
+				</button>
+			{/snippet}
 		</DropdownMenuTrigger>
 		<DropdownMenuContent align="end" class="w-64">{@render hostItems()}</DropdownMenuContent>
 	</DropdownMenu>
-{:else}
-	<button
-		type="button"
-		class={buttonClass}
-		style={controlStyle}
-		disabled={!busy && disabled}
-		aria-disabled={busy || undefined}
-		aria-busy={busy || undefined}
-		aria-label={m.workspace_new_terminal()}
-		title={m.workspace_new_terminal()}
-		data-workspace-window-add-inline={windowId ? 'new-terminal' : undefined}
-		data-workspace-window-add-action={windowId ? 'new-terminal' : undefined}
-		onclick={() => create()}
-	>
-		<Icon class="h-4 w-4" />{#if showLabel}{m.workspace_new_terminal()}{/if}
-	</button>
 {/if}
