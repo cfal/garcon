@@ -26,9 +26,13 @@ export function validateGitHttpFields(method: GitMethod, input: unknown, extra: 
 
 export function gitJsonBody(method: GitMethod, handler: (body: JsonBody, request: Request) => Promise<Response>): RouteHandler {
   return withJsonBody(async (body: JsonBody, request: Request) => {
-    try { validateGitHttpFields(method, body); return await handler(body, request); }
+    try { assertGitBodyUrl(request); validateGitHttpFields(method, body); return await handler(body, request); }
     catch (error) { return gitRouteFailure(error); }
   });
+}
+
+export function assertGitBodyUrl(request: Request): void {
+  if (new URL(request.url).search) throw new GitServiceError('GIT_INVALID_INPUT', 'Git body-routed requests do not accept query parameters');
 }
 
 export function gitQuery(method: GitMethod, handler: RouteHandler): RouteHandler {

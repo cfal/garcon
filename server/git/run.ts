@@ -1,7 +1,7 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
-import { assertGitWorkingPath, gitOperationOptions, markGitOutputTruncated, markGitMutationDispatched, trackGitProcess } from './operation-context.js';
+import { assertGitWorkingPath, gitOperationOptions, isGitCancellation, markGitOutputTruncated, markGitMutationDispatched, trackGitProcess } from './operation-context.js';
 import type {
   GitCommandOptions,
   GitCommandResult,
@@ -354,7 +354,7 @@ export async function assertGitRepository(
       readOnlyGitOptions({ signal }),
     ));
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || isGitCancellation(error)) throw error;
     throw new Error('Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.');
   }
 

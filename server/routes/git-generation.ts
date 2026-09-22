@@ -13,7 +13,7 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { executionNodeIdFromValue } from './node-target.js';
 import { gitRouteFailure, type GitServiceResolver } from './git-node-service.js';
-import { validateGitHttpFields } from './git-request-fields.js';
+import { assertGitBodyUrl, validateGitHttpFields } from './git-request-fields.js';
 
 const GENERATION_FIELDS = ['generationNodeId', 'agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol', 'thinkingMode', 'customPrompt'];
 
@@ -63,6 +63,7 @@ function gitRouteError(error: string, status = 400): Response { return jsonError
 export function createGitGenerationRoute(agents: AgentRegistryServiceContract, settings: SettingsStore, resolveGit: GitServiceResolver) {
   return withJsonBody(async (body: JsonBody, request: Request): Promise<Response> => {
     try {
+      assertGitBodyUrl(request);
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const files = stringArray(input.files);
