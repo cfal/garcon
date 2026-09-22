@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 37 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 39 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -42,10 +42,15 @@ native-activity facets, and persisted Responses checkpoints. Ledger context
 folds supply new-session seeds and carryover, not universal per-turn resume
 context. This documentation correction adds no cases or runtime obligations.
 
+Revision 38 allows explicitly selected, in-scope preambles when automatic
+catalog inclusion is disabled. Revision 39 distinguishes combined-tool warm
+windows from bounded cold-cache restoration and treats collapsed tool groups
+as client-only projections of individually addressed ledger rows.
+
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 37, SHA-256
-  `336cfef098ea91937230503fabad157fd6ff0cf11363add8c0070201888d0dcb`
+- `docs/transcript-ledger-v5-design.md`, revision 39, SHA-256
+  `ae917d66c3c875c8881834639d9394fd4d4dd8e27fb09b5ab21233a01803c60d`
 
 Current inventory: 419 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
