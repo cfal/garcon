@@ -5,21 +5,9 @@ import {
 	terminateTerminal,
 } from '$lib/api/terminals.js';
 import { ApiError } from '$lib/api/client.js';
-import type {
-	TerminalRuntime,
-	TerminalRuntimeOptions,
-} from '$lib/terminal/runtime/terminal-runtime.svelte.js';
-import {
-	TerminalTransport,
-	type TerminalTransportOptions,
-	type TerminalTransportStatus,
-} from '$lib/ws/terminal-transport.svelte.js';
-import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
-import type {
-	TerminalMetadata,
-	TerminalStreamClientMessage,
-	TerminalStreamServerMessage,
-} from '$shared/terminal';
+import type { TerminalRuntimeOptions } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
+import { TerminalTransport } from '$lib/ws/terminal-transport.svelte.js';
+import type { TerminalMetadata, TerminalStreamServerMessage } from '$shared/terminal';
 import { TerminalThemeStore } from '$lib/terminal/runtime/terminal-theme.svelte.js';
 import type { TerminalThemePresentation } from '$lib/terminal/runtime/terminal-theme.svelte.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
@@ -28,46 +16,26 @@ import * as m from '$lib/paraglide/messages.js';
 import { parseTerminalReference } from '$shared/terminal-identity';
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 import { terminalDisplayName } from './terminal-display-name.js';
 import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output-fragments.js';
+import type {
+	TerminalAttachmentState,
+	TerminalClientSession,
+	TerminalRegistryDeps,
+	TerminalRuntimeModule,
+	TerminalSessionRuntime,
+	TerminalTransportPort,
+} from './terminal-registry-types.js';
+export type {
+	TerminalAttachmentState,
+	TerminalClientSession,
+	TerminalRegistryDeps,
+	TerminalRuntimeModule,
+	TerminalSessionRuntime,
+	TerminalTransportPort,
+} from './terminal-registry-types.js';
 
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
-
-export type TerminalSessionRuntime = Pick<
-	TerminalRuntime,
-	| 'write'
-	| 'resendSize'
-	| 'applyTheme'
-	| 'dispose'
-	| 'prepareRendererTransfer'
-	| 'attach'
-	| 'park'
-	| 'scheduleFit'
-	| 'focus'
-	| 'pasteFromClipboard'
-	| 'applyFontSize'
-	| 'clipboardMessage'
-	| 'sendToolbarKey'
-> & {
-	readonly inputControls: Pick<
-		TerminalRuntime['inputControls'],
-		'ctrlMode' | 'altMode' | 'toggleModifier'
-	>;
-};
-
-export type TerminalAttachmentState =
-	'connecting' | 'attached' | 'detached' | 'taken-over' | 'unavailable';
-
-export interface TerminalClientSession {
-	metadata: TerminalMetadata;
-	attachmentState: TerminalAttachmentState;
-	runtimeState: 'idle' | 'loading' | 'ready' | 'failed';
-	runtimeError: string | null;
-	runtimeErrorRequiresPageReload: boolean;
-	lastReceivedSequence: number;
-	replayTruncatedAt: number | null;
-}
 
 interface PendingTerminalCreate {
 	nodeId: string;
@@ -77,37 +45,6 @@ interface PendingTerminalCreate {
 	startedAt: number;
 	requiresList: boolean;
 	timer: ReturnType<typeof setTimeout> | null;
-}
-
-export interface TerminalRegistryDeps {
-	nodes?: Pick<ExecutionNodesStore, 'nodes' | 'label' | 'onChanged'>;
-	connection: PrimaryWsConnectionPort;
-	getClientId(): string;
-	now?: () => number;
-	listTerminals?: typeof listTerminals;
-	createTerminal?: typeof createTerminal;
-	terminateTerminal?: typeof terminateTerminal;
-	renameTerminal?: typeof renameTerminal;
-	createTransport?: (options: TerminalTransportOptions) => TerminalTransportPort;
-	createRuntime?: (
-		options: TerminalRuntimeOptions,
-	) => TerminalSessionRuntime | Promise<TerminalSessionRuntime>;
-	loadRuntime?: () => Promise<TerminalRuntimeModule>;
-	reloadApplication?: () => void;
-	onSuccessfulList?(terminalIds: readonly string[], nodeId?: string): void;
-	onSessionTerminated?(terminalId: string): void;
-}
-
-export interface TerminalRuntimeModule {
-	createTerminalRuntime(options: TerminalRuntimeOptions): Promise<TerminalSessionRuntime>;
-}
-
-export interface TerminalTransportPort {
-	readonly status: TerminalTransportStatus;
-	connect(): void;
-	send(message: TerminalStreamClientMessage): boolean;
-	suspend(): void;
-	destroy(): void;
 }
 
 async function loadRuntime(): Promise<TerminalRuntimeModule> {
@@ -141,6 +78,7 @@ export class TerminalRegistry {
 	readonly #gapRecovery = new Set<string>();
 	readonly #stopNodes: () => void;
 	#initialized = false;
+	#inventoryRetry: ReturnType<typeof setTimeout> | null = null;
 	sessions = $state<Record<string, TerminalClientSession>>({});
 	listStatus = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
 	listError = $state<string | null>(null);
@@ -298,7 +236,10 @@ export class TerminalRegistry {
 				}
 				for (const [terminalId, existing] of Object.entries(this.sessions)) {
 					if (next[terminalId]) continue;
-					if ((this.#sessionMutationVersions.get(terminalId) ?? 0) > startedAtMutationVersion) {
+					if (
+						parseTerminalReference(terminalId)?.terminalRuntimeId === response.terminalRuntimeId &&
+						(this.#sessionMutationVersions.get(terminalId) ?? 0) > startedAtMutationVersion
+					) {
 						next[terminalId] = existing;
 						continue;
 					}
@@ -328,11 +269,13 @@ export class TerminalRegistry {
 			} catch (error) {
 				if (this.#destroyed || version !== this.#nodeVersions.get(nodeId)) return;
 				this.nodeInventories[nodeId] = {
+					...this.nodeInventories[nodeId],
 					status: 'failed',
 					error: error instanceof Error ? error.message : m.terminal_list_failed(),
 				};
 				this.listStatus = 'failed';
 				this.listError = error instanceof Error ? error.message : m.terminal_list_failed();
+				this.#scheduleInventoryRetry();
 				throw error;
 			} finally {
 				if (this.#lists.get(nodeId) === listing) this.#lists.delete(nodeId);
@@ -394,6 +337,11 @@ export class TerminalRegistry {
 				expectedTerminalRuntimeId: attempt.terminalRuntimeId,
 				requestedInitialWorkingDirectory: attempt.requestedInitialWorkingDirectory,
 			});
+			if (this.#destroyed || !this.#nodeVersions.has(nodeId))
+				throw new ApiError(503, m.terminal_unavailable(), 'terminal-unavailable');
+			const observedRuntime = this.nodeInventories[nodeId]?.runtimeId;
+			if (observedRuntime && observedRuntime !== attempt.terminalRuntimeId)
+				throw new ApiError(409, m.terminal_create_requires_list(), 'terminal-runtime-changed');
 			this.#upsert(result.terminal, 'detached');
 			this.#clearCreateAttempt(requestId);
 			void this.attach(result.terminal.terminalId, 'restore');
@@ -547,6 +495,7 @@ export class TerminalRegistry {
 	authChanged(authenticated: boolean): void {
 		this.#authSuspended = !authenticated;
 		if (!authenticated) {
+			this.#clearInventoryRetry();
 			this.#invalidateAttachments();
 			this.#transport.suspend();
 			return;
@@ -556,6 +505,7 @@ export class TerminalRegistry {
 
 	destroy(): void {
 		this.#destroyed = true;
+		this.#clearInventoryRetry();
 		this.#stopNodes();
 		this.#invalidateAttachments();
 		this.#transport.destroy();
@@ -951,18 +901,39 @@ export class TerminalRegistry {
 			if (previous === availability) continue;
 			if (!host.available) this.#loseNode(host.id);
 			else if (this.#initialized && !this.#authSuspended) {
-				void this.list(host.id)
-					.then(() => {
-						for (const session of this.orderedSessions)
-							if (
-								this.nodeIdFor(session.metadata.terminalId) === host.id &&
-								session.attachmentState !== 'taken-over'
-							)
-								void this.attach(session.metadata.terminalId, 'restore');
-					})
-					.catch(() => undefined);
+				void this.#refreshNode(host.id);
 			}
 		}
+	}
+
+	async #refreshNode(nodeId: string): Promise<void> {
+		try {
+			await this.list(nodeId);
+		} catch {
+			return;
+		}
+		for (const session of this.orderedSessions)
+			if (
+				this.nodeIdFor(session.metadata.terminalId) === nodeId &&
+				!['attached', 'taken-over'].includes(session.attachmentState)
+			)
+				void this.attach(session.metadata.terminalId, 'restore');
+	}
+
+	#scheduleInventoryRetry(): void {
+		if (this.#inventoryRetry || !this.#initialized || this.#authSuspended || this.#destroyed)
+			return;
+		this.#inventoryRetry = setTimeout(() => {
+			this.#inventoryRetry = null;
+			for (const host of this.hosts)
+				if (host.available && this.nodeInventories[host.id]?.status === 'failed')
+					void this.#refreshNode(host.id);
+		}, 5_000);
+	}
+
+	#clearInventoryRetry(): void {
+		if (this.#inventoryRetry) clearTimeout(this.#inventoryRetry);
+		this.#inventoryRetry = null;
 	}
 
 	#loseNode(nodeId: string): void {

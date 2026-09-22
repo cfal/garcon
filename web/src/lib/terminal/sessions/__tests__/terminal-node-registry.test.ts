@@ -12,11 +12,14 @@ import type {
 	TerminalStreamClientMessage,
 } from '$shared/terminal';
 import type { TerminalTransportOptions } from '$lib/ws/terminal-transport.svelte.js';
+import { TerminalTransport } from '$lib/ws/terminal-transport.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { ApiError } from '$lib/api/client.js';
+import { parseTerminalStreamClientMessage } from '$shared/terminal';
 
 const remoteId = '00000000-0000-4000-8000-000000000001';
 const runtimeId = '00000000-0000-4000-8000-000000000002';
+const replacementRuntimeId = '00000000-0000-4000-8000-000000000003';
 const registries: TerminalRegistry[] = [];
 afterEach(() => {
 	for (const registry of registries.splice(0)) registry.destroy();
@@ -41,9 +44,9 @@ function node(
 		machineServices: { terminals: true, files: true, git: false },
 	};
 }
-function terminal(nodeId: string, sequence = 1): TerminalMetadata {
+function terminal(nodeId: string, sequence = 1, runtime = runtimeId): TerminalMetadata {
 	return {
-		terminalId: `${nodeId}/${runtimeId}/00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`,
+		terminalId: `${nodeId}/${runtime}/00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`,
 		title: null,
 		displaySequence: sequence,
 		initialWorkingDirectory: '/project',
@@ -54,14 +57,14 @@ function terminal(nodeId: string, sequence = 1): TerminalMetadata {
 		latestOutputSequence: 0,
 	};
 }
-const inventory = (terminals: TerminalMetadata[]): TerminalListResponse => ({
+const inventory = (terminals: TerminalMetadata[], runtime = runtimeId): TerminalListResponse => ({
 	success: true,
-	terminalRuntimeId: runtimeId,
+	terminalRuntimeId: runtime,
 	attachmentEpoch: 'epoch',
 	terminals,
 });
 
-function setup() {
+function setup(options: { realTransport?: boolean } = {}) {
 	const nodes = new ExecutionNodesStore();
 	nodes.applySnapshot([node('local'), node(remoteId)]);
 	const list = vi.fn(async (nodeId = 'local') => inventory([terminal(nodeId)]));
@@ -84,14 +87,18 @@ function setup() {
 		sendToolbarKey() {},
 		inputControls: { ctrlMode: 'inactive', altMode: 'inactive', toggleModifier() {} },
 	} satisfies TerminalSessionRuntime;
+	const sent: TerminalStreamClientMessage[] = [];
 	const connection = {
 		isConnected: true,
-		sendMessage: () => true,
+		sendMessage(message) {
+			const parsed = parseTerminalStreamClientMessage(message);
+			if (parsed) sent.push(parsed);
+			return true;
+		},
 		addMessageConsumer: () => () => {},
 		onConnectionChange: () => () => {},
 	} satisfies PrimaryWsConnectionPort;
 	let callbacks!: TerminalTransportOptions;
-	const sent: TerminalStreamClientMessage[] = [];
 	const transport = {
 		status: 'connected' as const,
 		connect() {},
@@ -108,9 +115,9 @@ function setup() {
 		getClientId: () => 'browser',
 		listTerminals: list,
 		createTerminal: create,
-		createTransport: (options) => {
-			callbacks = options;
-			return transport;
+		createTransport: (callbacksOptions) => {
+			callbacks = callbacksOptions;
+			return options.realTransport ? new TerminalTransport(callbacksOptions) : transport;
 		},
 		createRuntime: () => renderer,
 	});
@@ -119,6 +126,83 @@ function setup() {
 }
 
 describe('node-qualified terminal registry', () => {
+	it.each(['before inventory', 'after inventory'])(
+		'fences obsolete create results resolving %s',
+		async (ordering) => {
+			const { registry, list, create, sent } = setup();
+			await registry.initialize();
+			const creation = Promise.withResolvers<Awaited<ReturnType<typeof create>>>();
+			create.mockImplementationOnce(() => creation.promise);
+			const creating = registry.create('/project', 'in-flight-create', remoteId);
+			const oldId = terminal(remoteId, 2).terminalId;
+			const replacement = Promise.withResolvers<TerminalListResponse>();
+			list.mockImplementationOnce(() => replacement.promise);
+			const listing = registry.list(remoteId);
+			if (ordering === 'before inventory') {
+				creation.resolve({ success: true, terminal: terminal(remoteId, 2) });
+				await expect(creating).resolves.toBe(oldId);
+			}
+			replacement.resolve(
+				inventory([terminal(remoteId, 1, replacementRuntimeId)], replacementRuntimeId),
+			);
+			await listing;
+			if (ordering === 'after inventory') {
+				creation.resolve({ success: true, terminal: terminal(remoteId, 2) });
+				await expect(creating).rejects.toMatchObject({ errorCode: 'terminal-runtime-changed' });
+			}
+			expect(registry.nodeInventories[remoteId].runtimeId).toBe(replacementRuntimeId);
+			expect(registry.sessions[oldId]).toBeUndefined();
+			expect(registry.sessions[terminal(remoteId).terminalId]).toBeUndefined();
+			expect(
+				registry.sessions[terminal(remoteId, 1, replacementRuntimeId).terminalId],
+			).toBeDefined();
+			expect(registry.sessions[terminal('local').terminalId]).toBeDefined();
+			expect(sent.some((message) => message.terminalId === oldId)).toBe(false);
+		},
+	);
+
+	it('retries a failed ready-node inventory after partial transport reconciliation succeeds', async () => {
+		vi.useFakeTimers();
+		const { registry, list, sent } = setup({ realTransport: true });
+		let remoteUnavailable = true;
+		list.mockImplementation(async (id = 'local') => {
+			if (id === remoteId && remoteUnavailable) throw new Error('Transient inventory failure');
+			return inventory([terminal(id)]);
+		});
+		await registry.initialize();
+		await vi.waitFor(() => expect(registry.transportStatus).toBe('connected'));
+		expect(registry.sessions[terminal('local').terminalId]).toBeDefined();
+		expect(registry.nodeInventories[remoteId].status).toBe('failed');
+		const localCalls = list.mock.calls.filter(([id]) => id === 'local').length;
+		remoteUnavailable = false;
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(registry.nodeInventories[remoteId].status).toBe('ready');
+		expect(registry.sessions[terminal(remoteId).terminalId]).toBeDefined();
+		expect(sent).toContainEqual(
+			expect.objectContaining({
+				type: 'terminal-attach',
+				terminalId: terminal(remoteId).terminalId,
+			}),
+		);
+		expect(list.mock.calls.filter(([id]) => id === 'local')).toHaveLength(localCalls);
+	});
+
+	it.each(['destroy', 'logout', 'offline'])('does not retry inventory after %s', async (action) => {
+		vi.useFakeTimers();
+		const { registry, list, nodes } = setup();
+		list.mockImplementation(async (id = 'local') => {
+			if (id === remoteId) throw new Error('Transient inventory failure');
+			return inventory([terminal(id)]);
+		});
+		await registry.initialize();
+		const calls = list.mock.calls.length;
+		if (action === 'destroy') registry.destroy();
+		else if (action === 'logout') registry.authChanged(false);
+		else nodes.applySnapshot([node('local'), node(remoteId, 'offline')]);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(list).toHaveBeenCalledTimes(calls);
+	});
+
 	it('rejects unqualified stream events and cancels gap recovery when the node goes offline', async () => {
 		const { registry, nodes, sent, callbacks, write } = setup();
 		await registry.initialize();

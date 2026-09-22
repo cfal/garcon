@@ -489,14 +489,35 @@ export class TerminalPlacementService {
 
 	async reconcile(
 		liveTerminalIds: readonly string[],
-		options: { deriveLauncher: boolean },
+		options: { deriveLauncher: boolean; nodeId?: string },
 	): Promise<void> {
-		const live = new Set(liveTerminalIds);
 		let mobileFallbackId: string | null = null;
-		for (const terminalId of this.#terminalTerminateRequestIds.keys()) {
-			if (!live.has(terminalId)) this.#terminalTerminateRequestIds.delete(terminalId);
-		}
 		const current = await this.deps.commit((latest) => {
+			const live = new Set(
+				options.nodeId
+					? Object.keys(this.deps.terminals.sessions).filter(
+							(id) => this.deps.terminals.nodeIdFor(id) === options.nodeId,
+						)
+					: liveTerminalIds,
+			);
+			if (options.nodeId) {
+				for (const surface of Object.values(latest.surfaces)) {
+					if (
+						surface.type === 'terminal' &&
+						this.deps.terminals.nodeIdFor(surface.terminalId) !== options.nodeId
+					)
+						live.add(surface.terminalId);
+				}
+				for (const id of latest.unplacedTerminalIds)
+					if (this.deps.terminals.nodeIdFor(id) !== options.nodeId) live.add(id);
+			}
+			for (const terminalId of this.#terminalTerminateRequestIds.keys()) {
+				if (
+					(!options.nodeId || this.deps.terminals.nodeIdFor(terminalId) === options.nodeId) &&
+					!live.has(terminalId)
+				)
+					this.#terminalTerminateRequestIds.delete(terminalId);
+			}
 			const mutations: WorkspaceLayoutMutation[] = [];
 			const removedSurfaceIds = new Set<string>();
 			const survivingTerminalIds = new Set<string>();

@@ -206,16 +206,10 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			});
 		},
 		onSuccessfulList: (terminalIds, nodeId) => {
-			const unaffected = Object.values(layout.snapshot.surfaces)
-				.filter(
-					(surface) =>
-						surface.type === 'terminal' && terminals.nodeIdFor(surface.terminalId) !== nodeId,
-				)
-				.flatMap((surface) => (surface.type === 'terminal' ? [surface.terminalId] : []));
-			unaffected.push(
-				...layout.snapshot.unplacedTerminalIds.filter((id) => terminals.nodeIdFor(id) !== nodeId),
+			terminalLayoutBinding?.handleSuccessfulList(
+				terminalIds.filter((id) => terminals.nodeIdFor(id) === nodeId),
+				nodeId,
 			);
-			terminalLayoutBinding?.handleSuccessfulList([...new Set([...terminalIds, ...unaffected])]);
 		},
 	});
 	const workspaceInteractionGate = new WorkspaceInteractionGate();

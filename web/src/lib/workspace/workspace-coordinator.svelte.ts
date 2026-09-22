@@ -927,7 +927,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async reconcileTerminals(
 		liveTerminalIds: readonly string[],
-		options: { deriveLauncher: boolean },
+		options: { deriveLauncher: boolean; nodeId?: string },
 	): Promise<void> {
 		await this.#terminalPlacement.reconcile(liveTerminalIds, options);
 	}

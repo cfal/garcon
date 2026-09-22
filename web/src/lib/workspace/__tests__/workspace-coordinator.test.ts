@@ -37,6 +37,7 @@ import type {
 } from '../project-resolution-store.svelte';
 import type { ProjectResolver } from '../workspace-project-path-resolution';
 import { AppShellChatNavigationController } from '$lib/components/layout/app-shell-chat-navigation-controller.svelte.js';
+import { TerminalLayoutBinding } from '../terminal-layout-binding.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -160,7 +161,7 @@ function createHarness(
 	const terminals = {
 		displayName: (metadata: TerminalMetadata) =>
 			metadata.title ?? `Local ${metadata.displaySequence}`,
-		nodeIdFor: vi.fn(() => 'local'),
+		nodeIdFor: vi.fn((_terminalId: string) => 'local'),
 		sessions: {} as Record<
 			string,
 			{
@@ -3023,6 +3024,54 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(terminalSurfaceId('one'));
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(terminalSurfaceId('two'));
 		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('reconciles concurrent node inventories against the latest placement without resurrecting tabs', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const local = ['local-placed', 'local-hidden'];
+		const remote = ['remote-placed', 'remote-hidden'];
+		const offline = ['offline-placed', 'offline-hidden'];
+		terminals.nodeIdFor.mockImplementation((id: string) => id.split('-')[0]);
+		for (const id of [...local, ...remote, ...offline]) {
+			terminals.sessions[id] = { metadata: terminalMetadata(id), attachmentState: 'detached' };
+			await coordinator.openTerminalSession(id, 'window-main');
+			if (id.endsWith('-hidden')) await coordinator.closeSurface(terminalSurfaceId(id));
+		}
+		const binding = new TerminalLayoutBinding({
+			restoreSource: 'valid',
+			workspace: coordinator,
+			isLauncherDismissed: () => false,
+			onError(error) {
+				throw error;
+			},
+		});
+		for (const id of [...local, ...remote]) delete terminals.sessions[id];
+		binding.handleSuccessfulList([], 'local');
+		binding.handleSuccessfulList([], 'remote');
+		await vi.waitFor(() => {
+			for (const id of [...local, ...remote]) {
+				expect(layout.surface(terminalSurfaceId(id))).toBeNull();
+				expect(layout.snapshot.unplacedTerminalIds).not.toContain(id);
+			}
+		});
+		expect(layout.surface(terminalSurfaceId(offline[0]))).not.toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).toContain(offline[1]);
+		binding.destroy();
+	});
+
+	it('does not restore a terminal removed after its node inventory queued layout reconciliation', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const id = 'local-race';
+		terminals.sessions[id] = { metadata: terminalMetadata(id), attachmentState: 'detached' };
+		await coordinator.openTerminalSession(id, 'window-main');
+		const reconciling = coordinator.reconcileTerminals([id], {
+			nodeId: 'local',
+			deriveLauncher: false,
+		});
+		delete terminals.sessions[id];
+		await reconciling;
+		expect(layout.surface(terminalSurfaceId(id))).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(id);
 	});
 
 	it('returns to an inactive Chat when mobile terminal reconciliation removes the active tab', async () => {

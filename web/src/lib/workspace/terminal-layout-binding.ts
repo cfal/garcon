@@ -4,7 +4,7 @@ import type { WorkspaceLayoutRestoreSource } from './layout-schema.js';
 interface TerminalLayoutReconciler {
 	reconcileTerminals(
 		terminalIds: readonly string[],
-		options: { deriveLauncher: boolean },
+		options: { deriveLauncher: boolean; nodeId?: string },
 	): Promise<void>;
 }
 
@@ -22,7 +22,7 @@ export class TerminalLayoutBinding {
 
 	constructor(private readonly deps: TerminalLayoutBindingDeps) {}
 
-	handleSuccessfulList(terminalIds: readonly string[]): void {
+	handleSuccessfulList(terminalIds: readonly string[], nodeId?: string): void {
 		if (this.#destroyed) return;
 		const isFirstSuccessfulList = !this.#receivedSuccessfulList;
 		this.#receivedSuccessfulList = true;
@@ -35,7 +35,10 @@ export class TerminalLayoutBinding {
 		void this.#reconciliationQueue
 			.enqueue(async () => {
 				if (this.#destroyed) return;
-				await this.deps.workspace.reconcileTerminals(snapshot, { deriveLauncher });
+				await this.deps.workspace.reconcileTerminals(snapshot, {
+					deriveLauncher,
+					...(nodeId ? { nodeId } : {}),
+				});
 			})
 			.catch((error: unknown) => {
 				if (!this.#destroyed) this.deps.onError(error);
