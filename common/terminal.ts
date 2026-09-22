@@ -1,3 +1,5 @@
+import { isExecutionNodeId } from './execution-nodes.js';
+
 export const TERMINAL_SESSION_LIMIT = 8;
 export const TERMINAL_REQUEST_ID_MAX_BYTES = 256;
 export const TERMINAL_ID_MAX_BYTES = 256;
@@ -32,6 +34,8 @@ export interface TerminalEncodedOutputChunk {
 export interface TerminalCreateRequest {
   requestId: string;
   requestedInitialWorkingDirectory: string | null;
+  nodeId?: string;
+  expectedTerminalRuntimeId?: string;
 }
 
 export interface TerminalTerminateRequest {
@@ -47,6 +51,7 @@ export interface TerminalRenameRequest {
 export interface TerminalListResponse {
   success: true;
   terminals: TerminalMetadata[];
+  terminalRuntimeId?: string;
 }
 
 export interface TerminalCreateResponse {
@@ -77,6 +82,9 @@ export type TerminalErrorCode =
   | 'terminal-backpressure'
   | 'terminal-auth-expired'
   | 'terminal-unsupported'
+  | 'terminal-unavailable'
+  | 'terminal-runtime-changed'
+  | 'terminal-outcome-unknown'
   | 'terminal-internal';
 
 const TERMINAL_ERROR_CODES: ReadonlySet<TerminalErrorCode> = new Set([
@@ -90,10 +98,13 @@ const TERMINAL_ERROR_CODES: ReadonlySet<TerminalErrorCode> = new Set([
   'terminal-backpressure',
   'terminal-auth-expired',
   'terminal-unsupported',
+  'terminal-unavailable',
+  'terminal-runtime-changed',
+  'terminal-outcome-unknown',
   'terminal-internal',
 ]);
 
-export type TerminalStreamClientMessage =
+type TerminalStreamClientPayload =
   | {
       type: 'terminal-attach';
       terminalId: string;
@@ -102,9 +113,12 @@ export type TerminalStreamClientMessage =
       intent: 'restore' | 'takeover';
     }
   | { type: 'terminal-input'; terminalId: string; data: string }
-  | { type: 'terminal-resize'; terminalId: string; cols: number; rows: number };
+  | { type: 'terminal-resize'; terminalId: string; cols: number; rows: number }
+  | { type: 'terminal-detach'; terminalId: string };
 
-export type TerminalStreamServerMessage =
+export type TerminalStreamClientMessage = TerminalStreamClientPayload & { attachmentId?: string };
+
+type TerminalStreamServerPayload =
   | {
       type: 'terminal-attached';
       terminal: TerminalMetadata;
@@ -147,6 +161,8 @@ export type TerminalStreamServerMessage =
       code: TerminalErrorCode;
       message: string;
     };
+
+export type TerminalStreamServerMessage = TerminalStreamServerPayload & { attachmentId?: string };
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -213,6 +229,8 @@ export function parseTerminalCreateRequest(
   const requestId = nonEmptyString(input.requestId);
   if (!requestId || utf8ByteLength(requestId) > TERMINAL_REQUEST_ID_MAX_BYTES)
     return null;
+  if (input.nodeId !== undefined && !isExecutionNodeId(input.nodeId)) return null;
+  if (input.expectedTerminalRuntimeId !== undefined && !terminalIdentifier(input.expectedTerminalRuntimeId)) return null;
   if (
     input.requestedInitialWorkingDirectory !== null &&
     typeof input.requestedInitialWorkingDirectory !== 'string'
@@ -220,6 +238,8 @@ export function parseTerminalCreateRequest(
     return null;
   return {
     requestId,
+    ...(input.nodeId === undefined ? {} : { nodeId: input.nodeId as string }),
+    ...(input.expectedTerminalRuntimeId === undefined ? {} : { expectedTerminalRuntimeId: input.expectedTerminalRuntimeId as string }),
     requestedInitialWorkingDirectory: input.requestedInitialWorkingDirectory as
       | string
       | null,
@@ -250,13 +270,14 @@ export function parseTerminalRenameRequest(
   return terminalId && title !== undefined ? { terminalId, title } : null;
 }
 
-export function parseTerminalStreamClientMessage(
+function parseTerminalStreamClientPayload(
   value: unknown,
 ): TerminalStreamClientMessage | null {
   const input = record(value);
   if (!input) return null;
   const terminalId = terminalIdentifier(input.terminalId);
   if (!terminalId) return null;
+  if (input.type === 'terminal-detach') return { type: input.type, terminalId };
   if (input.type === 'terminal-attach') {
     const clientId = nonEmptyString(input.clientId);
     const afterSequence = nonNegativeInteger(input.afterSequence);
@@ -325,7 +346,7 @@ export function parseTerminalMetadata(value: unknown): TerminalMetadata | null {
   };
 }
 
-export function parseTerminalStreamServerMessage(
+function parseTerminalStreamServerPayload(
   value: unknown,
 ): TerminalStreamServerMessage | null {
   const input = record(value);
@@ -444,7 +465,8 @@ export function parseTerminalListResponse(
     if (!terminal) return null;
     terminals.push(terminal);
   }
-  return { success: true, terminals };
+  if (input.terminalRuntimeId !== undefined && !terminalIdentifier(input.terminalRuntimeId)) return null;
+  return { success: true, terminals, ...(input.terminalRuntimeId === undefined ? {} : { terminalRuntimeId: input.terminalRuntimeId as string }) };
 }
 
 export function parseTerminalCreateResponse(
@@ -485,4 +507,21 @@ export function cloneTerminalMetadata(
   metadata: TerminalMetadata,
 ): TerminalMetadata {
   return { ...metadata };
+}
+
+function withAttachment<T>(value: unknown, parse: (value: unknown) => T | null): T & { attachmentId?: string } | null {
+  const input = record(value);
+  const parsed = parse(value);
+  if (!input || !parsed) return null;
+  if (input.attachmentId === undefined) return parsed;
+  const attachmentId = terminalIdentifier(input.attachmentId);
+  return attachmentId ? { ...parsed, attachmentId } : null;
+}
+
+export function parseTerminalStreamClientMessage(value: unknown): TerminalStreamClientMessage | null {
+  return withAttachment(value, parseTerminalStreamClientPayload);
+}
+
+export function parseTerminalStreamServerMessage(value: unknown): TerminalStreamServerMessage | null {
+  return withAttachment(value, parseTerminalStreamServerPayload);
 }

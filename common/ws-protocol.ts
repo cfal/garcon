@@ -28,6 +28,7 @@ const TERMINAL_CLIENT_TYPE_RECORD = {
   'terminal-attach': true,
   'terminal-input': true,
   'terminal-resize': true,
+  'terminal-detach': true,
 } satisfies Record<TerminalStreamClientMessageType, true>;
 
 export const TERMINAL_STREAM_CLIENT_MESSAGE_TYPES = Object.freeze(

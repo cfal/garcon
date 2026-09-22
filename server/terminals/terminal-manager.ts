@@ -13,8 +13,11 @@ import {
 } from "../../common/terminal.js";
 import { getProjectBasePath, getUserShell } from "../config.js";
 import { KeyedPromiseLock } from "../lib/keyed-lock.js";
-import { assertRealWithinProjectBase } from "../lib/path-boundary.js";
-import type { ServerPrincipal } from "../lib/http-route-types.js";
+import { assertRealWithinBase } from "../lib/path-boundary.js";
+import type { TerminalAuthority as ServerPrincipal, TerminalPeer } from '@garcon/server-agent-interface';
+import { terminalId as qualifiedTerminalId } from '../../common/terminal-identity.js';
+import { TerminalError as TerminalManagerError } from '../../common/terminal-error.js';
+export { TerminalError as TerminalManagerError } from '../../common/terminal-error.js';
 import { createLogger } from "../lib/log.js";
 import { errorMessage } from "../lib/errors.js";
 import { TerminalReplayBuffer } from "./terminal-replay-buffer.js";
@@ -25,11 +28,7 @@ const MAX_PENDING_OPERATIONS = 1024;
 export const MAX_TERMINAL_REQUEST_RESULTS_PER_PRINCIPAL = 256;
 export const MAX_TERMINAL_REQUEST_RESULTS = 4096;
 
-export interface TerminalStreamPeer {
-  readonly connectionId: string;
-  readonly ownedTerminalIds: Set<string>;
-  sendTerminalMessage(message: TerminalStreamServerMessage): void;
-}
+export type TerminalStreamPeer = TerminalPeer;
 
 interface TerminalAttachment {
   clientId: string;
@@ -45,6 +44,7 @@ interface TerminalSession {
   subscribers: Set<TerminalStreamPeer>;
   attachmentGeneration: number;
   pendingOperations: number;
+  pendingBytes: number;
   operationChain: Promise<void>;
   pendingResize: {
     cols: number;
@@ -57,6 +57,7 @@ interface TerminalSession {
 
 interface CachedCreateResult {
   expiresAt: number;
+  target?: string | null;
   response?: TerminalCreateResponse;
   error?: { code: TerminalErrorCode; message: string; status: number };
 }
@@ -64,17 +65,6 @@ interface CachedCreateResult {
 interface CachedTerminateResult {
   expiresAt: number;
   response: TerminalTerminateResponse;
-}
-
-export class TerminalManagerError extends Error {
-  constructor(
-    readonly code: TerminalErrorCode,
-    message: string,
-    readonly status = 400,
-  ) {
-    super(message);
-    this.name = "TerminalManagerError";
-  }
 }
 
 type PtySpawner = (
@@ -89,7 +79,10 @@ type PtySpawner = (
   },
 ) => IPty;
 
-interface TerminalManagerOptions {
+export interface TerminalManagerOptions {
+  nodeId?: string;
+  terminalRuntimeId?: string;
+  projectBasePath?: string;
   spawnPty?: PtySpawner;
   now?: () => number;
   createResultTtlMs?: number;
@@ -131,6 +124,10 @@ async function defaultSpawnPty(
 }
 
 export class TerminalManager {
+  readonly nodeId: string;
+  readonly terminalRuntimeId: string;
+  readonly #projectBasePath: string;
+  #stopped = false;
   readonly #sessionsByPrincipal = new Map<
     string,
     Map<string, TerminalSession>
@@ -152,6 +149,9 @@ export class TerminalManager {
   readonly #resultCleanupTimer: ReturnType<typeof setInterval>;
 
   constructor(options: TerminalManagerOptions = {}) {
+    this.nodeId = options.nodeId ?? 'local';
+    this.terminalRuntimeId = options.terminalRuntimeId ?? crypto.randomUUID();
+    this.#projectBasePath = options.projectBasePath ?? getProjectBasePath();
     this.#now = options.now ?? Date.now;
     this.#createResultTtlMs = options.createResultTtlMs ?? CREATE_RESULT_TTL_MS;
     this.#replayBytes = options.replayBytes;
@@ -190,11 +190,18 @@ export class TerminalManager {
     request: TerminalCreateRequest,
   ): Promise<TerminalCreateResponse> {
     return this.#createLock.runExclusive(principal.key, async () => {
+      this.#assertRunning();
+      if (request.expectedTerminalRuntimeId !== undefined && request.expectedTerminalRuntimeId !== this.terminalRuntimeId) {
+        throw new TerminalManagerError('terminal-runtime-changed', 'Terminal node restarted. Refresh its terminal list before creating a new shell.', 409);
+      }
       this.#pruneRequestResults(principal.key);
       const cached = this.#createResults
         .get(principal.key)
         ?.get(request.requestId);
       if (cached && cached.expiresAt > this.#now()) {
+        if (cached.target !== undefined && cached.target !== request.requestedInitialWorkingDirectory) {
+          throw new TerminalManagerError('terminal-validation', 'A terminal request ID cannot change its directory.', 409);
+        }
         if (cached.response)
           return {
             success: true,
@@ -239,7 +246,8 @@ export class TerminalManager {
       const displaySequence =
         (this.#displaySequenceByPrincipal.get(principal.key) ?? 0) + 1;
       this.#displaySequenceByPrincipal.set(principal.key, displaySequence);
-      const terminalId = crypto.randomUUID();
+      this.#assertRunning();
+      const terminalId = qualifiedTerminalId({ nodeId: this.nodeId, terminalRuntimeId: this.terminalRuntimeId, sessionId: crypto.randomUUID() });
       let pty: IPty;
       try {
         const shell = getUserShell();
@@ -264,6 +272,11 @@ export class TerminalManager {
         );
       }
 
+      if (this.#stopped) {
+        try { pty.kill(); } catch { /* Cleanup is best effort. */ }
+        this.#assertRunning();
+      }
+
       const metadata: TerminalMetadata = {
         terminalId,
         displaySequence,
@@ -284,6 +297,7 @@ export class TerminalManager {
         subscribers: new Set(),
         attachmentGeneration: 0,
         pendingOperations: 0,
+        pendingBytes: 0,
         operationChain: Promise.resolve(),
         pendingResize: null,
         terminating: false,
@@ -300,6 +314,7 @@ export class TerminalManager {
         request.requestId,
         {
           expiresAt: this.#now() + this.#createResultTtlMs,
+          target: request.requestedInitialWorkingDirectory,
           response,
         },
       );
@@ -454,6 +469,8 @@ export class TerminalManager {
     terminalId: string,
     data: string,
   ): void {
+    const bytes = Buffer.byteLength(data);
+    if (bytes > 64 * 1024) throw new TerminalManagerError('terminal-validation', 'Terminal input is too large.');
     const session = this.#requireOwnedSession(principal, peer, terminalId);
     if (session.metadata.processStatus !== "running") {
       throw new TerminalManagerError(
@@ -466,9 +483,10 @@ export class TerminalManager {
     // Ends resize coalescing at the input boundary so later resizes remain ordered after this input.
     session.pendingResize = null;
     this.#enqueue(session, peer, () => {
+      if (principal.expiresAtMs !== null && principal.expiresAtMs <= this.#now()) return;
       if (!this.#stillOwns(session, peer, attachmentGeneration)) return;
       session.pty.write(data);
-    });
+    }, bytes);
   }
 
   resize(
@@ -478,6 +496,9 @@ export class TerminalManager {
     cols: number,
     rows: number,
   ): void {
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1 || cols > 4096 || rows > 4096) {
+      throw new TerminalManagerError('terminal-validation', 'Invalid terminal dimensions.');
+    }
     const session = this.#requireOwnedSession(principal, peer, terminalId);
     if (session.metadata.processStatus !== "running") return;
     const attachmentGeneration = session.attachmentGeneration;
@@ -495,6 +516,7 @@ export class TerminalManager {
     session.pendingResize = resize;
     try {
       this.#enqueue(session, peer, () => {
+        if (principal.expiresAtMs !== null && principal.expiresAtMs <= this.#now()) return;
         if (session.pendingResize === resize) session.pendingResize = null;
         if (!this.#stillOwns(session, resize.peer, resize.attachmentGeneration))
           return;
@@ -537,6 +559,7 @@ export class TerminalManager {
   }
 
   shutdown(): void {
+    this.#stopped = true;
     clearInterval(this.#resultCleanupTimer);
     for (const sessions of this.#sessionsByPrincipal.values()) {
       for (const session of sessions.values()) {
@@ -599,6 +622,7 @@ export class TerminalManager {
     attachmentGeneration: number,
   ): boolean {
     return (
+      !this.#stopped && !session.terminating && session.metadata.processStatus === 'running' &&
       session.attachmentGeneration === attachmentGeneration &&
       session.attachment?.peer === peer &&
       peer.ownedTerminalIds.has(session.metadata.terminalId)
@@ -649,8 +673,9 @@ export class TerminalManager {
     session: TerminalSession,
     peer: TerminalStreamPeer,
     operation: () => void,
+    bytes = 0,
   ): void {
-    if (session.pendingOperations >= MAX_PENDING_OPERATIONS) {
+    if (session.pendingOperations >= MAX_PENDING_OPERATIONS || session.pendingBytes + bytes > 1024 * 1024) {
       throw new TerminalManagerError(
         "terminal-backpressure",
         "Terminal input queue is full.",
@@ -658,6 +683,7 @@ export class TerminalManager {
       );
     }
     session.pendingOperations += 1;
+    session.pendingBytes += bytes;
     session.operationChain = session.operationChain
       .catch(() => undefined)
       .then(() => operation())
@@ -684,12 +710,13 @@ export class TerminalManager {
       })
       .finally(() => {
         session.pendingOperations -= 1;
+        session.pendingBytes -= bytes;
       });
   }
 
   async #resolveInitialDirectory(requested: string | null): Promise<string> {
-    const target = requested ?? getProjectBasePath();
-    const realPath = await assertRealWithinProjectBase(target);
+    const target = requested ?? this.#projectBasePath;
+    const realPath = await assertRealWithinBase(this.#projectBasePath, target);
     const stat = await fs.stat(realPath);
     if (!stat.isDirectory())
       throw new Error("Terminal path is not a directory");
@@ -709,6 +736,10 @@ export class TerminalManager {
       error: { code, message, status },
     });
     throw new TerminalManagerError(code, message, status);
+  }
+
+  #assertRunning(): void {
+    if (this.#stopped) throw new TerminalManagerError('terminal-unavailable', 'Terminal node is stopping.', 503);
   }
 
   #assertRequestResultCapacity(principalKey: string): void {

@@ -127,6 +127,8 @@ export class TerminalStreamHandler {
           message.terminalId,
           message.data,
         );
+      } else if (message.type === 'terminal-detach') {
+        this.manager.detachTerminal(socket.data.principal, runtime.peer, message.terminalId);
       } else {
         this.manager.resize(
           socket.data.principal,
