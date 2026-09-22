@@ -71,12 +71,12 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       await client.waitForTurnTerminal(chatId, started.turnId);
 
       expect(await client.get(`/api/v1/files/browse?nodeId=${nodeId}&path=${encodeURIComponent(projectPath)}`)).toBeArray();
-      for (const route of ['git/status', 'gh/pull-requests', 'terminals']) {
-        await expect(client.get(`/api/v1/${route}?nodeId=${nodeId}&projectPath=${encodeURIComponent(projectPath)}`))
-          .rejects.toMatchObject({ status: 501, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
-      }
+      expect(await client.post('/api/v1/git/quick-summary', { nodeId, project: projectPath }))
+        .toMatchObject({ nodeId, status: 'not-git-repository' });
+      expect(await client.get(`/api/v1/gh/status?nodeId=${nodeId}`)).toMatchObject({ nodeId });
+      expect(await client.get(`/api/v1/terminals?nodeId=${nodeId}`)).toMatchObject({ success: true, terminals: [] });
       expect(await terminalResponse(fixture.garcon.baseUrl)).toMatchObject({
-        type: 'terminal-error', code: 'terminal-not-found',
+        type: 'terminal-error', code: 'terminal-validation', message: 'Terminal attachment identity is required.',
       });
       await expect(client.post('/api/v1/tickets/project-default', { nodeId, directory: fixture.dirs.project }))
         .rejects.toMatchObject({ body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
