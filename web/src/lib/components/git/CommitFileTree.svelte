@@ -168,7 +168,7 @@
 			use:indeterminate={selection.mixed}
 			onchange={() =>
 				controller.toggleDirectory(row.node.path, selection.mixed ? true : !selection.checked)}
-			disabled={selection.fileCount === 0}
+			disabled={!controller.isRepositoryReady || selection.fileCount === 0}
 			class="size-3.5 shrink-0 accent-current"
 			aria-checked={selection.mixed ? 'mixed' : selection.checked}
 			aria-label={selection.checked && !selection.mixed
@@ -203,6 +203,7 @@
 			type="checkbox"
 			checked={row.intent?.desiredSelected ?? false}
 			onchange={(event) => controller.togglePath(row.node.path, event.currentTarget.checked)}
+			disabled={!controller.isRepositoryReady}
 			class="size-3.5 shrink-0 accent-current"
 			aria-label={controller.operationLabelForPath(row.node.path)}
 		/>
@@ -234,6 +235,7 @@
 			<button
 				type="button"
 				onclick={() => controller.includeUnstaged(row.node.path)}
+				disabled={!controller.isRepositoryReady}
 				class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:hidden"
 				title={m.git_quick_commit_include_unstaged()}
 				aria-label={m.git_quick_commit_include_unstaged()}
@@ -243,6 +245,7 @@
 			<button
 				type="button"
 				onclick={() => controller.includeUnstaged(row.node.path)}
+				disabled={!controller.isRepositoryReady}
 				class="hidden shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-opacity hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:inline-flex sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
 			>
 				{m.git_quick_commit_include_unstaged()}

@@ -182,6 +182,92 @@ describe('CommitController', () => {
 		mockedApi.generateCommitMessage.mockResolvedValue({ message: 'test: commit' });
 	});
 
+	it.each(['success', 'failure'] as const)(
+		'requires tree revalidation after recovery: %s',
+		async (outcome) => {
+			const controller = makeController();
+			const project = {
+				nodeId: 'worker',
+				chatId: 'chat1',
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				nodeContextKey: 'session1',
+			};
+			await controller.setProjectState({ kind: 'available', project });
+			await controller.setPresentationVisible(true);
+			controller.message = 'Retained draft';
+			expect(controller.canCommit).toBe(true);
+			await controller.setProjectState({
+				kind: 'request-failed',
+				context: project,
+				message: 'Offline',
+			});
+			const replacement = deferred<GitWorkbenchSnapshotReady>();
+			mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(replacement.promise);
+			const reads = mockedApi.getGitWorkbenchSnapshot.mock.calls.length;
+			const recovery = controller.setProjectState({
+				kind: 'available',
+				project: { ...project, nodeContextKey: 'session2' },
+			});
+			await vi.waitFor(() =>
+				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(reads + 1),
+			);
+			expect(controller.canCommit).toBe(false);
+			controller.togglePath('unstaged.ts', true);
+			controller.toggleDirectory('unstaged.ts', true);
+			controller.includeUnstaged('staged.ts');
+			await controller.generateMessage();
+			expect(await controller.commit()).toBe(false);
+			expect(mockedApi.gitStagePaths).not.toHaveBeenCalled();
+			expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
+			expect(mockedApi.generateCommitMessage).not.toHaveBeenCalled();
+			if (outcome === 'success')
+				replacement.resolve(snapshot([fileNode('replacement.ts', { staged: true })]));
+			else replacement.reject(new Error('Revalidation failed'));
+			await recovery;
+			expect(controller.canCommit).toBe(outcome === 'success');
+			expect(controller.message).toBe('Retained draft');
+			if (outcome === 'success') expect(controller.actualSelectedFiles).toEqual(['replacement.ts']);
+			else expect(controller.lastError).toContain('Revalidation failed');
+			controller.dispose();
+		},
+	);
+
+	it('rejects generated text from an earlier serving session without clearing a newer generation', async () => {
+		const controller = makeController();
+		const project = {
+			nodeId: 'worker',
+			chatId: 'chat1',
+			projectPath: '/project',
+			effectiveProjectKey: '/project',
+			nodeContextKey: 'session1',
+		};
+		await controller.setProjectState({ kind: 'available', project });
+		await controller.setPresentationVisible(true);
+		controller.message = 'Retained draft';
+		const oldMessage = deferred<{ message: string }>();
+		const newMessage = deferred<{ message: string }>();
+		mockedApi.generateCommitMessage
+			.mockReturnValueOnce(oldMessage.promise)
+			.mockReturnValueOnce(newMessage.promise);
+		const oldGeneration = controller.generateMessage();
+		await vi.waitFor(() => expect(mockedApi.generateCommitMessage).toHaveBeenCalledOnce());
+		await controller.setProjectState({
+			kind: 'available',
+			project: { ...project, nodeContextKey: 'session2' },
+		});
+		const newGeneration = controller.generateMessage();
+		await vi.waitFor(() => expect(mockedApi.generateCommitMessage).toHaveBeenCalledTimes(2));
+		oldMessage.resolve({ message: 'Obsolete message' });
+		await oldGeneration;
+		expect(controller.message).toBe('Retained draft');
+		expect(controller.isGeneratingMessage).toBe(true);
+		newMessage.resolve({ message: 'Current message' });
+		await newGeneration;
+		expect(controller.message).toBe('Current message');
+		controller.dispose();
+	});
+
 	it('retains its project state and starts no work while project identity resolves', async () => {
 		const controller = makeController();
 		await controller.setProjectState({

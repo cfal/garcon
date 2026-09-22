@@ -195,7 +195,8 @@
 					<button
 						type="button"
 						onclick={() => void controller.generateMessage()}
-						disabled={controller.desiredSelectedFiles.length === 0 ||
+						disabled={!controller.isRepositoryReady ||
+							controller.desiredSelectedFiles.length === 0 ||
 							controller.isGeneratingMessage}
 						class={generateButtonClass}
 						title={m.git_changes_generate_message()}
