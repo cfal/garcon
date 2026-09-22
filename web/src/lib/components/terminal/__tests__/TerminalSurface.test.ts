@@ -34,6 +34,15 @@ describe('TerminalSurface', () => {
 		expect(picker.getAttribute('title')).toBe('Local 1 - Local: /workspace/project - Taken over');
 	});
 
+	it('updates the mobile picker title for custom titles and missing sessions', async () => {
+		const view = render(TerminalSurfaceTestHost, { host: 'mobile' });
+		const picker = screen.getByRole('combobox', { name: 'Terminal session' });
+		await view.rerender({ terminalId: 'terminal-2' });
+		expect(picker.getAttribute('title')).toBe('Build logs - Local: /workspace/project - Attached');
+		await view.rerender({ terminalId: 'missing' });
+		expect(picker.hasAttribute('title')).toBe(false);
+	});
+
 	it('shows input helpers on a coarse-pointer desktop', async () => {
 		const originalMatchMedia = window.matchMedia;
 		Object.defineProperty(window, 'matchMedia', {

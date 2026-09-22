@@ -2,7 +2,7 @@ import { AgentCallError, type ExecutionTerminalService, type TerminalAuthority, 
 import { TerminalError } from '../../common/terminal-error.js';
 import { parseTerminalReference } from '../../common/terminal-identity.js';
 import { parseTerminalListResponse, parseTerminalCreateResponse, parseTerminalRenameResponse, parseTerminalTerminateResponse,
-  type TerminalCreateRequest, type TerminalStreamClientMessage } from '../../common/terminal.js';
+  terminalIdForMessage, type TerminalCreateRequest, type TerminalStreamClientMessage } from '../../common/terminal.js';
 import type { RemoteSessionBacking } from './remote.js';
 import type { AgentRpc } from './rpc.js';
 import type { TerminalNotification } from './terminal-protocol.js';
@@ -65,16 +65,22 @@ export class RemoteExecutionTerminalService implements ExecutionTerminalService 
     await attachment.rpc.call('', 'terminals.resize', { authority, attachmentId, terminalId, type: 'terminal-resize', cols, rows });
   }
   detachPeer(authority: TerminalAuthority, peer: TerminalPeer): void {
-    for (const [id, attachment] of this.#attachments) if (attachment.peer === peer && attachment.authority.key === authority.key) this.#detach(id);
+    for (const [id, attachment] of this.#attachments) {
+      if (attachment.peer === peer && attachment.authority.key === authority.key) this.#detach(id);
+    }
   }
   detachTerminal(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string): void {
-    for (const [id, attachment] of this.#attachments) if (attachment.peer === peer && attachment.authority.key === authority.key && attachment.terminalId === terminalId) this.#detach(id);
+    for (const [id, attachment] of this.#attachments) {
+      if (attachment.peer === peer && attachment.authority.key === authority.key && attachment.terminalId === terminalId) {
+        this.#detach(id);
+      }
+    }
   }
   receive(frame: TerminalNotification, rpc: AgentRpc): void {
     const attachment = this.#attachments.get(frame.attachmentId);
     if (!attachment || attachment.rpc !== rpc) return;
     const message = frame.message;
-    const terminalId = 'terminal' in message ? message.terminal.terminalId : 'terminalId' in message ? message.terminalId : undefined;
+    const terminalId = terminalIdForMessage(message);
     if (terminalId !== attachment.terminalId) throw new Error('Terminal notification target mismatch');
     if (message.type === 'terminal-attached') attachment.peer.ownedTerminalIds.add(terminalId);
     if (message.type === 'terminal-taken-over' || message.type === 'terminal-terminated') attachment.peer.ownedTerminalIds.delete(terminalId);
@@ -89,7 +95,11 @@ export class RemoteExecutionTerminalService implements ExecutionTerminalService 
     }
   }
   #find(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string): [string, Attachment] {
-    for (const entry of this.#attachments) if (entry[1].peer === peer && entry[1].terminalId === terminalId && entry[1].authority.key === authority.key) return entry;
+    for (const [attachmentId, attachment] of this.#attachments) {
+      if (attachment.peer === peer && attachment.terminalId === terminalId && attachment.authority.key === authority.key) {
+        return [attachmentId, attachment];
+      }
+    }
     throw new AgentCallError('not-dispatched', 'Terminal attachment is unavailable');
   }
   #detach(id: string): void {

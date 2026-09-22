@@ -1,4 +1,4 @@
-import type { TerminalStreamServerMessage } from "../../common/terminal.js";
+import { terminalIdForMessage, type TerminalStreamServerMessage } from "../../common/terminal.js";
 
 export const TERMINAL_STREAM_MAX_PENDING_MESSAGES = 256;
 export const TERMINAL_STREAM_MAX_PENDING_BYTES = 16 * 1024 * 1024;
@@ -237,14 +237,9 @@ export class TerminalOutputQueue {
   }
 
   #queueKey(message: TerminalStreamServerMessage): string {
-    if ("terminalId" in message && message.terminalId)
-      return JSON.stringify([message.terminalId, message.attachmentId]);
-    if (
-      message.type === "terminal-attached" ||
-      message.type === "terminal-status"
-    ) {
-      return JSON.stringify([message.terminal.terminalId, message.attachmentId]);
-    }
-    return CONTROL_QUEUE_KEY;
+    const terminalId = terminalIdForMessage(message);
+    return terminalId === null
+      ? CONTROL_QUEUE_KEY
+      : JSON.stringify([terminalId, message.attachmentId]);
   }
 }

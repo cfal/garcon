@@ -37,15 +37,28 @@ export function validateTerminalRpc(call: TerminalRpcRequest): void {
   const input = call.request;
   const authority = input?.authority;
   if (!authority || typeof authority.key !== 'string' || !authority.key || authority.key.length > 256
-    || (authority.expiresAtMs !== null && (!Number.isSafeInteger(authority.expiresAtMs) || authority.expiresAtMs <= 0))) throw invalidTerminalRequest();
-  if (call.method === 'terminals.list') return;
-  const valid = call.method === 'terminals.create' ? parseTerminalCreateRequest(input)
-    : call.method === 'terminals.rename' ? parseTerminalRenameRequest(input)
-    : call.method === 'terminals.terminate' ? parseTerminalTerminateRequest(input)
-    : parseTerminalStreamClientMessage(input);
-  if (!valid) throw invalidTerminalRequest();
-  if ('type' in valid && (!('attachmentId' in valid) || !valid.attachmentId
-    || valid.type !== `terminal-${call.method === 'terminals.detach' ? 'detach' : call.method.slice(10)}`)) throw invalidTerminalRequest();
+    || (authority.expiresAtMs !== null && (!Number.isSafeInteger(authority.expiresAtMs) || authority.expiresAtMs <= 0))) {
+    throw invalidTerminalRequest();
+  }
+  switch (call.method) {
+    case 'terminals.list':
+      return;
+    case 'terminals.create':
+      if (!parseTerminalCreateRequest(input)) throw invalidTerminalRequest();
+      return;
+    case 'terminals.rename':
+      if (!parseTerminalRenameRequest(input)) throw invalidTerminalRequest();
+      return;
+    case 'terminals.terminate':
+      if (!parseTerminalTerminateRequest(input)) throw invalidTerminalRequest();
+      return;
+    default: {
+      const message = parseTerminalStreamClientMessage(input);
+      if (!message?.attachmentId) throw invalidTerminalRequest();
+      const expectedType = `terminal-${call.method.slice('terminals.'.length)}`;
+      if (message.type !== expectedType) throw invalidTerminalRequest();
+    }
+  }
 }
 
 export function parseTerminalNotification(value: TerminalNotification): TerminalNotification {

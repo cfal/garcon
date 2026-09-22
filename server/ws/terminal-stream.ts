@@ -1,5 +1,6 @@
 import {
   parseTerminalStreamClientMessage,
+  terminalIdForMessage,
   type TerminalStreamServerMessage,
 } from "../../common/terminal.js";
 import type { PrimaryWebSocket } from "./primary-delivery.js";
@@ -330,16 +331,4 @@ export class TerminalStreamHandler {
     runtime.terminalAuthorized = false;
     this.manager.detachPeer(socket.data.principal, runtime.peer);
   }
-}
-
-function terminalIdForMessage(
-  message: TerminalStreamServerMessage,
-): string | null {
-  if ("terminalId" in message && message.terminalId) return message.terminalId;
-  if (
-    message.type === "terminal-attached" ||
-    message.type === "terminal-status"
-  )
-    return message.terminal.terminalId;
-  return null;
 }

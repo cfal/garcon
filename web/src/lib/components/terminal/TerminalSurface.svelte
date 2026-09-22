@@ -48,6 +48,17 @@
 	let creating = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
+	const nodeId = $derived(terminals.nodeIdFor(terminalId));
+	const hostLabel = $derived(terminals.nodeLabel(nodeId));
+	const sessionLabels = $derived.by(() => {
+		if (!session) return null;
+		const name = terminals.displayName(session.metadata);
+		const initialDirectory = `${hostLabel}: ${session.metadata.initialWorkingDirectory}`;
+		return {
+			initialDirectory: m.terminal_initial_working_directory({ path: initialDirectory }),
+			pickerTitle: `${name} - ${initialDirectory} - ${attachmentLabel(session.attachmentState)}`,
+		};
+	});
 	let runtime = $state<Awaited<ReturnType<typeof terminals.ensureRuntime>> | null>(null);
 	let runtimeTerminalId = $state<string | null>(null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
@@ -260,9 +271,7 @@
 					value={terminalId}
 					onchange={(event) => selectTerminal(event.currentTarget.value)}
 					aria-label={m.terminal_session()}
-					title={session
-						? `${terminals.displayName(session.metadata)} - ${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory} - ${attachmentLabel(session.attachmentState)}`
-						: undefined}
+					title={sessionLabels?.pickerTitle}
 				>
 					{#each terminals.orderedSessions as item (item.metadata.terminalId)}
 						{@const placement = placementLabel(item.metadata.terminalId)}
@@ -277,13 +286,9 @@
 				{#if session}
 					<span
 						class="terminal-context min-w-0 flex-1 truncate text-xs text-muted-foreground"
-						title={m.terminal_initial_working_directory({
-							path: `${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory}`,
-						})}
+						title={sessionLabels?.initialDirectory}
 					>
-						{m.terminal_initial_working_directory({
-							path: `${terminals.nodeLabel(terminals.nodeIdFor(terminalId))}: ${session.metadata.initialWorkingDirectory}`,
-						})}
+						{sessionLabels?.initialDirectory}
 					</span>
 					<span class="terminal-context shrink-0 text-[11px] text-muted-foreground"
 						>{attachmentLabel(session.attachmentState)}</span
@@ -294,7 +299,7 @@
 				{terminals}
 				icon={Plus}
 				busy={creating}
-				defaultNodeId={terminals.nodeIdFor(terminalId)}
+				defaultNodeId={nodeId}
 				oncreate={(nodeId) => void createTerminal(nodeId)}
 			/>
 			<div class="terminal-actions">
@@ -386,7 +391,7 @@
 
 <TerminalRenameDialog
 	terminal={host === 'mobile' && renameDialogOpen ? (session?.metadata ?? null) : null}
-	hostLabel={terminals.nodeLabel(terminals.nodeIdFor(terminalId))}
+	{hostLabel}
 	onClose={() => (renameDialogOpen = false)}
 	onRename={(selectedTerminalId, title) => terminals.rename(selectedTerminalId, title)}
 />

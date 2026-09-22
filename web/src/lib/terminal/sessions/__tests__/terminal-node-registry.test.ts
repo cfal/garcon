@@ -126,6 +126,14 @@ function setup(options: { realTransport?: boolean } = {}) {
 }
 
 describe('node-qualified terminal registry', () => {
+	it('keeps Local first and preserves configured remote host order', () => {
+		const { registry, nodes } = setup();
+		const otherRemoteId = '00000000-0000-4000-8000-000000000004';
+		nodes.applySnapshot([node(otherRemoteId), node('local'), node(remoteId, 'offline')]);
+		expect(registry.hosts.map((host) => host.id)).toEqual(['local', otherRemoteId, remoteId]);
+		expect(registry.hosts[2].available).toBe(false);
+	});
+
 	it.each(['before inventory', 'after inventory'])(
 		'fences obsolete create results resolving %s',
 		async (ordering) => {

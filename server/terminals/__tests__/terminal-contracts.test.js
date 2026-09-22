@@ -10,6 +10,7 @@ import {
   parseTerminalStreamServerMessage,
   parseTerminalTerminateRequest,
   parseTerminalTerminateResponse,
+  terminalIdForMessage,
   TERMINAL_TITLE_MAX_LENGTH,
 } from '../../../common/terminal.ts';
 import {
@@ -202,7 +203,16 @@ describe('terminal contracts', () => {
       expect(
         parseTerminalStreamServerMessage(JSON.parse(JSON.stringify(message))),
       ).toEqual(message);
+      expect(terminalIdForMessage(message)).toBe(metadata.terminalId);
     }
+  });
+
+  it('leaves connection-wide terminal errors unscoped', () => {
+    expect(terminalIdForMessage({
+      type: 'terminal-error',
+      code: 'terminal-auth-expired',
+      message: 'Terminal authorization expired.',
+    })).toBeNull();
   });
 
   it('parses chat and terminal messages through the primary server contract', () => {

@@ -63,6 +63,19 @@ test('remote terminals keep their renderer and job through host reconnect and re
     const mobilePicker = page.locator('.mobile-shell select[aria-label="Terminal session"]');
     const pickerBounds = await mobilePicker.boundingBox();
     expect(pickerBounds?.width).toBeGreaterThanOrEqual(170);
+
+    markPhase('updating host and terminal labels without replacing the renderer');
+    await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { label: 'Renamed worker' });
+    await browserExpect(mobilePicker).toHaveAttribute('title', `Renamed worker ${terminal.displaySequence} - Renamed worker: ${terminal.initialWorkingDirectory} - Attached`);
+    await client.patch('/api/v1/terminals', { terminalId: terminal.terminalId, title: 'Build logs' });
+    await browserExpect(mobilePicker).toHaveAttribute('title', `Build logs - Renamed worker: ${terminal.initialWorkingDirectory} - Attached`);
+    await client.patch('/api/v1/terminals', { terminalId: terminal.terminalId, title: null });
+    await browserExpect(mobilePicker).toHaveAttribute('title', `Renamed worker ${terminal.displaySequence} - Renamed worker: ${terminal.initialWorkingDirectory} - Attached`);
+    await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { label: 'Integration worker' });
+    await browserExpect(mobilePicker).toHaveAttribute('title', `Integration worker ${terminal.displaySequence} - Integration worker: ${terminal.initialWorkingDirectory} - Attached`);
+    await browserExpect(surface.locator('[data-retained-terminal="synthetic-renderer"]')).toHaveCount(1);
+
+    markPhase('taking over the mobile terminal and choosing Local');
     const takeoverInventory = await client.get<TerminalListResponse>(`/api/v1/terminals?nodeId=${client.nodeId}`);
     client.sendTerminal({ type: 'terminal-attach', terminalId: terminal.terminalId, attachmentId: crypto.randomUUID(), attachmentEpoch: takeoverInventory.attachmentEpoch, clientId: 'synthetic-takeover-browser', afterSequence: 0, intent: 'takeover' });
     await browserExpect(mobilePicker).toHaveAttribute('title', /Taken over/);

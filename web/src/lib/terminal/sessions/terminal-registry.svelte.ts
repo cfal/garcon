@@ -15,7 +15,7 @@ import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import { parseTerminalReference } from '$shared/terminal-identity';
 import { createRandomId } from '$lib/utils/random-id.js';
-import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+import { TERMINAL_SESSION_LIMIT, terminalIdForMessage } from '$shared/terminal';
 import { terminalDisplayName } from './terminal-display-name.js';
 import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output-fragments.js';
 import type {
@@ -57,6 +57,21 @@ async function loadRuntime(): Promise<TerminalRuntimeModule> {
 
 function reloadApplication(): void {
 	if (typeof window !== 'undefined') window.location.reload();
+}
+
+function createClientSession(
+	metadata: TerminalMetadata,
+	attachmentState: TerminalAttachmentState,
+): TerminalClientSession {
+	return {
+		metadata,
+		attachmentState,
+		runtimeState: 'idle',
+		runtimeError: null,
+		runtimeErrorRequiresPageReload: false,
+		lastReceivedSequence: 0,
+		replayTruncatedAt: null,
+	};
 }
 
 export class TerminalRegistry {
@@ -144,7 +159,11 @@ export class TerminalRegistry {
 		];
 		return nodes
 			.filter((node) => node.id === 'local' || node.machineServices.terminals)
-			.toSorted((left, right) => (left.id === 'local' ? -1 : right.id === 'local' ? 1 : 0))
+			.toSorted((left, right) => {
+				if (left.id === 'local') return -1;
+				if (right.id === 'local') return 1;
+				return 0;
+			})
 			.map((node) => ({
 				id: node.id,
 				label: node.label,
@@ -224,15 +243,7 @@ export class TerminalRegistry {
 					}
 					next[metadata.terminalId] = existing
 						? { ...existing, metadata }
-						: {
-								metadata,
-								attachmentState: 'detached',
-								runtimeState: 'idle',
-								runtimeError: null,
-								runtimeErrorRequiresPageReload: false,
-								lastReceivedSequence: 0,
-								replayTruncatedAt: null,
-							};
+						: createClientSession(metadata, 'detached');
 				}
 				for (const [terminalId, existing] of Object.entries(this.sessions)) {
 					if (next[terminalId]) continue;
@@ -526,13 +537,11 @@ export class TerminalRegistry {
 	}
 
 	#handleMessage(message: TerminalStreamServerMessage): void {
-		const id =
-			'terminal' in message
-				? message.terminal.terminalId
-				: 'terminalId' in message
-					? message.terminalId
-					: undefined;
-		if (id && (!message.attachmentId || this.#attachmentIds.get(id) !== message.attachmentId))
+		const terminalId = terminalIdForMessage(message);
+		if (
+			terminalId &&
+			(!message.attachmentId || this.#attachmentIds.get(terminalId) !== message.attachmentId)
+		)
 			return;
 		if (message.type === 'terminal-output') {
 			this.#applyOutput(message.terminalId, message.sequence, message.data);
@@ -661,15 +670,7 @@ export class TerminalRegistry {
 			...this.sessions,
 			[metadata.terminalId]: existing
 				? { ...existing, metadata, attachmentState }
-				: {
-						metadata,
-						attachmentState,
-						runtimeState: 'idle',
-						runtimeError: null,
-						runtimeErrorRequiresPageReload: false,
-						lastReceivedSequence: 0,
-						replayTruncatedAt: null,
-					},
+				: createClientSession(metadata, attachmentState),
 		};
 		this.#recordSessionMutation(metadata.terminalId);
 		this.#syncTransportDemand();

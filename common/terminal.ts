@@ -166,6 +166,14 @@ type TerminalStreamServerPayload =
 
 export type TerminalStreamServerMessage = TerminalStreamServerPayload & { attachmentId?: string };
 
+export function terminalIdForMessage(message: TerminalStreamServerMessage): string | null {
+  if ('terminalId' in message && message.terminalId) return message.terminalId;
+  if (message.type === 'terminal-attached' || message.type === 'terminal-status') {
+    return message.terminal.terminalId;
+  }
+  return null;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
