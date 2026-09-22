@@ -1,12 +1,17 @@
 import { GitDomainError } from './git-types.js';
+import type { NodeCallOptions } from '@garcon/server-agent-interface';
 import { generateCommitMessage } from './commit-message.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.js';
-import type { CommitMessageFileOptions, CommitMessageGenerationResult, GitAgentRunner, GitOperations } from './types.js';
+import type { CommitMessageFileOptions, CommitMessageGenerationResult, GitAgentRunner } from './types.js';
+
+interface CommitMessageContextSource {
+  collectCommitMessageContext(request: { projectPath: string; files: string[] }, options?: NodeCallOptions): Promise<{ diff: string }>;
+}
 
 export async function generateCommitMessageForFiles(
   agents: GitAgentRunner,
-  git: Pick<GitOperations, 'collectCommitMessageContext'>,
+  git: CommitMessageContextSource,
   request: CommitMessageFileOptions,
 ): Promise<CommitMessageGenerationResult> {
   const { projectPath, files, agentId, useCommonDirPrefix, ...options } = request;
@@ -14,7 +19,7 @@ export async function generateCommitMessageForFiles(
     throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
   }
   const signal = options.signal ?? createGenerationRequestSignal();
-  const { diff } = await git.collectCommitMessageContext({ projectPath, files, signal });
+  const { diff } = await git.collectCommitMessageContext({ projectPath, files }, { signal });
   if (!diff.trim()) {
     throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');
   }

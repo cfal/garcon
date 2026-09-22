@@ -1,5 +1,8 @@
-import { createGitService } from '../git/git-service.js';
-import type { GitService } from '../git/git-service.js';
+import { createGitRouteService, type GitRouteService, type GitServiceResolver } from './git-node-service.js';
+import { createGitGenerationRoute } from './git-generation.js';
+import { gitJsonBody, gitQuery } from './git-request-fields.js';
+import { isGitDocumentRef } from '../../common/git-request-validation.js';
+import { GIT_OPERATION_TIMEOUT_MS } from '../../common/git-execution.js';
 import {
   GIT_DIFF_LIMITS,
   GIT_REF_RESULT_LIMITS,
@@ -8,21 +11,11 @@ import {
   type GitRefKind,
   type GitReviewRouteMetrics,
 } from '../git/types.js';
-import { classifyGitError } from '../git/git-error-classifier.js';
-import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
-import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
-import { isAgentId } from '../../common/agents.ts';
-import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { SettingsStore } from '../settings/store.js';
-import type { ApiProtocol } from '../../common/api-providers.js';
-import { isThinkingMode } from '../../common/chat-modes.js';
 import { isRecord } from '../../common/json.js';
-import { LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import { isGitRefKind, parseGitRefSort } from '../../common/git-refs.js';
-import { createGenerationRequestSignal } from '../settings/generation-limits.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError, projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createGitComparisonRoutes } from './git-comparisons.js';
@@ -42,37 +35,8 @@ function hasOwn(source: unknown, key: string): source is Record<string, unknown>
   return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
 }
 
-function optionalId(value: unknown): string | null {
-  return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value) ? value : null;
-}
-
-function optionalProtocol(value: unknown): ApiProtocol | null {
-  return value === 'openai-compatible' || value === 'anthropic-messages' ? value : null;
-}
-
 function validReviewBodyPurpose(value: unknown): 'visible' | 'prefetch' | null {
   return value === 'visible' || value === 'prefetch' ? value : null;
-}
-
-function hasGenerationRoutingOverride(input: Record<string, unknown>): boolean {
-  return ['agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol'].some((key) => hasOwn(input, key));
-}
-
-function isAllowedGenerationAgent(agents: AgentRegistryServiceContract, value: unknown): boolean {
-  if (!isAgentId(value)) return false;
-  if (typeof agents?.hasAgent === 'function') {
-    return agents.hasAgent(value);
-  }
-  return true;
-}
-
-async function resolveCommitMessageConfig(settings: SettingsStore, agents: AgentRegistryServiceContract, signal?: AbortSignal) {
-  const ui = (await settings?.getUiSettings?.()) ?? {};
-  const generationContext = await resolveGenerationContextForSelection(agents, ui?.commitMessage, signal);
-  return resolveEffectiveGenerationUiConfig({
-    persisted: ui?.commitMessage,
-    ...generationContext,
-  });
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -85,31 +49,6 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isValidLineIndices(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
-}
-
-async function boundaryCheckedOptions(options: unknown): Promise<unknown> {
-  if (!options || typeof options !== 'object') return options;
-  const next = { ...(options as Record<string, unknown>) };
-  if (typeof next.projectPath === 'string') {
-    next.projectPath = await assertRealWithinProjectBase(next.projectPath);
-  }
-  if (typeof next.worktreePath === 'string') {
-    next.worktreePath = await assertRealWithinProjectBase(next.worktreePath);
-  }
-  return next;
-}
-
-function createBoundaryCheckedGitService(git: GitService): GitService {
-  return new Proxy(git, {
-    get(target: GitService, prop: string | symbol, receiver: unknown): unknown {
-      const value = Reflect.get(target, prop, receiver);
-      if (prop === 'toHttpError' && typeof value === 'function') {
-        return (error: unknown) => (isProjectBoundaryError(error) ? projectBoundaryErrorResponse() : value.call(target, error));
-      }
-      if (typeof value !== 'function') return value;
-      return async (options: unknown, ...args: unknown[]) => value.call(target, await boundaryCheckedOptions(options), ...args);
-    },
-  });
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -159,7 +98,7 @@ function validNonNegativeInteger(value: unknown, fallback: number, max: number):
 
 type GitRouteResult = Response | unknown;
 
-async function gitJson(git: GitService, action: () => Promise<GitRouteResult> | GitRouteResult): Promise<Response> {
+async function gitJson(git: GitRouteService, action: () => Promise<GitRouteResult> | GitRouteResult): Promise<Response> {
   try {
     const result = await action();
     return result instanceof Response ? result : Response.json(result);
@@ -188,28 +127,22 @@ function requiredProjectFromBody(input: Record<string, unknown>): string | Respo
   return project || gitRouteError('Missing required parameter: project.', 400);
 }
 
-export default function createGitRoutes(agents: AgentRegistryServiceContract, settings: SettingsStore): RouteMap {
-  const git = createBoundaryCheckedGitService(
-    createGitService({
-      agents,
-      classifyGitError,
-      assertProjectPathAllowed: assertRealWithinProjectBase,
-    }),
-  );
+export default function createGitRoutes(agents: AgentRegistryServiceContract, settings: SettingsStore, resolveGit: GitServiceResolver, timeoutMs = GIT_OPERATION_TIMEOUT_MS): RouteMap {
+  const git = createGitRouteService(resolveGit, timeoutMs);
 
-  async function getStatus(_request: Request, url: URL): Promise<Response> {
+  async function getStatus(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getStatus({ projectPath: project }));
+    return gitJson(git, () => git.getStatus({ nodeId: url.searchParams.get('nodeId'), signal: request.signal, projectPath: project }));
   }
 
-  async function postInitialCommit(body: JsonBody): Promise<Response> {
+  async function postInitialCommit(body: JsonBody, request: Request): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.initialCommit({ projectPath: project }));
+    return gitJson(git, () => git.initialCommit({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project }));
   }
 
-  async function postCommit(body: JsonBody): Promise<Response> {
+  async function postCommit(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -219,14 +152,14 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project, message, and files.', 400);
       }
 
-      return git.commit({ projectPath: project, message, files });
+      return git.commit({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, message, files });
     });
   }
 
-  async function getBranches(_request: Request, url: URL): Promise<Response> {
+  async function getBranches(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getBranches({ projectPath: project }));
+    return gitJson(git, () => git.getBranches({ nodeId: url.searchParams.get('nodeId'), signal: request.signal, projectPath: project }));
   }
 
   async function getRefs(request: Request, url: URL): Promise<Response> {
@@ -247,7 +180,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       );
     }
     return gitJson(git, () =>
-      git.getRefs({
+      git.getRefs({ nodeId: url.searchParams.get('nodeId'),
         projectPath: project,
         query: url.searchParams.get('query') ?? undefined,
         limit,
@@ -257,7 +190,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     );
   }
 
-  async function postCheckout(body: JsonBody): Promise<Response> {
+  async function postCheckout(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -267,11 +200,11 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and ref.', 400);
       }
 
-      return git.checkout({ projectPath: project, ref, refKind });
+      return git.checkout({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, ref, refKind });
     });
   }
 
-  async function postCreateBranch(body: JsonBody): Promise<Response> {
+  async function postCreateBranch(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -281,7 +214,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and branch.', 400);
       }
 
-      return git.createBranch({ projectPath: project, branch, baseRef });
+      return git.createBranch({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, branch, baseRef });
     });
   }
 
@@ -302,7 +235,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
 
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
-      const result = await git.getHistoryCommits({
+      const result = await git.getHistoryCommits({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         ref,
         limit,
@@ -334,7 +267,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       const metrics: GitReviewRouteMetrics = { phases: [] };
       const startedAt = performance.now();
       const result = await measureGitRoutePhase(metrics.phases, 'summary-git', () =>
-        git.getCommitSnapshot({
+        git.getCommitSnapshot({ nodeId: asJsonBody(body).nodeId,
           projectPath: project,
           commit,
           parent,
@@ -352,91 +285,25 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     });
   }
 
-  async function postGenerateCommitMessage(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const files = stringArray(input.files);
-      if (!project || !files || files.length === 0) {
-        return gitRouteError('Missing required parameters: project and files.', 400);
-      }
-      if (hasOwn(input, 'agentId') && !isAllowedGenerationAgent(agents, input.agentId)) {
-        return gitRouteError('Invalid agent.', 400);
-      }
-      if (hasOwn(input, 'thinkingMode') && !isThinkingMode(input.thinkingMode)) {
-        return gitRouteError('Invalid reasoning effort.', 400);
-      }
-
-      const generationSignal = createGenerationRequestSignal(request.signal);
-      const persistedConfig = await resolveCommitMessageConfig(settings, agents, generationSignal);
-      const nodeId = hasGenerationRoutingOverride(input) ? LOCAL_EXECUTION_NODE_ID : persistedConfig.nodeId;
-      const agentId = hasOwn(input, 'agentId') && isAgentId(input.agentId) ? input.agentId : persistedConfig.agentId;
-      const model = hasOwn(input, 'model') ? (typeof input.model === 'string' ? input.model : '') : typeof persistedConfig.model === 'string' ? persistedConfig.model : '';
-      const apiProviderId = hasOwn(input, 'apiProviderId') ? optionalId(input.apiProviderId) : (persistedConfig.apiProviderId ?? null);
-      const modelEndpointId = hasOwn(input, 'modelEndpointId') ? optionalId(input.modelEndpointId) : (persistedConfig.modelEndpointId ?? null);
-      const modelProtocol = hasOwn(input, 'modelProtocol') ? optionalProtocol(input.modelProtocol) : (persistedConfig.modelProtocol ?? null);
-      const customPrompt = hasOwn(input, 'customPrompt')
-        ? typeof input.customPrompt === 'string'
-          ? input.customPrompt
-          : ''
-        : typeof persistedConfig.customPrompt === 'string'
-          ? persistedConfig.customPrompt
-          : '';
-      const useCommonDirPrefix = persistedConfig.useCommonDirPrefix === true;
-      const selectedThinkingMode = hasOwn(input, 'thinkingMode') && isThinkingMode(input.thinkingMode)
-        ? input.thinkingMode
-        : hasGenerationRoutingOverride(input)
-          ? 'none'
-          : persistedConfig.thinkingMode;
-      let thinkingMode = selectedThinkingMode;
-      if (agentId) {
-        try {
-          if (hasOwn(input, 'thinkingMode')) {
-            agents.assertExecutionModeSelectionSupported(agentId, { thinkingMode: selectedThinkingMode, nodeId });
-          }
-          thinkingMode = agents.normalizeThinkingModeForAgent(agentId, selectedThinkingMode, nodeId);
-        } catch (error) {
-          return jsonErrorFromUnknown(error);
-        }
-      }
-
-      const result = await git.generateCommitMessageForFiles({
-        nodeId,
-        projectPath: project,
-        files,
-        agentId,
-        model,
-        apiProviderId,
-        modelEndpointId,
-        modelProtocol,
-        thinkingMode,
-        customPrompt,
-        useCommonDirPrefix,
-        signal: generationSignal,
-      });
-      return result;
-    });
-  }
-
-  async function getRemoteStatus(_request: Request, url: URL): Promise<Response> {
+  async function getRemoteStatus(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getRemoteStatus({ projectPath: project }));
+    return gitJson(git, () => git.getRemoteStatus({ nodeId: url.searchParams.get('nodeId'), signal: request.signal, projectPath: project }));
   }
 
-  async function postFetch(body: JsonBody): Promise<Response> {
+  async function postFetch(body: JsonBody, request: Request): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.fetch({ projectPath: project }));
+    return gitJson(git, () => git.fetch({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project }));
   }
 
-  async function postPull(body: JsonBody): Promise<Response> {
+  async function postPull(body: JsonBody, request: Request): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.pull({ projectPath: project }));
+    return gitJson(git, () => git.pull({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project }));
   }
 
-  async function postPush(body: JsonBody): Promise<Response> {
+  async function postPush(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -446,17 +313,17 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameter: project.', 400);
       }
 
-      return git.push({ projectPath: project, remote, remoteBranch });
+      return git.push({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, remote, remoteBranch });
     });
   }
 
-  async function getRemotes(_request: Request, url: URL): Promise<Response> {
+  async function getRemotes(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getRemotes({ projectPath: project }));
+    return gitJson(git, () => git.getRemotes({ nodeId: url.searchParams.get('nodeId'), signal: request.signal, projectPath: project }));
   }
 
-  async function postDiscard(body: JsonBody): Promise<Response> {
+  async function postDiscard(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -465,11 +332,11 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and file.', 400);
       }
 
-      return git.discard({ projectPath: project, file });
+      return git.discard({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, file });
     });
   }
 
-  async function postDeleteUntracked(body: JsonBody): Promise<Response> {
+  async function postDeleteUntracked(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -478,7 +345,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and file.', 400);
       }
 
-      return git.deleteUntracked({ projectPath: project, file });
+      return git.deleteUntracked({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, file });
     });
   }
 
@@ -508,7 +375,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       const metrics: GitReviewRouteMetrics = { phases: [] };
       const startedAt = performance.now();
       const result = await measureGitRoutePhase(metrics.phases, 'summary-git', () =>
-        git.getWorkbenchSnapshot({
+        git.getWorkbenchSnapshot({ nodeId: asJsonBody(body).nodeId,
           projectPath: project,
           mode,
           context,
@@ -536,7 +403,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     return gitJson(git, async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
-      const result = await git.getWorkingTreeFingerprint({
+      const result = await git.getWorkingTreeFingerprint({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         trace,
         signal: request.signal,
@@ -552,7 +419,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     return gitJson(git, async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
-      const result = await git.getQuickSummary({
+      const result = await git.getQuickSummary({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         trace,
         signal: request.signal,
@@ -565,13 +432,13 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
-      const documentId = nonEmptyString(input.documentId);
+      const document = isGitDocumentRef(input.document) ? input.document : null;
       const files = stringArray(input.files);
       const purpose = validReviewBodyPurpose(input.purpose);
 
-      if (!project || !documentId || !files || files.length === 0 || !purpose) {
+      if (!project || !document || !files || files.length === 0 || !purpose) {
         return gitRouteError(
-          'Missing or invalid parameters: project, documentId, files, and purpose.',
+          'Missing or invalid parameters: project, document, files, and purpose.',
           400,
         );
       }
@@ -582,9 +449,9 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       const trace: GitCommandTrace[] = [];
       const metrics: GitReviewRouteMetrics = { phases: [] };
       const startedAt = performance.now();
-      const result = await git.getReviewDocumentFileBodies({
+      const result = await git.getReviewDocumentFileBodies({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
-        documentId,
+        document,
         files,
         purpose,
         trace,
@@ -595,7 +462,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     });
   }
 
-  async function postStageSelection(body: JsonBody): Promise<Response> {
+  async function postStageSelection(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -616,7 +483,12 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('selection.lineIndices must be an array of non-negative integers.', 400);
       }
 
-      const result = await git.stageSelection({
+
+      if (!isGitDocumentRef(input.document) || typeof input.bodyFingerprint !== 'string' || typeof input.patchDigest !== 'string') {
+        return gitRouteError('A current review document and patch identity are required.', 400);
+      }
+      const result = await git.stageSelection({ nodeId: asJsonBody(body).nodeId, signal: request.signal,
+        document: input.document, bodyFingerprint: input.bodyFingerprint, patchDigest: input.patchDigest,
         projectPath: project,
         file,
         mode,
@@ -627,7 +499,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     });
   }
 
-  async function postStageHunk(body: JsonBody): Promise<Response> {
+  async function postStageHunk(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -647,7 +519,12 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('hunkIndex must be a non-negative integer.', 400);
       }
 
-      const result = await git.stageHunk({
+
+      if (!isGitDocumentRef(input.document) || typeof input.bodyFingerprint !== 'string' || typeof input.patchDigest !== 'string') {
+        return gitRouteError('A current review document and patch identity are required.', 400);
+      }
+      const result = await git.stageHunk({ nodeId: asJsonBody(body).nodeId, signal: request.signal,
+        document: input.document, bodyFingerprint: input.bodyFingerprint, patchDigest: input.patchDigest,
         projectPath: project,
         file,
         mode,
@@ -658,19 +535,19 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     });
   }
 
-  async function getWorktrees(_request: Request, url: URL): Promise<Response> {
+  async function getWorktrees(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getWorktrees({ projectPath: project }));
+    return gitJson(git, () => git.getWorktrees({ nodeId: url.searchParams.get('nodeId'), signal: request.signal, projectPath: project }));
   }
 
-  async function getTargets(_request: Request, url: URL): Promise<Response> {
+  async function getTargets(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getTargetCandidates({ projectPath: project }));
+    return gitJson(git, () => git.getTargetCandidates({ nodeId: url.searchParams.get('nodeId'), signal: request.signal, projectPath: project }));
   }
 
-  async function postCreateWorktree(body: JsonBody): Promise<Response> {
+  async function postCreateWorktree(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -683,7 +560,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and worktreePath.', 400);
       }
 
-      return git.createWorktree({
+      return git.createWorktree({ nodeId: asJsonBody(body).nodeId, signal: request.signal,
         projectPath: project,
         baseRef,
         worktreePath,
@@ -693,7 +570,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     });
   }
 
-  async function postRemoveWorktree(body: JsonBody): Promise<Response> {
+  async function postRemoveWorktree(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -704,11 +581,11 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and worktreePath.', 400);
       }
 
-      return git.removeWorktree({ projectPath: project, worktreePath, force });
+      return git.removeWorktree({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, worktreePath, force });
     });
   }
 
-  async function postCommitIndex(body: JsonBody): Promise<Response> {
+  async function postCommitIndex(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -718,11 +595,11 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and message.', 400);
       }
 
-      return git.commitIndex({ projectPath: project, message });
+      return git.commitIndex({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, message });
     });
   }
 
-  async function postStagePaths(body: JsonBody): Promise<Response> {
+  async function postStagePaths(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -744,11 +621,11 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Invalid paths. Pathspecs cannot contain NUL bytes.', 400);
       }
 
-      return git.stagePaths({ projectPath: project, paths, mode });
+      return git.stagePaths({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, paths, mode });
     });
   }
 
-  async function postRevertCommit(body: JsonBody): Promise<Response> {
+  async function postRevertCommit(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -758,21 +635,21 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('Missing required parameters: project and commit.', 400);
       }
 
-      return git.revertCommit({ projectPath: project, commit });
+      return git.revertCommit({ nodeId: asJsonBody(body).nodeId, signal: request.signal, projectPath: project, commit });
     });
   }
 
   async function getConflicts(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getConflicts({ projectPath: project, signal: request.signal }));
+    return gitJson(git, () => git.getConflicts({ nodeId: url.searchParams.get('nodeId'), projectPath: project, signal: request.signal }));
   }
 
   async function getConflictDetails(request: Request, url: URL): Promise<Response> {
     const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
     if (input instanceof Response) return input;
     return gitJson(git, () =>
-      git.getConflictDetails({
+      git.getConflictDetails({ nodeId: url.searchParams.get('nodeId'),
         projectPath: input.project,
         file: input.file,
         signal: request.signal,
@@ -789,7 +666,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       if (!project || !file || (side !== 'ours' && side !== 'theirs')) {
         return gitRouteError('Missing or invalid parameters: project, file, and side.', 400);
       }
-      const result = await git.acceptConflictSide({
+      const result = await git.acceptConflictSide({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         file,
         side,
@@ -807,7 +684,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       if (!project || !file) {
         return gitRouteError('Missing required parameters: project and file.', 400);
       }
-      return git.markConflictResolved({
+      return git.markConflictResolved({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         file,
         signal: request.signal,
@@ -818,7 +695,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getStashes(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     if (project instanceof Response) return project;
-    return gitJson(git, () => git.getStashes({ projectPath: project, signal: request.signal }));
+    return gitJson(git, () => git.getStashes({ nodeId: url.searchParams.get('nodeId'), projectPath: project, signal: request.signal }));
   }
 
   async function postCreateStash(body: JsonBody, request: Request): Promise<Response> {
@@ -826,7 +703,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     const project = requiredProjectFromBody(input);
     if (project instanceof Response) return project;
     return gitJson(git, () =>
-      git.createStash({
+      git.createStash({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         message: typeof input.message === 'string' ? input.message : undefined,
         includeUntracked: input.includeUntracked === true,
@@ -843,7 +720,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
     return gitJson(git, () =>
-      git.applyStash({
+      git.applyStash({ nodeId: asJsonBody(body).nodeId,
         projectPath: project,
         stashRef,
         signal: request.signal,
@@ -858,7 +735,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (!project || !stashRef) {
       return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
-    return gitJson(git, () => git.popStash({ projectPath: project, stashRef, signal: request.signal }));
+    return gitJson(git, () => git.popStash({ nodeId: asJsonBody(body).nodeId, projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function postDropStash(body: JsonBody, request: Request): Promise<Response> {
@@ -868,7 +745,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (!project || !stashRef) {
       return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
-    return gitJson(git, () => git.dropStash({ projectPath: project, stashRef, signal: request.signal }));
+    return gitJson(git, () => git.dropStash({ nodeId: asJsonBody(body).nodeId, projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function getFileHistory(request: Request, url: URL): Promise<Response> {
@@ -879,7 +756,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       return gitRouteError('Invalid limit. Expected an integer between 1 and 200.', 400);
     }
     return gitJson(git, () =>
-      git.getFileHistory({
+      git.getFileHistory({ nodeId: url.searchParams.get('nodeId'),
         projectPath: input.project,
         file: input.file,
         limit,
@@ -897,7 +774,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       return gitRouteError('Invalid limit. Expected an integer between 1 and 2000.', 400);
     }
     return gitJson(git, () =>
-      git.getBlame({
+      git.getBlame({ nodeId: url.searchParams.get('nodeId'),
         projectPath: input.project,
         file: input.file,
         ref,
@@ -914,66 +791,66 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 500.', 400);
     }
-    return gitJson(git, () => git.getGraph({ projectPath: project, limit, signal: request.signal }));
+    return gitJson(git, () => git.getGraph({ nodeId: url.searchParams.get('nodeId'), projectPath: project, limit, signal: request.signal }));
   }
 
   return {
-    '/api/v1/git/status': { GET: getStatus },
-    '/api/v1/git/initial-commit': { POST: withJsonBody(postInitialCommit) },
-    '/api/v1/git/commit': { POST: withJsonBody(postCommit) },
-    '/api/v1/git/branches': { GET: getBranches },
-    '/api/v1/git/refs': { GET: getRefs },
-    '/api/v1/git/checkout': { POST: withJsonBody(postCheckout) },
-    '/api/v1/git/create-branch': { POST: withJsonBody(postCreateBranch) },
-    '/api/v1/git/history/commits': { POST: withJsonBody(postHistoryCommits) },
+    '/api/v1/git/status': { GET: gitQuery('getStatus', getStatus) },
+    '/api/v1/git/initial-commit': { POST: gitJsonBody('initialCommit', postInitialCommit) },
+    '/api/v1/git/commit': { POST: gitJsonBody('commit', postCommit) },
+    '/api/v1/git/branches': { GET: gitQuery('getBranches', getBranches) },
+    '/api/v1/git/refs': { GET: gitQuery('getRefs', getRefs) },
+    '/api/v1/git/checkout': { POST: gitJsonBody('checkout', postCheckout) },
+    '/api/v1/git/create-branch': { POST: gitJsonBody('createBranch', postCreateBranch) },
+    '/api/v1/git/history/commits': { POST: gitJsonBody('getHistoryCommits', postHistoryCommits) },
     '/api/v1/git/history/commit/snapshot': {
-      POST: withJsonBody(postCommitSnapshot),
+      POST: gitJsonBody('getCommitSnapshot', postCommitSnapshot),
     },
     ...createGitComparisonRoutes(git),
     '/api/v1/git/generate-commit-message': {
-      POST: withJsonBody(postGenerateCommitMessage),
+      POST: createGitGenerationRoute(agents, settings, resolveGit),
     },
-    '/api/v1/git/remote-status': { GET: getRemoteStatus },
-    '/api/v1/git/fetch': { POST: withJsonBody(postFetch) },
-    '/api/v1/git/pull': { POST: withJsonBody(postPull) },
-    '/api/v1/git/push': { POST: withJsonBody(postPush) },
-    '/api/v1/git/remotes': { GET: getRemotes },
-    '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
-    '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
+    '/api/v1/git/remote-status': { GET: gitQuery('getRemoteStatus', getRemoteStatus) },
+    '/api/v1/git/fetch': { POST: gitJsonBody('fetch', postFetch) },
+    '/api/v1/git/pull': { POST: gitJsonBody('pull', postPull) },
+    '/api/v1/git/push': { POST: gitJsonBody('push', postPush) },
+    '/api/v1/git/remotes': { GET: gitQuery('getRemotes', getRemotes) },
+    '/api/v1/git/discard': { POST: gitJsonBody('discard', postDiscard) },
+    '/api/v1/git/delete-untracked': { POST: gitJsonBody('deleteUntracked', postDeleteUntracked) },
     '/api/v1/git/workbench/snapshot': {
-      POST: withJsonBody(postWorkbenchSnapshot),
+      POST: gitJsonBody('getWorkbenchSnapshot', postWorkbenchSnapshot),
     },
     '/api/v1/git/working-tree/fingerprint': {
-      POST: withJsonBody(postWorkingTreeFingerprint),
+      POST: gitJsonBody('getWorkingTreeFingerprint', postWorkingTreeFingerprint),
     },
-    '/api/v1/git/quick-summary': { POST: withJsonBody(postQuickSummary) },
+    '/api/v1/git/quick-summary': { POST: gitJsonBody('getQuickSummary', postQuickSummary) },
     '/api/v1/git/review-documents/files': {
-      POST: withJsonBody(postReviewDocumentFiles),
+      POST: gitJsonBody('getReviewDocumentFileBodies', postReviewDocumentFiles),
     },
-    '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
-    '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },
-    '/api/v1/git/worktrees': { GET: getWorktrees },
-    '/api/v1/git/targets': { GET: getTargets },
-    '/api/v1/git/worktrees/create': { POST: withJsonBody(postCreateWorktree) },
-    '/api/v1/git/worktrees/remove': { POST: withJsonBody(postRemoveWorktree) },
-    '/api/v1/git/revert-commit': { POST: withJsonBody(postRevertCommit) },
-    '/api/v1/git/commit-index': { POST: withJsonBody(postCommitIndex) },
-    '/api/v1/git/stage-paths': { POST: withJsonBody(postStagePaths) },
-    '/api/v1/git/conflicts': { GET: getConflicts },
-    '/api/v1/git/conflict-details': { GET: getConflictDetails },
+    '/api/v1/git/stage-selection': { POST: gitJsonBody('stageSelection', postStageSelection) },
+    '/api/v1/git/stage-hunk': { POST: gitJsonBody('stageHunk', postStageHunk) },
+    '/api/v1/git/worktrees': { GET: gitQuery('getWorktrees', getWorktrees) },
+    '/api/v1/git/targets': { GET: gitQuery('getTargetCandidates', getTargets) },
+    '/api/v1/git/worktrees/create': { POST: gitJsonBody('createWorktree', postCreateWorktree) },
+    '/api/v1/git/worktrees/remove': { POST: gitJsonBody('removeWorktree', postRemoveWorktree) },
+    '/api/v1/git/revert-commit': { POST: gitJsonBody('revertCommit', postRevertCommit) },
+    '/api/v1/git/commit-index': { POST: gitJsonBody('commitIndex', postCommitIndex) },
+    '/api/v1/git/stage-paths': { POST: gitJsonBody('stagePaths', postStagePaths) },
+    '/api/v1/git/conflicts': { GET: gitQuery('getConflicts', getConflicts) },
+    '/api/v1/git/conflict-details': { GET: gitQuery('getConflictDetails', getConflictDetails) },
     '/api/v1/git/conflict/accept': {
-      POST: withJsonBody(postAcceptConflictSide),
+      POST: gitJsonBody('acceptConflictSide', postAcceptConflictSide),
     },
     '/api/v1/git/conflict/resolve': {
-      POST: withJsonBody(postMarkConflictResolved),
+      POST: gitJsonBody('markConflictResolved', postMarkConflictResolved),
     },
-    '/api/v1/git/stashes': { GET: getStashes },
-    '/api/v1/git/stash/create': { POST: withJsonBody(postCreateStash) },
-    '/api/v1/git/stash/apply': { POST: withJsonBody(postApplyStash) },
-    '/api/v1/git/stash/pop': { POST: withJsonBody(postPopStash) },
-    '/api/v1/git/stash/drop': { POST: withJsonBody(postDropStash) },
-    '/api/v1/git/file-history': { GET: getFileHistory },
-    '/api/v1/git/blame': { GET: getBlame },
-    '/api/v1/git/graph': { GET: getGraph },
+    '/api/v1/git/stashes': { GET: gitQuery('getStashes', getStashes) },
+    '/api/v1/git/stash/create': { POST: gitJsonBody('createStash', postCreateStash) },
+    '/api/v1/git/stash/apply': { POST: gitJsonBody('applyStash', postApplyStash) },
+    '/api/v1/git/stash/pop': { POST: gitJsonBody('popStash', postPopStash) },
+    '/api/v1/git/stash/drop': { POST: gitJsonBody('dropStash', postDropStash) },
+    '/api/v1/git/file-history': { GET: gitQuery('getFileHistory', getFileHistory) },
+    '/api/v1/git/blame': { GET: gitQuery('getBlame', getBlame) },
+    '/api/v1/git/graph': { GET: gitQuery('getGraph', getGraph) },
   };
 }

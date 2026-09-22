@@ -11,6 +11,7 @@ import { isExpectedMissingGitResult } from './comparison-errors.js';
 import { commitSelectedFiles } from './selected-file-commit.js';
 import { withRepositoryMutation } from './repository-coordination.js';
 import { discard } from './discard.js';
+import { parsePorcelainV1Z } from './porcelain-status.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -335,7 +336,7 @@ export async function collectCommitMessageDiffContext(
       }
       } catch (error) {
         if (signal?.aborted) throw error;
-        logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
+        logger.error('Failed to collect staged diff', { fileCount: chunk.length });
     }
   }
   return diffContext;
@@ -377,7 +378,7 @@ export function createStatusOperations() {
     // run them concurrently instead of paying sequential spawn latency.
     const [branchInfo, { stdout: statusOutput }] = await Promise.all([
       resolveStatusBranch(projectPath),
-      runGit(projectPath, ['status', '--porcelain', '-uall'], readOnlyGitOptions()),
+      runGit(projectPath, ['status', '--porcelain', '-z', '-uall'], readOnlyGitOptions()),
     ]);
     const { branch, hasCommits } = branchInfo;
 
@@ -385,22 +386,14 @@ export function createStatusOperations() {
     const added: string[] = [];
     const deleted: string[] = [];
     const untracked: string[] = [];
-    statusOutput.split('\n').forEach((line) => {
-      if (!line.trim()) return;
-      const status = line.substring(0, 2);
-      const file = line.substring(3).trim().replace(/\/+$/g, '');
+    parsePorcelainV1Z(statusOutput).forEach(({ path: file, indexStatus: staged, workTreeStatus: unstaged }) => {
       if (!file) return;
       // Classifies by letter so every porcelain variant lands somewhere:
       // T (typechange) and U (unmerged) count as modifications of a tracked
       // path, and any A wins because the index still holds an addition. Index
       // intent also wins over worktree deletion, so AD/MD read as added or
-      // modified rather than deleted. Renames and copies drop out as before:
-      // their porcelain line carries "old -> new", which is not a path this
-      // endpoint's consumers could act on. R/C can appear in either column;
-      // the unstaged form (DR, via an intent-to-add destination) pairs a
-      // worktree rename the same way.
-      const staged = status[0];
-      const unstaged = status[1];
+      // modified rather than deleted. Renames and copies remain omitted from
+      // this projection; the workbench represents their two-path identity.
       if (staged === 'R' || staged === 'C' || unstaged === 'R' || unstaged === 'C') return;
       if (staged === 'A' || unstaged === 'A') {
         added.push(file);
@@ -412,7 +405,7 @@ export function createStatusOperations() {
         modified.push(file);
       } else if (staged === 'D' || unstaged === 'D') {
         deleted.push(file);
-      } else if (status === '??') {
+      } else if (staged === '?' && unstaged === '?') {
         untracked.push(file);
       }
     });

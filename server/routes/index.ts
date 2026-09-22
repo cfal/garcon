@@ -68,8 +68,9 @@ import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { ExecutionNodeManager } from '../execution-nodes/manager.js';
 import { PreambleProjectPathService } from '../preambles/project-path-service.js';
-import { localMachineRoutes } from './node-target.js';
 import { createExecutionNodeRoutes } from './execution-nodes.js';
+import { getHttpIdleTimeoutSeconds } from '../config.js';
+import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS } from '../../common/git-execution.js';
 
 export default function createAllRoutes(workspaceDir: string, {
   registry,
@@ -152,6 +153,8 @@ export default function createAllRoutes(workspaceDir: string, {
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
   const inspectProject = executionNodes.inspectProject;
+  const httpIdleSeconds = getHttpIdleTimeoutSeconds();
+  const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
   return {
     ...createExecutionNodeRoutes(executionNodes),
     ...createRuntimeRoutes(runtimeState),
@@ -195,10 +198,8 @@ export default function createAllRoutes(workspaceDir: string, {
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry, { files: (nodeId) => executionNodes.requireNode(nodeId).getFilesService(), inspectProject }),
     ...createTerminalRoutes(terminals),
-    ...localMachineRoutes({
-      ...createGitRoutes(agents, settings),
-      ...createGhRoutes(),
-    }, registry),
+    ...createGitRoutes(agents, settings, (nodeId) => executionNodes.requireNode(nodeId).getGitService(), Math.min(GIT_OPERATION_TIMEOUT_MS, gitBudget)),
+    ...createGhRoutes((nodeId) => executionNodes.requireNode(nodeId).getGhService(), Math.min(GH_DETAIL_TIMEOUT_MS, gitBudget)),
     ...createCommandsRoutes({ registry, agents, inspectProject }),
     ...createWorkspaceRoutes(
       settings,

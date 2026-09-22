@@ -69,9 +69,6 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       await expect(client.put(`/api/v1/files/text?${query}`, { content: 'stale', expectedRevision: result.revision, conflictResolution: 'reject' })).rejects.toMatchObject({ status: 409, body: { errorCode: 'FILE_REVISION_CONFLICT' } });
       const wrongRoot = new URLSearchParams({ nodeId, projectPath: fixture.dirs.project, path: 'file.txt' });
       await expect(client.get(`/api/v1/files/text?${wrongRoot}`)).rejects.toMatchObject({ status: 403 });
-      for (const route of ['git/status']) {
-        await expect(client.get(`/api/v1/${route}?nodeId=${nodeId}&projectPath=${encodeURIComponent(projectPath)}`)).rejects.toMatchObject({ status: 501 });
-      }
       await fixture.crashAndRestartGarcon({ preserveExecutionWorker: true });
       const restarted = await fixture.client.get<ReadTextResponse>(`/api/v1/files/text?${query}`);
       expect(restarted.content === `${content}saved`).toBe(true);

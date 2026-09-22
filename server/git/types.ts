@@ -42,31 +42,8 @@ export interface GitCommandTrace {
   aborted?: boolean;
 }
 
-export type GitReviewRoutePhaseName =
-  | 'resolve'
-  | 'summary-git'
-  | 'document-register'
-  | 'freshness-before'
-  | 'body-cache'
-  | 'body-git'
-  | 'body-split'
-  | 'patch-scan'
-  | 'freshness-after'
-  | 'serialize';
-
-export interface GitReviewRoutePhase {
-  name: GitReviewRoutePhaseName;
-  durationMs: number;
-}
-
-export interface GitReviewRouteMetrics {
-  phases: GitReviewRoutePhase[];
-  fileCount?: number;
-  rowCount?: number;
-  cacheHits?: number;
-  batchCount?: number;
-  bisectionCount?: number;
-}
+import type { GitReviewRouteMetrics } from '../../common/git-diagnostics.js';
+export type { GitReviewRouteMetrics, GitReviewRoutePhase, GitReviewRoutePhaseName } from '../../common/git-diagnostics.js';
 
 export interface GitProcessError extends Error {
   code?: number;

@@ -41,8 +41,14 @@ function snapshot(v: Record<string, unknown>): boolean {
 function revision(v: unknown): boolean { return shape(v, { kind: oneOf('revision'), requestedRevision: str, label: str, hash: str, shortHash: str }); }
 function workingTree(v: unknown): boolean { return shape(v, { kind: oneOf('working-tree'), label: str, branch: str, headHash: nullable(str), fingerprint: str, shortFingerprint: str }); }
 
+function diagnostics(v: unknown): boolean {
+  return shape(v, { commands: array(c => shape(c, { command: str, durationMs: num, stdoutBytes: num, stderrBytes: num }), 128),
+    phases: array(p => shape(p, { name: oneOf('resolve', 'summary-git', 'document-register', 'freshness-before', 'body-cache', 'body-git', 'body-split', 'patch-scan', 'freshness-after', 'serialize'), durationMs: num }), 128),
+    fileCount: optional(num), rowCount: optional(num), cacheHits: optional(num), batchCount: optional(num), bisectionCount: optional(num) });
+}
+
 export function validateGitResult<K extends GitMethod>(method: K, value: unknown, scope: GitNodeScope): asserts value is ExecutionGitResults[K] {
-  if (!isRecord(value) || value.nodeId !== scope.nodeId || value.instanceId !== scope.instanceId || !gitResult(method, value)) {
+  if (!isRecord(value) || value.nodeId !== scope.nodeId || value.instanceId !== scope.instanceId || !optional(diagnostics)(value.diagnostics) || !gitResult(method, value)) {
     throw new GitServiceError('GIT_INVALID_RESULT', `Invalid Git ${method} response`);
   }
 }

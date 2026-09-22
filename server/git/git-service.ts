@@ -54,13 +54,15 @@ export function createGitService({
   const git = createGitOperations({ assertProjectPathAllowed });
   return {
     ...git,
-    generateCommitMessageForFiles: (options) => generateCommitMessageForFiles(agents, git, options),
+    generateCommitMessageForFiles: (options) => generateCommitMessageForFiles(agents, {
+      collectCommitMessageContext: (request, callOptions) => git.collectCommitMessageContext({ ...request, signal: callOptions?.signal }),
+    }, options),
     toHttpError: (error) => gitHttpError(error, classifyGitError),
   };
 }
 
 export function gitHttpError(error: unknown, classifyGitError: CreateGitServiceOptions['classifyGitError']): Response {
-  logger.error('[git]', error);
+  logger.error('[git]', { code: error instanceof GitDomainError ? error.code : 'GIT_OPERATION_FAILED' });
   if (error instanceof GitDomainError) return gitDomainErrorToResponse(error);
   return classifiedGitErrorToResponse(classifyGitError(error));
 }

@@ -174,6 +174,9 @@ describe("Git refs HTTP API", () => {
 
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
+        success: false,
+        errorCode: 'GIT_NOT_REPO',
+        retryable: false,
         error: "Path is not a Git repository.",
       });
     });

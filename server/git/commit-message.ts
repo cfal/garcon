@@ -91,7 +91,7 @@ export async function generateCommitMessage(
     return cleaned;
   } catch (error) {
     if (error instanceof GitDomainError) throw error;
-    logger.error('Error generating commit message:', error);
+    logger.error('Failed to generate commit message', { code: classifyCommitMessageAgentError(error) });
     throw new GitDomainError(
       classifyCommitMessageAgentError(error),
       'Failed to generate commit message.',

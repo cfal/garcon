@@ -1,8 +1,14 @@
 import type { GitRequests, GitResults, GitMethod } from './git.js';
+import type { GitOperationDiagnostics } from './git-diagnostics.js';
 
 export interface GitNodeScope {
   readonly nodeId: string;
   readonly instanceId: string;
+}
+
+export interface GitProjectTarget {
+  readonly nodeId: string;
+  readonly projectPath: string;
 }
 
 export interface GitReviewDocumentRef extends GitNodeScope {
@@ -21,7 +27,7 @@ export interface ExecutionGitRequests extends Omit<GitRequests, 'getReviewDocume
   stageHunk: GitRequests['stageHunk'] & GitSelectionProof;
 }
 
-export type ExecutionGitResults = { [K in GitMethod]: GitResults[K] & GitNodeScope };
+export type ExecutionGitResults = { [K in GitMethod]: GitResults[K] & GitNodeScope & { diagnostics?: GitOperationDiagnostics } };
 
 export const GIT_MUTATIONS = [
   'initialCommit', 'commit', 'checkout', 'createBranch', 'fetch', 'pull', 'push', 'discard', 'deleteUntracked',

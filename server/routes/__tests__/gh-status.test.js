@@ -27,7 +27,7 @@ function makeService(overrides = {}) {
 describe('GET /api/v1/gh/status', () => {
   it('returns the service status payload without requiring project', async () => {
     const service = makeService();
-    const routes = createGhRoutes(service);
+    const routes = createGhRoutes(async () => service);
     const url = new URL('http://localhost/api/v1/gh/status');
 
     const response = await routes['/api/v1/gh/status'].GET(new Request(url), url);
@@ -35,6 +35,7 @@ describe('GET /api/v1/gh/status', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
+      nodeId: 'local',
       available: true,
       authenticated: true,
       reason: 'authenticated',
@@ -44,19 +45,19 @@ describe('GET /api/v1/gh/status', () => {
     expect(service.getStatus).toHaveBeenCalledTimes(1);
   });
 
-  it('maps unexpected service failures through toHttpError', async () => {
+  it('maps unexpected service failures without leaking untyped details', async () => {
     const failure = new Error('unexpected');
     const service = makeService({
       getStatus: mock(() => Promise.reject(failure)),
     });
-    const routes = createGhRoutes(service);
+    const routes = createGhRoutes(async () => service);
     const url = new URL('http://localhost/api/v1/gh/status');
 
     const response = await routes['/api/v1/gh/status'].GET(new Request(url), url);
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe('unexpected');
-    expect(service.toHttpError).toHaveBeenCalledWith(failure);
+    expect(body.error).toBe('Internal server error');
+    expect(body.errorCode).toBe('INTERNAL_ERROR');
   });
 });

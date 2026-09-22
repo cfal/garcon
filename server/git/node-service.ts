@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import type { ExecutionGitService, ExecutionGhService, NodeCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod, GitRequests, GitResults } from '../../common/git.js';
-import { isGitMutation, type ExecutionGitRequests, type GitNodeScope } from '../../common/git-execution.js';
+import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type GitNodeScope } from '../../common/git-execution.js';
 import { GitServiceError } from '../../common/git-error.js';
 import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
@@ -17,7 +17,7 @@ import { withRepositoryMutation } from './repository-coordination.js';
 import { readOnlyGitOptions, runGit } from './run.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { gitServiceError } from './service-errors.js';
-import type { GitStageProvenance } from './types.js';
+import type { GitCommandTrace, GitReviewRouteMetrics, GitStageProvenance } from './types.js';
 import type { GitReviewDocumentRegistry } from './review-document-registry.js';
 
 interface GitNodeOptions extends GitNodeScope {
@@ -87,7 +87,7 @@ export class LocalGitRuntime {
     }
   }
 
-  async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: NodeCallOptions): Promise<GitResults[K] & GitNodeScope> {
+  async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: NodeCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
     try {
       return await this.#admit(isGitMutation(method), options, async (callOptions) => {
@@ -95,7 +95,9 @@ export class LocalGitRuntime {
         const execute = async () => {
           this.#available(callOptions);
           if (await this.#repository(request.projectPath, callOptions) !== projectPath) throw new GitServiceError('GIT_INVALID_INPUT', 'Repository path changed');
-          const input = { ...request, projectPath, signal: callOptions.signal };
+          const trace: GitCommandTrace[] = [];
+          const metrics: GitReviewRouteMetrics = { phases: [] };
+          const input = { ...request, projectPath, signal: callOptions.signal, trace, metrics };
           if ('document' in input) {
             if (input.document.nodeId !== this.configuration.nodeId || input.document.instanceId !== this.configuration.instanceId) throw new GitServiceError('GIT_STALE_DOCUMENT', 'Git review belongs to a different node or serving instance');
             Object.assign(input, { documentId: input.document.documentId });
@@ -105,13 +107,15 @@ export class LocalGitRuntime {
           for (const file of files) await resolveRealWithinBase(projectPath, toNativePath(file));
           const invoke = this.#operations[method] as (input: GitRequests[GitMethod] & GitStageProvenance & { signal?: AbortSignal }) => Promise<GitResults[K]>;
           const result = await invoke(input);
-          const response = { ...portableResult(result), nodeId: this.configuration.nodeId, instanceId: this.configuration.instanceId,
+          const diagnostics = { ...metrics, phases: metrics.phases.slice(0, 128), commands: trace.slice(0, 128).map(({ args, durationMs, stdoutBytes, stderrBytes }) => ({ command: args[0], durationMs, stdoutBytes, stderrBytes })) };
+          const response = { ...portableResult(result), nodeId: this.configuration.nodeId, instanceId: this.configuration.instanceId, diagnostics,
             ...(isGitMutation(method) && gitOutputTruncated() ? { outputTruncated: true } : {}) };
           try { validateGitResult(method, response, this.configuration); }
           catch (error) {
             if (isGitMutation(method)) throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation could not be confirmed. Inspect the repository before trying again.');
             throw error;
           }
+          if (!isGitMutation(method) && Buffer.byteLength(JSON.stringify(response)) > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git query result exceeds the transfer limit');
           return response;
         };
         return isGitMutation(method) ? withRepositoryMutation(projectPath, execute) : execute();
@@ -132,6 +136,7 @@ export class LocalGitRuntime {
         return this.#gh.getPullRequest({ projectPath, number: request.number!, signal: callOptions.signal });
       }) as Awaited<ReturnType<ExecutionGhService[K]>>;
       validateGhResult(method, result);
+      if (Buffer.byteLength(JSON.stringify(result)) > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'GitHub query result exceeds the transfer limit');
       return result;
     } catch (error) { throw gitServiceError(error, 'gh'); }
   }

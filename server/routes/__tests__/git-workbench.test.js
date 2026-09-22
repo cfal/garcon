@@ -33,6 +33,7 @@ mock.module('../../lib/log.js', () => ({
 
 import { parseJsonBody } from '../../lib/http-request.js';
 import { GIT_DIFF_LIMITS, GIT_REF_RESULT_LIMITS, GIT_REVIEW_DOCUMENT_LIMITS } from '../../git/types.js';
+import { LocalGitRuntime } from '../../git/node-service.js';
 
 const originalDebug = console.debug;
 const originalLogLevel = process.env.GARCON_LOG_LEVEL;
@@ -52,7 +53,8 @@ const ctx = {
   },
 };
 
-const routes = createGitRoutes(ctx.agents, ctx.settings);
+const runtime = new LocalGitRuntime({ nodeId: 'local', instanceId: 'test-instance', projectBasePath, assertAvailable() {} });
+const routes = createGitRoutes(ctx.agents, ctx.settings, async () => runtime.git);
 
 async function streamText(stream) {
   return stream ? new Response(stream).text() : '';
@@ -345,7 +347,7 @@ describe('POST /api/v1/git/workbench/snapshot validation', () => {
     const body = await response.json();
 
     expect(response.status).toBe(403);
-    expect(body.errorCode).toBe('outside_project_base');
+    expect(body.errorCode).toBe('GIT_OUTSIDE_BASE');
   });
 
   it('emits a safe route trace for successful workbench snapshot loads', async () => {
@@ -529,7 +531,7 @@ describe('POST /api/v1/git/history routes', () => {
       parseJsonBody.mockImplementation(() =>
         Promise.resolve({
           project: projectPath,
-          documentId: snapshot.documentId,
+          document: { nodeId: snapshot.nodeId, instanceId: snapshot.instanceId, documentId: snapshot.documentId },
           files: ['a.txt'],
           purpose: 'visible',
         }),
@@ -613,7 +615,7 @@ describe('POST /api/v1/git/comparison routes', () => {
 
       parseJsonBody.mockImplementation(() => Promise.resolve({
         project: projectPath,
-        documentId: snapshot.documentId,
+        document: { nodeId: snapshot.nodeId, instanceId: snapshot.instanceId, documentId: snapshot.documentId },
         files: ['a.txt'],
         purpose: 'visible',
       }));
@@ -638,9 +640,11 @@ describe('POST /api/v1/git/worktrees/create boundary validation', () => {
   beforeEach(() => { parseJsonBody.mockClear(); });
 
   it('returns 403 when worktreePath is outside the configured base', async () => {
+    const directory = await fs.mkdtemp(path.join(projectBasePath, 'git-worktree-boundary-'));
+    try {
     parseJsonBody.mockImplementation(() =>
       Promise.resolve({
-        project: gitFixturePath,
+        project: directory,
         worktreePath: '/',
       }),
     );
@@ -648,7 +652,8 @@ describe('POST /api/v1/git/worktrees/create boundary validation', () => {
     const body = await response.json();
 
     expect(response.status).toBe(403);
-    expect(body.errorCode).toBe('outside_project_base');
+    expect(body.errorCode).toBe('GIT_OUTSIDE_BASE');
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
   });
 });
 
@@ -661,7 +666,7 @@ describe('POST /api/v1/git/review-documents validation', () => {
     parseJsonBody.mockImplementation(() =>
       Promise.resolve({
         project: '/proj',
-        documentId: 'doc',
+        document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'doc' },
         files: Array.from({ length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 }, (_, index) => `file-${index}.ts`),
         purpose: 'visible',
       }),
@@ -677,7 +682,7 @@ describe('POST /api/v1/git/review-documents validation', () => {
     parseJsonBody.mockImplementation(() =>
       Promise.resolve({
         project: '/proj',
-        documentId: 'doc',
+        document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'doc' },
         files: ['a.ts'],
         purpose: 'background',
       }),
@@ -780,14 +785,17 @@ describe('POST /api/v1/git/generate-commit-message contract', () => {
   beforeEach(() => { parseJsonBody.mockClear(); });
 
   it('returns typed errorCode when no staged changes are found', async () => {
+    const directory = await fs.mkdtemp(path.join(projectBasePath, 'git-generation-empty-'));
+    try {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: path.join(projectBasePath, 'definitely-not-a-repo'), files: ['a.ts'], agentId: 'claude' }),
+      Promise.resolve({ project: directory, files: ['a.ts'], agentId: 'claude' }),
     );
     const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
     expect(body.errorCode).toBe('commit_message_no_staged_files');
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
   });
 });
 

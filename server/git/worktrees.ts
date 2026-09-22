@@ -96,8 +96,8 @@ async function collectWorktrees(
     if (layout.refFormat === "files") {
       try {
         records = await readAdminWorktreeRecords(layout);
-      } catch (error) {
-        logger.debug("Direct worktree metadata read failed; using Git.", error);
+      } catch {
+        logger.debug("Direct worktree metadata read failed; using Git.");
       }
     }
   } else {

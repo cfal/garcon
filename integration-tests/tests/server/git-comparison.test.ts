@@ -50,7 +50,7 @@ describe('Git comparison HTTP API', () => {
 
       expect(response.status).toBe(403);
       expect(await response.json()).toMatchObject({
-        errorCode: 'outside_project_base',
+        errorCode: 'GIT_OUTSIDE_BASE',
       });
     });
   });
@@ -115,6 +115,8 @@ describe('Git comparison HTTP API', () => {
       await mkdir(nestedProject);
       const workingTree = await postJson<{
         status: string;
+        nodeId: string;
+        instanceId: string;
         documentId: string;
         effectiveFromHash: string;
         to: { kind: 'working-tree'; fingerprint: string };
@@ -135,7 +137,7 @@ describe('Git comparison HTTP API', () => {
         files: Record<string, { patch: string }>;
       }>(fixture.garcon.baseUrl, '/api/v1/git/review-documents/files', {
         project: nestedProject,
-        documentId: workingTree.documentId,
+        document: { nodeId: workingTree.nodeId, instanceId: workingTree.instanceId, documentId: workingTree.documentId },
         files: ['untracked.txt'],
         purpose: 'visible',
       });

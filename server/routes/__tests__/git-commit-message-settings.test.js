@@ -9,25 +9,9 @@ const parseJsonBody = mock(() => Promise.resolve({}));
 const generateCommitMessageForFiles = mock(() =>
   Promise.resolve({ message: 'feat: generated', directoryPrefix: '' }),
 );
-const assertRealWithinProjectBase = mock((targetPath) => Promise.resolve(targetPath));
-const isProjectBoundaryError = mock(() => false);
-
-mock.module('../../lib/http-request.js', () => ({
-  parseJsonBody,
-  MalformedJsonError,
-}));
-
-mock.module('../../lib/path-boundary.ts', () => ({
-  assertRealWithinProjectBase,
-  isProjectBoundaryError,
-  projectBoundaryErrorResponse: mock(() => Response.json({ error: 'boundary' }, { status: 403 })),
-}));
-
-mock.module('../../git/git-service.js', () => ({
-  createGitService: mock(() => ({
-    generateCommitMessageForFiles,
-    toHttpError: (error) => Response.json({ error: error.message }, { status: error.status || 500 }),
-  })),
+mock.module('../../lib/http-request.js', () => ({ parseJsonBody, MalformedJsonError }));
+mock.module('../../git/commit-generation.js', () => ({
+  generateCommitMessageForFiles: (_agents, _git, request) => generateCommitMessageForFiles(request),
 }));
 
 import createGitRoutes from '../git.js';
@@ -63,7 +47,9 @@ const settings = {
   getUiSettings: mock(() => ({})),
 };
 
-const routes = createGitRoutes(agents, settings);
+const repository = { collectCommitMessageContext: mock(async () => ({ diff: '+synthetic' })) };
+const resolveGit = mock(async () => repository);
+const routes = createGitRoutes(agents, settings, resolveGit);
 
 function makeRequest(body, signal) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
@@ -112,10 +98,26 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     agents.normalizeThinkingModeForAgent.mockImplementation((agentId, value) => agentId === 'amp' ? 'none' : value);
     settings.getUiSettings.mockClear();
     settings.getUiSettings.mockImplementation(() => ({}));
-    assertRealWithinProjectBase.mockClear();
-    assertRealWithinProjectBase.mockImplementation((targetPath) => Promise.resolve(targetPath));
-    isProjectBoundaryError.mockClear();
-    isProjectBoundaryError.mockImplementation(() => false);
+    resolveGit.mockClear();
+  });
+
+  it('selects repository and explicit model nodes independently', async () => {
+    const repositoryNode = '11111111-1111-4111-8111-111111111111';
+    const generationNode = '22222222-2222-4222-8222-222222222222';
+    parseJsonBody.mockResolvedValue({ nodeId: repositoryNode, project: '/node-only/project', files: ['file'], generationNodeId: generationNode, agentId: 'codex', model: 'synthetic' });
+    const response = await handler(makeRequest({}));
+    expect(response.status).toBe(200);
+    expect(resolveGit).toHaveBeenCalledWith(repositoryNode);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(expect.objectContaining({ nodeId: generationNode, projectPath: '/node-only/project' }));
+  });
+
+  it('keeps Auto generation Local for a remote repository', async () => {
+    const repositoryNode = '11111111-1111-4111-8111-111111111111';
+    parseJsonBody.mockResolvedValue({ nodeId: repositoryNode, project: '/node-only/project', files: ['file'] });
+    const response = await handler(makeRequest({}));
+    expect(response.status).toBe(200);
+    expect(resolveGit).toHaveBeenCalledWith(repositoryNode);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'local' }));
   });
 
   it('normalizes stale persisted commit message effort when the request omits it', async () => {

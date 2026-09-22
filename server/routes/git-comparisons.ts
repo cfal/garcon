@@ -1,5 +1,6 @@
 import { isRecord } from '../../common/json.js';
-import type { GitService } from '../git/git-service.js';
+import type { GitRouteService } from './git-node-service.js';
+import { gitJsonBody } from './git-request-fields.js';
 import {
   GIT_DIFF_LIMITS,
   GIT_REVIEW_DOCUMENT_LIMITS,
@@ -13,7 +14,6 @@ import {
 } from '../git/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { jsonError } from '../lib/http-error.js';
-import { withJsonBody } from '../lib/json-route.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
@@ -74,7 +74,7 @@ function routeError(error: string): Response {
   return jsonError(error, 400);
 }
 
-async function gitJson(git: GitService, action: () => Promise<Response | unknown>): Promise<Response> {
+async function gitJson(git: GitRouteService, action: () => Promise<Response | unknown>): Promise<Response> {
   try {
     const result = await action();
     return result instanceof Response ? result : Response.json(result);
@@ -83,7 +83,7 @@ async function gitJson(git: GitService, action: () => Promise<Response | unknown
   }
 }
 
-export function createGitComparisonRoutes(git: GitService): RouteMap {
+export function createGitComparisonRoutes(git: GitRouteService): RouteMap {
   async function postSnapshot(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
@@ -112,6 +112,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
       const startedAt = performance.now();
       const result = await measureGitRoutePhase(metrics.phases, 'summary-git', () =>
         git.getComparisonSnapshot({
+          nodeId: input.nodeId,
           projectPath: project,
           from,
           to,
@@ -143,6 +144,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
       const result = await git.getComparisonFreshness({
+        nodeId: input.nodeId,
         projectPath: project,
         from,
         to,
@@ -154,7 +156,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
   }
 
   return {
-    '/api/v1/git/comparisons/snapshot': { POST: withJsonBody(postSnapshot) },
-    '/api/v1/git/comparisons/freshness': { POST: withJsonBody(postFreshness) },
+    '/api/v1/git/comparisons/snapshot': { POST: gitJsonBody('getComparisonSnapshot', postSnapshot) },
+    '/api/v1/git/comparisons/freshness': { POST: gitJsonBody('getComparisonFreshness', postFreshness) },
   };
 }

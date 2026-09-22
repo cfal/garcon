@@ -91,7 +91,7 @@ export function createGhService(): GhService {
 }
 
 export function ghHttpError(error: unknown): Response {
-  logger.error('[gh]', error);
+  logger.error('[gh]', { code: error instanceof GhDomainError ? error.code : classifyGhError(error).code });
   if (error instanceof GhDomainError) return ghDomainErrorToResponse(error);
   return classifiedGhErrorToResponse(classifyGhError(error));
 }

@@ -1093,6 +1093,16 @@ describe("getStatus", () => {
     classifyGitError: mockClassifyGitError,
   });
 
+  it('preserves literal filenames rather than porcelain quoting or trimming', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-status-literal-'));
+    try {
+      await initRepoWithCommit(projectPath);
+      const names = ['-literal [file].txt', ' line\nbreak ', 'quote".txt'];
+      for (const name of names) await fs.writeFile(path.join(projectPath, name), 'synthetic');
+      expect((await git.getStatus({ projectPath })).untracked.sort()).toEqual(names.sort());
+    } finally { await fs.rm(projectPath, { recursive: true, force: true }); }
+  });
+
   it("classifies typechanged, unmerged, and mixed-status paths instead of dropping them", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-status-"),

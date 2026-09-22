@@ -13,9 +13,9 @@ async function removeFilesBestEffort(filePaths: string[]): Promise<void> {
   const results = await Promise.allSettled(
     filePaths.map((filePath) => fs.rm(filePath, { force: true })),
   );
-  for (const [index, result] of results.entries()) {
+  for (const result of results) {
     if (result.status === 'rejected') {
-      logger.warn(`Failed to remove temporary Git index ${filePaths[index]}:`, result.reason);
+      logger.warn('Failed to remove temporary Git index');
     }
   }
 }
@@ -32,8 +32,8 @@ async function removeStaleTemporaryGitIndexes(indexDirectory: string): Promise<v
       if (stats.mtimeMs < cutoff) stalePaths.push(entryPath);
     }
     await removeFilesBestEffort(stalePaths);
-  } catch (error) {
-    logger.warn('Failed to sweep stale temporary Git indexes:', error);
+  } catch {
+    logger.warn('Failed to sweep stale temporary Git indexes');
   }
 }
 
@@ -81,8 +81,8 @@ async function readCommittedPathspecs(projectPath: string): Promise<string[] | n
       .split('\0')
       .filter(Boolean)
       .map(topLevelLiteralGitPathspec);
-  } catch (error) {
-    logger.warn('Selected-file commit succeeded but its committed paths could not be inspected:', error);
+  } catch {
+    logger.warn('Selected-file commit succeeded but its committed paths could not be inspected');
     return null;
   }
 }
@@ -98,9 +98,9 @@ async function synchronizeCommittedPaths(
       pathspecInput,
     );
     return true;
-  } catch (error) {
+  } catch {
     // The ref already moved, so index synchronization cannot change commit success.
-    logger.warn('Selected-file commit succeeded but the real index could not be synchronized:', error);
+    logger.warn('Selected-file commit succeeded but the real index could not be synchronized');
     return false;
   }
 }

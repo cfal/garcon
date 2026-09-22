@@ -34,8 +34,9 @@ describe("Git worktree HTTP API", () => {
   test("lists linked and missing worktrees and builds target candidates", async () => {
     await withIntegrationFixture("git-worktrees", async (fixture) => {
       const projectPath = fixture.dirs.project;
-      const linkedPath = join(fixture.dirs.root, "linked");
-      const missingPath = join(fixture.dirs.root, "missing");
+      const linkedPath = join(projectPath, "linked");
+      const missingPath = join(projectPath, "missing");
+      const outsidePath = join(fixture.dirs.root, "outside");
       await runGit(projectPath, ["init", "-b", "main"]);
       await runGit(projectPath, ["config", "user.email", "test@example.com"]);
       await runGit(projectPath, ["config", "user.name", "Integration Test"]);
@@ -57,6 +58,7 @@ describe("Git worktree HTTP API", () => {
         missingPath,
       ]);
       await rm(missingPath, { recursive: true, force: true });
+      await runGit(projectPath, ['worktree', 'add', '-b', 'outside', outsidePath]);
 
       const query = new URLSearchParams({ project: projectPath });
       const { worktrees } = await getJson<{
@@ -91,6 +93,7 @@ describe("Git worktree HTTP API", () => {
           isPathMissing: true,
         },
       ]);
+      expect(worktrees.some(worktree => worktree.path === outsidePath)).toBe(false);
 
       const { targets } = await getJson<{
         targets: Array<{
