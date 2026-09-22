@@ -16,6 +16,7 @@ import type { WebSocketLink } from './websocket-link.js';
 import { unavailableService } from './in-process.js';
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../api-providers/discovery.js';
 import { RemoteExecutionFilesService } from './remote-files.js';
+import { RemoteExecutionTerminalService } from './remote-terminals.js';
 
 export interface RemoteSessionBacking {
   readonly rpc: AgentRpc;
@@ -39,6 +40,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   #candidate: SessionTransport | null = null;
   #initialized = false;
   readonly #files = new RemoteExecutionFilesService(() => this.#backing());
+  readonly #terminals = new RemoteExecutionTerminalService(() => this.#backing());
   readonly #projects: ExecutionProjectService = {
     inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
     resolveFileMentions: async (request, options) => this.#backing().rpc.call('', 'projects.resolveFileMentions', request, options),
@@ -55,16 +57,19 @@ export class RemoteExecutionNode implements ExecutionNode {
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
       const rpc = new AgentRpc(transport);
+      rpc.onTerminal((frame) => this.#terminals.receive(frame, rpc));
       setupRpc(rpc);
       transport.onFailure(() => {
         rpc.retireUnknown();
         if (this.#availability === 'disposed' || this.#candidate !== transport) return;
+        this.#terminals.disconnect();
         this.#current = null;
         for (const integration of this.#integrations.values()) integration.retire();
         this.#setAvailability('offline');
       });
       transport.onAvailability((connected) => {
         if (this.#current?.rpc !== rpc || this.#availability === 'disposed') return;
+        if (!connected) this.#terminals.disconnect();
         this.#setAvailability(connected ? 'ready' : 'reconnecting');
       });
       void this.#install(transport, rpc).catch((error: unknown) => {
@@ -123,7 +128,11 @@ export class RemoteExecutionNode implements ExecutionNode {
     return this.#files;
   }
   async getGitService(): Promise<never> { throw unavailableService('git'); }
-  async getTerminalService(): Promise<never> { throw unavailableService('terminals'); }
+  async getTerminalService(options?: NodeCallOptions) {
+    options?.signal?.throwIfAborted();
+    if (!this.#backing().info.services.terminals) throw unavailableService('terminals');
+    return this.#terminals;
+  }
 
   onAvailabilityChanged(listener: (value: NodeAvailability) => void): () => void {
     this.#listeners.add(listener);
@@ -134,6 +143,7 @@ export class RemoteExecutionNode implements ExecutionNode {
     if (this.#availability === 'disposed') return;
     this.#setAvailability('disposed');
     this.#unsubscribe();
+    this.#terminals.disconnect();
     this.#current = null;
     for (const integration of this.#integrations.values()) integration.retire();
     await this.link.dispose();

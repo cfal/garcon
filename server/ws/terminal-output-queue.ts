@@ -30,6 +30,13 @@ export function serializeTerminalMessage(
 export function expandTerminalMessageForDelivery(
   message: TerminalStreamServerMessage,
 ): TerminalStreamServerMessage[] {
+  const expanded = expandTerminalPayload(message);
+  return message.attachmentId ? expanded.map(part => ({ ...part, attachmentId: message.attachmentId })) : expanded;
+}
+
+function expandTerminalPayload(
+  message: TerminalStreamServerMessage,
+): TerminalStreamServerMessage[] {
   if (
     serializeTerminalMessage(message).byteLength <=
     TERMINAL_STREAM_TARGET_MESSAGE_BYTES

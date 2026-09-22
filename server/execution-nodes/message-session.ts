@@ -4,6 +4,7 @@
 export interface SessionSocket {
   send(encoded: string): void;
   close(): void;
+  canSend?(bytes: number): boolean;
 }
 
 type Packet =
@@ -68,6 +69,16 @@ export class MessageSession {
   get received(): number { return this.#accepted; }
   get retainedBytes(): number { return this.#bytes; }
   get retainedFrames(): number { return this.#pending.length; }
+
+  // Lossy producers decline admission before entering the reliable ordered stream.
+  trySend(body: string): boolean {
+    if (!this.connected || this.#failure) return false;
+    const bytes = Buffer.byteLength(JSON.stringify({ kind: 'message', ordinal: this.#issued + 1, body }));
+    if (bytes > this.#limits.frame || this.#bytes + bytes > Math.min(this.#limits.bytes / 2, 2 * 1024 * 1024)
+      || this.#pending.length >= Math.min(this.#limits.count / 2, 256)
+      || this.#attachment?.socket.canSend?.(bytes) === false) return false;
+    try { this.send(body); return this.connected; } catch { return false; }
+  }
 
   send(body: string): void {
     this.#checkLifetime();

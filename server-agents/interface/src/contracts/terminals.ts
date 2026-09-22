@@ -26,4 +26,5 @@ export interface ExecutionTerminalService {
   resize(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, cols: number, rows: number): Promise<void>;
   detachPeer(authority: TerminalAuthority, peer: TerminalPeer): void;
   detachTerminal(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string): void;
+  disconnect(): void;
 }

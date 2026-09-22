@@ -14,6 +14,7 @@ import {
   TerminalOutputQueue,
 } from "./terminal-output-queue.js";
 import { sendWebSocketPayload } from "./transport.js";
+import { type TerminalController, terminalOperationError } from '../terminals/controller.js';
 
 export {
   TERMINAL_STREAM_MAX_PENDING_BYTES,
@@ -43,11 +44,14 @@ function sendError(
   peer: TerminalStreamPeer,
   error: unknown,
   terminalId?: string,
+  attachmentId?: string,
 ): void {
+  error = terminalOperationError(error);
   if (error instanceof TerminalManagerError) {
     peer.sendTerminalMessage({
       type: "terminal-error",
       ...(terminalId ? { terminalId } : {}),
+      ...(attachmentId ? { attachmentId } : {}),
       code: error.code,
       message: error.message,
     });
@@ -65,7 +69,13 @@ export class TerminalStreamHandler {
   readonly #runtimeBySocket = new WeakMap<TerminalSocket, SocketRuntime>();
 
   constructor(
-    readonly manager: TerminalManager,
+    readonly manager: {
+      attach: TerminalManager['attach'] | TerminalController['attach'];
+      input(principal: Parameters<TerminalManager['input']>[0], peer: TerminalStreamPeer, terminalId: string, data: string, attachmentId?: string): void | Promise<void>;
+      resize(principal: Parameters<TerminalManager['resize']>[0], peer: TerminalStreamPeer, terminalId: string, cols: number, rows: number, attachmentId?: string): void | Promise<void>;
+      detachPeer: TerminalManager['detachPeer'];
+      detachTerminal(principal: Parameters<TerminalManager['detachTerminal']>[0], peer: TerminalStreamPeer, terminalId: string, attachmentId?: string): void;
+    },
     readonly now: () => number = Date.now,
   ) {}
 
@@ -119,27 +129,29 @@ export class TerminalStreamHandler {
     if (!runtime.terminalAuthorized) return;
     try {
       if (message.type === "terminal-attach") {
-        this.manager.attach(socket.data.principal, runtime.peer, message);
+        await this.manager.attach(socket.data.principal, runtime.peer, message);
       } else if (message.type === "terminal-input") {
-        this.manager.input(
+        await this.manager.input(
           socket.data.principal,
           runtime.peer,
           message.terminalId,
           message.data,
+          message.attachmentId,
         );
       } else if (message.type === 'terminal-detach') {
-        this.manager.detachTerminal(socket.data.principal, runtime.peer, message.terminalId);
+        this.manager.detachTerminal(socket.data.principal, runtime.peer, message.terminalId, message.attachmentId);
       } else {
-        this.manager.resize(
+        await this.manager.resize(
           socket.data.principal,
           runtime.peer,
           message.terminalId,
           message.cols,
           message.rows,
+          message.attachmentId,
         );
       }
     } catch (error) {
-      sendError(runtime.peer, error, message.terminalId);
+      sendError(runtime.peer, error, message.terminalId, message.attachmentId);
     }
   }
 
@@ -195,10 +207,12 @@ export class TerminalStreamHandler {
             socket.data.principal,
             runtime.peer,
             terminalId,
+            message.attachmentId,
           );
           const errorMessage: TerminalStreamServerMessage = {
             type: "terminal-error",
             terminalId,
+            ...(message.attachmentId ? { attachmentId: message.attachmentId } : {}),
             code: "terminal-backpressure",
             message:
               "Terminal output exceeded this client connection capacity.",

@@ -283,6 +283,7 @@ export class WebSocketLink {
     }
     connection.session = session;
     connection.hooks = session!.attach({
+      canSend: (bytes) => connection.socket.bufferedAmount + bytes < 2 * 1024 * 1024,
       send: (frame) => {
         if (connection.socket.bufferedAmount > 4 * 1024 * 1024) {
           throw new MessageContinuityError('Execution-node socket backpressure budget exhausted');

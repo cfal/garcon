@@ -5,6 +5,7 @@ import { serveAgentNode } from './agent-worker.js';
 import { InProcessExecutionNode } from './in-process.js';
 import { WebSocketLink } from './websocket-link.js';
 import { cleanupAbandonedFileStaging } from './file-staging.js';
+import { TerminalRuntime } from '../terminals/node-service.js';
 
 export interface ExecutionWorkerOptions {
   readonly secret: string;
@@ -28,6 +29,7 @@ export async function runExecutionWorker(
   const link = new WebSocketLink({ role: 'worker', secret: options.secret,
     allowInsecureDevelopment: options.allowInsecureDevelopment, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveAgentNode> | null = null;
+  const terminals = new TerminalRuntime({ projectBasePath: options.projectBasePath, terminalRuntimeId: link.runtimeId });
   const stopped = Promise.withResolvers<void>();
   let stopping = false;
   const stop = async () => {
@@ -36,7 +38,7 @@ export async function runExecutionWorker(
     try {
       await link.dispose();
       await serving?.dispose();
-    } finally { stopped.resolve(); }
+    } finally { terminals.shutdown(); stopped.resolve(); }
   };
   const onSignal = () => { void stop(); };
   process.on('SIGTERM', onSignal);
@@ -55,6 +57,7 @@ export async function runExecutionWorker(
     const node = new InProcessExecutionNode({
       id: transport.nodeId, workspaceDir: options.workspaceDir, projectBasePath: options.projectBasePath,
       integrations: defaultAgentIntegrations,
+      terminalRuntime: terminals,
       resolveCredential: ({ agentId, reference, signal }) => rpc.call(agentId, 'credentials.resolve', { reference }, { signal }),
     });
     serving = serveAgentNode(node, rpc);

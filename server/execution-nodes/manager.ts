@@ -119,7 +119,7 @@ export class ExecutionNodeManager {
       availability: this.isReady(entry.config.id) ? 'ready' : entry.node?.availability === 'reconnecting' ? 'reconnecting' : 'offline',
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
       instanceId: entry.info?.instanceId ?? null,
-      machineServices: { files: entry.info?.services.files === true, git: false, terminals: false },
+      machineServices: { files: entry.info?.services.files === true, git: false, terminals: entry.info?.services.terminals === true },
     }))];
   }
 

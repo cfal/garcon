@@ -52,6 +52,7 @@ export interface TerminalListResponse {
   success: true;
   terminals: TerminalMetadata[];
   terminalRuntimeId?: string;
+  attachmentEpoch?: string;
 }
 
 export interface TerminalCreateResponse {
@@ -111,6 +112,7 @@ type TerminalStreamClientPayload =
       clientId: string;
       afterSequence: number;
       intent: 'restore' | 'takeover';
+      attachmentEpoch?: string;
     }
   | { type: 'terminal-input'; terminalId: string; data: string }
   | { type: 'terminal-resize'; terminalId: string; cols: number; rows: number }
@@ -289,6 +291,7 @@ function parseTerminalStreamClientPayload(
       clientId,
       afterSequence,
       intent: input.intent,
+      ...(input.attachmentEpoch === undefined ? {} : { attachmentEpoch: terminalIdentifier(input.attachmentEpoch) ?? '' }),
     };
   }
   if (input.type === 'terminal-input' && typeof input.data === 'string') {
@@ -466,7 +469,11 @@ export function parseTerminalListResponse(
     terminals.push(terminal);
   }
   if (input.terminalRuntimeId !== undefined && !terminalIdentifier(input.terminalRuntimeId)) return null;
-  return { success: true, terminals, ...(input.terminalRuntimeId === undefined ? {} : { terminalRuntimeId: input.terminalRuntimeId as string }) };
+  if (input.attachmentEpoch !== undefined && !terminalIdentifier(input.attachmentEpoch)) return null;
+  return { success: true, terminals,
+    ...(input.terminalRuntimeId === undefined ? {} : { terminalRuntimeId: input.terminalRuntimeId as string }),
+    ...(input.attachmentEpoch === undefined ? {} : { attachmentEpoch: input.attachmentEpoch as string }),
+  };
 }
 
 export function parseTerminalCreateResponse(

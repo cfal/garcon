@@ -11,6 +11,7 @@ import { NULLABLE_AGENT_FACETS, type AgentRpcRequest, type IntegrationManifest }
 import type { AgentRpc } from './rpc.js';
 import { FileTransfers } from './file-transfers.js';
 import { validateFileRpcRequest, invalidFileTransfer } from './file-protocol.js';
+import { TerminalWorker } from './terminal-worker.js';
 
 interface HistoryReader {
   readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
@@ -24,12 +25,21 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   let disposed = false;
   let cleanup: Promise<void> | null = null;
   let fileTransfers: FileTransfers | null = null;
+  let terminalWorker: TerminalWorker | null = null;
+  let disconnectTerminals = () => {};
+  const unsubscribeAvailability = rpc.transport.onAvailability((connected) => { if (!connected) disconnectTerminals(); });
   const integrations = new Map<string, AgentIntegration>();
   const readers = new Map<string, AgentResourceTable<'history-reader', HistoryReader>>();
   const readerResources = new Set<HistoryReader>();
   const subscriptions = new Set<() => void>();
   const ready = (async () => {
     info = await node.getInfo();
+    if (info.services.terminals) {
+      const service = await node.getTerminalService();
+      terminalWorker = new TerminalWorker(service, rpc);
+      disconnectTerminals = () => { terminalWorker?.disconnect(); service.disconnect(); };
+      if (disposed) { disconnectTerminals(); throw new AgentCallError('not-dispatched', 'Worker session retired'); }
+    }
     if (info.services.files) fileTransfers = new FileTransfers(await node.getFilesService(), { nodeId: info.nodeId, instanceId: info.instanceId, sessionId: rpc.transport.id });
     for (const id of info.integrationIds) {
       const integration = await node.getAgentIntegration(id);
@@ -42,6 +52,8 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   const dispose = (): Promise<void> => {
     if (cleanup) return cleanup;
     disposed = true;
+    unsubscribeAvailability();
+    disconnectTerminals();
     unsubscribe();
     rpc.retireUnknown();
     for (const unsubscribeProducer of subscriptions) unsubscribeProducer();
@@ -84,6 +96,10 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
       validateFileRpcRequest(call.method, call.request);
     }
     switch (call.method) {
+      case 'terminals.list': case 'terminals.create': case 'terminals.rename': case 'terminals.terminate':
+      case 'terminals.attach': case 'terminals.input': case 'terminals.resize': case 'terminals.detach':
+        if (call.integrationId !== '') throw new AgentCallError('rejected', 'Terminals are node services');
+        return required(terminalWorker).handle(call);
       case 'files.tree': return (await node.getFilesService()).tree(call.request, { signal });
       case 'files.browse': return (await node.getFilesService()).browse(call.request, { signal });
       case 'files.list': return (await node.getFilesService()).list(call.request, { signal });

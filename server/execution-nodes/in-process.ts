@@ -12,6 +12,7 @@ import { IntegrationRegistry } from '../agents/integration-registry.js';
 import { LocalExecutionProjectService } from './project-service.js';
 import { discoverApiProviderModels } from '../api-providers/discovery.js';
 import { LocalExecutionFilesService } from '../files/service.js';
+import { TerminalRuntime, type LocalExecutionTerminalService } from '../terminals/node-service.js';
 
 export class InProcessExecutionNode implements ExecutionNode {
   readonly id: string;
@@ -21,13 +22,20 @@ export class InProcessExecutionNode implements ExecutionNode {
   readonly #files: LocalExecutionFilesService;
   readonly #listeners = new Set<(value: NodeAvailability) => void>();
   #disposed = false;
+  readonly #terminalRuntime: TerminalRuntime;
+  readonly #ownsTerminalRuntime: boolean;
+  readonly #terminals: LocalExecutionTerminalService;
 
   constructor(options: IntegrationHostFactoryOptions & {
     readonly id: string;
     readonly integrations: readonly AgentIntegrationClass[];
     readonly projectBasePath: string;
+    readonly terminalRuntime?: TerminalRuntime;
   }) {
     this.id = options.id;
+    this.#ownsTerminalRuntime = !options.terminalRuntime;
+    this.#terminalRuntime = options.terminalRuntime ?? new TerminalRuntime({ projectBasePath: options.projectBasePath });
+    this.#terminals = this.#terminalRuntime.service(options.id);
     this.#projects = new LocalExecutionProjectService(options.projectBasePath, (callOptions) => this.#assertAvailable(callOptions));
     this.#files = new LocalExecutionFilesService({ nodeId: options.id, projectBasePath: options.projectBasePath, assertAvailable: (callOptions) => this.#assertAvailable(callOptions) });
     const instanceId = options.instanceId ?? crypto.randomUUID();
@@ -40,7 +48,7 @@ export class InProcessExecutionNode implements ExecutionNode {
       instanceId,
       projectBasePath: this.#projects.projectBasePath,
       integrationIds: Object.freeze(this.#registry.list().map((integration) => integration.descriptor.id)),
-      services: Object.freeze({ agents: true, processes: false, files: true, git: false, terminals: false }),
+      services: Object.freeze({ agents: true, processes: false, files: true, git: false, terminals: true }),
     });
   }
 
@@ -67,7 +75,7 @@ export class InProcessExecutionNode implements ExecutionNode {
   }
   async getFilesService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#files; }
   async getGitService(): Promise<never> { throw unavailableService('git'); }
-  async getTerminalService(): Promise<never> { throw unavailableService('terminals'); }
+  async getTerminalService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#terminals; }
 
   onAvailabilityChanged(listener: (value: NodeAvailability) => void): () => void {
     this.#listeners.add(listener);
@@ -77,6 +85,8 @@ export class InProcessExecutionNode implements ExecutionNode {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#terminals.dispose();
+    if (this.#ownsTerminalRuntime) this.#terminalRuntime.shutdown();
     for (const listener of this.#listeners) listener('disposed');
     this.#listeners.clear();
     await Promise.allSettled(this.#registry.list().map((integration) => integration.lifecycle.stop()));

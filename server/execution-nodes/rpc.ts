@@ -7,10 +7,13 @@ import type { AgentRpcMethods, AgentRpcRequest, AgentProducerFrame } from './age
 import type { SessionTransport } from './session-transport.js';
 import { DomainError } from '../lib/domain-error.js';
 import { isErrorCode, type ErrorCode } from '../../common/error-codes.js';
+import { TerminalError } from '../../common/terminal-error.js';
+import { parseTerminalStreamServerMessage, type TerminalErrorCode } from '../../common/terminal.js';
+import { parseTerminalNotification, type TerminalNotification } from './terminal-protocol.js';
 
 interface Failure {
-  readonly code: AgentIntegrationErrorCode | ErrorCode;
-  readonly domain?: 'node';
+  readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode;
+  readonly domain?: 'node' | 'terminal';
   readonly status?: number;
   readonly message: string;
   readonly retryable: boolean;
@@ -18,7 +21,7 @@ interface Failure {
   readonly outcome?: AgentDeliveryOutcome;
 }
 
-type RpcFrame = AgentRpcRequest | AgentProducerFrame
+type RpcFrame = AgentRpcRequest | AgentProducerFrame | TerminalNotification
   | { readonly type: 'result'; readonly id: string; readonly value: unknown }
   | { readonly type: 'error'; readonly id: string; readonly error: Failure }
   | { readonly type: 'cancel'; readonly id: string };
@@ -28,6 +31,7 @@ export class AgentRpc {
   readonly #incoming = new Map<string, AbortController>();
   #handler: ((request: AgentRpcRequest, signal: AbortSignal) => Promise<unknown>) | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
+  #terminal: ((frame: TerminalNotification) => void) | null = null;
   #retired = false;
   readonly #unsubscribe: () => void;
 
@@ -42,6 +46,7 @@ export class AgentRpc {
     this.#unsubscribe();
     this.#handler = null;
     this.#producer = null;
+    this.#terminal = null;
     for (const call of this.#pending.values()) {
       call.cleanup();
       call.reject(new AgentCallError('unknown', 'Execution-node continuity lost after possible dispatch'));
@@ -53,6 +58,10 @@ export class AgentRpc {
 
   handle(handler: (request: AgentRpcRequest, signal: AbortSignal) => Promise<unknown>): void { this.#handler = handler; }
   onProducer(handler: (frame: AgentProducerFrame) => void): void { this.#producer = handler; }
+  onTerminal(handler: (frame: TerminalNotification) => void): void { this.#terminal = handler; }
+  publishTerminal(frame: TerminalNotification): boolean {
+    return !this.#retired && this.transport.channel.trySend(JSON.stringify(frame));
+  }
   publish(frame: AgentProducerFrame): void {
     if (!this.#retired) this.transport.send(JSON.stringify(frame));
   }
@@ -90,6 +99,7 @@ export class AgentRpc {
     if (this.#retired) return;
     const frame: RpcFrame = JSON.parse(payload);
     if (!frame || typeof frame !== 'object' || typeof frame.type !== 'string') throw new Error('Invalid execution-node RPC frame');
+    if (frame.type === 'terminal') { this.#terminal?.(parseTerminalNotification(frame)); return; }
     if (frame.type === 'producer') {
       if (!this.#producer) throw new Error('Producer receiver is not installed');
       this.#producer(frame);
@@ -131,6 +141,7 @@ export class AgentRpc {
 }
 
 function encodeFailure(error: unknown): Failure {
+  if (error instanceof TerminalError) return { domain: 'terminal', code: error.code, message: error.message, status: error.status, retryable: error.status >= 500 };
   if (error instanceof DomainError) return { domain: 'node', code: error.code, message: error.message, status: error.status, retryable: error.retryable };
   if (error instanceof AgentIntegrationError) return {
     code: error.code, message: error.message, retryable: error.retryable,
@@ -149,6 +160,11 @@ function decodeFailure(error: Failure): Error {
   if (error.domain === 'node') {
     if (!isErrorCode(error.code) || !Number.isInteger(error.status) || error.status! < 400 || error.status! > 599) throw new Error('Invalid node RPC error');
     return new DomainError(error.code, error.message, error.status, error.retryable);
+  }
+  if (error.domain === 'terminal') {
+    if (!parseTerminalStreamServerMessage({ type: 'terminal-error', code: error.code, message: error.message })
+      || !Number.isInteger(error.status) || error.status! < 400 || error.status! > 599) throw new Error('Invalid terminal RPC error');
+    return new TerminalError(error.code as TerminalErrorCode, error.message, error.status);
   }
   return error.outcome
     ? new AgentCallError(error.outcome, error.message, error.code as AgentIntegrationErrorCode)

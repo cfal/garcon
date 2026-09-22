@@ -38,7 +38,7 @@ describe('process-owned terminals', () => {
     const id = created.terminal.terminalId;
     expect(parseTerminalReference(id)).toMatchObject({ nodeId, terminalRuntimeId: runtime.id });
     const old = peer('old');
-    await first.attach(authority, old, { type: 'terminal-attach', terminalId: id, clientId: 'browser', afterSequence: 0, intent: 'restore' });
+    await first.attach(authority, old, { type: 'terminal-attach', terminalId: id, clientId: 'browser', afterSequence: 0, intent: 'restore', attachmentEpoch: (await first.list(authority)).attachmentEpoch });
     first.dispose();
     ptys[0].data('still running');
     expect(ptys[0].killed).toBe(false);
@@ -46,7 +46,7 @@ describe('process-owned terminals', () => {
     expect((await create(replacement)).terminal.terminalId).toBe(id);
     expect(ptys).toHaveLength(1);
     const next = peer('next');
-    await replacement.attach(authority, next, { type: 'terminal-attach', terminalId: id, clientId: 'browser', afterSequence: 0, intent: 'restore' });
+    await replacement.attach(authority, next, { type: 'terminal-attach', terminalId: id, clientId: 'browser', afterSequence: 0, intent: 'restore', attachmentEpoch: (await replacement.list(authority)).attachmentEpoch });
     expect(next.messages[0].replay).toEqual([{ sequence: 1, data: 'still running' }]);
     await expect(first.input(authority, old, id, 'stale')).rejects.toMatchObject({ code: 'terminal-unavailable' });
     expect((await create(replacement, 'second')).terminal.displaySequence).toBe(2);
@@ -71,7 +71,7 @@ describe('process-owned terminals', () => {
     const service = runtime.service('local');
     const { terminal } = await create(service);
     const source = peer('browser');
-    await service.attach(authority, source, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'browser', afterSequence: 0, intent: 'restore' });
+    await service.attach(authority, source, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'browser', afterSequence: 0, intent: 'restore', attachmentEpoch: (await service.list(authority)).attachmentEpoch });
     await expect(service.input(authority, source, terminal.terminalId, 'x'.repeat(65537))).rejects.toMatchObject({ code: 'terminal-validation' });
     service.disconnect();
     await expect(service.input(authority, source, terminal.terminalId, 'stale')).rejects.toMatchObject({ code: 'terminal-not-attached' });

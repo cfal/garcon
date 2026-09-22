@@ -1,6 +1,7 @@
 import type { AgentIntegration } from './integration.js';
 import type { NodeCallOptions } from './resources.js';
 import type { ExecutionFilesService } from './files.js';
+import type { ExecutionTerminalService } from './terminals.js';
 import type { NodePath } from '@garcon/common/node-path';
 import type { ProjectResolution } from '@garcon/common/project-resolution';
 import type { ApiProtocol, ModelDiscoveryKind, ApiProviderModelDiscoveryResponse } from '@garcon/common/api-providers';
@@ -38,7 +39,7 @@ export interface ExecutionNodeInfo {
     readonly processes: false;
     readonly files: boolean;
     readonly git: false;
-    readonly terminals: false;
+    readonly terminals: boolean;
   };
 }
 
@@ -52,7 +53,7 @@ export interface ExecutionNode {
   getProcessService(options?: NodeCallOptions): Promise<never>;
   getFilesService(options?: NodeCallOptions): Promise<ExecutionFilesService>;
   getGitService(options?: NodeCallOptions): Promise<never>;
-  getTerminalService(options?: NodeCallOptions): Promise<never>;
+  getTerminalService(options?: NodeCallOptions): Promise<ExecutionTerminalService>;
   onAvailabilityChanged(listener: (value: NodeAvailability) => void): () => void;
   dispose(): Promise<void>;
 }

@@ -12,11 +12,13 @@ interface Subscription {
 
 /** Owns PTYs independently of replaceable controller/provider sessions. */
 export class TerminalRuntime {
-  readonly id = crypto.randomUUID();
+  readonly id: string;
   readonly #managers = new Map<string, TerminalManager>();
   #stopped = false;
 
-  constructor(private readonly options: TerminalManagerOptions = {}) {}
+  constructor(private readonly options: TerminalManagerOptions = {}) {
+    this.id = options.terminalRuntimeId ?? crypto.randomUUID();
+  }
 
   service(nodeId: string): LocalExecutionTerminalService {
     if (this.#stopped) throw new TerminalError('terminal-unavailable', 'Terminal node is stopping.', 503);
@@ -38,12 +40,13 @@ export class TerminalRuntime {
 export class LocalExecutionTerminalService implements ExecutionTerminalService {
   readonly #subscriptions = new Map<TerminalPeer, Subscription>();
   #disposed = false;
+  #epoch = crypto.randomUUID();
 
   constructor(readonly manager: TerminalManager) {}
 
   async list(authority: TerminalAuthority, options?: NodeCallOptions) {
     this.#check(authority, options);
-    return { success: true as const, terminalRuntimeId: this.manager.terminalRuntimeId, terminals: this.manager.list(authority) };
+    return { success: true as const, terminalRuntimeId: this.manager.terminalRuntimeId, attachmentEpoch: this.#epoch, terminals: this.manager.list(authority) };
   }
 
   async create(authority: TerminalAuthority, request: TerminalCreateRequest, options?: NodeCallOptions) {
@@ -65,6 +68,7 @@ export class LocalExecutionTerminalService implements ExecutionTerminalService {
 
   async attach(authority: TerminalAuthority, peer: TerminalPeer, request: Extract<TerminalStreamClientMessage, { type: 'terminal-attach' }>) {
     this.#check(authority); this.#reference(request.terminalId);
+    if (request.attachmentEpoch !== this.#epoch) throw new TerminalError('terminal-not-attached', 'Refresh terminal attachments after reconnecting.', 409);
     let subscription = this.#subscriptions.get(peer);
     if (!subscription) {
       const current: Subscription = { authority, timer: null, peer: {
@@ -115,6 +119,7 @@ export class LocalExecutionTerminalService implements ExecutionTerminalService {
   }
 
   disconnect(): void {
+    this.#epoch = crypto.randomUUID();
     for (const [peer, subscription] of this.#subscriptions) this.detachPeer(subscription.authority, peer);
   }
 
