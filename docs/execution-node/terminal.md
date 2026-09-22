@@ -1,6 +1,6 @@
 # Terminals On Execution Nodes
 
-Status: architecture and design, updated 2026-09-21. Remote terminals are not implemented. Channel topology, PTY lifetime, replay policy, session limits, and creation targets are decided below; wire method names remain illustrative.
+Status: architecture and design, updated 2026-09-22. Remote terminals are not implemented. Channel topology, PTY lifetime, replay policy, session limits, creation targets, and host-picker behavior are decided below; wire method names remain illustrative.
 
 This follows [Execution Node Interfaces](./interface.md), [Execution Nodes In The App](./app-integration.md), and [Files On Execution Nodes](./files.md). Source behavior was inspected at `808d869658325b62c60c23782e986f76ded8b7a3`. The Files implementation can proceed independently; this proposal should reuse its node-scoped service and transport infrastructure where appropriate, not introduce a competing transport framework.
 
@@ -10,7 +10,8 @@ This follows [Execution Node Interfaces](./interface.md), [Execution Nodes In Th
 - PTYs belong to the execution-node process, not its current controller connection or provider-serving generation. Browser network changes, controller restarts, and arbitrarily long disconnections must not terminate a surviving node's shells.
 - Preserve today's bounded output tail and visible truncation. Full-screen recovery is best effort; users can run `reset` themselves. Do not build screen snapshots or automatically send recovery commands.
 - Allow eight retained terminal sessions per principal per node, including exited sessions until removal.
-- Create on the selected project's node/path, otherwise Local. From an existing terminal, default to its node and initial directory. Provide a node chooser for explicit overrides.
+- Create on the selected project's node/path, otherwise Local. From an existing terminal, default to its node and initial directory. When remote terminal hosts are available, desktop New Terminal and the mobile toolbar `+` open a host chooser containing Local and those nodes.
+- Default terminal labels use the host name and session number: `Local 1` or `<node label> 1`, not `Terminal 1`. Preserve explicit user titles.
 
 ## Scope
 
@@ -266,15 +267,40 @@ The browser's retained entries can show disconnected/unavailable state, but cann
 
 ## Node Selection And Workspace UX
 
-Creation defaults:
+### Host Picker
+
+Use the existing creation entry points, not a separate node-selection dialog:
+
+- Desktop: when at least one enabled, ready remote node advertises terminal support, the inline New Terminal button opens a host menu. Where New Terminal is already a menu item, turn it into a submenu with the same choices.
+- Mobile: under the same condition, the terminal toolbar `+` opens a touch-accessible host menu rather than immediately creating a shell. Preserve this choice when responsive layout moves the action into an overflow menu.
+- Show `Local` first, followed by remote node labels in the execution-node list's order. A connection alone is insufficient: a remote must advertise terminal support. Nodes without that capability are not creation targets.
+- Selecting a host creates on that host using the directory rules below. Opening or dismissing the menu creates nothing. With no remote terminal hosts available, keep the existing direct-create interaction and its target validation; do not silently redirect an unavailable remote context to Local.
+- Creation availability is per host. Keep hosts at their eight-session limit visible but disabled with the limit reason. One full or unavailable node must not disable the chooser or creation on another node. Revalidate capability, readiness, and quota on selection; if the selected node disconnects, fail for that node rather than creating elsewhere.
+- A host that becomes unavailable while the menu is open must not turn the same interaction into an implicit Local create. Disable its entry and keep the selected node identity explicit through dispatch and retries.
+
+Keep the existing list of retained/unplaced terminals separate from the host choices for creating a new one. Reopening an existing terminal always uses its own reference, not a selected creation host. The empty terminal launcher and other New Terminal entry points must use the same host-selection policy and creation admission rules.
+
+The relevant existing entry points are [WorkspaceWindowAddMenu](../../web/src/lib/components/workspace/WorkspaceWindowAddMenu.svelte), the toolbar in [TerminalSurface](../../web/src/lib/components/terminal/TerminalSurface.svelte), and [TerminalLauncherSurface](../../web/src/lib/components/terminal/TerminalLauncherSurface.svelte). Share the host choices and admission policy rather than duplicating node filtering and quota rules in each renderer. Preserve keyboard navigation, touch selection, focus return, and the retained terminal renderer when a menu opens or closes.
+
+### Creation Target
+
+The host choice overrides the default node, not the filesystem namespace:
 
 - New Terminal from a project/chat context captures that context's node and validated directory. With no project target, use Local and its configured base; explicit remote failures never fall back.
-- A launcher node selector can create at a remote base even without a selected chat. Directory browsing may reuse Files when available; terminal creation itself only requires project inspection and a valid path.
+- Choosing the context's node keeps its validated directory. Choosing a different node uses that node's configured base unless the user explicitly supplies a directory for that node. Never copy a Local or another node's path merely because its string might also exist on the chosen host.
+- The host menu can create at a remote base even without a selected chat. Directory browsing may reuse Files when available; terminal creation itself only requires project inspection and a valid path.
 - New Terminal from an existing terminal makes its node explicit and defaults to the same node and initial directory unless the user chooses another target. Do not claim to know its current shell directory after `cd`.
-- Node label belongs in terminal selection and terminal context so identical titles/paths on different machines cannot be confused. Model/agent selection is irrelevant.
 - Existing terminals remain on their captured node across chat switches, handoffs, desktop/mobile moves, and renderer parking.
 
 [TerminalPlacementService](../../web/src/lib/workspace/terminal-placement-service.ts) currently obtains only a string from [workspace project resolution](../../web/src/lib/workspace/workspace-project-path-resolution.ts), which rejects remotes. Replace that contract with a captured node/path target. Preserve the creation target in retry state, placement rollback, and termination cleanup.
+
+### Labels And Placement
+
+Replace the default `Terminal <number>` label with `<host label> <number>` in the terminal toolbar/session picker, workspace tabs, and retained-terminal menus. Local uses the literal host label `Local`; remote nodes use their configured display label. For example, `Local 1`, `Local 2`, and `Build Server 1` can coexist.
+
+Use the existing node/principal-scoped `displaySequence`, not a list index or a controller-global counter. Closing another terminal, taking over an attachment, or reconnecting must not renumber surviving sessions. A node-label edit updates default display labels without renaming the shell, changing terminal identity, or remounting xterm. Labels are presentation, never routing keys.
+
+Preserve explicit user titles from Rename; clearing a title restores the host-based default. Keep the host identifiable in terminal context even when a custom title replaces the default. Centralize this in the existing [terminal display-name helper](../../web/src/lib/terminal/sessions/terminal-display-name.ts), rather than giving mobile and desktop separate naming rules. Model/agent selection remains irrelevant.
 
 Qualify [workspace surface references](../../web/src/lib/workspace/surface-types.ts) and list-driven layout reconciliation. Do not key a retained xterm solely by a potentially colliding terminal ID, and do not remount it on unrelated chat/node selection. Keep tab close, hide, process exit, and explicit terminate as distinct operations. A disconnected remote tab can still be hidden without falsely claiming its process was terminated.
 
@@ -311,6 +337,8 @@ Existing focused coverage lives under [terminal manager tests](../../server/term
 - Lost create/terminate responses, typed uncertain errors, retry expiry, parameter mismatch under reused request IDs, and reconciliation without duplicate PTYs.
 - One offline node during List, stale snapshots after stream mutations, and no pruning or gating of healthy Local/other-node sessions.
 - One shared channel under file transfers, noisy PTYs, and a slow browser: bounded memory/queues, explicit delivery detachment under pressure, reconnect without killing jobs, and measured input/chat latency. No assertion of cross-workload latency isolation or dependency on a new scheduler.
+- Desktop inline and submenu creation plus mobile toolbar/overflow creation: consistent Local/remote host choices, capability filtering, per-node limits, keyboard/touch access, and no spawn on menu dismissal. Disconnect during selection must not redirect creation; choosing a different host must use its own directory target.
+- Toolbar, tabs, and terminal menus use `Local <number>` / `<node label> <number>` consistently; custom titles survive, clearing a title restores the default, and node-label edits or terminal removal do not renumber or remount surviving sessions.
 - Rapid chat/node switches and desktop/mobile renderer moves without focus loss, unnecessary xterm remount, retargeted input, or a hidden terminal being accidentally terminated.
 
 Use deterministic fake/interleaving tests for ownership and failure races, plus isolated real-process and browser tests for the cross-boundary behavior. The document does not claim these new scenarios have been implemented or verified. No paid provider calls are required for terminal-service acceptance.
