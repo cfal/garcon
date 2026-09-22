@@ -17,6 +17,7 @@ mock.module('../../git/commit-generation.js', () => ({
 import createGitRoutes from '../git.js';
 
 const agents = {
+  assertAgentAvailable: mock(() => undefined),
   getAgentAuthStatusMap: mock(() => Promise.resolve({
     claude: { authenticated: false },
     codex: { authenticated: false },
@@ -64,6 +65,8 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
   const handler = routes['/api/v1/git/generate-commit-message'].POST;
 
   beforeEach(() => {
+    agents.assertAgentAvailable.mockReset();
+    agents.assertAgentAvailable.mockImplementation(() => undefined);
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
@@ -109,6 +112,21 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(response.status).toBe(200);
     expect(resolveGit).toHaveBeenCalledWith(repositoryNode);
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith(expect.objectContaining({ nodeId: generationNode, projectPath: '/node-only/project' }));
+  });
+
+  it('reports an unavailable explicit generation node before reading the repository', async () => {
+    const generationNode = '22222222-2222-4222-8222-222222222222';
+    parseJsonBody.mockResolvedValue({ project: '/project', files: ['file'], generationNodeId: generationNode, agentId: 'codex', model: 'synthetic' });
+    agents.hasAgent.mockReturnValue(false);
+    agents.assertAgentAvailable.mockImplementation(() => {
+      throw new DomainError('EXECUTION_NODE_UNAVAILABLE', 'Execution node is unavailable', 503, true);
+    });
+    const response = await handler(makeRequest({}));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTION_NODE_UNAVAILABLE' });
+    expect(agents.assertAgentAvailable).toHaveBeenCalledWith('codex', generationNode);
+    expect(resolveGit).not.toHaveBeenCalled();
+    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
   });
 
   it('keeps Auto generation Local for a remote repository', async () => {

@@ -33,14 +33,6 @@ function hasGenerationRoutingOverride(input: Record<string, unknown>): boolean {
   return ['generationNodeId', 'agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol'].some((key) => hasOwn(input, key));
 }
 
-function isAllowedGenerationAgent(agents: AgentRegistryServiceContract, value: unknown, nodeId: unknown): boolean {
-  if (!isAgentId(value)) return false;
-  if (typeof agents?.hasAgent === 'function') {
-    return agents.hasAgent(value, executionNodeIdFromValue(nodeId));
-  }
-  return true;
-}
-
 async function resolveCommitMessageConfig(settings: SettingsStore, agents: AgentRegistryServiceContract, signal?: AbortSignal) {
   const ui = (await settings?.getUiSettings?.()) ?? {};
   const generationContext = await resolveGenerationContextForSelection(agents, ui?.commitMessage, signal);
@@ -72,7 +64,7 @@ export function createGitGenerationRoute(agents: AgentRegistryServiceContract, s
       }
       validateGitHttpFields('collectCommitMessageContext', input, GENERATION_FIELDS);
       validateGitRequest('collectCommitMessageContext', { projectPath: project, files });
-      if (hasOwn(input, 'agentId') && !isAllowedGenerationAgent(agents, input.agentId, input.generationNodeId)) {
+      if (hasOwn(input, 'agentId') && !isAgentId(input.agentId)) {
         return gitRouteError('Invalid agent.', 400);
       }
       if (hasOwn(input, 'thinkingMode') && !isThinkingMode(input.thinkingMode)) {
@@ -103,6 +95,7 @@ export function createGitGenerationRoute(agents: AgentRegistryServiceContract, s
       let thinkingMode = selectedThinkingMode;
       if (agentId) {
         try {
+          agents.assertAgentAvailable(agentId, nodeId);
           if (hasOwn(input, 'thinkingMode')) {
             agents.assertExecutionModeSelectionSupported(agentId, { thinkingMode: selectedThinkingMode, nodeId });
           }

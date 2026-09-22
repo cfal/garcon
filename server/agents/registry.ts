@@ -71,6 +71,7 @@ const logger = createLogger('agents:registry');
 
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string, nodeId?: string | null): boolean;
+  assertAgentAvailable(agentId: string, nodeId?: string | null): void;
   supportsAuthLogin(agentId: string, nodeId?: string | null): boolean;
   supportsAuthLoginCompletion(agentId: string, nodeId?: string | null): boolean;
   supportsFork(agentId: string, nodeId?: string | null): boolean;
@@ -254,6 +255,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   hasAgent(agentId: string, nodeId?: string | null): boolean { return this.#directory.has(agentId, nodeId); }
+  assertAgentAvailable(agentId: string, nodeId?: string | null): void {
+    if (!this.#directory.list(nodeId).some(integration => integration.descriptor.id === agentId)) {
+      throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
+    }
+  }
   assertExecutionModeSelectionSupported(agentId: string, selection: {
     readonly nodeId?: string | null;
     readonly permissionMode?: PermissionMode;
