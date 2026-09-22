@@ -44,7 +44,9 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
       expect(await terminals.list({ key: 'synthetic-principal', expiresAtMs: null })).toMatchObject({
         success: true, terminalRuntimeId: expect.any(String), attachmentEpoch: expect.any(String), terminals: [],
       });
-      for (const service of [node.getProcessService, node.getGitService]) {
+      expect((await node.getGitService()).getStatus).toBeFunction();
+      expect((await node.getGhService()).getStatus).toBeFunction();
+      for (const service of [node.getProcessService]) {
         await expect(service.call(node)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
       }
       await node.dispose();

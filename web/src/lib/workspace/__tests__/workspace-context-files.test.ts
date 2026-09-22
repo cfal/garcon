@@ -25,7 +25,7 @@ describe('node-owned workspace files', () => {
 		}
 		const remote = {
 			...remoteExecutionNode,
-			machineServices: { files: true, git: false, terminals: false },
+			machineServices: { files: true, git: false, gh: false, terminals: false },
 		};
 		const nodes = new ExecutionNodesStore(async () => [localExecutionNode, remote]);
 		nodes.applySnapshot([localExecutionNode, remote]);

@@ -3,7 +3,7 @@
 	import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
 	setExecutionNodesTestContext([
 		localExecutionNode,
-		{ ...remoteExecutionNode, machineServices: { files: true, git: false, terminals: false } },
+		{ ...remoteExecutionNode, machineServices: { files: true, git: false, gh: false, terminals: false } },
 	]);
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {

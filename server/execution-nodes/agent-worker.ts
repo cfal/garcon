@@ -12,6 +12,8 @@ import type { AgentRpc } from './rpc.js';
 import { FileTransfers } from './file-transfers.js';
 import { validateFileRpcRequest, invalidFileTransfer } from './file-protocol.js';
 import { TerminalWorker } from './terminal-worker.js';
+import { GitWorker } from './git-worker.js';
+import { isGitRpcMethod, type GitRpcRequest } from './git-protocol.js';
 
 interface HistoryReader {
   readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
@@ -26,6 +28,7 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   let cleanup: Promise<void> | null = null;
   let fileTransfers: FileTransfers | null = null;
   let terminalWorker: TerminalWorker | null = null;
+  let gitWorker: GitWorker | null = null;
   let disconnectTerminals = () => {};
   const unsubscribeAvailability = rpc.transport.onAvailability((connected) => { if (!connected) disconnectTerminals(); });
   const integrations = new Map<string, AgentIntegration>();
@@ -34,6 +37,7 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   const subscriptions = new Set<() => void>();
   const ready = (async () => {
     info = await node.getInfo();
+    gitWorker = new GitWorker(node, { nodeId: info.nodeId, instanceId: info.instanceId, sessionId: rpc.transport.id });
     if (info.services.terminals) {
       const service = await node.getTerminalService();
       terminalWorker = new TerminalWorker(service, rpc);
@@ -52,6 +56,7 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
   const dispose = (): Promise<void> => {
     if (cleanup) return cleanup;
     disposed = true;
+    gitWorker?.dispose();
     unsubscribeAvailability();
     disconnectTerminals();
     unsubscribe();
@@ -92,6 +97,10 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
     await ready;
     if (disposed || signal.aborted) throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
     if (call.method === 'node.describe') return { info, integrations: [...integrations.values()].map(manifest) };
+    if (isGitRpcMethod(call.method)) {
+      if (call.integrationId !== '') throw new AgentCallError('rejected', 'Git operations are node services');
+      return required(gitWorker).handle(call as GitRpcRequest, signal);
+    }
     if (call.method === 'apiProviders.discoverModels') return node.discoverApiProviderModels(call.request, { signal });
     if (call.method === 'projects.inspect') return (await node.getProjectService()).inspect(call.request, { signal });
     if (call.method === 'projects.resolveFileMentions') return (await node.getProjectService()).resolveFileMentions(call.request, { signal });
@@ -232,6 +241,6 @@ function required<T>(value: T | null | undefined): T {
   return value;
 }
 
-function unknownMethod(call: never): never {
+function unknownMethod(call: GitRpcRequest): never {
   throw new AgentCallError('not-dispatched', `Unknown execution-node RPC method: ${(call as AgentRpcRequest).method}`, 'OPERATION_UNSUPPORTED');
 }

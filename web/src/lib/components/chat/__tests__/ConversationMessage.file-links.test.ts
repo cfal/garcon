@@ -19,7 +19,7 @@ describe('ConversationMessage file links', () => {
 			},
 			executionNodes: [
 				localExecutionNode,
-				{ ...remoteExecutionNode, machineServices: { files: true, git: false, terminals: false } },
+				{ ...remoteExecutionNode, machineServices: { files: true, git: false, gh: false, terminals: false } },
 			],
 		});
 		await fireEvent.click(screen.getByRole('link', { name: 'remote file' }));
@@ -47,7 +47,7 @@ describe('ConversationMessage file links', () => {
 				{
 					...remoteExecutionNode,
 					availability: 'offline',
-					machineServices: { files: true, git: false, terminals: false },
+					machineServices: { files: true, git: false, gh: false, terminals: false },
 				},
 			],
 		});

@@ -135,7 +135,7 @@ describe('FilesSurfaceController node browsing', () => {
 		const nodes = new ExecutionNodesStore();
 		nodes.applySnapshot([
 			localExecutionNode,
-			{ ...remoteExecutionNode, machineServices: { files: true, git: false, terminals: false } },
+			{ ...remoteExecutionNode, machineServices: { files: true, git: false, gh: false, terminals: false } },
 		]);
 		return nodes;
 	}

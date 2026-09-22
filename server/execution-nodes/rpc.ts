@@ -8,12 +8,13 @@ import type { SessionTransport } from './session-transport.js';
 import { DomainError } from '../lib/domain-error.js';
 import { isErrorCode, type ErrorCode } from '../../common/error-codes.js';
 import { TerminalError } from '../../common/terminal-error.js';
+import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from '../../common/git-error.js';
 import { parseTerminalStreamServerMessage, type TerminalErrorCode } from '../../common/terminal.js';
 import { parseTerminalNotification, type TerminalNotification } from './terminal-protocol.js';
 
 interface Failure {
-  readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode;
-  readonly domain?: 'node' | 'terminal';
+  readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode | GitServiceErrorCode;
+  readonly domain?: 'node' | 'terminal' | 'git';
   readonly status?: number;
   readonly message: string;
   readonly retryable: boolean;
@@ -159,6 +160,7 @@ export class AgentRpc {
 }
 
 function encodeFailure(error: unknown): Failure {
+  if (error instanceof GitServiceError) return { domain: 'git', code: error.code, message: error.message, status: error.status, retryable: false };
   if (error instanceof TerminalError) return { domain: 'terminal', code: error.code, message: error.message, status: error.status, retryable: error.status >= 500 };
   if (error instanceof DomainError) return { domain: 'node', code: error.code, message: error.message, status: error.status, retryable: error.retryable };
   if (error instanceof AgentIntegrationError) return {
@@ -178,6 +180,10 @@ function decodeFailure(error: Failure): Error {
   if (error.domain === 'node') {
     if (!isErrorCode(error.code) || !Number.isInteger(error.status) || error.status! < 400 || error.status! > 599) throw new Error('Invalid node RPC error');
     return new DomainError(error.code, error.message, error.status, error.retryable);
+  }
+  if (error.domain === 'git') {
+    if (!isGitServiceErrorCode(error.code)) throw new Error('Invalid Git RPC error');
+    return new GitServiceError(error.code, error.message);
   }
   if (error.domain === 'terminal') {
     if (!parseTerminalStreamServerMessage({ type: 'terminal-error', code: error.code, message: error.message })

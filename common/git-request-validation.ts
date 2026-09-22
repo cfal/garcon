@@ -3,6 +3,7 @@ import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
 import { GIT_MAX_REQUEST_BYTES } from './git-execution.js';
 import { GitServiceError } from './git-error.js';
+import type { GhRequests } from './gh.js';
 
 const path = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 4096 && !v.includes('\0');
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 * 1024 && !v.includes('\0');
@@ -47,6 +48,14 @@ export const GIT_REQUEST_FIELDS = {
 
 export function isGitMethod(value: unknown): value is GitMethod {
   return typeof value === 'string' && Object.hasOwn(GIT_REQUEST_FIELDS, value);
+}
+
+export function validateGhRequest(method: keyof GhRequests, request: unknown): void {
+  const keys = method === 'getStatus' ? [] : method === 'listPullRequests' ? ['projectPath'] : ['projectPath', 'number'];
+  if (!isRecord(request) || !fields(request, keys) || method !== 'getStatus' && !path(request.projectPath)
+    || method === 'getPullRequest' && (!integer(request.number, Number.MAX_SAFE_INTEGER) || request.number === 0)) {
+    throw new GitServiceError('GIT_INVALID_INPUT', `Invalid GitHub ${method} request`);
+  }
 }
 
 export function validateGitRequest<K extends GitMethod>(method: K, request: unknown): asserts request is ExecutionGitRequests[K] {

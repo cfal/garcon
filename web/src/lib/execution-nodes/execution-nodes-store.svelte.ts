@@ -16,7 +16,7 @@ const localFallback: readonly ExecutionNodeSnapshot[] = [
 		instanceId: null,
 		projectBasePath: null,
 		lastError: null,
-		machineServices: { files: true, git: true, terminals: true },
+		machineServices: { files: true, git: true, gh: true, terminals: true },
 	},
 ];
 

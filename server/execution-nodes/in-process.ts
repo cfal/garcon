@@ -13,6 +13,7 @@ import { LocalExecutionProjectService } from './project-service.js';
 import { discoverApiProviderModels } from '../api-providers/discovery.js';
 import { LocalExecutionFilesService } from '../files/service.js';
 import { TerminalRuntime, type LocalExecutionTerminalService } from '../terminals/node-service.js';
+import { LocalGitRuntime } from '../git/node-service.js';
 
 export class InProcessExecutionNode implements ExecutionNode {
   readonly id: string;
@@ -20,6 +21,7 @@ export class InProcessExecutionNode implements ExecutionNode {
   readonly #registry: IntegrationRegistry;
   readonly #projects: LocalExecutionProjectService;
   readonly #files: LocalExecutionFilesService;
+  readonly #git: LocalGitRuntime;
   readonly #listeners = new Set<(value: NodeAvailability) => void>();
   #disposed = false;
   readonly #terminalRuntime: TerminalRuntime;
@@ -39,6 +41,7 @@ export class InProcessExecutionNode implements ExecutionNode {
     this.#projects = new LocalExecutionProjectService(options.projectBasePath, (callOptions) => this.#assertAvailable(callOptions));
     this.#files = new LocalExecutionFilesService({ nodeId: options.id, projectBasePath: options.projectBasePath, assertAvailable: (callOptions) => this.#assertAvailable(callOptions) });
     const instanceId = options.instanceId ?? crypto.randomUUID();
+    this.#git = new LocalGitRuntime({ nodeId: options.id, instanceId, projectBasePath: options.projectBasePath, assertAvailable: (callOptions) => this.#assertAvailable(callOptions) });
     this.#registry = new IntegrationRegistry({
       integrations: options.integrations,
       hostFactory: new IntegrationHostFactory({ ...options, nodeId: options.id, instanceId }),
@@ -48,7 +51,7 @@ export class InProcessExecutionNode implements ExecutionNode {
       instanceId,
       projectBasePath: this.#projects.projectBasePath,
       integrationIds: Object.freeze(this.#registry.list().map((integration) => integration.descriptor.id)),
-      services: Object.freeze({ agents: true, processes: false, files: true, git: false, terminals: true }),
+      services: Object.freeze({ agents: true, processes: false, files: true, git: true, gh: true, terminals: true }),
     });
   }
 
@@ -74,7 +77,8 @@ export class InProcessExecutionNode implements ExecutionNode {
     return this.#projects;
   }
   async getFilesService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#files; }
-  async getGitService(): Promise<never> { throw unavailableService('git'); }
+  async getGitService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#git.git; }
+  async getGhService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#git.gh; }
   async getTerminalService(options?: NodeCallOptions) { this.#assertAvailable(options); return this.#terminals; }
 
   onAvailabilityChanged(listener: (value: NodeAvailability) => void): () => void {
@@ -85,6 +89,7 @@ export class InProcessExecutionNode implements ExecutionNode {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#git.dispose();
     this.#terminals.dispose();
     if (this.#ownsTerminalRuntime) this.#terminalRuntime.shutdown();
     for (const listener of this.#listeners) listener('disposed');

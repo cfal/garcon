@@ -15,6 +15,18 @@ export interface GhStatusResponse {
   host?: string;
 }
 
+export interface GhResults {
+  getStatus: GhStatusResponse;
+  listPullRequests: PullRequestListResult;
+  getPullRequest: PullRequestDetail;
+}
+
+export interface GhRequests {
+  getStatus: Record<string, never>;
+  listPullRequests: { projectPath: string };
+  getPullRequest: { projectPath: string; number: number };
+}
+
 export type PullRequestState = 'open' | 'closed' | 'merged';
 export type PullRequestChecksState = 'passing' | 'failing' | 'pending' | 'none';
 export type PullRequestReviewDecision =

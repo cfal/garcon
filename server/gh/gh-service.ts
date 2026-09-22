@@ -78,9 +78,10 @@ async function loadReviewThreads(
     );
     return buildThreads(Array.isArray(comments) ? comments : []);
   } catch (error) {
+    signal?.throwIfAborted();
     // Review threads are best-effort; a comment fetch failure should not blank
     // out the whole PR view.
-    logger.warn('[gh] failed to load review threads', error);
+    logger.warn('[gh] failed to load review threads', { code: classifyGhError(error).code });
     return [];
   }
 }
@@ -108,7 +109,7 @@ export function createGhOperations(statusDirectory = process.cwd()): GhOperation
       } catch (error) {
         signal?.throwIfAborted();
         const status = deriveGhStatus(null, error);
-        if (status.reason === 'unknown') logger.warn('[gh] failed to resolve gh auth status', error);
+        if (status.reason === 'unknown') logger.warn('[gh] failed to resolve gh auth status', { code: classifyGhError(error).code });
         return status;
       }
     },
@@ -131,7 +132,8 @@ export function createGhOperations(statusDirectory = process.cwd()): GhOperation
         );
         if (repoRaw.nameWithOwner) repo = { nameWithOwner: repoRaw.nameWithOwner };
       } catch (error) {
-        logger.warn('[gh] failed to resolve repo name', error);
+        signal?.throwIfAborted();
+        logger.warn('[gh] failed to resolve repo name', { code: classifyGhError(error).code });
       }
 
       return { pulls, repo };

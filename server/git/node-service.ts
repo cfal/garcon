@@ -5,7 +5,7 @@ import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod, GitRequests, GitResults } from '../../common/git.js';
 import { isGitMutation, type ExecutionGitRequests, type GitNodeScope } from '../../common/git-execution.js';
 import { GitServiceError } from '../../common/git-error.js';
-import { validateGitRequest } from '../../common/git-request-validation.js';
+import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
 import { isRecord } from '../../common/json.js';
 import { assertRealWithinBase, resolveRealWithinBase } from '../lib/path-boundary.js';
@@ -81,7 +81,7 @@ export class LocalGitRuntime {
     const signal = options?.signal ? AbortSignal.any([options.signal, this.#abort.signal]) : this.#abort.signal;
     try {
       const callOptions = { ...options, signal };
-      return await withGitOperation(toNativePath(this.configuration.projectBasePath), { ...callOptions, mutation }, () => operation(callOptions));
+      return await withGitOperation(toNativePath(this.configuration.projectBasePath), { ...callOptions, mutation }, (signal) => operation({ ...callOptions, signal }));
     } finally {
       if (mutation) { this.#mutations--; processAdmission.mutations--; } else { this.#reads--; processAdmission.reads--; }
     }
@@ -120,6 +120,7 @@ export class LocalGitRuntime {
   }
 
   async #ghCall<K extends keyof ExecutionGhService>(method: K, request: { projectPath?: string; number?: number }, options?: NodeCallOptions): Promise<Awaited<ReturnType<ExecutionGhService[K]>>> {
+    validateGhRequest(method, request);
     try {
       const result = await this.#admit(false, options, async (callOptions) => {
         if (method === 'getStatus') return this.#gh.getStatus(callOptions.signal);

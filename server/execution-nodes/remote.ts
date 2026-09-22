@@ -16,6 +16,7 @@ import type { WebSocketLink } from './websocket-link.js';
 import { unavailableService } from './in-process.js';
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../api-providers/discovery.js';
 import { RemoteExecutionFilesService } from './remote-files.js';
+import { RemoteGitServices } from './remote-git.js';
 import { RemoteExecutionTerminalService } from './remote-terminals.js';
 
 export interface RemoteSessionBacking {
@@ -40,6 +41,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   #candidate: SessionTransport | null = null;
   #initialized = false;
   readonly #files = new RemoteExecutionFilesService(() => this.#backing());
+  readonly #git = new RemoteGitServices(() => this.#backing());
   readonly #terminals = new RemoteExecutionTerminalService(() => this.#backing());
   readonly #projects: ExecutionProjectService = {
     inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
@@ -127,7 +129,16 @@ export class RemoteExecutionNode implements ExecutionNode {
     if (!this.#backing().info.services.files) throw unavailableService('files');
     return this.#files;
   }
-  async getGitService(): Promise<never> { throw unavailableService('git'); }
+  async getGitService(options?: NodeCallOptions) {
+    options?.signal?.throwIfAborted();
+    if (!this.#backing().info.services.git) throw unavailableService('git');
+    return this.#git.git;
+  }
+  async getGhService(options?: NodeCallOptions) {
+    options?.signal?.throwIfAborted();
+    if (!this.#backing().info.services.gh) throw unavailableService('gh');
+    return this.#git.gh;
+  }
   async getTerminalService(options?: NodeCallOptions) {
     options?.signal?.throwIfAborted();
     if (!this.#backing().info.services.terminals) throw unavailableService('terminals');
@@ -155,6 +166,7 @@ export class RemoteExecutionNode implements ExecutionNode {
     const { info, integrations } = await rpc.call('', 'node.describe', null);
     if (info.nodeId !== this.id || transport.nodeId !== this.id) throw new NodeConfigurationError('Execution-node identity mismatch');
     if (typeof info.projectBasePath !== 'string' || !info.projectBasePath) throw new NodeConfigurationError('Execution-node project base is missing');
+    if (!info.services || (['files', 'git', 'gh', 'terminals'] as const).some(key => typeof info.services[key] !== 'boolean')) throw new NodeConfigurationError('Execution-node machine capabilities are invalid');
     const manifests = new Map<string, IntegrationManifest>();
     for (const manifest of integrations) {
       if (manifest.scope.nodeId !== info.nodeId || manifest.scope.instanceId !== info.instanceId

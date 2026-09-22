@@ -207,7 +207,7 @@ describe('PermissionRequestRow', () => {
 			},
 			executionNodes: [
 				localExecutionNode,
-				{ ...remoteExecutionNode, machineServices: { files: true, git: false, terminals: false } },
+				{ ...remoteExecutionNode, machineServices: { files: true, git: false, gh: false, terminals: false } },
 			],
 		});
 		await fireEvent.click(screen.getByRole('link', { name: 'Plan file' }));

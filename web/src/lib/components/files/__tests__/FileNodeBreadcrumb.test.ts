@@ -12,7 +12,7 @@ afterEach(cleanup);
 it('selects file-capable nodes and keeps unavailable nodes visible but disabled', async () => {
 	const remote = {
 		...remoteExecutionNode,
-		machineServices: { files: true, git: false, terminals: false },
+		machineServices: { files: true, git: false, gh: false, terminals: false },
 	};
 	const offline = {
 		...remote,

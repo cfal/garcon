@@ -1,5 +1,6 @@
 import type { AgentDescriptor, AgentSettingDescriptor, AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { FileRpcMethods } from './file-protocol.js';
+import type { GitRpcMethods } from './git-protocol.js';
 import type { TerminalRpcMethods } from './terminal-protocol.js';
 import type {
   AgentIntegration,
@@ -43,7 +44,7 @@ export interface IntegrationManifest {
 
 export type HistoryReaderRef = AgentResourceRef<'history-reader'>;
 
-export interface AgentRpcMethods extends FileRpcMethods, TerminalRpcMethods {
+export interface AgentRpcMethods extends FileRpcMethods, TerminalRpcMethods, GitRpcMethods {
   'node.describe': Call<null, { readonly info: ExecutionNodeInfo; readonly integrations: readonly IntegrationManifest[] }>;
   'apiProviders.discoverModels': Call<Parameters<ExecutionNode['discoverApiProviderModels']>[0], Awaited<ReturnType<ExecutionNode['discoverApiProviderModels']>>>;
   'projects.inspect': Call<Parameters<ExecutionProjectService['inspect']>[0], Awaited<ReturnType<ExecutionProjectService['inspect']>>>;

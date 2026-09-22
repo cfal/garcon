@@ -112,14 +112,14 @@ export class ExecutionNodeManager {
       id: LOCAL_EXECUTION_NODE_ID, label: 'Local', kind: 'local', enabled: true, direction: null,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
       instanceId: this.localInfo.instanceId,
-      lastError: null, machineServices: { files: true, git: true, terminals: true },
+      lastError: null, machineServices: { files: true, git: true, gh: true, terminals: true },
     }, ...[...this.#remotes.values()].map((entry): ExecutionNodeSnapshot => ({
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
       direction: entry.config.connection.kind,
       availability: this.isReady(entry.config.id) ? 'ready' : entry.node?.availability === 'reconnecting' ? 'reconnecting' : 'offline',
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
       instanceId: entry.info?.instanceId ?? null,
-      machineServices: { files: entry.info?.services.files === true, git: false, terminals: entry.info?.services.terminals === true },
+      machineServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true },
     }))];
   }
 

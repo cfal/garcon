@@ -38,6 +38,7 @@ export interface ExecutionNodeSnapshot {
   readonly machineServices: {
     readonly files: boolean;
     readonly git: boolean;
+    readonly gh: boolean;
     readonly terminals: boolean;
   };
 }
@@ -124,8 +125,8 @@ export function parseExecutionNodeSnapshot(value: unknown): ExecutionNodeSnapsho
     ? value.kind !== 'local' || value.direction !== null || !value.enabled
     : value.kind !== 'remote' || (value.direction !== 'node-connects' && value.direction !== 'controller-connects')) return null;
   const services = value.machineServices;
-  if (!isRecord(services) || !hasOnlyKeys(services, ['files', 'git', 'terminals'])
-    || typeof services.files !== 'boolean' || typeof services.git !== 'boolean' || typeof services.terminals !== 'boolean') return null;
+  if (!isRecord(services) || !hasOnlyKeys(services, ['files', 'git', 'gh', 'terminals'])
+    || typeof services.files !== 'boolean' || typeof services.git !== 'boolean' || typeof services.gh !== 'boolean' || typeof services.terminals !== 'boolean') return null;
   const error = value.lastError;
   if (error !== null && (!isRecord(error) || !hasOnlyKeys(error, ['code', 'message'])
     || typeof error.code !== 'string' || typeof error.message !== 'string')) return null;

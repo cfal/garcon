@@ -4,7 +4,7 @@ export const localExecutionNode = {
 	id: 'local', label: 'Local', kind: 'local', enabled: true, direction: null,
 	availability: 'ready', projectBasePath: '/workspace', lastError: null,
 	instanceId: 'synthetic-local-instance',
-	machineServices: { files: true, git: true, terminals: true },
+	machineServices: { files: true, git: true, gh: true, terminals: true },
 } satisfies ExecutionNodeSnapshot;
 
 export const remoteExecutionNode = {
@@ -12,5 +12,5 @@ export const remoteExecutionNode = {
 	enabled: true, direction: 'node-connects', availability: 'ready',
 	projectBasePath: '/worker', lastError: null,
 	instanceId: 'synthetic-remote-instance',
-	machineServices: { files: false, git: false, terminals: false },
+	machineServices: { files: false, git: false, gh: false, terminals: false },
 } satisfies ExecutionNodeSnapshot;

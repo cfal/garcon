@@ -253,9 +253,9 @@ async function markConflictResolved({
 function parseStashes(output: string): GitStashEntry[] {
   return output
     .split('\x1e')
-    .filter(Boolean)
+    .filter((entry) => entry.trim().length > 0)
     .map((entry) => {
-      const [ref = '', hash = '', date = '', message = ''] = entry.split('\0');
+      const [ref = '', hash = '', date = '', message = ''] = entry.replace(/^\r?\n/, '').split('\0');
       const indexMatch = ref.match(/^stash@\{(\d+)\}$/);
       return {
         index: indexMatch ? Number(indexMatch[1]) : -1,
@@ -315,9 +315,9 @@ async function dropStash({ projectPath, stashRef, signal }: StashRefOptions): Pr
 function parseFileHistory(output: string): GitFileHistoryEntry[] {
   return output
     .split('\x1e')
-    .filter(Boolean)
+    .filter((entry) => entry.trim().length > 0)
     .map((entry) => {
-      const [hash = '', author = '', email = '', date = '', subject = ''] = entry.split('\0');
+      const [hash = '', author = '', email = '', date = '', subject = ''] = entry.replace(/^\r?\n/, '').split('\0');
       return { hash, author, email, date, subject };
     });
 }

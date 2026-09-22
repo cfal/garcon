@@ -41,7 +41,7 @@ function node(
 		instanceId: null,
 		projectBasePath: '/project',
 		lastError: null,
-		machineServices: { terminals: true, files: true, git: false },
+		machineServices: { terminals: true, files: true, git: false, gh: false },
 	};
 }
 function terminal(nodeId: string, sequence = 1, runtime = runtimeId): TerminalMetadata {
@@ -526,7 +526,7 @@ describe('node-qualified terminal registry', () => {
 			node('local'),
 			{
 				...node(remoteId, 'offline'),
-				machineServices: { files: false, git: false, terminals: false },
+				machineServices: { files: false, git: false, gh: false, terminals: false },
 			},
 		]);
 		expect(registry.sessions[id].attachmentState).toBe('unavailable');

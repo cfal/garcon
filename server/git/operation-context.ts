@@ -17,7 +17,7 @@ interface GitOperation {
 
 const operations = new AsyncLocalStorage<GitOperation>();
 
-export async function withGitOperation<T>(root: string, options: (NodeCallOptions & { mutation?: boolean }) | undefined, operation: () => Promise<T>): Promise<T> {
+export async function withGitOperation<T>(root: string, options: (NodeCallOptions & { mutation?: boolean }) | undefined, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? GIT_OPERATION_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -27,7 +27,7 @@ export async function withGitOperation<T>(root: string, options: (NodeCallOption
   try {
     return await operations.run(current, async () => {
       signal.throwIfAborted();
-      try { return await operation(); }
+      try { return await operation(signal); }
       catch (error) {
         if (options?.mutation && current.mutationDispatched && (signal.aborted || isGitCancellation(error))) {
           throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation was interrupted after dispatch. Inspect the repository before trying again.');
