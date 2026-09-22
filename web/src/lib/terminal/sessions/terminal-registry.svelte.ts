@@ -501,6 +501,7 @@ export class TerminalRegistry {
 			return;
 		}
 		this.#syncTransportDemand();
+		this.#scheduleInventoryRetry();
 	}
 
 	destroy(): void {
@@ -922,6 +923,12 @@ export class TerminalRegistry {
 
 	#scheduleInventoryRetry(): void {
 		if (this.#inventoryRetry || !this.#initialized || this.#authSuspended || this.#destroyed)
+			return;
+		if (
+			!this.hosts.some(
+				(host) => host.available && this.nodeInventories[host.id]?.status === 'failed',
+			)
+		)
 			return;
 		this.#inventoryRetry = setTimeout(() => {
 			this.#inventoryRetry = null;

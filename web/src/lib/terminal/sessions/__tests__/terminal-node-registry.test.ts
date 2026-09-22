@@ -203,6 +203,40 @@ describe('node-qualified terminal registry', () => {
 		expect(list).toHaveBeenCalledTimes(calls);
 	});
 
+	it('resumes failed-node inventory retries after login when successful hosts are empty', async () => {
+		vi.useFakeTimers();
+		const { registry, list, sent } = setup({ realTransport: true });
+		const local = Promise.withResolvers<TerminalListResponse>();
+		let remoteUnavailable = true;
+		list.mockImplementation(async (id = 'local') => {
+			if (id === 'local') return local.promise;
+			if (remoteUnavailable) throw new Error('Transient inventory failure');
+			return inventory([terminal(id)]);
+		});
+		const initializing = registry.initialize();
+		await vi.waitFor(() => expect(registry.nodeInventories[remoteId].status).toBe('failed'));
+		local.resolve(inventory([]));
+		await initializing;
+		expect(registry.listStatus).toBe('ready');
+		expect(registry.sessions).toEqual({});
+		registry.authChanged(false);
+		const calls = list.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(list).toHaveBeenCalledTimes(calls);
+
+		remoteUnavailable = false;
+		registry.authChanged(true);
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(registry.nodeInventories[remoteId].status).toBe('ready');
+		expect(registry.sessions[terminal(remoteId).terminalId]).toBeDefined();
+		expect(sent).toContainEqual(
+			expect.objectContaining({
+				type: 'terminal-attach',
+				terminalId: terminal(remoteId).terminalId,
+			}),
+		);
+	});
+
 	it('rejects unqualified stream events and cancels gap recovery when the node goes offline', async () => {
 		const { registry, nodes, sent, callbacks, write } = setup();
 		await registry.initialize();
