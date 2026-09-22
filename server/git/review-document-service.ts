@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks';
 import { GitDomainError } from './git-types.js';
 import {
   isGitReviewCollectionLimitBody,
@@ -40,7 +41,7 @@ class GitReviewBodyExecutor {
     return new Promise<T>((resolve, reject) => {
       this.prefetchQueue.push({
         signal,
-        task,
+        task: AsyncResource.bind(task),
         resolve: resolve as (value: unknown) => void,
         reject,
       });

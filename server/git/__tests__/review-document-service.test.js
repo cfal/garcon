@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createGitService } from '../git-service.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 import { createReviewDocumentOperations } from '../review-document-service.js';
+import { withGitOperation } from '../operation-context.js';
 
 const temporaryDirectories = [];
 
@@ -57,6 +58,44 @@ afterEach(async () => {
 });
 
 describe('Git review documents', () => {
+  it('retains each queued prefetch operation context after the preceding request settles', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    await fs.writeFile(path.join(projectPath, 'a.txt'), 'changed a\n');
+    await fs.writeFile(path.join(projectPath, 'b.txt'), 'changed b\n');
+    const snapshot = await service.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 2 });
+    expect(snapshot.status).toBe('ready');
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const originalSpawn = Bun.spawn;
+    let held = false;
+    const spawn = spyOn(Bun, 'spawn').mockImplementation((argv, options) => {
+      const process = originalSpawn(argv, options);
+      if (held || !argv.includes('--patch-with-raw')) return process;
+      held = true;
+      entered.resolve();
+      const exited = process.exited.then(async (code) => { await release.promise; return code; });
+      return new Proxy(process, { get: (target, key) => key === 'exited' ? exited : Reflect.get(target, key, target) });
+    });
+    const load = (file) => withGitOperation(projectPath, undefined, () => service.getReviewDocumentFileBodies({
+      projectPath, documentId: snapshot.reviewSummary.documentId, files: [file], purpose: 'prefetch',
+    }));
+    let first;
+    let second;
+    try {
+      first = load('a.txt');
+      await entered.promise;
+      second = load('b.txt');
+      release.resolve();
+      expect((await first).status).toBe('ready');
+      expect((await second).files['b.txt'].patch).toContain('+changed b');
+    } finally {
+      release.resolve();
+      await Promise.allSettled([first, second]);
+      spawn.mockRestore();
+    }
+  });
+
   it('loads multiple revision files through one compact body batch', async () => {
     const projectPath = await createRepository();
     const service = createService();

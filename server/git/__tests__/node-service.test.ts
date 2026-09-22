@@ -97,6 +97,11 @@ test('evicted patch digests survive Git configuration changes that merge hunk bo
   await runGit(projectPath, ['config', 'diff.interHunkContext', '40']);
   await expect(git.stageHunk(proof)).rejects.toMatchObject({ code: 'GIT_STALE_DOCUMENT' });
   expect((await runGit(projectPath, ['diff', '--cached'])).stdout).toBe('');
+  const refreshed = await selection(git, projectPath);
+  expect(refreshed.document.documentId).not.toBe(proof.document.documentId);
+  expect(refreshed.patchDigest).not.toBe(proof.patchDigest);
+  await git.stageHunk(refreshed);
+  expect((await runGit(projectPath, ['diff', '--cached'])).stdout).toContain('+second');
 });
 
 test('untracked files retain partial staging and failed selection cleanup', async () => {
@@ -118,6 +123,18 @@ test('retired services and cancelled requests never execute mutations', async ()
   expect((await runGit(projectPath, ['branch', '--list'])).stdout.trim()).toBe('* main');
 });
 
+test('untracked selections preserve an absent final newline', async () => {
+  const { git, projectPath } = await fixture();
+  for (const method of ['stageHunk', 'stageSelection'] as const) {
+    const file = `${method}.txt`;
+    await fs.writeFile(path.join(projectPath, file), 'no newline');
+    const { hunkIndex, ...proof } = await selection(git, projectPath, file);
+    if (method === 'stageHunk') await git.stageHunk({ ...proof, hunkIndex });
+    else await git.stageSelection({ ...proof, selection: { lineIndices: [0] } });
+    expect((await runGit(projectPath, ['show', `:${file}`])).stdout).toBe('no newline');
+  }
+});
+
 test('linked worktrees share locks until native work settles, including across serving instances', async () => {
   const { git, projectPath, root } = await fixture();
   const linked = path.join(root, 'linked');
@@ -128,8 +145,8 @@ test('linked worktrees share locks until native work settles, including across s
   const locks = KeyedPromiseLock.prototype.runExclusive;
   let waiting = false;
   let secondRan = false;
-  const lockSpy = spyOn(KeyedPromiseLock.prototype, 'runExclusive').mockImplementation(function (key, operation) {
-    const result = locks.call(this, key, operation);
+  const lockSpy = spyOn(KeyedPromiseLock.prototype, 'runExclusive').mockImplementation(function (key, operation, signal) {
+    const result = locks.call(this, key, operation, signal);
     if (waiting) secondQueued.resolve();
     return result;
   });

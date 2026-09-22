@@ -1,7 +1,8 @@
 export function buildFullFileAddedPatch(contentAfter: string): string {
   const lines = fullFileLines(contentAfter);
   if (lines.length === 0) return '';
-  return `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
+  const eof = contentAfter.endsWith('\n') ? '' : '\n\\ No newline at end of file';
+  return `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}${eof}`;
 }
 
 export function countFullFileAddedLines(contentAfter: string): number {

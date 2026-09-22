@@ -256,7 +256,10 @@ export class GitReviewDocumentRegistry {
           if (body.patch !== null) {
             const digest = createHash('sha256').update(body.patch, 'utf8').digest('hex');
             const previous = document.patchDigests.get(body.path);
-            if (previous && previous !== digest) throw new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
+            if (previous && previous !== digest) {
+              document.superseded = true;
+              throw new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
+            }
             body.patchDigest = digest;
           }
         }
