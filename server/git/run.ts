@@ -1,7 +1,7 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
-import { assertGitWorkingPath, gitOperationOptions, markGitOutputTruncated, trackGitProcess } from './operation-context.js';
+import { assertGitWorkingPath, gitOperationOptions, markGitOutputTruncated, markGitMutationDispatched, trackGitProcess } from './operation-context.js';
 import type {
   GitCommandOptions,
   GitCommandResult,
@@ -154,6 +154,7 @@ async function runGitProcess(
         signal: abortState.signal,
         env: gitCommandEnv(options),
       });
+      if (!options.disableOptionalLocks) markGitMutationDispatched();
     } catch (error) {
       abortState.cleanup();
       // Bun.spawn throws synchronously for an already-aborted signal; route

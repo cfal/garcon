@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { realpath } from 'node:fs/promises';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { probeWorktreeLayout } from './worktree-layout.js';
-import { settleGitProcesses } from './operation-context.js';
+import { gitOperationSignal, settleGitProcesses } from './operation-context.js';
 
 const mutations = new KeyedPromiseLock();
 const heldRepository = new AsyncLocalStorage<string>();
@@ -14,5 +14,5 @@ export async function withRepositoryMutation<T>(projectPath: string, operation: 
   return mutations.runExclusive(key, () => heldRepository.run(key, async () => {
     try { return await operation(); }
     finally { await settleGitProcesses(); }
-  }));
+  }), gitOperationSignal());
 }

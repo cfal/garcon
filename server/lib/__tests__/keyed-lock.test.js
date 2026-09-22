@@ -34,4 +34,25 @@ describe('KeyedPromiseLock ordered pairs', () => {
     expect(await lock.runExclusiveMany(['a', 'b'], async () => 'released')).toBe('released');
     expect(await lock.runExclusiveMany([], async () => 'empty')).toBe('empty');
   });
+
+  it('removes aborted waiters without releasing their active owner', async () => {
+    const lock = new KeyedPromiseLock();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const owner = lock.runExclusive('repo', async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    let ran = false;
+    const controller = new AbortController();
+    const cancelled = lock.runExclusive('repo', async () => { ran = true; }, controller.signal);
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+    const following = lock.runExclusive('repo', async () => { ran = true; });
+    await Promise.resolve();
+    expect(ran).toBe(false);
+    release.resolve();
+    await owner;
+    await following;
+    expect(ran).toBe(true);
+    expect(await lock.runExclusive('repo', async () => 'released')).toBe('released');
+  });
 });

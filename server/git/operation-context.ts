@@ -12,24 +12,44 @@ interface GitOperation {
   readonly pending: Set<Promise<unknown>>;
   closed: boolean;
   outputTruncated: boolean;
+  mutationDispatched: boolean;
 }
 
 const operations = new AsyncLocalStorage<GitOperation>();
 
-export async function withGitOperation<T>(root: string, options: NodeCallOptions | undefined, operation: () => Promise<T>): Promise<T> {
+export async function withGitOperation<T>(root: string, options: (NodeCallOptions & { mutation?: boolean }) | undefined, operation: () => Promise<T>): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? GIT_OPERATION_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref();
   const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-  const current: GitOperation = { root, signal, deadline: performance.now() + timeoutMs, pending: new Set(), closed: false, outputTruncated: false };
+  const current: GitOperation = { root, signal, deadline: performance.now() + timeoutMs, pending: new Set(), closed: false, outputTruncated: false, mutationDispatched: false };
   try {
     return await operations.run(current, async () => {
       signal.throwIfAborted();
       try { return await operation(); }
+      catch (error) {
+        if (options?.mutation && current.mutationDispatched && (signal.aborted || isGitCancellation(error))) {
+          throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation was interrupted after dispatch. Inspect the repository before trying again.');
+        }
+        throw error;
+      }
       finally { await settleGitProcesses(); }
     });
   } finally { clearTimeout(timer); }
+}
+
+export function isGitCancellation(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'
+    || 'aborted' in error && error.aborted === true || 'timedOut' in error && error.timedOut === true
+    || error instanceof GitServiceError && error.code === 'GIT_TIMEOUT');
+}
+
+export function gitOperationSignal(): AbortSignal | undefined { return operations.getStore()?.signal; }
+
+export function markGitMutationDispatched(): void {
+  const current = operations.getStore();
+  if (current) current.mutationDispatched = true;
 }
 
 // Parallel native commands must settle before their repository lock can be released.

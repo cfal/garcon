@@ -1,4 +1,4 @@
-import { assertGitWorkingPath } from './operation-context.js';
+import { assertGitWorkingPath, markGitMutationDispatched } from './operation-context.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { GitDomainError } from './git-types.js';
@@ -745,6 +745,7 @@ export function createStatusOperations() {
     const filePath = resolvePathWithinProject(projectPath, file);
     await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
+    markGitMutationDispatched();
     if (stats.isDirectory()) {
       await fs.rm(filePath, { recursive: true, force: true });
       return { success: true, message: `Untracked directory ${file} deleted successfully` };

@@ -81,7 +81,7 @@ export class LocalGitRuntime {
     const signal = options?.signal ? AbortSignal.any([options.signal, this.#abort.signal]) : this.#abort.signal;
     try {
       const callOptions = { ...options, signal };
-      return await withGitOperation(toNativePath(this.configuration.projectBasePath), callOptions, () => operation(callOptions));
+      return await withGitOperation(toNativePath(this.configuration.projectBasePath), { ...callOptions, mutation }, () => operation(callOptions));
     } finally {
       if (mutation) { this.#mutations--; processAdmission.mutations--; } else { this.#reads--; processAdmission.reads--; }
     }
