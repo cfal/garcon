@@ -4,6 +4,12 @@ import GitTargetDialog from './GitTargetDialogTestHost.svelte';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitTargetCandidate, GitWorktreeItem } from '$lib/api/git';
+import { flushSync } from 'svelte';
+import {
+	localExecutionNode,
+	remoteExecutionNode,
+} from '$lib/execution-nodes/__tests__/fixtures.js';
+import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
@@ -66,6 +72,47 @@ afterEach(() => {
 });
 
 describe('GitTargetDialog', () => {
+	it('retains remote worktree creation through unrelated node snapshot changes', async () => {
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			worktrees: [makeWorktree('/workspace/repo', 'main', true)],
+		});
+		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+		const remote = {
+			...remoteExecutionNode,
+			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+		};
+		let nodes!: ExecutionNodesStore;
+		renderDialog({
+			nodeId: remote.id,
+			nodes: [localExecutionNode, remote],
+			onNodes: (store: ExecutionNodesStore) => {
+				nodes = store;
+			},
+		});
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Select a different worktree' }),
+		);
+		await screen.findByRole('option', { name: /main/ });
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
+			target: { value: 'feature' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		expect(gitApi.gitCreateWorktree).toHaveBeenCalledOnce();
+		const validations = vi.mocked(chatsApi.validateStart).mock.calls.length;
+		flushSync(() =>
+			nodes.applySnapshot([{ ...localExecutionNode, availability: 'offline' }, remote]),
+		);
+		creation.resolve({ success: true, worktreePath: '/workspace/repo/.worktrees/feature' });
+		await screen.findByRole('dialog', { name: 'Git target' });
+		expect((screen.getByLabelText('Project Path') as HTMLInputElement).value).toBe(
+			'/workspace/repo/.worktrees/feature',
+		);
+		expect(vi.mocked(chatsApi.validateStart).mock.calls.length).toBe(validations);
+	});
+
 	it('rejects valid folders that are not Git repositories', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
 		const onConfirm = vi.fn();

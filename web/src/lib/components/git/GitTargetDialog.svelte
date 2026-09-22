@@ -2,7 +2,7 @@
 	// Selects the Git folder used by the Git panel. Worktree selection updates
 	// only the pending path; the active target changes after OK.
 
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { getExecutionNodes } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
@@ -42,12 +42,13 @@
 	}: GitTargetDialogProps = $props();
 
 	const nodes = getExecutionNodes();
+	const nodeContextKey = $derived(nodes.gitContextKey(nodeId));
 	const dialog = new GitTargetDialogState({
 		get nodeId() {
 			return nodeId;
 		},
 		get nodeContextKey() {
-			return nodes.gitContextKey(nodeId);
+			return nodeContextKey;
 		},
 		get available() {
 			return nodes.gitAvailable(nodeId);
@@ -67,8 +68,8 @@
 
 	$effect(() => {
 		void dialog.candidatePath;
-		void nodes.gitContextKey(nodeId);
-		dialog.scheduleValidation();
+		void nodeContextKey;
+		untrack(() => dialog.scheduleValidation());
 	});
 
 	onDestroy(() => {

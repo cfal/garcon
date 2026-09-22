@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PullRequestsStore } from '../pull-requests-store.svelte';
 import * as prApi from '$lib/api/pull-requests';
 import type { PullRequestDetail, PullRequestSummary } from '$lib/api/pull-requests';
+import { flushSync } from 'svelte';
+import { bindProject } from './pull-requests-effect-harness.svelte.js';
 
 vi.mock('$lib/api/pull-requests', () => ({
 	getPullRequests: vi.fn(),
@@ -65,6 +67,34 @@ function createVisibleStore(): PullRequestsStore {
 describe('PullRequestsStore', () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+	});
+
+	it('stabilizes reactive project binding and preserves selection for an unchanged node and path', async () => {
+		getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
+		getPullRequestMock.mockResolvedValue(detail(3));
+		const store = createVisibleStore();
+		const project = {
+			nodeId: 'local',
+			chatId: 'one',
+			projectPath: '/project',
+			effectiveProjectKey: '/project',
+		};
+		const binding = bindProject(store, { kind: 'available', project });
+		try {
+			flushSync();
+			await tick();
+			await store.select(3);
+			binding.setProject({ kind: 'available', project: { ...project, chatId: 'two' } });
+			flushSync();
+			const settledRuns = binding.runs;
+			flushSync();
+			expect(binding.runs).toBe(settledRuns);
+			expect(store.selectedNumber).toBe(3);
+			expect(getPullRequestsMock).toHaveBeenCalledOnce();
+		} finally {
+			binding.dispose();
+			store.dispose();
+		}
 	});
 
 	it('loads the list when a project is set', async () => {

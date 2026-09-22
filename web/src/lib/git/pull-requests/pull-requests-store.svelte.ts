@@ -148,7 +148,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			effectiveProjectKey === this.#effectiveProjectKey &&
 			project?.nodeId === this.#project?.nodeId
 		) {
-			this.#project = project;
+			if (project?.projectPath !== this.#project?.projectPath) this.#project = project;
 			return;
 		}
 		this.#listController?.abort();
