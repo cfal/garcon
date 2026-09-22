@@ -85,7 +85,7 @@
 			void controller.history.comparison.refresh(activeTarget);
 			return;
 		}
-		controller.history.refreshSession(activeTarget);
+		void controller.target.refreshTargets('session');
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
