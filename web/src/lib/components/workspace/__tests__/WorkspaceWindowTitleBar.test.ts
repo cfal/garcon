@@ -24,6 +24,7 @@ import {
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import * as m from '$lib/paraglide/messages.js';
+import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 
 const {
 	closeSurface,
@@ -78,6 +79,7 @@ vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
 
 vi.mock('$lib/context', () => ({
 	getWorkspaceCoordinator: () => ({
+		terminalCreationNodeIdFor: () => 'local',
 		layout: {
 			get snapshot() {
 				return {
@@ -129,6 +131,11 @@ vi.mock('$lib/context', () => ({
 	getFileSessions: () => ({ get: (id: string) => runtime.fileSessions[id] ?? null }),
 	getNotifications: () => ({ error: notificationError }),
 	getTerminalRegistry: () => ({
+		hasRemoteHosts: false,
+		hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
+		canCreate: (nodeId: string) => nodeId === 'local' && runtime.terminalSessions.length < 8,
+		displayName: (metadata: { title: string | null; displaySequence: number }) =>
+			terminalDisplayName(metadata, 'Local'),
 		get orderedSessions() {
 			return runtime.terminalSessions;
 		},
@@ -1165,7 +1172,11 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_new_terminal() }));
-		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
+		expect(createTerminal).toHaveBeenCalledWith(
+			'window-main',
+			'workspace-window:window-main',
+			undefined,
+		);
 	});
 
 	it('keeps a busy inline terminal action focused while creation is pending', async () => {
@@ -1334,7 +1345,11 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(openTerminals.nextElementSibling).toBe(savedTerminal);
 
 		await fireEvent.click(newTerminal);
-		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
+		expect(createTerminal).toHaveBeenCalledWith(
+			'window-main',
+			'workspace-window:window-main',
+			undefined,
+		);
 		await fireEvent.click(trigger);
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Build logs' }));
 		expect(openTerminalSession).toHaveBeenCalledWith('terminal-seven', 'window-main');
@@ -1489,7 +1504,11 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(trigger);
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_new_terminal() }));
 
-		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
+		expect(createTerminal).toHaveBeenCalledWith(
+			'window-main',
+			'workspace-window:window-main',
+			undefined,
+		);
 		await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
 	});
 

@@ -18,10 +18,12 @@ type CommandMenuWorkspacePort = Pick<
 	| 'openSingleton'
 	| 'focusMostRecentTerminalOrCreate'
 	| 'createTerminalInAvailableSpace'
+	| 'terminalCreationNodeId'
 >;
 
 const mocks = vi.hoisted(() => ({
 	workspace: {
+		terminalCreationNodeId: 'local',
 		isMobile: false as boolean,
 		focusOwner: { kind: 'chat-list' },
 		focusChat: vi.fn(),
@@ -55,11 +57,15 @@ vi.mock('$lib/context', async (importOriginal) => ({
 import CommandMenu from '../CommandMenu.svelte';
 
 const workspace: CommandMenuWorkspacePort = mocks.workspace;
-const terminals: Pick<WorkbenchCommandRegistryDeps['terminals'], 'listStatus' | 'orderedSessions'> =
-	{
-		listStatus: 'ready',
-		orderedSessions: [],
-	};
+const terminals: Pick<
+	WorkbenchCommandRegistryDeps['terminals'],
+	'listStatus' | 'orderedSessions' | 'hasRemoteHosts' | 'canCreate'
+> = {
+	hasRemoteHosts: false,
+	canCreate: (nodeId) => nodeId === 'local',
+	listStatus: 'ready',
+	orderedSessions: [],
+};
 const appShell: Pick<
 	WorkbenchCommandRegistryDeps['appShell'],
 	'openNewChatDialog' | 'openSettings'

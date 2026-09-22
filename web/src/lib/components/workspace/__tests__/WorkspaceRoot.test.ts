@@ -32,6 +32,7 @@ import type { ProjectTarget } from '$shared/project-resolution';
 import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { findWorkspaceChatPlacement } from '$lib/workspace/workspace-chat-placement.js';
+import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -373,6 +374,7 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 			);
 		}),
 		createTerminal: vi.fn(async () => 'terminal-created'),
+		terminalCreationNodeIdFor: () => 'local',
 		terminateTerminalSession: vi.fn(async () => true),
 		openTerminalSession: vi.fn(async () => undefined),
 		retryPresentation: vi.fn(async () => undefined),
@@ -380,6 +382,13 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 		focusChat: vi.fn(async () => undefined),
 	};
 	const terminals = {
+		hasRemoteHosts: false,
+		hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
+		canCreate: (nodeId: string) => nodeId === 'local',
+		nodeIdFor: () => 'local',
+		nodeLabel: () => 'Local',
+		displayName: (metadata: { title: string | null; displaySequence: number }) =>
+			terminalDisplayName(metadata, 'Local'),
 		orderedSessions: [] as TerminalClientSession[],
 		sessions: {} as Record<string, TerminalClientSession>,
 		listStatus: 'ready' as const,

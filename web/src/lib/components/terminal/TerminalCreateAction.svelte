@@ -41,7 +41,7 @@
 	const disabled = $derived(busy || (!chooseHost && !terminals.canCreate(defaultNodeId)));
 	const buttonClass = $derived(
 		controlClass ||
-			`inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${showLabel ? 'px-3' : 'w-8'}`,
+			`inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 aria-disabled:opacity-50 ${showLabel ? 'px-3' : 'w-8'}`,
 	);
 
 	function create(nodeId?: string): void {
@@ -104,7 +104,8 @@
 		type="button"
 		class={buttonClass}
 		style={controlStyle}
-		{disabled}
+		disabled={!busy && disabled}
+		aria-disabled={busy || undefined}
 		aria-busy={busy || undefined}
 		aria-label={m.workspace_new_terminal()}
 		title={m.workspace_new_terminal()}
