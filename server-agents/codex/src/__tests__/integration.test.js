@@ -48,6 +48,17 @@ describe('CodexAgentIntegration', () => {
     expect(host.environment.get).not.toHaveBeenCalled();
   });
 
+  it('defaults new and generated Codex work to GPT-6 Sol', async () => {
+    const integration = new CodexAgentIntegration(createHost());
+    const snapshot = await integration.catalog.snapshot({
+      strict: false,
+      signal: new AbortController().signal,
+    });
+
+    expect(snapshot.defaultModel).toBe('gpt-6-sol');
+    expect(snapshot.generation).toEqual({ priority: 30, model: 'gpt-6-sol' });
+  });
+
   it('preserves version 1 settings and native-session migration envelopes', async () => {
     const integration = new CodexAgentIntegration(createHost());
     const signal = new AbortController().signal;

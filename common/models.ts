@@ -51,7 +51,7 @@ export const CODEX_MODELS = {
     { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: true },
     { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'gpt-5.5',
+  DEFAULT: GPT_6_SOL_MODEL,
 };
 
 export const AMP_MODELS = {
