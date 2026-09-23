@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
+import type { Request } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -7,14 +8,26 @@ import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.j
 import { Deferred } from '../../support/deferred.js';
 
 test('chat host selectors fit narrow containers and stage complete cancellable handoffs', async () => {
-  const failedResponses: Promise<{ url: string; status: number; body: string }>[] = [];
-  await withChromiumFixture('chat-host-selection', async ({ page, integration, assertNoBrowserErrors }, phase) => {
+  const failedResponses: Promise<{ url: string; status: number; body: string; beforeHandoff: boolean }>[] = [];
+  await withChromiumFixture('chat-host-selection', async ({ page, integration, browserErrors }, phase) => {
+    const requestsBeforeHandoff = new WeakSet<Request>();
+    const consoleErrorUrls: string[] = [];
+    let handoffSubmitted = false;
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/v1/chats/run') handoffSubmitted = true;
+      if (!handoffSubmitted) requestsBeforeHandoff.add(request);
+    });
+    page.on('console', message => {
+      if (message.type() === 'error') consoleErrorUrls.push(message.location().url);
+    });
     page.on('response', response => {
       if (response.status() >= 400) failedResponses.push(response.text().then(body => ({
         url: response.url(), status: response.status(), body,
-      })).catch(() => ({ url: response.url(), status: response.status(), body: 'unavailable' })));
+        beforeHandoff: requestsBeforeHandoff.has(response.request()),
+      })).catch(() => ({ url: response.url(), status: response.status(), body: 'unavailable', beforeHandoff: false })));
     });
     const { client, executionDirs, directAgents } = integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
     const label = 'Production build and review execution host';
     await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { label });
     await mkdir(join(executionDirs.project, 'destination'));
@@ -66,9 +79,20 @@ test('chat host selectors fit narrow containers and stage complete cancellable h
     await page.getByRole('button', { name: 'Use This Node', exact: true }).click();
     await browserExpect(controls().getByRole('button', { name: 'Execution node: Local', exact: true })).toBeVisible();
     expect((await client.getChatSnapshot(chatId)).chat.nodeId).toBe(client.nodeId);
+    const destinationResolution = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/api/v1/projects/resolve' && url.searchParams.get('chatId') === chatId
+        && url.searchParams.get('nodeId') === 'local' && response.status() === 200;
+    });
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await browserExpect(composer).toHaveValue('');
     await browserExpect.poll(async () => (await client.getChatSnapshot(chatId)).chat.nodeId ?? 'local').toBe('local');
+    expect(await (await destinationResolution).json()).toMatchObject({
+      target: { kind: 'chat', chatId, nodeId: 'local', projectPath: integration.dirs.project },
+      resolution: { kind: 'available' },
+    });
+    await browserExpect(controls().getByRole('button', { name: 'Execution node: Local', exact: true })).toBeVisible();
+    await browserExpect(page.getByText('The chat project changed', { exact: true })).toHaveCount(0);
 
     phase('new-chat project target');
     await page.getByRole('button', { name: 'New Chat', exact: true }).click();
@@ -109,7 +133,21 @@ test('chat host selectors fit narrow containers and stage complete cancellable h
     const compact = page.locator('[data-slot="model-selector-compact"]');
     await browserExpect(compact).toBeVisible();
     await page.screenshot({ path: join(artifacts, 'generation-host-compact.png') });
-    assertNoBrowserErrors();
+    const failures = await Promise.all(failedResponses);
+    for (const failure of failures) {
+      const url = new URL(failure.url);
+      expect(failure.beforeHandoff).toBe(true);
+      expect(url.pathname).toBe('/api/v1/projects/resolve');
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        chatId, expectedProjectPath: executionDirs.project, nodeId: client.nodeId,
+      });
+      expect(failure.status).toBe(409);
+      expect(JSON.parse(failure.body)).toMatchObject({ success: false, errorCode: 'PROJECT_PATH_CHANGED' });
+    }
+    expect(consoleErrorUrls.sort()).toEqual(failures.map(failure => failure.url).sort());
+    expect(browserErrors).toEqual(failures.map(() =>
+      'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)',
+    ));
   }, async () => ({ failedResponses: await Promise.all(failedResponses) }),
   { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 180_000);
@@ -117,6 +155,7 @@ test('chat host selectors fit narrow containers and stage complete cancellable h
 test('accepted node handoffs update the Files target before background chat refresh', async () => {
   await withChromiumFixture('chat-host-handoff-project', async ({ page, integration, assertNoBrowserErrors }) => {
     const { client, executionDirs, directAgents } = integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
     const chatId = integration.newChatId();
     const accepted = await client.startDirectChat({ chatId, projectPath: executionDirs.project,
       content: 'Synthetic handoff binding', agent: directAgents.openAi });
