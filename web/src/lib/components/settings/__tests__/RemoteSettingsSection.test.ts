@@ -664,7 +664,7 @@ describe('RemoteSettingsSection', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		expect(screen.getByText('GitHub CLI')).toBeTruthy();
-		expect(screen.getByText('On the Garcon host, run:')).toBeTruthy();
+		expect(screen.getByText('On the selected execution node, run:')).toBeTruthy();
 		expect(screen.getByText('gh auth login')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Refresh GitHub CLI status' }));
 		expect(refresh).toHaveBeenCalled();
@@ -681,7 +681,7 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.getByText('Connected as octocat@github.com')).toBeTruthy();
 		expect(
 			screen.getByText(
-				'Pull Requests is available. Garcon uses the GitHub CLI (gh) on this server.',
+				'Pull Requests is available through the GitHub CLI (gh) on the selected execution node.',
 			),
 		).toBeTruthy();
 	});
