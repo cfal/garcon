@@ -104,12 +104,8 @@
 
 	function openCommit(): void {
 		const target = controller.target.requestTarget;
-		if (
-			!target ||
-			!controller.target.canChangeTarget ||
-			!surfaces.commit().target.selectProject(target)
-		)
-			return;
+		if (!target || !controller.target.canChangeTarget) return;
+		if (!surfaces.commit().target.selectProject(target)) return;
 		const opening = openCommitFromGitWorkbench(workspace, presentation);
 		void opening.catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
@@ -118,12 +114,8 @@
 
 	async function openPush(): Promise<void> {
 		const target = activeTarget;
-		if (
-			!target ||
-			!controller.target.canChangeTarget ||
-			!(await repository.prepareToolbarPush(target))
-		)
-			return;
+		if (!target || !controller.target.canChangeTarget) return;
+		if (!(await repository.prepareToolbarPush(target))) return;
 		if (sameGitProject(target, activeTarget)) repository.showPushModal = true;
 	}
 

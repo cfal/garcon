@@ -7,16 +7,15 @@
 	let {
 		target,
 		isMobile,
-		disabled = false,
 	}: {
 		target: GitTargetSessionController;
 		isMobile: boolean;
-		disabled?: boolean;
 	} = $props();
+	const branchDisabled = $derived(!target.canChangeTarget);
 
 	function toggleBranchSelector(): void {
 		const projectPath = target.activeProjectPath;
-		if (disabled || !projectPath) return;
+		if (branchDisabled || !projectPath) return;
 		if (target.branches.showBranchDropdown) {
 			target.branches.closeBranchDropdown();
 			return;
@@ -40,7 +39,7 @@
 		sort={target.branches.branchSort}
 		isOpen={target.branches.showBranchDropdown}
 		isLoading={target.branches.isLoadingBranches}
-		{disabled}
+		disabled={branchDisabled}
 		{isMobile}
 		triggerClass="h-8 min-w-26 max-w-40 px-2 text-xs sm:max-w-80"
 		iconClass="shrink-0"

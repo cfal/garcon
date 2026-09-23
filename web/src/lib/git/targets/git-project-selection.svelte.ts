@@ -5,6 +5,7 @@ import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-s
 import {
 	ProjectResolutionStore,
 	type ProjectResolutionLease,
+	type ProjectResolutionSnapshot,
 } from '$lib/workspace/project-resolution-store.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
@@ -28,8 +29,8 @@ export interface GitProjectSelectionDeps {
 export class GitProjectSelectionController {
 	projectState = $state.raw<GitProjectState>({ kind: 'absent' });
 	showFolderDialog = $state(false);
-	#chat = $state.raw<WorkspaceProjectState>({ kind: 'absent' });
-	#explicit = $state.raw<GitProjectTarget | null>(null);
+	#chatProjectState = $state.raw<WorkspaceProjectState>({ kind: 'absent' });
+	#pinnedTarget = $state.raw<GitProjectTarget | null>(null);
 	#visible = false;
 	#disposed = false;
 	#generation = 0;
@@ -51,11 +52,13 @@ export class GitProjectSelectionController {
 	}
 
 	get followingChat(): boolean {
-		return this.#explicit === null;
+		return this.#pinnedTarget === null;
 	}
 	get chatId(): string | null {
-		if (!this.followingChat || this.#chat.kind === 'absent') return null;
-		return this.#chat.kind === 'available' ? this.#chat.project.chatId : this.#chat.context.chatId;
+		if (!this.followingChat) return null;
+		const chat = this.#chatProjectState;
+		if (chat.kind === 'absent') return null;
+		return chat.kind === 'available' ? chat.project.chatId : chat.context.chatId;
 	}
 	get target(): GitProjectTarget | null {
 		const project = this.projectState;
@@ -69,30 +72,34 @@ export class GitProjectSelectionController {
 		return this.target?.projectPath ?? null;
 	}
 	get canGoToChatProject(): boolean {
-		return this.#chat.kind === 'available';
+		return this.#chatProjectState.kind === 'available';
 	}
 
 	setProjectState(project: WorkspaceProjectState): void {
-		this.#chat = project;
+		this.#chatProjectState = project;
 		if (!this.followingChat) return;
-		if (project.kind === 'absent') this.#publish(project);
-		else if (project.kind === 'available') {
-			this.#publish({
-				...project,
-				project: { ...project.project, nodeId: effectiveNodeId(project.project.nodeId) },
-			});
-		} else {
-			this.#publish({
-				...project,
-				context: { ...project.context, nodeId: effectiveNodeId(project.context.nodeId) },
-			});
+		switch (project.kind) {
+			case 'absent':
+				this.#publish(project);
+				break;
+			case 'available':
+				this.#publish({
+					...project,
+					project: { ...project.project, nodeId: effectiveNodeId(project.project.nodeId) },
+				});
+				break;
+			default:
+				this.#publish({
+					...project,
+					context: { ...project.context, nodeId: effectiveNodeId(project.context.nodeId) },
+				});
 		}
 	}
 
 	selectResolvedProject(target: GitProjectTarget): void {
 		this.showFolderDialog = false;
 		this.#cancelResolution();
-		this.#explicit = target;
+		this.#pinnedTarget = target;
 		this.#fallbackToBase = false;
 		this.#nodeContextKey = this.#contextKey(target.nodeId);
 		this.#publish({
@@ -110,19 +117,19 @@ export class GitProjectSelectionController {
 		this.showFolderDialog = false;
 		this.#cancelResolution();
 		const projectPath = currentPath ?? this.#deps.projectBasePath(nodeId) ?? '';
-		this.#explicit = { nodeId, projectPath };
+		this.#pinnedTarget = { nodeId, projectPath };
 		this.#nodeContextKey = this.#contextKey(nodeId);
 		this.#fallbackToBase = true;
-		this.#publish({ kind: 'resolving', context: this.#explicit });
+		this.#publish({ kind: 'resolving', context: this.#pinnedTarget });
 		await this.#resolveSelection();
 	}
 
 	goToChatProject(): void {
 		this.showFolderDialog = false;
 		this.#cancelResolution();
-		this.#explicit = null;
+		this.#pinnedTarget = null;
 		this.#fallbackToBase = false;
-		this.setProjectState(this.#chat);
+		this.setProjectState(this.#chatProjectState);
 	}
 
 	setPresentationVisible(visible: boolean): void {
@@ -130,20 +137,22 @@ export class GitProjectSelectionController {
 		if (!visible) {
 			this.showFolderDialog = false;
 			this.#cancelResolution();
-		} else if (this.#explicit && this.projectState.kind === 'resolving')
+		} else if (this.#pinnedTarget && this.projectState.kind === 'resolving') {
 			void this.#resolveSelection();
+		}
 	}
 
 	async retry(): Promise<void> {
-		if (this.#explicit) {
+		if (this.#pinnedTarget) {
 			this.#cancelResolution();
-			this.#publish({ kind: 'resolving', context: this.#explicit });
+			this.#publish({ kind: 'resolving', context: this.#pinnedTarget });
 			await this.#resolveSelection();
 			return;
 		}
-		if (this.#chat.kind === 'absent') return;
-		const chat = this.#chat.kind === 'available' ? this.#chat.project : this.#chat.context;
-		const lease = this.#deps.projectResolution.retain({ kind: 'chat', ...chat });
+		const chat = this.#chatProjectState;
+		if (chat.kind === 'absent') return;
+		const target = chat.kind === 'available' ? chat.project : chat.context;
+		const lease = this.#deps.projectResolution.retain({ kind: 'chat', ...target });
 		try {
 			await lease.retry();
 		} finally {
@@ -159,7 +168,7 @@ export class GitProjectSelectionController {
 	}
 
 	#nodeChanged(): void {
-		const target = this.#explicit;
+		const target = this.#pinnedTarget;
 		if (!target) return;
 		const key = this.#contextKey(target.nodeId);
 		if (key === this.#nodeContextKey) return;
@@ -179,53 +188,63 @@ export class GitProjectSelectionController {
 	}
 
 	async #resolveSelection(): Promise<void> {
-		const target = this.#explicit;
+		const target = this.#pinnedTarget;
 		if (!target || !this.#visible || this.#disposed || this.#lease) return;
 		const generation = this.#generation;
-		const current = () => !this.#disposed && generation === this.#generation;
-		let requested = target;
+		const isCurrent = () => !this.#disposed && generation === this.#generation;
+		let requestedTarget = target;
 		try {
-			if (!this.#available(target.nodeId))
+			if (!this.#available(target.nodeId)) {
 				throw new Error('Git is unavailable on this execution node.');
-			if (!requested.projectPath)
+			}
+			if (!requestedTarget.projectPath) {
 				throw new Error('The execution node has no project base directory.');
-			let snapshot = await this.#resolvePath(requested, current);
-			if (!current()) return;
-			const base = this.#deps.projectBasePath(target.nodeId);
+			}
+			let snapshot = await this.#resolvePath(requestedTarget, isCurrent);
+			if (!isCurrent()) return;
+			const baseProjectPath = this.#deps.projectBasePath(target.nodeId);
 			if (
 				this.#fallbackToBase &&
 				snapshot.kind === 'unavailable' &&
-				snapshot.reason !== 'permission-denied' &&
-				base &&
-				base !== requested.projectPath
+				(snapshot.reason === 'not-found' ||
+					snapshot.reason === 'not-a-directory' ||
+					snapshot.reason === 'outside-base') &&
+				baseProjectPath &&
+				baseProjectPath !== requestedTarget.projectPath
 			) {
-				requested = { nodeId: target.nodeId, projectPath: base };
-				snapshot = await this.#resolvePath(requested, current);
-				if (!current()) return;
+				requestedTarget = { nodeId: target.nodeId, projectPath: baseProjectPath };
+				snapshot = await this.#resolvePath(requestedTarget, isCurrent);
+				if (!isCurrent()) return;
 			}
 			this.#fallbackToBase = false;
-			this.#explicit = requested;
+			this.#pinnedTarget = requestedTarget;
 			if (snapshot.kind === 'available') {
 				this.#publish({
 					kind: 'available',
 					project: {
-						...requested,
+						...requestedTarget,
 						effectiveProjectKey: snapshot.effectiveProjectKey,
 						nodeContextKey: this.#contextKey(target.nodeId),
 					},
 				});
-			} else this.#publish({ ...snapshot, context: requested });
+			} else {
+				this.#publish({ ...snapshot, context: requestedTarget });
+			}
 		} catch (error) {
-			if (current())
-				this.#publish({
-					kind: 'request-failed',
-					context: requested,
-					message: error instanceof Error ? error.message : String(error),
-				});
+			if (!isCurrent()) return;
+			this.#publish({
+				kind: 'request-failed',
+				context: requestedTarget,
+				message: error instanceof Error ? error.message : String(error),
+			});
 		}
 	}
 
-	async #resolvePath(target: GitProjectTarget, isCurrent: () => boolean) {
+	async #resolvePath(
+		target: GitProjectTarget,
+		isCurrent: () => boolean,
+	): Promise<ProjectResolutionSnapshot> {
+		// A path-context change can invalidate the lease without changing the Git context.
 		while (true) {
 			const lease = this.#deps.projectResolution.retain({ kind: 'path', ...target });
 			this.#lease = lease;

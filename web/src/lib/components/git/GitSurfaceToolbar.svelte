@@ -24,22 +24,22 @@
 		onClose?: () => void;
 		closeDisabled?: boolean;
 	} = $props();
+
+	const toolbarActions = $derived(
+		actions.map((action) => ({
+			...action,
+			disabled: action.disabled || !target.canChangeTarget,
+		})),
+	);
 </script>
 
 <div
 	class="git-toolbar flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-background px-2 py-1"
 	data-git-surface-toolbar
 >
-	<GitTargetSelector
-		{target}
-		isMobile={presentation === 'mobile'}
-		disabled={!target.canChangeTarget}
-	/>
+	<GitTargetSelector {target} isMobile={presentation === 'mobile'} />
 	<ResponsiveSurfaceActions
-		actions={actions.map((action) => ({
-			...action,
-			disabled: action.disabled || !target.canChangeTarget,
-		}))}
+		actions={toolbarActions}
 		menuLabel={m.git_more_actions()}
 		{menuLeadingContent}
 	/>

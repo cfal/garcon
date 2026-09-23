@@ -36,6 +36,8 @@
 	const selectedPath = $derived(
 		selection.projectState.kind === 'available' ? path : selection.projectPath,
 	);
+	const folderLabel = $derived(selectedPath || m.git_panel_select_project());
+	const canSelectFolder = $derived(!disabled && nodes.gitAvailable(nodeId));
 	const projectBasePath = $derived(
 		nodes.get(nodeId)?.projectBasePath ??
 			(nodeId === 'local' ? remoteSettings.snapshot?.projectBasePath : null) ??
@@ -48,7 +50,7 @@
 	);
 
 	function openFolder(): void {
-		if (disabled || !nodes.gitAvailable(nodeId)) return;
+		if (!canSelectFolder) return;
 		void remoteSettings.ensureLoadedInBackground();
 		transientLayers.open('main-inert', () => {
 			selection.showFolderDialog = true;
@@ -70,13 +72,13 @@
 		type="button"
 		class="inline-flex h-8 min-w-8 max-w-48 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 		onclick={openFolder}
-		disabled={disabled || !nodes.gitAvailable(nodeId)}
-		aria-label={selectedPath || m.git_panel_select_project()}
-		title={selectedPath || m.git_panel_select_project()}
+		disabled={!canSelectFolder}
+		aria-label={folderLabel}
+		title={folderLabel}
 		data-git-folder-picker
 	>
 		<Folder class="size-4 shrink-0 text-file-icon-folder" />
-		<span class="min-w-0 truncate">{selectedPath || m.git_panel_select_project()}</span>
+		<span class="min-w-0 truncate">{folderLabel}</span>
 	</button>
 	{#if !selection.followingChat && selection.canGoToChatProject}
 		<button

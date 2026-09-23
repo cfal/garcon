@@ -82,7 +82,7 @@
 
 	function refreshHistory(): void {
 		if (!controller.target.canChangeTarget || !activeTarget) return;
-		if (controller.history.screen === 'comparison' && activeTarget) {
+		if (controller.history.screen === 'comparison') {
 			void controller.history.comparison.refresh(activeTarget);
 			return;
 		}
