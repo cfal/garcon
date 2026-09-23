@@ -221,6 +221,10 @@ The initial implementation shares the existing WebSocket without traffic schedul
 
 ## Failure And UI Behavior
 
+Files and Git share an execution-node selector. Its Network icon matches the Execution Nodes menu item and uses the semantic folder-icon theme color. Hide the selector when Local is the only configured node; configured offline remotes still count. Without a selected chat, Files opens the Local project base and follows the next selected chat. Explicit node browsing remains independent of chat changes until the user chooses "Go to chat project".
+
+When switching nodes, try the current directory on the destination before defaulting to its project base. Fall back only for a missing, non-directory, or outside-base path. Permission and connectivity failures remain explicit. Abort and generation fencing prevent an old node's directory response from replacing the newly selected node's tree. No node switch retargets already-open file tabs or unsaved buffers.
+
 | Observation | Behavior |
 | --- | --- |
 | Node unavailable before dispatch | Fail explicitly; do not fall back to controller-local files. Preserve open documents and unsaved buffers. |
