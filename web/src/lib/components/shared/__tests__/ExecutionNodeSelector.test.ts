@@ -49,7 +49,7 @@ it('selects file-capable nodes and keeps unavailable nodes visible but disabled'
 	expect(onSelect).toHaveBeenLastCalledWith('local');
 });
 
-it.each(['files', 'git'] as const)(
+it.each(['files', 'git', 'agents'] as const)(
 	'hides the %s selector for a Local-only inventory',
 	(service) => {
 		const nodes = new ExecutionNodesStore();
@@ -59,7 +59,7 @@ it.each(['files', 'git'] as const)(
 	},
 );
 
-it.each(['files', 'git'] as const)(
+it.each(['files', 'git', 'agents'] as const)(
 	'shows the themed execution-node icon with an offline remote (%s)',
 	(service) => {
 		const nodes = new ExecutionNodesStore();
@@ -83,6 +83,20 @@ it('selects Git-capable nodes independently of Files capability', async () => {
 	await fireEvent.click(screen.getByRole('button', { name: 'Execution node: Local' }));
 	await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Worker' }));
 	expect(onSelect).toHaveBeenCalledWith(remote.id);
+});
+
+it('selects execution hosts without requiring Files or Git and retains missing selections', async () => {
+	const snapshot = [localExecutionNode, remoteExecutionNode];
+	const nodes = new ExecutionNodesStore(async () => snapshot);
+	nodes.applySnapshot(snapshot);
+	const onSelect = vi.fn();
+	render(ExecutionNodeSelector, { nodes, nodeId: 'missing', service: 'agents', presentation: 'composer', onSelect });
+	const trigger = screen.getByRole('button', { name: /Execution node:/ });
+	expect(trigger.classList.contains('composer-node-trigger')).toBe(true);
+	await fireEvent.click(trigger);
+	expect(screen.getByRole('menuitemradio', { name: /Unavailable/ }).getAttribute('aria-disabled')).toBe('true');
+	await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Worker' }));
+	expect(onSelect).toHaveBeenCalledWith(remoteExecutionNode.id);
 });
 
 it('updates the selected label and open menu availability when inventory changes', async () => {

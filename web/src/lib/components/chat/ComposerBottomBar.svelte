@@ -137,7 +137,7 @@
 	);
 </script>
 
-<div class="mt-1 w-full min-w-0 max-w-full px-2 py-1.5" data-slot="composer-bottom-bar">
+<div class="mt-1 w-full min-w-0 max-w-full px-2 py-1.5" style="container: composer-controls / inline-size" data-slot="composer-bottom-bar">
 	<div
 		class="flex min-w-0 items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
 			? 'flex-wrap'
