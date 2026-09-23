@@ -287,12 +287,12 @@ test('outbound node initializes independently and mutation guards retain configu
   expect((await manager.inspectProject(root, configured.id)).kind).toBe('available');
   manager.setGuards({
     assertIdle() { throw new DomainError('EXECUTION_NODE_IN_USE', 'Stop running work first', 409); },
-    assertUnreferenced() {},
+    assertRemovable() {},
   });
   await expect(manager.update(configured.id, { enabled: false })).rejects.toMatchObject({ status: 409 });
   expect(manager.isReady(configured.id)).toBe(true);
   await manager.update(configured.id, { label: 'Safe rename' });
-  manager.setGuards({ assertIdle() {}, assertUnreferenced() { throw new DomainError('EXECUTION_NODE_IN_USE', 'Referenced by chats', 409); } });
+  manager.setGuards({ assertIdle() {}, assertRemovable() { throw new DomainError('EXECUTION_NODE_IN_USE', 'Pending ownership change', 409); } });
   await expect(manager.remove(configured.id)).rejects.toMatchObject({ status: 409 });
   expect(manager.config.require(configured.id).label).toBe('Safe rename');
 });

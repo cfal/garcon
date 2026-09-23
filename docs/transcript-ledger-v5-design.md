@@ -2323,6 +2323,12 @@ Carried forward from V4, with the 12.1 ordering and a narrowed fence:
   records, closing the ledger connection before removing the chat
   directory. Deletion's read-blocking is its own tombstone mechanism,
   not the pending fence.
+  Permanently removing an execution-node configuration may abandon that node's
+  native cleanup references after registry removal; it never substitutes Local
+  cleanup or skips controller ledger removal. Offline or disabled configured
+  nodes retain their cleanup records. Node removal itself preserves existing
+  chats and ledgers as readable, unavailable targets; pending handoff decisions
+  and prepared registry deletions remain temporary node-removal blockers.
 - Restart: reopen ledgers (SQLite WAL recovery is normal startup
   behavior); drop all overlay state; fence orphan provider processes; no
   epoch rotation, no replay; ordinals and the view continue.

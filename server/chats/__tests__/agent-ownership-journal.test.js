@@ -132,6 +132,7 @@ describe('AgentOwnershipJournal', () => {
       target: { ...target(), nodeId, projectPath: '/worker/project' },
     }));
     expect(journal.referencesNode(nodeId)).toBe(true);
+    expect(journal.blocksNodeRemoval(nodeId)).toBe(true);
     const restarted = new AgentOwnershipJournal(options);
     await restarted.initialize();
     await restarted.applyHandoffDecision(intent.operationId);
@@ -139,6 +140,7 @@ describe('AgentOwnershipJournal', () => {
     expect(registry.getChat('chat')).toMatchObject({ nodeId, projectPath: '/worker/project', agentSessionId: null });
     await restarted.completeHandoff(intent.operationId);
     expect(restarted.referencesNode(nodeId)).toBe(false);
+    expect(restarted.blocksNodeRemoval(nodeId)).toBe(false);
   });
 
   it('persists the complete handoff decision and accepts an identical retry', async () => {
@@ -402,6 +404,107 @@ describe('AgentOwnershipJournal', () => {
     expect(ledger.deleteChat).toHaveBeenCalledTimes(1);
     expect(registry.getChat('chat')).toBe(replacement);
     expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
+  });
+
+  it.each(['delete', 'recover-prepared', 'recover-removed'])('retains failed controller-ledger cleanup during node retirement (%s)', async (mode) => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const registry = createRegistry({ chat: chat('source-agent', { nodeId }) });
+    const ledger = { deleteChat: mock(() => {}) };
+    ledger.deleteChat.mockImplementationOnce(() => { throw new Error('Synthetic ledger deletion failure'); });
+    const release = mock(async () => {});
+    let configured = true;
+    const options = { workspaceDir, registry, ledger, integrations: createIntegrations(release), isNodeConfigured: () => configured };
+    const journal = new AgentOwnershipJournal(options);
+    if (mode !== 'delete') {
+      registry.removeChat('chat');
+      await writeJournal(workspaceDir, { version: 5, ownershipIntents: [{
+        version: 2, operationId: 'delete:chat', kind: 'delete', chatId: 'chat',
+        phase: mode === 'recover-prepared' ? 'prepared' : 'registry-removed',
+        sourceEpoch: 'source-agent-epoch', createdAt: timestamp,
+        releaseReferences: [{ ...referenceFor('source-agent'), nodeId }],
+      }] });
+    }
+    await journal.initialize();
+    if (mode === 'delete') await expect(journal.delete('chat')).rejects.toThrow('Synthetic ledger deletion failure');
+    expect(journal.blocksNodeRemoval(nodeId)).toBe(true);
+    configured = false;
+    await journal.retireRemovedNode(nodeId);
+    expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
+    expect(release).not.toHaveBeenCalled();
+    const restarted = new AgentOwnershipJournal(options);
+    await restarted.initialize();
+    await restarted.waitForProviderCleanup();
+    expect(ledger.deleteChat).toHaveBeenCalledTimes(2);
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('retains offline cleanup without blocking node removal, then retires it when the node is forgotten', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const registry = createRegistry({ chat: chat('source-agent', { nodeId }) });
+    let configured = true;
+    const journal = new AgentOwnershipJournal({
+      workspaceDir, registry, integrations: { get: () => null },
+      ledger: { deleteChat: mock(() => {}) },
+      isNodeConfigured: () => configured,
+    });
+    await journal.initialize();
+    const flushed = Promise.withResolvers();
+    const finishFlush = Promise.withResolvers();
+    registry.flush.mockImplementationOnce(async () => { flushed.resolve(); await finishFlush.promise; });
+    const deleting = journal.delete('chat');
+    await flushed.promise;
+    expect(journal.blocksNodeRemoval(nodeId)).toBe(true);
+    finishFlush.resolve();
+    await deleting;
+    await journal.waitForProviderCleanup();
+    expect(journal.referencesNode(nodeId)).toBe(true);
+    expect(journal.blocksNodeRemoval(nodeId)).toBe(false);
+    await journal.retireRemovedNode(nodeId);
+    expect(journal.hasPending('chat')).toBe(true);
+    configured = false;
+    await journal.retireRemovedNode(nodeId);
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+  });
+
+  it('retires removed-node cleanup on restart without releasing artifacts on another node', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const registry = createRegistry({ chat: chat('source-agent', { nodeId }) });
+    const options = { workspaceDir, registry, ledger: { deleteChat: mock(() => {}) } };
+    const journal = new AgentOwnershipJournal({ ...options, integrations: { get: () => null } });
+    await journal.initialize();
+    await journal.delete('chat');
+    await journal.waitForProviderCleanup();
+    const release = mock(async () => {});
+    const restarted = new AgentOwnershipJournal({
+      ...options, integrations: createIntegrations(release), isNodeConfigured: (id) => id === 'local',
+    });
+    await restarted.initialize();
+    await restarted.waitForProviderCleanup();
+    expect(release).not.toHaveBeenCalled();
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+  });
+
+  it('retires cleanup queued behind an in-flight release without resurrecting the intent', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const registry = createRegistry({ chat: chat('source-agent', { nodeId }) });
+    const pending = Promise.withResolvers();
+    const started = Promise.withResolvers();
+    const release = mock(async () => { started.resolve(); await pending.promise; });
+    let configured = true;
+    const journal = new AgentOwnershipJournal({
+      workspaceDir, registry, integrations: createIntegrations(release),
+      ledger: { deleteChat: mock(() => {}) }, isNodeConfigured: () => configured,
+    });
+    await journal.initialize();
+    await journal.delete('chat');
+    await started.promise;
+    configured = false;
+    const retiring = journal.retireRemovedNode(nodeId);
+    pending.reject(new Error('Node removed'));
+    await retiring;
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
   });
 
   it('retains delete cleanup when provider release fails', async () => {

@@ -323,6 +323,7 @@ export async function startServer(): Promise<void> {
       registry: chatRegistry,
       integrations: directory,
       ledger: transcriptLedger,
+      isNodeConfigured: (nodeId) => nodeId === 'local' || executionNodes.config.get(nodeId) !== null,
     });
     // Persists the version before ownership recovery can remove chats and rewrite the migrated registry.
     await workspaceMigrations.finish();
@@ -725,13 +726,16 @@ export async function startServer(): Promise<void> {
     });
 
     executionNodes.setGuards(executionNodeConfigGuards({
-      chats: chatRegistry, execution: queue, settings, schedules: scheduledPrompts, preambles, ownership: agentOwnership,
+      chats: chatRegistry, execution: queue, ownership: agentOwnership,
     }));
     let configuredNodes = new Set(executionNodes.config.list().map((node) => node.id));
     executionNodes.onChanged(() => {
       const current = new Set(executionNodes.config.list().map((node) => node.id));
       for (const id of configuredNodes) {
-        if (!current.has(id)) void settings.forgetExecutionNode(id).catch((error) => logger.warn('Could not prune execution-node preferences', error));
+        if (!current.has(id)) {
+          void settings.forgetExecutionNode(id).catch((error) => logger.warn('Could not prune execution-node preferences', error));
+          void agentOwnership.retireRemovedNode(id).catch((error) => logger.warn('Could not retire removed-node cleanup', error));
+        }
       }
       configuredNodes = current;
     });

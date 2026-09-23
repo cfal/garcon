@@ -4,7 +4,7 @@ import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { waitForPersistedChat } from '../../support/persisted-chat.js';
 
 for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const) {
-  test(`same-agent handoff starts fresh on the destination and can leave an offline source (${backend})`, async () => {
+  test(`same-agent handoff starts fresh on the destination and can leave a deleted source (${backend})`, async () => {
     await withIntegrationFixture(`cross-node-handoff-${backend}`, async (fixture) => {
       const client = fixture.client;
       const agent = fixture.directAgents.openAi;
@@ -25,7 +25,9 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       expect(await nativeId()).not.toBe(localSession);
       expect((await client.getMessages(chatId)).transcriptViewId).toBe(original.transcriptViewId);
       await client.waitForProcessing(chatId, false);
-      await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { enabled: false });
+      await client.delete(`/api/v1/execution-nodes/${client.nodeId}`);
+      expect((await client.listChats()).sessions.find((chat) => chat.id === chatId)?.nodeId).toBe(client.nodeId);
+      expect(userContents((await client.getMessages(chatId)).messages)).toEqual(['Synthetic local input', 'Synthetic remote input']);
       const returned = await client.handoffDirectChat({ chatId, agent, content: 'Synthetic return input', nodeId: 'local', projectPath: fixture.dirs.project });
       await client.waitForTurnTerminal(chatId, returned.turnId);
       const row = (await client.listChats()).sessions.find((chat) => chat.id === chatId)!;

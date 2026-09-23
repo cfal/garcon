@@ -8,6 +8,8 @@ import { ExecutionNodeProcess } from '../../support/execution-backend.js';
 import { withIntegrationFixture, type IntegrationDirectories } from '../../support/integration-fixture.js';
 import type { GarconTestClient } from '../../support/garcon-client.js';
 import { userContents } from '../../support/chat-assertions.js';
+import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
+import type { PreamblesSnapshot } from '../../../common/preambles.js';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -63,7 +65,7 @@ test('node onboarding is available offline and keeps credentials out of public s
   }, { executionBackend: 'in-process' });
 }, 30_000);
 
-test('Local and two public workers coexist, reject remote machine IO, and retain offline chats after restart', async () => {
+test('Local and two public workers coexist and retain chats and settings for deleted nodes after restart', async () => {
   await withIntegrationFixture('execution-node-app', async (fixture) => {
     const workers: ExecutionNodeProcess[] = [];
     try {
@@ -101,10 +103,32 @@ test('Local and two public workers coexist, reject remote machine IO, and retain
       const startedA = await client.startDirectChat({ nodeId: inbound.id, chatId: chatA, projectPath: a.project, agent, content: 'Synthetic input A' });
       await client.waitForTurnTerminal(chatA, startedA.turnId);
       await client.waitForProcessing(chatA, false);
+      const schedules = await client.createScheduledPrompt({
+        expectedRevision: (await client.getScheduledPrompts()).revision,
+        scheduledPrompt: {
+          prompt: 'Synthetic future prompt',
+          schedule: { type: 'once', runAtUtc: '2099-01-01T00:00:00.000Z' },
+          target: {
+            type: 'new-chat', nodeId: inbound.id, agentId: agent.agentId, projectPath: a.project,
+            model: agent.provider.model, apiProviderId: agent.provider.providerId,
+            modelEndpointId: agent.provider.endpointId, modelProtocol: agent.provider.protocol,
+            permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+            preambleChoice: { mode: 'defaults' },
+          },
+        },
+      });
+      const preambles = (await client.post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
+        expectedRevision: (await client.get<PreamblesSnapshot>('/api/v1/preambles')).revision,
+        preamble: {
+          enabled: true, title: 'Synthetic remote preamble', content: 'Synthetic preamble body',
+          scope: { type: 'project-paths', rules: [{ nodeId: inbound.id, projectPath: a.project, includeNested: false }] },
+        },
+      })).snapshot;
       const held = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
       const startedB = await client.startDirectChat({ nodeId: outbound.id, chatId: chatB, projectPath: b.project, agent, content: 'Synthetic input B' });
       await held.received;
       await expect(client.patch(`/api/v1/execution-nodes/${outbound.id}`, { enabled: false })).rejects.toMatchObject({ status: 409 });
+      await expect(client.delete(`/api/v1/execution-nodes/${outbound.id}`)).rejects.toMatchObject({ status: 409 });
       await client.patch(`/api/v1/execution-nodes/${outbound.id}`, { label: 'Running worker' });
       await client.patch(`/api/v1/execution-nodes/${inbound.id}`, { enabled: false });
       expect((await nodeSnapshots(client)).find((node) => node.id === outbound.id)?.availability).toBe('ready');
@@ -112,7 +136,6 @@ test('Local and two public workers coexist, reject remote machine IO, and retain
       await client.waitForTurnTerminal(localChat, local.turnId);
       held.releaseText('Synthetic answer B');
       await client.waitForTurnTerminal(chatB, startedB.turnId);
-      await expect(client.delete(`/api/v1/execution-nodes/${inbound.id}`)).rejects.toMatchObject({ status: 409 });
 
       const localFile = join(fixture.dirs.project, 'input.txt');
       await writeFile(localFile, 'Controller content');
@@ -128,6 +151,8 @@ test('Local and two public workers coexist, reject remote machine IO, and retain
         apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,
         modelProtocol: agent.provider.protocol, thinkingMode: 'none',
       } } });
+      await client.delete(`/api/v1/execution-nodes/${inbound.id}`);
+      await expect(client.get(`/api/v1/models?nodeId=${inbound.id}`)).rejects.toMatchObject({ status: 503 });
       const requestCount = fixture.fakeProviders.openAi.requests().length;
       await expect(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' })).rejects.toBeDefined();
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
@@ -135,12 +160,17 @@ test('Local and two public workers coexist, reject remote machine IO, and retain
       for (const worker of workers) await worker.stop();
       workers.length = 0;
       await fixture.crashAndRestartGarcon();
-      expect((await nodeSnapshots(fixture.client)).map((node) => node.availability)).toEqual(['ready', 'offline', 'offline']);
+      expect((await nodeSnapshots(fixture.client)).map((node) => node.availability)).toEqual(['ready', 'offline']);
+      expect((await fixture.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).ui.promptRefinement?.nodeId).toBe(inbound.id);
+      expect((await fixture.client.getScheduledPrompts()).prompts).toEqual(schedules.snapshot.prompts);
+      expect(await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles')).toEqual(preambles);
       const chats = (await fixture.client.listChats()).sessions;
       expect(chats.find((chat) => chat.id === chatA)).toMatchObject({ nodeId: inbound.id, projectPath: a.project });
       expect(chats.find((chat) => chat.id === chatB)).toMatchObject({ nodeId: outbound.id, projectPath: b.project });
       expect(userContents((await fixture.client.getMessages(chatA)).messages)).toEqual(['Synthetic input A']);
       expect(userContents((await fixture.client.getMessages(chatB)).messages)).toEqual(['Synthetic input B']);
+      await fixture.client.deleteChat(chatA);
+      expect((await fixture.client.listChats()).sessions.some((chat) => chat.id === chatA)).toBe(false);
     } finally {
       for (const worker of workers.reverse()) await worker.stop();
     }

@@ -43,7 +43,7 @@ export class ExecutionNodeManager {
   #mutations: Promise<unknown> = Promise.resolve();
   #disposed = false;
   #quiescing = false;
-  #guards = { assertIdle: (_id: string) => {}, assertUnreferenced: (_id: string) => {} };
+  #guards = { assertIdle: (_id: string) => {}, assertRemovable: (_id: string) => {} };
 
   private constructor(
     readonly local: InProcessExecutionNode,
@@ -66,7 +66,7 @@ export class ExecutionNodeManager {
     } catch (error) { await local.dispose(); throw error; }
   }
 
-  setGuards(guards: { assertIdle(nodeId: string): void; assertUnreferenced(nodeId: string): void }): void {
+  setGuards(guards: { assertIdle(nodeId: string): void; assertRemovable(nodeId: string): void }): void {
     this.#guards = guards;
   }
 
@@ -150,7 +150,7 @@ export class ExecutionNodeManager {
   remove(id: string): Promise<void> {
     return this.#mutate(id, async () => {
       this.#referenceWrites.assertNoWrites(id);
-      this.#guards.assertUnreferenced(id);
+      this.#guards.assertRemovable(id);
       await this.config.remove(id);
     });
   }

@@ -49,7 +49,7 @@ async function fixture() {
   });
   await ownership.initialize();
   manager.setGuards(executionNodeConfigGuards({
-    chats, settings, schedules, preambles, ownership, execution: { ownsExecution: () => false },
+    chats, ownership, execution: { ownsExecution: () => false },
   }));
   const publish = (kind: Kind, nodeId = node.id): Promise<unknown> => {
     switch (kind) {
@@ -104,7 +104,7 @@ function gateRename(filename: string, failure?: Error) {
   return { entered: entered.promise, release: () => release.resolve(), restore: () => spy.mockRestore() };
 }
 
-test.each(kinds)('Delete rejects a %s reference before disk publication and after commit', async (kind) => {
+test.each(kinds)('Delete fences an in-flight %s publication but only pending handoffs block after commit', async (kind) => {
   const { manager, node, publish } = await fixture();
   const gate = gateRename(filenames[kind]);
   const writing = publish(kind);
@@ -112,7 +112,12 @@ test.each(kinds)('Delete rejects a %s reference before disk publication and afte
   await expect(manager.remove(node.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_IN_USE', status: 409 });
   gate.release();
   await writing;
-  await expect(manager.remove(node.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_IN_USE', status: 409 });
+  if (kind === 'handoff') {
+    await expect(manager.remove(node.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_IN_USE', status: 409 });
+  } else {
+    await manager.remove(node.id);
+    expect(manager.isReady(node.id)).toBe(false);
+  }
 });
 
 test.each(kinds)('a rejected %s save releases its reference reservation', async (kind) => {
@@ -138,7 +143,7 @@ test.each(kinds)('a %s publication cannot start once Delete owns the node', asyn
   await expect(publish(kind)).rejects.toMatchObject({ code: 'EXECUTION_NODE_NOT_FOUND', status: 404 });
 });
 
-test.each(kinds)('a renamed but unconfirmed %s reference still prevents deletion', async (kind) => {
+test.each(kinds)('an uncertain %s write only blocks deletion for ownership decisions', async (kind) => {
   const { root, manager, node, publish } = await fixture();
   const open = fs.open;
   const spy = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
@@ -150,7 +155,24 @@ test.each(kinds)('a renamed but unconfirmed %s reference still prevents deletion
   } finally {
     spy.mockRestore();
   }
-  await expect(manager.remove(node.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_IN_USE', status: 409 });
+  if (kind === 'handoff') {
+    await expect(manager.remove(node.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_IN_USE', status: 409 });
+  } else {
+    await manager.remove(node.id);
+  }
+});
+
+test('saved chats do not prevent removal, but active execution does', async () => {
+  const { root, manager, node, chats, ownership } = await fixture();
+  const id = await addRemoteChat(chats, root, node.id);
+  let active = true;
+  manager.setGuards(executionNodeConfigGuards({ chats, ownership, execution: { ownsExecution: (chat) => active && chat === id } }));
+  await expect(manager.remove(node.id)).rejects.toMatchObject({ code: 'EXECUTION_NODE_IN_USE' });
+  active = false;
+  await manager.remove(node.id);
+  expect(chats.getChat(id)?.nodeId).toBe(node.id);
+  expect(manager.isReady(node.id)).toBe(false);
+  expect(() => manager.requireNode(node.id)).toThrow('Execution node is unavailable');
 });
 
 test('chat creation rechecks configuration at synchronous registry publication', async () => {

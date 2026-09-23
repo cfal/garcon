@@ -73,7 +73,9 @@ export class AgentOwnershipJournal {
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   readonly #retainNodeReferences?: RetainNodeReferences;
+  readonly #isNodeConfigured: (nodeId: string) => boolean;
   readonly #unconfirmedNodeReferences = new Set<string>();
+  readonly #completedLedgerDeletes = new Set<string>();
   #journal: AgentOwnershipJournalFileV5 = emptyOwnershipJournalV5();
   #deletePromise: Promise<void> = Promise.resolve();
   #providerCleanupPromise: Promise<void> = Promise.resolve();
@@ -86,6 +88,7 @@ export class AgentOwnershipJournal {
     ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
     retainNodeReferences?: RetainNodeReferences;
+    isNodeConfigured?: (nodeId: string) => boolean;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
     this.#registry = options.registry;
@@ -93,6 +96,7 @@ export class AgentOwnershipJournal {
     this.#ledger = options.ledger;
     this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
     this.#retainNodeReferences = options.retainNodeReferences;
+    this.#isNodeConfigured = options.isNodeConfigured ?? (() => true);
     if (!Number.isSafeInteger(this.#releaseTimeoutMs) || this.#releaseTimeoutMs < 1) {
       throw new Error('Ownership cleanup release timeout must be a positive integer');
     }
@@ -120,6 +124,24 @@ export class AgentOwnershipJournal {
 
   referencesNode(nodeId: string): boolean {
     return this.#unconfirmedNodeReferences.has(nodeId) || journalNodes(this.#journal).includes(nodeId);
+  }
+
+  blocksNodeRemoval(nodeId: string): boolean {
+    return this.#unconfirmedNodeReferences.has(nodeId) || this.#journal.ownershipIntents.some((intent) => (
+      (intent.kind === 'handoff' || intent.phase === 'prepared' || !this.#completedLedgerDeletes.has(intent.operationId))
+        && intentNodes(intent).includes(nodeId)
+    ));
+  }
+
+  retireRemovedNode(nodeId: string): Promise<void> {
+    return this.#scheduleProviderCleanup(async () => {
+      if (this.#isNodeConfigured(nodeId)) return;
+      for (const intent of this.#journal.ownershipIntents) {
+        if (intent.kind === 'delete' && intent.phase === 'registry-removed' && intentNodes(intent).includes(nodeId)) {
+          await this.#finishDelete(intent.operationId);
+        }
+      }
+    });
   }
 
   roots(): ReadonlySet<string> {
@@ -294,12 +316,13 @@ export class AgentOwnershipJournal {
     if (!intent) return;
     this.#registry.removeChat(chatId);
     await this.#registry.flush();
-    const removed = { ...intent, phase: 'registry-removed' as const };
-    await this.#replaceIntent(removed);
     // The provider-neutral ledger must be removed before delete resolves. Only
     // provider/native release is detached, so same-id recreation is safe.
     this.#ledger.deleteChat(chatId);
-    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed)).catch((error) => {
+    this.#completedLedgerDeletes.add(intent.operationId);
+    const removed = { ...intent, phase: 'registry-removed' as const };
+    await this.#replaceIntent(removed);
+    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed.operationId)).catch((error) => {
       logger.warn('Delete cleanup scheduling failed', {
         chatId,
         reason: error instanceof Error ? error.message : String(error),
@@ -316,10 +339,11 @@ export class AgentOwnershipJournal {
       this.#registry.removeChat(intent.chatId);
       await this.#registry.flush();
     }
+    this.#ledger.deleteChat(intent.chatId);
+    this.#completedLedgerDeletes.add(intent.operationId);
     const removed = { ...intent, phase: 'registry-removed' as const };
     await this.#replaceIntent(removed);
-    this.#ledger.deleteChat(intent.chatId);
-    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed)).catch((error) => {
+    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed.operationId)).catch((error) => {
       logger.warn('Recovered delete cleanup failed', {
         chatId: intent.chatId,
         reason: error instanceof Error ? error.message : String(error),
@@ -327,24 +351,28 @@ export class AgentOwnershipJournal {
     });
   }
 
-  async #finishDelete(intent: DeleteIntentV2): Promise<void> {
+  async #finishDelete(operationId: string): Promise<void> {
+    const intent = this.#journal.ownershipIntents.find((entry) => entry.operationId === operationId);
+    if (!intent || intent.kind !== 'delete' || intent.phase !== 'registry-removed') return;
+    // Recovery can retain registry-removed intents whose controller cleanup failed.
+    if (!this.#completedLedgerDeletes.has(operationId)) return;
     let remaining = [...intent.releaseReferences];
     for (const reference of [...remaining]) {
       const { nodeId, ...chat } = reference;
-      const integration = this.#integrations.get(reference.agentId, nodeId);
-      if (!integration) continue;
-      try {
-        await this.#releaseTranscript(integration, {
-          chat,
-          reason: 'deleted',
-        });
-      } catch (error) {
-        logger.warn('Delete cleanup release failed', {
-          chatId: intent.chatId,
-          agentId: reference.agentId,
-          errorCode: errorCode(error),
-        });
-        continue;
+      // Forgetting a node abandons native cleanup, not controller ledger cleanup.
+      if (this.#isNodeConfigured(effectiveNodeId(nodeId))) {
+        const integration = this.#integrations.get(reference.agentId, nodeId);
+        if (!integration) continue;
+        try {
+          await this.#releaseTranscript(integration, { chat, reason: 'deleted' });
+        } catch (error) {
+          logger.warn('Delete cleanup release failed', {
+            chatId: intent.chatId,
+            agentId: reference.agentId,
+            errorCode: errorCode(error),
+          });
+          continue;
+        }
       }
       remaining = remaining.filter((candidate) => candidate !== reference);
       if (remaining.length > 0) {
@@ -378,6 +406,7 @@ export class AgentOwnershipJournal {
         (intent) => intent.operationId !== operationId,
       ),
     }));
+    this.#completedLedgerDeletes.delete(operationId);
   }
 
   #scheduleDeleteWork<T>(work: () => Promise<T>): Promise<T> {
@@ -469,9 +498,13 @@ export class AgentOwnershipJournal {
 }
 
 function journalNodes(journal: AgentOwnershipJournalFileV5): string[] {
-  return journal.ownershipIntents.flatMap((intent) => intent.kind === 'handoff'
+  return journal.ownershipIntents.flatMap(intentNodes);
+}
+
+function intentNodes(intent: AgentHandoffIntent | DeleteIntentV2): string[] {
+  return intent.kind === 'handoff'
     ? [effectiveNodeId(intent.source.nodeId), effectiveNodeId(intent.target.execution.nodeId)]
-    : intent.releaseReferences.map((reference) => effectiveNodeId(reference.nodeId)));
+    : intent.releaseReferences.map((reference) => effectiveNodeId(reference.nodeId));
 }
 
 function sameHandoffDecision(left: AgentHandoffIntent, right: AgentHandoffIntent): boolean {
