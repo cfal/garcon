@@ -3,6 +3,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerExecutionNotice from './ComposerExecutionNotice.svelte';
 	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
@@ -183,6 +184,10 @@
 	});
 	const selectedProjectTarget = $derived(projectState.target);
 	const selectedProjectResolution = $derived(projectState.snapshot);
+	const showProjectNotice = $derived(
+		nodes.isReady(agentState.nodeId) && selectedProjectTarget !== null &&
+		(selectedProjectResolution.kind === 'unavailable' || selectedProjectResolution.kind === 'request-failed'),
+	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
 		Boolean(
@@ -690,7 +695,7 @@
 				nodeId={agentState.nodeId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
-				isVisible={ui.showFileMenu}
+				isVisible={ui.showFileMenu && !showProjectNotice}
 				projectPending={Boolean(
 					selectedProjectTarget &&
 					(selectedProjectResolution.kind === 'unchecked' ||
@@ -703,24 +708,7 @@
 				onClose={() => ui.closeFileMenu()}
 			/>
 		{/if}
-		{#if !nodes.isReady(agentState.nodeId)}<p
-				role="status"
-				class="px-4 py-2 text-sm text-muted-foreground"
-			>
-				{nodes.label(agentState.nodeId)} is unavailable.
-			</p>{/if}
-		{#if nodes.isReady(agentState.nodeId) && !modelCatalog.isValidated}
-			<div role="status" class="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
-				{#if modelCatalog.error}
-					<span>{modelCatalog.error}</span>
-					<button
-						type="button"
-						class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
-						onclick={() => void modelCatalog.forceRefresh()}>Retry</button
-					>
-				{:else}Loading models...{/if}
-			</div>
-		{/if}
+		{#if !showProjectNotice}<ComposerExecutionNotice nodeId={agentState.nodeId} {nodes} catalog={modelCatalog} />{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
@@ -924,7 +912,7 @@
 			nodeId={agentState.nodeId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={ui.showSlashMenu}
+			isVisible={ui.showSlashMenu && nodes.isReady(agentState.nodeId) && !showProjectNotice}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||
@@ -958,7 +946,7 @@
 
 <div class={composerShellClass} data-composer-shell>
 	<div class={composerFrameWrapperClass}>
-		{#if selectedProjectTarget && (selectedProjectResolution.kind === 'unavailable' || selectedProjectResolution.kind === 'request-failed')}
+		{#if showProjectNotice && selectedProjectTarget}
 			<div
 				class="mb-2 rounded-lg border border-border bg-card px-4 py-3"
 				data-project-availability-notice

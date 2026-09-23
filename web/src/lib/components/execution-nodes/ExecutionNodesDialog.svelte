@@ -60,7 +60,7 @@
 				{/each}
 			</ul>
 		{:else}
-			<form class="space-y-4" onsubmit={(event) => { event.preventDefault(); void editor.save(); }}>
+			<form class="space-y-4" onsubmit={(event) => { event.preventDefault(); if (!editor.confirmDelete) void editor.save(); }}>
 				<div class="flex items-center gap-2"><Button type="button" variant="ghost" size="icon-sm" onclick={back} aria-label="Back to nodes" title="Back to nodes"><ArrowLeft class="size-4" /></Button><h3 class="text-sm font-medium">{editor.id ? 'Edit Node' : 'Add Node'}</h3></div>
 				<label class="block space-y-1 text-sm">Label<input id="execution-node-label" class={`${inputClass} text-base pointer-fine:text-sm`} bind:value={editor.label} required maxlength="100" disabled={editor.busy} /></label>
 				<label class="block space-y-1 text-sm">Connection direction
@@ -91,13 +91,16 @@
 				{/if}
 				{#if editor.id}<label class="flex items-center gap-2 text-sm"><input type="checkbox" bind:checked={editor.enabled} disabled={editor.busy} />Enabled</label>{/if}
 				{#if editor.error}<p role="alert" class="break-words text-sm text-destructive">{editor.error}</p>{/if}
-				<div class="flex items-center justify-between gap-2 border-t border-border pt-4">
+				{#if editor.confirmDelete}
+					<p id="execution-node-delete-warning" role="status" class="text-sm text-muted-foreground">Chats and saved settings will remain, but this node will be unavailable. Files and terminal sessions on the node will not be deleted.</p>
+				{/if}
+				<div class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
 					{#if editor.id}
 						{#if editor.confirmDelete}
-							<div class="flex flex-wrap gap-2"><Button type="button" variant="destructive" disabled={editor.busy} onclick={async () => { if (await editor.remove()) back(); }}>Delete Node</Button><Button type="button" variant="ghost" onclick={() => editor.confirmDelete = false}>Cancel</Button></div>
+							<div class="flex flex-wrap gap-2"><Button type="button" variant="destructive" disabled={editor.busy} aria-describedby="execution-node-delete-warning" onclick={async () => { if (await editor.remove()) back(); }}>{editor.busy ? 'Deleting...' : 'Delete Node'}</Button><Button type="button" variant="ghost" disabled={editor.busy} onclick={() => editor.confirmDelete = false}>Cancel</Button></div>
 						{:else}<Button type="button" variant="ghost" size="icon-sm" aria-label="Delete node" title="Delete node" disabled={editor.busy} onclick={() => editor.confirmDelete = true}><Trash2 class="size-4" /></Button>{/if}
 					{:else}<span></span>{/if}
-					<Button type="submit" disabled={editor.busy || !editor.label.trim()}>{editor.busy ? 'Saving...' : editor.id ? 'Save' : 'Add Node'}</Button>
+					{#if !editor.confirmDelete}<Button type="submit" disabled={editor.busy || !editor.label.trim()}>{editor.busy ? 'Saving...' : editor.id ? 'Save' : 'Add Node'}</Button>{/if}
 				</div>
 			</form>
 		{/if}

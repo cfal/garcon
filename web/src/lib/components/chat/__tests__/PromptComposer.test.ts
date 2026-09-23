@@ -2039,7 +2039,52 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review keep this');
 	});
 
-	it('presents unavailable project recovery actions for completion demand', async () => {
+	it.each(['missing', 'request-failed'])('prioritizes node, project (%s), then catalog notices across disconnect and recovery without losing the draft', async (failure) => {
+		const catalog = new ModelCatalogStore();
+		const remote = catalog.forNode(remoteExecutionNode.id);
+		remote.invalidate();
+		remote.error = 'Synthetic catalog failure';
+		vi.spyOn(remote, 'refreshIfStale').mockResolvedValue();
+		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+		let pathAvailable = false;
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget): Promise<ProjectResolutionResponse> => {
+			if (!pathAvailable && failure === 'request-failed') throw new Error('Synthetic project check failure');
+			return {
+				target, resolution: pathAvailable
+					? { kind: 'available', effectiveProjectKey: target.projectPath }
+					: { kind: 'unavailable', reason: 'not-found' },
+			};
+		});
+		const { component, container } = render(PromptComposerTestHost, {
+			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode],
+			catalog, fetchProjectResolution,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/synthetic-preserved-draft' } });
+		await screen.findByText('Project folder unavailable');
+		expect(screen.queryByText('Synthetic catalog failure')).toBeNull();
+		expect(screen.queryByRole('listbox')).toBeNull();
+		component.applyExecutionNodes([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+		await screen.findByText('Worker is unavailable.');
+		expect(container.querySelector('[data-project-availability-notice]')).toBeNull();
+		expect(screen.queryByText('Synthetic catalog failure')).toBeNull();
+		expect(screen.queryByRole('listbox')).toBeNull();
+		component.applyExecutionNodes([localExecutionNode]);
+		await screen.findByText("This chat's execution node is no longer configured.");
+		expect(screen.queryByText('Project folder unavailable')).toBeNull();
+		pathAvailable = true;
+		component.applyExecutionNodes([localExecutionNode, remoteExecutionNode]);
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledTimes(2));
+		await screen.findByText('Synthetic catalog failure');
+		expect(screen.queryByText('Project folder unavailable')).toBeNull();
+		remote.error = null;
+		remote.lastValidatedAt = Date.now();
+		await waitFor(() => expect(screen.queryByText('Synthetic catalog failure')).toBeNull());
+		expect(screen.getByRole('textbox')).toBe(textarea);
+		expect(textarea.value).toBe('/synthetic-preserved-draft');
+	});
+
+	it.each(['/', '@'])('presents unavailable project recovery actions instead of the %s completion menu', async (trigger) => {
 		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
 			target,
 			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
@@ -2053,9 +2098,10 @@ describe('PromptComposer focus', () => {
 			onChooseProjectFolder,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		await fireEvent.input(textarea, { target: { value: '/' } });
+		await fireEvent.input(textarea, { target: { value: trigger } });
 
 		await screen.findByText('Project folder unavailable');
+		expect(screen.queryByRole('listbox')).toBeNull();
 		const notice = container.querySelector('[data-project-availability-notice]');
 		const noticeContent = notice?.querySelector<HTMLElement>('[role="status"]');
 		const noticeFrame = notice?.parentElement;

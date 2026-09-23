@@ -45,7 +45,7 @@ export class ExecutionNodesStore {
 	}
 
 	label(id?: string | null): string {
-		return this.get(id)?.label ?? (effectiveNodeId(id) === 'local' ? 'Local' : effectiveNodeId(id));
+		return this.get(id)?.label ?? (effectiveNodeId(id) === 'local' ? 'Local' : this.hasSnapshot ? 'Unavailable node' : effectiveNodeId(id));
 	}
 
 	isReady(id?: string | null): boolean {

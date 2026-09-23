@@ -40,7 +40,11 @@ describe('ExecutionNodesStore', () => {
 		nodes.applySnapshot([localExecutionNode]);
 		expect(nodes.get(remoteExecutionNode.id)).toBeUndefined();
 		expect(nodes.isReady(remoteExecutionNode.id)).toBe(false);
-		expect(nodes.label(remoteExecutionNode.id)).toBe(remoteExecutionNode.id);
+		expect(nodes.label(remoteExecutionNode.id)).toBe('Unavailable node');
+		expect(nodes.filesAvailable(remoteExecutionNode.id)).toBe(false);
+		expect(nodes.gitAvailable(remoteExecutionNode.id)).toBe(false);
+		nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, id: '33333333-3333-4333-8333-333333333333' }]);
+		expect(nodes.isReady(remoteExecutionNode.id)).toBe(false);
 	});
 
 	it('rejects credential-bearing snapshots without replacing the current list', () => {

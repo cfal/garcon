@@ -166,7 +166,11 @@
 			})
 		);
 	}
-	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver());
+	const executionNodes = setExecutionNodesTestContext(untrack(() => nodes));
+	export function applyExecutionNodes(snapshot: readonly ExecutionNodeSnapshot[]): void {
+		executionNodes.applySnapshot(snapshot);
+	}
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver(), undefined, executionNodes);
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -238,7 +242,6 @@
 		return modelOptionsFor(agentId).find((option) => option.value === model) ?? null;
 	}
 
-	setExecutionNodesTestContext(untrack(() => nodes));
 	const selectedChat = $derived<ChatSessionRecord>({
 		nodeId: selectedNodeId,
 		id: selectedChatId,

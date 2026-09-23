@@ -60,7 +60,7 @@
 				className,
 			)}
 			{disabled}
-			title={nodeLabel}
+			title={nodes.get(nodeId) ? nodeLabel : nodeId}
 			aria-label={`Execution node: ${nodeLabel}`}
 			data-execution-node-picker
 			data-presentation={presentation}
@@ -72,9 +72,9 @@
 		<DropdownMenuContent align="start" class="max-w-[calc(100vw-1rem)]">
 			<DropdownMenuRadioGroup value={nodeId}>
 				{#if !nodes.get(nodeId)}
-					<DropdownMenuRadioItem value={nodeId} disabled class="text-sm">
+					<DropdownMenuRadioItem value={nodeId} disabled class="text-sm" title={nodeId}>
 						<span class="min-w-0 max-w-64 break-words">{nodeLabel}</span>
-						<span class="text-muted-foreground">Unavailable</span>
+						{#if !nodes.hasSnapshot}<span class="text-muted-foreground">Unavailable</span>{/if}
 					</DropdownMenuRadioItem>
 				{/if}
 				{#each nodes.nodes as node (node.id)}

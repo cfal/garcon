@@ -97,6 +97,31 @@ describe('ExecutionNodesDialog', () => {
 		expect(screen.queryByLabelText('Connection URL')).toBeNull();
 	});
 
+	it('confirms deletion without saving edits, retains conflicts, then returns to the node list', async () => {
+		vi.mocked(api.getExecutionNodes).mockResolvedValue([localExecutionNode, remoteExecutionNode]);
+		vi.mocked(api.removeExecutionNode).mockRejectedValueOnce(new Error('Stop or finish this node\'s active work before changing its connection.'));
+		vi.mocked(api.removeExecutionNode).mockResolvedValueOnce([localExecutionNode]);
+		await openDialog();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker' }));
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Delete node' }).hasAttribute('disabled')).toBe(false));
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete node' }));
+		expect(screen.getByText(/Chats and saved settings will remain/)).toBeDefined();
+		expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+		await fireEvent.submit(screen.getByLabelText('Label').closest('form')!);
+		expect(api.updateExecutionNode).not.toHaveBeenCalled();
+		expect(api.removeExecutionNode).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(screen.queryByText(/Chats and saved settings will remain/)).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete node' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete Node' }));
+		expect((await screen.findByRole('alert')).textContent).toContain('Stop or finish');
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete Node' }));
+		await waitFor(() => expect(screen.queryByLabelText('Connection URL')).toBeNull());
+		expect(api.removeExecutionNode).toHaveBeenLastCalledWith(remoteExecutionNode.id);
+		expect(screen.queryByRole('button', { name: 'Edit Worker' })).toBeNull();
+		expect(screen.getByText('Local')).toBeDefined();
+	});
+
 	it('defaults to certificate verification and saves an explicit outbound opt-out', async () => {
 		vi.mocked(api.getExecutionNodes).mockResolvedValue([localExecutionNode, { ...remoteExecutionNode, direction: 'controller-connects' }]);
 		vi.mocked(api.updateExecutionNode).mockResolvedValue([localExecutionNode, remoteExecutionNode]);
