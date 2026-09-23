@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { assertGitWorkingPath } from './operation-context.js';
-import { untrackedPatch } from './untracked-patch.js';
+import { loadUntrackedPatch } from './untracked-patch.js';
 import { exactGitPathspecs } from './pathspecs.js';
 import type {
   RegisteredGitReviewDocument,
@@ -200,7 +200,7 @@ async function loadUntrackedBody(
       );
     }
     await assertGitWorkingPath(filePath);
-    const patch = await measureGitReviewPhase(routeMetrics, 'body-git', () => untrackedPatch(
+    const patch = await measureGitReviewPhase(routeMetrics, 'body-git', () => loadUntrackedPatch(
       document.repoRoot, file.path, document.context, {
         signal,
         maxStdoutBytes: GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes,

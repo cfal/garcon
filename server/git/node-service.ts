@@ -123,20 +123,37 @@ export class LocalGitRuntime {
   }
 
   async #validateFiles(method: GitMethod, request: ExecutionGitRequests[GitMethod], projectPath: string): Promise<void> {
-    const files = 'file' in request ? [request.file] : 'paths' in request ? request.paths
-      : 'files' in request ? request.files : 'selectedFile' in request && request.selectedFile ? [request.selectedFile] : [];
+    let files: string[] = [];
+    if ('file' in request) {
+      files = [request.file];
+    } else if ('paths' in request) {
+      files = request.paths;
+    } else if ('files' in request) {
+      files = request.files;
+    } else if ('selectedFile' in request && request.selectedFile) {
+      files = [request.selectedFile];
+    }
+
+    // Object/index reads must remain independent of today's symlink targets.
+    // Review-body access is checked where its registered source is known.
+    const lexicalOnly = method === 'getFileHistory'
+      || method === 'getBlame'
+      || method === 'getReviewDocumentFileBodies'
+      || method === 'getWorkbenchSnapshot'
+      || ('mode' in request && request.mode === 'unstage');
+    const requiresFileContainment = method === 'getConflictDetails'
+      || method === 'markConflictResolved'
+      || method === 'acceptConflictSide'
+      || method === 'discard'
+      || method === 'deleteUntracked';
+
     for (const file of files) {
       const resolved = resolvePathWithinProject(projectPath, toNativePath(file));
-      // Object/index reads must remain independent of today's symlink targets.
-      // Review-body access is checked where its registered source is known.
-      if (method === 'getFileHistory' || method === 'getBlame' || method === 'getReviewDocumentFileBodies'
-        || method === 'getWorkbenchSnapshot' || 'mode' in request && request.mode === 'unstage') continue;
-      if (method === 'getConflictDetails' || method === 'markConflictResolved'
-        || method === 'acceptConflictSide' || method === 'discard' || method === 'deleteUntracked') {
-        await resolveRealWithinBase(projectPath, resolved);
-      } else {
-        await resolveRealWithinBase(projectPath, resolved === projectPath ? resolved : path.dirname(resolved));
-      }
+      if (lexicalOnly) continue;
+      const boundaryPath = requiresFileContainment || resolved === projectPath
+        ? resolved
+        : path.dirname(resolved);
+      await resolveRealWithinBase(projectPath, boundaryPath);
     }
   }
 

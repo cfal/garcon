@@ -21,7 +21,9 @@ const GIT_TERMINATION_GRACE_MS = 250;
 async function terminateGitProcess(proc: Bun.Subprocess): Promise<void> {
   if (process.platform === 'win32') {
     const killer = Bun.spawn(['taskkill', '/PID', String(proc.pid), '/T', '/F'], {
-      stdin: 'ignore', stdout: 'ignore', stderr: 'ignore',
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
     });
     await killer.exited;
     return;
@@ -34,8 +36,11 @@ async function terminateGitProcess(proc: Bun.Subprocess): Promise<void> {
   }
   // Git gets a chance to clean its locks before uncooperative filters are forced to exit.
   await sleep(GIT_TERMINATION_GRACE_MS);
-  try { process.kill(-proc.pid, 'SIGKILL'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  try {
+    process.kill(-proc.pid, 'SIGKILL');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
 }
 
 export function gitCommandEnv(options: GitCommandOptions): NodeJS.ProcessEnv | undefined {
@@ -192,7 +197,9 @@ async function runGitProcess(
       throw error;
     }
     let termination: Promise<void> | undefined;
-    const abortListener = (): void => { termination ??= terminateGitProcess(proc); };
+    const abortListener = (): void => {
+      termination ??= terminateGitProcess(proc);
+    };
     abortState.signal?.addEventListener('abort', abortListener, { once: true });
     if (abortState.signal?.aborted) abortListener();
     let outputLimitError: GitOutputLimitError | null = null;

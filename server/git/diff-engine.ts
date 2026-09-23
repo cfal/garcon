@@ -67,7 +67,7 @@ import {
 } from './review-document-registry.js';
 import { captureWorkingPathTokensFromObservation } from './working-path-token.js';
 import { measureGitReviewPhaseSync } from './review-performance.js';
-import { untrackedPatch } from './untracked-patch.js';
+import { loadUntrackedPatch } from './untracked-patch.js';
 
 const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
@@ -261,7 +261,6 @@ function buildTreeFromChangeEntries(
 // 6. The patch is applied via `git apply --cached` (staging) or
 //    `git apply --cached --reverse` (unstaging).
 
-// Parses a full unified diff into its file-level header and per-hunk bodies.
 // Replaces full diff header with minimal a/b paths, matching lazygit's
 // FileNameOverride approach. Prevents failures when partially staging
 // deleted files or files with mode changes.
@@ -273,10 +272,12 @@ function simplifyDiffHeader(filePath: string): string[] {
 }
 
 function stagingDiffHeader(file: string, parsed: ParsedPatch, mode: 'stage' | 'unstage'): string[] {
-  return mode === 'stage' && parsed.header.filter(line => line.startsWith('diff --git ')).length === 1
-    && parsed.header.some(line => line.startsWith('new file mode '))
-    ? parsed.header
-    : simplifyDiffHeader(file);
+  if (mode === 'stage') {
+    const fileSectionCount = parsed.header.filter((line) => line.startsWith('diff --git ')).length;
+    const createsFile = parsed.header.some((line) => line.startsWith('new file mode '));
+    if (fileSectionCount === 1 && createsFile) return parsed.header;
+  }
+  return simplifyDiffHeader(file);
 }
 
 // Strips the trailing empty element that `split('\n')` produces from a
@@ -284,7 +285,6 @@ function stagingDiffHeader(file: string, parsed: ParsedPatch, mode: 'stage' | 'u
 // spurious empty line that corrupts line counts in buildHunkHeader.
 function parsePatch(patchText: string): ParsedPatch {
   const allLines = patchText.split('\n');
-  // Remove trailing empty string artifact from split (diff always ends with \n)
   if (allLines.length > 0 && allLines[allLines.length - 1] === '') {
     allLines.pop();
   }
@@ -443,8 +443,10 @@ function buildHunkHeader(rawHeader: string, bodyLines: string[], startOffset: nu
 // Staged tab: `git diff --cached` (HEAD vs index).
 // The same diff is used for both display and `git apply --cached`.
 function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): string[] {
-  return ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/',
-    ...(isUnstage ? ['--cached'] : []), `-U${contextLines}`, '--', literalGitPathspec(file)];
+  return [
+    'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/',
+    ...(isUnstage ? ['--cached'] : []), `-U${contextLines}`, '--', literalGitPathspec(file),
+  ];
 }
 
 
@@ -1302,9 +1304,21 @@ async function getWorkbenchSnapshot({
   };
 }
 
-async function stagingPatch(projectPath: string, file: string, context: number, mode: 'stage' | 'unstage'): Promise<string> {
-  if (mode === 'stage' && await isFileUntracked(projectPath, file)) return untrackedPatch(projectPath, file, context);
-  return (await runGit(projectPath, tabDiffArgs(context, file, mode === 'unstage'), readOnlyGitOptions())).stdout;
+async function loadStagingPatch(
+  projectPath: string,
+  file: string,
+  contextLines: number,
+  mode: 'stage' | 'unstage',
+): Promise<string> {
+  if (mode === 'stage' && await isFileUntracked(projectPath, file)) {
+    return loadUntrackedPatch(projectPath, file, contextLines);
+  }
+  const { stdout } = await runGit(
+    projectPath,
+    tabDiffArgs(contextLines, file, mode === 'unstage'),
+    readOnlyGitOptions(),
+  );
+  return stdout;
 }
 
 async function stageSelection({
@@ -1318,7 +1332,7 @@ async function stageSelection({
 
   const reverse = mode === 'unstage';
 
-  const patchText = displayedPatch ?? await stagingPatch(projectPath, file, contextLines, mode);
+  const patchText = displayedPatch ?? await loadStagingPatch(projectPath, file, contextLines, mode);
   if (!patchText.trim()) {
     throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
   }
@@ -1366,7 +1380,7 @@ async function stageHunk({
 
   const isUnstage = mode === 'unstage';
 
-  const fullPatch = displayedPatch ?? await stagingPatch(projectPath, file, contextLines, mode);
+  const fullPatch = displayedPatch ?? await loadStagingPatch(projectPath, file, contextLines, mode);
   if (!fullPatch.trim()) {
     throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
   }

@@ -38,6 +38,15 @@ function statusToken(entry: PorcelainStatusEntry | undefined): string {
   return `${entry.indexStatus}${entry.workTreeStatus}\0${entry.originalPath ?? ''}`;
 }
 
+function missingWorktreeToken(): Omit<GitWorkingPathToken, 'path' | 'indexEntry' | 'status'> {
+  return {
+    worktreeKind: 'missing',
+    worktreeSize: null,
+    worktreeMtimeNs: null,
+    worktreeCtimeNs: null,
+  };
+}
+
 async function worktreeToken(
   projectPath: string,
   filePath: string,
@@ -46,18 +55,19 @@ async function worktreeToken(
   const resolved = resolvePathWithinProject(projectPath, filePath);
   // Git reports descendants of replaced directory symlinks as deleted; no filesystem access is needed.
   if (entry?.workTreeStatus === 'D') {
-    return { worktreeKind: 'missing', worktreeSize: null, worktreeMtimeNs: null, worktreeCtimeNs: null };
+    return missingWorktreeToken();
   }
   await assertGitWorkingPath(path.dirname(resolved));
   try {
     const stats = await fs.lstat(resolved, { bigint: true });
-    const worktreeKind = stats.isFile()
-      ? 'file'
-      : stats.isSymbolicLink()
-        ? 'symlink'
-        : stats.isDirectory()
-          ? 'directory'
-          : 'other';
+    let worktreeKind: GitWorkingPathToken['worktreeKind'] = 'other';
+    if (stats.isFile()) {
+      worktreeKind = 'file';
+    } else if (stats.isSymbolicLink()) {
+      worktreeKind = 'symlink';
+    } else if (stats.isDirectory()) {
+      worktreeKind = 'directory';
+    }
     return {
       worktreeKind,
       worktreeSize: stats.size.toString(),
@@ -65,12 +75,7 @@ async function worktreeToken(
       worktreeCtimeNs: stats.ctimeNs.toString(),
     };
   } catch {
-    return {
-      worktreeKind: 'missing',
-      worktreeSize: null,
-      worktreeMtimeNs: null,
-      worktreeCtimeNs: null,
-    };
+    return missingWorktreeToken();
   }
 }
 
@@ -126,12 +131,7 @@ export async function captureWorkingPathTokens(
           ? `${statusToken(statusByPath.get(path)).slice(0, 1)} \0`
           : statusToken(statusByPath.get(path)),
       ...(scope === 'index'
-        ? {
-            worktreeKind: 'missing' as const,
-            worktreeSize: null,
-            worktreeMtimeNs: null,
-            worktreeCtimeNs: null,
-          }
+        ? missingWorktreeToken()
         : await worktreeToken(projectPath, path, statusByPath.get(path))),
     })),
   );
