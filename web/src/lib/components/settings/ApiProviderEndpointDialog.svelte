@@ -14,7 +14,6 @@
 	import { ApiProviderEndpointDialogState } from './api-provider-endpoint-dialog-state.svelte';
 
 	let {
-		nodeId = 'local',
 		open = false,
 		protocol,
 		endpointId = null,
@@ -22,7 +21,6 @@
 		duplicate = false,
 		onOpenChange = () => undefined,
 	} = $props<{
-		nodeId?: string;
 		open?: boolean;
 		protocol: ApiProtocol;
 		endpointId?: string | null;
@@ -34,9 +32,12 @@
 	const rootModelCatalog = getModelCatalog();
 	const providers = getApiProviders();
 	const nodes = getExecutionNodes();
+	let nodeId = $state('local');
 	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
 	const dialog = new ApiProviderEndpointDialogState({
-		get modelCatalog() { return modelCatalog; },
+		get modelCatalog() {
+			return modelCatalog;
+		},
 		providers,
 		isNodeReady: () => nodes.isReady(nodeId),
 		getProtocol: () => protocol,
@@ -47,18 +48,29 @@
 	});
 
 	$effect(() => {
-		void nodeId;
 		dialog.open = open;
 		if (open) {
 			untrack(() => {
+				nodeId = initialNodeId();
 				void dialog.load();
 			});
 		}
 		return () => dialog.dispose();
 	});
 
-	function handleOpenChange(next: boolean) {
-		onOpenChange(next);
+	function initialNodeId(): string {
+		const found = endpointId ? providers.findEndpoint(endpointId) : null;
+		if (!found) return 'local';
+
+		const assignedNodes = nodes.nodes.filter((node) => providers.isAssigned(node.id, found.apiProvider.id));
+		const readyNode = assignedNodes.find((node) => nodes.isReady(node.id));
+		return readyNode?.id ?? assignedNodes[0]?.id ?? 'local';
+	}
+
+	function selectNode(value: string): void {
+		if (dialog.isSaving || value === nodeId) return;
+		dialog.clearProbeResults();
+		nodeId = value;
 	}
 
 	function handleModelsInput(event: Event) {
@@ -68,7 +80,7 @@
 	}
 </script>
 
-<Dialog.Root {open} onOpenChange={handleOpenChange}>
+<Dialog.Root {open} {onOpenChange}>
 	<Dialog.Content
 		class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border"
 	>
@@ -84,11 +96,35 @@
 				void dialog.save();
 			}}
 		>
+			{#if nodes.hasRemoteNodes}
+				<div class="grid gap-2">
+					<label class="text-sm font-medium" for="api-provider-node">
+						{dialog.apiProviderId
+							? m.settings_provider_test_from()
+							: m.settings_provider_create_on()}
+					</label>
+					<select
+						id="api-provider-node"
+						class="h-9 min-w-0 w-full rounded-md border border-input bg-background px-3 text-base pointer-fine:text-sm"
+						value={nodeId}
+						onchange={(event) => selectNode(event.currentTarget.value)}
+						disabled={dialog.isSaving}
+					>
+						{#each nodes.nodes as node (node.id)}
+							<option value={node.id}>{node.label}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 			{#if dialog.apiProviderId}
-				<p class="text-sm text-muted-foreground">Changes affect every node and workspace using this shared profile.</p>
+				<p class="text-sm text-muted-foreground">
+					Changes affect every node and workspace using this shared profile.
+				</p>
 			{/if}
 			{#if !dialog.canProbe}
-				<p class="text-sm text-muted-foreground">Testing requires a ready node and an assigned profile or a newly entered key.</p>
+				<p class="text-sm text-muted-foreground">
+					Testing requires a ready node and an assigned profile or a newly entered key.
+				</p>
 			{/if}
 			<div class="grid gap-2">
 				<label class="text-sm font-medium" for="api-provider-label"

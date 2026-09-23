@@ -95,8 +95,8 @@ test('chat host selectors fit narrow containers and stage complete cancellable h
     await page.keyboard.press('Escape');
     phase('one-shot host column');
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Remote Settings', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'General', exact: true }).click();
     const generation = page.getByRole('dialog').locator('button').filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') }).first();
     await generation.click();
     const columns = page.locator('[data-slot="model-selector-columns"]');

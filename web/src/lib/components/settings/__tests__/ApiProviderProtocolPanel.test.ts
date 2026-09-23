@@ -1,12 +1,104 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ApiProviderProtocolPanelTestHost from './ApiProviderProtocolPanelTestHost.svelte';
+import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import type { ApiProviderCatalogEntry } from '$shared/api-providers';
+import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+
+const workerProfile = {
+	id: 'synthetic',
+	revision: 1,
+	label: 'Worker endpoint',
+	createdAt: '',
+	updatedAt: '',
+	endpoints: [{
+		id: 'synthetic_openai',
+		protocol: 'openai-compatible',
+		baseUrl: 'http://localhost:1234/v1',
+		hasApiKey: true,
+		supportsImages: false,
+		defaultModel: 'synthetic-model',
+		models: [{ value: 'synthetic-model', label: 'Synthetic Model' }],
+	}],
+} satisfies ApiProviderCatalogEntry;
+
+const offlineWorker = { ...remoteExecutionNode, availability: 'offline' } satisfies ExecutionNodeSnapshot;
+const secondWorker = {
+	...remoteExecutionNode,
+	id: '33333333-3333-4333-8333-333333333333',
+	label: 'Second worker',
+} satisfies ExecutionNodeSnapshot;
 
 describe('ApiProviderProtocolPanel', () => {
 	afterEach(() => {
 		cleanup();
 	});
 
+	it.each([
+		{
+			name: 'prefers a ready assigned node over an earlier offline assignment',
+			nodes: [localExecutionNode, offlineWorker, secondWorker],
+			assignments: { [offlineWorker.id]: [workerProfile.id], [secondWorker.id]: [workerProfile.id] },
+			expectedNodeId: secondWorker.id,
+		},
+		{
+			name: 'keeps the assigned node when it is offline',
+			nodes: [localExecutionNode, offlineWorker],
+			assignments: { [offlineWorker.id]: [workerProfile.id] },
+			expectedNodeId: offlineWorker.id,
+		},
+		{
+			name: 'uses Local when the profile has no node assignments',
+			nodes: [localExecutionNode, remoteExecutionNode],
+			assignments: {},
+			expectedNodeId: localExecutionNode.id,
+		},
+		{
+			name: 'keeps Local first when it and a worker are both assigned and ready',
+			nodes: [localExecutionNode, remoteExecutionNode],
+			assignments: { local: [workerProfile.id], [remoteExecutionNode.id]: [workerProfile.id] },
+			expectedNodeId: localExecutionNode.id,
+		},
+	] satisfies Array<{
+		name: string;
+		nodes: ExecutionNodeSnapshot[];
+		assignments: Record<string, string[]>;
+		expectedNodeId: string;
+	}>)('$name', async ({ nodes, assignments, expectedNodeId }) => {
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible',
+			title: 'OpenAI Providers',
+			description: '',
+			addLabel: 'Add provider',
+			nodes,
+			assignments,
+			apiProviderCatalog: [workerProfile],
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
+		const host = await screen.findByRole<HTMLSelectElement>('combobox', { name: 'Test from' });
+		expect(host.value).toBe(expectedNodeId);
+	});
+
+	it('edits a remote-only profile on its assigned host and preserves input when changing probe hosts', async () => {
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible', title: 'OpenAI Providers', description: '', addLabel: 'Add provider',
+			nodes: [localExecutionNode, remoteExecutionNode],
+			assignments: { [remoteExecutionNode.id]: ['synthetic'] },
+			apiProviderCatalog: [workerProfile],
+		});
+		expect(screen.queryByRole('combobox')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
+		const host = await screen.findByRole<HTMLSelectElement>('combobox', { name: 'Test from' });
+		expect(host.value).toBe(remoteExecutionNode.id);
+		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(false);
+		const label = screen.getByLabelText('Display name') as HTMLInputElement;
+		await fireEvent.input(label, { target: { value: 'Unsaved profile label' } });
+		await fireEvent.change(host, { target: { value: 'local' } });
+		expect(label.value).toBe('Unsaved profile label');
+		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(true);
+		await fireEvent.change(host, { target: { value: remoteExecutionNode.id } });
+		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(false);
+	});
 	it('restores a failed unassignment and retries revocation on the next click', async () => {
 		const unassign = vi.fn(async () => {
 			throw new Error('Assignment write failed');

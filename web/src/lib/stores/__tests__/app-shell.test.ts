@@ -142,24 +142,56 @@ describe('AppShellStore', () => {
 	});
 
 	describe('settings tabs', () => {
-		it('defaults unknown section requests to providers', () => {
+		it('defaults unknown server sections to execution nodes', () => {
 			const store = new AppShellStore();
 
 			store.openSettings('display');
-			expect(store.settingsTab).toBe('providers');
+			expect(store.settingsTab).toBe('execution-nodes');
 
-			store.openSettings('remote');
-			expect(store.settingsTab).toBe('remote');
+			store.openSettings('general');
+			expect(store.settingsTab).toBe('general');
 
 			store.setSettingsTab('other-agents');
 			expect(store.settingsTab).toBe('other-agents');
 		});
+
+		it('keeps app and server settings mutually exclusive with independent tabs', () => {
+			const store = new AppShellStore();
+			store.openSettings('github');
+			store.openAppSettings('shortcuts');
+			expect(store.showSettings).toBe(false);
+			expect(store.showAppSettings).toBe(true);
+			expect(store.settingsTab).toBe('github');
+			expect(store.appSettingsTab).toBe('shortcuts');
+			store.openSettings();
+			expect(store.showAppSettings).toBe(false);
+			expect(store.showSettings).toBe(true);
+			expect(store.settingsTab).toBe('execution-nodes');
+			store.openAppSettings('unknown');
+			expect(store.appSettingsTab).toBe('general');
+			store.closeAppSettings();
+			expect(store.showAppSettings).toBe(false);
+		});
+
+		it.each(['openScheduledPrompts', 'openOnboardingWizard', 'openPreambles', 'openSnippets'] as const)(
+			'%s closes app settings', (open) => {
+				const store = new AppShellStore();
+				store.openAppSettings();
+				store[open]();
+				expect(store.showAppSettings).toBe(false);
+				store.openAppSettings();
+				expect(store.showScheduledPrompts).toBe(false);
+				expect(store.showOnboardingWizard).toBe(false);
+				expect(store.showPreambles).toBe(false);
+				expect(store.showSnippets).toBe(false);
+			},
+		);
 	});
 
 	describe('scheduled prompts dialog', () => {
 		it('opens independently and closes settings', () => {
 			const store = new AppShellStore();
-			store.openSettings('remote');
+			store.openSettings('general');
 
 			store.openScheduledPrompts();
 
@@ -173,13 +205,13 @@ describe('AppShellStore', () => {
 
 		it('closes without changing settings tab state', () => {
 			const store = new AppShellStore();
-			store.setSettingsTab('remote');
+			store.setSettingsTab('general');
 			store.openScheduledPrompts();
 
 			store.closeScheduledPrompts();
 
 			expect(store.showScheduledPrompts).toBe(false);
-			expect(store.settingsTab).toBe('remote');
+			expect(store.settingsTab).toBe('general');
 		});
 	});
 
@@ -187,7 +219,7 @@ describe('AppShellStore', () => {
 		it('opens exclusively and returns focus after a user close', async () => {
 			const store = new AppShellStore();
 			const returnFocus = vi.fn();
-			store.openSettings('remote');
+			store.openSettings('general');
 
 			store.openSnippets(returnFocus);
 
@@ -220,7 +252,7 @@ describe('AppShellStore', () => {
 		it('opens exclusively and closes other shell dialogs', async () => {
 			const store = new AppShellStore();
 			const returnFocus = vi.fn();
-			store.openSettings('remote');
+			store.openSettings('general');
 			store.openSnippets(returnFocus);
 
 			store.openOnboardingWizard();
@@ -237,10 +269,10 @@ describe('AppShellStore', () => {
 			const store = new AppShellStore();
 			store.openOnboardingWizard();
 
-			store.openSettings('local');
+			store.openAppSettings();
 
 			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showSettings).toBe(true);
+			expect(store.showAppSettings).toBe(true);
 		});
 
 		it('closes when scheduled prompts or snippets open', () => {
@@ -261,20 +293,20 @@ describe('AppShellStore', () => {
 
 		it('closes without touching settings tab state', () => {
 			const store = new AppShellStore();
-			store.setSettingsTab('remote');
+			store.setSettingsTab('general');
 			store.openOnboardingWizard();
 
 			store.closeOnboardingWizard();
 
 			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.settingsTab).toBe('remote');
+			expect(store.settingsTab).toBe('general');
 		});
 	});
 
 	describe('preambles dialog', () => {
 		it('opens exclusively with the other shell dialogs', () => {
 			const store = new AppShellStore();
-			store.openSettings('remote');
+			store.openSettings('general');
 
 			store.openPreambles();
 
@@ -300,13 +332,13 @@ describe('AppShellStore', () => {
 
 		it('closes without changing settings tab state', () => {
 			const store = new AppShellStore();
-			store.setSettingsTab('remote');
+			store.setSettingsTab('general');
 			store.openPreambles();
 
 			store.closePreambles();
 
 			expect(store.showPreambles).toBe(false);
-			expect(store.settingsTab).toBe('remote');
+			expect(store.settingsTab).toBe('general');
 		});
 
 		it('restores the captured opener after catalog management closes', async () => {

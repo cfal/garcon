@@ -81,7 +81,7 @@
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
-		onShowExecutionNodes: () => void;
+		onShowAppSettings: () => void;
 		onShowSettings: () => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 	}
@@ -113,7 +113,7 @@
 		onShowScheduledPrompts,
 		onShowPreambles,
 		onShowSnippets,
-		onShowExecutionNodes,
+		onShowAppSettings,
 		onShowSettings,
 		newWindowEdges,
 	}: SidebarProps = $props();
@@ -463,7 +463,7 @@
 			{onShowScheduledPrompts}
 			{onShowPreambles}
 			{onShowSnippets}
-			{onShowExecutionNodes}
+			{onShowAppSettings}
 			{onShowSettings}
 		/>
 	</div>

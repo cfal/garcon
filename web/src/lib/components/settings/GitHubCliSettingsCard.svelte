@@ -8,9 +8,9 @@
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
+	let { nodeId }: { nodeId: string } = $props();
 	const capabilities = getGhCapability();
 	const nodes = getExecutionNodes();
-	let nodeId = $state('local');
 	const ghCapability = $derived(capabilities.forNode(nodeId));
 	$effect(() => {
 		if (!nodes.ghAvailable(nodeId) || ghCapability.hasChecked) return;
@@ -37,7 +37,7 @@
 	});
 
 	const badgeClass = $derived.by(() => {
-		if (!ghCapability.hasChecked || ghCapability.isLoading) {
+		if (!nodes.ghAvailable(nodeId) || !ghCapability.hasChecked || ghCapability.isLoading) {
 			return 'bg-status-neutral text-status-neutral-foreground border-status-neutral-border';
 		}
 		if (ghCapability.available) {
@@ -55,7 +55,7 @@
 </script>
 
 <section class="rounded-lg border border-border bg-muted/50">
-	<div class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+	<div class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
 		<div class="flex min-w-0 items-start gap-3">
 			<div
 				class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
@@ -69,18 +69,9 @@
 		</div>
 
 		<div class="flex min-w-0 flex-wrap items-center gap-2">
-			<select
-				aria-label="Execution node"
-				bind:value={nodeId}
-				class="min-w-0 max-w-full rounded border border-border bg-background px-2 py-1 text-base sm:max-w-56 sm:pointer-fine:text-sm"
-			>
-				{#each nodes.nodes as node (node.id)}
-					<option value={node.id}>{node.label}</option>
-				{/each}
-			</select>
 			<Badge
 				variant="outline"
-				class={cn('min-w-0 whitespace-normal break-words text-xs', badgeClass)}>{statusLabel}</Badge
+				class={cn('min-w-0 max-w-full whitespace-normal break-words text-xs', badgeClass)}>{statusLabel}</Badge
 			>
 			<Button
 				variant="outline"

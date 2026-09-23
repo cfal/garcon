@@ -481,6 +481,7 @@ describe('ModelCatalogStore', () => {
 					[
 						{
 							id: 'acme',
+							revision: 1,
 							label: 'Acme',
 							templateId: 'custom',
 							createdAt: '2026-01-01T00:00:00.000Z',

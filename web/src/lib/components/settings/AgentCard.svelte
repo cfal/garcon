@@ -115,9 +115,9 @@
 		{onOpenChange}
 		class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}"
 	>
-		<div class="flex items-center gap-3 px-4 py-3">
-			<Collapsible.Trigger class="flex flex-1 items-center gap-3 text-left cursor-pointer">
-				<span class="font-medium text-foreground">{agentName}</span>
+		<div class="flex flex-wrap items-center gap-3 px-4 py-3">
+			<Collapsible.Trigger class="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left cursor-pointer">
+				<span class="break-words font-medium text-foreground">{agentName}</span>
 
 				{#if auth.loading}
 					<Badge variant="secondary" class="text-xs"
@@ -125,7 +125,7 @@
 					>
 				{:else if isReady}
 					<Badge
-						class="text-xs bg-status-success text-status-success-foreground border-status-success-border"
+						class="max-w-full whitespace-normal break-words text-xs bg-status-success text-status-success-foreground border-status-success-border"
 					>
 						{statusLabel}
 					</Badge>
@@ -173,7 +173,7 @@
 									href={deviceAuth.url}
 									target="_blank"
 									rel="noopener noreferrer"
-									class="text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+									class="min-w-0 break-all text-sm text-primary underline underline-offset-2 hover:text-primary/80"
 								>
 									{deviceAuth.url}
 								</a>
@@ -192,7 +192,7 @@
 								<div class="text-xs text-muted-foreground">
 									{m.settings_agents_device_auth_step2()}
 								</div>
-								<div class="flex items-center gap-2">
+								<div class="flex flex-wrap items-center gap-2">
 									<code
 										class="rounded bg-muted px-2.5 py-1 font-mono text-base font-semibold text-foreground tracking-wider"
 									>
@@ -214,7 +214,7 @@
 								</div>
 								<div class="flex items-center gap-2">
 									<input
-										class="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+										class="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-base pointer-fine:text-sm text-foreground"
 										placeholder={m.settings_agents_browser_auth_code_placeholder()}
 										bind:value={authCode}
 										onkeydown={handleAuthCodeKeydown}
@@ -250,8 +250,8 @@
 						{/if}
 					</div>
 				{:else if auth.canReauth}
-					<div class="flex items-center justify-between">
-						<div>
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<div class="min-w-0 flex-1">
 							<div class="text-sm font-medium text-foreground">
 								{auth.authenticated
 									? m.settings_agents_login_re_authenticate()
@@ -293,15 +293,15 @@
 	<div
 		class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}"
 	>
-		<div class="flex items-center gap-3 px-4 py-3">
-			<span class="font-medium text-foreground">{agentName}</span>
+		<div class="flex flex-wrap items-center gap-3 px-4 py-3">
+			<span class="break-words font-medium text-foreground">{agentName}</span>
 
 			{#if auth.loading}
 				<Badge variant="secondary" class="text-xs">{m.settings_agents_auth_status_checking()}</Badge
 				>
 			{:else if isReady}
 				<Badge
-					class="text-xs bg-status-success text-status-success-foreground border-status-success-border"
+					class="max-w-full whitespace-normal break-words text-xs bg-status-success text-status-success-foreground border-status-success-border"
 				>
 					{statusLabel}
 				</Badge>

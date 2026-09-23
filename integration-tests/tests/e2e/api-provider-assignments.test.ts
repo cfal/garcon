@@ -31,8 +31,10 @@ test('provider settings support offline grants and independent profiles; remote 
     await app.waitForText('echo:Synthetic preserved draft');
 
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Settings');
-    await app.clickMenuItem('Settings');
+    await app.waitForMenuItemEnabled('Server Settings');
+    await app.clickMenuItem('Server Settings');
+    await app.waitForButton('Providers');
+    await app.clickButton('Providers');
     await app.waitForText('Integration Fake OpenAI');
     await fixture.page.$eval(`[data-api-provider-id="${providerId}"]`, (element) => {
       const label = [...element.querySelectorAll('label')].find((item) => item.textContent?.trim() === 'Offline worker');

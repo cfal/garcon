@@ -40,21 +40,14 @@ test('provider settings test and fetch models through the selected execution nod
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.clickButton('More actions');
-      await app.waitForMenuItemEnabled('Settings');
-      await app.clickMenuItem('Settings');
-      await fixture.page.waitForSelector('[role="dialog"] select');
-      await app.waitForText('Synthetic discovery endpoint');
-      await fixture.page.$eval('[role="dialog"] select', (element, nodeId) => {
-        const select = element as HTMLSelectElement;
-        select.value = nodeId;
-        const query = select.querySelector.bind(select);
-        // Lightpanda 0.3.5 omits the :checked option lookup used by Svelte bindings.
-        Object.defineProperty(select, 'querySelector', { configurable: true, value: (selector: string) => selector === ':checked' ? select.selectedOptions[0] : query(selector) });
-        try { select.dispatchEvent(new Event('change', { bubbles: true })); }
-        finally { Reflect.deleteProperty(select, 'querySelector'); }
-      }, client.nodeId);
+      await app.waitForMenuItemEnabled('Server Settings');
+      await app.clickMenuItem('Server Settings');
+      await app.waitForButton('Providers');
+      await app.clickButton('Providers');
       await app.waitForText('Synthetic discovery endpoint');
       await app.clickButton('Edit Synthetic discovery endpoint');
+      await fixture.page.waitForSelector('#api-provider-node');
+      expect(await fixture.page.$eval('#api-provider-node', (element) => (element as HTMLSelectElement).value)).toBe(client.nodeId);
       await app.waitForButtonEnabled('Fetch models');
       await app.clickButton('Fetch models');
       await app.waitForText('Fetched 1 model(s).');

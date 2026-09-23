@@ -2,8 +2,7 @@
 	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
 	setExecutionNodesTestContext();
 	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
-	import { setGhCapability, setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
-	import { getTestGhCapability } from './gh-capability-test-context';
+	import { setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
 	import { getTestLocalSettingsStore } from './local-settings-test-context';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
@@ -18,7 +17,6 @@
 	import { onDestroy } from 'svelte';
 
 	setRemoteSettings(getTestRemoteSettingsStore());
-	setGhCapability(getTestGhCapability());
 
 	setTestLocalSettingsStore(new LocalSettingsStore());
 	setLocalSettings(getTestLocalSettingsStore());

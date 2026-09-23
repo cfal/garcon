@@ -21,7 +21,7 @@
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
 	const lazyPreambles = () => import('../preambles/PreamblesDialog.svelte');
-	const lazyExecutionNodes = () => import('../execution-nodes/ExecutionNodesDialog.svelte');
+	const lazyAppSettings = () => import('../settings/AppSettings.svelte');
 	const lazyChatPreambleSelection = () => import('../preambles/ChatPreambleSelectionDialog.svelte');
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
@@ -717,7 +717,7 @@
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
 		onShowSnippets={() => appShell.openSnippets()}
-		onShowExecutionNodes={() => appShell.openExecutionNodes()}
+		onShowAppSettings={() => appShell.openAppSettings()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>
@@ -921,9 +921,9 @@
 	{/await}
 {/if}
 
-{#if appShell.showExecutionNodes}
-	{#await lazyExecutionNodes() then { default: ExecutionNodesDialog }}
-		<ExecutionNodesDialog />
+{#if appShell.showAppSettings}
+	{#await lazyAppSettings() then { default: AppSettings }}
+		<AppSettings />
 	{/await}
 {/if}
 

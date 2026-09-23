@@ -465,6 +465,37 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.isFetchingModels).toBe(false);
 	});
 
+	it.each(['fetchModels', 'test'] as const)('preserves the editor draft and fences %s across a host round trip', async (operation) => {
+		const remote = { ...makeModelCatalog(), nodeId: '22222222-2222-4222-8222-222222222222' };
+		let catalog = remote;
+		const dialog = new ApiProviderEndpointDialogState({
+			...dialogPorts(remote), get modelCatalog() { return catalog; },
+			getProtocol: () => 'openai-compatible', getEndpointId: () => null,
+		});
+		await dialog.load();
+		dialog.label = 'Synthetic draft';
+		dialog.apiKey = 'synthetic-key';
+		dialog.baseUrl = 'http://localhost:11434/v1';
+		dialog.modelsText = 'synthetic-model';
+		dialog.defaultModel = 'synthetic-model';
+		const draft = dialog.payload();
+		const api = operation === 'fetchModels' ? discoverApiProviderModels : testApiProvider;
+		const pending = Promise.withResolvers<Awaited<ReturnType<typeof api>>>();
+		vi.mocked(api).mockReturnValueOnce(pending.promise);
+		const request = dialog[operation]();
+		dialog.clearProbeResults();
+		catalog = { ...remote, nodeId: 'local' };
+		expect(dialog.payload()).toEqual(draft);
+		expect(dialog.isTesting).toBe(false);
+		expect(dialog.isFetchingModels).toBe(false);
+		dialog.clearProbeResults();
+		catalog = remote;
+		pending.resolve({ success: true, models: [{ value: 'stale', label: 'Stale' }] });
+		await request;
+		expect(dialog.payload()).toEqual(draft);
+		expect(dialog.testMessage).toBeNull();
+	});
+
 	it('refreshes the captured remote catalog after saving without closing a replacement dialog', async () => {
 		const remote = { ...makeModelCatalog(), nodeId: '22222222-2222-4222-8222-222222222222', findEndpoint: () => null };
 		const local = { ...remote, nodeId: 'local', forceRefresh: vi.fn(async () => {}) };

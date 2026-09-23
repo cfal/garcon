@@ -12,63 +12,30 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { onMount } from 'svelte';
-	import { getApiProviders, getExecutionNodes } from '$lib/context';
+	import { getApiProviders } from '$lib/context';
 	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
-	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents';
 	import { templatesForProtocol, type ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import ApiProviderEndpointDialog from './ApiProviderEndpointDialog.svelte';
-	import AgentCard from './AgentCard.svelte';
 	import ApiProviderProfileRow from './ApiProviderProfileRow.svelte';
 
-	interface AuthStatus {
-		authenticated: boolean;
-		canReauth: boolean;
-		label: string;
-		loading: boolean;
-		error: string | null;
-	}
-
-	interface OAuthAgentConfig {
-		id: 'claude' | 'codex';
-		name: string;
-	}
-
 	let {
-		nodeId = 'local',
 		protocol,
 		title,
 		description,
 		addLabel,
-		oauthAgent = undefined,
-		auth = undefined,
-		readiness = undefined,
-		deviceAuth = undefined,
-		pending = false,
-		onLogin = undefined,
-		onCompleteLogin = undefined,
 	}: {
-		nodeId?: string;
 		protocol: ApiProtocol;
 		title: string;
 		description: string;
 		addLabel: string;
-		oauthAgent?: OAuthAgentConfig;
-		auth?: AuthStatus;
-		readiness?: AgentReadiness;
-		deviceAuth?: DeviceAuthInfo;
-		pending?: boolean;
-		onLogin?: () => void | Promise<void>;
-		onCompleteLogin?: (code: string) => void;
 	} = $props();
 
 	const providers = getApiProviders();
-	const nodes = getExecutionNodes();
 	onMount(() => providers.retain());
 	let dialogOpen = $state(false);
 	let editingEndpointId = $state<string | null>(null);
 	let createTemplateId = $state<ApiProviderTemplateId>('custom');
 	let duplicate = $state(false);
-	let oauthOpen = $state(false);
 	const templateOptions = $derived(templatesForProtocol(protocol));
 
 	const endpointRows = $derived.by(() => {
@@ -118,7 +85,7 @@
 <section class="space-y-3">
 	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 		<div class="space-y-1">
-			<h2 class="text-base font-semibold text-foreground">{title}</h2>
+			<h3 class="text-sm font-semibold text-foreground">{title}</h3>
 			<p class="text-sm text-muted-foreground">{description}</p>
 			<div class="text-xs text-muted-foreground">
 				{m.settings_api_providers_endpoint_count({ count: endpointRows.length })}
@@ -144,7 +111,10 @@
 		</DropdownMenu>
 	</div>
 
-	<p class="text-xs text-muted-foreground">Assigned nodes can receive this profile's credentials. Removing access does not revoke keys already received.</p>
+	<p class="text-xs text-muted-foreground">
+		Assigned nodes can receive this profile's credentials. Removing access does not revoke keys
+		already received.
+	</p>
 	{#if providers.error}
 		<div
 			class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -154,36 +124,27 @@
 		</div>
 	{/if}
 
-	{#if oauthAgent && auth && nodes.isReady(nodeId)}
-		<AgentCard
-			agentId={oauthAgent.id}
-			agentName={oauthAgent.name}
-			{auth}
-			open={oauthOpen}
-			onOpenChange={(open) => {
-				oauthOpen = open;
-			}}
-			onLogin={onLogin ?? (() => undefined)}
-			onCompleteLogin={onCompleteLogin ?? (() => undefined)}
-			{deviceAuth}
-			{pending}
-			{readiness}
-		/>
-	{/if}
-
 	<div class="space-y-2">
 		{#each endpointRows as row (row.endpoint.id)}
 			<svelte:boundary>
-				<ApiProviderProfileRow profile={row.apiProvider} endpoint={row.endpoint} onEdit={() => beginEdit(row.endpoint.id)}
-					onDuplicate={() => { beginEdit(row.endpoint.id); duplicate = true; }} />
-				{#snippet failed()}<p class="text-sm text-destructive">Unable to display provider.</p>{/snippet}
+				<ApiProviderProfileRow
+					profile={row.apiProvider}
+					endpoint={row.endpoint}
+					onEdit={() => beginEdit(row.endpoint.id)}
+					onDuplicate={() => {
+						beginEdit(row.endpoint.id);
+						duplicate = true;
+					}}
+				/>
+				{#snippet failed()}<p class="text-sm text-destructive">
+						Unable to display provider.
+					</p>{/snippet}
 			</svelte:boundary>
 		{/each}
 	</div>
 
 	{#if dialogOpen}
 		<ApiProviderEndpointDialog
-			{nodeId}
 			{duplicate}
 			open={dialogOpen}
 			{protocol}

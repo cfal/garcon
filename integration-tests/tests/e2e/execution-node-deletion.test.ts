@@ -8,6 +8,7 @@ import { SpaDriver } from '../../support/spa-driver.js';
 test('deleting a referenced node preserves the transcript and draft and permits explicit handoff', async () => {
   await withE2eFixture('execution-node-deletion', async (fixture) => {
     const { client, directAgents, executionDirs, dirs, fakeProviders } = fixture.integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
     const chatId = fixture.integration.newChatId();
     const started = await client.startDirectChat({
       chatId, agent: directAgents.openAi, projectPath: executionDirs.project,
@@ -22,8 +23,8 @@ test('deleting a referenced node preserves the transcript and draft and permits 
     await app.fill('[data-composer] textarea', draft);
     await app.waitForButtonEnabled('Send message');
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Execution Nodes');
-    await app.clickMenuItem('Execution Nodes');
+    await app.waitForMenuItemEnabled('Server Settings');
+    await app.clickMenuItem('Server Settings');
     await app.waitForButtonEnabled('Edit Integration worker');
     await app.clickButton('Edit Integration worker');
     await app.waitForButtonEnabled('Delete node');
@@ -50,6 +51,7 @@ test('deleting a referenced node preserves the transcript and draft and permits 
     await selectExecutionNode(fixture.page, '[data-slot="composer-bottom-bar"] [data-execution-node-picker]', 'Local');
     await app.waitForText('Move to Local');
     await app.fill('[role="dialog"] input', dirs.project);
+    await app.waitForButtonEnabled('Use This Node');
     await app.clickDialogButton('Use This Node');
     await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"]') === null);
     await app.waitForButtonEnabled('Send message');

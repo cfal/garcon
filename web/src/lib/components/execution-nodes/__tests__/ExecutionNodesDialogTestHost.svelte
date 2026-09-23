@@ -4,7 +4,8 @@
 	import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
-	import ExecutionNodesDialog from '../ExecutionNodesDialog.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import ExecutionNodesSection from '../ExecutionNodesSection.svelte';
 
 	const shell = createAppShellStore();
 	setAppShell(shell);
@@ -12,5 +13,12 @@
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));
 </script>
 
-<button onclick={() => shell.openExecutionNodes()}>Open execution nodes</button>
-{#if shell.showExecutionNodes}<ExecutionNodesDialog />{/if}
+<button onclick={() => shell.openSettings()}>Open execution nodes</button>
+{#if shell.showSettings}
+	<Dialog.Root open={shell.showSettings} onOpenChange={(open) => { if (!open) shell.closeSettings(); }}>
+		<Dialog.Content>
+			<Dialog.Title>Server Settings</Dialog.Title>
+			<ExecutionNodesSection />
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}

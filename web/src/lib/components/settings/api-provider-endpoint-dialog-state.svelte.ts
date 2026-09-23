@@ -169,8 +169,6 @@ export class ApiProviderEndpointDialogState {
 
 	async load(): Promise<void> {
 		this.dispose();
-		this.error = null;
-		this.testMessage = null;
 		const endpointId = this.endpointId;
 		if (!endpointId) {
 			this.beginCreate();
@@ -194,7 +192,6 @@ export class ApiProviderEndpointDialogState {
 		this.templateId = found.apiProvider.templateId ?? 'custom';
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
 		this.openAiCapabilities = this.openAiCapabilitiesFrom(found.endpoint.capabilities);
-		this.apiKey = '';
 		if (this.options.getDuplicate?.()) {
 			this.apiProviderId = null;
 			this.#savedEndpointId = null;
@@ -204,11 +201,17 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	dispose(): void {
-		this.#contextVersion++;
+		this.clearProbeResults();
 		this.isSaving = false;
+		this.apiKey = '';
+	}
+
+	clearProbeResults(): void {
+		this.#contextVersion++;
 		this.isTesting = false;
 		this.isFetchingModels = false;
-		this.apiKey = '';
+		this.testMessage = null;
+		this.error = null;
 	}
 
 	#isCurrent(catalog: DialogOptions['modelCatalog'], version: number): boolean {

@@ -230,7 +230,7 @@
 		onShowPreambles={() => {}}
 		onShowSnippets={() => {}}
 		onShowSettings={() => {}}
-		onShowExecutionNodes={() => {}}
+		onShowAppSettings={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 {/if}

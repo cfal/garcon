@@ -1,5 +1,4 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import AgentCard from './AgentCard.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
@@ -31,10 +30,6 @@
 </script>
 
 <section class="space-y-4">
-	<p class="text-sm text-muted-foreground">
-		{m.settings_other_agents_description()}
-	</p>
-
 	<div class="space-y-3">
 		{#each agents as agent (agent.id)}
 			<AgentCard

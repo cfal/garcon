@@ -7,7 +7,6 @@
 	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
 	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
 	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
-	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
 	import AgentCommandsSettingsCard from './AgentCommandsSettingsCard.svelte';
 	import HiddenBashCommandsSettingsCard from './HiddenBashCommandsSettingsCard.svelte';
@@ -33,8 +32,6 @@
 </script>
 
 <div class="space-y-3">
-	<GitHubCliSettingsCard />
-
 	{#if !remoteSettings.hasSnapshot}
 		<div class="py-12 flex items-center justify-center text-muted-foreground">
 			{m.status_loading()}
@@ -51,7 +48,7 @@
 		{/if}
 
 		<div class="bg-muted/50 border border-border rounded-lg px-4 py-2">
-			<div class="flex items-center justify-between gap-4">
+			<div class="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
 				<div class="min-w-0">
 					<label class="text-sm font-medium text-foreground" for="remote-pinned-insert-position">
 						{m.sidebar_chats_pinned_insert_position()}

@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
 	appShell: {
 		openNewChatDialog: vi.fn(),
 		openSettings: vi.fn(),
+		openAppSettings: vi.fn(),
 	},
 	notifications: {
 		error: vi.fn(),
@@ -68,7 +69,7 @@ const terminals: Pick<
 };
 const appShell: Pick<
 	WorkbenchCommandRegistryDeps['appShell'],
-	'openNewChatDialog' | 'openSettings'
+	'openNewChatDialog' | 'openSettings' | 'openAppSettings'
 > = mocks.appShell;
 const files: Pick<WorkbenchCommandRegistryDeps['files'], 'navigation' | 'open'> = {
 	navigation: null,
@@ -109,6 +110,13 @@ afterEach(() => {
 });
 
 describe('CommandMenu', () => {
+	it('routes app and server settings to their separate dialogs', async () => {
+		await commandRegistry.execute('open-app-settings');
+		expect(mocks.appShell.openAppSettings).toHaveBeenCalledOnce();
+		expect(mocks.appShell.openSettings).not.toHaveBeenCalled();
+		await commandRegistry.execute('open-settings');
+		expect(mocks.appShell.openSettings).toHaveBeenCalledOnce();
+	});
 	it('uses the same creation entry point when host discovery changes command presentation', async () => {
 		const { component } = render(CommandMenu);
 		component.toggle();

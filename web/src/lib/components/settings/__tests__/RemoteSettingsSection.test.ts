@@ -12,7 +12,6 @@ import {
 import { ApiError } from '$lib/api/client.js';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
-import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
 import {
@@ -41,7 +40,6 @@ vi.mock('$lib/api/settings.js', () => ({
 describe('RemoteSettingsSection', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		setTestGhCapability(makeTestGhCapability());
 	});
 
 	it('enables transcript search through the remote feature patch', async () => {
@@ -624,66 +622,21 @@ describe('RemoteSettingsSection', () => {
 		).toBeTruthy();
 	});
 
-	it('renders GitHub CLI status above pinned chats settings', async () => {
+	it('renders pinned chats settings without GitHub status', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
-		setTestGhCapability(makeTestGhCapability());
 
 		render(RemoteSettingsSectionTestHost);
 
-		const githubCliTitle = screen.getByText('GitHub CLI');
-		const pinnedChatsSetting = screen.getByText('Pinned chats are added to');
+		expect(screen.queryByText('GitHub CLI')).toBeNull();
 		const pinnedChatsSelect = screen.getByRole('combobox', { name: 'Pinned chats are added to' });
-		expect(
-			githubCliTitle.compareDocumentPosition(pinnedChatsSetting) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
 		expect(
 			screen.getByText(/recent-activity sorting also places the newest pinned chats/),
 		).toBeTruthy();
 		expect(pinnedChatsSelect.getAttribute('aria-describedby')).toBe(
 			'remote-pinned-insert-position-hint',
 		);
-	});
-
-	it('renders GitHub CLI guidance even while remote settings are loading', async () => {
-		const refresh = vi.fn(() => Promise.resolve());
-		setTestRemoteSettingsStore(new RemoteSettingsStore());
-		setTestGhCapability(
-			makeTestGhCapability({
-				available: false,
-				authenticated: false,
-				reason: 'unauthenticated',
-				login: null,
-				host: null,
-				hasChecked: true,
-				refresh,
-			}),
-		);
-
-		render(RemoteSettingsSectionTestHost);
-
-		expect(screen.getByText('GitHub CLI')).toBeTruthy();
-		expect(screen.getByText('On the selected execution node, run:')).toBeTruthy();
-		expect(screen.getByText('gh auth login')).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name: 'Refresh GitHub CLI status' }));
-		expect(refresh).toHaveBeenCalled();
-	});
-
-	it('renders connected GitHub CLI status from the shared capability store', async () => {
-		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeRemoteSettingsSnapshot());
-		setTestRemoteSettingsStore(store);
-		setTestGhCapability(makeTestGhCapability());
-
-		render(RemoteSettingsSectionTestHost);
-
-		expect(screen.getByText('Connected as octocat@github.com')).toBeTruthy();
-		expect(
-			screen.getByText(
-				'Pull Requests is available through the GitHub CLI (gh) on the selected execution node.',
-			),
-		).toBeTruthy();
 	});
 
 	it('saves a custom app title from remote settings', async () => {

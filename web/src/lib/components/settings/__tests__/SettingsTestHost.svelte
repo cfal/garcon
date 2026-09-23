@@ -1,10 +1,15 @@
 <script lang="ts">
 	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
 	import Settings from '../Settings.svelte';
+	import AppSettings from '../AppSettings.svelte';
+	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
+	import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
+	import { makeTestGhCapability } from './gh-capability-test-context';
 	import {
 		setAppShell,
 		setApiProviders,
+		setExecutionNodes,
 		setFileSessions,
 		setGhCapability,
 		setLocalSettings,
@@ -29,6 +34,9 @@
 		onLocalSet?: (key: string, value: unknown) => void;
 		onLocalToggle?: (key: string) => void;
 		onClearRecovery?: FileSessionRegistry['clearRecovery'];
+		nodes?: readonly ExecutionNodeSnapshot[];
+		nodeStore?: ExecutionNodesStore;
+		ghCapability?: GhCapabilityContext;
 	}
 
 	let {
@@ -37,7 +45,14 @@
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
 		onClearRecovery = async () => true,
+		nodes,
+		nodeStore,
+		ghCapability = { forNode: () => makeTestGhCapability() },
 	}: SettingsTestHostProps = $props();
+	untrack(() => {
+		if (nodeStore) setExecutionNodes(nodeStore);
+		else setExecutionNodesTestContext(nodes);
+	});
 	class SettingsLocalStore extends LocalSettingsStore {
 		#notifySet: (key: string, value: unknown) => void;
 		#notifyToggle: (key: string) => void;
@@ -181,20 +196,7 @@
 		},
 	};
 
-	setGhCapability({
-		forNode: () => ({
-			available: true,
-			authenticated: true,
-			reason: 'authenticated',
-			login: 'octocat',
-			host: 'github.com',
-			isLoading: false,
-			hasChecked: true,
-			lastError: null,
-			ensureChecked: async () => {},
-			refresh: async () => {},
-		}),
-	});
+	setGhCapability(untrack(() => ghCapability));
 
 	setAppShell(untrack(() => appShell));
 	setApiProviders(new ApiProvidersStore(() => {}, {
@@ -270,4 +272,5 @@
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<Settings />
+{#if appShell.showSettings}<Settings />{/if}
+{#if appShell.showAppSettings}<AppSettings />{/if}

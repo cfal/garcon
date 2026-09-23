@@ -34,9 +34,8 @@ describe("theme switching", () => {
         () => document.documentElement.dataset.theme === "phosphor-light",
       );
       await page.getByRole("button", { name: "More actions" }).click();
-      await page.getByRole("menuitem", { name: "Settings" }).click();
-      await page.getByRole("dialog", { name: "Settings" }).waitFor();
-      await page.getByRole("tab", { name: "Local Settings" }).click();
+      await page.getByRole("menuitem", { name: "App Settings" }).click();
+      await page.getByRole("dialog", { name: "App Settings" }).waitFor();
 
       markPhase("selecting a fixed dark profile");
       await page.getByRole("radio", { name: "Use one theme" }).click();

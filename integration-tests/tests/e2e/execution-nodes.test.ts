@@ -35,8 +35,8 @@ async function selectConnectionDirection(fixture: E2eFixture): Promise<void> {
 
 async function openNodes(app: SpaDriver): Promise<void> {
   await app.clickButton('More actions');
-  await app.waitForMenuItemEnabled('Execution Nodes');
-  await app.clickMenuItem('Execution Nodes');
+  await app.waitForMenuItemEnabled('Server Settings');
+  await app.clickMenuItem('Server Settings');
   await app.waitForButtonEnabled('Add Node');
 }
 
@@ -189,9 +189,9 @@ test('normal app onboarding supports both directions and sends remote chat input
       expect((await fixture.integration.client.getMessages(chatId)).transcriptViewId).not.toBe(beforeReload.transcriptViewId);
 
       await app.clickButton('More actions');
-      await app.clickMenuItem('Settings');
-      await app.waitForButton('Remote Settings');
-      await app.clickButton('Remote Settings');
+      await app.clickMenuItem('Server Settings');
+      await app.waitForButton('General');
+      await app.clickButton('General');
       await fixture.page.evaluate(() => {
         const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((entry) => entry.getAttribute('aria-label')?.includes(' / '));
         if (!button) throw new Error('Generation model selector is unavailable');

@@ -71,30 +71,28 @@ test('execution-node Git labels and GitHub host controls fit desktop and mobile'
     await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Remote Settings', exact: true }).click();
-    const host = page.getByRole('combobox', { name: 'Execution node', exact: true });
+    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
     const checked = page.waitForResponse(response => response.url().includes(`/api/v1/gh/status?nodeId=${client.nodeId}`));
-    await host.selectOption(client.nodeId);
+    await page.getByRole('tab', { name: 'Github', exact: true }).click();
+    const host = page.getByRole('region', { name: label, exact: true });
     const status = await checked;
     expect(status.status()).toBe(200);
     expect(await status.json()).toMatchObject({ nodeId: client.nodeId, instanceId: expect.any(String) });
-    await page.waitForFunction(() => {
-      const section = document.querySelector('select[aria-label="Execution node"]')?.closest('section');
+    await page.waitForFunction((name) => {
+      const section = document.querySelector(`section[aria-label="${name}"]`);
       return section && !section.textContent?.includes('Checking');
-    });
-    expect(await host.locator('xpath=ancestor::section').textContent()).not.toContain('GitHub CLI status check failed');
+    }, label);
+    expect(await host.textContent()).not.toContain('GitHub CLI status check failed');
     for (const width of [1440, 390]) {
       phase(`GitHub host controls at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
       await host.scrollIntoViewIfNeeded();
       const geometry = await host.evaluate(element => {
-        const section = element.closest('section')!;
-        const bounds = section.getBoundingClientRect();
-        const controls = [...section.querySelectorAll<HTMLElement>('button, select')].map(control => control.getBoundingClientRect());
+        const bounds = element.getBoundingClientRect();
+        const controls = [...element.querySelectorAll<HTMLElement>('button')].map(control => control.getBoundingClientRect());
         return {
           contained: controls.every(control => control.left >= bounds.left && control.right <= bounds.right),
-          fits: section.scrollWidth <= section.clientWidth,
+          fits: element.scrollWidth <= element.clientWidth,
         };
       });
       expect(geometry).toEqual({ contained: true, fits: true });

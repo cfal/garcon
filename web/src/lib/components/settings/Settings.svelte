@@ -1,36 +1,36 @@
-<!-- Renders the settings dialog as tabbed, scrollable sections. -->
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell, getModelCatalog, getRemoteSettings, getExecutionNodes } from '$lib/context';
-	import { untrack } from 'svelte';
+	import { getAppShell, getRemoteSettings, getExecutionNodes } from '$lib/context';
+	import Network from '@lucide/svelte/icons/network';
+	import KeyRound from '@lucide/svelte/icons/key-round';
+	import Bot from '@lucide/svelte/icons/bot';
+	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import ApiProvidersSection from './ApiProvidersSection.svelte';
-	import OtherAgentsSection from './OtherAgentsSection.svelte';
-	import LocalSettingsSection from './LocalSettingsSection.svelte';
+	import NodeAgentSettings from './NodeAgentSettings.svelte';
+	import SettingsNodeSections from './SettingsNodeSections.svelte';
+	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 	import RemoteSettingsSection from './RemoteSettingsSection.svelte';
-	import KeyboardShortcutsSection from './KeyboardShortcutsSection.svelte';
-	import { SettingsAuthState } from './settings-auth-state.svelte.js';
+	import ExecutionNodesSection from '../execution-nodes/ExecutionNodesSection.svelte';
 
 	const appShell = getAppShell();
 	const remoteSettings = getRemoteSettings();
-	const modelCatalog = getModelCatalog();
 	const executionNodes = getExecutionNodes();
-	let nodeId = $state('local');
-	const settingsAuth = $derived(new SettingsAuthState(modelCatalog.forNode(nodeId), nodeId));
 	let scrollContainer = $state<HTMLDivElement | null>(null);
+	const tabs = $derived([
+		{ value: 'execution-nodes', label: m.settings_tab_execution_nodes(), icon: Network },
+		{ value: 'providers', label: m.settings_tab_providers(), icon: KeyRound },
+		{ value: 'other-agents', label: m.settings_tab_other_agents(), icon: Bot },
+		{ value: 'github', label: m.settings_tab_github(), icon: GitPullRequest },
+		{ value: 'general', label: m.settings_tab_general(), icon: SlidersHorizontal },
+	]);
 
 	$effect(() => {
 		if (!appShell.showSettings) return;
 		void remoteSettings.refreshInBackground();
 		void executionNodes.refresh();
-	});
-
-	$effect(() => {
-		if (!appShell.showSettings || !['providers', 'other-agents'].includes(appShell.settingsTab)) return;
-		const auth = settingsAuth;
-		if (!executionNodes.isReady(nodeId)) return;
-		return untrack(() => auth.initialize());
 	});
 
 	function handleOpenChange(open: boolean) {
@@ -45,13 +45,9 @@
 	}
 </script>
 
-{#snippet tabDescription(description: string)}
-	<p class="text-sm text-muted-foreground">{description}</p>
-{/snippet}
-
 <Dialog.Root open={appShell.showSettings} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="sm:max-w-3xl h-[80vh] max-h-[44rem] flex flex-col gap-0 p-0 overflow-hidden"
+		class="safe-viewport-dialog h-[85dvh] max-h-[50rem] max-w-[calc(100%-1rem)] sm:max-w-5xl flex flex-col gap-0 p-0 overflow-hidden"
 		showCloseButton={true}
 	>
 		<Dialog.Header class="px-6 py-3 border-b border-border">
@@ -62,65 +58,67 @@
 		<Tabs.Root
 			value={appShell.settingsTab}
 			onValueChange={handleTabChange}
-			class="min-h-0 flex-1 gap-0"
+			orientation="vertical"
+			class="min-h-0 flex-1 flex-row gap-0"
 		>
-			<div class="border-b border-border px-4 py-3 sm:px-6">
-				<Tabs.List class="grid h-auto w-full grid-cols-2 sm:grid-cols-5">
-					<Tabs.Trigger value="providers" class="h-8 px-2">
-						{m.settings_tab_providers()}
+			<Tabs.List
+				aria-label={m.settings_title()}
+				class="h-full w-14 shrink-0 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none border-r border-border bg-muted/30 p-1.5 sm:w-48 sm:p-3"
+			>
+				{#each tabs as tab (tab.value)}
+					<Tabs.Trigger
+						value={tab.value}
+						aria-label={tab.label}
+						title={tab.label}
+						class="h-auto min-h-10 flex-none px-2 py-2 sm:justify-start sm:gap-2 sm:whitespace-normal sm:text-left"
+					>
+						<tab.icon class="size-4" />
+						<span class="hidden sm:inline">{tab.label}</span>
 					</Tabs.Trigger>
-					<Tabs.Trigger value="other-agents" class="h-8 px-2">
-						{m.settings_tab_other_agents()}
-					</Tabs.Trigger>
-					<Tabs.Trigger value="remote" class="h-8 px-2">
-						{m.settings_tab_remote_settings()}
-					</Tabs.Trigger>
-					<Tabs.Trigger value="local" class="h-8 px-2">
-						{m.settings_tab_local_settings()}
-					</Tabs.Trigger>
-					<Tabs.Trigger value="shortcuts" class="h-8 px-2">
-						{m.settings_tab_shortcuts()}
-					</Tabs.Trigger>
-				</Tabs.List>
-				{#if appShell.settingsTab === 'providers' || appShell.settingsTab === 'other-agents'}
-					<label class="mt-3 flex items-center gap-3 text-sm">
-						<span class="shrink-0">Execution node</span>
-						<select bind:value={nodeId} class="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-base sm:pointer-fine:text-sm">
-							{#each executionNodes.nodes as node (node.id)}
-								<option value={node.id}>{node.label}{node.availability === 'ready' ? '' : ' (Unavailable)'}</option>
-							{/each}
-						</select>
-					</label>
-				{/if}
-			</div>
+				{/each}
+			</Tabs.List>
 
-			<div class="flex-1 min-h-0 overflow-y-auto px-6 py-6" bind:this={scrollContainer}>
-				<Tabs.Content value="providers" class="mt-0 space-y-6">
-					{@render tabDescription(m.settings_providers_description())}
-					<ApiProvidersSection {settingsAuth} {nodeId} />
-				</Tabs.Content>
-
-				<Tabs.Content value="other-agents" class="mt-0 space-y-6">
-					{#if executionNodes.isReady(nodeId)}
-						<OtherAgentsSection {settingsAuth} />
-					{:else}
-						<p class="text-sm text-muted-foreground">{executionNodes.label(nodeId)} is unavailable.</p>
+			<div class="min-w-0 flex-1 min-h-0 overflow-y-auto p-3 sm:p-6" bind:this={scrollContainer}>
+				<Tabs.Content value="execution-nodes" class="mt-0 space-y-6">
+					{#if appShell.settingsTab === 'execution-nodes'}
+						<h2 class="text-base font-semibold">{m.settings_tab_execution_nodes()}</h2>
+						<ExecutionNodesSection />
 					{/if}
 				</Tabs.Content>
 
-				<Tabs.Content value="remote" class="mt-0 space-y-6">
-					{@render tabDescription(m.settings_scope_remote_description())}
-					<RemoteSettingsSection />
+				<Tabs.Content value="providers" class="mt-0 space-y-6">
+					{#if appShell.settingsTab === 'providers'}
+						<ApiProvidersSection />
+					{/if}
 				</Tabs.Content>
 
-				<Tabs.Content value="local" class="mt-0 space-y-6">
-					{@render tabDescription(m.settings_scope_local_description())}
-					<LocalSettingsSection />
+				<Tabs.Content value="other-agents" class="mt-0 space-y-6">
+					{#if appShell.settingsTab === 'other-agents'}
+						<h2 class="text-base font-semibold">{m.settings_tab_other_agents()}</h2>
+						<p class="text-sm text-muted-foreground">{m.settings_other_agents_description()}</p>
+						<SettingsNodeSections>
+							{#snippet children(nodeId)}<NodeAgentSettings
+									{nodeId}
+									section="other-agents"
+								/>{/snippet}
+						</SettingsNodeSections>
+					{/if}
 				</Tabs.Content>
 
-				<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
-					{@render tabDescription(m.settings_shortcuts_description())}
-					<KeyboardShortcutsSection />
+				<Tabs.Content value="github" class="mt-0 space-y-6">
+					{#if appShell.settingsTab === 'github'}
+						<h2 class="text-base font-semibold">{m.settings_tab_github()}</h2>
+						<SettingsNodeSections>
+							{#snippet children(nodeId)}<GitHubCliSettingsCard {nodeId} />{/snippet}
+						</SettingsNodeSections>
+					{/if}
+				</Tabs.Content>
+
+				<Tabs.Content value="general" class="mt-0 space-y-6">
+					{#if appShell.settingsTab === 'general'}
+						<h2 class="text-base font-semibold">{m.settings_tab_general()}</h2>
+						<RemoteSettingsSection />
+					{/if}
 				</Tabs.Content>
 			</div>
 		</Tabs.Root>

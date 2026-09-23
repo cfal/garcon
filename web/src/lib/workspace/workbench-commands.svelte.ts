@@ -214,6 +214,13 @@ export class WorkbenchCommandRegistry {
 				isEnabled: always,
 				run: () => this.deps.appShell.openSettings(),
 			},
+			{
+				id: 'open-app-settings',
+				label: m.command_open_app_settings(),
+				category: 'Navigation',
+				isEnabled: always,
+				run: () => this.deps.appShell.openAppSettings(),
+			},
 			...this.#workspaceCommands(always),
 			{
 				id: 'file.save',

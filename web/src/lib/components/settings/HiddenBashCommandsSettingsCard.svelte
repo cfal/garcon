@@ -134,7 +134,7 @@
 </script>
 
 <div class="border border-border bg-muted/50 rounded-lg px-4 py-3 space-y-3">
-	<div class="flex items-center justify-between gap-3">
+	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div class="text-sm font-medium text-foreground">{m.settings_hidden_bash_commands_title()}</div>
 		<DropdownMenu>
 			<DropdownMenuTrigger
@@ -189,10 +189,10 @@
 	{/if}
 
 	<form class="flex flex-col gap-1" onsubmit={addPattern}>
-		<div class="flex items-center gap-2">
+		<div class="flex flex-wrap items-center gap-2">
 			<input
 				type="text"
-				class="min-w-0 flex-1 rounded-md border border-border bg-muted px-2 py-1 font-mono text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+				class="min-w-32 flex-1 rounded-md border border-border bg-muted px-2 py-1 font-mono text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				aria-label={m.settings_hidden_bash_commands_pattern_label()}
 				autocapitalize="off"
 				autocomplete="off"

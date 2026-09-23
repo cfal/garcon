@@ -16,7 +16,7 @@
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
-	import Network from '@lucide/svelte/icons/network';
+	import Server from '@lucide/svelte/icons/server';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import Braces from '@lucide/svelte/icons/braces';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -60,7 +60,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowSettings: () => void;
-		onShowExecutionNodes: () => void;
+		onShowAppSettings: () => void;
 	}
 
 	let {
@@ -89,7 +89,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowSettings,
-		onShowExecutionNodes,
+		onShowAppSettings,
 	}: SidebarControlsRowProps = $props();
 
 	let buttonLabel = $derived(m.sidebar_chats_new_chat());
@@ -276,13 +276,13 @@
 					<Braces class="h-3.5 w-3.5" />
 					{m.snippets_title()}
 				</DropdownMenuItem>
-				<DropdownMenuItem onclick={onShowSettings}>
+				<DropdownMenuItem onclick={onShowAppSettings}>
 					<Settings class="h-3.5 w-3.5" />
-					{m.sidebar_actions_settings()}
+					{m.app_settings_title()}
 				</DropdownMenuItem>
-				<DropdownMenuItem onclick={onShowExecutionNodes}>
-					<Network class="h-3.5 w-3.5" />
-					Execution Nodes
+				<DropdownMenuItem onclick={onShowSettings}>
+					<Server class="h-3.5 w-3.5" />
+					{m.settings_title()}
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
