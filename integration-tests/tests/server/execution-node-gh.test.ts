@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { chmod, copyFile, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { GhStatusResponse, PullRequestDetail, PullRequestListResult } from '../../../common/gh.js';
+import type { ExecutionGhResults } from '../../../common/git-execution.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 
@@ -12,19 +12,25 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const project = fixture.executionDirs.project;
       await initializeFixtureRepository(project);
       const query = new URLSearchParams({ nodeId, project });
-      expect(await fixture.client.get<GhStatusResponse>(`/api/v1/gh/status?nodeId=${nodeId}`)).toMatchObject({ available: true, login: 'synthetic-worker' });
-      const list = await fixture.client.get<PullRequestListResult>(`/api/v1/gh/pull-requests?${query}`);
+      const status = await fixture.client.get<ExecutionGhResults['getStatus']>(`/api/v1/gh/status?nodeId=${nodeId}`);
+      expect(status).toMatchObject({ nodeId, available: true, login: 'synthetic-worker' });
+      expect(status.instanceId).toBeString();
+      expect(status.instanceId.length).toBeGreaterThan(0);
+      const scope = { nodeId, instanceId: status.instanceId };
+      const list = await fixture.client.get<ExecutionGhResults['listPullRequests']>(`/api/v1/gh/pull-requests?${query}`);
+      expect(list).toMatchObject(scope);
       expect(list.repo?.nameWithOwner).toBe('synthetic-worker/repository');
-      const detail = await fixture.client.get<PullRequestDetail>(`/api/v1/gh/pull-request?${query}&number=1`);
+      const detail = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
+      expect(detail).toMatchObject(scope);
       expect(detail.body.length).toBe(17 * 1024 * 1024);
       expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
       expect(detail.threads).toEqual([]);
       if (nodeId !== 'local') {
-        expect(await fixture.client.get<GhStatusResponse>('/api/v1/gh/status?nodeId=local')).toMatchObject({ available: false });
+        expect(await fixture.client.get('/api/v1/gh/status?nodeId=local')).toMatchObject({ nodeId: 'local', instanceId: expect.any(String), available: false });
         await expect(fixture.client.get(`/api/v1/gh/pull-requests?${new URLSearchParams({ nodeId, project: fixture.dirs.project })}`)).rejects.toMatchObject({ status: 403 });
       }
       await rm(join(fixture.dirs.root, 'gh-bin', 'gh'));
-      expect(await fixture.client.get<GhStatusResponse>(`/api/v1/gh/status?nodeId=${nodeId}`)).toMatchObject({ available: false, reason: 'gh_missing' });
+      expect(await fixture.client.get(`/api/v1/gh/status?nodeId=${nodeId}`)).toMatchObject({ ...scope, available: false, reason: 'gh_missing' });
     }, {
       executionBackend, projectRoots: 'separate',
       resolveServerEnvironment: dirs => ({ PATH: join(dirs.root, 'gh-bin') }),

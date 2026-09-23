@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import path from 'node:path';
@@ -20,9 +20,11 @@ for (const dialer of ['controller', 'worker'] as const) {
       await fs.writeFile(path.join(fixture.root, 'gh-fixture.json'), JSON.stringify(config));
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify(config));
       const gh = await fixture.node.getGhService();
-      expect(await gh.getStatus()).toMatchObject({ available: true, login: config.label, host: 'git.example.invalid' });
-      expect((await gh.listPullRequests({ projectPath: fixture.projectPath })).repo?.nameWithOwner).toBe(`${config.label}/repository`);
+      const { nodeId, instanceId } = await fixture.node.getInfo();
+      expect(await gh.getStatus()).toMatchObject({ nodeId, instanceId, available: true, login: config.label, host: 'git.example.invalid' });
+      expect(await gh.listPullRequests({ projectPath: fixture.projectPath })).toMatchObject({ nodeId, instanceId, repo: { nameWithOwner: `${config.label}/repository` } });
       const detail = await gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 });
+      expect(detail).toMatchObject({ nodeId, instanceId });
       expect(detail.body.length).toBe(config.bodyBytes);
       expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
       expect(detail.threads).toEqual([]);
@@ -32,6 +34,27 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { process.env.PATH = originalPath; await fixture.dispose(); }
   }, 30_000);
 }
+
+test('GitHub rejects missing or mismatched payload scope even inside a valid RPC envelope', async () => {
+  const fixture = await gitRpcFixture();
+  const local = await fixture.local.getGhService();
+  const gh = await fixture.node.getGhService();
+  const { nodeId, instanceId } = await fixture.node.getInfo();
+  const status = spyOn(local, 'getStatus');
+  try {
+    for (const field of ['nodeId', 'instanceId'] as const) {
+      for (const missing of [false, true]) {
+        status.mockImplementation(async () => {
+          const payload = { nodeId, instanceId, available: false, authenticated: false, reason: 'gh_missing' as const };
+          if (missing) Reflect.deleteProperty(payload, field);
+          else payload[field] = 'wrong';
+          return payload;
+        });
+        await expect(gh.getStatus()).rejects.toMatchObject({ code: 'GIT_INVALID_RESULT' });
+      }
+    }
+  } finally { status.mockRestore(); await fixture.dispose(); }
+});
 
 test('cancelled GitHub status is not published as unauthenticated', async () => {
   const fixture = await gitRpcFixture();

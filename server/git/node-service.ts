@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import type { ExecutionGitService, ExecutionGhService, NodeCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod, GitRequests, GitResults } from '../../common/git.js';
-import { GIT_MAX_CONCURRENT_QUERIES, GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type GitNodeScope } from '../../common/git-execution.js';
+import { GIT_MAX_CONCURRENT_QUERIES, GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitNodeScope } from '../../common/git-execution.js';
 import { GitServiceError } from '../../common/git-error.js';
 import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
@@ -123,10 +123,10 @@ export class LocalGitRuntime {
     } catch (error) { throw gitServiceError(error); }
   }
 
-  async #ghCall<K extends keyof ExecutionGhService>(method: K, request: { projectPath?: string; number?: number }, options?: NodeCallOptions): Promise<Awaited<ReturnType<ExecutionGhService[K]>>> {
+  async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: NodeCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
     try {
-      const result = await this.#admit(false, options, async (callOptions) => {
+      const payload = await this.#admit(false, options, async (callOptions) => {
         if (method === 'getStatus') return this.#gh.getStatus(callOptions.signal);
         if (typeof request.projectPath !== 'string' || !request.projectPath || request.projectPath.length > 4096 || request.projectPath.includes('\0')) throw new GitServiceError('GIT_INVALID_INPUT', 'Invalid GitHub project');
         const projectPath = await this.#repository(request.projectPath, callOptions);
@@ -134,8 +134,9 @@ export class LocalGitRuntime {
         if (method === 'listPullRequests') return this.#gh.listPullRequests({ projectPath, signal: callOptions.signal });
         if (!Number.isSafeInteger(request.number) || request.number! <= 0) throw new GitServiceError('GIT_INVALID_INPUT', 'Invalid pull request number');
         return this.#gh.getPullRequest({ projectPath, number: request.number!, signal: callOptions.signal });
-      }) as Awaited<ReturnType<ExecutionGhService[K]>>;
-      validateGhResult(method, result);
+      });
+      const result = { ...payload, nodeId: this.configuration.nodeId, instanceId: this.configuration.instanceId };
+      validateGhResult(method, result, this.configuration);
       if (Buffer.byteLength(JSON.stringify(result)) > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'GitHub query result exceeds the transfer limit');
       return result;
     } catch (error) { throw gitServiceError(error, 'gh'); }

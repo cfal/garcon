@@ -5,6 +5,8 @@ function makeService(overrides = {}) {
   return {
     getStatus: mock(() =>
       Promise.resolve({
+        nodeId: 'local',
+        instanceId: 'test-instance',
         available: true,
         authenticated: true,
         reason: 'authenticated',
@@ -36,6 +38,7 @@ describe('GET /api/v1/gh/status', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({
       nodeId: 'local',
+      instanceId: 'test-instance',
       available: true,
       authenticated: true,
       reason: 'authenticated',
@@ -43,6 +46,16 @@ describe('GET /api/v1/gh/status', () => {
       login: 'octocat',
     });
     expect(service.getStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects missing or mismatched scope instead of relabeling a service response', async () => {
+    for (const scope of [{}, { nodeId: 'other-node', instanceId: 'test-instance' }]) {
+      const routes = createGhRoutes(async () => makeService({ getStatus: async () => scope }));
+      const url = new URL('http://localhost/api/v1/gh/status');
+      const response = await routes['/api/v1/gh/status'].GET(new Request(url), url);
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({ errorCode: 'GIT_INVALID_RESULT' });
+    }
   });
 
   it('maps unexpected service failures without leaking untyped details', async () => {

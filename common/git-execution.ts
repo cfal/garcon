@@ -1,5 +1,6 @@
 import type { GitRequests, GitResults, GitMethod } from './git.js';
 import type { GitOperationDiagnostics } from './git-diagnostics.js';
+import type { GhResults } from './gh.js';
 
 export interface GitNodeScope {
   readonly nodeId: string;
@@ -28,6 +29,7 @@ export interface ExecutionGitRequests extends Omit<GitRequests, 'getReviewDocume
 }
 
 export type ExecutionGitResults = { [K in GitMethod]: GitResults[K] & GitNodeScope & { diagnostics?: GitOperationDiagnostics } };
+export type ExecutionGhResults = { [K in keyof GhResults]: GhResults[K] & GitNodeScope };
 
 export const GIT_MUTATIONS = [
   'initialCommit', 'commit', 'checkout', 'createBranch', 'fetch', 'pull', 'push', 'discard', 'deleteUntracked',

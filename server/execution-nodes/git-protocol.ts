@@ -1,6 +1,5 @@
-import type { ExecutionGitRequests, ExecutionGitResults, GitNodeScope } from '../../common/git-execution.js';
+import type { ExecutionGitRequests, ExecutionGitResults, ExecutionGhResults, GitNodeScope } from '../../common/git-execution.js';
 import type { GitMethod } from '../../common/git.js';
-import type { GhStatusResponse, PullRequestDetail, PullRequestListResult } from '../../common/gh.js';
 import { GitServiceError } from '../../common/git-error.js';
 import { isRecord } from '../../common/json.js';
 import { isGitMethod } from '../../common/git-request-validation.js';
@@ -17,9 +16,9 @@ export interface GitCall<Q> { readonly input: Q; readonly budgetMs: number }
 export type GitRpcMethods = {
   [K in GitMethod as `git.${K}`]: Call<GitCall<ExecutionGitRequests[K]>, GitReply<ExecutionGitResults[K]>>;
 } & {
-  'gh.getStatus': Call<GitCall<Record<string, never>>, GitReply<GhStatusResponse>>;
-  'gh.listPullRequests': Call<GitCall<{ projectPath: string }>, GitReply<PullRequestListResult>>;
-  'gh.getPullRequest': Call<GitCall<{ projectPath: string; number: number }>, GitReply<PullRequestDetail>>;
+  'gh.getStatus': Call<GitCall<Record<string, never>>, GitReply<ExecutionGhResults['getStatus']>>;
+  'gh.listPullRequests': Call<GitCall<{ projectPath: string }>, GitReply<ExecutionGhResults['listPullRequests']>>;
+  'gh.getPullRequest': Call<GitCall<{ projectPath: string; number: number }>, GitReply<ExecutionGhResults['getPullRequest']>>;
   'gitResults.readChunk': Call<{ transfer: GitResultRef; offset: number }, { offset: number; data: string; eof: boolean }>;
   'gitResults.close': Call<GitResultRef, void>;
 };

@@ -26,7 +26,10 @@ export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = G
         const result = method === 'getStatus' ? await service.getStatus(options)
           : method === 'listPullRequests' ? await service.listPullRequests({ projectPath }, options)
             : await service.getPullRequest({ projectPath, number }, options);
-        return Response.json({ ...result, nodeId });
+        if (result.nodeId !== nodeId || typeof result.instanceId !== 'string' || !result.instanceId) {
+          throw new GitServiceError('GIT_INVALID_RESULT', 'Invalid GitHub response scope');
+        }
+        return Response.json(result);
       } catch (error) { return gitRouteFailure(error); }
     };
   }

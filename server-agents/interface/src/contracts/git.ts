@@ -1,6 +1,5 @@
 import type { GitMethod } from '@garcon/common/git';
-import type { ExecutionGitRequests, ExecutionGitResults } from '@garcon/common/git-execution';
-import type { GhStatusResponse, PullRequestListResult, PullRequestDetail } from '@garcon/common/gh';
+import type { ExecutionGitRequests, ExecutionGitResults, ExecutionGhResults } from '@garcon/common/git-execution';
 import type { NodeCallOptions } from './resources.js';
 
 export type ExecutionGitService = {
@@ -8,7 +7,7 @@ export type ExecutionGitService = {
 };
 
 export interface ExecutionGhService {
-  getStatus(options?: NodeCallOptions): Promise<GhStatusResponse>;
-  listPullRequests(request: { projectPath: string }, options?: NodeCallOptions): Promise<PullRequestListResult>;
-  getPullRequest(request: { projectPath: string; number: number }, options?: NodeCallOptions): Promise<PullRequestDetail>;
+  getStatus(options?: NodeCallOptions): Promise<ExecutionGhResults['getStatus']>;
+  listPullRequests(request: { projectPath: string }, options?: NodeCallOptions): Promise<ExecutionGhResults['listPullRequests']>;
+  getPullRequest(request: { projectPath: string; number: number }, options?: NodeCallOptions): Promise<ExecutionGhResults['getPullRequest']>;
 }

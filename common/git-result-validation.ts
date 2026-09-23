@@ -1,6 +1,6 @@
 import { isRecord } from './json.js';
 import { GitServiceError } from './git-error.js';
-import { isGitMutation, type ExecutionGitResults, type GitNodeScope } from './git-execution.js';
+import { isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitNodeScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
 
 type Check = (value: unknown) => boolean;
@@ -104,7 +104,10 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
   }
 }
 
-export function validateGhResult(method: 'getStatus' | 'listPullRequests' | 'getPullRequest', value: unknown): void {
+export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, value: unknown, scope: GitNodeScope): asserts value is ExecutionGhResults[K] {
+  if (!isRecord(value) || value.nodeId !== scope.nodeId || value.instanceId !== scope.instanceId) {
+    throw new GitServiceError('GIT_INVALID_RESULT', `Invalid GitHub ${method} response scope`);
+  }
   const identity = { number: num, title: str, state: oneOf('open', 'closed', 'merged'), isDraft: bool, author: str, headRefName: str, baseRefName: str,
     additions: num, deletions: num, changedFiles: num, updatedAt: str, url: str, reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
   const valid = method === 'getStatus' ? shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) })

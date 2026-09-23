@@ -1,7 +1,6 @@
 import { AgentCallError, type ExecutionGitService, type ExecutionGhService, type NodeCallOptions } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../common/git.js';
-import type { GhResults } from '../../common/gh.js';
-import { GIT_MAX_RESULT_BYTES, GIT_RESULT_CHUNK_BYTES, GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults } from '../../common/git-execution.js';
+import { GIT_MAX_RESULT_BYTES, GIT_RESULT_CHUNK_BYTES, GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults } from '../../common/git-execution.js';
 import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
 import { GitServiceError } from '../../common/git-error.js';
@@ -92,7 +91,7 @@ export class RemoteGitServices {
     }
   }
 
-  async #ghCall<K extends keyof GhResults>(method: K, request: { projectPath?: string; number?: number }, options?: NodeCallOptions): Promise<GhResults[K]> {
+  async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: NodeCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
     const backing = this.backing();
     if (!backing.info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this node', 'OPERATION_UNSUPPORTED');
@@ -103,8 +102,8 @@ export class RemoteGitServices {
       else if (method === 'listPullRequests') reply = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, callOptions);
       else reply = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, callOptions);
       const result = await receiveResult(backing, reply, callOptions);
-      validateGhResult(method, result);
-      return result as GhResults[K];
+      validateGhResult(method, result, backing.info);
+      return result;
     });
   }
 }
