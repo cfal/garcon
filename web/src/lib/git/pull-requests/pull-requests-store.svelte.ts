@@ -252,7 +252,6 @@ export class PullRequestsStore implements PortableSingletonController {
 			const detail = await getPullRequest(project, number, { signal: controller.signal });
 			if (controller.signal.aborted || generation !== this.#detailGeneration) return;
 			this.detail = detail;
-			this.#detailNeedsRefresh = false;
 		} catch (error) {
 			if (controller.signal.aborted) return;
 			if (generation !== this.#detailGeneration) return;
@@ -261,6 +260,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.#deps.notifyError?.(message);
 		} finally {
 			if (generation === this.#detailGeneration) {
+				if (!controller.signal.aborted) this.#detailNeedsRefresh = false;
 				this.isDetailLoading = false;
 				if (this.#detailController === controller) this.#detailController = null;
 			}
@@ -325,7 +325,8 @@ export class PullRequestsStore implements PortableSingletonController {
 		if (!this.#listController && (!this.hasLoaded || this.#needsRefresh)) void this.refresh();
 		if (
 			this.selectedNumber !== null &&
-			(this.detail?.number !== this.selectedNumber || this.#detailNeedsRefresh) &&
+			(this.#detailNeedsRefresh ||
+				(this.detail?.number !== this.selectedNumber && !this.detailError)) &&
 			!this.isDetailLoading
 		) {
 			void this.loadDetail(this.selectedNumber);

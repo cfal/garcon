@@ -110,6 +110,55 @@ describe('PullRequestsStore', () => {
 		expect(store.hasLoaded).toBe(true);
 	});
 
+	it.each([false, true])(
+		'requires explicit retry after detail failure (cached: %s)',
+		async (cached) => {
+			getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
+			const blocked = deferred<PullRequestDetail>();
+			if (cached) getPullRequestMock.mockResolvedValueOnce(detail(3));
+			getPullRequestMock.mockRejectedValueOnce(new Error('Detail unavailable'));
+			getPullRequestMock.mockReturnValue(blocked.promise);
+			const notifyError = vi.fn();
+			const store = new PullRequestsStore({ notifyError });
+			store.setCapability('remote', true, true);
+			store.setPresentationVisible(true);
+			const project = {
+				nodeId: 'remote',
+				chatId: 'one',
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				nodeContextKey: 'first',
+			};
+			const binding = bindProject(store, { kind: 'available', project });
+			try {
+				flushSync();
+				await tick();
+				await store.select(3);
+				if (cached)
+					binding.setProject({
+						kind: 'available',
+						project: { ...project, nodeContextKey: 'replacement' },
+					});
+				flushSync();
+				await tick();
+				flushSync();
+				await tick();
+				expect(getPullRequestMock).toHaveBeenCalledTimes(cached ? 2 : 1);
+				expect(store.isDetailLoading).toBe(false);
+				expect(store.detailError).toBe('Detail unavailable');
+				expect(store.detail?.number ?? null).toBe(cached ? 3 : null);
+				expect(notifyError).toHaveBeenCalledExactlyOnceWith('Detail unavailable');
+				getPullRequestMock.mockResolvedValue(detail(3));
+				await store.loadDetail(3);
+				expect(store.detailError).toBeNull();
+				expect(store.detail?.number).toBe(3);
+			} finally {
+				binding.dispose();
+				store.dispose();
+			}
+		},
+	);
+
 	it('records a load error on failure', async () => {
 		getPullRequestsMock.mockRejectedValue(new Error('boom'));
 		const store = createVisibleStore();
