@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from 'bun:test';
+import { afterEach, expect, test, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -6,7 +6,9 @@ import { runGit } from '../run.js';
 import * as runner from '../run.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from '../types.js';
-import { nodeRuntimeFixture, untrackedReview } from './node-runtime-fixture.js';
+import { cleanupNodeRuntimeFixtures, nodeRuntimeFixture, untrackedReview } from './node-runtime-fixture.js';
+
+afterEach(cleanupNodeRuntimeFixtures);
 
 async function scratchIndexes(projectPath: string) {
   return (await fs.readdir(path.join(projectPath, '.git'))).filter(name => name.startsWith('.garcon-index-'));

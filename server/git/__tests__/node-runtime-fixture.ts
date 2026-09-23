@@ -1,4 +1,3 @@
-import { afterEach } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,9 +6,9 @@ import { runGit } from '../run.js';
 import type { GitReviewDocumentRegistry } from '../review-document-registry.js';
 
 const cleanups: Array<() => Promise<unknown>> = [];
-afterEach(async () => {
+export async function cleanupNodeRuntimeFixtures(): Promise<void> {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-});
+}
 
 export async function nodeRuntimeFixture(reviewRegistry?: GitReviewDocumentRegistry) {
   const temporary = path.join(os.homedir(), 'tmp');

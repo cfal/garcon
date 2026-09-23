@@ -40,6 +40,19 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(await client.get(`/api/v1/git/blame?${query}`)).toMatchObject({ lines: [{ content: 'historical bytes' }] });
       await expect(client.post('/api/v1/git/stage-paths', { ...target, paths: ['dir/file.txt'], mode: 'stage' })).rejects.toMatchObject({ status: 403, body: { errorCode: 'GIT_OUTSIDE_BASE' } });
       await expect(client.get(`/api/v1/git/conflict-details?${new URLSearchParams({ ...target, file: 'dir/file.txt' })}`)).rejects.toMatchObject({ status: 403, body: { errorCode: 'GIT_OUTSIDE_BASE' } });
+      for (const destination of [outside, join(outside, 'missing')]) {
+        await rm(join(project, 'dir'));
+        await symlink(destination, join(project, 'dir'));
+        const working = await client.post<ExecutionGitResults['getWorkbenchSnapshot']>('/api/v1/git/workbench/snapshot', { ...target, mode: 'working', context: 2 });
+        if (working.status !== 'ready') throw new Error('Expected working snapshot');
+        const deletion = await client.post<ExecutionGitResults['getReviewDocumentFileBodies']>('/api/v1/git/review-documents/files', {
+          ...target, document: { nodeId: client.nodeId, instanceId: working.instanceId, documentId: working.reviewSummary.documentId },
+          files: ['dir/file.txt'], purpose: 'visible',
+        });
+        if (deletion.status !== 'ready') throw new Error('Expected deletion review');
+        expect(deletion.files['dir/file.txt'].patch).toContain('-historical bytes');
+        expect(deletion.files['dir/file.txt'].patch).not.toContain('outside bytes');
+      }
     }, { executionBackend, projectRoots: 'separate' });
   }, 60_000);
 }

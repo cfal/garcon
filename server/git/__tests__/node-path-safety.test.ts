@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from 'bun:test';
+import { afterEach, expect, test, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runGit } from '../run.js';
@@ -7,7 +7,9 @@ import { captureWorkingPathTokens } from '../working-path-token.js';
 import { summarizeUntrackedFile, createUntrackedSummaryBudget } from '../working-tree-comparison.js';
 import { loadReviewDiffBatches } from '../review-diff-batch.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
-import { nodeRuntimeFixture } from './node-runtime-fixture.js';
+import { cleanupNodeRuntimeFixtures, nodeRuntimeFixture } from './node-runtime-fixture.js';
+
+afterEach(cleanupNodeRuntimeFixtures);
 
 for (const targetKind of ['outside', 'dangling'] as const) {
   test(`whole-file staging and selected commit preserve ${targetKind} leaf symlinks`, async () => {
@@ -50,6 +52,36 @@ for (const replacement of ['leaf', 'parent', 'missing-parent'] as const) {
     expect(history.commits[0].subject).toBe('Historical file');
     const blame = await git.getBlame({ projectPath, file: 'dir/file.txt', ref: 'HEAD', limit: 1 });
     expect(blame.lines[0].content).toBe('historical content');
+  });
+}
+
+for (const replacement of ['outside', 'dangling'] as const) {
+  test(`working review treats descendants of a ${replacement} directory symlink as deleted`, async () => {
+    const { root, projectPath, git } = await nodeRuntimeFixture();
+    await fs.mkdir(path.join(projectPath, 'dir'));
+    await fs.writeFile(path.join(projectPath, 'dir/file.txt'), 'tracked descendant\n');
+    await runGit(projectPath, ['add', '.']);
+    await runGit(projectPath, ['commit', '-m', 'Track directory']);
+    const outside = path.join(root, replacement);
+    if (replacement === 'outside') {
+      await fs.mkdir(outside);
+      await fs.writeFile(path.join(outside, 'file.txt'), 'outside secret\n');
+    }
+    await fs.rm(path.join(projectPath, 'dir'), { recursive: true });
+    await fs.symlink(outside, path.join(projectPath, 'dir'));
+    await fs.writeFile(path.join(projectPath, 'tracked.txt'), 'unrelated change\n');
+    const lstat = spyOn(fs, 'lstat');
+    try {
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 2 });
+      if (snapshot.status !== 'ready') throw new Error('Expected working snapshot');
+      const document = { nodeId: snapshot.nodeId, instanceId: snapshot.instanceId, documentId: snapshot.reviewSummary.documentId };
+      const loaded = await git.getReviewDocumentFileBodies({ projectPath, document, files: ['dir/file.txt', 'tracked.txt'], purpose: 'visible' });
+      if (loaded.status !== 'ready') throw new Error('Expected working bodies');
+      expect(loaded.files['dir/file.txt'].patch).toContain('-tracked descendant');
+      expect(loaded.files['dir/file.txt'].patch).not.toContain('outside secret');
+      expect(loaded.files['tracked.txt'].patch).toContain('+unrelated change');
+      expect(lstat.mock.calls.some(([entry]) => entry === path.join(projectPath, 'dir/file.txt'))).toBe(false);
+    } finally { lstat.mockRestore(); }
   });
 }
 

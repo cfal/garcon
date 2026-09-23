@@ -41,8 +41,13 @@ function statusToken(entry: PorcelainStatusEntry | undefined): string {
 async function worktreeToken(
   projectPath: string,
   filePath: string,
+  entry: PorcelainStatusEntry | undefined,
 ): Promise<Omit<GitWorkingPathToken, 'path' | 'indexEntry' | 'status'>> {
   const resolved = resolvePathWithinProject(projectPath, filePath);
+  // Git reports descendants of replaced directory symlinks as deleted; no filesystem access is needed.
+  if (entry?.workTreeStatus === 'D') {
+    return { worktreeKind: 'missing', worktreeSize: null, worktreeMtimeNs: null, worktreeCtimeNs: null };
+  }
   await assertGitWorkingPath(path.dirname(resolved));
   try {
     const stats = await fs.lstat(resolved, { bigint: true });
@@ -127,7 +132,7 @@ export async function captureWorkingPathTokens(
             worktreeMtimeNs: null,
             worktreeCtimeNs: null,
           }
-        : await worktreeToken(projectPath, path)),
+        : await worktreeToken(projectPath, path, statusByPath.get(path))),
     })),
   );
   return new Map(tokens.map((token) => [token.path, token]));
