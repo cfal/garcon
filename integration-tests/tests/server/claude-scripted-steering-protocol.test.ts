@@ -223,6 +223,7 @@ describe('pinned Claude steering protocol', () => {
     const expandedReview = harness.model.requests()[1]?.lastUserText;
     expect(expandedReview).toContain(bareMarker);
     expect(expandedReview).not.toBe(`/review ${bareMarker}`);
+    expect(expandedReview).not.toBe(claudeContinuationRequestText(`/review ${bareMarker}`));
     expect(expandedReview).not.toContain(STEERING_PREFIX);
     harness.model.assertSettled();
   }, 30_000);
