@@ -82,6 +82,7 @@ test('chat host selectors fit narrow containers and stage complete cancellable h
       const path = dialog.getByLabel('Project Path', { exact: true });
       const pickerRect = (await picker.boundingBox())!;
       const pathRect = (await path.boundingBox())!;
+      expect(pickerRect.height).toBe(pathRect.height);
       expect(width === 390 ? pickerRect.y + pickerRect.height <= pathRect.y : pickerRect.x + pickerRect.width <= pathRect.x).toBe(true);
       expect(await picker.locator('.node-label').evaluate(element => getComputedStyle(element).display)).not.toBe('none');
       await page.screenshot({ path: join(artifacts, `new-chat-host-${width}.png`) });
