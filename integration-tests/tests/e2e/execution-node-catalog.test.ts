@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { openDialogModelSelector, selectExecutionNode } from '../../support/execution-node-ui.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -55,6 +56,54 @@ test('cold remote chats load their catalog before submission and refresh it afte
   }, { executionBackend: 'remote-controller-dials' });
 }, 90_000);
 
+test('editing a remote schedule preserves its saved endpoint across failed discovery and Retry', async () => {
+  await withE2eFixture('execution-node-saved-schedule-catalog', async (fixture) => {
+    const { client, executionDirs, directAgents } = fixture.integration;
+    const provider = directAgents.anthropic.provider;
+    const target = {
+      type: 'new-chat' as const, nodeId: client.nodeId, agentId: 'claude',
+      projectPath: executionDirs.project, model: provider.model,
+      apiProviderId: provider.providerId, modelEndpointId: provider.endpointId, modelProtocol: provider.protocol,
+      permissionMode: 'default' as const, thinkingMode: 'none' as const,
+      agentSettingsById: {}, tags: [], preambleChoice: { mode: 'defaults' as const },
+    };
+    const scheduledAt = new Date(Date.now() + 86_400_000);
+    scheduledAt.setUTCSeconds(0, 0);
+    await client.createScheduledPrompt({ expectedRevision: (await client.getScheduledPrompts()).revision,
+      scheduledPrompt: { prompt: 'Synthetic saved remote schedule', target,
+        schedule: { type: 'once', runAtUtc: scheduledAt.toISOString() } } });
+    await fixture.page.evaluateOnNewDocument((nodeId) => {
+      const originalFetch = globalThis.fetch.bind(globalThis);
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true,
+        value: (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+          if (url.pathname === '/api/v1/models' && url.searchParams.get('nodeId') === nodeId
+            && document.documentElement.dataset.allowRemoteCatalog !== 'true') {
+            return Promise.resolve(new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }));
+          }
+          return originalFetch(input, init);
+        },
+      });
+    }, client.nodeId);
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.open();
+    await fixture.waitForSpaWebSocket();
+    await app.clickButton('More actions');
+    await app.waitForMenuItemEnabled('Scheduled prompts');
+    await app.clickMenuItem('Scheduled prompts');
+    await app.waitForButtonEnabled('Edit prompt');
+    await app.clickButton('Edit prompt');
+    await app.waitForText('Failed to fetch model catalog: 503');
+    await fixture.page.evaluate(() => { document.documentElement.dataset.allowRemoteCatalog = 'true'; });
+    await app.clickButton('Retry', { last: true });
+    await app.waitForButtonEnabled('Save Prompt');
+    await app.clickButton('Save Prompt', { last: true });
+    await fixture.page.waitForFunction(() => document.querySelector('#scheduled-project-path') === null);
+    expect((await client.getScheduledPrompts()).prompts[0]?.target).toMatchObject(target);
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
+
 test('new and scheduled chats retain input and require Retry after cached remote catalog discovery fails', async () => {
   await withE2eFixture('execution-node-draft-catalog', async (fixture) => {
     const { client, dirs } = fixture.integration;
@@ -83,17 +132,8 @@ test('new and scheduled chats retain input and require Retry after cached remote
         await app.clickButton('Add Prompt');
       }
       await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].some((button) => !button.disabled && button.getAttribute('aria-label')?.includes(' / ')));
-      await fixture.page.evaluate(() => {
-        const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((entry) => entry.getAttribute('aria-label')?.includes(' / '));
-        if (!button) throw new Error('Draft model selector is unavailable');
-        button.click();
-      });
-      await fixture.page.waitForSelector('select[aria-label="Execution node"]');
-      await fixture.page.$eval('select[aria-label="Execution node"]', (element, nodeId) => {
-        const select = element as HTMLSelectElement;
-        select.value = nodeId;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      }, client.nodeId);
+      await selectExecutionNode(fixture.page, '[role="dialog"] [data-execution-node-picker]', 'Integration worker');
+      await openDialogModelSelector(fixture.page);
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');

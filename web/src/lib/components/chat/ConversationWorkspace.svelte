@@ -856,6 +856,7 @@
 			{onSteerPreferredSubmit}
 			{onChooseProjectFolder}
 			onModelChange={(next) => controller.handleModelSelectionChange(next)}
+			onNodeChange={(nodeId) => controller.handleModelSelectionChange({ nodeId, agentId: agentState.agentId, modelValue: agentState.model })}
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAgentSettingChange={(descriptor, value) =>

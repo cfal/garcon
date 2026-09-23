@@ -8,8 +8,9 @@
 	import type { ModelSelectorState } from './model-selector-state.svelte';
 	import type { ModelSelectorRecentOption } from './model-selector-types';
 	import VirtualModelList from './VirtualModelList.svelte';
+	import ModelSelectorNodePicker from './ModelSelectorNodePicker.svelte';
 
-	type CompactPane = 'menu' | 'recent' | 'agent' | 'source' | 'model' | 'effort';
+	type CompactPane = 'node' | 'menu' | 'recent' | 'agent' | 'source' | 'model' | 'effort';
 
 	interface Props {
 		selector: ModelSelectorState;
@@ -37,18 +38,22 @@
 	);
 	const showCurrentSource = $derived(selector.shouldShowSourcePicker);
 	const previousPane = $derived.by<CompactPane | null>(() => {
+		if (pane === 'node') return null;
+		const first = selector.showNodePicker ? 'node' : null;
+		if (pane === 'menu') return first;
 		if (pane === 'recent') return 'menu';
-		if (pane === 'agent') return selector.recentOptions.length > 0 ? 'menu' : null;
-		if (pane === 'source') return showAgent ? 'agent' : null;
+		if (pane === 'agent') return selector.recentOptions.length > 0 ? 'menu' : first;
+		if (pane === 'source') return showAgent ? 'agent' : first;
 		if (pane === 'model') {
 			if (shouldShowSourcePaneFor(selector.agentId)) return 'source';
 			if (showAgent) return selector.recentOptions.length > 0 ? 'menu' : 'agent';
-			return null;
+			return first;
 		}
 		if (pane === 'effort') return 'model';
 		return null;
 	});
 	const headerTitle = $derived.by(() => {
+		if (pane === 'node') return 'Execution node';
 		if (pane === 'menu') return m.model_selector_model();
 		if (pane === 'recent') return m.model_selector_recent_models();
 		if (pane === 'agent') return m.model_selector_agent();
@@ -61,6 +66,7 @@
 		return parts.length > 0 ? parts.join(' / ') : m.model_selector_model();
 	});
 	const headerSubtitle = $derived.by(() => {
+		if (pane === 'node') return '';
 		if (pane === 'menu') return '';
 		if (pane === 'recent') return '';
 		if (pane === 'agent') return '';
@@ -71,7 +77,8 @@
 	$effect(() => {
 		const openNow = selector.open;
 		const nodeId = selector.nodeId;
-		if (openNow && (!wasOpen || nodeId !== previousNodeId)) pane = firstPane();
+		if (openNow && !wasOpen) pane = firstPane();
+		else if (openNow && nodeId !== previousNodeId) pane = firstModelPane();
 		wasOpen = openNow;
 		previousNodeId = nodeId;
 	});
@@ -97,6 +104,11 @@
 	});
 
 	function firstPane(): CompactPane {
+		if (selector.showNodePicker && !selector.currentModelValue) return 'node';
+		return firstModelPane();
+	}
+
+	function firstModelPane(): CompactPane {
 		if (selector.shouldStartFromRecentsOnOpen) return 'recent';
 		if (selector.currentModelValue) return 'model';
 		if (selector.recentOptions.length > 0 && showAgent) return 'menu';
@@ -117,6 +129,11 @@
 	function handleAgentSelect(agentId: SessionAgentId): void {
 		selector.selectAgent(agentId);
 		pane = paneAfterAgent(agentId);
+	}
+
+	function handleNodeSelect(nodeId: string): void {
+		void selector.selectNode(nodeId);
+		pane = firstModelPane();
 	}
 
 	function handleSourceSelect(sourceKey: string): void {
@@ -215,7 +232,9 @@
 	</header>
 
 	<div data-slot="model-selector-compact-pane" class="flex min-h-0 flex-1 flex-col">
-		{#if pane === 'menu'}
+		{#if pane === 'node'}
+			<ModelSelectorNodePicker {selector} onSelect={handleNodeSelect} />
+		{:else if pane === 'menu'}
 			<div
 				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
 			>

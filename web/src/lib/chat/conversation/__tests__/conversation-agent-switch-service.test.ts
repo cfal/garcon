@@ -6,6 +6,7 @@ import {
 	type ConversationAgentSwitchDeps,
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
 import type { ConversationExecutionSelection } from '../conversation-execution-draft-state.svelte.js';
+import type { NodeHandoffModel, NodeHandoffDestination } from '../node-handoff-project.svelte.js';
 
 function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -102,7 +103,7 @@ function createDeps(chat = createChat()) {
 		},
 		executionDraft: { replaceSelection, resetToDurable },
 		modelCatalogForNode(): ConversationAgentSwitchDeps['modelCatalog'] { return this.modelCatalog; },
-		chooseProjectPath: vi.fn(async (_chatId: string, _nodeId: string, path: string) => path),
+		chooseDestination: vi.fn(async (_chatId: string, _nodeId: string, projectPath: string, selection: NodeHandoffModel): Promise<NodeHandoffDestination | null> => ({ projectPath, selection })),
 		getExecutionDefaults: vi.fn((agentId: string) => ({
 			permissionMode: 'bypassPermissions' as const,
 			thinkingMode: 'high' as const,
@@ -113,6 +114,54 @@ function createDeps(chat = createChat()) {
 }
 
 describe('ConversationAgentSwitchService', () => {
+	it('stages a complete destination only after confirmation and preserves ownership on cancel', async () => {
+		const { deps, agentState, replaceSelection, patchChat } = createDeps();
+		const service = new ConversationAgentSwitchService(deps);
+		const held = Promise.withResolvers<NodeHandoffDestination | null>();
+		deps.chooseDestination.mockReturnValueOnce(held.promise);
+		const next = { nodeId: '22222222-2222-4222-8222-222222222222', agentId: 'claude', modelValue: 'sonnet' };
+		const pending = service.switchAgent('chat-1', next);
+		expect(agentState.nodeId).toBe('local');
+		expect(replaceSelection).not.toHaveBeenCalled();
+		held.resolve(null);
+		await pending;
+		expect(agentState.nodeId).toBe('local');
+		deps.chooseDestination.mockResolvedValueOnce({ projectPath: '/worker', selection: { ...claudeSelection(), agentId: 'codex', model: 'gpt-5.5' } });
+		await service.switchAgent('chat-1', next);
+		expect(replaceSelection).toHaveBeenCalledWith(expect.objectContaining({ nodeId: next.nodeId, projectPath: '/worker', agentId: 'codex', model: 'gpt-5.5' }));
+		expect(patchChat).not.toHaveBeenCalled();
+	});
+	it('preserves a cold-loaded endpoint identity when proposing another node', async () => {
+		const { deps, agentState } = createDeps();
+		agentState.modelEndpointId = 'saved-endpoint';
+		agentState.apiProviderId = 'saved-provider';
+		agentState.modelProtocol = 'openai-compatible';
+		deps.chooseDestination.mockResolvedValueOnce(null);
+		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', {
+			nodeId: '22222222-2222-4222-8222-222222222222', agentId: 'claude', modelValue: 'sonnet',
+		});
+		expect(deps.chooseDestination).toHaveBeenCalledWith('chat-1',
+			'22222222-2222-4222-8222-222222222222', '/workspace/project', {
+				agentId: 'claude', model: 'sonnet', modelEndpointId: 'saved-endpoint',
+				apiProviderId: 'saved-provider', modelProtocol: 'openai-compatible',
+			});
+	});
+
+	it('keeps the confirmed directory when changing agent on a staged destination', async () => {
+		const { deps, replaceSelection } = createDeps();
+		const service = new ConversationAgentSwitchService(deps);
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		deps.chooseDestination.mockResolvedValueOnce({ projectPath: '/worker/project', selection: {
+			...claudeSelection(), agentId: 'claude', model: 'sonnet',
+		} });
+		await service.switchAgent('chat-1', { nodeId, agentId: 'claude', modelValue: 'sonnet' });
+		await service.switchAgent('chat-1', { nodeId, agentId: 'codex', modelValue: 'gpt-5.5' });
+		expect(deps.chooseDestination).toHaveBeenCalledOnce();
+		expect(replaceSelection).toHaveBeenLastCalledWith(expect.objectContaining({
+			nodeId, projectPath: '/worker/project', agentId: 'codex', model: 'gpt-5.5',
+		}));
+	});
+
 	it('stores a running-chat switch only in the execution draft', () => {
 		const { deps, agentState, patchChat, replaceSelection } = createDeps();
 

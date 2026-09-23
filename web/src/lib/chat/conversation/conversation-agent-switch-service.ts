@@ -4,6 +4,9 @@ import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import { effectiveNodeId } from '$shared/execution-nodes';
+import type { ResolvedModelSelection } from '$shared/start-selection';
+import { resolveConversationModelSelection } from './conversation-model-selection.js';
+import type { NodeHandoffDestination, NodeHandoffModel } from './node-handoff-project.svelte.js';
 import type {
 	ConversationExecutionDraftState,
 	ConversationExecutionSelection,
@@ -16,7 +19,7 @@ interface AgentSwitchSessions {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
 }
 
-interface AgentSwitchState {
+interface AgentSwitchState extends ResolvedModelSelection {
 	nodeId: string;
 	projectPath: string;
 	agentId: SessionAgentId;
@@ -37,12 +40,7 @@ interface AgentSwitchModelCatalog {
 		agentId: SessionAgentId,
 		model: string,
 		modelEndpointId?: string | null,
-	): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	};
+	): ResolvedModelSelection | null;
 	selectionValueFor(
 		agentId: SessionAgentId,
 		model: string,
@@ -55,15 +53,17 @@ export interface ConversationAgentSwitchDeps {
 	agentState: AgentSwitchState;
 	modelCatalog: AgentSwitchModelCatalog;
 	modelCatalogForNode(nodeId: string): AgentSwitchModelCatalog;
-	chooseProjectPath(chatId: string, nodeId: string, path: string): Promise<string | null>;
-	executionDraft: Pick<
-		ConversationExecutionDraftState,
-		'replaceSelection' | 'resetToDurable'
-	>;
-	getExecutionDefaults(agentId: SessionAgentId, nodeId?: string): Pick<
-		ConversationExecutionSelection,
-		'permissionMode' | 'thinkingMode' | 'agentSettings'
-	>;
+	chooseDestination(
+		chatId: string,
+		nodeId: string,
+		path: string,
+		model: NodeHandoffModel,
+	): Promise<NodeHandoffDestination | null>;
+	executionDraft: Pick<ConversationExecutionDraftState, 'replaceSelection' | 'resetToDurable'>;
+	getExecutionDefaults(
+		agentId: SessionAgentId,
+		nodeId?: string,
+	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
 }
 
 export interface AgentSwitchSelection {
@@ -79,23 +79,60 @@ export class ConversationAgentSwitchService {
 		const durable = this.deps.sessions.selectedChat;
 		if (!durable || durable.id !== chatId) return;
 		const nodeId = effectiveNodeId(next.nodeId ?? durable.nodeId);
-		if (!this.deps.sessions.isDraft(chatId) && next.agentId === durable.agentId && nodeId === effectiveNodeId(durable.nodeId)) {
+		if (
+			!this.deps.sessions.isDraft(chatId) &&
+			next.agentId === durable.agentId &&
+			nodeId === effectiveNodeId(durable.nodeId)
+		) {
 			const selection = this.deps.executionDraft.resetToDurable();
 			if (selection) this.#applyAgentState(selection);
 			return;
 		}
 
-		const projectPath = nodeId === effectiveNodeId(durable.nodeId) ? durable.projectPath
-			: await this.deps.chooseProjectPath(chatId, nodeId, durable.projectPath);
-		if (!projectPath || this.deps.sessions.selectedChat?.id !== chatId
-			|| this.deps.sessions.selectedChat.agentOwnershipEpoch !== durable.agentOwnershipEpoch) return;
-		const catalog = this.deps.modelCatalogForNode(nodeId);
-		const model = catalog.selectionFor(next.agentId, next.modelValue);
-		const defaults = this.deps.getExecutionDefaults(next.agentId, nodeId);
+		let agentId = next.agentId;
+		let modelValue = next.modelValue;
+		let projectPath = this.deps.agentState.projectPath;
+		let model: ResolvedModelSelection;
+		if (nodeId !== effectiveNodeId(this.deps.agentState.nodeId)) {
+			const current = this.deps.agentState;
+			const catalog = this.deps.modelCatalogForNode(current.nodeId);
+			if (agentId === current.agentId && modelValue === current.model) {
+				model = resolveConversationModelSelection(current, catalog);
+			} else {
+				model = catalog.selectionFor(agentId, modelValue) ?? {
+					model: modelValue,
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				};
+			}
+			const destination = await this.deps.chooseDestination(chatId, nodeId, projectPath, {
+				agentId,
+				...model,
+			});
+			if (!destination) return;
+			projectPath = destination.projectPath;
+			model = destination.selection;
+			agentId = destination.selection.agentId;
+			modelValue = this.deps
+				.modelCatalogForNode(nodeId)
+				.selectionValueFor(agentId, model.model, model.modelEndpointId);
+		} else {
+			const resolved = this.deps.modelCatalogForNode(nodeId).selectionFor(agentId, modelValue);
+			if (!resolved) return;
+			model = resolved;
+		}
+		if (
+			!projectPath ||
+			this.deps.sessions.selectedChat?.id !== chatId ||
+			this.deps.sessions.selectedChat.agentOwnershipEpoch !== durable.agentOwnershipEpoch
+		)
+			return;
+		const defaults = this.deps.getExecutionDefaults(agentId, nodeId);
 		const selection: ConversationExecutionSelection = {
 			nodeId,
 			projectPath,
-			agentId: next.agentId,
+			agentId,
 			model: model.model,
 			apiProviderId: model.apiProviderId,
 			modelEndpointId: model.modelEndpointId,
@@ -105,7 +142,7 @@ export class ConversationAgentSwitchService {
 			agentSettings: defaults.agentSettings,
 		};
 
-		this.#applyAgentState(selection, next.modelValue);
+		this.#applyAgentState(selection, modelValue);
 		if (this.deps.sessions.isDraft(chatId)) {
 			this.deps.sessions.patchDraftStartup(chatId, { ...selection, nodeId });
 			this.deps.sessions.patchChat(chatId, selection);
@@ -121,11 +158,13 @@ export class ConversationAgentSwitchService {
 		const modelCatalog = this.deps.modelCatalogForNode(agentState.nodeId);
 		agentState.setAgentId(selection.agentId);
 		agentState.setModelSelection({
-			model: modelValue ?? modelCatalog.selectionValueFor(
-				selection.agentId,
-				selection.model,
-				selection.modelEndpointId,
-			),
+			model:
+				modelValue ??
+				modelCatalog.selectionValueFor(
+					selection.agentId,
+					selection.model,
+					selection.modelEndpointId,
+				),
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,

@@ -37,6 +37,7 @@ import { ConversationQueueController } from '$lib/chat/conversation/conversation
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
 import { NodeHandoffProjectState } from './node-handoff-project.svelte.js';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import { ConversationPermissionService } from './conversation-permission-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
@@ -190,6 +191,7 @@ export interface SessionControllerDeps {
 	conversationUi: SessionConversationUiState;
 	startupCoordinator: SessionStartupCoordinator;
 	modelCatalog: {
+		getModelForSelection: ModelCatalogStore['getModelForSelection'];
 		isLocalModel: (
 			agentId: SessionAgentId,
 			model: string,
@@ -246,9 +248,11 @@ export class ConversationSessionController {
 	readonly #permissions: ConversationPermissionService;
 	readonly #executionDraft: ConversationExecutionDraftState;
 	readonly #handoffForkConfirmation = new HandoffForkConfirmationState();
-	readonly nodeHandoff = new NodeHandoffProjectState();
+	readonly nodeHandoff: NodeHandoffProjectState;
 
 	constructor(private deps: SessionControllerDeps) {
+		this.nodeHandoff = new NodeHandoffProjectState((nodeId, selection) => deps.canSubmitToNode(nodeId)
+			&& Boolean(deps.modelCatalogForNode(nodeId).getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId)));
 		this.#executionDraft = new ConversationExecutionDraftState({
 			get activeChatId() {
 				return deps.sessions.selectedChatId;
@@ -271,7 +275,7 @@ export class ConversationSessionController {
 			agentState: deps.agentState,
 			modelCatalog: deps.modelCatalog,
 			modelCatalogForNode: deps.modelCatalogForNode,
-			chooseProjectPath: (chatId, nodeId, path) => this.nodeHandoff.ask(chatId, nodeId, path),
+			chooseDestination: (chatId, nodeId, path, model) => this.nodeHandoff.ask(chatId, nodeId, path, model),
 			executionDraft: this.#executionDraft,
 			getExecutionDefaults: deps.getExecutionDefaults,
 		});

@@ -667,6 +667,7 @@ function createDeps(chat = createRunningChat()) {
 			openNewChatDialog: vi.fn(),
 		},
 		modelCatalog: {
+			getModelForSelection: vi.fn((_agentId: string, model: string) => ({ value: model, label: model })),
 			isLocalModel: vi.fn(() => false),
 			selectionFor: vi.fn<SessionControllerDeps['modelCatalog']['selectionFor']>(
 				(_provider, model) => ({

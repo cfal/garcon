@@ -298,6 +298,65 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
+	it('preserves compatible models, prompt and attachments while adopting destination path preferences', async () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byNode: {
+			[remoteExecutionNode.id]: { defaultPath: '/worker/default', recentPaths: ['/worker/recent'], pinnedPaths: ['/worker/pin'] },
+		} } });
+		mockModelCatalog.getModels.mockImplementation((agentId) => agentId === 'claude'
+			? [{ value: 'default', label: 'Default' }, { value: 'kept', label: 'Kept' }] : modelsForAgent(agentId));
+		formState.selectModel('kept');
+		formState.firstMessage = 'Synthetic preserved prompt';
+		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
+		formState.attachedImages = [image];
+		formState.selectNode(remoteExecutionNode.id);
+		expect(formState.projectPath).toBe('/worker/default');
+		expect(formState.pinnedProjectPaths).toEqual(['/worker/pin']);
+		expect(formState.modelValue).toBe('kept');
+		expect(formState.firstMessage).toBe('Synthetic preserved prompt');
+		expect(formState.attachedImages).toEqual([image]);
+		await Promise.resolve();
+		expect(formState.modelValue).toBe('kept');
+		formState.dispose();
+	});
+
+	it('retains the compatible model through an intermediate uncached host', async () => {
+		mockModelCatalog.getModels.mockImplementation(() => formState.nodeId === 'local'
+			? [{ value: 'opus', label: 'Default' }, { value: 'kept', label: 'Kept' }] : []);
+		formState.selectModel('kept');
+		mockModelCatalog.isValidated = false;
+		const remoteRefresh = deferred<void>();
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(remoteRefresh.promise);
+		formState.selectNode(remoteExecutionNode.id);
+		expect(formState.resolvedModelSelection).toBeNull();
+		mockModelCatalog.isValidated = true;
+		formState.selectNode('local');
+		expect(formState.modelValue).toBe('kept');
+		remoteRefresh.resolve();
+		await remoteRefresh.promise;
+		expect(formState.modelValue).toBe('kept');
+		formState.dispose();
+	});
+
+	it('explicit restoration supersedes a pending node-change model after failed discovery', async () => {
+		mockModelCatalog.getModels.mockReturnValue([
+			{ value: 'opus', label: 'Default' },
+			{ value: 'endpoint:saved', rawModel: 'saved', label: 'Saved', endpointId: 'endpoint', apiProviderId: 'provider', protocol: 'anthropic-messages' },
+		]);
+		mockModelCatalog.isValidated = false;
+		mockModelCatalog.error = 'Discovery failed';
+		formState.selectNode(remoteExecutionNode.id);
+		const saved = { model: 'saved', modelEndpointId: 'endpoint', apiProviderId: 'provider', modelProtocol: 'anthropic-messages' as const };
+		formState.restoreSelection('claude', saved);
+		await Promise.resolve();
+		expect(formState.modelSelectionTarget).toEqual(saved);
+		mockModelCatalog.isValidated = true;
+		mockModelCatalog.error = null;
+		formState.validateAllModelsAgainstLive();
+		expect(formState.modelSelectionTarget).toEqual(saved);
+		expect(formState.modelValue).toBe('endpoint:saved');
+		formState.dispose();
+	});
+
 	it('updates a selected remote base without resetting the draft and ignores old validation', async () => {
 		executionNodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
 		formState.selectNode(remoteExecutionNode.id);

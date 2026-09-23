@@ -495,6 +495,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			this.#mergeServerEntry(entry, false);
 		} else {
 		this.patchChat(entry.id, {
+				nodeId: entry.nodeId ?? 'local',
+				projectPath: entry.projectPath,
 				agentId: entry.agentId as ChatSessionRecord['agentId'],
 				agentOwnershipEpoch: entry.agentOwnershipEpoch,
 				model: entry.model,

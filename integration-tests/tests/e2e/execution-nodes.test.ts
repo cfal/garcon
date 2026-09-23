@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { openDialogModelSelector, selectExecutionNode } from '../../support/execution-node-ui.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,15 +16,6 @@ async function workerDirectories(root: string): Promise<IntegrationDirectories> 
   const dirs = { root, config: join(root, 'config'), workspace: join(root, 'workspace'), project: join(root, 'project'), home: join(root, 'home') };
   for (const path of Object.values(dirs)) await mkdir(path, { recursive: true });
   return dirs;
-}
-
-async function select(fixture: E2eFixture, selector: string, value: string): Promise<void> {
-  await fixture.page.waitForSelector(selector);
-  await fixture.page.$eval(selector, (element, next) => {
-    const input = element as HTMLSelectElement;
-    input.value = next;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }, value);
 }
 
 async function selectConnectionDirection(fixture: E2eFixture): Promise<void> {
@@ -144,17 +136,13 @@ test('normal app onboarding supports both directions and sends remote chat input
         const dialog = document.querySelector('[role="dialog"]');
         return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
       });
-      await fixture.page.evaluate(() => {
-        const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((entry) => entry.getAttribute('aria-label')?.includes(' / '));
-        if (!button || button.disabled) throw new Error('New Chat model selector is unavailable');
-        button.click();
-      });
-      await select(fixture, 'select[aria-label="Execution node"]', inbound.id);
+      await selectExecutionNode(fixture.page, '[role="dialog"] [data-execution-node-picker]', 'Inbound Worker');
+      await openDialogModelSelector(fixture.page);
       await app.waitForButton('Chat Completions', { timeout: 20_000 });
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');
       await app.clickButton('Integration Echo');
-      await fixture.page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((button) => button.getAttribute('aria-label')?.startsWith('Inbound Worker / Direct (Chat Completions) /')));
+      await fixture.page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((button) => button.getAttribute('aria-label')?.startsWith('Direct (Chat Completions) /')));
       await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
       const browsing = fixture.page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/files/browse' && new URL(response.url()).searchParams.get('nodeId') === inbound.id);
       await fixture.page.$eval('input[aria-label="Project Path"]', (element) => (element as HTMLInputElement).focus());
@@ -208,7 +196,7 @@ test('normal app onboarding supports both directions and sends remote chat input
         if (!button) throw new Error('Generation model selector is unavailable');
         button.click();
       });
-      await select(fixture, 'select[aria-label="Execution node"]', inbound.id);
+      await app.clickButton('Inbound Worker');
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');
@@ -222,15 +210,12 @@ test('normal app onboarding supports both directions and sends remote chat input
       expect(settings.ui.commitMessage?.nodeId).toBe(inbound.id);
       await app.clickDialogButton('Close');
 
-      await app.clickButton('Inbound Worker / Direct (Chat Completions) / Integration Fake OpenAI / Integration Echo');
-      await select(fixture, 'select[aria-label="Execution node"]', 'local');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
+      await selectExecutionNode(fixture.page, '[data-slot="composer-bottom-bar"] [data-execution-node-picker]', 'Local');
       await app.waitForText('Move to Local');
       await app.fill('[role="dialog"] input', fixture.integration.dirs.project);
       await app.clickDialogButton('Use This Node');
       await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"]') === null);
-      await app.waitForButton('Local / Direct (Chat Completions) / Integration Fake OpenAI / Integration Echo');
+      await app.waitForButton('Direct (Chat Completions) / Integration Fake OpenAI / Integration Echo');
       await app.submitComposerWithEnter('Synthetic browser handoff', 'Send message');
       await app.waitForAssistantMessageContaining('Synthetic browser handoff');
       await app.waitForChatProcessing(false);
@@ -241,7 +226,9 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.clickWorkspaceWindowAddAction('Open Files');
       await app.waitForText('local-only.txt');
       await app.clickWorkspaceWindowAddAction('New Terminal');
-      await app.waitForText('Terminal 1');
+      await app.waitForMenuItemEnabled('Local');
+      await app.clickMenuItem('Local');
+      await app.waitForText('Local 1');
       expect((await fixture.integration.client.get<{ terminals: unknown[] }>('/api/v1/terminals')).terminals).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     } finally {

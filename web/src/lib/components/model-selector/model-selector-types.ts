@@ -9,6 +9,7 @@ export type ModelSelectorSurface = 'composer' | 'settings';
 export type ModelSelectorEffortMode = 'select' | 'hidden';
 
 export interface ModelSelectorMode {
+	node?: 'fixed' | 'select';
 	agent: ModelSelectorAgentMode;
 	source: ModelSelectorSourceMode;
 	surface: ModelSelectorSurface;

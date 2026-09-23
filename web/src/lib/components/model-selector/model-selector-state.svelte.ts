@@ -76,6 +76,7 @@ export class ModelSelectorState {
 	draftThinkingMode = $state<ThinkingMode | null>(null);
 	contentPane = $state<ModelSelectorContentPane>('browse');
 	#draftTargetChanged = false;
+	#draftOriginNodeId: string | null = null;
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
@@ -122,17 +123,53 @@ export class ModelSelectorState {
 		return this.nodeId === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forNode(this.nodeId);
 	}
 
-	get committedNodeId(): string { return effectiveNodeId(this.value.nodeId); }
-	get nodeId(): string { return this.open && this.draftNodeId !== null ? this.draftNodeId : this.committedNodeId; }
-	get nodes() { return this.#options.nodes?.nodes ?? []; }
-	get nodeReady(): boolean { return this.#options.nodes?.isReady(this.nodeId) ?? true; }
-	get nodeLabel(): string { return this.#options.nodes?.label(this.value.nodeId) ?? 'Local'; }
+	get committedNodeId(): string {
+		return effectiveNodeId(this.value.nodeId);
+	}
+
+	get nodeSelectionEnabled(): boolean {
+		return this.mode.node === 'select';
+	}
+
+	get showNodePicker(): boolean {
+		return this.nodeSelectionEnabled && (
+			this.#options.nodes?.hasRemoteNodes === true || this.committedNodeId !== 'local'
+		);
+	}
+
+	get nodeId(): string {
+		if (this.nodeSelectionEnabled && this.open && this.draftNodeId !== null) {
+			return this.draftNodeId;
+		}
+		return this.committedNodeId;
+	}
+
+	get nodes() {
+		return this.#options.nodes?.nodes ?? [];
+	}
+
+	get nodeReady(): boolean {
+		return this.#options.nodes?.isReady(this.nodeId) ?? true;
+	}
+
+	get nodeLabel(): string {
+		return this.#options.nodes?.label(this.value.nodeId) ?? 'Local';
+	}
+
+	get draftNodeLabel(): string {
+		return this.#options.nodes?.label(this.nodeId) ?? 'Local';
+	}
 	get committedCatalog(): ModelCatalogStore {
 		return effectiveNodeId(this.value.nodeId) === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forNode(this.value.nodeId);
 	}
 
 	async selectNode(nodeId: string): Promise<void> {
-		if (nodeId === this.nodeId || !this.#options.nodes?.isReady(nodeId)) return;
+		if (
+			!this.nodeSelectionEnabled ||
+			!this.open ||
+			nodeId === this.nodeId ||
+			!this.#options.nodes?.isReady(nodeId)
+		) return;
 		this.draftNodeId = nodeId;
 		this.#draftTargetChanged = true;
 		this.draftModelValue = '';
@@ -146,6 +183,10 @@ export class ModelSelectorState {
 		if (!this.open || this.nodeId !== nodeId) return;
 		if (!this.selectableAgentIds.includes(this.agentId)) this.draftAgentId = this.selectableAgentIds[0] ?? null;
 		this.resetActiveModelIndex();
+	}
+
+	reconcileNode(): void {
+		if (this.open && this.#draftOriginNodeId !== this.committedNodeId) this.discardAndClose();
 	}
 
 	get selectableAgentIds(): readonly SessionAgentId[] {
@@ -359,7 +400,7 @@ export class ModelSelectorState {
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
 		return [
-			this.nodeLabel,
+			this.nodeSelectionEnabled ? this.nodeLabel : '',
 			committed.agentLabel,
 			this.#visibleSourceFor(committed)?.label,
 			committed.modelLabel,
@@ -609,10 +650,17 @@ export class ModelSelectorState {
 		const committedModelValue = currentModelValue(this.modelCatalog, this.value);
 		const committedThinkingMode = normalizeThinkingMode(this.value.thinkingMode);
 		const draftThinkingMode = normalizeThinkingMode(this.draftThinkingMode);
+		const selectedEndpointId = this.modelCatalog.getModelForSelection(
+			this.draftAgentId,
+			this.draftModelValue,
+		)?.endpointId ?? null;
+		const endpointChanged = this.#draftTargetChanged
+			&& selectedEndpointId !== (this.value.modelEndpointId ?? null);
 		if (
 			this.nodeId === effectiveNodeId(this.value.nodeId) &&
 			this.draftAgentId === this.value.agentId &&
 			this.draftModelValue === committedModelValue &&
+			!endpointChanged &&
 			(!this.effortSelectionEnabled || draftThinkingMode === committedThinkingMode)
 		) {
 			return;
@@ -621,6 +669,7 @@ export class ModelSelectorState {
 	}
 
 	#startDraftFromValue(): void {
+		this.#draftOriginNodeId = this.committedNodeId;
 		this.draftNodeId = effectiveNodeId(this.value.nodeId);
 		this.#draftTargetChanged = false;
 		const agentId = this.value.agentId;

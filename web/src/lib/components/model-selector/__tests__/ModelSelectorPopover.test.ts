@@ -20,8 +20,7 @@ function installMatchMedia(matchesCompact: boolean): void {
 		configurable: true,
 		writable: true,
 		value: vi.fn((query: string) => ({
-			matches:
-				query === '(max-width: 639px)' || query === '(max-width: 899px)' ? matchesCompact : false,
+			matches: query.startsWith('(max-width:') ? matchesCompact : false,
 			media: query,
 			onchange: null,
 			addEventListener: vi.fn(),
@@ -168,20 +167,19 @@ describe('ModelSelectorPopover', () => {
 			const onChange = vi.fn();
 			render(ModelSelectorPopoverHost, {
 				value: { nodeId: committedNode.id, agentId: 'claude', model: 'model-0' },
-				mode: { agent: 'select', source: 'select', surface: 'composer' },
+				mode: { node: 'select', agent: 'select', source: 'select', surface: 'composer' },
 				onChange,
 				nodes: [localExecutionNode, remoteExecutionNode],
 			});
 			const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
 			const label = trigger.textContent;
 			await fireEvent.click(trigger);
-			await fireEvent.change(await screen.findByRole('combobox', { name: 'Execution node' }), {
-				target: { value: committedNode.id === 'local' ? remoteExecutionNode.id : 'local' },
-			});
+			const destination = committedNode.id === 'local' ? remoteExecutionNode : localExecutionNode;
+			await fireEvent.click(await screen.findByRole('button', { name: destination.label }));
 			await waitFor(() => {
-				expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Execution node' }).value)
-					.not.toBe(committedNode.id);
+				expect(screen.getByRole('button', { name: destination.label }).getAttribute('aria-pressed')).toBe('true');
 			});
+			expect(document.querySelector('[data-slot="model-selector-columns"]')?.firstElementChild?.querySelector('[data-slot="model-selector-nodes"]')).toBeTruthy();
 			expect(trigger.textContent).toBe(label);
 			expect(onChange).not.toHaveBeenCalled();
 		});
@@ -215,6 +213,20 @@ describe('ModelSelectorPopover', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
+	});
+
+	it('closes an open fixed-node picker when its enclosing target changes', async () => {
+		const onChange = vi.fn();
+		const view = render(ModelSelectorPopoverHost, {
+			value: { nodeId: 'local', agentId: 'claude', model: 'model-0' },
+			mode: { node: 'fixed', agent: 'select', source: 'select', surface: 'composer' },
+			onChange, nodes: [localExecutionNode, remoteExecutionNode],
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		expect(document.querySelector('[data-slot="model-selector-nodes"]')).toBeNull();
+		await view.rerender({ value: { nodeId: remoteExecutionNode.id, agentId: 'claude', model: 'model-0' } });
+		await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull());
+		expect(onChange).not.toHaveBeenCalled();
 	});
 
 	it('does not submit a surrounding form when the compact provider selector opens', async () => {
@@ -357,6 +369,22 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it.each([false, true])('allows explicit native replacement of an unavailable same-named endpoint (compact %s)', async (compact) => {
+		installMatchMedia(compact);
+		const onChange = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', modelEndpointId: 'unavailable', apiProviderId: 'provider', modelProtocol: 'anthropic-messages' },
+			mode: { node: 'fixed', agent: 'select', source: 'select', surface: 'composer' },
+			onChange,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .*model-0/ }));
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		await fireEvent.click(within(listbox).getByText('Model 0'));
+		await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+			agentId: 'claude', model: 'model-0', modelEndpointId: null, apiProviderId: null, modelProtocol: null,
+		})));
+	});
+
 	it('allows explicitly selecting the live endpoint for a stale model name', async () => {
 		const onChange = vi.fn();
 
@@ -438,13 +466,14 @@ describe('ModelSelectorPopover', () => {
 		const onChange = vi.fn();
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'none' },
-			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			mode: { node: 'select', agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
 			nodes: [localExecutionNode, remoteExecutionNode], onChange,
 		});
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 		await fireEvent.click(within(await screen.findByRole('listbox', { name: 'Model' })).getByText('Model 1'));
 		expect(screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ })).toBeTruthy();
-		await fireEvent.change(screen.getByRole('combobox', { name: 'Execution node' }), { target: { value: remoteExecutionNode.id } });
+		for (let i = 0; i < 3; i++) await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: remoteExecutionNode.label }));
 		expect(screen.queryByRole('button', { name: /Ultra Highest available reasoning effort/ })).toBeNull();
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Done' }).disabled).toBe(true);
 		await fireEvent.click(screen.getByRole('button', { name: 'Claude' }));
@@ -457,13 +486,15 @@ describe('ModelSelectorPopover', () => {
 		installMatchMedia(true);
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: 'model-0' },
-			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			mode: { node: 'select', agent: 'select', source: 'select', surface: 'composer' },
 			nodes: [localExecutionNode, remoteExecutionNode], recents: [claudeRecent(), codexRecent()],
 			preferRecentsOnOpen: true, onChange: vi.fn(),
 		});
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 		expect(await screen.findByText('Recent models')).toBeTruthy();
-		await fireEvent.change(screen.getByRole('combobox', { name: 'Execution node' }), { target: { value: remoteExecutionNode.id } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: remoteExecutionNode.label }));
 		expect(screen.queryByText('Recent models')).toBeNull();
 		expect(screen.getByRole('button', { name: 'Claude' })).toBeTruthy();
 	});

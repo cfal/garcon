@@ -8,6 +8,7 @@
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
 	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
@@ -27,7 +28,7 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getExecutionNodes } from '$lib/context';
 
 	interface Props {
 		startup: NewChatFormState;
@@ -56,6 +57,7 @@
 	}: Props = $props();
 	let textarea: HTMLTextAreaElement | null = $state(null);
 	const appShell = getAppShell();
+	const nodes = getExecutionNodes();
 
 	const permissionOptions = $derived(buildPermissionOptions(startup.permissionModes));
 	const thinkingOptions = $derived(buildThinkingOptions(startup.thinkingModes, startup.modelValue));
@@ -78,7 +80,7 @@
 	}
 
 	function handlePathKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Tab' && startup.localMachine) {
+		if (event.key === 'Tab' && startup.filesAvailable) {
 			event.preventDefault();
 			void startup.handleTabCompletion();
 			return;
@@ -90,12 +92,12 @@
 	}
 
 	function handlePathFocus(event: FocusEvent & { currentTarget: HTMLInputElement }): void {
-		if (isMobile && startup.localMachine) event.currentTarget.blur();
+		if (isMobile && startup.filesAvailable) event.currentTarget.blur();
 		startup.handlePathFocus();
 	}
 
 	function handleModelChange(next: ModelSelectorChange): void {
-		startup.selectNode(next.nodeId);
+		if (next.nodeId !== startup.nodeId) return;
 		startup.selectAgent(next.agentId);
 		startup.selectModel(next.modelValue, next);
 	}
@@ -107,7 +109,10 @@
 			{m.chat_new_chat_project_path()}
 		</label>
 		<div class="relative">
-			<div class="flex gap-2">
+			<div class="flex flex-wrap gap-2 @container/project-target">
+				<ExecutionNodeSelector {nodes} nodeId={startup.nodeId} service="agents" presentation="field"
+					class="w-full @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
+					onSelect={(nodeId) => startup.selectNode(nodeId)} />
 				<div class="relative min-w-0 flex-1">
 					<input
 						id="scheduled-project-path"
@@ -146,8 +151,9 @@
 					onToggle={() => startup.toggleTagInput()}
 				/>
 			</div>
-			{#if startup.localMachine && startup.showBrowser && !startup.isUpdatingPinnedPath}
+			{#if startup.filesAvailable && startup.showBrowser && !startup.isUpdatingPinnedPath}
 				<DirectoryBrowser
+					nodeId={startup.nodeId}
 					nodeContextKey={startup.pathContextKey}
 					currentPath={startup.trimmedPath || startup.browseStartPath || startup.projectBasePath}
 					basePath={startup.projectBasePath}

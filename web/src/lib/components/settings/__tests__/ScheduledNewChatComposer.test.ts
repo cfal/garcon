@@ -14,10 +14,10 @@ vi.mock(
 const ScheduledNewChatComposerTestHost = (await import('./ScheduledNewChatComposerTestHost.svelte'))
 	.default;
 
-function makeStartup(modelSelectionError: string | null = null): NewChatFormState {
+function makeStartup(modelSelectionError: string | null = null, nodeId = 'local'): NewChatFormState {
 	return {
-		nodeId: 'local',
-		localMachine: true,
+		nodeId,
+		localMachine: nodeId === 'local',
 		gitAvailable: true,
 		filesAvailable: true,
 		agentId: 'claude',
@@ -83,7 +83,8 @@ function makeStartup(modelSelectionError: string | null = null): NewChatFormStat
 }
 
 function renderComposer(
-	overrides: {
+		overrides: {
+		nodeId?: string;
 		prompt?: string;
 		promptError?: string | null;
 		modelSelectionError?: string | null;
@@ -94,7 +95,7 @@ function renderComposer(
 ) {
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
-	const startup = makeStartup(overrides.modelSelectionError);
+	const startup = makeStartup(overrides.modelSelectionError, overrides.nodeId);
 	const modelCatalog = {
 		getSelectableAgents: () => [],
 	} as unknown as ModelCatalogStore;
@@ -120,6 +121,11 @@ function renderComposer(
 }
 
 describe('ScheduledNewChatComposer', () => {
+	it('uses Files capability for remote Tab completion instead of a Local-only guard', async () => {
+		const { startup } = renderComposer({ nodeId: '22222222-2222-4222-8222-222222222222' });
+		await fireEvent.keyDown(screen.getByLabelText('Project Path'), { key: 'Tab' });
+		expect(startup.handleTabCompletion).toHaveBeenCalledOnce();
+	});
 	it('keeps the prompt and new-chat controls in one composer surface', async () => {
 		const { container, startup } = renderComposer();
 		const configuration = container.querySelector('[data-slot="scheduled-new-chat-configuration"]');

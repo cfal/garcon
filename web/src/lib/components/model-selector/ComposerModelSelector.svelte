@@ -35,7 +35,7 @@
 
 <ModelSelectorPopover
 	{value}
-	mode={{ ...mode, surface: 'composer' }}
+	mode={{ ...mode, node: 'fixed', surface: 'composer' }}
 	{onChange}
 	{getRecents}
 	{preferRecentsOnOpen}

@@ -61,6 +61,7 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -589,7 +590,7 @@
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
 		if (!localSettings.allowDirectChats && nonDirectAgentIds([next.agentId]).length === 0) return;
-		form.selectNode(next.nodeId);
+		if (next.nodeId !== form.nodeId) return;
 		if (!newChatAgentIds.includes(next.agentId)) return;
 		form.selectAgent(next.agentId);
 		form.selectModel(next.modelValue, next);
@@ -611,7 +612,10 @@
 		>
 			<div class="space-y-2">
 				<div class="relative">
-					<div class="flex gap-2">
+					<div class="flex flex-wrap gap-2 @container/project-target">
+						<ExecutionNodeSelector nodes={executionNodes} nodeId={form.nodeId} service="agents" presentation="field"
+							class="w-full @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
+							onSelect={(nodeId) => form.selectNode(nodeId)} />
 						<div class="relative min-w-0 flex-1">
 							<input
 								id="project-path-input"

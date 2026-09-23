@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { openDialogModelSelector, selectExecutionNode } from '../../support/execution-node-ui.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { E2eFixture } from '../../support/e2e-fixture.js';
@@ -184,18 +185,8 @@ test('New Chat selects a worktree from its chosen execution node', async () => {
       const dialog = document.querySelector('[role="dialog"]');
       return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
     });
-    await fixture.page.evaluate(() => {
-      const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
-        .find(item => item.getAttribute('aria-label')?.includes(' / '));
-      if (!button || button.disabled) throw new Error('Model selector unavailable');
-      button.click();
-    });
-    await fixture.page.waitForSelector('select[aria-label="Execution node"]');
-    await fixture.page.$eval('select[aria-label="Execution node"]', (element, nodeId) => {
-      const input = element as HTMLSelectElement;
-      input.value = nodeId;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    }, client.nodeId);
+    await selectExecutionNode(fixture.page, '[role="dialog"] [data-execution-node-picker]', 'Integration worker');
+    await openDialogModelSelector(fixture.page);
     await app.waitForButton('Chat Completions');
     await app.clickButton('Chat Completions');
     await app.waitForButton('Integration Echo');

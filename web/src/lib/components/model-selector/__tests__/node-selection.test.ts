@@ -16,7 +16,7 @@ function metadata(id: string): AgentMetadata {
 	};
 }
 
-function fixture(remoteAgent = 'sample') {
+function fixture(remoteAgent = 'sample', node: 'fixed' | 'select' = 'select') {
 	const nodes = new ExecutionNodesStore();
 	nodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
 	const catalog = new ModelCatalogStore();
@@ -30,7 +30,7 @@ function fixture(remoteAgent = 'sample') {
 	const onChange = vi.fn();
 	const selector = new ModelSelectorState({
 		modelCatalog: catalog, nodes, value: { nodeId: 'local', agentId: 'sample', model: 'same' },
-		mode: { agent: 'select', source: 'select', surface: 'composer' },
+		mode: { node, agent: 'select', source: 'select', surface: 'composer' },
 		getRecents: (nodeId) => buildModelSelectorRecents(catalog.forNode(nodeId), [
 			{ agentId: 'sample', model: 'same', apiProviderId: null, modelEndpointId: null, modelProtocol: null },
 			{ nodeId: remoteExecutionNode.id, agentId: remoteAgent, model: 'same', apiProviderId: null, modelEndpointId: null, modelProtocol: null },
@@ -43,6 +43,19 @@ function fixture(remoteAgent = 'sample') {
 
 describe('model selector node selection', () => {
 	beforeEach(() => localStorage.clear());
+
+	it('fixed-node selection and recents cannot change hosts', async () => {
+		const { selector, catalog, onChange } = fixture('sample', 'fixed');
+		selector.openDraft();
+		expect(selector.showNodePicker).toBe(false);
+		await selector.selectNode(remoteExecutionNode.id);
+		expect(selector.nodeId).toBe('local');
+		const recent = buildModelSelectorRecents(catalog.forNode(remoteExecutionNode.id), [{
+			nodeId: remoteExecutionNode.id, agentId: 'sample', model: 'same', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+		}])[0]!;
+		selector.selectRecent(recent);
+		expect(onChange).not.toHaveBeenCalled();
+	});
 
 	it('keeps node browsing draft-only and commits the same model name on another node', async () => {
 		const { selector, onChange } = fixture();

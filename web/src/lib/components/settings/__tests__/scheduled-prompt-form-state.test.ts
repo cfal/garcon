@@ -313,6 +313,33 @@ describe('ScheduledPromptFormState', () => {
 		});
 	});
 
+	it('keeps the saved remote endpoint after failed discovery and retry during schedule editing', async () => {
+		const catalog: CatalogOverrides = {
+			isValidated: false, error: 'Discovery failed',
+			getModels: () => [
+				{ value: 'gpt-5', label: 'Default' },
+				{ value: 'endpoint:saved', rawModel: 'saved', label: 'Saved', endpointId: 'endpoint', apiProviderId: 'provider', protocol: 'openai-compatible' },
+			],
+		};
+		const form = createForm(new Set(), () => ['claude'], catalog);
+		form.startup.validatePath = vi.fn();
+		const target = {
+			type: 'new-chat' as const, nodeId: '22222222-2222-4222-8222-222222222222',
+			agentId: 'claude', projectPath: '/worker', model: 'saved',
+			apiProviderId: 'provider', modelEndpointId: 'endpoint', modelProtocol: 'openai-compatible' as const,
+			permissionMode: 'default' as const, thinkingMode: 'none' as const, agentSettingsById: {}, tags: [],
+		};
+		await form.initialize(newChatPrompt(target));
+		expect(form.startup.modelSelectionError).toBe('Discovery failed');
+		catalog.isValidated = true;
+		catalog.error = null;
+		form.startup.validateAllModelsAgainstLive();
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00Z'))?.target).toMatchObject(target);
+		form.dispose();
+	});
+
 	it('blocks a stale endpoint target until another model is explicitly selected', async () => {
 		const form = createForm(new Set(['123']), () => ['claude', 'codex'], {
 			getModels: () => [

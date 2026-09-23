@@ -43,6 +43,7 @@
 	const remoteSettings = getRemoteSettings();
 	const modelCatalog = getModelCatalog();
 	const selectorMode: ModelSelectorMode = {
+		node: 'select',
 		agent: 'select',
 		source: 'select',
 		surface: 'settings',

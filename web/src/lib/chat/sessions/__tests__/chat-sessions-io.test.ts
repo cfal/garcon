@@ -1366,6 +1366,29 @@ describe('ChatSessionsStore IO', () => {
 		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(1));
 	});
 
+	it.each([
+		{ sourceNode: '00000000-0000-4000-8000-000000000001', nodeId: undefined, projectPath: '/local' },
+		{ sourceNode: 'local', nodeId: '00000000-0000-4000-8000-000000000001', projectPath: '/repo' },
+	])('publishes the accepted handoff project binding before list refresh: $sourceNode', async ({ sourceNode, nodeId, projectPath }) => {
+		const refresh = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const store = new ChatSessionsStore({ listChats: () => refresh.promise });
+		store.upsertFromServer([makeServerSession({ nodeId: sourceNode, projectPath: '/repo' })]);
+		const bindingChanged = vi.fn();
+		const unsubscribe = store.onProjectPathChanged(bindingChanged);
+		const accepted = makeServerSession({ nodeId, projectPath, agentOwnershipEpoch: 'epoch-2' });
+		try {
+			store.reconcileAcceptedHandoffProjection(accepted);
+			expect(store.byId['chat-1']).toMatchObject({
+				nodeId: nodeId ?? 'local', projectPath, agentOwnershipEpoch: 'epoch-2',
+			});
+			expect(bindingChanged).toHaveBeenCalledExactlyOnceWith('chat-1', projectPath, nodeId ?? 'local');
+		} finally {
+			refresh.resolve({ sessions: [accepted], total: 1, lastSelectedChatId: null });
+			await store.quietRefreshChats();
+			unsubscribe();
+		}
+	});
+
 	it('generates a chat title from a message and patches local state', async () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'chat-1', title: 'Old Title' })]);

@@ -96,6 +96,7 @@
 		onsubmit,
 		onSteerPreferredSubmit,
 		onModelChange,
+		onNodeChange,
 		onPermissionModeChange,
 		onThinkingModeChange,
 		onAgentSettingChange,
@@ -283,8 +284,6 @@
 		}),
 	);
 
-	// Shared image URL lifecycle management. Syncs blob URLs with
-	// composerState.images and revokes stale URLs automatically.
 	const imageAttachments = new ImageAttachmentState();
 
 	$effect(() => {
@@ -902,7 +901,7 @@
 					/>
 				{/snippet}
 				{#snippet modelSelector()}
-					<PromptComposerModelSelector onChange={onModelChange} />
+					<PromptComposerModelSelector onChange={onModelChange} {onNodeChange} />
 				{/snippet}
 			</ComposerBottomBar>
 		</form>

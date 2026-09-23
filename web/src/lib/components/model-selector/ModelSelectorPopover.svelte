@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import { onMount, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog, getExecutionNodes } from '$lib/context';
@@ -10,7 +10,7 @@
 	import { ModelSelectorState } from './model-selector-state.svelte';
 	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
 	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';
-	import ModelSelectorNodePicker from './ModelSelectorNodePicker.svelte';
+	import { composerSelectionTriggerClass } from '$lib/components/shared/selection-trigger';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -77,8 +77,13 @@
 	const sourceSelectionEnabled = $derived(mode.source === 'select');
 	const showSource = $derived(selector.shouldShowSourcePicker);
 	const showEffort = $derived(selector.effortSelectionEnabled);
+	const showNode = $derived(selector.showNodePicker);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
+		if (showNode) {
+			if (!showAgent && !sourceSelectionEnabled) return 'w-[min(34rem,calc(100vw-1rem))]';
+			return showEffort ? 'w-[min(74rem,calc(100vw-1rem))]' : 'w-[min(62rem,calc(100vw-1rem))]';
+		}
 		if (!showAgent && !sourceSelectionEnabled) return 'w-[min(22rem,calc(100vw-1rem))]';
 		if (showAgent && sourceSelectionEnabled && showEffort) {
 			return 'w-[min(62rem,calc(100vw-1rem))]';
@@ -92,16 +97,16 @@
 	const triggerBaseClass = $derived(
 		surfaceIsSettings
 			? 'inline-flex min-h-9 min-w-0 max-w-[18rem] items-center justify-between gap-2 overflow-hidden rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
-			: 'inline-flex h-9 min-w-0 max-w-[11rem] items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[15rem]',
+			: cn(composerSelectionTriggerClass, 'max-w-[11rem] sm:max-w-[15rem]'),
 	);
 	const showTriggerSecondaryLine = $derived(
 		surfaceIsSettings || mode.agent === 'select' || Boolean(selector.triggerSecondary),
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
 
-	onMount(() => {
+	$effect(() => {
 		if (typeof window.matchMedia !== 'function') return;
-		const compactMaxWidth = showAgent && sourceSelectionEnabled && showEffort ? 899 : 639;
+		const compactMaxWidth = (showAgent && sourceSelectionEnabled && showEffort ? 899 : 639) + (showNode ? 176 : 0);
 		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
 		const updateLayout = () => {
 			isCompactLayout = mediaQuery.matches;
@@ -109,6 +114,11 @@
 		updateLayout();
 		mediaQuery.addEventListener('change', updateLayout);
 		return () => mediaQuery.removeEventListener('change', updateLayout);
+	});
+
+	$effect(() => {
+		void selector.committedNodeId;
+		untrack(() => selector.reconcileNode());
 	});
 
 	function handleOpenChange(open: boolean): void {
@@ -165,7 +175,7 @@
 {#snippet triggerContent()}
 	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
 		<span class="truncate font-medium"
-			>{selector.committedNodeId !== 'local' ? `${selector.nodeLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
+			>{selector.nodeSelectionEnabled && selector.committedNodeId !== 'local' ? `${selector.nodeLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
 		>
 		{#if showTriggerSecondaryLine}
 			<span
@@ -199,7 +209,7 @@
 			)}
 			showCloseButton={false}
 		>
-			<ModelSelectorNodePicker {selector} />
+			{#if selector.modelCatalog.error}<p role="alert" class="shrink-0 px-3 py-2 text-sm text-destructive">{selector.modelCatalog.error}</p>{/if}
 			<div class="min-h-0 flex-1">
 			<ModelSelectorCompactLayout
 				{selector}
@@ -236,7 +246,7 @@
 				contentClass,
 			)}
 		>
-			<ModelSelectorNodePicker {selector} />
+			{#if selector.modelCatalog.error}<p role="alert" class="shrink-0 px-3 py-2 text-sm text-destructive">{selector.modelCatalog.error}</p>{/if}
 			<div class="min-h-0 flex-1">
 			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
 			</div>

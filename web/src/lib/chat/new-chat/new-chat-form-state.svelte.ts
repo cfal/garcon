@@ -28,6 +28,7 @@ import {
 	withAgentSetting,
 } from '$shared/agent-settings';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
+import { newChatNodePreferences } from './new-chat-node-preferences';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -60,6 +61,7 @@ export class NewChatFormState {
 	selectedModelsByAgent = $state<Record<string, string>>({});
 	#selectedModelTargetsByAgent = $state<Record<string, ResolvedModelSelection>>({});
 	#catalogRefreshCompleted = $state(false);
+	#nodeModelCandidate: ResolvedModelSelection | null = null;
 
 	// Path
 	projectPath = $state('');
@@ -156,7 +158,9 @@ export class NewChatFormState {
 	selectNode(value?: string | null): void {
 		const nodeId = effectiveNodeId(value);
 		if (nodeId === this.nodeId) return;
+		this.#nodeModelCandidate ??= this.resolvedModelSelection;
 		this.nodeId = nodeId;
+		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#clearValidation();
 		this.#cancelWorktreeLoad();
@@ -166,17 +170,11 @@ export class NewChatFormState {
 		this.selectedModelsByAgent = {};
 		this.#selectedModelTargetsByAgent = {};
 		const snapshot = this.#remoteSettings.snapshot;
-		const preferences = snapshot?.paths.byNode?.[nodeId];
 		this.#localProjectBasePath = snapshot?.projectBasePath ?? '';
-		this.pinnedProjectPaths = this.localMachine
-			? (snapshot?.paths.pinnedProjectPaths ?? [])
-			: [...(preferences?.pinnedPaths ?? [])];
-		this.browseStartPath = this.localMachine ? (snapshot?.paths.browseStartPath ?? '') : '';
-		this.projectPath =
-			(this.localMachine
-				? snapshot?.paths.recentProjectPaths[0] || this.browseStartPath
-				: preferences?.defaultPath || preferences?.recentPaths[0]) || this.projectBasePath;
+		Object.assign(this, newChatNodePreferences(snapshot, nodeId, this.projectBasePath));
+		this.validateAllModelsAgainstLive();
 		this.validatePath();
+		void this.#refreshModelsInBackground();
 	}
 
 	get #remoteSettings(): RemoteSettingsStore {
@@ -290,6 +288,7 @@ export class NewChatFormState {
 
 	selectAgent(next: SessionAgentId): void {
 		if (!this.#selectableAgentIds.includes(next)) return;
+		this.#nodeModelCandidate = null;
 		this.#startupSelectionAutomatic = false;
 		this.#applyAgent(next);
 	}
@@ -355,6 +354,7 @@ export class NewChatFormState {
 	// Model
 
 	selectModel(value: string, selection?: ResolvedModelSelection): void {
+		this.#nodeModelCandidate = null;
 		this.#startupSelectionAutomatic = false;
 		this.#setModelSelection(
 			this.agentId,
@@ -364,6 +364,7 @@ export class NewChatFormState {
 	}
 
 	restoreSelection(agentId: SessionAgentId, selection: ResolvedModelSelection): void {
+		this.#nodeModelCandidate = null;
 		this.#startupSelectionAutomatic = false;
 		this.agentId = agentId;
 		this.#setModelSelection(
@@ -382,6 +383,12 @@ export class NewChatFormState {
 	}
 
 	validateAllModelsAgainstLive(): void {
+		if (!this.#modelCatalog.isValidated) return;
+		const candidate = this.#nodeModelCandidate;
+		this.#nodeModelCandidate = null;
+		if (candidate && this.#modelCatalog.getModelForSelection(this.agentId, candidate.model, candidate.modelEndpointId)) {
+			this.restoreSelection(this.agentId, candidate);
+		}
 		for (const agentId of this.#selectableAgentIds) {
 			this.validateModelAgainstLive(agentId);
 		}
@@ -843,8 +850,10 @@ export class NewChatFormState {
 	}
 
 	async #refreshModelsInBackground(): Promise<void> {
+		const catalog = this.#modelCatalog;
 		try {
-			await this.#modelCatalog.refreshIfStale();
+			await catalog.refreshIfStale();
+			if (catalog !== this.#modelCatalog) return;
 			this.#catalogRefreshCompleted = true;
 			this.#reconcileAgentSettingsWithCatalog();
 			const previousAgentId = this.agentId;
@@ -874,17 +883,10 @@ export class NewChatFormState {
 		this.#startupRecents = snap.recentAgentSettings;
 		this.#seedAgentSettings(snap.executionDefaults);
 
-		this.pinnedProjectPaths = snap.paths.pinnedProjectPaths ?? [];
-		this.browseStartPath = snap.paths.browseStartPath ?? '';
-
-		const defaultPath = snap.paths.recentProjectPaths[0] || this.browseStartPath;
-		if (defaultPath && !this.projectPath) {
-			this.projectPath = defaultPath;
-		}
-
-		if (!this.projectPath) {
-			this.projectPath = this.projectBasePath;
-		}
+		const preferences = newChatNodePreferences(snap, this.nodeId, this.projectBasePath);
+		this.pinnedProjectPaths = preferences.pinnedProjectPaths;
+		this.browseStartPath = preferences.browseStartPath;
+		if (!this.projectPath) this.projectPath = preferences.projectPath;
 
 		const recent = this.#firstSelectableRecent(snap.recentAgentSettings);
 		if (recent) {
