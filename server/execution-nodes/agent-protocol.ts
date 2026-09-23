@@ -48,6 +48,7 @@ export interface AgentRpcMethods extends FileRpcMethods, TerminalRpcMethods, Git
   'node.describe': Call<null, { readonly info: ExecutionNodeInfo; readonly integrations: readonly IntegrationManifest[] }>;
   'apiProviders.discoverModels': Call<Parameters<ExecutionNode['discoverApiProviderModels']>[0], Awaited<ReturnType<ExecutionNode['discoverApiProviderModels']>>>;
   'projects.inspect': Call<Parameters<ExecutionProjectService['inspect']>[0], Awaited<ReturnType<ExecutionProjectService['inspect']>>>;
+  'projects.ticketProjectDefault': Call<Parameters<ExecutionProjectService['ticketProjectDefault']>[0], Awaited<ReturnType<ExecutionProjectService['ticketProjectDefault']>>>;
   'projects.resolveFileMentions': Call<Parameters<ExecutionProjectService['resolveFileMentions']>[0], string>;
   'producers.bind': Call<Request<'producers', 'bind'>, void>;
   'producers.close': Call<Request<'producers', 'close'>, void>;

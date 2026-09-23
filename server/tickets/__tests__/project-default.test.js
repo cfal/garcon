@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { resolveRealWithinBase } from '../../lib/path-boundary.js';
 import { inspectProjectDirectory } from '../../projects/project-directory-service.js';
 import { runGit } from '../../git/run.js';
-import { resolveTicketProjectDefault } from '../project-default.js';
+import { resolveTicketProjectDefault } from '../../projects/ticket-project-default.js';
 
 describe('ticket project defaults', () => {
   let root;
@@ -41,17 +41,17 @@ describe('ticket project defaults', () => {
     const alias = join(root, 'alias');
     symlinkSync(subdirectory, alias);
     for (const path of [base, worktree, subdirectory, alias]) {
-      expect(await resolve(path)).toEqual({ project: base, kind: 'repository' });
+      expect(await resolve(path)).toEqual({ project: basename(base), kind: 'repository' });
     }
   });
 
   test('uses a configured primary checkout with separate Git storage and distinguishes clones', async () => {
     const base = await repo('separate', [`--separate-git-dir=${join(root, 'metadata')}`]);
     await git(base, 'config', 'core.worktree', '../separate');
-    expect(await resolve(base)).toEqual({ project: base, kind: 'repository' });
+    expect(await resolve(base)).toEqual({ project: basename(base), kind: 'repository' });
     const clone = join(root, 'clone');
     await git(root, 'clone', base, clone);
-    expect(await resolve(clone)).toEqual({ project: clone, kind: 'repository' });
+    expect(await resolve(clone)).toEqual({ project: basename(clone), kind: 'repository' });
   });
 
   test('falls back to each captured context when separate Git storage cannot identify its primary checkout', async () => {
@@ -61,18 +61,18 @@ describe('ticket project defaults', () => {
     const nested = join(linked, 'nested');
     mkdirSync(nested);
     for (const directory of [base, linked, nested]) {
-      expect(await resolve(directory)).toEqual({ project: directory, kind: 'folder' });
+      expect(await resolve(directory)).toEqual({ project: basename(directory), kind: 'folder' });
     }
   });
 
   test('uses the shared bare directory and treats submodules independently', async () => {
     const bare = join(root, 'bare');
     await git(root, 'init', '--bare', bare);
-    expect(await resolve(bare)).toEqual({ project: bare, kind: 'repository' });
+    expect(await resolve(bare)).toEqual({ project: basename(bare), kind: 'repository' });
     const source = await repo('module-source');
     const base = await repo('parent');
     await git(base, '-c', 'protocol.file.allow=always', 'submodule', 'add', source, 'module');
-    expect(await resolve(join(base, 'module'))).toEqual({ project: join(base, 'module'), kind: 'repository' });
+    expect(await resolve(join(base, 'module'))).toEqual({ project: 'module', kind: 'repository' });
   });
 
   test('reads the main worktree configuration rather than a linked-worktree override', async () => {
@@ -84,8 +84,8 @@ describe('ticket project defaults', () => {
     await git(base, 'config', '--worktree', 'core.worktree', base);
     await git(base, 'config', '--local', '--unset', 'core.worktree');
     await git(linked, 'config', '--worktree', 'core.worktree', linked);
-    expect(await resolve(base)).toEqual({ project: base, kind: 'repository' });
-    expect(await resolve(linked)).toEqual({ project: base, kind: 'repository' });
+    expect(await resolve(base)).toEqual({ project: basename(base), kind: 'repository' });
+    expect(await resolve(linked)).toEqual({ project: basename(base), kind: 'repository' });
   });
 
   test('uses the canonical context for non-Git folders and broken Git metadata', async () => {
@@ -93,9 +93,9 @@ describe('ticket project defaults', () => {
     mkdirSync(folder);
     const alias = join(root, 'alias');
     symlinkSync(folder, alias);
-    expect(await resolve(alias)).toEqual({ project: folder, kind: 'folder' });
+    expect(await resolve(alias)).toEqual({ project: basename(folder), kind: 'folder' });
     writeFileSync(join(folder, '.git'), 'gitdir: missing\n');
-    expect(await resolve(alias)).toEqual({ project: folder, kind: 'folder' });
+    expect(await resolve(alias)).toEqual({ project: basename(folder), kind: 'folder' });
   });
 
   test('rejects unavailable, outside-base and control-containing contexts without leaking paths', async () => {
@@ -132,7 +132,7 @@ describe('ticket project defaults', () => {
     const base = await repo(`primary${suffix}`);
     const linked = join(root, 'linked');
     await git(base, 'worktree', 'add', '-b', 'synthetic-linked', linked);
-    expect(await resolve(linked)).toEqual({ project: linked, kind: 'folder' });
+    expect(await resolve(linked)).toEqual({ project: basename(linked), kind: 'folder' });
   });
 
   test('falls back regardless of Git diagnostic wording or exit status', async () => {
@@ -141,14 +141,14 @@ describe('ticket project defaults', () => {
     const probe = (failure) => resolveTicketProjectDefault(root, undefined, {
       ...options, git: async () => { throw failure; },
     });
-    expect(await probe({ code: 128, stderr: boundary })).toEqual({ project: root, kind: 'folder' });
+    expect(await probe({ code: 128, stderr: boundary })).toEqual({ project: basename(root), kind: 'folder' });
     for (const failure of [
       { code: 128, stderr: boundary, timedOut: true },
       { code: 128, stderr: boundary, aborted: true },
       { code: 1, stderr: boundary },
       { code: 128, stderr: `${boundary}fatal: additional failure\n` },
     ]) {
-      expect(await probe(failure)).toEqual({ project: root, kind: 'folder' });
+      expect(await probe(failure)).toEqual({ project: basename(root), kind: 'folder' });
     }
   });
 
@@ -159,7 +159,7 @@ describe('ticket project defaults', () => {
     for (const failure of failures) {
       expect(await resolveTicketProjectDefault(root, undefined, {
         ...options, git: async () => { throw failure; },
-      })).toEqual({ project: root, kind: 'folder' });
+      })).toEqual({ project: basename(root), kind: 'folder' });
     }
     const calls = [];
     expect(await resolveTicketProjectDefault(root, undefined, {
@@ -170,7 +170,7 @@ describe('ticket project defaults', () => {
         if (args.includes('config')) throw { code: 1, stdout: '', stderr: '' };
         return { stdout: `worktree ${root}\nHEAD abc\n`, stderr: '' };
       },
-    })).toEqual({ project: root, kind: 'folder' });
+    })).toEqual({ project: basename(root), kind: 'folder' });
     expect(calls).toHaveLength(4);
     for (const config of calls) {
       expect(config.env.LC_ALL).toBe('C');
@@ -190,7 +190,7 @@ describe('ticket project defaults', () => {
         if (args.includes('config')) throw { code: 1, stdout: '', stderr: '' };
         return { stdout: `worktree ${join(root, 'absent')}\0HEAD abc\0\0`, stderr: '' };
       },
-    })).toEqual({ project: root, kind: 'folder' });
+    })).toEqual({ project: basename(root), kind: 'folder' });
   });
 
   test('honors cancellation before and during a probe', async () => {

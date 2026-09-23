@@ -4,6 +4,7 @@ import type { ExecutionFilesService } from './files.js';
 import type { ExecutionGitService, ExecutionGhService } from './git.js';
 import type { ExecutionTerminalService } from './terminals.js';
 import type { NodePath } from '@garcon/common/node-path';
+import type { TicketProjectDefault } from '@garcon/common/tickets';
 import type { ProjectResolution } from '@garcon/common/project-resolution';
 import type { ApiProtocol, ModelDiscoveryKind, ApiProviderModelDiscoveryResponse } from '@garcon/common/api-providers';
 
@@ -15,6 +16,7 @@ export interface ApiProviderDiscoveryRequest {
 }
 
 export interface ExecutionProjectService {
+  ticketProjectDefault(request: { readonly projectPath: NodePath }, options?: NodeCallOptions): Promise<TicketProjectDefault>;
   inspect(request: {
     readonly projectPath: NodePath;
     readonly includeGitRepository?: boolean;

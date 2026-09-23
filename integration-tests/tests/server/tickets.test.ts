@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, readdir, rename } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { HttpTicketMutationRequest, TicketMutationPayload } from '../../../common/ticket-commands.js';
 import { parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { parseTicketBootstrap, parseTicketCommentsPage, parseTicketDetail, parseTicketPage,
@@ -113,7 +113,7 @@ describe('persistent Tickets integration', () => {
       await mkdir(nested);
       for (const directory of [fixture.dirs.project, worktree, nested]) {
         const resolved = parseTicketProjectDefault(await fixture.client.post('/api/v1/tickets/project-default', { directory }));
-        expect(resolved).toEqual({ project: fixture.dirs.project, kind: 'repository' });
+        expect(resolved).toEqual({ project: basename(fixture.dirs.project), kind: 'repository' });
       }
     });
   });

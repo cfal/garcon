@@ -5,12 +5,27 @@ import { inspectProjectDirectory } from '../projects/project-directory-service.j
 import { assertRealWithinBase } from '../lib/path-boundary.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
 import { toNativePath, toNodePath } from './node-path.js';
+import { resolveTicketProjectDefault } from '../projects/ticket-project-default.js';
+import { ticketRecord, ticketString } from '../../common/ticket-validation.js';
 
 export class LocalExecutionProjectService implements ExecutionProjectService {
   readonly projectBasePath: string;
 
   constructor(projectBasePath: string, private readonly assertAvailable: (options?: NodeCallOptions) => void) {
     this.projectBasePath = toNodePath(path.resolve(projectBasePath));
+  }
+
+  async ticketProjectDefault(request: Parameters<ExecutionProjectService['ticketProjectDefault']>[0], options?: NodeCallOptions) {
+    this.assertAvailable(options);
+    const input = ticketRecord(request, ['projectPath']);
+    const directory = ticketString(input.projectPath, 'projectPath');
+    const result = await resolveTicketProjectDefault(toNativePath(directory), options?.signal, {
+      inspect: (input) => inspectProjectDirectory(input, {
+        resolvePath: (path) => assertRealWithinBase(toNativePath(this.projectBasePath), path),
+      }),
+    });
+    this.assertAvailable(options);
+    return result;
   }
 
   async inspect(request: Parameters<ExecutionProjectService['inspect']>[0], options?: NodeCallOptions) {

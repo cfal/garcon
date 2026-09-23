@@ -102,9 +102,14 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(await projects.inspect({ projectPath: 'project' })).toEqual({
         resolution: { kind: 'available', effectiveProjectKey: f.project },
       });
+      expect(await projects.ticketProjectDefault({ projectPath: 'project' })).toEqual({ project: 'project', kind: 'folder' });
+      await expect(projects.ticketProjectDefault({ projectPath: f.root })).rejects.toThrow();
+      await expect(projects.ticketProjectDefault({ projectPath: 42 } as never)).rejects.toThrow();
       const request = { command: 'Read @input.txt', projectPath: f.project };
       expect(await projects.resolveFileMentions(request)).toContain('remote content');
       remote.controller.disconnect(); remote.worker.disconnect();
+      await expect(projects.ticketProjectDefault({ projectPath: f.project }))
+        .rejects.toMatchObject({ outcome: 'not-dispatched' });
       await expect(Promise.resolve().then(() => projects.resolveFileMentions(request)))
         .rejects.toMatchObject({ outcome: 'not-dispatched' });
       const ready = Promise.withResolvers<void>();

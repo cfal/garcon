@@ -103,6 +103,10 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
     }
     if (call.method === 'apiProviders.discoverModels') return node.discoverApiProviderModels(call.request, { signal });
     if (call.method === 'projects.inspect') return (await node.getProjectService()).inspect(call.request, { signal });
+    if (call.method === 'projects.ticketProjectDefault') {
+      if (call.integrationId !== '') throw new AgentCallError('rejected', 'Project operations are node services');
+      return (await node.getProjectService()).ticketProjectDefault(call.request, { signal });
+    }
     if (call.method === 'projects.resolveFileMentions') return (await node.getProjectService()).resolveFileMentions(call.request, { signal });
     if (call.method.startsWith('files.')) {
       if (call.integrationId !== '') throw invalidFileTransfer();

@@ -4,7 +4,7 @@ import { ticketRecord, ticketString } from '../../common/ticket-validation.js';
 import { deriveTicketCaller } from '../tickets/contracts.js';
 import { TicketDomainError, validateTicketInput } from '../tickets/errors.js';
 import { ticketErrorResponse, ticketJson, readTicketBody, requireTicketPrincipal } from '../tickets/http.js';
-import { resolveNodeTicketProjectDefault } from '../tickets/project-default.js';
+import type { TicketProjectResolver } from '../tickets/project-default.js';
 import { parseNodeId } from '../../common/execution-nodes.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
@@ -23,7 +23,7 @@ function authenticated(handler: RouteHandler): RouteHandler {
 }
 
 export function createTicketRoutes(tickets: TicketRuntime,
-  projectDefault = resolveNodeTicketProjectDefault): RouteMap {
+  projectDefault: TicketProjectResolver): RouteMap {
   const query = (url: URL) => validateTicketInput(() => ticketQueryParams(url.searchParams));
   return {
     '/api/v1/tickets/bootstrap': { GET: authenticated((_request, url, _server, context) => {

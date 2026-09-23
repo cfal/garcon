@@ -18,6 +18,7 @@ import { MODEL_DISCOVERY_TIMEOUT_MS } from '../api-providers/discovery.js';
 import { RemoteExecutionFilesService } from './remote-files.js';
 import { RemoteGitServices } from './remote-git.js';
 import { RemoteExecutionTerminalService } from './remote-terminals.js';
+import { parseTicketProjectDefault } from '../../common/ticket-responses.js';
 
 export interface RemoteSessionBacking {
   readonly rpc: AgentRpc;
@@ -44,6 +45,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   readonly #git = new RemoteGitServices(() => this.#backing());
   readonly #terminals = new RemoteExecutionTerminalService(() => this.#backing());
   readonly #projects: ExecutionProjectService = {
+    ticketProjectDefault: async (request, options) => parseTicketProjectDefault(await this.#backing().rpc.call('', 'projects.ticketProjectDefault', request, options)),
     inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
     resolveFileMentions: async (request, options) => this.#backing().rpc.call('', 'projects.resolveFileMentions', request, options),
   };

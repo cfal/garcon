@@ -220,7 +220,7 @@ describe('authenticated Tickets routes', () => {
   test('an unavailable store returns an error rather than an empty catalog', async () => {
     fixture.service.close();
     const runtime = initializeTickets(join(fixture.directory, 'missing'), { chatExists: () => false, commandsEnabled: () => true });
-    routes = createTicketRoutes(runtime);
+    routes = createTicketRoutes(runtime, async () => ({ project: 'shared', kind: 'folder' }));
     expect((await call('')).body.errorCode).toBe('TICKET_STORAGE_UNAVAILABLE');
     runtime.close();
   });

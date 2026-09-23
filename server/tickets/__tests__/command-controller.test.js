@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { TicketCommandController } from '../command-controller.js';
-import { rejectRemoteTicketProjectDefault } from '../project-default.js';
+import { createTicketProjectResolver } from '../project-default.js';
 import { parseGarconTicketCommand } from '../../../common/garcon-ticket-command.js';
 import { parseGarconTicketResult } from '../../../common/garcon-ticket-result.js';
 import { ticketBytes } from '../../../common/ticket-validation.js';
@@ -24,7 +24,7 @@ function fixture(resolveProject) {
   const lock = new KeyedPromiseLock();
   const controller = new TicketCommandController({
     tickets: { get service() { return current.replacedStore ? { storeId: '44444444-4444-4444-8444-444444444444' } : f.service; } },
-    registry: { getChat: (id) => f.chats.has(id) ? { projectPath: current.directory } : null },
+    registry: { getChat: (id) => f.chats.has(id) ? { projectPath: current.directory, nodeId: current.nodeId } : null },
     notices: {
       existingCurrentView: () => ({ viewId: current.viewId }),
       appendNotice(_chatId, _viewId, notice) {
@@ -59,13 +59,32 @@ function fixture(resolveProject) {
 }
 
 describe('ticket command controller', () => {
-  test('rejects remote automatic defaults while permitting explicit projects', async () => {
-    const f = fixture(rejectRemoteTicketProjectDefault);
+  test('unavailable nodes reject automatic defaults while permitting explicit projects', async () => {
+    const f = fixture(createTicketProjectResolver(async () => { throw new Error('offline'); }));
     expect(await f.send(create)).toMatchObject({ status: 'error', errorCode: 'TICKET_PROJECT_UNAVAILABLE' });
     expect(f.service.list({}).items).toHaveLength(0);
     const result = await f.send('<garcon-ticket-create ref="explicit">{"title":"Synthetic ticket","project":"Explicit project"}</garcon-ticket-create>', 2);
     expect(result).toMatchObject({ status: 'ok', ticketId: 'G-1' });
     expect(f.service.read({ ticketId: 'G-1' }, { kind: 'chat', chatId: CHAT_ID }).ticket.project).toBe('Explicit project');
+  });
+
+  test('resolves automatic projects on the captured node and fences same-path node changes', async () => {
+    const held = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    const remote = '11111111-1111-4111-8111-111111111111';
+    const f = fixture(async (directory, _signal, nodeId) => {
+      expect(directory).toBe('/synthetic');
+      expect(nodeId).toBe(remote);
+      entered.resolve();
+      return held.promise;
+    });
+    f.current.nodeId = remote;
+    const response = f.send(create);
+    await entered.promise;
+    f.current.nodeId = 'local';
+    held.resolve({ project: 'repo', kind: 'repository' });
+    expect(await response).toMatchObject({ status: 'error', errorCode: 'TICKET_SOURCE_UNAVAILABLE' });
+    expect(f.service.list({}).items).toHaveLength(0);
   });
 
   test('commits attributed writes, compact notices and result delivery outside the source lock', async () => {

@@ -103,7 +103,7 @@ import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
 import { initializeChatPreambleSelectionService } from './preambles/setup.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
-import { resolveNodeTicketProjectDefault } from './tickets/project-default.js';
+import { createTicketProjectResolver } from './tickets/project-default.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -254,7 +254,7 @@ export async function startServer(): Promise<void> {
     const directory = new AgentDirectory(integrationRegistry, executionNodes);
     const { inspectProject, resolveFileMentions } = executionNodes;
     const projectBasePath = executionNodes.localInfo.projectBasePath;
-    const resolveTicketProject = resolveNodeTicketProjectDefault;
+    const resolveTicketProject = createTicketProjectResolver((nodeId) => executionNodes.projectService(nodeId));
     const endpointResolver = new ApiProviderEndpointResolver(
       () => apiProviderStore.list(),
       (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],

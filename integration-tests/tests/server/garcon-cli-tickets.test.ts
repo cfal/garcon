@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { rename } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTicketDetail, parseTicketPage } from '../../../common/ticket-responses.js';
 import { parseTicketWriteResult } from '../../../common/ticket-records.js';
@@ -25,7 +25,7 @@ describe('ticket CLI public server integration', () => {
       const create = await runCli(fixture, ['create', '--title', 'Synthetic CLI ticket', '--cwd', fixture.dirs.project, '--json']);
       expect(create.exitCode).toBe(0);
       const initial = parseTicketWriteResult(JSON.parse(create.stdout));
-      expect(initial.ticket.project).toBe(fixture.dirs.project);
+      expect(initial.ticket.project).toBe(basename(fixture.dirs.project));
       expect(create.stderr).toContain('Project (folder)');
       const requestId = /^Request: (.+)$/m.exec(create.stderr)?.[1];
       expect(requestId).toBeDefined();

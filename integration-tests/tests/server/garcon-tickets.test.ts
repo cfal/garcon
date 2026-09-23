@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, realpath, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { garconTicketResultContent, parseGarconTicketResult, ticketCommandOutcome, type GarconTicketResult } from '../../../common/garcon-ticket-result.js';
 import { ticketCommandNoticeText } from '../../../common/ticket-command-notice.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
@@ -133,11 +133,11 @@ describe('Garcon ticket commands', () => {
       const resolved = parseTicketProjectDefault(await fixture.client.post('/api/v1/tickets/project-default', {
         directory: fixture.dirs.project,
       }));
-      expect(resolved).toEqual({ project, kind: 'folder' });
+      expect(resolved).toEqual({ project: basename(project), kind: 'folder' });
       const emit = ticketCommands(fixture, fixture.newChatId());
       const created = mutation(await emit('<garcon-ticket-create ref="fallback">{"title":"Synthetic fallback ticket"}</garcon-ticket-create>'));
       const detail = parseTicketDetail(await fixture.client.get(`/api/v1/tickets/detail?ticketId=${created.ticketId}`));
-      expect(detail.ticket.project).toBe(project);
+      expect(detail.ticket.project).toBe(basename(project));
     });
   });
 
@@ -165,7 +165,7 @@ describe('Garcon ticket commands', () => {
       const create = '<garcon-ticket-create ref="create">{"title":"Synthetic task"}</garcon-ticket-create>';
       const first = mutation(await emit(create));
       const detail = parseTicketDetail(await fixture.client.get(`/api/v1/tickets/detail?ticketId=${first.ticketId}`));
-      expect(detail.ticket.project).toBe(fixture.dirs.project);
+      expect(detail.ticket.project).toBe(basename(fixture.dirs.project));
       expect(detail.ticket.createdBy).toEqual({ kind: 'chat', chatId, provenance: 'observed' });
       const list = await emit('<garcon-ticket-list />');
       if (list.command !== 'list' || list.status !== 'ok') throw new Error('Expected list response');

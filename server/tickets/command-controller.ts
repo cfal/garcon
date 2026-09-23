@@ -5,19 +5,19 @@ import { garconTicketResultContent, ticketCommandOutcome, ticketCommandContext,
 import { parseMarkupTicketMutationPayload } from '../../common/ticket-commands.js';
 import { ticketCommandNoticeText } from '../../common/ticket-command-notice.js';
 import { ticketBytes } from '../../common/ticket-validation.js';
-import { TICKET_LIMITS, type TicketProjectDefault } from '../../common/tickets.js';
+import { TICKET_LIMITS } from '../../common/tickets.js';
 import { AgentCommandReplies, type AgentCommandContext } from '../chats/agent-command-replies.js';
 import type { AgentCommandSource } from '../ledger/garcon-command-publication.js';
 import { markupTicketContext, type TicketMutationContext } from './contracts.js';
 import { TicketDomainError, validateTicketInput } from './errors.js';
-import { resolveNodeTicketProjectDefault } from './project-default.js';
+import type { TicketProjectResolver } from './project-default.js';
 import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { TicketReadBudget } from './queries.js';
 import type { TicketRuntime } from './setup.js';
 
 export interface TicketCommandControllerOptions extends AgentCommandContext {
   readonly tickets: Pick<TicketRuntime, 'service'>;
-  readonly resolveProject?: (directory: string, signal: AbortSignal, nodeId?: string | null) => Promise<TicketProjectDefault>;
+  readonly resolveProject: TicketProjectResolver;
 }
 
 export class TicketCommandController {
@@ -94,7 +94,7 @@ export class TicketCommandController {
       return { kind: 'complete' as const, result: this.#execute(source, command, context) };
     });
     if (prepared.kind === 'complete') return prepared.result;
-    const probe = await (this.options.resolveProject ?? resolveNodeTicketProjectDefault)(prepared.directory, signal, prepared.nodeId).then(
+    const probe = await this.options.resolveProject(prepared.directory, signal, prepared.nodeId).then(
       (value) => ({ value }), (error: unknown) => ({ error }),
     );
     return this.#locked(source, signal, storeId, () => {
