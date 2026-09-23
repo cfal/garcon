@@ -165,8 +165,9 @@ describe('CommitSurface', () => {
 				],
 			},
 		]);
-		const toggleDirectory = vi.spyOn(controller, 'toggleDirectory');
-		const togglePath = vi.spyOn(controller, 'togglePath');
+		vi.spyOn(controller, 'isRepositoryReady', 'get').mockReturnValue(true);
+		const toggleDirectory = vi.spyOn(controller, 'toggleDirectory').mockImplementation(() => {});
+		const togglePath = vi.spyOn(controller, 'togglePath').mockImplementation(() => {});
 		const { container } = render(CommitSurfaceTestHost, {
 			controller,
 			presentation: 'window-sidebar',
