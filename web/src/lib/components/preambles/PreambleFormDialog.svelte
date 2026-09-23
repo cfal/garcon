@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
 	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
@@ -237,18 +238,11 @@
 					<div class="space-y-3">
 						{#each form.pathRules as rule (rule.key)}
 							{@const pathError = form.pathRuleError(rule.key)}
+							{@const nodeId = rule.nodeId ?? 'local'}
+							{@const basePath = nodeId === 'local' ? appShell.projectBasePath : executionNodes.get(nodeId)?.projectBasePath ?? ''}
 							<div class="relative space-y-2 rounded-md border border-border p-3">
-								<select
-									aria-label="Execution node"
-									value={rule.nodeId ?? 'local'}
-									onchange={(event) => { rule.nodeId = event.currentTarget.value; closePathPicker(); }}
-									class="h-10 w-full rounded-md border border-input bg-background px-3 text-base sm:pointer-fine:text-sm"
-								>
-									{#each executionNodes.nodes as node (node.id)}
-										<option value={node.id}>{node.label}</option>
-									{/each}
-									{#if rule.nodeId && !executionNodes.get(rule.nodeId)}<option value={rule.nodeId}>{rule.nodeId} (Unavailable)</option>{/if}
-								</select>
+								<ExecutionNodeSelector nodes={executionNodes} {nodeId} service="agents" presentation="field"
+									onSelect={(next) => { rule.nodeId = next; closePathPicker(); }} />
 								<div class="flex min-w-0 gap-2">
 									<input
 										type="text"
@@ -267,7 +261,7 @@
 											else openPathPicker(rule.key);
 										}}
 										aria-label={m.preambles_browse_path()}
-										disabled={(rule.nodeId ?? 'local') !== 'local'}
+										disabled={!executionNodes.filesAvailable(nodeId)}
 										title={m.preambles_browse_path()}
 									>
 										<FolderOpen class="h-4 w-4" />
@@ -290,11 +284,13 @@
 								<p id={`preamble-path-error-${rule.key}`} class="min-h-4 text-xs text-destructive">
 									{pathError ?? ''}
 								</p>
-								{#if pickerKey === rule.key && (rule.nodeId ?? 'local') === 'local'}
+								{#if pickerKey === rule.key && executionNodes.filesAvailable(nodeId)}
 									<DirectoryBrowser
-										currentPath={rule.projectPath || appShell.projectBasePath}
-										basePath={appShell.projectBasePath}
-										onSelect={(projectPath) => form.setPath(rule.key, projectPath)}
+										{nodeId}
+										nodeContextKey={executionNodes.pathContextKey(nodeId)}
+										currentPath={rule.projectPath || basePath}
+										{basePath}
+										onSelect={(projectPath) => { if ((rule.nodeId ?? 'local') === nodeId) form.setPath(rule.key, projectPath); }}
 										onClose={closePathPicker}
 										isMobile={appShell.isMobile}
 									/>
