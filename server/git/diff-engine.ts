@@ -273,7 +273,8 @@ function simplifyDiffHeader(filePath: string): string[] {
 }
 
 function stagingDiffHeader(file: string, parsed: ParsedPatch, mode: 'stage' | 'unstage'): string[] {
-  return mode === 'stage' && parsed.header.some(line => line.startsWith('new file mode '))
+  return mode === 'stage' && parsed.header.filter(line => line.startsWith('diff --git ')).length === 1
+    && parsed.header.some(line => line.startsWith('new file mode '))
     ? parsed.header
     : simplifyDiffHeader(file);
 }
@@ -293,7 +294,13 @@ function parsePatch(patchText: string): ParsedPatch {
   let current: PatchHunk | null = null;
 
   for (const line of allLines) {
-    if (!current && (line.startsWith('diff --git') || line.startsWith('index ') ||
+    if (line.startsWith('diff --git ')) {
+      if (current) hunks.push(current);
+      current = null;
+      header.push(line);
+      continue;
+    }
+    if (!current && (line.startsWith('index ') ||
       line.startsWith('new file') || line.startsWith('deleted file') ||
       line.startsWith('---') || line.startsWith('+++') ||
       line.startsWith('old mode') || line.startsWith('new mode'))) {
