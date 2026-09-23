@@ -75,7 +75,8 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
       });
 
       await openGit(fixture);
-      await app.waitForButton(`Integration worker: ${executionDirs.project}`);
+      await app.waitForButton(executionDirs.project);
+      await app.waitForButton('Execution node: Integration worker');
       await showGitDiff(fixture);
       await waitForDiff(fixture, 'Worker-only change');
       expect(await fixture.page.$eval(GIT_PANEL, panel => panel.textContent)).not.toContain('Controller-only change');
@@ -101,9 +102,12 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
       expect(await fixture.page.$eval(GIT_PANEL, panel =>
         panel.querySelector<HTMLElement>('[aria-busy="true"] > [aria-hidden="true"]')?.inert,
       )).toBe(true);
-      expect(await fixture.page.$eval(`${GIT_PANEL} [data-git-surface-toolbar] button`, element =>
+      expect(await fixture.page.$eval(`${GIT_PANEL} [data-git-folder-picker]`, element =>
         (element as HTMLButtonElement).disabled,
       )).toBe(true);
+      expect(await fixture.page.$eval(`${GIT_PANEL} [data-execution-node-picker]`, element =>
+        (element as HTMLButtonElement).disabled,
+      )).toBe(false);
       await writeFile(join(executionDirs.project, 'example.txt'), 'Worker replacement change\n');
       await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { enabled: true });
       await waitForDiff(fixture, 'Worker replacement change');
@@ -112,7 +116,29 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
       await app.clickSidebarChatContaining('Synthetic controller Git chat');
       await app.waitForSelectedChat(localId);
       await openGit(fixture);
-      await app.waitForButton(`Local: ${dirs.project}`);
+      await app.waitForButton(dirs.project);
+      await app.waitForButton('Execution node: Local');
+      await waitForDiff(fixture, 'Controller-only change');
+      await fixture.page.$eval(`${GIT_PANEL} [data-execution-node-picker]`, element => (element as HTMLButtonElement).click());
+      await fixture.page.waitForSelector('[role="menuitemradio"]');
+      await fixture.page.evaluate(() => {
+        const node = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+          .find(element => element.textContent?.trim() === 'Integration worker');
+        if (!node) throw new Error('Missing worker node');
+        node.click();
+      });
+      await app.waitForButton(executionDirs.project);
+      await waitForDiff(fixture, 'Worker replacement change');
+      await app.waitForSelectedChat(localId);
+      await app.clickSidebarChatContaining('Synthetic worker Git chat');
+      await app.waitForSelectedChat(remoteId);
+      await app.clickSidebarChatContaining('Synthetic controller Git chat');
+      await app.waitForSelectedChat(localId);
+      await openGit(fixture);
+      await app.waitForButton('Execution node: Integration worker');
+      await waitForDiff(fixture, 'Worker replacement change');
+      await fixture.page.$eval(`${GIT_PANEL} button[aria-label="Go to chat project"]`, element => (element as HTMLButtonElement).click());
+      await app.waitForButton(dirs.project);
       await waitForDiff(fixture, 'Controller-only change');
       await app.clickSidebarChatContaining('Synthetic worker Git chat');
       await app.waitForSelectedChat(remoteId);
@@ -123,7 +149,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
       await app.waitForText('Initial synthetic commit');
       await runFixtureGit(executionDirs.project, 'checkout', '-b', 'external-checkout');
       const historyPanel = '[data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]';
-      await fixture.page.$eval(`${historyPanel} button[aria-label="Refresh"]`, element => (element as HTMLButtonElement).click());
+      await app.clickResponsiveAction('Refresh', { within: historyPanel });
       await fixture.page.waitForFunction(selector => document.querySelector(selector)?.textContent?.includes('external-checkout') === true, {}, historyPanel);
       await app.clickWorkspaceWindowAddAction('Open Git Compare', await app.currentWorkspaceWindowId());
       await fixture.page.waitForFunction(() => document.querySelector(
@@ -136,7 +162,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
       await app.clickButton('Settings');
       await app.waitForMenuItemEnabled('Open Git History');
       await app.clickMenuItem('Open Git History');
-      await app.waitForButton(`Integration worker: ${executionDirs.project}`);
+      await app.waitForButton(executionDirs.project);
       await app.waitForText('Initial synthetic commit');
       fixture.assertNoBrowserErrors();
     }, { executionBackend, projectRoots: 'separate' });
@@ -229,13 +255,16 @@ test('selected lines from multiple remote files use one review document before r
       }
     });
     await app.waitForButton('Stage (3)');
-    const [staged] = await Promise.all([
-      Promise.all(['a.txt', 'b.txt'].map(file => fixture.page.waitForResponse(response =>
-        new URL(response.url()).pathname === '/api/v1/git/stage-selection'
-        && JSON.parse(response.request().postData() ?? '{}').file === file))),
+    const stagingStatuses: number[] = [];
+    await Promise.all([
+      fixture.page.waitForResponse(response => {
+        if (new URL(response.url()).pathname !== '/api/v1/git/stage-selection') return false;
+        stagingStatuses.push(response.status());
+        return stagingStatuses.length === 2;
+      }),
       app.clickButton('Stage (3)'),
     ]);
-    expect(staged.map(response => response.status())).toEqual([200, 200]);
+    expect(stagingStatuses).toEqual([200, 200]);
     expect(await runFixtureGit(executionDirs.project, 'show', ':a.txt')).toBe('Synthetic first selection\n');
     expect(await runFixtureGit(executionDirs.project, 'show', ':b.txt')).toBe('Synthetic second selection\nSynthetic second final selection\n');
     for (const [file, omitted] of [

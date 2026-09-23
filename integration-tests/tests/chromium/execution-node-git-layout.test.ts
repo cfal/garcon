@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
-import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
 test('execution-node Git labels and GitHub host controls fit desktop and mobile', async () => {
   await withChromiumFixture('execution-node-git-layout', async (fixture, phase) => {
@@ -12,6 +12,7 @@ test('execution-node Git labels and GitHub host controls fit desktop and mobile'
     const label = 'Production build and review execution host';
     await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { label });
     await initializeFixtureRepository(executionDirs.project);
+    await runFixtureGit(executionDirs.project, 'branch', '-m', 'feature/long-branch-for-execution-node-layout');
     await writeFile(join(executionDirs.project, 'example.txt'), 'Synthetic remote change\n');
     const chatId = fixture.integration.newChatId();
     const accepted = await client.startDirectChat({ chatId, projectPath: executionDirs.project, content: 'Synthetic Git layout chat', agent: directAgents.openAi });
@@ -23,8 +24,10 @@ test('execution-node Git labels and GitHub host controls fit desktop and mobile'
     await collapseCanonicalFilesWindow(page);
     await clickWorkspaceWindowAddAction(page, 'Open Git Workbench');
     const panel = page.locator('[data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
-    const target = panel.getByRole('button', { name: `${label}: ${executionDirs.project}`, exact: true });
+    const target = panel.getByRole('button', { name: executionDirs.project, exact: true });
+    const nodePicker = panel.getByRole('button', { name: `Execution node: ${label}`, exact: true });
     await target.waitFor({ state: 'visible' });
+    await nodePicker.waitFor({ state: 'visible' });
     await panel.getByText('Synthetic remote change', { exact: false }).first().waitFor();
     phase('desktop Git target');
     expect(await target.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -36,28 +39,34 @@ test('execution-node Git labels and GitHub host controls fit desktop and mobile'
       (element as HTMLElement).inert && element.hasAttribute('inert'),
     )).toBe(true);
     expect(await panel.getByRole('button', {
-      name: `${label}: ${executionDirs.project}`, exact: true, includeHidden: true,
+      name: executionDirs.project, exact: true, includeHidden: true,
     }).isDisabled()).toBe(true);
+    expect(await nodePicker.isDisabled()).toBe(false);
     await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { enabled: true });
     await page.waitForFunction(() => document.querySelector(
-      '[data-workspace-surface-id="singleton:git"] [data-git-surface-toolbar] button',
+      '[data-workspace-surface-id="singleton:git"] [data-git-folder-picker]',
     )?.hasAttribute('disabled') === false);
 
     phase('mobile Git target');
     await page.setViewportSize({ width: 390, height: 900 });
     const mobilePanel = page.locator('.mobile-shell [data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
-    const mobileTarget = mobilePanel.getByRole('button', { name: `${label}: ${executionDirs.project}`, exact: true });
+    const mobileTarget = mobilePanel.getByRole('button', { name: executionDirs.project, exact: true });
     await mobileTarget.waitFor({ state: 'visible' });
     expect(await mobileTarget.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await mobilePanel.evaluate(element => {
       const bounds = element.getBoundingClientRect();
       const controls = [...element.querySelectorAll<HTMLElement>('[data-git-surface-toolbar] button')]
         .filter(button => button.checkVisibility({ checkVisibilityCSS: true }));
-      return controls.length > 0 && controls.every(control => {
-        const rect = control.getBoundingClientRect();
-        return rect.width > 0 && rect.left >= bounds.left && rect.right <= bounds.right;
-      });
+      const rectangles = controls.map(control => control.getBoundingClientRect());
+      return controls.length > 0 && rectangles.every((rect, index) =>
+        rect.width > 0 && rect.left >= bounds.left && rect.right <= bounds.right
+        && rectangles.slice(index + 1).every(other =>
+          rect.right <= other.left || rect.left >= other.right || rect.bottom <= other.top || rect.top >= other.bottom),
+      );
     })).toBe(true);
+    for (const selector of ['[data-execution-node-picker] span', '[data-popover-trigger] span']) {
+      expect(await mobilePanel.locator(selector).first().evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(40);
+    }
     await page.screenshot({ path: join(artifacts, 'execution-node-git-mobile.png') });
     await page.setViewportSize({ width: 1440, height: 900 });
 

@@ -73,7 +73,7 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
     await openChat(fixture);
     await clickWorkspaceWindowAddAction(page, 'Open Git Workbench');
     const panel = page.locator('[data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
-    await panel.getByRole('button', { name: `Integration worker: ${project}`, exact: true }).click();
+    await panel.getByRole('button', { name: project, exact: true }).click();
     const release = Promise.withResolvers<void>();
     const dispatched = Promise.withResolvers<void>();
     let calls = 0;
