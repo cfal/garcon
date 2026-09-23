@@ -97,6 +97,12 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
     ];
 
     if (model) args.push('--model', model);
+    if (codexConfig?.modelCatalogPath) {
+      args.push(
+        '--config',
+        `model_catalog_json=${JSON.stringify(codexConfig.modelCatalogPath)}`,
+      );
+    }
     appendCodexConfigArgs(args, codexConfig?.config);
     if (reasoningEffort) args.push('--config', `model_reasoning_effort="${reasoningEffort}"`);
     if (approvalPolicy) args.push('--config', `approval_policy="${approvalPolicy}"`);

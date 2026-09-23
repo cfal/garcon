@@ -19,14 +19,20 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import {
+  singleQueryRuntimeOptions,
+  withSingleQueryControl,
+} from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import {
   createHistoryImport,
   createNativeHistoryImport,
 } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCodexConfig, type CodexConfig } from './config.js';
-import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
+import {
+  createCodexAuthStatusResolver,
+  resolveCodexExecAuthStatus,
+} from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
 import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
 import {
@@ -39,6 +45,7 @@ import { createCodexNativeEvidence } from './agents/codex/transcript.js';
 import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
+  buildCodexHostProviderConfig,
 } from './agents/codex/app-server/endpoint-runtime.js';
 import { CodexAppServerClient } from './agents/codex/app-server/client.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
@@ -58,6 +65,7 @@ const CODEX_DESCRIPTOR = {
   supportedEndpointProtocols: ['openai-compatible'],
   configuration: [
     { key: 'OPENAI_API_KEY', source: 'environment', description: 'OpenAI API key.' },
+    { key: 'CODEX_API_KEY', source: 'environment', description: 'Codex exec API key.' },
     { key: 'OPENAI_BASE_URL', source: 'environment', description: 'OpenAI API base URL.' },
     { key: 'CODEX_HOME', source: 'environment', description: 'Codex state directory.' },
     { key: 'npm_package_version', source: 'environment', description: 'Garcon package version.' },
@@ -94,6 +102,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
 
   constructor(host: AgentHost) {
     const config = createCodexConfig(host.environment);
+    const authStatus = createCodexAuthStatusResolver(config);
     const logger = createScopedAgentLogger(host.logger, 'codex');
     const nativeSessions = createPathNativeSessionCodec('codex');
     const createClient = (options: ConstructorParameters<typeof CodexAppServerClient>[0] = {}) => (
@@ -127,7 +136,13 @@ export default class CodexAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    const execution = new CodexExecution(host, runtime, nativeSessions, config);
+    const execution = new CodexExecution(
+      host,
+      runtime,
+      nativeSessions,
+      config,
+      authStatus.current,
+    );
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration, previousConfiguration) => (
         execution.applySessionConfiguration(agentSessionId, configuration, previousConfiguration)
@@ -173,7 +188,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
-        const status = await getCodexAuthStatus(config);
+        const status = await authStatus.refresh(signal);
         return {
           authenticated: status.authenticated,
           canReauth: true,
@@ -181,8 +196,15 @@ export default class CodexAgentIntegration implements AgentIntegration {
           source: status.authenticated ? 'cli' : 'none',
         };
       },
-      launchLogin: () => login.launch(),
-      loginStatus: (expectedSessionId) => login.status(expectedSessionId),
+      launchLogin: () => {
+        authStatus.invalidate();
+        return login.launch();
+      },
+      loginStatus: (expectedSessionId) => {
+        const status = login.status(expectedSessionId);
+        authStatus.invalidate();
+        return status;
+      },
     };
     this.commands = {
       discover: (projectPath, signal) => {
@@ -202,6 +224,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
         runtime,
         nativeSessions,
         config,
+        authStatus.current,
       ),
     });
     this.forking = createCodexForking({
@@ -236,6 +259,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
         runtime,
         nativeSessions,
         config,
+        authStatus.current,
       ),
       forkPaginatedPoint: (request, lastTurnId) => forkCodexNativeSession(
         request,
@@ -243,6 +267,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
         runtime,
         nativeSessions,
         config,
+        authStatus.current,
         lastTurnId,
       ),
     });
@@ -266,25 +291,33 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     this.singleQuery = {
       async run(request) {
-        const resolved = await resolveAgentEndpoint(host, request.endpoint, request.signal);
-        const endpointRuntime = resolved
-          ? buildCodexAppServerEndpointRuntime(resolved)
-          : null;
-        if (resolved && !endpointRuntime) {
-          throw new AgentIntegrationError(
-            'INVALID_ENDPOINT',
-            'Codex requires an OpenAI-compatible endpoint',
-            false,
-          );
-        }
+        const runtimeOptions = singleQueryRuntimeOptions(request);
         try {
-          return await runSingleQuery(request.prompt, {
-            projectPath: request.projectPath,
-            model: request.model,
-            ...singleQueryRuntimeOptions(request),
-            permissionMode: 'default',
-            envOverrides: buildCodexHostEnvironment(config),
-            codexConfig: endpointRuntime?.codexConfig,
+          return await withSingleQueryControl(runtimeOptions, async (signal) => {
+            const resolved = await resolveAgentEndpoint(host, request.endpoint, signal);
+            const endpointRuntime = resolved
+              ? buildCodexAppServerEndpointRuntime(resolved)
+              : null;
+            if (resolved && !endpointRuntime) {
+              throw new AgentIntegrationError(
+                'INVALID_ENDPOINT',
+                'Codex requires an OpenAI-compatible endpoint',
+                false,
+              );
+            }
+            return runSingleQuery(request.prompt, {
+              projectPath: request.projectPath,
+              model: request.model,
+              ...runtimeOptions,
+              timeoutMs: undefined,
+              signal,
+              permissionMode: 'default',
+              envOverrides: buildCodexHostEnvironment(config),
+              codexConfig: endpointRuntime?.codexConfig
+                ?? buildCodexHostProviderConfig(
+                  await resolveCodexExecAuthStatus(config, authStatus.current, signal),
+                ),
+            });
           });
         } catch (error) {
           throw classifyCodexError(error);
@@ -308,6 +341,7 @@ async function forkCodexNativeSession(
   runtime: CodexAppServerRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
   config: CodexConfig,
+  resolveAuthStatus: ReturnType<typeof createCodexAuthStatusResolver>['current'],
   lastTurnId?: string,
 ) {
   const source = nativeSessions.decode(request.source.nativeSession);
@@ -331,7 +365,8 @@ async function forkCodexNativeSession(
         nativePath: source.path,
       },
       envOverrides: buildCodexHostEnvironment(config),
-      codexConfig: endpointRuntime?.codexConfig,
+      codexConfig: endpointRuntime?.codexConfig
+        ?? buildCodexHostProviderConfig(await resolveAuthStatus(request.admission.signal)),
       lastTurnId: lastTurnId ?? null,
     });
   } catch (error) {

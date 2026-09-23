@@ -353,6 +353,7 @@ function createRpcClientFixture(responder, options = {}) {
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
+    modelCatalogPath: options.modelCatalogPath,
     resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'bundled' })),
     shutdownGraceMs: options.shutdownGraceMs,
     shutdownTerminateMs: options.shutdownTerminateMs,
@@ -771,7 +772,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       if (message.method === 'thread/loaded/list') return { data: ['thread-1'] };
       if (message.method === 'thread/unsubscribe') return { status: 'notSubscribed' };
       throw new Error(`Unexpected method ${message.method}`);
-    });
+    }, { modelCatalogPath: '/opt/garcon/codex-models.json' });
     const metrics = [];
     client.on('metric', (metric) => metrics.push(metric));
 
@@ -779,7 +780,13 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     await expect(client.unsubscribeThread('thread-1')).resolves.toEqual({ status: 'notSubscribed' });
     await client.shutdown();
 
-    expect(spawn).toHaveBeenCalledWith('/tmp/codex', ['app-server', '--listen', 'stdio://'], expect.any(Object));
+    expect(spawn).toHaveBeenCalledWith('/tmp/codex', [
+      'app-server',
+      '--listen',
+      'stdio://',
+      '--config',
+      'model_catalog_json="/opt/garcon/codex-models.json"',
+    ], expect.any(Object));
     expect(writes).toContainEqual(expect.objectContaining({ method: 'thread/loaded/list', params: {} }));
     expect(writes).toContainEqual(expect.objectContaining({
       method: 'thread/unsubscribe',
@@ -1066,14 +1073,20 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('high')).toBe('high');
     expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
     expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
-    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra']) {
+    for (const model of [
+      'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
+      'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna',
+    ]) {
       expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
     }
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
+    expect(mapThinkingModeToCodexEffort('ultra', 'gpt-6-sol')).toBe('ultra');
+    expect(mapThinkingModeToCodexEffort('ultra', 'acme-openai:gpt-6-sol')).toBe('ultra');
   });
 
   it.each([
-    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
+    'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna',
+    'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
     'gpt-5.5', 'gpt-5.4', 'custom-model',
   ])('leaves provider-default effort unset for %s', (model) => {
     const params = buildTurnStartParams({
@@ -1132,11 +1145,11 @@ describe('Codex app-server request builders', () => {
     });
   });
 
-  it('uses max effort for GPT-5.6 turn params', () => {
+  it('uses max effort for models that support it', () => {
     const params = buildTurnStartParams({
       threadId: 'thread-1',
       command: 'hello',
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'max',
@@ -7198,6 +7211,7 @@ describe('CodexAppServerRuntime', () => {
       codexConfig: {
         env: { CODEX_HOME: '/tmp/codex-home' },
         config: { model_provider: 'custom-openai' },
+        modelCatalogPath: '/opt/garcon/codex-models.json',
       },
     });
 
@@ -7206,6 +7220,7 @@ describe('CodexAppServerRuntime', () => {
       OPENAI_API_KEY: 'endpoint-key',
       CODEX_HOME: '/tmp/codex-home',
     });
+    expect(clientOptions[0].modelCatalogPath).toBe('/opt/garcon/codex-models.json');
     expect(operationClient.forkThread).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
       config: { model_provider: 'custom-openai' },

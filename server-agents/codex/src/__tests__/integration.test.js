@@ -76,6 +76,54 @@ describe('CodexAgentIntegration', () => {
     });
   });
 
+  it('reports a stalled authentication probe as a retryable single-query timeout', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalCli = process.env.GARCON_CODEX_CLI;
+    let finish;
+    const exited = new Promise((resolve) => {
+      finish = resolve;
+    });
+    let integration;
+
+    try {
+      process.env.GARCON_CODEX_CLI = '/synthetic/codex';
+      Bun.spawn = mock(() => ({
+        stdout: null,
+        stderr: null,
+        exited,
+        killed: false,
+        kill: () => finish(1),
+      }));
+      globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(
+        callback,
+        delay === 10_000 ? 0 : delay,
+        ...args,
+      );
+      integration = new CodexAgentIntegration(createHost());
+
+      await expect(integration.singleQuery.run({
+        projectPath: '/tmp',
+        model: 'gpt-6-sol',
+        prompt: 'test',
+        thinkingMode: 'ultra',
+        endpoint: null,
+        settings: integration.settings.defaults(),
+        signal: new AbortController().signal,
+      })).rejects.toMatchObject({
+        code: 'TIMEOUT',
+        message: 'Codex authentication check timed out after 10000ms.',
+        retryable: true,
+      });
+    } finally {
+      await integration?.lifecycle.stop();
+      Bun.spawn = originalSpawn;
+      globalThis.setTimeout = originalSetTimeout;
+      if (originalCli === undefined) delete process.env.GARCON_CODEX_CLI;
+      else process.env.GARCON_CODEX_CLI = originalCli;
+    }
+  });
+
   it('[TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01] rejects incomplete selected records and recognized content payloads before retry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-codex-native-import-'));
     const nativePath = join(root, 'rollout.jsonl');

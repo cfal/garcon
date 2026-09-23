@@ -1,5 +1,6 @@
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import { THINKING_MODES } from '$lib/chat/composer/chat-ui-constants.js';
+import { isCodexSolModel } from '@garcon/common/models';
 
 export type ComposerModeIconId =
 	| 'permission-default'
@@ -120,8 +121,7 @@ export function buildThinkingOptions(
 	return modes.map((modeId) => {
 		const mode = THINKING_MODES.find((candidate) => candidate.id === modeId);
 		const iconMeta = THINKING_ICON_METADATA[modeId] ?? THINKING_ICON_METADATA.none;
-		const rainbow =
-			modeId === 'ultra' && (model === 'gpt-5.6-sol' || model?.endsWith(':gpt-5.6-sol'));
+		const rainbow = modeId === 'ultra' && isCodexSolModel(model);
 		return {
 			value: modeId,
 			label: mode?.name ?? modeId,

@@ -16,8 +16,11 @@ describe('buildThinkingOptions', () => {
 		]);
 	});
 
-	it('marks Ultra as rainbow only for GPT-5.6 Sol', () => {
-		const solUltra = buildThinkingOptions(allModes, 'gpt-5.6-sol').find(
+	it('marks Ultra as rainbow for GPT-6 Sol and GPT-5.6 Sol', () => {
+		const solUltra = buildThinkingOptions(allModes, 'gpt-6-sol').find(
+			(option) => option.value === 'ultra',
+		);
+		const previousSolUltra = buildThinkingOptions(allModes, 'gpt-5.6-sol').find(
 			(option) => option.value === 'ultra',
 		);
 		const terraUltra = buildThinkingOptions(allModes, 'gpt-5.6-terra').find(
@@ -25,11 +28,12 @@ describe('buildThinkingOptions', () => {
 		);
 
 		expect(solUltra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
+		expect(previousSolUltra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
 		expect(terraUltra).not.toHaveProperty('rainbow');
 	});
 
-	it('recognizes GPT-5.6 Sol through an API endpoint model value', () => {
-		const endpointSolUltra = buildThinkingOptions(allModes, 'acme-openai:gpt-5.6-sol').find(
+	it('recognizes GPT-6 Sol through an API endpoint model value', () => {
+		const endpointSolUltra = buildThinkingOptions(allModes, 'acme-openai:gpt-6-sol').find(
 			(option) => option.value === 'ultra',
 		);
 

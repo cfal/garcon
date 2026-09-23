@@ -709,11 +709,11 @@ export class CodexAppServerRuntime {
     for (const session of sessions) this.#retireSource(session.client);
   }
 
-  #newClient(
-    request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
-    bufferNotifications = false,
-  ): CodexAppServerClient {
-    const client = this.#createClient({ env: buildCodexEnv(request.envOverrides, request.codexConfig) });
+  #newClient(request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>, bufferNotifications = false): CodexAppServerClient {
+    const client = this.#createClient({
+      env: buildCodexEnv(request.envOverrides, request.codexConfig),
+      modelCatalogPath: request.codexConfig?.modelCatalogPath,
+    });
     if (bufferNotifications) this.#bufferingClients.add(client);
     this.#wireClient(client);
     return client;

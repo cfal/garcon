@@ -15,6 +15,7 @@ export type CodexConfigObject = { [key: string]: CodexConfigValue };
 export interface CodexProviderConfig {
   readonly config: CodexConfigObject;
   readonly env?: Record<string, string>;
+  readonly modelCatalogPath?: string;
 }
 
 export interface CodexExecutionAdmission {

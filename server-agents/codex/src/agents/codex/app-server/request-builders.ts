@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import { GPT_6_ASTRA_MODEL } from '@garcon/common/models';
+import { codexModelSupportsMaxEffort } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type { ThreadInjectItemsParams } from './protocol.js';
@@ -21,6 +21,7 @@ export function codexSourceRuntimeIdentity(
   const source = stableStringify({
     env: buildCodexEnv(request.envOverrides, request.codexConfig) ?? null,
     config: request.codexConfig?.config ?? null,
+    modelCatalogPath: request.codexConfig?.modelCatalogPath ?? null,
   });
   return createHash('sha256').update(source).digest('hex');
 }
@@ -213,11 +214,7 @@ export function mapThinkingModeToCodexEffort(
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
-    case 'max': return model === GPT_6_ASTRA_MODEL
-      || model === 'gpt-5.6'
-      || model?.startsWith('gpt-5.6-')
-      ? 'max'
-      : 'xhigh';
+    case 'max': return codexModelSupportsMaxEffort(model) ? 'max' : 'xhigh';
     case 'ultra': return 'ultra';
     default: return undefined;
   }

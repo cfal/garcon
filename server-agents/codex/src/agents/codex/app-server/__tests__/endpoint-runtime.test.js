@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { buildCodexAppServerEndpointRuntime } from '../endpoint-runtime.ts';
+import {
+  buildCodexAppServerEndpointRuntime,
+  buildCodexHostEnvironment,
+  buildCodexHostProviderConfig,
+} from '../endpoint-runtime.ts';
+import { resolveCodexModelCatalogPath } from '../model-catalog.ts';
 
 function selection(endpoint = {}) {
   return {
@@ -47,6 +52,7 @@ describe('buildCodexAppServerEndpointRuntime', () => {
         env: {
           GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI: 'secret',
         },
+        modelCatalogPath: resolveCodexModelCatalogPath(),
       },
     });
   });
@@ -69,7 +75,35 @@ describe('buildCodexAppServerEndpointRuntime', () => {
             },
           },
         },
+        modelCatalogPath: resolveCodexModelCatalogPath(),
       },
+    });
+  });
+
+  it('supplies the bundled catalog only when effective auth disables live discovery', () => {
+    expect(buildCodexHostProviderConfig({ kind: 'chatgpt' })).toBeUndefined();
+    expect(buildCodexHostProviderConfig({ kind: 'none' })).toBeUndefined();
+    expect(buildCodexHostProviderConfig({ kind: 'api-key' })).toEqual({
+      config: {},
+      modelCatalogPath: resolveCodexModelCatalogPath(),
+    });
+    expect(buildCodexHostProviderConfig({ kind: 'external' })).toEqual({
+      config: {},
+      modelCatalogPath: resolveCodexModelCatalogPath(),
+    });
+  });
+
+  it('passes both supported host API-key variables to Codex processes', () => {
+    expect(buildCodexHostEnvironment({
+      codexApiKey: () => 'codex-key',
+      openAiApiKey: () => 'openai-key',
+      openAiBaseUrl: () => null,
+      home: () => '/home/test/.codex',
+      packageVersion: () => 'test',
+    })).toEqual({
+      CODEX_API_KEY: 'codex-key',
+      OPENAI_API_KEY: 'openai-key',
+      CODEX_HOME: '/home/test/.codex',
     });
   });
 });

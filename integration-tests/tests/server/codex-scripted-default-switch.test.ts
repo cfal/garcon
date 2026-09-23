@@ -15,6 +15,8 @@ import {
 
 const SCRIPTED_MODEL_DEFAULTS = {
   'gpt-6-astra': 'low',
+  'gpt-6-sol': 'medium',
+  'gpt-6-luna': 'medium',
   'gpt-5.6-sol': 'low',
   'gpt-5.6-terra': 'medium',
   'gpt-5.6-luna': 'medium',
@@ -53,7 +55,8 @@ describe('Codex scripted default effort model switching', () => {
       });
 
       for (const model of [
-        'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.4', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra',
+        'gpt-5.5', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol',
+        'gpt-5.4', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra',
       ] as const) {
         const response = await fetch(`${fixture.client.baseUrl}/api/v1/chats/model`, {
           method: 'PATCH',
@@ -125,6 +128,98 @@ describe('Codex scripted default effort model switching', () => {
       },
     });
   }, 120_000);
+
+  test('uses bundled metadata to preserve GPT-6 Sol Ultra semantics', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+
+    await withIntegrationFixture('codex-scripted-sol-ultra', async (fixture) => {
+      await runScriptedTurn({
+        fixture,
+        testEnvironment,
+        chatId: fixture.newChatId(),
+        model: 'gpt-6-sol',
+        command: 'Use maximum reasoning without automatic delegation.',
+        start: true,
+        thinkingMode: 'max',
+        expectedEffort: 'max',
+        unexpectedRequestText: 'Proactive multi-agent delegation is active.',
+      });
+      await runScriptedTurn({
+        fixture,
+        testEnvironment,
+        chatId: fixture.newChatId(),
+        model: 'gpt-6-sol',
+        command: 'Use the highest Sol effort.',
+        start: true,
+        thinkingMode: 'ultra',
+        expectedEffort: 'max',
+        expectedRequestText: 'Proactive multi-agent delegation is active.',
+      });
+
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: {
+        ...testEnvironment.serverEnvironment,
+        OPENAI_API_KEY: 'garcon-scripted-catalog-key',
+      },
+      prepareWorkspace: (directories) => testEnvironment.prepareWorkspace(directories, {
+        useFixtureModelCatalog: false,
+      }),
+    });
+  }, 120_000);
+
+  test('uses CODEX_API_KEY metadata for one-shot GPT-6 Sol Ultra queries', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const title = `SCRIPTED_SOL_TITLE_${crypto.randomUUID()}`;
+
+    await withIntegrationFixture('codex-scripted-sol-ultra-title', async (fixture) => {
+      await fixture.client.updateSettings({
+        ui: {
+          chatTitle: {
+            enabled: false,
+            agentId: 'codex',
+            model: 'gpt-6-sol',
+            apiProviderId: null,
+            modelEndpointId: null,
+            modelProtocol: null,
+            thinkingMode: 'ultra',
+          },
+        },
+      });
+      const chatId = fixture.newChatId();
+      await runScriptedTurn({
+        fixture,
+        testEnvironment,
+        chatId,
+        model: 'gpt-5.4',
+        command: 'Create a source conversation for title generation.',
+        start: true,
+        expectedEffort: 'medium',
+      });
+
+      const requestIndex = testEnvironment.model.requests().length;
+      testEnvironment.model.scriptTurn([codexAssistantMessage(title)]);
+      await expect(fixture.client.generateChatTitle({
+        chatId,
+        message: 'A conversation about one-shot Codex metadata.',
+      })).resolves.toMatchObject({ success: true, title });
+
+      const request = testEnvironment.model.requests()[requestIndex]?.body;
+      expect(request).toMatchObject({ reasoning: { effort: 'max' } });
+      expect(JSON.stringify(request)).toContain('Proactive multi-agent delegation is active.');
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: {
+        ...testEnvironment.serverEnvironment,
+        CODEX_API_KEY: 'garcon-scripted-codex-exec-key',
+      },
+      prepareWorkspace: (directories) => testEnvironment.prepareWorkspace(directories, {
+        useFixtureModelCatalog: false,
+      }),
+    });
+  }, 120_000);
 });
 
 async function runScriptedTurn(options: {
@@ -134,8 +229,10 @@ async function runScriptedTurn(options: {
   model: keyof typeof SCRIPTED_MODEL_DEFAULTS;
   command: string;
   start?: boolean;
-  thinkingMode?: 'none' | 'high';
+  thinkingMode?: 'none' | 'high' | 'max' | 'ultra';
   expectedEffort: string;
+  expectedRequestText?: string;
+  unexpectedRequestText?: string;
 }): Promise<void> {
   const {
     fixture,
@@ -177,6 +274,16 @@ async function runScriptedTurn(options: {
     model,
     reasoning: { effort: options.expectedEffort },
   });
+  if (options.expectedRequestText) {
+    expect(JSON.stringify(testEnvironment.model.requests()[requestIndex]?.body)).toContain(
+      options.expectedRequestText,
+    );
+  }
+  if (options.unexpectedRequestText) {
+    expect(JSON.stringify(testEnvironment.model.requests()[requestIndex]?.body)).not.toContain(
+      options.unexpectedRequestText,
+    );
+  }
 }
 
 async function overlayScriptedModelDefaults(directories: IntegrationDirectories): Promise<void> {
@@ -192,7 +299,7 @@ async function overlayScriptedModelDefaults(directories: IntegrationDirectories)
     display_name: slug,
     description: `Scripted ${slug} model.`,
     default_reasoning_level: effort,
-    supported_reasoning_levels: ['low', 'medium', 'high', 'xhigh'].map((supportedEffort) => ({
+    supported_reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map((supportedEffort) => ({
       effort: supportedEffort,
       description: `${supportedEffort} effort`,
     })),

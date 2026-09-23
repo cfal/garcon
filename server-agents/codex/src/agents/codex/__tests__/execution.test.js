@@ -88,11 +88,22 @@ function createHost() {
 
 function createConfig() {
   return {
+    codexApiKey: () => null,
     openAiApiKey: () => null,
     openAiBaseUrl: () => null,
     home: () => '/tmp/codex-home',
     packageVersion: () => '1.0.0',
   };
+}
+
+function createTestCodexExecution(host, runtime, nativeSessions, config) {
+  return new CodexExecution(
+    host,
+    runtime,
+    nativeSessions,
+    config,
+    async () => ({ authenticated: false, canReauth: true, label: '', kind: 'none' }),
+  );
 }
 
 function startRequest(overrides = {}) {
@@ -138,7 +149,7 @@ function goalControlRequest(runId, beforeDelivery = commitHandoff) {
 describe('CodexExecution', () => {
   it('preserves admission, endpoint configuration, session identity, and run correlation', async () => {
     const runtime = createRuntime();
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -211,7 +222,7 @@ describe('CodexExecution', () => {
     runtime.startSession.mockImplementation(async () => {
       throw new Error('Codex thread did not materialize transcript');
     });
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -227,7 +238,7 @@ describe('CodexExecution', () => {
   it('keeps carried context separate when starting a Codex goal', async () => {
     const publish = () => {};
     const runtime = createRuntime();
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -257,7 +268,7 @@ describe('CodexExecution', () => {
 
   it('rejects goal controls that cannot start a new thread', async () => {
     const publish = () => {};
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       createRuntime(),
       createPathNativeSessionCodec('codex'),
@@ -271,7 +282,7 @@ describe('CodexExecution', () => {
   for (const outcome of ['decline', 'failure']) {
     it(`keeps the predecessor run active when goal control has a pre-boundary ${outcome}`, async () => {
       const runtime = createRuntime();
-      const execution = new CodexExecution(
+      const execution = createTestCodexExecution(
         createHost(),
         runtime,
         createPathNativeSessionCodec('codex'),
@@ -302,7 +313,7 @@ describe('CodexExecution', () => {
 
   it('retains successor correlation after a post-boundary delivery failure', async () => {
     const runtime = createRuntime();
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -339,7 +350,7 @@ describe('CodexExecution', () => {
       messages.push(...event.rows.map((row) => row.message.content));
     };
     const runtime = createRuntime();
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -394,7 +405,7 @@ describe('CodexExecution', () => {
   it('[TLV5-L07.07-CODEX-UNIT-01] keeps the prior source route when a replacement start fails before activation', async () => {
     const host = createHost();
     const runtime = createRuntime(host);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       host,
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -446,7 +457,7 @@ describe('CodexExecution', () => {
   it('[TLV5-L07.08-CODEX-UNIT-01] drops a delayed provider event at its closed originating sink after view replacement', async () => {
     const host = createHost();
     const runtime = createRuntime(host);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       host,
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -485,7 +496,7 @@ describe('CodexExecution', () => {
 
   it('forwards supported configuration changes while the provider source is live', async () => {
     const runtime = createRuntime();
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -521,7 +532,7 @@ describe('CodexExecution', () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     runtime.isRunning.mockReturnValue(true);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -545,7 +556,7 @@ describe('CodexExecution', () => {
   it('defers returning to provider-default effort until the retained source is replaced', async () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -570,7 +581,7 @@ describe('CodexExecution', () => {
 
   it('allows returning to provider-default effort after the source is gone', async () => {
     const runtime = createRuntime();
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -596,10 +607,10 @@ describe('CodexExecution', () => {
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 
-  it('switches an established GPT-6 Astra Default session to GPT-5.6 Sol Default', async () => {
+  it('switches an established GPT-6 Astra Default session to GPT-6 Sol Default', async () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -615,22 +626,23 @@ describe('CodexExecution', () => {
 
     await execution.applySessionConfiguration('thread-1', {
       ...previous,
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     }, previous);
 
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       permissionMode: 'default',
       thinkingMode: 'none',
     });
   });
 
   it.each([
-    'gpt-5.5', 'gpt-5.4', 'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol',
+    'gpt-6-luna', 'gpt-5.5', 'gpt-5.4',
+    'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol',
   ])('allows switching from Astra Default to %s Default', async (model) => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
@@ -659,7 +671,7 @@ describe('CodexExecution', () => {
     const runtime = createRuntime();
     runtime.isRunning.mockReturnValue(true);
     runtime.hasSource.mockReturnValue(true);
-    const execution = new CodexExecution(
+    const execution = createTestCodexExecution(
       createHost(),
       runtime,
       createPathNativeSessionCodec('codex'),
