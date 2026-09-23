@@ -20,21 +20,36 @@ function textStream(value) {
 
 describe('runGit', () => {
   let originalSpawn;
+  let originalKill;
   let spawnMock;
 
   beforeEach(() => {
     originalSpawn = Bun.spawn;
+    originalKill = process.kill;
     spawnMock = mock(() => ({
       stdout: textStream('ok\n'),
       stderr: textStream(''),
       exited: Promise.resolve(0),
       kill: mock(() => undefined),
     }));
-    Bun.spawn = spawnMock;
+    Bun.spawn = (...args) => {
+      if (args[0][0] === 'taskkill') {
+        spawnMock.mock.results.at(-1).value.kill();
+        return { exited: Promise.resolve(0) };
+      }
+      return Object.assign(spawnMock(...args), { pid: 424242 });
+    };
+    process.kill = mock((pid, signal) => {
+      expect(pid).toBe(-424242);
+      if (signal === 'SIGKILL') throw Object.assign(new Error('No remaining group'), { code: 'ESRCH' });
+      spawnMock.mock.results.at(-1).value.kill();
+      return true;
+    });
   });
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
+    process.kill = originalKill;
   });
 
   it('sets GIT_OPTIONAL_LOCKS=0 when optional locks are disabled', async () => {
@@ -90,6 +105,7 @@ describe('runGit', () => {
 
   it('enforces limits while draining real subprocess pipes', async () => {
     Bun.spawn = originalSpawn;
+    process.kill = originalKill;
     const commandDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-fake-git-'));
     const fakeGitPath = path.join(commandDirectory, 'git');
     await fs.writeFile(fakeGitPath, `#!/usr/bin/env bun

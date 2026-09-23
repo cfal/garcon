@@ -16,6 +16,27 @@ const GIT_LOCK_MAX_RETRIES = 50;
 const GIT_DEFAULT_TIMEOUT_MS = 30_000;
 const GIT_DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 const GIT_DEFAULT_MAX_STDERR_BYTES = 2 * 1024 * 1024;
+const GIT_TERMINATION_GRACE_MS = 250;
+
+async function terminateGitProcess(proc: Bun.Subprocess): Promise<void> {
+  if (process.platform === 'win32') {
+    const killer = Bun.spawn(['taskkill', '/PID', String(proc.pid), '/T', '/F'], {
+      stdin: 'ignore', stdout: 'ignore', stderr: 'ignore',
+    });
+    await killer.exited;
+    return;
+  }
+  try {
+    process.kill(-proc.pid, 'SIGTERM');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+    throw error;
+  }
+  // Git gets a chance to clean its locks before uncooperative filters are forced to exit.
+  await sleep(GIT_TERMINATION_GRACE_MS);
+  try { process.kill(-proc.pid, 'SIGKILL'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+}
 
 export function gitCommandEnv(options: GitCommandOptions): NodeJS.ProcessEnv | undefined {
   if (!options.disableOptionalLocks && !options.env) return undefined;
@@ -148,12 +169,13 @@ async function runGitProcess(
     const abortState = createGitAbortState(options, remainingMs);
     let proc: Bun.Subprocess<GitStdin, 'pipe', 'pipe'>;
     try {
+      abortState.signal?.throwIfAborted();
       proc = Bun.spawn(['git', ...args], {
         cwd,
         stdin,
         stdout: 'pipe',
         stderr: 'pipe',
-        signal: abortState.signal,
+        detached: process.platform !== 'win32',
         env: gitCommandEnv(options),
       });
       if (!options.disableOptionalLocks) markGitMutationDispatched();
@@ -169,16 +191,16 @@ async function runGitProcess(
       }
       throw error;
     }
-    const abortListener = (): void => {
-      proc.kill();
-    };
+    let termination: Promise<void> | undefined;
+    const abortListener = (): void => { termination ??= terminateGitProcess(proc); };
     abortState.signal?.addEventListener('abort', abortListener, { once: true });
+    if (abortState.signal?.aborted) abortListener();
     let outputLimitError: GitOutputLimitError | null = null;
     const captureOutput = (output: Promise<string>): Promise<string> =>
       output.catch((error) => {
         if (error instanceof GitOutputLimitError) {
           outputLimitError ??= error;
-          proc.kill();
+          abortListener();
         }
         return '';
       });
@@ -193,13 +215,14 @@ async function runGitProcess(
         options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
       )),
       proc.exited,
-    ]).finally(() => {
+    ]).finally(async () => {
       abortState.signal?.removeEventListener('abort', abortListener);
       abortState.cleanup();
+      await termination;
     });
     if (diagnosticOutput && Buffer.byteLength(stdout) >= stdoutLimit) markGitOutputTruncated();
     if (outputLimitError) throw outputLimitError;
-    if (exitCode === 0) return { stdout, stderr };
+    if (exitCode === 0 && !abortState.aborted()) return { stdout, stderr };
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       lastFailure = { exitCode, stdout, stderr };

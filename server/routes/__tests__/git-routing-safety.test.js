@@ -41,9 +41,7 @@ test('deadline during repository validation remains a timeout at the HTTP bounda
     spawn = spyOn(Bun, 'spawn').mockImplementation((args, options) => {
       if (!args.includes('--is-inside-work-tree')) return original(args, options);
       heldProbe = true;
-      const done = Promise.withResolvers();
-      const empty = () => new ReadableStream({ start(output) { output.close(); } });
-      return { stdout: empty(), stderr: empty(), exited: done.promise, kill() { done.resolve(1); } };
+      return original([process.execPath, '-e', 'setTimeout(() => {}, 10000)'], options);
     });
     const routes = createGitRoutes({}, {}, async () => runtime.git, 1_000);
     const url = new URL('http://localhost/api/v1/git/remotes');

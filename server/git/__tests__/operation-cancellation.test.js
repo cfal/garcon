@@ -43,10 +43,9 @@ test('cancelled native dispatch is uncertain, while cancelled lock acquisition i
     const originalSpawn = Bun.spawn;
     spawn = spyOn(Bun, 'spawn').mockImplementation((args, options) => {
       if (args[0] !== 'git' || args[1] !== 'commit') return originalSpawn(args, options);
-      const done = Promise.withResolvers();
+      const child = originalSpawn([process.execPath, '-e', 'setTimeout(() => {}, 10000)'], options);
       queueMicrotask(() => controller.abort());
-      const empty = () => new ReadableStream({ start(output) { output.close(); } });
-      return { stdout: empty(), stderr: empty(), exited: done.promise, kill() { done.resolve(1); } };
+      return child;
     });
     await expect(runtime.git.commitIndex({ projectPath, message: 'interrupted' }, { signal: controller.signal }))
       .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
