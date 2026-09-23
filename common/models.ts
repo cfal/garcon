@@ -18,11 +18,32 @@ export const CLAUDE_MODELS = {
 };
 
 export const GPT_6_ASTRA_MODEL = 'gpt-6-astra';
+export const GPT_6_SOL_MODEL = 'gpt-6-sol';
+export const GPT_6_LUNA_MODEL = 'gpt-6-luna';
+
+function matchesModelValue(model: string | undefined, value: string): boolean {
+  return model === value || model?.endsWith(`:${value}`) === true;
+}
+
+export function isCodexSolModel(model: string | undefined): boolean {
+  return matchesModelValue(model, GPT_6_SOL_MODEL)
+    || matchesModelValue(model, 'gpt-5.6-sol');
+}
+
+export function codexModelSupportsMaxEffort(model: string | undefined): boolean {
+  return matchesModelValue(model, GPT_6_ASTRA_MODEL)
+    || matchesModelValue(model, GPT_6_SOL_MODEL)
+    || matchesModelValue(model, GPT_6_LUNA_MODEL)
+    || matchesModelValue(model, 'gpt-5.6')
+    || model?.startsWith('gpt-5.6-') === true;
+}
 
 export const CODEX_MODELS = {
   OPTIONS: [
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
     { value: GPT_6_ASTRA_MODEL, label: 'GPT-6-Astra', supportsImages: true },
+    { value: GPT_6_SOL_MODEL, label: 'GPT-6-Sol', supportsImages: true },
+    { value: GPT_6_LUNA_MODEL, label: 'GPT-6-Luna', supportsImages: true },
     { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', supportsImages: true },
     { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', supportsImages: true },
     { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna', supportsImages: true },
@@ -30,7 +51,7 @@ export const CODEX_MODELS = {
     { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: true },
     { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'gpt-5.5',
+  DEFAULT: GPT_6_SOL_MODEL,
 };
 
 export const AMP_MODELS = {

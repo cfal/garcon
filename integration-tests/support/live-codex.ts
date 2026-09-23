@@ -81,7 +81,10 @@ export interface LiveCodexTestEnvironment {
   readonly forbiddenPersistedValues: readonly string[];
   readonly proxyBaseUrl: string;
   readonly serverEnvironment: Record<string, string>;
-  prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
+  prepareWorkspace(
+    directories: IntegrationDirectories,
+    options?: { useFixtureModelCatalog?: boolean },
+  ): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -228,22 +231,27 @@ export async function startLiveCodexTestEnvironment(
     forbiddenPersistedValues: [testingKey],
     proxyBaseUrl,
     serverEnvironment,
-    async prepareWorkspace(directories) {
+    async prepareWorkspace(directories, workspaceOptions = {}) {
       const codexHome = join(directories.home, '.codex');
       const catalogPath = join(codexHome, 'live-models.json');
       await mkdir(codexHome, { recursive: true, mode: 0o700 });
-      const modelCatalog = {
-        ...LIVE_MODEL_CATALOG,
-        models: LIVE_MODEL_CATALOG.models.map((model) => ({
-          ...model,
-          slug: options.model ?? model.slug,
-          tool_mode: options.toolMode ?? model.tool_mode,
-        })),
-      };
-      await writeFile(catalogPath, JSON.stringify(modelCatalog), { mode: 0o600 });
+      const useFixtureModelCatalog = workspaceOptions.useFixtureModelCatalog ?? true;
+      if (useFixtureModelCatalog) {
+        const modelCatalog = {
+          ...LIVE_MODEL_CATALOG,
+          models: LIVE_MODEL_CATALOG.models.map((model) => ({
+            ...model,
+            slug: options.model ?? model.slug,
+            tool_mode: options.toolMode ?? model.tool_mode,
+          })),
+        };
+        await writeFile(catalogPath, JSON.stringify(modelCatalog), { mode: 0o600 });
+      }
       await writeFile(join(codexHome, 'config.toml'), [
         'model_provider = "garcon-live-openai"',
-        `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+        ...(useFixtureModelCatalog
+          ? [`model_catalog_json = ${JSON.stringify(catalogPath)}`]
+          : []),
         '',
         '[model_providers.garcon-live-openai]',
         'name = "Garcon Live OpenAI"',

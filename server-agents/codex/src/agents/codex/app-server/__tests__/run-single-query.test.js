@@ -50,6 +50,7 @@ describe('Codex runSingleQuery', () => {
     await runSingleQuery('hello', {
       model: 'acme-code',
       codexConfig: {
+        modelCatalogPath: '/opt/garcon/codex-models.json',
         config: {
           model_provider: 'garcon_acme_openai',
           model_providers: {
@@ -72,6 +73,7 @@ describe('Codex runSingleQuery', () => {
     const [command, options] = spawnMock.mock.calls[0];
     expect(command[0]).toBe(expectedCodexCommand);
     expect(command).toContain('--config');
+    expect(command).toContain('model_catalog_json="/opt/garcon/codex-models.json"');
     expect(command).toContain('model_provider="garcon_acme_openai"');
     expect(command).toContain('model_providers.garcon_acme_openai.base_url="https://api.acme.test/v1"');
     expect(command).toContain('model_providers.garcon_acme_openai.wire_api="responses"');

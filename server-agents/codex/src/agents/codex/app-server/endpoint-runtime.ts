@@ -1,6 +1,8 @@
 import type { ResolvedAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { CodexConfig } from '../../../config.js';
+import type { CodexAuthStatus } from '../codex-auth.js';
 import type { CodexConfigObject, CodexProviderConfig } from '../runtime-types.js';
+import { withCodexModelCatalog } from './model-catalog.js';
 
 export interface CodexEndpointRuntime {
   readonly codexConfig: CodexProviderConfig;
@@ -29,7 +31,7 @@ export function buildCodexAppServerEndpointRuntime(
     providerConfig.http_headers = { ...endpoint.selection.headers };
   }
   return {
-    codexConfig: {
+    codexConfig: withCodexModelCatalog({
       config: {
         model_provider: providerId,
         model_providers: {
@@ -37,14 +39,23 @@ export function buildCodexAppServerEndpointRuntime(
         },
       },
       ...(envKey ? { env: { [envKey]: endpoint.credential! } } : {}),
-    },
+    }),
   };
 }
 
+export function buildCodexHostProviderConfig(
+  authStatus: Pick<CodexAuthStatus, 'kind'>,
+): CodexProviderConfig | undefined {
+  if (authStatus.kind !== 'api-key' && authStatus.kind !== 'external') return undefined;
+  return withCodexModelCatalog();
+}
+
 export function buildCodexHostEnvironment(config: CodexConfig): Record<string, string> {
+  const codexApiKey = config.codexApiKey();
   const apiKey = config.openAiApiKey();
   const baseUrl = config.openAiBaseUrl();
   return {
+    ...(codexApiKey ? { CODEX_API_KEY: codexApiKey } : {}),
     ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}),
     ...(baseUrl ? { OPENAI_BASE_URL: baseUrl } : {}),
     CODEX_HOME: config.home(),

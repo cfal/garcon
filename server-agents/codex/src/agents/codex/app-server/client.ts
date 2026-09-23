@@ -92,6 +92,7 @@ export const CODEX_STEER_ACKNOWLEDGEMENT_TIMEOUT_MS = 15_000;
 
 export interface CodexAppServerClientOptions {
   env?: Record<string, string>;
+  modelCatalogPath?: string;
   spawn?: SpawnCodexAppServer;
   resolveCli?: () => Promise<ResolvedCodexCli>;
   resolveCommand?: () => Promise<string>;
@@ -172,6 +173,7 @@ export class CodexAppServerClient extends EventEmitter {
   #spawn: SpawnCodexAppServer;
   #resolveCli: () => Promise<ResolvedCodexCli>;
   #env: Record<string, string>;
+  #modelCatalogPath: string | undefined;
   #clientVersion: () => string;
   #shutdownGraceMs: number;
   #shutdownTerminateMs: number;
@@ -188,6 +190,7 @@ export class CodexAppServerClient extends EventEmitter {
         ? async () => ({ command: await resolveCommand(), source: 'path' })
         : resolveCodexCli);
     this.#env = mergedEnv(options.env);
+    this.#modelCatalogPath = options.modelCatalogPath;
     this.#clientVersion = options.clientVersion ?? (() => '0.1.0');
     this.#shutdownGraceMs = options.shutdownGraceMs ?? 2_000;
     this.#shutdownTerminateMs = options.shutdownTerminateMs ?? 5_000;
@@ -351,7 +354,11 @@ export class CodexAppServerClient extends EventEmitter {
     const startedAt = performance.now();
     const resolved = await this.#resolveCli();
     if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
-    this.#proc = this.#spawn(resolved.command, ['app-server', '--listen', 'stdio://'], { env: this.#env });
+    const args = ['app-server', '--listen', 'stdio://'];
+    if (this.#modelCatalogPath) {
+      args.push('--config', `model_catalog_json=${JSON.stringify(this.#modelCatalogPath)}`);
+    }
+    this.#proc = this.#spawn(resolved.command, args, { env: this.#env });
 
     void this.#readStdout(this.#proc.stdout ?? null);
     void this.#readStderr(this.#proc.stderr ?? null);

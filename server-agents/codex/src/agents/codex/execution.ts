@@ -15,9 +15,11 @@ import {
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
+import type { CodexAuthStatus } from './codex-auth.js';
 import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
+  buildCodexHostProviderConfig,
 } from './app-server/endpoint-runtime.js';
 import { codexOperation } from './app-server/operation-routes.js';
 import { mapThinkingModeToCodexEffort } from './app-server/request-builders.js';
@@ -42,6 +44,7 @@ export class CodexExecution implements AgentRuntimeExecution {
     private readonly runtime: CodexAppServerRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly config: CodexConfig,
+    private readonly resolveAuthStatus: (signal?: AbortSignal) => Promise<CodexAuthStatus>,
   ) {}
 
   async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
@@ -183,7 +186,12 @@ export class CodexExecution implements AgentRuntimeExecution {
       request.admission.signal,
     );
     if (!endpoint) {
-      return { envOverrides: buildCodexHostEnvironment(this.config) };
+      return {
+        envOverrides: buildCodexHostEnvironment(this.config),
+        codexConfig: buildCodexHostProviderConfig(
+          await this.resolveAuthStatus(request.admission.signal),
+        ),
+      };
     }
     const runtime = buildCodexAppServerEndpointRuntime(endpoint);
     if (!runtime) {

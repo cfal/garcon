@@ -4,6 +4,7 @@ import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
 import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
 export interface CodexConfig {
+  readonly codexApiKey: () => string | null;
   readonly openAiApiKey: () => string | null;
   readonly openAiBaseUrl: () => string | null;
   readonly home: () => string;
@@ -12,6 +13,7 @@ export interface CodexConfig {
 
 export function createCodexConfig(environment: AgentEnvironmentReader): CodexConfig {
   return Object.freeze({
+    codexApiKey: () => readEnvironment(environment, 'CODEX_API_KEY'),
     openAiApiKey: () => readEnvironment(environment, 'OPENAI_API_KEY'),
     openAiBaseUrl: () => readEnvironment(environment, 'OPENAI_BASE_URL'),
     home: () => readEnvironment(environment, 'CODEX_HOME') ?? path.join(os.homedir(), '.codex'),

@@ -9,7 +9,7 @@
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
-    "@openai/codex": "0.155.1",
+    "@openai/codex": "0.156.0",
     "acorn": "^8.18.0",
     "bun-pty": "^0.4.10",
     "shell-quote": "^1.10.0"
@@ -18,7 +18,7 @@
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "codex",
-    "preMainModules": [],
+    "preMainModules": ["./src/build/prepare-compiled-runtime.ts"],
     "embeddedDependencyMetadata": []
   }
 }
