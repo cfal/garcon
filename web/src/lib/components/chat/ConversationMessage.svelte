@@ -68,6 +68,15 @@
 	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
 	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
 		'a, button, input, textarea, select, [role="button"], [contenteditable]:not([contenteditable="false"])';
+	const MESSAGE_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+		dateStyle: 'short',
+		timeStyle: 'short',
+	});
+
+	function formatMessageTimestamp(value: string): string | null {
+		const timestamp = new Date(value);
+		return Number.isNaN(timestamp.getTime()) ? null : MESSAGE_TIMESTAMP_FORMATTER.format(timestamp);
+	}
 
 	interface Props {
 		message: ChatMessage;
@@ -184,6 +193,7 @@
 	const asCliRow = $derived(message instanceof CliRowMessage ? message : null);
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
 	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
+	const messageTimestamp = $derived(formatMessageTimestamp(message.timestamp));
 	const asPermissionRequest = $derived(
 		message instanceof PermissionRequestMessage ? message : null,
 	);
@@ -512,6 +522,18 @@
 	</button>
 {/snippet}
 
+{#snippet messageTimestampLabel()}
+	{#if messageTimestamp}
+		<time
+			data-slot="message-timestamp"
+			datetime={message.timestamp}
+			class="mt-1 block text-[11px] leading-4 text-muted-foreground/70"
+		>
+			{messageTimestamp}
+		</time>
+	{/if}
+{/snippet}
+
 {#if !shouldHideThinking}
 	<div
 		class={messageClass}
@@ -590,6 +612,7 @@
 									{/each}
 								</div>
 							{/if}
+							{@render messageTimestampLabel()}
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent
@@ -831,6 +854,7 @@
 								: undefined}
 						/>
 					{/if}
+					{@render messageTimestampLabel()}
 				</div>
 			</div>
 		{/if}

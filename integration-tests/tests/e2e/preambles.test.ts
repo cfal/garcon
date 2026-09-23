@@ -233,7 +233,7 @@ describe('Lightpanda preambles', () => {
           && element.textContent?.includes('Preambles applied'));
         const userIndex = rows.findIndex((element) =>
           element.dataset.chatMessageType === 'user-message'
-          && element.textContent?.trim() === 'visible UI boundary prompt');
+          && element.querySelector('.markdown-body')?.textContent?.trim() === 'visible UI boundary prompt');
         const notice = rows[noticeIndex];
         return {
           adjacent: noticeIndex >= 0 && userIndex === noticeIndex + 1,

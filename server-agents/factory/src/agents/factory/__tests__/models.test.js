@@ -79,6 +79,11 @@ Model details:
     const catalog = await new FactoryModelCatalogService(config).getCatalog(true);
 
     expect(catalog.options.length).toBeGreaterThan(0);
+    expect(catalog.options).toContainEqual({
+      value: 'claude-opus-5-5',
+      label: 'Claude Opus 5.5',
+      supportsImages: true,
+    });
     expect(catalog.options.find((entry) => entry.value === catalog.defaultModel)).toBeTruthy();
     expect(typeof catalog.metadata[catalog.defaultModel]?.supportsImages).toBe('boolean');
   });

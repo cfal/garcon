@@ -17,7 +17,10 @@ const agentCatalogEntries = [
     supportedProtocols: ["anthropic-messages"],
     authLoginSupported: true,
     defaultModel: "opus",
-    models: [{ value: "opus", label: "Opus", supportsImages: true }],
+    models: [
+      { value: "opus", label: "Opus", supportsImages: true },
+      { value: "claude-opus-5-5", label: "Claude Opus 5.5", supportsImages: true },
+    ],
   },
   {
     id: "codex",
@@ -92,7 +95,10 @@ const agentCatalogEntries = [
     supportedProtocols: [],
     authLoginSupported: false,
     defaultModel: "claude-opus-4-6",
-    models: [{ value: "claude-opus-4-6", label: "Claude Opus 4-6" }],
+    models: [
+      { value: "claude-opus-5-5", label: "Claude Opus 5.5", supportsImages: true },
+      { value: "claude-opus-4-6", label: "Claude Opus 4-6" },
+    ],
   },
   {
     id: "pi",

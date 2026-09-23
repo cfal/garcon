@@ -660,7 +660,7 @@ describe('Chromium preambles', () => {
             const userIndex = rows.findIndex(
               (row) =>
                 row.getAttribute('data-chat-message-type') === 'user-message' &&
-                row.textContent?.trim() === prompt,
+                row.querySelector('.markdown-body')?.textContent?.trim() === prompt,
             );
             return noticeIndex >= 0 && userIndex === noticeIndex + 1;
           }, targetPrompt),

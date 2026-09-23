@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	AssistantMessage,
 	CliRowMessage,
 	ErrorMessage,
 	TranscriptNoticeMessage,
@@ -48,6 +49,36 @@ describe('ConversationMessage chat rows', () => {
 		);
 		expect(card?.className).toContain('border-status-info-border');
 		expect(card?.querySelector('button')).toBeNull();
+	});
+
+	it('renders message timestamps for user, assistant, and event-style messages', () => {
+		const user = render(ConversationMessageHost, {
+			message: new UserMessage(AT, 'User message'),
+		});
+		const userTimestamp = user.container.querySelector('time[data-slot="message-timestamp"]');
+		expect(userTimestamp).not.toBeNull();
+		expect(userTimestamp?.getAttribute('datetime')).toBe(AT);
+		expect(userTimestamp?.textContent?.trim()).not.toBe('');
+		user.unmount();
+
+		const assistant = render(ConversationMessageHost, {
+			message: new AssistantMessage(AT, 'Assistant message'),
+		});
+		const assistantTimestamp = assistant.container.querySelector(
+			'time[data-slot="message-timestamp"]',
+		);
+		expect(assistantTimestamp).not.toBeNull();
+		expect(assistantTimestamp?.getAttribute('datetime')).toBe(AT);
+		expect(assistantTimestamp?.textContent?.trim()).not.toBe('');
+		assistant.unmount();
+
+		const notice = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'System notice'),
+		});
+		const noticeTimestamp = notice.container.querySelector('time[data-slot="message-timestamp"]');
+		expect(noticeTimestamp).not.toBeNull();
+		expect(noticeTimestamp?.getAttribute('datetime')).toBe(AT);
+		expect(noticeTimestamp?.textContent?.trim()).not.toBe('');
 	});
 
 	it('renders uncompacted carryover as a plain titled notice', () => {

@@ -10,6 +10,7 @@ export interface SharedModelOption {
 export const CLAUDE_MODELS = {
   OPTIONS: [
     { value: 'opus', label: 'Opus', supportsImages: true },
+    { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', supportsImages: true },
     { value: 'sonnet', label: 'Sonnet', supportsImages: true },
     { value: 'haiku', label: 'Haiku', supportsImages: true },
     { value: 'fable', label: 'Fable', supportsImages: true },
@@ -66,6 +67,7 @@ export const AMP_MODELS = {
 
 export const FACTORY_MODELS = {
   OPTIONS: [
+    { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', supportsImages: true },
     { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5', supportsImages: true },
     { value: 'claude-opus-4-6', label: 'Claude Opus 4.6', supportsImages: true },
     { value: 'claude-opus-4-6-fast', label: 'Claude Opus 4.6 Fast Mode', supportsImages: true },
