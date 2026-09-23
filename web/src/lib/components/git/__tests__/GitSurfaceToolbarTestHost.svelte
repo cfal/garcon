@@ -5,8 +5,9 @@
 	import GitSurfaceToolbar from '../GitSurfaceToolbar.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
-	import { setRemoteSettings, setTransientLayers } from '$lib/context';
+	import { setNotifications, setRemoteSettings, setTransientLayers } from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+	import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 
@@ -25,6 +26,7 @@
 	} = $props();
 
 	setExecutionNodesTestContext();
+	setNotifications(new NotificationsStore());
 	setRemoteSettings(createRemoteSettingsStore());
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));
 
