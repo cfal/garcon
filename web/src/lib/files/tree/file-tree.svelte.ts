@@ -59,6 +59,7 @@ export interface FileTreeNavigationError {
 
 export type FileTreeDirectoryTargetReason =
 	| 'initial'
+	| 'node-switch'
 	| 'directory-row'
 	| 'parent-row'
 	| 'breadcrumb'
@@ -338,6 +339,7 @@ export class FileTreeStore {
 	}
 
 	browseNode(nodeId: string): void {
+		const directoryPath = this.retainedResponse?.directory.path ?? this.#projectPath ?? '';
 		this.#resetBrowsingState();
 		this.#nodeId = nodeId;
 		this.#projectPath = null;
@@ -345,7 +347,12 @@ export class FileTreeStore {
 		this.#chatProjectBreadcrumbs = [];
 		this.#effectiveProjectKey = `node:${nodeId}`;
 		this.#projectRequestsAllowed = true;
-		this.#resumePendingWork();
+		void this.navigateTo({
+			path: directoryPath,
+			label: directoryPath,
+			breadcrumbs: [],
+			reason: 'node-switch',
+		});
 	}
 
 	setNodeAvailable(available: boolean): void {
@@ -372,17 +379,29 @@ export class FileTreeStore {
 
 	invalidateNodePaths(): void {
 		const response = this.retainedResponse;
-		const target: FileTreeDirectoryTarget = this.navigation.kind === 'loading' || this.navigation.kind === 'error'
-			? this.navigation.target : response ? {
-				path: response.directory.path, label: response.directory.path, breadcrumbs: [], reason: 'initial' as const,
-			} : this.#initialTarget();
-		const captureAsChatProject = target.captureAsChatProject || target.path === this.#canonicalChatProjectPath;
+		const target: FileTreeDirectoryTarget =
+			this.navigation.kind === 'loading' || this.navigation.kind === 'error'
+				? this.navigation.target
+				: response
+					? {
+							path: response.directory.path,
+							label: response.directory.path,
+							breadcrumbs: [],
+							reason: 'initial' as const,
+						}
+					: this.#initialTarget();
+		const captureAsChatProject =
+			target.captureAsChatProject || target.path === this.#canonicalChatProjectPath;
 		this.#abortRequests();
 		this.#clearDirectoryCaches();
 		this.#canonicalChatProjectPath = null;
 		this.#chatProjectBreadcrumbs = [];
 		this.refreshError = null;
-		this.navigation = { kind: 'loading', target: { ...target, captureAsChatProject, breadcrumbs: [] }, previous: null };
+		this.navigation = {
+			kind: 'loading',
+			target: { ...target, captureAsChatProject, breadcrumbs: [] },
+			previous: null,
+		};
 		this.#resumePendingWork();
 	}
 
@@ -835,6 +854,19 @@ export class FileTreeStore {
 			}
 		} catch (error) {
 			if (isAbortError(error) || token !== this.#navigationToken) return;
+			if (
+				target.reason === 'node-switch' &&
+				target.path &&
+				error instanceof ApiError &&
+				[
+					'FILE_TREE_DIRECTORY_NOT_FOUND',
+					'FILE_TREE_DIRECTORY_REQUIRED',
+					'outside_project_base',
+				].includes(error.errorCode ?? '')
+			) {
+				await this.navigateTo(this.#initialTarget());
+				return;
+			}
 			this.navigation = {
 				kind: 'error',
 				target,

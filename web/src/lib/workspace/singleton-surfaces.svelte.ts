@@ -79,7 +79,7 @@ export class FilesSurfaceController implements PortableSingletonController {
 	}
 
 	get browsingNode(): boolean {
-		return this.#selectedNodeId !== null;
+		return this.#selectedNodeId !== null || this.#projectState.kind === 'absent';
 	}
 
 	get canGoToChatProject(): boolean {
@@ -107,11 +107,23 @@ export class FilesSurfaceController implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
+		const wasAbsent = this.#projectState.kind === 'absent';
 		this.#projectState = projectState;
-		if (this.browsingNode) return;
-		let projectPath: string | null = null;
-		if (projectState.kind === 'available') projectPath = projectState.project.projectPath;
-		else if (projectState.kind !== 'absent') projectPath = projectState.context.projectPath;
+		if (this.#selectedNodeId !== null) return;
+		if (projectState.kind === 'absent') {
+			if (!wasAbsent || this.tree.effectiveProjectKey !== 'node:local') {
+				this.#pendingReveal = null;
+				this.#projectPath = null;
+				this.tree.setProjectState(projectState);
+				this.tree.browseNode('local');
+			}
+			this.tree.setNodeAvailable(this.#filesAvailable('local'));
+			return;
+		}
+		const projectPath =
+			projectState.kind === 'available'
+				? projectState.project.projectPath
+				: projectState.context.projectPath;
 		if (projectPath !== this.#projectPath) this.#pendingReveal = null;
 		this.#projectPath = projectPath;
 		this.tree.setProjectState(projectState);

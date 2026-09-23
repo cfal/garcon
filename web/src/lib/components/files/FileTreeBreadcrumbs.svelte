@@ -93,12 +93,13 @@
 	class="relative flex h-8 min-w-0 shrink-0 items-center overflow-hidden border-b border-border bg-background px-2 text-xs"
 	data-file-tree-breadcrumbs
 >
-	<Folder class="mr-1.5 h-3.5 w-3.5 shrink-0 text-file-icon-folder" aria-hidden="true" />
 	{#if nodeCrumb}
 		{@render nodeCrumb()}
 		{#if breadcrumbs.length > 0}
 			<ChevronRight class="mx-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 		{/if}
+	{:else}
+		<Folder class="mr-1.5 h-3.5 w-3.5 shrink-0 text-file-icon-folder" aria-hidden="true" />
 	{/if}
 	<div bind:this={root} class="relative flex min-w-0 flex-1 items-center overflow-hidden">
 		{#each breadcrumbs as breadcrumb, index (breadcrumb.path)}

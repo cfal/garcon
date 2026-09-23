@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { expect as browserExpect } from 'playwright/test';
+import { expect as browserExpect, type Response } from 'playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -76,7 +76,7 @@ test('edits remote files and retains offline buffers without touching controller
 }, 180_000);
 
 test('switches file nodes from breadcrumbs without changing chat ownership and reveals complete paths', async () => {
-  await withChromiumFixture('execution-node-file-breadcrumbs', async ({ page, integration, assertNoBrowserErrors }) => {
+  await withChromiumFixture('execution-node-file-breadcrumbs', async ({ page, integration, browserErrors }) => {
     const { client, executionDirs, dirs, directAgents } = integration;
     const nested = join(executionDirs.project, 'nested');
     await mkdir(nested);
@@ -86,10 +86,14 @@ test('switches file nodes from breadcrumbs without changing chat ownership and r
     const chatId = integration.newChatId();
     const started = await client.startDirectChat({ chatId, content: 'Synthetic file node navigation', projectPath: nested, agent: directAgents.openAi });
     await client.waitForTurnTerminal(chatId, started.turnId);
+    const failedRequests: Response[] = [];
+    page.on('response', response => {
+      if (response.status() >= 400) failedRequests.push(response);
+    });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
 
     const breadcrumbs = page.locator('[data-file-tree-breadcrumbs]:visible');
-    const picker = breadcrumbs.locator('[data-file-node-picker]');
+    const picker = breadcrumbs.locator('[data-execution-node-picker]');
     await browserExpect(picker).toHaveText('Integration worker');
     await browserExpect(breadcrumbs.getByRole('button', { name: executionDirs.project, exact: true })).toHaveText(executionDirs.project);
     await breadcrumbs.getByRole('button', { name: nested, exact: true }).click();
@@ -110,6 +114,7 @@ test('switches file nodes from breadcrumbs without changing chat ownership and r
     await picker.focus();
     await page.keyboard.press('Enter');
     await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
+    await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'local-only.txt' })).toBeVisible();
     await picker.click();
     await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
     await browserExpect(breadcrumbs.getByRole('button', { name: executionDirs.project, exact: true })).toHaveAttribute('aria-current', 'location');
@@ -141,6 +146,32 @@ test('switches file nodes from breadcrumbs without changing chat ownership and r
     expect(await pathInput.evaluate((input) => Number.parseFloat(getComputedStyle(input).fontSize))).toBeGreaterThanOrEqual(16);
     await page.screenshot({ path: join(dirs.root, 'file-full-path-mobile.png') });
     await page.keyboard.press('Escape');
-    assertNoBrowserErrors();
+    const expectedProbes = [
+      { nodeId: 'local', path: nested },
+      { nodeId: 'local', path: nested },
+      { nodeId: client.nodeId, path: dirs.project },
+      { nodeId: 'local', path: nested },
+      { nodeId: client.nodeId, path: dirs.project },
+    ];
+    expect(await Promise.all(failedRequests.map(async response => {
+      const url = new URL(response.url());
+      return {
+        nodeId: url.searchParams.get('nodeId'),
+        path: url.searchParams.get('path'),
+        endpoint: url.pathname,
+        method: response.request().method(),
+        status: response.status(),
+        errorCode: (await response.json()).errorCode,
+      };
+    }))).toEqual(expectedProbes.map(probe => ({
+      ...probe,
+      endpoint: '/api/v1/files/tree',
+      method: 'GET',
+      status: 403,
+      errorCode: 'outside_project_base',
+    })));
+    expect(browserErrors).toEqual(expectedProbes.map(() =>
+      'console.error: Failed to load resource: the server responded with a status of 403 (Forbidden)',
+    ));
   }, undefined, { executionBackend: 'remote-node-dials', projectRoots: 'separate' });
 }, 180_000);

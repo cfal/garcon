@@ -1,6 +1,6 @@
 <script lang="ts">
 	import FileTree from './FileTree.svelte';
-	import FileNodeBreadcrumb from './FileNodeBreadcrumb.svelte';
+	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
 	import type { Snippet } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import {
@@ -81,9 +81,11 @@
 </script>
 
 {#snippet nodeCrumb()}
-	<FileNodeBreadcrumb
+	<ExecutionNodeSelector
 		{nodes}
 		nodeId={tree.nodeId}
+		service="files"
+		class="h-6 max-w-[35%] shrink-0 px-1"
 		onSelect={(nodeId) => controller.selectNode(nodeId)}
 	/>
 {/snippet}
@@ -158,7 +160,7 @@
 	{/if}
 	<div class="min-h-0 min-w-0 flex-1">
 		<FileTree
-			{nodeCrumb}
+			nodeCrumb={nodes.hasRemoteNodes || tree.nodeId !== 'local' ? nodeCrumb : undefined}
 			{contentGate}
 			onGoToChatProject={() => controller.goToChatProject()}
 			canGoToChatProject={controller.canGoToChatProject}

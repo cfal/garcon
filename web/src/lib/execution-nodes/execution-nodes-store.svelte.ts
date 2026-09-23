@@ -36,6 +36,9 @@ export class ExecutionNodesStore {
 	get hasSnapshot(): boolean {
 		return this.#snapshot !== null;
 	}
+	get hasRemoteNodes(): boolean {
+		return this.nodes.some((node) => node.id !== 'local');
+	}
 
 	get(id?: string | null): ExecutionNodeSnapshot | undefined {
 		return this.nodes.find((node) => node.id === effectiveNodeId(id));

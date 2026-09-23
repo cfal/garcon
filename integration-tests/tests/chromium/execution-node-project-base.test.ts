@@ -32,7 +32,7 @@ test('worker base replacement refreshes breadcrumbs while preserving root-qualif
     await page.getByRole('tab', { name: 'Files', exact: true }).click();
     const breadcrumbs = page.locator('[data-file-tree-breadcrumbs]:visible');
     await browserExpect(breadcrumbs.getByRole('button', { name: '/', exact: true })).toBeVisible();
-    await browserExpect(breadcrumbs.locator('[data-file-node-picker]')).toHaveText('Integration worker');
+    await browserExpect(breadcrumbs.locator('[data-execution-node-picker]')).toHaveText('Integration worker');
 
     markPhase('opening the same file under the wider root');
     await entry.click();
