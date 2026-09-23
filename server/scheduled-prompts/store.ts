@@ -11,6 +11,7 @@ import { hasNodeErrorCode } from '../lib/errors.js';
 import { AtomicJsonWriteError, syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
+import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('scheduled-prompts');
@@ -267,12 +268,20 @@ export class ScheduledPromptStore {
   #file: ScheduledPromptsFile = emptyFile();
   readonly #unconfirmedNodeReferences = new Set<string>();
 
-  constructor(workspaceDir: string, private readonly retainNodeReferences?: RetainNodeReferences) {
+  readonly #providerReferences: ApiProviderDurableReferences;
+
+  constructor(
+    workspaceDir: string,
+    private readonly retainNodeReferences?: RetainNodeReferences,
+    retainProviderReferences?: RetainProviderReferences,
+  ) {
+    this.#providerReferences = new ApiProviderDurableReferences(retainProviderReferences);
     this.#filePath = path.join(workspaceDir, 'scheduled-prompts.json');
   }
 
   async init(): Promise<void> {
     const loaded = await readFile(this.#filePath);
+    this.#providerReferences.initialize(scheduleProviders(loaded.file));
     let backupPath: string | null = null;
     if (loaded.migrated || loaded.ignoredPromptCount > 0 || loaded.invalidContainerShape) {
       if (!loaded.sourceBytes) throw new Error('scheduled-prompts.json source is unavailable for backup');
@@ -306,6 +315,10 @@ export class ScheduledPromptStore {
 
   referencesNode(nodeId: string): boolean {
     return this.#unconfirmedNodeReferences.has(nodeId) || scheduleNodes(this.#file).includes(nodeId);
+  }
+
+  referencesApiProvider(id: string): boolean {
+    return this.#providerReferences.references(id);
   }
 
   get(id: string): ScheduledPrompt | null {
@@ -357,7 +370,8 @@ export class ScheduledPromptStore {
       if (existing >= 0) draft.prompts[existing] = clonePrompt(scheduledPrompt);
       else draft.prompts.push(clonePrompt(scheduledPrompt));
       return true;
-    }, false, scheduledPrompt.target.type === 'new-chat' ? [scheduledPrompt.target.nodeId] : []);
+    }, false, scheduledPrompt.target.type === 'new-chat' ? [scheduledPrompt.target.nodeId] : [],
+    scheduledPrompt.target.type === 'new-chat' ? [scheduledPrompt.target.apiProviderId] : []);
   }
 
   async reorder(orderedPromptIds: string[], expectedRevision: number): Promise<void> {
@@ -479,23 +493,28 @@ export class ScheduledPromptStore {
     change: (draft: ScheduledPromptsFile) => T | false,
     unchanged: T,
     inheritedNodes: readonly (string | null | undefined)[] = [],
+    inheritedProviders: readonly (string | null | undefined)[] = [],
   ): Promise<T> {
     return this.#lock.runExclusive('scheduled-prompts', async () => {
       const draft = structuredClone(this.#file);
       const result = change(draft);
       if (result === false) return structuredClone(unchanged);
       draft.revision += 1;
-      await this.#publish(draft, inheritedNodes);
+      await this.#publish(draft, inheritedNodes, inheritedProviders);
       return structuredClone(result);
     });
   }
 
-  async #publish(file: ScheduledPromptsFile, inheritedNodes: readonly (string | null | undefined)[] = []): Promise<void> {
+  async #publish(
+    file: ScheduledPromptsFile,
+    inheritedNodes: readonly (string | null | undefined)[] = [],
+    inheritedProviders: readonly (string | null | undefined)[] = [],
+  ): Promise<void> {
     const nodes = scheduleNodes(file);
     const release = this.retainNodeReferences?.(nodes, [...scheduleNodes(this.#file), ...inheritedNodes]);
     try {
       try {
-        await this.#write(file);
+        await this.#providerReferences.publish(scheduleProviders(file), () => this.#write(file), inheritedProviders);
       } catch (error) {
         if (error instanceof AtomicJsonWriteError && error.renamed) {
           for (const id of nodes) this.#unconfirmedNodeReferences.add(id);
@@ -521,4 +540,8 @@ export class ScheduledPromptStore {
 function scheduleNodes(file: ScheduledPromptsFile): string[] {
   return file.prompts.flatMap((prompt) => prompt.target.type === 'new-chat'
     ? [effectiveNodeId(prompt.target.nodeId)] : []);
+}
+
+function scheduleProviders(file: ScheduledPromptsFile): (string | null | undefined)[] {
+  return file.prompts.flatMap((prompt) => prompt.target.type === 'new-chat' ? [prompt.target.apiProviderId] : []);
 }

@@ -21,6 +21,7 @@ import { AtomicJsonWriteError } from '../lib/json-file-store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
+import type { RetainProviderReferences } from '../api-providers/reference-writes.js';
 import { errorMessage } from '../lib/errors.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
@@ -137,6 +138,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       preambles: Pick<PreambleService, 'snapshot'>;
       inspectProject: ProjectInspector;
       retainNodeReferences?: RetainNodeReferences;
+      retainProviderReferences?: RetainProviderReferences;
       cron?: CronRuntime;
     },
   ) {
@@ -261,18 +263,26 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         previous.target.type === 'new-chat' ? [previous.target.nodeId] : [],
       );
       try {
-        await this.deps.store.replace(replacement, request.expectedRevision);
-        this.#jobs.get(request.id)?.stop();
-        this.#jobs.delete(request.id);
+        const releaseProvider = this.deps.retainProviderReferences?.(
+          replacement.target.type === 'new-chat' ? [replacement.target.apiProviderId] : [],
+          previous.target.type === 'new-chat' ? [previous.target.apiProviderId] : [],
+        );
         try {
-          this.#register(replacement);
-        } catch (error) {
-          await this.deps.store.restore(previous);
-          this.#register(previous);
-          throw error;
+          await this.deps.store.replace(replacement, request.expectedRevision);
+          this.#jobs.get(request.id)?.stop();
+          this.#jobs.delete(request.id);
+          try {
+            this.#register(replacement);
+          } catch (error) {
+            await this.deps.store.restore(previous);
+            this.#register(previous);
+            throw error;
+          }
+          this.#emitInvalidated('updated');
+          return this.#snapshot();
+        } finally {
+          releaseProvider?.();
         }
-        this.#emitInvalidated('updated');
-        return this.#snapshot();
       } finally {
         release?.();
       }

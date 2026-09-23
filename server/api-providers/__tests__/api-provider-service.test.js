@@ -69,7 +69,7 @@ describe('ApiProviderService', () => {
     const { service } = await tempService({ isApiProviderReferenced: () => true });
     const created = await service.create(openAiInput());
 
-    await expect(service.delete(created.id)).rejects.toThrow('API provider is used by existing chats');
+    await expect(service.delete(created.id)).rejects.toMatchObject({ code: 'API_PROVIDER_IN_USE' });
   });
 
   it('validates API provider input before persistence', async () => {

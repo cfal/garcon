@@ -25,6 +25,7 @@ import {
 } from '../../common/chat-parentage.js';
 import type { AgentName } from "../agents/session-types.js";
 import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
+import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { effectiveNodeId, isExecutionNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
 import {
@@ -70,6 +71,7 @@ const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
 interface ChatRegistryOptions {
   saveDelayMs?: number;
   retainNodeReferences?: RetainNodeReferences;
+  retainProviderReferences?: RetainProviderReferences;
 }
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
@@ -276,10 +278,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   #workspaceDir: string;
   #saveDelayMs: number;
   readonly #retainNodeReferences?: RetainNodeReferences;
+  readonly #providerReferences: ApiProviderDurableReferences;
 
   constructor(workspaceDir: string, options: ChatRegistryOptions = {}) {
     super();
     this.#retainNodeReferences = options.retainNodeReferences;
+    this.#providerReferences = new ApiProviderDurableReferences(options.retainProviderReferences);
     this.#workspaceDir = workspaceDir;
     this.#saveDelayMs = options.saveDelayMs ?? REGISTRY_SAVE_DEBOUNCE_MS;
   }
@@ -344,6 +348,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         version: CHAT_REGISTRY_VERSION,
         sessions,
       };
+      this.#providerReferences.initialize(registryProviders(this.#registry));
       return this.#registry;
     } catch (error: unknown) {
       const errno = error as NodeJS.ErrnoException;
@@ -413,6 +418,10 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return Object.fromEntries(
       Object.entries(registry.sessions).map(([id, entry]) => [id, cloneRegistryEntry(entry)]),
     );
+  }
+
+  referencesApiProvider(id: string): boolean {
+    return this.#providerReferences.references(id) || registryProviders(this.getRegistry()).includes(id);
   }
 
   // Ids-only read for callers that never touch entry data; avoids the
@@ -491,34 +500,39 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     // Registry additions publish synchronously before Delete can observe them.
     const release = this.#retainNodeReferences?.([nodeId]);
     try {
-      registry.sessions[chatId] = {
-        ...(nodeId == null || nodeId === LOCAL_EXECUTION_NODE_ID ? {} : { nodeId }),
-        agentId,
-        nativeSession: nativeSession ? structuredClone(nativeSession) : null,
-        agentOwnershipEpoch,
-        agentSettingsById: structuredClone(agentSettingsById),
-        projectPath,
-        tags: [...tags],
-        agentSessionId,
-        model,
-        apiProviderId,
-        modelEndpointId,
-        modelProtocol,
-        ...normalizedModes,
-        carryOverSegments: normalizedSegments,
-        nativeSeedReceipt: normalizedReceipt,
-        carryOverMigrationQuarantine: normalizedQuarantine,
-        pendingPreambleBoundary: normalizedPreambleBoundary,
-        preambleSelection: {
-          revision: normalizedPreambleSelection.revision,
-          orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
-        },
-        parentChat: normalizedParentChat,
-      };
-      this.#advanceChatMutationRevision(chatId);
-      this.#emitChatAdded(chatId);
-      this.#scheduleRegistrySave();
-      return true;
+      const releaseProvider = this.#providerReferences.retain?.([apiProviderId]);
+      try {
+        registry.sessions[chatId] = {
+          ...(nodeId == null || nodeId === LOCAL_EXECUTION_NODE_ID ? {} : { nodeId }),
+          agentId,
+          nativeSession: nativeSession ? structuredClone(nativeSession) : null,
+          agentOwnershipEpoch,
+          agentSettingsById: structuredClone(agentSettingsById),
+          projectPath,
+          tags: [...tags],
+          agentSessionId,
+          model,
+          apiProviderId,
+          modelEndpointId,
+          modelProtocol,
+          ...normalizedModes,
+          carryOverSegments: normalizedSegments,
+          nativeSeedReceipt: normalizedReceipt,
+          carryOverMigrationQuarantine: normalizedQuarantine,
+          pendingPreambleBoundary: normalizedPreambleBoundary,
+          preambleSelection: {
+            revision: normalizedPreambleSelection.revision,
+            orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
+          },
+          parentChat: normalizedParentChat,
+        };
+        this.#advanceChatMutationRevision(chatId);
+        this.#emitChatAdded(chatId);
+        this.#scheduleRegistrySave();
+        return true;
+      } finally {
+        releaseProvider?.();
+      }
     } finally {
       release?.();
     }
@@ -565,7 +579,13 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     assertSeedReceiptBinding(candidate);
     const previous = { ...existing };
     const previousTags = existing.tags;
-    Object.assign(existing, normalizedPatch);
+    const releaseProvider = this.#providerReferences.retain?.([candidate.apiProviderId],
+      [previous.apiProviderId, ...(ownership ? [candidate.apiProviderId] : [])]);
+    try {
+      Object.assign(existing, normalizedPatch);
+    } finally {
+      releaseProvider?.();
+    }
     const mutationRevision = this.#advanceChatMutationRevision(id);
     const emitUpdateEvents = (): void => {
       if ('lastReadAt' in normalizedPatch) {
@@ -688,7 +708,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       const candidateBaseRevision = this.#nextChatMutationRevision;
       let durability: 'durable' | 'unknown' = 'durable';
       try {
-        await writeJsonFileAtomic(target, candidateRegistry, { mode: 0o600 });
+        await this.#providerReferences.publish(registryProviders(candidateRegistry),
+          () => writeJsonFileAtomic(target, candidateRegistry, { mode: 0o600 }), registryProviders(registry));
         this.#unknownDurabilityChats.clear();
       } catch (error) {
         if (error instanceof AtomicJsonWriteError && error.renamed) {
@@ -839,7 +860,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       async () => {
         const candidateRevision = this.#nextChatMutationRevision;
         try {
-          await writeJsonFileAtomic(target, registry, { mode: 0o600 });
+          const snapshot = cloneRegistrySnapshot(registry);
+          await this.#providerReferences.publish(registryProviders(snapshot),
+            () => writeJsonFileAtomic(target, snapshot, { mode: 0o600 }), registryProviders(this.getRegistry()));
         } catch (error) {
           onWriteFailure?.();
           throw error;
@@ -950,4 +973,8 @@ function cloneRegistrySnapshot(registry: ChatRegistrySnapshot): ChatRegistrySnap
       Object.entries(registry.sessions).map(([id, entry]) => [id, cloneRegistryEntry(entry)]),
     ),
   };
+}
+
+function registryProviders(registry: ChatRegistrySnapshot): (string | null | undefined)[] {
+  return Object.values(registry.sessions).map((chat) => chat.apiProviderId);
 }

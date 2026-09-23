@@ -2,9 +2,11 @@
 // Credentials stay server-side; catalog responses expose only redacted flags.
 
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync, watchFile, unwatchFile } from 'fs';
 import path from 'path';
-import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import lockfile from 'proper-lockfile';
+import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { ApiProviderReferenceWrites } from './reference-writes.js';
 import {
   apiProviderTemplate,
   type ApiProviderTemplate,
@@ -20,9 +22,10 @@ import {
 import type { AgentModelOption } from '../../common/agents.js';
 import { getConfigDir } from '../config.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { DomainError } from '../lib/domain-error.js';
 
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
-const API_PROVIDER_WRITE_LOCK_KEY = 'api-providers';
+const writeLocks = new KeyedPromiseLock();
 const MODEL_DISCOVERY_KINDS = new Set<ModelDiscoveryKind>([
   'none',
   'anthropic-models',
@@ -33,6 +36,7 @@ const MODEL_DISCOVERY_KINDS = new Set<ModelDiscoveryKind>([
 
 export interface StoredApiProvider {
   id: string;
+  revision: number;
   label: string;
   templateId?: ApiProviderTemplateId;
   endpoints: StoredApiProviderEndpoint[];
@@ -80,12 +84,14 @@ export interface UpdateApiProviderEndpointInput {
 }
 
 export interface UpdateApiProviderInput {
+  revision?: number;
   label?: string;
   endpoint?: UpdateApiProviderEndpointInput;
 }
 
 export interface ApiProviderStoreSnapshot {
-  version: 1;
+  version: 2;
+  legacyProviderIds: string[];
   apiProviders: StoredApiProvider[];
 }
 
@@ -103,8 +109,9 @@ function redactEndpoint(endpoint: StoredApiProviderEndpoint) {
 }
 
 function createApiProviderId(label: string): string {
-  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   const suffix = crypto.randomBytes(3).toString('hex');
+  const maxBaseLength = 64 - '_anthropic'.length - suffix.length - 1;
+  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, maxBaseLength);
   const id = `${base}_${suffix}`;
   return SAFE_ID_RE.test(id) ? id : `custom_${suffix}`;
 }
@@ -247,11 +254,12 @@ function normalizeStoredApiProvider(value: unknown): StoredApiProvider | null {
       }
     })
     .filter((endpoint): endpoint is StoredApiProviderEndpoint => endpoint !== null);
-  if (endpoints.length === 0) return null;
+  if (endpoints.length === 0 || endpoints.length !== raw.endpoints.length) return null;
 
   const now = new Date().toISOString();
   return {
     id: raw.id,
+    revision: Number.isSafeInteger(raw.revision) && Number(raw.revision) > 0 ? Number(raw.revision) : 1,
     label: raw.label,
     templateId: normalizeTemplateId(raw.templateId),
     endpoints,
@@ -265,14 +273,25 @@ function normalizeSnapshot(raw: unknown): ApiProviderStoreSnapshot {
     throw new TypeError('API provider state must be a JSON object');
   }
   const root = raw as Record<string, unknown>;
-  if (root.version !== 1 || !Array.isArray(root.apiProviders)) {
-    throw new TypeError('API provider state must use version 1 with an apiProviders array');
+  if ((root.version !== 1 && root.version !== 2) || !Array.isArray(root.apiProviders)) {
+    throw new TypeError('Invalid API provider state');
+  }
+  const providers = root.apiProviders.map(normalizeStoredApiProvider);
+  if (providers.some((entry) => entry === null)) throw new TypeError('Invalid API provider profile');
+  const providerIds = providers.map((entry) => entry!.id);
+  const endpointIds = providers.flatMap((entry) => entry!.endpoints.map((endpoint) => endpoint.id));
+  if (new Set(providerIds).size !== providerIds.length || new Set(endpointIds).size !== endpointIds.length) {
+    throw new TypeError('Duplicate API provider or endpoint IDs');
+  }
+  if (root.version === 2 && (!Array.isArray(root.legacyProviderIds)
+    || !root.legacyProviderIds.every((id) => typeof id === 'string' && SAFE_ID_RE.test(id))
+    || root.apiProviders.some((entry) => !Number.isSafeInteger(entry.revision) || entry.revision < 1))) {
+    throw new TypeError('Invalid API provider revision or migration seed');
   }
   return {
-    version: 1,
-    apiProviders: root.apiProviders
-      .map(normalizeStoredApiProvider)
-      .filter((entry): entry is StoredApiProvider => entry !== null),
+    version: 2,
+    legacyProviderIds: root.version === 1 ? providers.map((entry) => entry!.id) : root.legacyProviderIds as string[],
+    apiProviders: providers as StoredApiProvider[],
   };
 }
 
@@ -306,34 +325,85 @@ function applyApiKeyPatch(
 }
 
 export class ApiProviderStore {
-  #writeLock = new KeyedPromiseLock();
-  #snapshot: ApiProviderStoreSnapshot = { version: 1, apiProviders: [] };
+  #snapshot: ApiProviderStoreSnapshot = { version: 2, legacyProviderIds: [], apiProviders: [] };
+  #bytes: string | null = null;
+  #unavailable = false;
+  #initialized = false;
+  readonly referenceWrites = new ApiProviderReferenceWrites((id) => this.getApiProvider(id) !== null);
+  readonly #listeners = new Set<() => void>();
 
   constructor(private readonly filePath = storePath()) {}
 
   async init(): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    this.#snapshot = await this.#read();
-    await this.#write(this.#snapshot);
+    await this.withLock(async () => {
+      const snapshot = await this.#read();
+      await this.#write(snapshot);
+      this.#snapshot = snapshot;
+      this.#initialized = true;
+    });
+  }
+
+  get legacyProviderIds(): readonly string[] {
+    this.#refresh();
+    return this.#snapshot.legacyProviderIds;
+  }
+
+  onChanged(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  observe(): () => void {
+    const listener = () => {
+      try {
+        this.#refresh();
+      } catch {
+        this.#notify();
+      }
+    };
+    watchFile(this.filePath, { interval: 1000, persistent: false }, listener);
+    return () => unwatchFile(this.filePath, listener);
+  }
+
+  #notify(): void {
+    for (const listener of this.#listeners) listener();
+  }
+
+  #refresh(): void {
+    this.#assertAvailable();
+    try {
+      // Small configuration reads are synchronous so admission cannot use an old account snapshot.
+      const bytes = readFileSync(this.filePath, 'utf8');
+      if (bytes === this.#bytes) return;
+      const snapshot = normalizeSnapshot(JSON.parse(bytes));
+      this.#snapshot = snapshot;
+      const changed = this.#bytes !== null;
+      this.#bytes = bytes;
+      if (changed) this.#notify();
+    } catch {
+      throw new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE', 'Provider configuration is unavailable. Restore its configuration file.', 503);
+    }
   }
 
   list(): StoredApiProvider[] {
+    this.#refresh();
     return this.#snapshot.apiProviders;
   }
 
   redactedList() {
-    return this.#snapshot.apiProviders.map((apiProvider) => ({
+    return this.list().map((apiProvider) => ({
       ...apiProvider,
       endpoints: apiProvider.endpoints.map(redactEndpoint),
     }));
   }
 
   getApiProvider(id: string): StoredApiProvider | null {
-    return this.#snapshot.apiProviders.find((apiProvider) => apiProvider.id === id) ?? null;
+    return this.list().find((apiProvider) => apiProvider.id === id) ?? null;
   }
 
   getEndpoint(endpointId: string): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } | null {
-    for (const apiProvider of this.#snapshot.apiProviders) {
+    for (const apiProvider of this.list()) {
       const endpoint = apiProvider.endpoints.find((entry) => entry.id === endpointId);
       if (endpoint) return { apiProvider, endpoint };
     }
@@ -351,13 +421,14 @@ export class ApiProviderStore {
       throw new Error(`Unsupported template for ${labelForProtocol(input.protocol)} providers: ${input.templateId}`);
     }
 
-    return this.#withLock(async () => {
+    return this.withLock(async () => {
       const snapshot = await this.#read();
       const now = new Date().toISOString();
       const id = createApiProviderId(label);
       const endpointId = `${id}_${endpointSuffix(input.protocol)}`;
       const apiProvider: StoredApiProvider = {
         id,
+        revision: 1,
         label,
         templateId: input.templateId,
         createdAt: now,
@@ -384,10 +455,15 @@ export class ApiProviderStore {
   }
 
   async updateApiProvider(id: string, input: UpdateApiProviderInput): Promise<StoredApiProvider> {
-    return this.#withLock(async () => {
+    return this.withLock(async () => {
       const snapshot = await this.#read();
       const apiProvider = snapshot.apiProviders.find((entry) => entry.id === id);
       if (!apiProvider) throw new Error(`Unknown API provider: ${id}`);
+      if (input.revision !== undefined && input.revision !== apiProvider.revision) {
+        throw new DomainError('API_PROVIDER_CONFIGURATION_CHANGED', 'Provider configuration changed. Reload before saving.', 409);
+      }
+      if (apiProvider.revision >= Number.MAX_SAFE_INTEGER) throw new Error('API provider revision exhausted');
+      apiProvider.revision++;
 
       if (input.label !== undefined) {
         apiProvider.label = normalizeRequiredString(input.label, 'label');
@@ -424,32 +500,69 @@ export class ApiProviderStore {
   }
 
   async deleteApiProvider(id: string, isReferenced: (apiProviderId: string) => boolean): Promise<void> {
-    return this.#withLock(async () => {
+    return this.withLock(async () => {
       const snapshot = await this.#read();
       const apiProvider = snapshot.apiProviders.find((entry) => entry.id === id);
       if (!apiProvider) return;
-      if (isReferenced(id)) {
-        throw new Error(`API provider is used by existing chats: ${id}`);
+      const release = this.referenceWrites.deleting(id, () => isReferenced(id));
+      try {
+        snapshot.apiProviders = snapshot.apiProviders.filter((entry) => entry.id !== id);
+        await this.#write(snapshot);
+        this.#snapshot = snapshot;
+      } finally {
+        release();
       }
-      snapshot.apiProviders = snapshot.apiProviders.filter((entry) => entry.id !== id);
-      await this.#write(snapshot);
-      this.#snapshot = snapshot;
     });
   }
 
-  async #withLock<T>(fn: () => Promise<T>): Promise<T> {
-    return this.#writeLock.runExclusive(API_PROVIDER_WRITE_LOCK_KEY, fn);
+  async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const directory = await fs.realpath(path.dirname(this.filePath));
+    return writeLocks.runExclusive(path.join(directory, path.basename(this.filePath)), async () => {
+      const release = await lockfile.lock(directory, {
+        realpath: false, lockfilePath: path.join(directory, '.api-providers.lock'),
+        retries: { retries: 40, minTimeout: 25, maxTimeout: 250, factor: 1.2 },
+        stale: 30_000, update: 5000,
+        onCompromised: () => {
+          // Bun can continue pending work after an uncaught callback error.
+          process.stderr.write('API provider configuration lock lost (ECOMPROMISED); exiting to prevent stale writes.\n');
+          process.exit(1);
+        },
+      });
+      try {
+        return await fn();
+      } finally {
+        await release();
+      }
+    });
   }
 
   async #read(): Promise<ApiProviderStoreSnapshot> {
+    this.#assertAvailable();
     return readJsonStateFile({
       filePath: this.filePath,
-      empty: () => ({ version: 1, apiProviders: [] }),
+      empty: () => {
+        if (this.#initialized) throw new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE', 'Provider configuration is missing.', 503);
+        return { version: 2, legacyProviderIds: [], apiProviders: [] };
+      },
       normalize: normalizeSnapshot,
     });
   }
 
   async #write(snapshot: ApiProviderStoreSnapshot): Promise<void> {
-    await writeJsonFileAtomic(this.filePath, snapshot, { mode: 0o600 });
+    try {
+      await writeJsonFileAtomic(this.filePath, snapshot, { mode: 0o600 });
+    } catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) this.#unavailable = true;
+      this.#notify();
+      throw error;
+    }
+    this.#bytes = null;
+    this.#notify();
+  }
+
+  #assertAvailable(): void {
+    if (this.#unavailable) {
+      throw new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE', 'Provider write durability is unknown. Restart after checking configuration.', 503);
+    }
   }
 }

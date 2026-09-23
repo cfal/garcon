@@ -10,6 +10,7 @@ import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
+import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
 import { createLogger } from '../lib/log.js';
 import { DomainError } from '../lib/domain-error.js';
 import type {
@@ -73,6 +74,7 @@ export class AgentOwnershipJournal {
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   readonly #retainNodeReferences?: RetainNodeReferences;
+  readonly #providerReferences: ApiProviderDurableReferences;
   readonly #isNodeConfigured: (nodeId: string) => boolean;
   readonly #unconfirmedNodeReferences = new Set<string>();
   readonly #completedLedgerDeletes = new Set<string>();
@@ -88,6 +90,7 @@ export class AgentOwnershipJournal {
     ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
     retainNodeReferences?: RetainNodeReferences;
+    retainProviderReferences?: RetainProviderReferences;
     isNodeConfigured?: (nodeId: string) => boolean;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
@@ -96,6 +99,7 @@ export class AgentOwnershipJournal {
     this.#ledger = options.ledger;
     this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
     this.#retainNodeReferences = options.retainNodeReferences;
+    this.#providerReferences = new ApiProviderDurableReferences(options.retainProviderReferences);
     this.#isNodeConfigured = options.isNodeConfigured ?? (() => true);
     if (!Number.isSafeInteger(this.#releaseTimeoutMs) || this.#releaseTimeoutMs < 1) {
       throw new Error('Ownership cleanup release timeout must be a positive integer');
@@ -104,6 +108,7 @@ export class AgentOwnershipJournal {
 
   async initialize(): Promise<void> {
     this.#journal = await this.#load();
+    this.#providerReferences.initialize(journalProviders(this.#journal));
     for (const intent of [...this.#journal.ownershipIntents]) {
       if (intent.kind !== 'delete') continue;
       try {
@@ -116,6 +121,10 @@ export class AgentOwnershipJournal {
         });
       }
     }
+  }
+
+  referencesApiProvider(id: string): boolean {
+    return this.#providerReferences.references(id);
   }
 
   hasPending(chatId: string): boolean {
@@ -464,7 +473,8 @@ export class AgentOwnershipJournal {
         const release = this.#retainNodeReferences?.(nodes, [...journalNodes(this.#journal), ...inheritedNodes]);
         try {
           try {
-            await writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 });
+            await this.#providerReferences.publish(journalProviders(journal),
+              () => writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 }));
           } catch (error) {
             // A renamed but unconfirmed decision still prevents node deletion.
             if (error instanceof AtomicJsonWriteError && error.renamed) {
@@ -499,6 +509,10 @@ export class AgentOwnershipJournal {
 
 function journalNodes(journal: AgentOwnershipJournalFileV5): string[] {
   return journal.ownershipIntents.flatMap(intentNodes);
+}
+
+function journalProviders(journal: AgentOwnershipJournalFileV5): (string | null | undefined)[] {
+  return journal.ownershipIntents.flatMap((intent) => intent.kind === 'handoff' ? [intent.target.execution.apiProviderId] : []);
 }
 
 function intentNodes(intent: AgentHandoffIntent | DeleteIntentV2): string[] {

@@ -12,6 +12,7 @@ import {
   writeJsonFileAtomic,
 } from '../lib/json-file-store.ts';
 import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
+import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
 import {
   ChatNameStore,
   ChatOrderStore,
@@ -259,6 +260,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #workspaceDir: string;
   readonly #writeFile: typeof writeJsonFileAtomic;
   readonly #retainNodeReferences?: RetainNodeReferences;
+  readonly #providerReferences: ApiProviderDurableReferences;
   #writeLock = new KeyedPromiseLock();
   #chatNames: ChatNameStore;
   #uiSettings: UiSettingsStore;
@@ -270,12 +272,17 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   constructor(
     workspaceDir: string,
-    deps: { readonly writeFile?: typeof writeJsonFileAtomic; readonly retainNodeReferences?: RetainNodeReferences } = {},
+    deps: {
+      readonly writeFile?: typeof writeJsonFileAtomic;
+      readonly retainNodeReferences?: RetainNodeReferences;
+      readonly retainProviderReferences?: RetainProviderReferences;
+    } = {},
   ) {
     super();
     this.#workspaceDir = workspaceDir;
     this.#writeFile = deps.writeFile ?? writeJsonFileAtomic;
     this.#retainNodeReferences = deps.retainNodeReferences;
+    this.#providerReferences = new ApiProviderDurableReferences(deps.retainProviderReferences);
     const context: SettingsStoreContext = {
       readSettings: () => this.#readSettings(),
       mutate: (fn) => this.#withLock(fn),
@@ -333,7 +340,12 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   }
 
   async #writeToDisk(settings: ProjectSettings): Promise<void> {
-    await this.#writeFile(this.#settingsPath(), settings, { mode: 0o600 });
+    await this.#providerReferences.publish(generationProviders(settings),
+      () => this.#writeFile(this.#settingsPath(), settings, { mode: 0o600 }));
+  }
+
+  referencesApiProvider(id: string): boolean {
+    return this.#providerReferences.references(id);
   }
 
   async #readFromDiskWithMigration(): Promise<SanitizedSettingsResult> {
@@ -351,6 +363,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     await fs.mkdir(this.#workspaceDir, { recursive: true });
     const { settings, migrated } = await this.#readFromDiskWithMigration();
     this.#cache = settings;
+    this.#providerReferences.initialize(generationProviders(settings));
     if (migrated) {
       await this.#saveSettingsWithNotificationsUnlocked(settings, []);
     }
@@ -361,6 +374,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
       const { settings: newCache, migrated } = await this.#readFromDiskWithMigration();
       this.#cache = newCache;
+      this.#providerReferences.initialize(generationProviders(newCache));
       this.#settingsDurabilityUnknown = false;
       this.#pendingSettingsNotifications = [];
       if (migrated) {
@@ -666,4 +680,8 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#folders.removeFolder(folderId);
   }
 
+}
+
+function generationProviders(settings: ProjectSettings): (string | null | undefined)[] {
+  return GENERATION_UI_SETTING_KEYS.map((key) => settings.ui[key]?.apiProviderId);
 }
