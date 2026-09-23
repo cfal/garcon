@@ -8,6 +8,7 @@ import {
 } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
+import type { GitProjectTarget } from '$lib/api/git-client.js';
 
 export type GitTargetValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 
@@ -18,6 +19,7 @@ interface GitTargetDialogOptions {
 	readonly nodeId: string;
 	readonly nodeContextKey: string;
 	readonly available: boolean;
+	onMutationError?(error: unknown, target: GitProjectTarget): void;
 }
 
 export class GitTargetDialogState {
@@ -118,7 +120,7 @@ export class GitTargetDialogState {
 		const path = this.trimmedPath;
 		const nodeId = this.options.nodeId;
 		const current = this.#captureContext();
-		if (!path || !this.options.available) return;
+		if (!path || !this.options.available || this.isCreatingWorktree) return;
 
 		this.#worktreeAbort?.abort();
 		const abort = new AbortController();
@@ -160,13 +162,13 @@ export class GitTargetDialogState {
 				branch,
 				baseRef,
 			});
-			if (!current() || generation !== this.#worktreeGeneration) return;
 			if (!result.success) {
-				this.worktreeError = result.error || result.message || m.git_target_load_worktrees_failed();
-				return;
+				throw new Error(result.error || result.message || m.git_target_load_worktrees_failed());
 			}
+			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.selectWorktree(result.worktreePath || worktreePath);
 		} catch (error) {
+			this.options.onMutationError?.(error, { nodeId, projectPath });
 			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.worktreeError =
 				error instanceof Error ? error.message : m.git_target_load_worktrees_failed();

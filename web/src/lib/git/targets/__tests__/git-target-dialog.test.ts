@@ -4,6 +4,7 @@ import * as gitApi from '$lib/api/git';
 import type { GitTargetCandidate, GitWorktreeItem } from '$lib/api/git';
 import * as m from '$lib/paraglide/messages.js';
 import { GitTargetDialogState } from '$lib/git/targets/git-target-dialog.svelte.js';
+import { ApiError } from '$lib/api/client.js';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
@@ -70,6 +71,69 @@ afterEach(() => {
 });
 
 describe('GitTargetDialogState', () => {
+	it('ignores list refresh while creation is pending without losing the result or busy state', async () => {
+		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+		const dialog = new GitTargetDialogState({
+			nodeId: 'remote',
+			nodeContextKey: 'first',
+			available: true,
+			initialPath: '/repo',
+		});
+		const pending = dialog.createWorktree('/repo/feature', 'feature');
+		await dialog.loadWorktrees();
+		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
+		expect(dialog.isCreatingWorktree).toBe(true);
+		creation.resolve({ success: true, worktreePath: '/repo/feature' });
+		await pending;
+		expect(dialog.isCreatingWorktree).toBe(false);
+		expect(dialog.candidatePath).toBe('/repo/feature');
+	});
+
+	it.each(['disconnect', 'dispose', 'switch'] as const)(
+		'reports captured creation uncertainty after %s without stale publication',
+		async (transition) => {
+			let available = true;
+			let nodeId = 'remote';
+			const onMutationError = vi.fn();
+			const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+			vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+			const dialog = new GitTargetDialogState({
+				get nodeId() {
+					return nodeId;
+				},
+				nodeContextKey: 'first',
+				get available() {
+					return available;
+				},
+				initialPath: '/repo',
+				onMutationError,
+			});
+			const pending = dialog.createWorktree('/repo/feature', 'feature');
+			if (transition === 'disconnect') available = false;
+			else if (transition === 'dispose') dialog.dispose();
+			else {
+				nodeId = 'local';
+				dialog.setCandidatePath('/other');
+			}
+			dialog.scheduleValidation();
+			const failure = new ApiError(
+				503,
+				'Worktree creation outcome unknown',
+				'GIT_MUTATION_OUTCOME_UNKNOWN',
+			);
+			creation.reject(failure);
+			await pending;
+			expect(onMutationError).toHaveBeenCalledExactlyOnceWith(failure, {
+				nodeId: 'remote',
+				projectPath: '/repo',
+			});
+			expect(dialog.worktreeError).toBeNull();
+			expect(dialog.candidatePath).toBe(transition === 'switch' ? '/other' : '/repo');
+			dialog.dispose();
+		},
+	);
+
 	it('debounces validation and ignores an aborted stale response', async () => {
 		const first = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
 		const second = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();

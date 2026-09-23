@@ -10,6 +10,8 @@ import {
 	remoteExecutionNode,
 } from '$lib/execution-nodes/__tests__/fixtures.js';
 import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
+import { ApiError } from '$lib/api/client.js';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
@@ -60,10 +62,12 @@ function makeTarget(path: string, branch: string): GitTargetCandidate {
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((res) => {
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
 		resolve = res;
+		reject = rej;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 afterEach(() => {
@@ -72,6 +76,52 @@ afterEach(() => {
 });
 
 describe('GitTargetDialog', () => {
+	it('notifies creation uncertainty after the selected node disconnects', async () => {
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			worktrees: [makeWorktree('/workspace/repo', 'main', true)],
+		});
+		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+		const remote = {
+			...remoteExecutionNode,
+			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+		};
+		const notifications = new NotificationsStore();
+		let nodes!: ExecutionNodesStore;
+		renderDialog({
+			nodeId: remote.id,
+			nodes: [localExecutionNode, remote],
+			notifications,
+			onNodes: (store: ExecutionNodesStore) => {
+				nodes = store;
+			},
+		});
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Select a different worktree' }),
+		);
+		await screen.findByRole('option', { name: /main/ });
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
+			target: { value: 'feature' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		expect((screen.getByRole('button', { name: 'Refresh worktrees' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+		flushSync(() =>
+			nodes.applySnapshot([localExecutionNode, { ...remote, availability: 'offline' }]),
+		);
+		creation.reject(
+			new ApiError(503, 'Worktree creation outcome unknown', 'GIT_MUTATION_OUTCOME_UNKNOWN'),
+		);
+		await waitFor(() => expect(notifications.items).toHaveLength(1));
+		expect(notifications.items[0].message).toBe(
+			`${remote.label}: /workspace/repo: Worktree creation outcome unknown`,
+		);
+		expect(screen.queryByText('Worktree creation outcome unknown')).toBeNull();
+	});
+
 	it('retains remote worktree creation through unrelated node snapshot changes', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({

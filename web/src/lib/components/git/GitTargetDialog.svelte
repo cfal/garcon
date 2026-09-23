@@ -3,7 +3,7 @@
 	// only the pending path; the active target changes after OK.
 
 	import { onDestroy, untrack } from 'svelte';
-	import { getExecutionNodes } from '$lib/context';
+	import { getExecutionNodes, getNotifications } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
@@ -42,8 +42,13 @@
 	}: GitTargetDialogProps = $props();
 
 	const nodes = getExecutionNodes();
+	const notifications = getNotifications();
 	const nodeContextKey = $derived(nodes.gitContextKey(nodeId));
 	const dialog = new GitTargetDialogState({
+		onMutationError: (error, target) =>
+			notifications.error(
+				`${nodes.label(target.nodeId)}: ${target.projectPath}: ${error instanceof Error ? error.message : String(error)}`,
+			),
 		get nodeId() {
 			return nodeId;
 		},

@@ -46,6 +46,17 @@ function renderedWorktreeNames(): string[] {
 		.map((option) => option.querySelector('.text-sm.font-medium')?.textContent?.trim() ?? '');
 }
 
+it('disables both refresh entry points while a worktree is being created', async () => {
+	const onRefresh = vi.fn();
+	renderPicker([], { isCreating: true, errorMessage: 'Previous list failed', onRefresh });
+	for (const name of ['Refresh worktrees', 'Retry']) {
+		const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		button.click();
+	}
+	expect(onRefresh).not.toHaveBeenCalled();
+});
+
 async function openSortMenu(trigger: HTMLElement): Promise<void> {
 	await fireEvent.pointerDown(trigger, {
 		button: 0,
