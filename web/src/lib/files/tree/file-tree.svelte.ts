@@ -379,17 +379,19 @@ export class FileTreeStore {
 
 	invalidateNodePaths(): void {
 		const response = this.retainedResponse;
-		const target: FileTreeDirectoryTarget =
-			this.navigation.kind === 'loading' || this.navigation.kind === 'error'
-				? this.navigation.target
-				: response
-					? {
-							path: response.directory.path,
-							label: response.directory.path,
-							breadcrumbs: [],
-							reason: 'initial' as const,
-						}
-					: this.#initialTarget();
+		let target: FileTreeDirectoryTarget;
+		if (this.navigation.kind === 'loading' || this.navigation.kind === 'error') {
+			target = this.navigation.target;
+		} else if (response) {
+			target = {
+				path: response.directory.path,
+				label: response.directory.path,
+				breadcrumbs: [],
+				reason: 'initial',
+			};
+		} else {
+			target = this.#initialTarget();
+		}
 		const captureAsChatProject =
 			target.captureAsChatProject || target.path === this.#canonicalChatProjectPath;
 		this.#abortRequests();

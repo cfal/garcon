@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 import {
@@ -83,4 +83,38 @@ it('selects Git-capable nodes independently of Files capability', async () => {
 	await fireEvent.click(screen.getByRole('button', { name: 'Execution node: Local' }));
 	await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Worker' }));
 	expect(onSelect).toHaveBeenCalledWith(remote.id);
+});
+
+it('updates the selected label and open menu availability when inventory changes', async () => {
+	const remote = {
+		...remoteExecutionNode,
+		machineServices: { ...remoteExecutionNode.machineServices, git: true },
+	};
+	const snapshot = [localExecutionNode, remote];
+	const nodes = new ExecutionNodesStore(async () => snapshot);
+	nodes.applySnapshot(snapshot);
+	render(ExecutionNodeSelector, {
+		nodes,
+		nodeId: remote.id,
+		service: 'git',
+		onSelect: vi.fn(),
+	});
+	const picker = screen.getByRole('button', { name: 'Execution node: Worker' });
+	await fireEvent.click(picker);
+	const renamed = { ...remote, label: 'Renamed worker' };
+	nodes.applySnapshot([localExecutionNode, { ...renamed, availability: 'offline' }]);
+	await waitFor(() => {
+		expect(picker.getAttribute('aria-label')).toBe('Execution node: Renamed worker');
+		expect(picker.getAttribute('title')).toBe('Renamed worker');
+		expect(picker.textContent?.trim()).toBe('Renamed worker');
+		expect(
+			screen.getByRole('menuitemradio', { name: /Renamed worker/ }).getAttribute('aria-disabled'),
+		).toBe('true');
+	});
+	nodes.applySnapshot([localExecutionNode, renamed]);
+	await waitFor(() =>
+		expect(
+			screen.getByRole('menuitemradio', { name: 'Renamed worker' }).getAttribute('aria-disabled'),
+		).not.toBe('true'),
+	);
 });
