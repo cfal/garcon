@@ -1,4 +1,4 @@
-import { GIT_MAX_RESULT_BYTES, GIT_MAX_RETAINED_RESULT_BYTES, GIT_RESULT_CHUNK_BYTES } from '../../common/git-execution.js';
+import { GIT_MAX_CONCURRENT_QUERIES, GIT_MAX_RETAINED_RESULTS, GIT_MAX_RESULT_BYTES, GIT_MAX_RETAINED_RESULT_BYTES, GIT_RESULT_CHUNK_BYTES } from '../../common/git-execution.js';
 import { GitServiceError } from '../../common/git-error.js';
 import { isRecord } from '../../common/json.js';
 import { invalidGitResult, validateGitResultRef, type GitReply, type GitResultRef, type GitResultScope } from './git-protocol.js';
@@ -6,15 +6,14 @@ import { invalidGitResult, validateGitResultRef, type GitReply, type GitResultRe
 interface ResultEntry {
   readonly ref: GitResultRef;
   readonly bytes: Buffer;
-  readonly release: () => void;
   readonly deadline: number;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
 export class GitResultTransfers {
   readonly #entries = new Map<string, ResultEntry>();
-  #reserved = 0;
-  #count = 0;
+  #retainedBytes = 0;
+  #producers = 0;
   #disposed = false;
   constructor(private readonly scope: GitResultScope, private readonly now = Date.now) {}
 
@@ -28,7 +27,6 @@ export class GitResultTransfers {
     }
     const release = this.#reserve();
     const deadline = this.now() + options.budgetMs;
-    let retained = false;
     try {
       const value = await operation();
       this.#check(options.signal);
@@ -37,14 +35,17 @@ export class GitResultTransfers {
       if (size > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git query result exceeds the transfer limit');
       if (size <= GIT_RESULT_CHUNK_BYTES - 4096) return { ...this.scope, kind: 'inline', value };
       if (this.now() >= deadline) throw new GitServiceError('GIT_TIMEOUT', 'Git result deadline expired');
+      if (this.#entries.size >= GIT_MAX_RETAINED_RESULTS || this.#retainedBytes + size > GIT_MAX_RETAINED_RESULT_BYTES) {
+        throw new GitServiceError('GIT_SERVICE_BUSY', 'Git result storage is full');
+      }
       const bytes = Buffer.from(encoded);
       const ref: GitResultRef = { ...this.scope, kind: 'git-result', id: crypto.randomUUID() };
       const timer = setTimeout(() => this.close(ref), Math.min(120_000, deadline - this.now()));
       timer.unref();
-      this.#entries.set(ref.id, { ref, bytes, release, timer, deadline });
-      retained = true;
+      this.#entries.set(ref.id, { ref, bytes, timer, deadline });
+      this.#retainedBytes += bytes.length;
       return { ...this.scope, kind: 'transfer', transfer: ref, size };
-    } finally { if (!retained) release(); }
+    } finally { release(); }
   }
 
   readChunk(request: { transfer: GitResultRef; offset: number }, signal: AbortSignal) {
@@ -67,7 +68,7 @@ export class GitResultTransfers {
     if (!entry) return;
     this.#entries.delete(ref.id);
     clearTimeout(entry.timer);
-    entry.release();
+    this.#retainedBytes -= entry.bytes.length;
   }
 
   dispose(): void {
@@ -81,9 +82,8 @@ export class GitResultTransfers {
   }
 
   #reserve(): () => void {
-    if (this.#count >= 8 || this.#reserved + GIT_MAX_RESULT_BYTES > GIT_MAX_RETAINED_RESULT_BYTES) throw new GitServiceError('GIT_SERVICE_BUSY', 'Too many open Git query results');
-    this.#count++;
-    this.#reserved += GIT_MAX_RESULT_BYTES;
-    return () => { this.#count--; this.#reserved -= GIT_MAX_RESULT_BYTES; };
+    if (this.#producers >= GIT_MAX_CONCURRENT_QUERIES) throw new GitServiceError('GIT_SERVICE_BUSY', 'Too many active Git queries');
+    this.#producers++;
+    return () => { this.#producers--; };
   }
 }

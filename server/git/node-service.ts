@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import type { ExecutionGitService, ExecutionGhService, NodeCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod, GitRequests, GitResults } from '../../common/git.js';
-import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type GitNodeScope } from '../../common/git-execution.js';
+import { GIT_MAX_CONCURRENT_QUERIES, GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type GitNodeScope } from '../../common/git-execution.js';
 import { GitServiceError } from '../../common/git-error.js';
 import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
@@ -76,7 +76,7 @@ export class LocalGitRuntime {
 
   async #admit<T>(mutation: boolean, options: NodeCallOptions | undefined, operation: (options: NodeCallOptions) => Promise<T>): Promise<T> {
     this.#available(options);
-    if (mutation ? this.#mutations >= 8 || processAdmission.mutations >= 16 : this.#reads >= 2 || processAdmission.reads >= 4) throw new GitServiceError('GIT_SERVICE_BUSY', 'Git operation capacity is exhausted');
+    if (mutation ? this.#mutations >= 8 || processAdmission.mutations >= 16 : this.#reads >= GIT_MAX_CONCURRENT_QUERIES || processAdmission.reads >= GIT_MAX_CONCURRENT_QUERIES) throw new GitServiceError('GIT_SERVICE_BUSY', 'Git operation capacity is exhausted');
     if (mutation) { this.#mutations++; processAdmission.mutations++; } else { this.#reads++; processAdmission.reads++; }
     const signal = options?.signal ? AbortSignal.any([options.signal, this.#abort.signal]) : this.#abort.signal;
     try {

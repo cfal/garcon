@@ -9,6 +9,7 @@ import { validateGitRequest } from '../../../common/git-request-validation.js';
 import { withRepositoryMutation } from '../repository-coordination.js';
 import { withGitOperation, trackGitProcess } from '../operation-context.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
+import { GIT_MAX_CONCURRENT_QUERIES } from '../../../common/git-execution.js';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const dispose of cleanups.splice(0).reverse()) await dispose(); });
@@ -53,6 +54,32 @@ test('local machine service scopes operations and rejects untrusted fields befor
   const other = path.join(path.dirname(projectPath), 'not-repo');
   await fs.mkdir(other);
   expect(await git.getWorkbenchSnapshot({ projectPath: other, mode: 'working', context: 5 })).toMatchObject({ status: 'not-git-repository' });
+});
+
+test('admits normal query bursts while bounding active reads across serving instances', async () => {
+  const { git, projectPath, configuration } = await fixture();
+  const replacement = new LocalGitRuntime({ ...configuration, instanceId: 'other-instance' });
+  cleanups.push(async () => replacement.dispose());
+  const stats = await fs.stat(projectPath);
+  const gate = Promise.withResolvers<typeof stats>();
+  const entered = Promise.withResolvers<void>();
+  let arrivals = 0;
+  const stat = spyOn(fs, 'stat').mockImplementation(() => {
+    if (++arrivals === GIT_MAX_CONCURRENT_QUERIES) entered.resolve();
+    return gate.promise;
+  });
+  const pending = Array.from({ length: GIT_MAX_CONCURRENT_QUERIES }, () => git.getRepoInfo({ projectPath }));
+  try {
+    await entered.promise;
+    expect(arrivals).toBe(8);
+    await expect(git.getRepoInfo({ projectPath })).rejects.toMatchObject({ code: 'GIT_SERVICE_BUSY' });
+    await expect(replacement.git.getRepoInfo({ projectPath })).rejects.toMatchObject({ code: 'GIT_SERVICE_BUSY' });
+  } finally {
+    stat.mockRestore();
+    gate.resolve(stats);
+    await Promise.all(pending);
+  }
+  expect(await replacement.git.getRepoInfo({ projectPath })).toMatchObject({ instanceId: 'other-instance' });
 });
 
 test('rejects an ancestor repository outside the node base and escaping file symlinks', async () => {
