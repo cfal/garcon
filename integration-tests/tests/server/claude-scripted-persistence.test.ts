@@ -130,10 +130,10 @@ describe('scripted Claude persistence', () => {
         userType: 'external',
         cwd: fixture.dirs.project,
         sessionId: binding.agentSessionId,
-        version: '2.1.278',
+        version: '2.1.280',
         type: 'user',
         message: { role: 'user', content: providerText },
-        uuid: '00000000-0000-4000-8000-000000000278',
+        uuid: '00000000-0000-4000-8000-000000000280',
         timestamp: '2099-01-01T00:00:00.000Z',
         origin: { kind: 'peer', from: 'synthetic-peer' },
       };
