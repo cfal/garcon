@@ -7,7 +7,7 @@ import {
 	type ScheduledPrompt,
 } from '$shared/scheduled-prompts';
 import type { SessionAgentId } from '$lib/types/app';
-import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import {
 	findModelForSelection,
 	modelValueForSelection,
@@ -16,6 +16,9 @@ import {
 
 interface CatalogOverrides {
 	getModels?(agentId: string): ModelOption[];
+	getPermissionModes?: ModelCatalogStore['getPermissionModes'];
+	getThinkingModes?: ModelCatalogStore['getThinkingModes'];
+	refreshIfStale?(): Promise<void>;
 	isValidated?: boolean;
 	error?: string | null;
 }
@@ -41,12 +44,12 @@ function createForm(
 		get isValidated() { return catalogOverrides.isValidated ?? true; },
 		get error() { return catalogOverrides.error ?? null; },
 		isRefreshing: false,
-		refreshIfStale: vi.fn(async () => {}),
+		refreshIfStale: catalogOverrides.refreshIfStale ?? vi.fn(async () => {}),
 		getSelectableAgents: () => selectableAgentIds(),
 		getModels,
 		getDefaultModel: () => 'gpt-5',
-		getPermissionModes: () => ['default', 'acceptEdits'],
-		getThinkingModes: () => ['none', 'high'],
+		getPermissionModes: catalogOverrides.getPermissionModes ?? (() => ['default', 'acceptEdits']),
+		getThinkingModes: catalogOverrides.getThinkingModes ?? (() => ['none', 'high']),
 		getAgentSettingsDescriptors: () => [],
 		getDefaultAgentSettings: (agentId: string) => ({
 			ownerId: agentId,
@@ -96,6 +99,72 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it('does not restore the old scheduled target over edits made during catalog discovery', async () => {
+		const discovery = Promise.withResolvers<void>();
+		const form = createForm(undefined, undefined, {
+			refreshIfStale: () => discovery.promise,
+			getModels: () => [
+				{ value: 'gpt-5', label: 'Saved remote model' },
+				{ value: 'local-model', label: 'Local model' },
+			],
+		});
+		form.startup.validatePath = vi.fn();
+		const initializing = form.initialize(newChatPrompt({
+			type: 'new-chat', nodeId: '22222222-2222-4222-8222-222222222222',
+			agentId: 'codex', projectPath: '/remote/project', model: 'gpt-5',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'acceptEdits', thinkingMode: 'high', agentSettingsById: {}, tags: [],
+		}));
+		await vi.waitFor(() => expect(form.startup.nodeId).not.toBe('local'));
+		form.startup.selectNode('local');
+		form.startup.projectPath = '/local/explicit-edit';
+		form.startup.selectModel('local-model');
+		form.startup.setPermissionMode('default');
+		form.startup.setThinkingMode('none');
+		form.startup.chatTags = ['edited'];
+		discovery.resolve();
+		await initializing;
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00Z'))?.target).toMatchObject({
+			projectPath: '/local/explicit-edit', model: 'local-model',
+			permissionMode: 'default', thinkingMode: 'none', tags: ['edited'],
+		});
+		expect(form.startup.nodeId).toBe('local');
+		form.dispose();
+	});
+
+	it('restores saved execution modes before a cold node catalog arrives', async () => {
+		const discovery = Promise.withResolvers<void>();
+		let loaded = false;
+		const form = createForm(undefined, undefined, {
+			refreshIfStale: () => discovery.promise,
+			get isValidated() { return loaded; },
+			getModels: () => loaded ? [{ value: 'gpt-5', label: 'Saved model' }] : [],
+			getPermissionModes: () => loaded ? ['default', 'acceptEdits'] : [],
+			getThinkingModes: () => loaded ? ['none', 'high'] : [],
+		});
+		form.startup.validatePath = vi.fn();
+		await form.initialize(newChatPrompt({
+			type: 'new-chat', nodeId: '22222222-2222-4222-8222-222222222222',
+			agentId: 'codex', projectPath: '/remote/project', model: 'gpt-5',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'acceptEdits', thinkingMode: 'high', agentSettingsById: {}, tags: [],
+		}));
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		expect(form.startup.permissionMode).toBe('acceptEdits');
+		expect(form.startup.thinkingMode).toBe('high');
+		expect(form.canSave).toBe(false);
+		loaded = true;
+		discovery.resolve();
+		await discovery.promise;
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00Z'))?.target).toMatchObject({
+			permissionMode: 'acceptEdits', thinkingMode: 'high', model: 'gpt-5',
+		});
+		form.dispose();
+	});
+
 	it.each(['local', '22222222-2222-4222-8222-222222222222'])('requires a validated catalog for a cached %s new-chat target', (nodeId) => {
 		const catalog: CatalogOverrides = { isValidated: true };
 		const form = createForm(undefined, undefined, catalog);

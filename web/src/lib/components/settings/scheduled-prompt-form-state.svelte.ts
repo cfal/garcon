@@ -51,7 +51,7 @@ export class ScheduledPromptFormState {
 	#originalEndDate: string | null = null;
 
 	constructor(
-		private readonly modelCatalog: ModelCatalogStore,
+		modelCatalog: ModelCatalogStore,
 		remoteSettings: RemoteSettingsStore,
 		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'>,
 		private readonly options: ScheduledPromptFormStateOptions,
@@ -157,7 +157,6 @@ export class ScheduledPromptFormState {
 			return;
 		}
 		this.startup.selectNode(scheduledPrompt.target.nodeId);
-		await this.modelCatalog.forNode(this.startup.nodeId).refreshIfStale();
 		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
 			model: scheduledPrompt.target.model,
 			apiProviderId: scheduledPrompt.target.apiProviderId,
@@ -165,8 +164,7 @@ export class ScheduledPromptFormState {
 			modelProtocol: scheduledPrompt.target.modelProtocol,
 		});
 		this.startup.projectPath = scheduledPrompt.target.projectPath;
-		this.startup.setPermissionMode(scheduledPrompt.target.permissionMode);
-		this.startup.setThinkingMode(scheduledPrompt.target.thinkingMode);
+		this.startup.restoreExecutionModes(scheduledPrompt.target.permissionMode, scheduledPrompt.target.thinkingMode);
 		this.startup.replaceAgentSettingsById(scheduledPrompt.target.agentSettingsById);
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;

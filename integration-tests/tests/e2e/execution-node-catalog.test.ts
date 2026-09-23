@@ -104,6 +104,72 @@ test('editing a remote schedule preserves its saved endpoint across failed disco
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
 
+test('late remote catalog discovery preserves a schedule retargeted to Local', async () => {
+  await withE2eFixture('execution-node-schedule-retarget', async (fixture) => {
+    const { client, dirs, executionDirs, directAgents } = fixture.integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
+    const provider = directAgents.anthropic.provider;
+    const target = {
+      type: 'new-chat' as const, nodeId: client.nodeId, agentId: 'claude',
+      projectPath: executionDirs.project, model: provider.model,
+      apiProviderId: provider.providerId, modelEndpointId: provider.endpointId, modelProtocol: provider.protocol,
+      permissionMode: 'default' as const, thinkingMode: 'none' as const,
+      agentSettingsById: {}, tags: [], preambleChoice: { mode: 'defaults' as const },
+    };
+    const scheduledAt = new Date(Date.now() + 86_400_000);
+    scheduledAt.setUTCSeconds(0, 0);
+    await client.createScheduledPrompt({ expectedRevision: (await client.getScheduledPrompts()).revision,
+      scheduledPrompt: { prompt: 'Synthetic retargeted schedule', target,
+        schedule: { type: 'once', runAtUtc: scheduledAt.toISOString() } } });
+    await fixture.page.evaluateOnNewDocument((nodeId) => {
+      const originalFetch = globalThis.fetch.bind(globalThis);
+      let release = () => {};
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      document.addEventListener('release-remote-catalog', () => release());
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true,
+        value: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+          if (url.pathname !== '/api/v1/models' || url.searchParams.get('nodeId') !== nodeId) {
+            return originalFetch(input, init);
+          }
+          document.documentElement.dataset.remoteCatalogPending = 'true';
+          await gate;
+          const response = await originalFetch(input, init);
+          document.documentElement.dataset.remoteCatalogReleased = 'true';
+          return response;
+        },
+      });
+    }, client.nodeId);
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.open();
+    await fixture.waitForSpaWebSocket();
+    await app.clickButton('More actions');
+    await app.waitForMenuItemEnabled('Scheduled prompts');
+    await app.clickMenuItem('Scheduled prompts');
+    await app.waitForButtonEnabled('Edit prompt');
+    await app.clickButton('Edit prompt');
+    await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogPending === 'true');
+    await selectExecutionNode(fixture.page, '[role="dialog"] [data-execution-node-picker]', 'Local');
+    await app.fill('#scheduled-project-path', dirs.project);
+    await openDialogModelSelector(fixture.page);
+    await app.waitForButton('Chat Completions');
+    await app.clickButton('Chat Completions');
+    await app.waitForButton('Integration Echo');
+    await app.clickButton('Integration Echo');
+    await fixture.page.evaluate(() => document.dispatchEvent(new Event('release-remote-catalog')));
+    await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogReleased === 'true');
+    await app.waitForDialogButtonEnabled('Save Prompt');
+    expect(await fixture.page.$eval('#scheduled-project-path', element => (element as HTMLInputElement).value)).toBe(dirs.project);
+    await app.clickButton('Save Prompt', { last: true });
+    await fixture.page.waitForFunction(() => document.querySelector('#scheduled-project-path') === null);
+    const saved = (await client.getScheduledPrompts()).prompts[0]?.target;
+    expect(saved).toMatchObject({ type: 'new-chat', projectPath: dirs.project,
+      agentId: 'direct-openai-compatible', apiProviderId: directAgents.openAi.provider.providerId });
+    expect(saved?.type === 'new-chat' && (saved.nodeId ?? 'local')).toBe('local');
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
+
 test('new and scheduled chats retain input and require Retry after cached remote catalog discovery fails', async () => {
   await withE2eFixture('execution-node-draft-catalog', async (fixture) => {
     const { client, dirs } = fixture.integration;

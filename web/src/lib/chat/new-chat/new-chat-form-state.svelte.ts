@@ -28,7 +28,7 @@ import {
 	withAgentSetting,
 } from '$shared/agent-settings';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
-import { newChatNodePreferences } from './new-chat-node-preferences';
+import { firstSelectableNodeRecent, newChatNodePreferences } from './new-chat-node-preferences';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -322,6 +322,14 @@ export class NewChatFormState {
 		this.#startupSelectionAutomatic = false;
 		this.thinkingMode = normalizeSupportedThinkingMode(mode, this.thinkingModes);
 		this.#modesTouched = true;
+	}
+
+	restoreExecutionModes(permissionMode: PermissionMode, thinkingMode: ThinkingMode): void {
+		this.#startupSelectionAutomatic = false;
+		this.#modesTouched = true;
+		// Saved modes must survive an empty catalog while node discovery is pending.
+		this.permissionMode = permissionMode;
+		this.thinkingMode = thinkingMode;
 	}
 
 	setAgentSetting(descriptor: AgentSettingDescriptor, value: JsonValue): void {
@@ -907,19 +915,7 @@ export class NewChatFormState {
 		recents: RecentAgentSetting[],
 		selectableAgentIds: readonly SessionAgentId[] = this.#selectableAgentIds,
 	): RecentAgentSetting | null {
-		const selectable = new Set(selectableAgentIds);
-		for (const recent of recents) {
-			if (effectiveNodeId(recent.nodeId) !== this.nodeId) continue;
-			const agentId = recent.agentId as SessionAgentId;
-			if (!selectable.has(agentId)) continue;
-			const model = this.#modelCatalog.getModelForSelection(
-				agentId,
-				recent.model,
-				recent.modelEndpointId,
-			);
-			if (model) return recent;
-		}
-		return null;
+		return firstSelectableNodeRecent(recents, this.nodeId, selectableAgentIds, this.#modelCatalog);
 	}
 
 	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
