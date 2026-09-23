@@ -1,8 +1,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { assertGitWorkingPath } from './operation-context.js';
-import { createTemporaryGitIndex, removeTemporaryGitIndex } from './temporary-index.js';
-import { exactGitPathspecs, literalGitPathspec } from './pathspecs.js';
+import { untrackedPatch } from './untracked-patch.js';
+import { exactGitPathspecs } from './pathspecs.js';
 import type {
   RegisteredGitReviewDocument,
   RegisteredGitReviewFile,
@@ -155,6 +155,9 @@ function diffArgs(
     '-z',
     '--no-color',
     '--no-ext-diff',
+    '--no-textconv',
+    '--src-prefix=a/',
+    '--dst-prefix=b/',
     `-U${document.context}`,
     '--find-renames',
     '--submodule=short',
@@ -197,29 +200,17 @@ async function loadUntrackedBody(
       );
     }
     await assertGitWorkingPath(filePath);
-    const temporaryIndex = await createTemporaryGitIndex(document.repoRoot, signal);
-    try {
-      // The copied index preserves indexed attributes without exposing intent-to-add in the real index.
-      const options = readOnlyGitOptions({
+    const patch = await measureGitReviewPhase(routeMetrics, 'body-git', () => untrackedPatch(
+      document.repoRoot, file.path, document.context, {
         signal,
-        env: { GIT_INDEX_FILE: temporaryIndex },
         maxStdoutBytes: GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes,
         truncateStdout: false,
-      });
-      await runGitTraced(document.repoRoot, ['add', '-N', '--', literalGitPathspec(file.path)], undefined, options);
-      const { stdout } = await measureGitReviewPhase(routeMetrics, 'body-git', () => runGitTraced(
-        document.repoRoot,
-        ['diff', '--no-color', '--no-ext-diff', '--no-textconv', `-U${document.context}`, '--', literalGitPathspec(file.path)],
-        undefined,
-        options,
-      ));
-      signal?.throwIfAborted();
-      return measureGitReviewPhaseSync(routeMetrics, 'patch-scan', () => compactRenderedPatch(
-        file.path, file.bodyFingerprint, stdout,
-      ));
-    } finally {
-      await removeTemporaryGitIndex(temporaryIndex);
-    }
+      },
+    ));
+    signal?.throwIfAborted();
+    return measureGitReviewPhaseSync(routeMetrics, 'patch-scan', () => compactRenderedPatch(
+      file.path, file.bodyFingerprint, patch,
+    ));
   } catch (error) {
     if (signal?.aborted) throw error;
     if (error instanceof GitOutputLimitError && error.stream === 'stdout') {

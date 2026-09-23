@@ -299,10 +299,6 @@ export async function runGitWithStdin(
   return trackGitProcess(() => runGitProcess(cwd, args, gitOperationOptions(options), new Blob([input])));
 }
 
-export async function runGitCleanup(cwd: string, args: string[]): Promise<void> {
-  await trackGitProcess(() => runGitProcess(cwd, args, { timeoutMs: 2000, env: { GIT_TERMINAL_PROMPT: '0' } }, 'ignore'));
-}
-
 export function readGitBlobPrefix(cwd: string, object: string, signal?: AbortSignal): Promise<Buffer> {
   return trackGitProcess(async () => {
     const options = gitOperationOptions(readOnlyGitOptions({ signal }));

@@ -40,7 +40,6 @@ import {
   assertGitRepository,
   isBinaryFile,
   readGitBlobPrefix,
-  runGitCleanup,
   isFileUntracked,
   readOnlyGitOptions,
   resolvePathWithinProject,
@@ -68,6 +67,7 @@ import {
 } from './review-document-registry.js';
 import { captureWorkingPathTokensFromObservation } from './working-path-token.js';
 import { measureGitReviewPhaseSync } from './review-performance.js';
+import { untrackedPatch } from './untracked-patch.js';
 
 const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
@@ -272,6 +272,12 @@ function simplifyDiffHeader(filePath: string): string[] {
   ];
 }
 
+function stagingDiffHeader(file: string, parsed: ParsedPatch, mode: 'stage' | 'unstage'): string[] {
+  return mode === 'stage' && parsed.header.some(line => line.startsWith('new file mode '))
+    ? parsed.header
+    : simplifyDiffHeader(file);
+}
+
 // Strips the trailing empty element that `split('\n')` produces from a
 // newline-terminated diff -- without this, the last hunk would contain a
 // spurious empty line that corrupts line counts in buildHunkHeader.
@@ -287,10 +293,10 @@ function parsePatch(patchText: string): ParsedPatch {
   let current: PatchHunk | null = null;
 
   for (const line of allLines) {
-    if (line.startsWith('diff --git') || line.startsWith('index ') ||
+    if (!current && (line.startsWith('diff --git') || line.startsWith('index ') ||
       line.startsWith('new file') || line.startsWith('deleted file') ||
       line.startsWith('---') || line.startsWith('+++') ||
-      line.startsWith('old mode') || line.startsWith('new mode')) {
+      line.startsWith('old mode') || line.startsWith('new mode'))) {
       header.push(line);
       continue;
     }
@@ -430,12 +436,8 @@ function buildHunkHeader(rawHeader: string, bodyLines: string[], startOffset: nu
 // Staged tab: `git diff --cached` (HEAD vs index).
 // The same diff is used for both display and `git apply --cached`.
 function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): string[] {
-  const ctx = `-U${contextLines}`;
-  const pathspec = literalGitPathspec(file);
-  if (isUnstage) {
-    return ['diff', '--cached', ctx, '--', pathspec];
-  }
-  return ['diff', ctx, '--', pathspec];
+  return ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/',
+    ...(isUnstage ? ['--cached'] : []), `-U${contextLines}`, '--', literalGitPathspec(file)];
 }
 
 
@@ -1293,23 +1295,11 @@ async function getWorkbenchSnapshot({
   };
 }
 
-// Partially stages or unstages selected diff lines for a file.
-//
-// The frontend always shows HEAD vs working tree (`git diff HEAD`), so
-// selection indices refer to positions in that diff. However, `git apply
-// --cached` applies against the index, not HEAD. When the index already
-// contains staged changes, context lines from a HEAD diff won't match
-// the index, causing "patch does not apply".
-//
-// To handle this correctly (following lazygit's approach):
-//   Staging: build the patch from `git diff` (index vs WT), translating
-//     the HEAD-diff indices to index-diff indices by content matching.
-//   Unstaging: build the patch from `git diff --cached` (HEAD vs index)
-//     directly, since the frontend indices already match.
-//
-// For untracked files, intent-to-add (`git add -N`) creates an empty
-// index entry first so `git diff` can produce a usable patch. On
-// failure, the intent-to-add is rolled back.
+async function stagingPatch(projectPath: string, file: string, context: number, mode: 'stage' | 'unstage'): Promise<string> {
+  if (mode === 'stage' && await isFileUntracked(projectPath, file)) return untrackedPatch(projectPath, file, context);
+  return (await runGit(projectPath, tabDiffArgs(context, file, mode === 'unstage'), readOnlyGitOptions())).stdout;
+}
+
 async function stageSelection({
   projectPath,
   file,
@@ -1321,64 +1311,38 @@ async function stageSelection({
 
   const reverse = mode === 'unstage';
 
-  // For untracked files, create an empty index entry so git diff works.
-  let didIntentToAdd = false;
-  try {
-    if (!reverse && await isFileUntracked(projectPath, file)) {
-      didIntentToAdd = true;
-      await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
-    }
-    // Frontend sends indices from the same diff that git apply --cached
-    // operates on, so no translation is needed. Unstaged tab uses
-    // `git diff`, staged tab uses `git diff --cached`.
-    const diffArgs = tabDiffArgs(contextLines, file, reverse);
-    const patchText = displayedPatch ?? (await runGit(projectPath, diffArgs, readOnlyGitOptions())).stdout;
-
-    if (!patchText.trim()) {
-      throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
-    }
-
-    const selectedSet = new Set(selection.lineIndices);
-    const { hunks } = parsePatch(patchText);
-
-    // Walk each hunk, transforming lines and propagating the cumulative
-    // offset that adjusts newStart in subsequent hunk headers.
-    const outputLines = [...simplifyDiffHeader(file)];
-    let startOffset = 0;
-    let diffLineIndex = 0;
-
-    for (const hunk of hunks) {
-      const { lines: bodyLines, nextIndex } = transformHunkLines(
-        hunk.lines, selectedSet, diffLineIndex, reverse,
-      );
-      diffLineIndex = nextIndex;
-
-      if (!hunkHasChanges(bodyLines)) continue;
-
-      const { header: hunkHeader, nextOffset } = buildHunkHeader(
-        hunk.rawHeader, bodyLines, startOffset,
-      );
-      startOffset = nextOffset;
-
-      outputLines.push(hunkHeader);
-      outputLines.push(...bodyLines);
-    }
-
-    const transformedPatch = outputLines.join('\n') + '\n';
-
-    const applyArgs = reverse
-      ? ['apply', '--cached', '--reverse', '-']
-      : ['apply', '--cached', '-'];
-
-    await runGitWithStdin(projectPath, applyArgs, transformedPatch);
-
-    return { success: true };
-  } catch (err) {
-    if (didIntentToAdd) {
-      try { await runGitCleanup(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
-    }
-    throw err;
+  const patchText = displayedPatch ?? await stagingPatch(projectPath, file, contextLines, mode);
+  if (!patchText.trim()) {
+    throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
   }
+  const selectedSet = new Set(selection.lineIndices);
+  const parsed = parsePatch(patchText);
+  const outputLines = [...stagingDiffHeader(file, parsed, mode)];
+  const headerLength = outputLines.length;
+  let startOffset = 0;
+  let diffLineIndex = 0;
+
+  for (const hunk of parsed.hunks) {
+    const { lines: bodyLines, nextIndex } = transformHunkLines(
+      hunk.lines, selectedSet, diffLineIndex, reverse,
+    );
+    diffLineIndex = nextIndex;
+    if (!hunkHasChanges(bodyLines)) continue;
+    const { header: hunkHeader, nextOffset } = buildHunkHeader(
+      hunk.rawHeader, bodyLines, startOffset,
+    );
+    startOffset = nextOffset;
+    outputLines.push(hunkHeader, ...bodyLines);
+  }
+  if (outputLines.length === headerLength) {
+    throw new GitDomainError('INVALID_INPUT', 'No changed lines were selected.');
+  }
+  const transformedPatch = outputLines.join('\n') + '\n';
+  const applyArgs = reverse
+    ? ['apply', '--cached', '--reverse', '-']
+    : ['apply', '--cached', '-'];
+  await runGitWithStdin(projectPath, applyArgs, transformedPatch);
+  return { success: true };
 }
 
 // Stages or unstages a single hunk by its index. The hunk index refers
@@ -1395,38 +1359,21 @@ async function stageHunk({
 
   const isUnstage = mode === 'unstage';
 
-  let didIntentToAdd = false;
-  try {
-    if (!isUnstage && await isFileUntracked(projectPath, file)) {
-      didIntentToAdd = true;
-      await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
-    }
-    const diffArgs = tabDiffArgs(contextLines, file, isUnstage);
-    const fullPatch = displayedPatch ?? (await runGit(projectPath, diffArgs, readOnlyGitOptions())).stdout;
-    if (!fullPatch.trim()) {
-      throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
-    }
-    const parsed = parsePatch(fullPatch);
-    if (hunkIndex < 0 || hunkIndex >= parsed.hunks.length) {
-      throw new GitDomainError('INVALID_INPUT', `Invalid hunk index ${hunkIndex}`);
-    }
-    const hunk = parsed.hunks[hunkIndex];
-
-    const singleHunkPatch = [...simplifyDiffHeader(file), hunk.rawHeader, ...hunk.lines].join('\n') + '\n';
-
-    const applyArgs = isUnstage
-      ? ['apply', '--cached', '--reverse', '-']
-      : ['apply', '--cached', '-'];
-
-    await runGitWithStdin(projectPath, applyArgs, singleHunkPatch);
-
-    return { success: true };
-  } catch (err) {
-    if (didIntentToAdd) {
-      try { await runGitCleanup(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
-    }
-    throw err;
+  const fullPatch = displayedPatch ?? await stagingPatch(projectPath, file, contextLines, mode);
+  if (!fullPatch.trim()) {
+    throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
   }
+  const parsed = parsePatch(fullPatch);
+  if (hunkIndex < 0 || hunkIndex >= parsed.hunks.length) {
+    throw new GitDomainError('INVALID_INPUT', `Invalid hunk index ${hunkIndex}`);
+  }
+  const hunk = parsed.hunks[hunkIndex];
+  const singleHunkPatch = [...stagingDiffHeader(file, parsed, mode), hunk.rawHeader, ...hunk.lines].join('\n') + '\n';
+  const applyArgs = isUnstage
+    ? ['apply', '--cached', '--reverse', '-']
+    : ['apply', '--cached', '-'];
+  await runGitWithStdin(projectPath, applyArgs, singleHunkPatch);
+  return { success: true };
 }
 
 

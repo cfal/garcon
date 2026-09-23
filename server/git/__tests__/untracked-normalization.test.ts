@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { runGit } from '../run.js';
-import * as runner from '../run.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from '../types.js';
 import { cleanupNodeRuntimeFixtures, nodeRuntimeFixture, untrackedReview } from './node-runtime-fixture.js';
@@ -129,31 +128,68 @@ test('cancelled scratch-index preparation cleans files without marking a real mu
 });
 
 for (const method of ['stageHunk', 'stageSelection'] as const) {
-  test(`${method} cleans owned intent-to-add when its command is interrupted after writing`, async () => {
+  for (const cancelled of [false, true]) test(`${method} preserves an external writer's staging after ${cancelled ? 'cancellation' : 'lock contention'}`, async () => {
     const { git, projectPath } = await nodeRuntimeFixture();
-    await fs.writeFile(path.join(projectPath, 'new.txt'), 'one\n');
+    const index = path.join(projectPath, '.git/index');
+    const externalIndex = path.join(projectPath, '.git/external-index');
+    await fs.copyFile(index, externalIndex);
+    await fs.writeFile(path.join(projectPath, 'new.txt'), 'externally staged-only content\n');
+    await runGit(projectPath, ['add', 'new.txt'], { env: { GIT_INDEX_FILE: externalIndex } });
+    const expected = await fs.readFile(externalIndex);
+    await fs.writeFile(path.join(projectPath, 'new.txt'), 'displayed content\n');
     const { document, body } = await untrackedReview(git, projectPath, 'new.txt');
+    await fs.copyFile(externalIndex, `${index}.lock`);
     const controller = new AbortController();
-    const original = runner.runGit;
-    const command = spyOn(runner, 'runGit').mockImplementation(async (cwd, args, options) => {
-      const result = await original(cwd, args, options);
-      if (args[0] === 'add' && args[1] === '-N' && !options?.env?.GIT_INDEX_FILE) {
-        controller.abort();
-        throw new DOMException('Interrupted after index write', 'AbortError');
+    const original = Bun.spawn;
+    let writer: Promise<void> | undefined;
+    const command = spyOn(Bun, 'spawn').mockImplementation((args, options) => {
+      const child = original(args, options);
+      if (Array.isArray(args) && args[0] === 'git' && (args[1] === 'apply' || args[1] === 'add') && !options?.env?.GIT_INDEX_FILE && !writer) {
+        writer = child.exited.then(async () => {
+          await fs.rename(`${index}.lock`, index);
+          if (cancelled) controller.abort();
+        });
       }
-      return result;
+      return child;
     });
     try {
       const proof = { projectPath, file: 'new.txt', document, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest!, mode: 'stage' as const, contextLines: 2 };
       const pending = method === 'stageHunk'
         ? git.stageHunk({ ...proof, hunkIndex: 0 }, { signal: controller.signal })
         : git.stageSelection({ ...proof, selection: { lineIndices: [0] } }, { signal: controller.signal });
-      await expect(pending).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-    } finally { command.mockRestore(); }
-    expect((await runGit(projectPath, ['ls-files', 'new.txt'])).stdout).toBe('');
+      await expect(pending).rejects.toThrow();
+      await writer;
+      expect(writer).toBeDefined();
+      expect(await fs.readFile(index)).toEqual(expected);
+      expect(command.mock.calls.some(([args, options]) => Array.isArray(args) && args[0] === 'git' && ['add', 'reset'].includes(args[1]) && !options?.env?.GIT_INDEX_FILE)).toBe(false);
+    } finally { command.mockRestore(); await writer; }
+    expect((await indexBytes(projectPath, 'new.txt')).toString()).toBe('externally staged-only content\n');
     expect(await scratchIndexes(projectPath)).toEqual([]);
   });
+
+  for (const intent of [false, true]) test(`${method} preserves creation headers despite prefix configuration (${intent ? 'existing intent' : 'untracked'})`, async () => {
+    const { projectPath, git } = await nodeRuntimeFixture();
+    const file = 'nested/new file.txt';
+    await fs.mkdir(path.join(projectPath, 'nested'));
+    await fs.writeFile(path.join(projectPath, file), '++content\nsecond\n');
+    if (intent) await runGit(projectPath, ['add', '-N', '--', file]);
+    await runGit(projectPath, ['config', 'diff.noprefix', 'true']);
+    const { document, body } = await untrackedReview(git, projectPath, file);
+    const proof = { projectPath, file, document, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest!, mode: 'stage' as const, contextLines: 2 };
+    if (method === 'stageHunk') await git.stageHunk({ ...proof, hunkIndex: 0 });
+    else await git.stageSelection({ ...proof, selection: { lineIndices: [0] } });
+    expect((await indexBytes(projectPath, file)).toString()).toBe(method === 'stageHunk' ? '++content\nsecond\n' : '++content\n');
+    expect((await runGit(projectPath, ['ls-files', '--', 'new file.txt'])).stdout).toBe('');
+  });
 }
+
+test('an empty numeric selection cannot stage a header-only empty file', async () => {
+  const { projectPath, git } = await nodeRuntimeFixture();
+  await fs.writeFile(path.join(projectPath, 'new.txt'), 'one\n');
+  const { document, body } = await untrackedReview(git, projectPath, 'new.txt');
+  await expect(git.stageSelection({ projectPath, file: 'new.txt', document, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest!, mode: 'stage', contextLines: 2, selection: { lineIndices: [50] } })).rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+  expect((await runGit(projectPath, ['ls-files', 'new.txt'])).stdout).toBe('');
+});
 
 test('a failed selection never removes pre-existing intent-to-add', async () => {
   const { git, projectPath } = await nodeRuntimeFixture();
