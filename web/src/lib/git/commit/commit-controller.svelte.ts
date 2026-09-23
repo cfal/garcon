@@ -111,6 +111,7 @@ export class CommitController implements PortableSingletonController {
 	constructor(private readonly deps: CommitControllerDeps) {
 		this.target = new GitTargetSessionController({
 			kind: 'commit',
+			projectSelection: deps.projectSelection,
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
 			onUnavailable: () => {

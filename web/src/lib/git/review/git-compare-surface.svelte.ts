@@ -21,7 +21,7 @@ interface GitCompareSurfaceControllerDeps extends GitSurfaceControllerDeps {
 }
 
 interface GitComparisonSessionIdentity extends GitProjectTarget {
-	readonly chatId: string;
+	readonly chatId: string | null;
 	readonly targetIdentity: string;
 }
 
@@ -31,6 +31,8 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	presentationVisible = $state(false);
 
 	#chatId: string | null = null;
+	#selectionPending = false;
+	#selectionActivationGeneration = 0;
 	#loadedSessionIdentity: GitComparisonSessionIdentity | null = null;
 	#unregisterReviewDisplay: () => void;
 
@@ -45,21 +47,25 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	constructor(private readonly deps: GitCompareSurfaceControllerDeps) {
 		this.target = new GitTargetSessionController({
 			kind: 'git-compare',
+			projectSelection: deps.projectSelection,
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
 			onUnavailable: () => this.comparison.suspend(),
+			onProjectSelectionChanged: () => this.#reconcileSelectionSession(),
 			canChangeTarget: () =>
 				deps.gitMutations.pendingCount(singletonSurfaceId('git-compare')) === 0,
 			onTargetChanged: (_target, _identity, reason, identityChanged) => {
-				if (reason === 'session' && !identityChanged && _target) {
-					this.comparison.refreshSession(_target);
-					return;
-				}
 				if (reason === 'invalidation' && !identityChanged) {
 					const project = this.target.requestTarget;
 					if (project && this.presentationVisible) {
 						void this.comparison.checkFreshness(project);
 					}
+					return;
+				}
+				this.#selectionActivationGeneration += 1;
+				if (reason === 'session' && !identityChanged && _target) {
+					if (this.#loadedSessionIdentity) this.comparison.refreshSession(_target);
+					else void this.#activateComparison();
 					return;
 				}
 				this.#rememberConfirmedChatComparison();
@@ -84,20 +90,22 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		const nextChatId = projectStateChatId(projectState);
-		const chatChanged = nextChatId !== this.#chatId;
+		this.target.setProjectState(projectState);
+	}
+
+	#reconcileSelectionSession(): void {
+		const nextChatId = this.target.projectSelection.chatId;
+		const chatChanged = this.#chatId !== nextChatId;
+		const completedResolution = this.#selectionPending && !this.target.projectIdentityPending;
+		this.#selectionPending = this.target.projectIdentityPending;
 		if (chatChanged) {
 			this.#rememberConfirmedChatComparison();
 			this.comparison.reset();
 			this.#loadedSessionIdentity = null;
 			this.#chatId = nextChatId;
 		}
-		const wasProjectIdentityPending = this.target.projectIdentityPending;
-		this.target.setProjectState(projectState);
-		const completedProjectResolution =
-			wasProjectIdentityPending && projectState.kind === 'available';
-		if (this.presentationVisible && (chatChanged || completedProjectResolution)) {
-			void this.#activateComparison();
+		if (this.presentationVisible && (chatChanged || completedResolution)) {
+			void this.#activateSelectionSession();
 		}
 	}
 
@@ -108,7 +116,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 			if (this.target.appliedIdentity === this.target.identity) {
 				this.deps.reviewDisplay.reconcile(singletonSurfaceId('git-compare'));
 			}
-			void this.#activateComparison();
+			void this.#activateSelectionSession();
 		}
 	}
 
@@ -134,12 +142,20 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	}
 
 	dispose(): void {
+		this.#selectionActivationGeneration += 1;
 		this.#rememberConfirmedChatComparison();
 		this.#unregisterReviewDisplay();
 		this.target.dispose();
 		this.comparison.reset();
 		this.#chatId = null;
 		this.#loadedSessionIdentity = null;
+	}
+
+	async #activateSelectionSession(): Promise<void> {
+		const generation = ++this.#selectionActivationGeneration;
+		await this.target.activate();
+		// Target callbacks own any load or refresh required by the pending activation.
+		if (generation === this.#selectionActivationGeneration) await this.#activateComparison();
 	}
 
 	async #activateComparison(): Promise<void> {
@@ -173,11 +189,10 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	}
 
 	#activeSessionIdentity(): GitComparisonSessionIdentity | null {
-		const chatId = this.#chatId;
+		const chatId = this.target.projectSelection.chatId;
 		const projectPath = this.target.activeProjectPath;
 		const targetIdentity = this.target.appliedIdentity;
 		if (
-			!chatId ||
 			!projectPath ||
 			!targetIdentity ||
 			this.target.projectIdentityPending ||
@@ -199,13 +214,6 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 		if (!specification) return;
 		this.deps.comparisonPreferences.rememberUserSelection(identity, specification);
 	}
-}
-
-function projectStateChatId(projectState: WorkspaceProjectState): string | null {
-	if (projectState.kind === 'absent') return null;
-	return projectState.kind === 'available'
-		? projectState.project.chatId
-		: projectState.context.chatId;
 }
 
 function sameSession(

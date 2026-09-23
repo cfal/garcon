@@ -13,6 +13,7 @@
 		getLocalSettings,
 		getNotifications,
 		getWorkspaceCoordinator,
+		getSingletonSurfaces,
 	} from '$lib/context';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import GitConfirmModal from './GitConfirmModal.svelte';
@@ -20,6 +21,7 @@
 	import GitPushModal from './GitPushModal.svelte';
 	import GitWorkbench from './GitWorkbench.svelte';
 	import GitWorkbenchToolbar from './GitWorkbenchToolbar.svelte';
+	import GitProjectContent from './GitProjectContent.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import { openCommitFromGitWorkbench } from '$lib/git/workbench/git-workbench-navigation.js';
@@ -37,6 +39,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const surfaces = getSingletonSurfaces();
 	const notifications = getNotifications();
 	const fileSessions = getFileSessions();
 	const localSettings = getLocalSettings();
@@ -70,7 +73,7 @@
 
 	async function refresh(): Promise<void> {
 		const target = activeTarget;
-		if (!target) return;
+		if (!target || !controller.target.canChangeTarget) return;
 		await controller.target.refreshTargets();
 		if (!sameGitProject(target, activeTarget)) return;
 		repository.refreshDeferredMetadata(target);
@@ -100,6 +103,13 @@
 	}
 
 	function openCommit(): void {
+		const target = controller.target.requestTarget;
+		if (
+			!target ||
+			!controller.target.canChangeTarget ||
+			!surfaces.commit().target.selectProject(target)
+		)
+			return;
 		const opening = openCommitFromGitWorkbench(workspace, presentation);
 		void opening.catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
@@ -108,7 +118,12 @@
 
 	async function openPush(): Promise<void> {
 		const target = activeTarget;
-		if (!target || !(await repository.prepareToolbarPush(target))) return;
+		if (
+			!target ||
+			!controller.target.canChangeTarget ||
+			!(await repository.prepareToolbarPush(target))
+		)
+			return;
 		if (sameGitProject(target, activeTarget)) repository.showPushModal = true;
 	}
 
@@ -130,20 +145,19 @@
 	}
 </script>
 
-{#if !activeProjectPath}
-	<div class="grid h-full place-items-center text-muted-foreground">
-		<p>{m.git_panel_select_project()}</p>
-	</div>
-{:else}
-	<div class="relative flex h-full min-h-0 flex-col bg-background">
-		<GitWorkbenchToolbar
-			{controller}
-			{presentation}
-			onCommit={openCommit}
-			onPush={() => void openPush()}
-			onRefresh={() => void refresh()}
-		/>
-
+<div class="relative flex h-full min-h-0 flex-col bg-background">
+	<GitWorkbenchToolbar
+		{controller}
+		{presentation}
+		onCommit={openCommit}
+		onPush={() => void openPush()}
+		onRefresh={() => void refresh()}
+	/>
+	<GitProjectContent
+		selection={controller.target.projectSelection}
+		ready={!controller.target.projectIdentityPending &&
+			controller.target.identity === controller.target.appliedIdentity}
+	>
 		{#if controller.target.lastError || repository.lastError || wb.lastError}
 			<div
 				class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
@@ -212,5 +226,5 @@
 				onClose={() => (repository.showPushModal = false)}
 			/>
 		{/if}
-	</div>
-{/if}
+	</GitProjectContent>
+</div>

@@ -16,9 +16,18 @@ import * as m from '$lib/paraglide/messages.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { errorMessage } from '$lib/utils/error-message.js';
+import { untrack } from 'svelte';
+import {
+	GitProjectSelectionController,
+	type GitProjectSelectionDeps,
+	type GitProjectState,
+} from '$lib/git/targets/git-project-selection.svelte.js';
+import type { GhCapabilityContext } from './gh-capability.svelte.js';
 
 export interface PullRequestsStoreDeps {
 	notifyError?: (message: string) => void;
+	projectSelection?: GitProjectSelectionDeps;
+	ghCapability?: GhCapabilityContext;
 }
 
 interface PullRequestProjectSnapshot {
@@ -32,6 +41,8 @@ interface PullRequestProjectSnapshot {
 }
 
 export class PullRequestsStore implements PortableSingletonController {
+	readonly projectSelection: GitProjectSelectionController;
+	readonly #destroyCapabilityBinding?: () => void;
 	#project = $state<GitProjectTarget | null>(null);
 	#nodeContextKey: string | null = null;
 	#capability: { nodeId: string; hasChecked: boolean; available: boolean } | null = null;
@@ -62,6 +73,30 @@ export class PullRequestsStore implements PortableSingletonController {
 
 	constructor(deps: PullRequestsStoreDeps = {}) {
 		this.#deps = deps;
+		this.projectSelection = new GitProjectSelectionController(
+			(project) => this.#setProjectState(project),
+			deps.projectSelection,
+		);
+		if (deps.ghCapability) {
+			const capabilities = deps.ghCapability;
+			this.#destroyCapabilityBinding = $effect.root(() => {
+				$effect(() => {
+					const nodeId = this.projectSelection.nodeId;
+					const capability = capabilities.forNode(nodeId);
+					const visible = this.#visible;
+					const checked = capability.hasChecked;
+					const available = capability.available;
+					untrack(() => {
+						this.setCapability(nodeId, checked, available);
+						if (visible && !checked) void capability.ensureChecked();
+					});
+				});
+			});
+		}
+	}
+
+	retryCapability(): void {
+		void this.#deps.ghCapability?.forNode(this.projectSelection.nodeId).refresh();
 	}
 
 	get projectPath(): string | null {
@@ -109,8 +144,18 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
+		this.projectSelection.setProjectState(projectState);
+	}
+
+	#setProjectState(projectState: GitProjectState): void {
 		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
 			this.#projectIdentityPending = true;
+			if (
+				!this.projectSelection.followingChat ||
+				projectState.context.nodeId !== this.nodeId ||
+				projectState.context.projectPath !== this.projectPath
+			)
+				this.#suspendRequests();
 			return;
 		}
 		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
@@ -179,6 +224,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	setPresentationVisible(visible: boolean): void {
 		if (visible === this.#visible) return;
 		this.#visible = visible;
+		this.projectSelection.setPresentationVisible(visible);
 		if (!visible) {
 			this.#suspendRequests();
 			return;
@@ -278,6 +324,8 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	dispose(): void {
+		this.projectSelection.dispose();
+		this.#destroyCapabilityBinding?.();
 		this.#listController?.abort();
 		this.#detailController?.abort();
 		this.#listController = null;

@@ -122,6 +122,7 @@ function assembleWorkspaceServices(
 		onConnectionChange: () => () => undefined,
 	} satisfies PrimaryWsConnectionPort;
 	const services = createWorkspaceServices({
+		localProjectBasePath: () => '/workspace',
 		appShell: createAppShellStore(),
 		chatBoardInvalidations: createChatBoardInvalidationHub(),
 		ticketsInvalidations: new TicketsInvalidationHub(),
@@ -528,7 +529,9 @@ describe('createWorkspaceServices', () => {
 		expect(services.commands.knownFileLocations).toEqual([]);
 		expect(services.singletonSurfaces.filesIfPresent()).toBeNull();
 		expect(services.gitQuickSummary.isEnabled).toBe(false);
-		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('available');
+		const pullRequests = services.singletonSurfaces.pullRequests();
+		await tick();
+		expect(pullRequests.capabilityState).toBe('available');
 
 		rootLocalSettings.showQuickCommitTray = true;
 		ghCapability.forNode('local').available = false;

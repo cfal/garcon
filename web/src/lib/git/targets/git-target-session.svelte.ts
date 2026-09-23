@@ -5,6 +5,11 @@ import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.sve
 import { effectiveNodeId } from '$shared/execution-nodes';
 import type { GitProjectTarget } from '$shared/git-execution';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
+import {
+	GitProjectSelectionController,
+	type GitProjectSelectionDeps,
+	type GitProjectState,
+} from './git-project-selection.svelte.js';
 import type { GitBranchSelectorState } from './git-branch-selector-state.svelte.js';
 import {
 	gitTargetCandidateFromTarget,
@@ -24,10 +29,12 @@ export type GitTargetChangeReason =
 
 export interface GitTargetSessionDeps {
 	kind: GitTargetSurfaceKind;
+	projectSelection?: GitProjectSelectionDeps;
 	createBranchSelector(): GitBranchSelectorState;
 	invalidationVersion(nodeId: string, effectiveProjectKey: string): number;
 	canChangeTarget(): boolean;
 	onUnavailable?(): void;
+	onProjectSelectionChanged?(): void;
 	beforeCheckout?(): boolean | Promise<boolean>;
 	runCheckoutReconciliation?<T>(project: GitProjectTarget, execute: () => Promise<T>): Promise<T>;
 	afterCheckout?(projectPath: string): void | Promise<void>;
@@ -40,6 +47,7 @@ export interface GitTargetSessionDeps {
 }
 
 export class GitTargetSessionController implements PortableSingletonController {
+	readonly projectSelection: GitProjectSelectionController;
 	readonly surfaceId: string;
 	readonly branches: GitBranchSelectorState;
 	presentationVisible = $state(false);
@@ -48,7 +56,6 @@ export class GitTargetSessionController implements PortableSingletonController {
 	targets = $state<GitTargetCandidate[]>([]);
 	activeTarget = $state<GitTarget | null>(null);
 	isLoadingTargets = $state(false);
-	showTargetDialog = $state(false);
 	lastError = $state<string | null>(null);
 	baseProjectPath = $state<string | null>(null);
 	nodeId = $state('local');
@@ -75,6 +82,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 	constructor(private readonly deps: GitTargetSessionDeps) {
 		this.surfaceId = singletonSurfaceId(deps.kind);
 		this.branches = deps.createBranchSelector();
+		this.projectSelection = new GitProjectSelectionController((project) => {
+			this.#setProjectState(project);
+			this.deps.onProjectSelectionChanged?.();
+		}, deps.projectSelection);
 	}
 
 	get fallbackTarget(): GitTarget | null {
@@ -119,9 +130,46 @@ export class GitTargetSessionController implements PortableSingletonController {
 		return !this.branchChangePending && this.#targetChangeAllowed();
 	}
 
+	get canChooseProject(): boolean {
+		return !this.branchChangePending && this.deps.canChangeTarget();
+	}
+
 	setProjectState(projectState: WorkspaceProjectState): void {
+		this.projectSelection.setProjectState(projectState);
+	}
+
+	async selectNode(nodeId: string): Promise<void> {
+		if (!this.canChooseProject) return;
+		await this.projectSelection.selectNode(
+			nodeId,
+			this.activeProjectPath ?? this.projectSelection.projectPath,
+		);
+	}
+
+	selectProject(project: GitProjectTarget): boolean {
+		if (!this.canChooseProject) return false;
+		this.projectSelection.selectResolvedProject(project);
+		return true;
+	}
+
+	goToChatProject(): void {
+		if (!this.canChooseProject || !this.projectSelection.canGoToChatProject) return;
+		this.#targetByProject.clear();
+		this.activeTarget = null;
+		this.#appliedIdentity = null;
+		this.#lastTargetFetchKey = null;
+		this.projectSelection.goToChatProject();
+	}
+
+	#setProjectState(projectState: GitProjectState): void {
 		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
-			this.projectIdentityPending = true;
+			if (
+				this.projectSelection.followingChat &&
+				projectState.context.nodeId === this.nodeId &&
+				projectState.context.projectPath === this.baseProjectPath
+			) {
+				this.projectIdentityPending = true;
+			} else this.#suspendContext();
 			return;
 		}
 		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
@@ -145,6 +193,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	setPresentationVisible(visible: boolean): void {
 		if (this.presentationVisible === visible) return;
 		this.presentationVisible = visible;
+		this.projectSelection.setPresentationVisible(visible);
 		if (!visible) {
 			this.closeDialogs();
 			this.#cancelTargetRequest();
@@ -185,16 +234,16 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	async selectTarget(candidate: GitTargetCandidate): Promise<boolean> {
-		if (!this.canChangeTarget) return false;
-		this.activeTarget = gitTargetFromCandidate(candidate, this.nodeId);
+		if (!this.canChooseProject) return false;
+		const nodeId = this.projectSelection.nodeId;
+		this.projectSelection.selectResolvedProject({ nodeId, projectPath: candidate.projectPath });
+		this.activeTarget = gitTargetFromCandidate(candidate, nodeId);
 		this.targets = [
 			candidate,
 			...this.targets.filter((target) => target.worktreePath !== candidate.worktreePath),
 		];
-		this.showTargetDialog = false;
 		this.#rememberTarget();
-		await this.#applyTarget('selection');
-		void this.#reconcileSelectedTarget();
+		await this.activate();
 		return true;
 	}
 
@@ -355,7 +404,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	closeDialogs(): void {
-		this.showTargetDialog = false;
+		this.projectSelection.showFolderDialog = false;
 		this.branches.closeBranchDropdown();
 		this.branches.closeNewBranchDialog();
 	}
@@ -373,6 +422,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	dispose(): void {
 		this.presentationVisible = false;
+		this.projectSelection.dispose();
 		this.closeDialogs();
 		this.#cancelTargetRequest();
 		this.branches.destroy();
@@ -476,6 +526,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	#targetChangeAllowed(): boolean {
 		return (
+			this.projectSelection.projectState.kind === 'available' &&
+			this.activeProjectPath !== null &&
 			!this.projectIdentityPending &&
 			this.identity === this.#appliedIdentity &&
 			this.deps.canChangeTarget()
@@ -548,22 +600,6 @@ export class GitTargetSessionController implements PortableSingletonController {
 		}
 		if (!projectPath || !effectiveProjectKey) {
 			void this.#applyTarget('project', true);
-		}
-	}
-
-	async #reconcileSelectedTarget(): Promise<void> {
-		const previousIdentity = this.identity;
-		const applicationGeneration = this.#targetApplicationGeneration;
-		const contextGeneration = this.#contextGeneration;
-		const identityChanged = await this.ensureTargets(true);
-		if (
-			identityChanged &&
-			previousIdentity !== this.identity &&
-			!this.projectIdentityPending &&
-			applicationGeneration === this.#targetApplicationGeneration &&
-			contextGeneration === this.#contextGeneration
-		) {
-			await this.#applyTarget('selection');
 		}
 	}
 

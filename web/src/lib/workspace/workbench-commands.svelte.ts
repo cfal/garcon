@@ -11,7 +11,6 @@ import {
 	rendererModeForNavigation,
 	resolveFileRendererMode,
 } from '$lib/files/sessions/file-open-mode.js';
-import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import type { FilesSurfaceController } from './singleton-surfaces.svelte.js';
@@ -46,8 +45,6 @@ export interface WorkbenchCommandRegistryDeps {
 	files: FileSessionRegistry;
 	terminals: TerminalRegistry;
 	appShell: AppShellStore;
-	ghCapability: GhCapabilityStore;
-	projectNodeId(): string;
 	filesSurface(): FilesSurfaceController;
 	filesSurfaceIfPresent(): FilesSurfaceController | null;
 	onError(error: unknown): void;
@@ -396,13 +393,7 @@ export class WorkbenchCommandRegistry {
 			open('workspace-git', m.command_switch_to_git(), 'git'),
 			open('workspace-git-history', m.workspace_surface_git_history(), 'git-history'),
 			open('workspace-git-compare', m.workspace_surface_git_compare(), 'git-compare'),
-			{
-				...open('workspace-pull-requests', m.workspace_surface_pull_requests(), 'pull-requests'),
-				isVisible: () => {
-					const capability = this.deps.ghCapability.forNode(this.deps.projectNodeId());
-					return capability.available || !capability.hasChecked;
-				},
-			},
+			open('workspace-pull-requests', m.workspace_surface_pull_requests(), 'pull-requests'),
 			open('workspace-commit', m.workspace_surface_commit(), 'commit'),
 		];
 	}

@@ -178,11 +178,6 @@ export class SingletonSurfaceRegistry {
 	readonly #factories: SingletonControllerFactories;
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
 	#filesProjectState: WorkspaceProjectState = { kind: 'absent' };
-	#pullRequestsCapability: {
-		nodeId: string;
-		hasChecked: boolean;
-		available: boolean;
-	} = { nodeId: 'local', hasChecked: false, available: false };
 	#visible: Record<PortableSingletonKind, boolean> = {
 		git: false,
 		'git-history': false,
@@ -219,15 +214,7 @@ export class SingletonSurfaceRegistry {
 				if (!this.deps.createChatBoard) throw new Error('Chat Board factory is unavailable');
 				return this.deps.createChatBoard();
 			},
-			'pull-requests': () => {
-				const controller = this.deps.createPullRequests();
-				controller.setCapability(
-					this.#pullRequestsCapability.nodeId,
-					this.#pullRequestsCapability.hasChecked,
-					this.#pullRequestsCapability.available,
-				);
-				return controller;
-			},
+			'pull-requests': () => this.deps.createPullRequests(),
 		};
 	}
 
@@ -296,13 +283,6 @@ export class SingletonSurfaceRegistry {
 		for (const [kind, owned] of this.#controllers) {
 			owned.controller.setProjectState(kind === 'files' ? filesProjectState : projectState);
 		}
-	}
-
-	setPullRequestsCapability(nodeId: string, hasChecked: boolean, available: boolean): void {
-		this.#pullRequestsCapability = { nodeId, hasChecked, available };
-		const controller = this.#controllers.get('pull-requests')?.controller as
-			PullRequestsStore | undefined;
-		controller?.setCapability(nodeId, hasChecked, available);
 	}
 
 	pruneGitNodes(nodeIds: ReadonlySet<string>): void {

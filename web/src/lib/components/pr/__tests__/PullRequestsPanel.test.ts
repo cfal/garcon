@@ -30,7 +30,15 @@ function summary(number: number): PullRequestSummary {
 function makeController(): PullRequestsStore {
 	const controller = new PullRequestsStore();
 	controller.setCapability('local', true, true);
-	controller.setProject({ nodeId: 'local', projectPath: '/project' }, 'project-key');
+	controller.setProjectState({
+		kind: 'available',
+		project: {
+			chatId: 'chat',
+			nodeId: 'local',
+			projectPath: '/project',
+			effectiveProjectKey: 'project-key',
+		},
+	});
 	controller.pulls = [summary(1), summary(2)];
 	controller.hasLoaded = true;
 	return controller;

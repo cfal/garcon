@@ -12,13 +12,7 @@
 		DropdownMenuSubContent,
 		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import {
-		getGhCapability,
-		getWorkspaceContext,
-		getNotifications,
-		getTerminalRegistry,
-		getWorkspaceCoordinator,
-	} from '$lib/context';
+	import { getNotifications, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import {
 		PORTABLE_SINGLETON_KINDS,
 		singletonSurfaceId,
@@ -75,11 +69,6 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
-	const ghCapabilities = getGhCapability();
-	const workspaceContext = getWorkspaceContext();
-	const ghCapability = $derived(
-		ghCapabilities.forNode(workspaceContext.currentTarget?.nodeId ?? 'local'),
-	);
 	const notifications = getNotifications();
 	let creatingTerminal = $state(false);
 	let menuChoosesTerminalHost = $state(false);
@@ -93,9 +82,7 @@
 		),
 	);
 	const availableSingletonKinds = $derived(
-		PORTABLE_SINGLETON_KINDS.filter(
-			(kind) => canOffer(kind) && !tabs.order.includes(singletonSurfaceId(kind)),
-		),
+		PORTABLE_SINGLETON_KINDS.filter((kind) => !tabs.order.includes(singletonSurfaceId(kind))),
 	);
 	const singletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
@@ -157,15 +144,6 @@
 			label: openSingletonLabel(kind),
 			onclick: () => openSingleton(kind),
 		};
-	}
-
-	function canOffer(kind: PortableSingletonKind): boolean {
-		return (
-			kind !== 'pull-requests' ||
-			!ghCapability.hasChecked ||
-			ghCapability.available ||
-			Boolean(workspace.layout.surface(singletonSurfaceId('pull-requests')))
-		);
 	}
 
 	function notifyFailure(error: unknown): void {

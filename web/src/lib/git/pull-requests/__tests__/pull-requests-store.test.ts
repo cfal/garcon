@@ -4,6 +4,16 @@ import * as prApi from '$lib/api/pull-requests';
 import type { PullRequestDetail, PullRequestSummary } from '$lib/api/pull-requests';
 import { flushSync } from 'svelte';
 import { bindProject } from './pull-requests-effect-harness.svelte.js';
+import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import {
+	localExecutionNode,
+	remoteExecutionNode,
+} from '$lib/execution-nodes/__tests__/fixtures.js';
+import { GhCapabilityStore } from '../gh-capability.svelte.js';
+import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
+import { getGhStatus } from '$lib/api/gh.js';
+
+vi.mock('$lib/api/gh.js', () => ({ getGhStatus: vi.fn() }));
 
 vi.mock('$lib/api/pull-requests', () => ({
 	getPullRequests: vi.fn(),
@@ -67,6 +77,79 @@ function createVisibleStore(): PullRequestsStore {
 describe('PullRequestsStore', () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+	});
+
+	it('checks the independently selected node only while visible and ignores subsequent chat changes', async () => {
+		const nodes = new ExecutionNodesStore();
+		const remote = {
+			...remoteExecutionNode,
+			machineServices: { files: true, git: true, gh: true, terminals: true },
+		};
+		nodes.applySnapshot([
+			{
+				...localExecutionNode,
+				machineServices: { ...localExecutionNode.machineServices, gh: false },
+			},
+			remote,
+		]);
+		const capabilities = new GhCapabilityStore(nodes);
+		const resolution = new ProjectResolutionStore(
+			async (target) => ({
+				target,
+				resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+			}),
+			undefined,
+			nodes,
+		);
+		vi.mocked(getGhStatus).mockResolvedValue({
+			available: true,
+			authenticated: true,
+			reason: 'authenticated',
+		});
+		getPullRequestsMock.mockResolvedValue({ pulls: [summary(1)], repo: null });
+		const store = new PullRequestsStore({
+			ghCapability: capabilities,
+			projectSelection: {
+				nodes,
+				projectResolution: resolution,
+				projectBasePath: (nodeId) => nodes.get(nodeId)?.projectBasePath ?? null,
+			},
+		});
+		try {
+			store.projectSelection.selectResolvedProject({ nodeId: remote.id, projectPath: '/worker' });
+			flushSync();
+			expect(getGhStatus).not.toHaveBeenCalled();
+			expect(getPullRequestsMock).not.toHaveBeenCalled();
+			store.setPresentationVisible(true);
+			flushSync();
+			await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
+			expect(getGhStatus).toHaveBeenCalledExactlyOnceWith(remote.id, expect.anything());
+			expect(getPullRequestsMock).toHaveBeenCalledWith(
+				{ nodeId: remote.id, projectPath: '/worker' },
+				expect.anything(),
+			);
+			store.setProjectState({
+				kind: 'available',
+				project: {
+					chatId: 'local-chat',
+					nodeId: 'local',
+					projectPath: '/local',
+					effectiveProjectKey: '/local',
+				},
+			});
+			flushSync();
+			expect(store.nodeId).toBe(remote.id);
+			expect(store.capabilityState).toBe('available');
+			store.projectSelection.goToChatProject();
+			flushSync();
+			expect(store.nodeId).toBe('local');
+			expect(store.capabilityState).toBe('unavailable');
+			expect(getPullRequestsMock).toHaveBeenCalledOnce();
+		} finally {
+			store.dispose();
+			capabilities.destroy();
+			resolution.destroy();
+		}
 	});
 
 	it('stabilizes reactive project binding and preserves selection for an unchanged node and path', async () => {

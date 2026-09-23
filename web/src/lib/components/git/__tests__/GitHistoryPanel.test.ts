@@ -42,6 +42,7 @@ describe('GitHistoryPanel refresh', () => {
 				},
 			});
 			controller.history.screen = historyScreen;
+			vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
 			const refresh = vi.spyOn(controller.target, 'refreshTargets').mockResolvedValue(undefined);
 			render(GitHistoryPanel, { controller, presentation: 'window-main', visible: false });
 

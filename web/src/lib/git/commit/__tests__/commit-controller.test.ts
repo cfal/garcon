@@ -790,7 +790,7 @@ describe('CommitController', () => {
 			]),
 		);
 		const controller = makeController();
-		await controller.setContext('chat', '/project');
+		await controller.setContext('/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'Project draft';
 
@@ -834,7 +834,7 @@ describe('CommitController', () => {
 		mockedApi.getGitTargetCandidates.mockResolvedValueOnce({
 			targets: [project],
 		});
-		await controller.target.refreshForInvalidation('chat', 1);
+		await controller.target.refreshForInvalidation('/repo/worktree', 1);
 		generation.resolve({ message: 'Stale project message' });
 		await pending;
 

@@ -25,7 +25,12 @@
 		setConversationLifecycles,
 		setConversationPanels,
 		setProjectResolution,
+		setSingletonSurfaces,
 	} from '$lib/context';
+	import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
+	import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
+	import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
+	import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -85,6 +90,14 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
+	const gitDeps = createGitSurfaceTestDeps();
+	const singletonSurfaces = new SingletonSurfaceRegistry({
+		...gitDeps,
+		createCommit: () => new CommitController(gitDeps),
+		createPullRequests: () => new PullRequestsStore(),
+	});
+	setSingletonSurfaces(singletonSurfaces);
+	onDestroy(() => singletonSurfaces.destroy());
 	function getInitialProjectResolver() {
 		return (
 			fetchProjectResolution ??
@@ -164,7 +177,9 @@
 	} as never);
 	setRemoteSettings({} as never);
 	setModelCatalog({
-		forNode() { return this; },
+		forNode() {
+			return this;
+		},
 		selectionValueFor: (_agentId: string, model: string) => model,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,

@@ -96,6 +96,7 @@ export interface WorkspaceRootDependencies {
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
+	localProjectBasePath(): string | null;
 	localSettings: LocalSettingsStore;
 	modelCatalog: ModelCatalogStore;
 	navigation: NavigationStore;
@@ -302,7 +303,15 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const gitBranchActions = createGitBranchSelector();
 	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
 	const comparisonPreferences = new LocalGitComparisonPreferences();
+	const projectSelection = {
+		projectResolution,
+		nodes: deps.executionNodes,
+		projectBasePath: (nodeId: string) =>
+			deps.executionNodes?.get(nodeId)?.projectBasePath ??
+			(nodeId === 'local' ? deps.localProjectBasePath() : null),
+	};
 	const singletonSurfaces = new SingletonSurfaceRegistry({
+		projectSelection,
 		executionNodes: deps.executionNodes,
 		createTickets: () => new TicketsController({ invalidations: deps.ticketsInvalidations }),
 		createChatBoard: () =>
@@ -338,6 +347,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createCommit: () =>
 			new CommitController({
+				projectSelection,
 				createGitBranchSelector,
 				gitMutations,
 				invalidationVersion: (nodeId, effectiveProjectKey) =>
@@ -351,6 +361,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createPullRequests: () =>
 			createPullRequestsStore({
+				projectSelection,
+				ghCapability: deps.ghCapability,
 				notifyError: (message) => deps.notifications.error(message),
 			}),
 		createGitBranchSelector,
@@ -363,7 +375,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
 		projectResolution,
-		ghCapability: deps.ghCapability,
 		localSettings: deps.localSettings,
 		singletons: singletonSurfaces,
 		gitQuickSummary,
@@ -482,12 +493,10 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 	});
 	const commands = new WorkbenchCommandRegistry({
-		projectNodeId: () => context.currentTarget?.nodeId ?? 'local',
 		workspace: coordinator,
 		files,
 		terminals,
 		appShell: deps.appShell,
-		ghCapability: deps.ghCapability,
 		filesSurface: () => singletonSurfaces.files(),
 		filesSurfaceIfPresent: () => singletonSurfaces.filesIfPresent(),
 		onError: (error) =>

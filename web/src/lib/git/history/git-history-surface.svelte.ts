@@ -22,6 +22,7 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 	constructor(private readonly deps: GitSurfaceControllerDeps) {
 		this.target = new GitTargetSessionController({
 			kind: 'git-history',
+			projectSelection: deps.projectSelection,
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
 			onUnavailable: () => this.history.suspend(),

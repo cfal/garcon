@@ -261,7 +261,7 @@ describe('SingletonSurfaceRegistry', () => {
 		const chatBoard = registry.chatBoard();
 		chatMap.setQuery('retained query');
 		chatCanvas.view = 'list';
-		git.target.showTargetDialog = true;
+		git.target.projectSelection.showFolderDialog = true;
 
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('files', false);
@@ -277,7 +277,7 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(chatMap.query).toBe('retained query');
 		expect(chatCanvas.view).toBe('list');
 		expect(git.presentationVisible).toBe(false);
-		expect(git.target.showTargetDialog).toBe(false);
+		expect(git.target.projectSelection.showFolderDialog).toBe(false);
 		expect(files.presentationVisible).toBe(false);
 	});
 

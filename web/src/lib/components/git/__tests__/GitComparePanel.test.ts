@@ -52,6 +52,10 @@ describe('GitComparePanel', () => {
 				updatedAt: null,
 			},
 		];
+		vi.spyOn(controller.target, 'appliedIdentity', 'get').mockReturnValue(
+			controller.target.identity,
+		);
+		vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
 		const fetchRefs = vi
 			.spyOn(controller.target.branches, 'fetchRefs')
 			.mockResolvedValue(undefined);

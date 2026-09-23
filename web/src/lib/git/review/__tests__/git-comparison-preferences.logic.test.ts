@@ -69,6 +69,18 @@ function storedRecord(storage: ReturnType<typeof createPersistence>): {
 }
 
 describe('LocalGitComparisonPreferences', () => {
+	it('remembers an independent node/project selection without manufacturing a chat entry', () => {
+		const storage = createPersistence();
+		const preferences = new LocalGitComparisonPreferences(storage.persistence);
+		const context = { nodeId: 'worker', chatId: null, projectPath: '/project' };
+		preferences.rememberUserSelection(context, revision);
+		expect(preferences.recall(context)).toEqual(revision);
+		expect(preferences.recall({ ...context, nodeId: 'local' })).toBeNull();
+		expect(storedRecord(storage)).toMatchObject({
+			entries: [],
+			projectEntries: [{ projectPath: '/project', specification: revision }],
+		});
+	});
 	it('returns no range when storage is empty', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);

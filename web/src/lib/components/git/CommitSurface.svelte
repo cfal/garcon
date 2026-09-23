@@ -10,6 +10,7 @@
 	import { cn } from '$lib/utils/cn';
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
+	import GitProjectContent from './GitProjectContent.svelte';
 	import CommitFileTree from './CommitFileTree.svelte';
 	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
@@ -121,99 +122,103 @@
 <div class="flex h-full min-h-0 min-w-0 overflow-hidden bg-background">
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
 		<GitSurfaceToolbar target={controller.target} {presentation} actions={toolbarActions} />
+		<GitProjectContent
+			selection={controller.target.projectSelection}
+			ready={!controller.projectIdentityPending}
+		>
+			<div bind:this={dialogBodyEl} class="grid min-h-0 min-w-0 flex-1" style={dialogBodyGridStyle}>
+				<section class="min-h-0 min-w-0 overflow-hidden" data-commit-file-tree>
+					<CommitFileTree {controller} />
+				</section>
 
-		<div bind:this={dialogBodyEl} class="grid min-h-0 min-w-0 flex-1" style={dialogBodyGridStyle}>
-			<section class="min-h-0 min-w-0 overflow-hidden" data-commit-file-tree>
-				<CommitFileTree {controller} />
-			</section>
+				{#if !isMobile}
+					<button
+						type="button"
+						class="group flex h-3 items-center justify-center border-y border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						onpointerdown={handlePaneResizeStart}
+						aria-label={m.git_quick_commit_resize_files_message()}
+					>
+						<GripHorizontal class="h-3.5 w-3.5" />
+					</button>
+				{/if}
 
-			{#if !isMobile}
-				<button
-					type="button"
-					class="group flex h-3 items-center justify-center border-y border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-					onpointerdown={handlePaneResizeStart}
-					aria-label={m.git_quick_commit_resize_files_message()}
+				<div
+					class={cn(
+						'flex min-w-0 items-center gap-2 bg-background py-2',
+						isMobile ? 'border-y border-border px-3' : 'border-b border-border px-4',
+					)}
+					data-commit-selection-summary
 				>
-					<GripHorizontal class="h-3.5 w-3.5" />
-				</button>
-			{/if}
-
-			<div
-				class={cn(
-					'flex min-w-0 items-center gap-2 bg-background py-2',
-					isMobile ? 'border-y border-border px-3' : 'border-b border-border px-4',
-				)}
-				data-commit-selection-summary
-			>
-				<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
-				<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
-					{controller.selectedFileCount === 0
-						? m.git_quick_commit_select_files()
-						: m.git_changes_commit_files({ count: controller.selectedFileCount })}
-				</h2>
-				<div class="flex shrink-0 gap-1.5 text-xs tabular-nums">
-					{#if controller.totalAdditions > 0}
-						<span class="text-git-added">+{controller.totalAdditions}</span>
-					{/if}
-					{#if controller.totalDeletions > 0}
-						<span class="text-git-deleted">-{controller.totalDeletions}</span>
-					{/if}
+					<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
+					<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
+						{controller.selectedFileCount === 0
+							? m.git_quick_commit_select_files()
+							: m.git_changes_commit_files({ count: controller.selectedFileCount })}
+					</h2>
+					<div class="flex shrink-0 gap-1.5 text-xs tabular-nums">
+						{#if controller.totalAdditions > 0}
+							<span class="text-git-added">+{controller.totalAdditions}</span>
+						{/if}
+						{#if controller.totalDeletions > 0}
+							<span class="text-git-deleted">-{controller.totalDeletions}</span>
+						{/if}
+					</div>
 				</div>
-			</div>
 
-			<section
-				class="flex min-h-0 min-w-0 flex-col {isMobile ? 'gap-2' : 'gap-3 p-4'}"
-				style={messagePaneStyle}
-				data-commit-message-pane
-			>
-				<textarea
-					data-surface-primary
-					value={controller.message}
-					oninput={(event) => {
-						controller.message = event.currentTarget.value;
-					}}
-					placeholder={m.git_commit_message_placeholder()}
-					rows={isMobile ? 3 : 5}
-					class="resize-none rounded-md border border-border bg-muted/30 p-3 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isMobile
-						? 'h-20 min-h-20 text-base leading-6'
-						: 'min-h-20 flex-1 text-sm'}"></textarea>
+				<section
+					class="flex min-h-0 min-w-0 flex-col {isMobile ? 'gap-2' : 'gap-3 p-4'}"
+					style={messagePaneStyle}
+					data-commit-message-pane
+				>
+					<textarea
+						data-surface-primary
+						value={controller.message}
+						oninput={(event) => {
+							controller.message = event.currentTarget.value;
+						}}
+						placeholder={m.git_commit_message_placeholder()}
+						rows={isMobile ? 3 : 5}
+						class="resize-none rounded-md border border-border bg-muted/30 p-3 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isMobile
+							? 'h-20 min-h-20 text-base leading-6'
+							: 'min-h-20 flex-1 text-sm'}"></textarea>
 
-				<div class={actionBarClass}>
-					<button
-						type="button"
-						onclick={() => void controller.commit()}
-						disabled={!controller.canCommit}
-						class={commitButtonClass}
-					>
-						{#if controller.isCommitting || controller.preparingAction === 'commit'}
-							<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-						{/if}
-						{controller.preparingAction === 'commit'
-							? m.git_quick_commit_preparing_index()
-							: m.git_changes_commit()}
-					</button>
-					<button
-						type="button"
-						onclick={() => void controller.generateMessage()}
-						disabled={!controller.isRepositoryReady ||
-							controller.desiredSelectedFiles.length === 0 ||
-							controller.isGeneratingMessage}
-						class={generateButtonClass}
-						title={m.git_changes_generate_message()}
-					>
-						{#if controller.isGeneratingMessage || controller.preparingAction === 'generate'}
-							<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-						{:else}
-							<Sparkles class="h-3.5 w-3.5" />
-						{/if}
-						<span class="min-w-0 truncate">
-							{controller.preparingAction === 'generate'
+					<div class={actionBarClass}>
+						<button
+							type="button"
+							onclick={() => void controller.commit()}
+							disabled={!controller.canCommit}
+							class={commitButtonClass}
+						>
+							{#if controller.isCommitting || controller.preparingAction === 'commit'}
+								<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+							{/if}
+							{controller.preparingAction === 'commit'
 								? m.git_quick_commit_preparing_index()
-								: m.git_quick_commit_generate()}
-						</span>
-					</button>
-				</div>
-			</section>
-		</div>
+								: m.git_changes_commit()}
+						</button>
+						<button
+							type="button"
+							onclick={() => void controller.generateMessage()}
+							disabled={!controller.isRepositoryReady ||
+								controller.desiredSelectedFiles.length === 0 ||
+								controller.isGeneratingMessage}
+							class={generateButtonClass}
+							title={m.git_changes_generate_message()}
+						>
+							{#if controller.isGeneratingMessage || controller.preparingAction === 'generate'}
+								<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+							{:else}
+								<Sparkles class="h-3.5 w-3.5" />
+							{/if}
+							<span class="min-w-0 truncate">
+								{controller.preparingAction === 'generate'
+									? m.git_quick_commit_preparing_index()
+									: m.git_quick_commit_generate()}
+							</span>
+						</button>
+					</div>
+				</section>
+			</div>
+		</GitProjectContent>
 	</div>
 </div>

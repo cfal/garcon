@@ -92,15 +92,13 @@ describe('git chat-switch desync repro', () => {
 		controller.setProjectState(resolvingProject('chat-b', '/project-b'));
 		controller.setProjectState(availableProject('chat-b', '/project-b'));
 		await controller.target.activate();
-		await vi.waitFor(() => expect(historyCalls()).toContain('/project-b'));
+		expect(historyCalls()).not.toContain('/project-b');
 
 		// chat B -> A
 		controller.setProjectState(resolvingProject('chat-a', '/project-a'));
 		controller.setProjectState(availableProject('chat-a', '/project-a'));
 		await controller.target.activate();
-		await vi.waitFor(() =>
-			expect(historyCalls().filter((p) => p === '/repo-x').length).toBeGreaterThanOrEqual(2),
-		);
+		expect(historyCalls().filter((p) => p === '/repo-x')).toHaveLength(1);
 
 		expect(controller.target.activeProjectPath).toBe('/repo-x');
 		expect(controller.target.appliedIdentity).toBe(controller.target.identity);
@@ -108,7 +106,7 @@ describe('git chat-switch desync repro', () => {
 		expect(historyCalls().at(-1)).toBe('/repo-x');
 	});
 
-	it('B: rapid A->B->A with the B candidate fetch still in flight converges on X', async () => {
+	it('B: rapid A->B->A leaves the explicit candidate fetch attached to X', async () => {
 		const pending = new Map<string, Array<(v: unknown) => void>>();
 		installCandidateRouter(pending);
 		const controller = new GitHistorySurfaceController(createGitSurfaceTestDeps());
@@ -119,12 +117,10 @@ describe('git chat-switch desync repro', () => {
 		pending.get('/project-a')!.shift()!({ targets: [candidate('/project-a')] });
 		await firstActivation;
 
-		await controller.target.selectTarget(candidate('/repo-x', { isCurrent: false }));
-		// selectTarget kicks a background reconcile fetch for /repo-x; leave it pending.
+		const selecting = controller.target.selectTarget(candidate('/repo-x', { isCurrent: false }));
 
 		controller.setProjectState(resolvingProject('chat-b', '/project-b'));
 		controller.setProjectState(availableProject('chat-b', '/project-b'));
-		// B's candidate fetch is now pending; do NOT resolve it - switch straight back.
 		controller.setProjectState(resolvingProject('chat-a', '/project-a'));
 		controller.setProjectState(availableProject('chat-a', '/project-a'));
 		await vi.waitFor(() => expect(pending.get('/repo-x')?.length ?? 0).toBeGreaterThan(0));
@@ -132,6 +128,7 @@ describe('git chat-switch desync repro', () => {
 			resolve({ targets: [candidate('/repo-x')] });
 		}
 		pending.set('/repo-x', []);
+		await selecting;
 		await controller.target.activate();
 
 		expect(controller.target.activeProjectPath).toBe('/repo-x');
@@ -142,7 +139,7 @@ describe('git chat-switch desync repro', () => {
 		expect(controller.history).toMatchObject({ screen: 'list' });
 	});
 
-	it('C: hidden during the switches, listings load once for X on show', async () => {
+	it('C: hidden during the switches, listings retain X without a redundant reload', async () => {
 		installCandidateRouter();
 		const controller = new GitHistorySurfaceController(createGitSurfaceTestDeps());
 		controller.setProjectState(availableProject('chat-a', '/project-a'));
@@ -160,7 +157,7 @@ describe('git chat-switch desync repro', () => {
 		controller.setPresentationVisible(true);
 		await controller.target.activate();
 
-		await vi.waitFor(() => expect(historyCalls().length).toBeGreaterThan(callsBeforeShow));
+		expect(historyCalls()).toHaveLength(callsBeforeShow);
 		expect(controller.target.activeProjectPath).toBe('/repo-x');
 		expect(controller.target.appliedIdentity).toBe(controller.target.identity);
 		expect(historyCalls().at(-1)).toBe('/repo-x');

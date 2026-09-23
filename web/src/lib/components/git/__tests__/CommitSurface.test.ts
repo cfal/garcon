@@ -10,6 +10,7 @@ import * as m from '$lib/paraglide/messages.js';
 function makeController(): CommitController {
 	const controller = new CommitController(createGitSurfaceTestDeps());
 	void controller.setContext('/project', '/project');
+	vi.spyOn(controller, 'projectIdentityPending', 'get').mockReturnValue(false);
 	return controller;
 }
 
@@ -69,10 +70,13 @@ describe('CommitSurface', () => {
 			presentation: 'window-main',
 		});
 
-		const folder = screen.getByRole('button', { name: 'Local: /project' });
+		const folder = screen.getByRole('button', { name: '/project' });
 		const toolbar = container.querySelector('[data-git-surface-toolbar]');
-		expect(toolbar?.querySelector('button')).toBe(folder);
-		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
+		expect(toolbar?.querySelector('[data-git-folder-picker]')).toBe(folder);
+		expect(toolbar?.querySelector('button')).toBe(
+			screen.getByRole('button', { name: /current ref HEAD/i }),
+		);
+		expect(screen.queryByRole('button', { name: /Execution node:/ })).toBeNull();
 	});
 
 	it('places the selected-file summary between the file tree and commit message', () => {

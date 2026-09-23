@@ -27,7 +27,7 @@
 </script>
 
 <div
-	class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border bg-background px-2"
+	class="git-toolbar flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-background px-2 py-1"
 	data-git-surface-toolbar
 >
 	<GitTargetSelector
@@ -35,7 +35,14 @@
 		isMobile={presentation === 'mobile'}
 		disabled={!target.canChangeTarget}
 	/>
-	<ResponsiveSurfaceActions {actions} menuLabel={m.git_more_actions()} {menuLeadingContent} />
+	<ResponsiveSurfaceActions
+		actions={actions.map((action) => ({
+			...action,
+			disabled: action.disabled || !target.canChangeTarget,
+		}))}
+		menuLabel={m.git_more_actions()}
+		{menuLeadingContent}
+	/>
 	{#if presentation === 'mobile' && onClose}
 		<button
 			type="button"
@@ -49,3 +56,15 @@
 		</button>
 	{/if}
 </div>
+
+<style>
+	.git-toolbar {
+		container: git-toolbar / inline-size;
+	}
+
+	@container git-toolbar (max-width: 34rem) {
+		.git-toolbar > :global([data-git-project-selector]) {
+			flex-basis: 100%;
+		}
+	}
+</style>

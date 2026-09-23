@@ -16,6 +16,7 @@
 	} from '$lib/context';
 	import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import GitHistoryToolbar from './GitHistoryToolbar.svelte';
+	import GitProjectContent from './GitProjectContent.svelte';
 	import GitHistoryView from './GitHistoryView.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -80,7 +81,7 @@
 	}
 
 	function refreshHistory(): void {
-		if (controller.target.projectIdentityPending || !activeTarget) return;
+		if (!controller.target.canChangeTarget || !activeTarget) return;
 		if (controller.history.screen === 'comparison' && activeTarget) {
 			void controller.history.comparison.refresh(activeTarget);
 			return;
@@ -113,57 +114,62 @@
 		onClose={() => void workspace.closeSurface(singletonSurfaceId('git-history'))}
 		{closeDisabled}
 	/>
-
-	{#if controller.target.lastError || controller.lastError}
-		<div
-			class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
-		>
-			<AlertTriangle class="h-3.5 w-3.5 shrink-0" />
-			<span class="min-w-0 flex-1 truncate">
-				{controller.target.lastError ?? controller.lastError}
-			</span>
-			<button
-				type="button"
-				class="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				aria-label={m.git_action_dismiss_error()}
-				onclick={() => {
-					controller.target.dismissError();
-					controller.lastError = null;
-				}}
+	<GitProjectContent
+		selection={controller.target.projectSelection}
+		ready={!controller.target.projectIdentityPending &&
+			controller.target.identity === controller.target.appliedIdentity}
+	>
+		{#if controller.target.lastError || controller.lastError}
+			<div
+				class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
 			>
-				<X class="h-3.5 w-3.5" />
-			</button>
-		</div>
-	{/if}
+				<AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+				<span class="min-w-0 flex-1 truncate">
+					{controller.target.lastError ?? controller.lastError}
+				</span>
+				<button
+					type="button"
+					class="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					aria-label={m.git_action_dismiss_error()}
+					onclick={() => {
+						controller.target.dismissError();
+						controller.lastError = null;
+					}}
+				>
+					<X class="h-3.5 w-3.5" />
+				</button>
+			</div>
+		{/if}
 
-	<GitHistoryView
-		history={controller.history}
-		comparisonSelection={controller.comparisonSelection}
-		project={activeTarget}
-		{presentation}
-		active={presentationVisible}
-		diffMode={reviewDisplay.diffMode}
-		contextLines={reviewDisplay.contextLines}
-		{diffFontSize}
-		onRevertCommit={requestRevert}
-		onOpenInEditor={openInEditor}
-		onOpenSelectedComparison={() => controller.openSelectedComparison()}
-		{onAppendToChatDraft}
-		onOpenChat={() => void workspace.focusChat()}
-		onSetDiffMode={(mode) => reviewDisplay.setDiffMode(mode)}
-		onSetContextLines={(lines) => reviewDisplay.setContextLines(lines)}
-		onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
-	/>
-
-	{#if controller.pendingRevertCommit}
-		<GitRevertModal
-			commitShortHash={controller.pendingRevertCommit.shortHash}
-			commitSubject={controller.pendingRevertCommit.subject}
-			isReverting={controller.isRevertingCommit}
-			onConfirm={() => void controller.revertPendingCommit()}
-			onCancel={() => {
-				if (!controller.isRevertingCommit) controller.pendingRevertCommit = null;
-			}}
+		<GitHistoryView
+			history={controller.history}
+			comparisonSelection={controller.comparisonSelection}
+			project={activeTarget}
+			{presentation}
+			active={presentationVisible}
+			diffMode={reviewDisplay.diffMode}
+			contextLines={reviewDisplay.contextLines}
+			{diffFontSize}
+			onRevertCommit={requestRevert}
+			onOpenInEditor={openInEditor}
+			onOpenSelectedComparison={() => controller.openSelectedComparison()}
+			{onAppendToChatDraft}
+			onOpenChat={() => void workspace.focusChat()}
+			onSetDiffMode={(mode) => reviewDisplay.setDiffMode(mode)}
+			onSetContextLines={(lines) => reviewDisplay.setContextLines(lines)}
+			onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
 		/>
-	{/if}
+
+		{#if controller.pendingRevertCommit}
+			<GitRevertModal
+				commitShortHash={controller.pendingRevertCommit.shortHash}
+				commitSubject={controller.pendingRevertCommit.subject}
+				isReverting={controller.isRevertingCommit}
+				onConfirm={() => void controller.revertPendingCommit()}
+				onCancel={() => {
+					if (!controller.isRevertingCommit) controller.pendingRevertCommit = null;
+				}}
+			/>
+		{/if}
+	</GitProjectContent>
 </div>

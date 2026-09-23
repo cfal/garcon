@@ -233,8 +233,8 @@ describe('workbench surface chat-switch repro', () => {
 		controller.setProjectState(availableProject('chat-b', '/project-b'));
 		await controller.target.activate();
 		await settle();
-		expect(controller.workbench.projectPath).toBe('/project-b');
-		expect(controller.workbench.review.summary?.project).toBe('/project-b');
+		expect(controller.workbench.projectPath).toBe('/repo-x');
+		expect(controller.workbench.review.summary?.project).toBe('/repo-x');
 
 		controller.setProjectState(resolvingProject('chat-a', '/project-a'));
 		controller.setProjectState(availableProject('chat-a', '/project-a'));
@@ -285,8 +285,8 @@ describe('workbench surface chat-switch repro', () => {
 		// snapshot request's tab must equal the current activeTab.
 		const lastSnapshotCall = api.getGitWorkbenchSnapshot.mock.calls.at(-1);
 		expect(lastSnapshotCall?.[1]).toBe(controller.workbench.files.activeTab);
-		// Chat B's open composer must not leak into chat A's surface identity.
-		expect(controller.workbench.drafts.commentComposer.open).toBe(false);
+		// Explicit targets retain their own composer independently of chat selection.
+		expect(controller.workbench.drafts.commentComposer.open).toBe(true);
 		// Comment composer must be functional: open it and confirm the state sticks.
 		controller.workbench.drafts.openCommentComposer('project-b.ts', 'after', 1);
 		expect(controller.workbench.drafts.commentComposer.open).toBe(true);
@@ -315,7 +315,7 @@ describe('compare surface chat-switch repro', () => {
 		controller.setProjectState(availableProject('chat-b', '/project-b'));
 		await controller.target.activate();
 		await settle();
-		expect(controller.comparison.snapshot?.repoRoot).toBe('/project-b');
+		expect(controller.comparison.snapshot?.repoRoot).toBe('/repo-x');
 
 		controller.setProjectState(resolvingProject('chat-a', '/project-a'));
 		controller.setProjectState(availableProject('chat-a', '/project-a'));

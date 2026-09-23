@@ -135,6 +135,7 @@
 	});
 	const ghCapability = createGhCapabilityStore(executionNodes);
 	const workspaceServices = createWorkspaceServices({
+		localProjectBasePath: () => remoteSettings.snapshot?.projectBasePath ?? null,
 		executionNodes,
 		appShell,
 		chatSessions,

@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context.js';
+	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitSurfaceToolbar from '../GitSurfaceToolbar.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
@@ -17,15 +19,17 @@
 		onClose,
 		closeDisabled = false,
 		showMenuLeadingContent = false,
+		nodes,
 	}: {
 		target: GitTargetSessionController;
 		presentation: WorkspaceWindowId | 'mobile';
 		onClose?: () => void;
 		closeDisabled?: boolean;
 		showMenuLeadingContent?: boolean;
+		nodes?: readonly ExecutionNodeSnapshot[];
 	} = $props();
 
-	setExecutionNodesTestContext();
+	setExecutionNodesTestContext(untrack(() => nodes));
 	setNotifications(new NotificationsStore());
 	setRemoteSettings(createRemoteSettingsStore());
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));

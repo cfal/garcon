@@ -13,6 +13,7 @@
 	import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import GitCompareToolbar from './GitCompareToolbar.svelte';
+	import GitProjectContent from './GitProjectContent.svelte';
 	import GitComparisonDialog from './GitComparisonDialog.svelte';
 	import GitComparisonScreen from './GitComparisonScreen.svelte';
 
@@ -63,11 +64,13 @@
 	});
 
 	function editComparison(): void {
+		if (!controller.target.canChangeTarget) return;
 		if (projectPath) void controller.target.branches.fetchRefs(projectPath);
 		transientLayers.open('main-inert', () => comparison.editComparison());
 	}
 
 	function refreshComparison(): void {
+		if (!controller.target.canChangeTarget) return;
 		if (activeTarget) void comparison.refresh(activeTarget);
 	}
 
@@ -97,30 +100,35 @@
 		onClose={() => void workspace.closeSurface(singletonSurfaceId('git-compare'))}
 		{closeDisabled}
 	/>
-
-	<GitComparisonScreen
-		{comparison}
-		isLoading={controller.isLoading}
-		{presentation}
-		active={presentationVisible}
-		fontSize={diffFontSize}
-		onEdit={editComparison}
-		onRefresh={refreshComparison}
-		onOpenInEditor={openInEditor}
-		{onAppendToChatDraft}
-		onOpenChat={() => void workspace.focusChat()}
-	/>
-
-	{#if comparison.dialogOpen}
-		<GitComparisonDialog
+	<GitProjectContent
+		selection={controller.target.projectSelection}
+		ready={!controller.target.projectIdentityPending &&
+			controller.target.identity === controller.target.appliedIdentity}
+	>
+		<GitComparisonScreen
 			{comparison}
-			refs={controller.target.branches.refs}
-			isLoadingRefs={controller.target.branches.isLoadingBranches}
-			onSearchRefs={(query) => {
-				if (projectPath) return controller.target.branches.fetchRefs(projectPath, query);
-			}}
-			onCompare={() => void controller.compareCurrentSpecification()}
-			onClose={() => controller.closeComparisonDialog()}
+			isLoading={controller.isLoading}
+			{presentation}
+			active={presentationVisible}
+			fontSize={diffFontSize}
+			onEdit={editComparison}
+			onRefresh={refreshComparison}
+			onOpenInEditor={openInEditor}
+			{onAppendToChatDraft}
+			onOpenChat={() => void workspace.focusChat()}
 		/>
-	{/if}
+
+		{#if comparison.dialogOpen}
+			<GitComparisonDialog
+				{comparison}
+				refs={controller.target.branches.refs}
+				isLoadingRefs={controller.target.branches.isLoadingBranches}
+				onSearchRefs={(query) => {
+					if (projectPath) return controller.target.branches.fetchRefs(projectPath, query);
+				}}
+				onCompare={() => void controller.compareCurrentSpecification()}
+				onClose={() => controller.closeComparisonDialog()}
+			/>
+		{/if}
+	</GitProjectContent>
 </div>

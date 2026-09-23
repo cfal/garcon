@@ -1,6 +1,5 @@
 import { untrack } from 'svelte';
 import { effectiveNodeId } from '$shared/execution-nodes';
-import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
@@ -15,7 +14,6 @@ import type {
 interface WorkspaceDomainBindingsDeps {
 	workspaceContext: WorkspaceContextStore;
 	projectResolution: ProjectResolutionStore;
-	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	singletons: SingletonSurfaceRegistry;
 	gitQuickSummary: GitQuickSummaryStore;
@@ -58,20 +56,9 @@ export class WorkspaceDomainBindings {
 			});
 
 			$effect(() => {
-				deps.singletons.setProjectState(
-					deps.workspaceContext.projectState,
-					deps.workspaceContext.filesProjectState,
-				);
-			});
-
-			$effect(() => {
-				const nodeId = effectiveNodeId(deps.workspaceContext.currentTarget?.nodeId);
-				const capability = deps.ghCapability.forNode(nodeId);
-				deps.singletons.setPullRequestsCapability(
-					nodeId,
-					capability.hasChecked,
-					capability.available,
-				);
+				const project = deps.workspaceContext.projectState;
+				const filesProject = deps.workspaceContext.filesProjectState;
+				untrack(() => deps.singletons.setProjectState(project, filesProject));
 			});
 
 			$effect(() => {

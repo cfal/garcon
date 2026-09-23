@@ -55,6 +55,7 @@
 		getRemoteSettings,
 		getNotifications,
 		getWorkspaceCoordinator,
+		getSingletonSurfaces,
 		getWorkspaceShortcuts,
 		getGitQuickSummary,
 		getProjectResolution,
@@ -128,6 +129,7 @@
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
+	const singletonSurfaces = getSingletonSurfaces();
 	const composerAnchorSurfaceId = $derived(workspace.composerAnchorSurfaceId);
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const chatDrafts = getChatDrafts();
@@ -634,6 +636,7 @@
 		if (!nodes.gitAvailable(nodeId)) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath || !quickGit.summaryFor({ nodeId, projectPath })) return;
+		if (!singletonSurfaces.commit().target.selectProject({ nodeId, projectPath })) return;
 		const targetWindowId = workspace.windowOf(surfaceId);
 		let opening: Promise<void> | null = null;
 		if (appShell.isMobile) {

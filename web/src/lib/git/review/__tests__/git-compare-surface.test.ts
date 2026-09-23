@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import type { GitTargetCandidate } from '$lib/api/git.js';
+import {
+	getGitComparisonSnapshot,
+	type GitComparisonSnapshotReady,
+} from '$lib/api/git-comparison.js';
+import { GIT_REVIEW_DOCUMENT_LIMITS } from '$shared/git';
 import type { GitComparisonSpecification } from '$lib/git/review/git-comparison.svelte.js';
+import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import {
 	LocalGitComparisonPreferences,
 	type GitComparisonPreferences,
@@ -17,6 +23,41 @@ vi.mock('$lib/api/git.js', () => ({
 }));
 
 const api = vi.mocked(await import('$lib/api/git.js'));
+
+vi.mock('$lib/api/git-comparison.js', () => ({
+	getGitComparisonSnapshot: vi.fn(),
+	getGitComparisonFreshness: vi.fn(),
+	getGitComparisonFileBodies: vi.fn(),
+}));
+
+function comparisonSnapshot(fromRevision: string): GitComparisonSnapshotReady {
+	return {
+		document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'comparison-doc' },
+		status: 'ready',
+		project: '/project',
+		repoRoot: '/project',
+		documentId: 'comparison-doc',
+		mode: 'direct',
+		from: {
+			kind: 'revision',
+			requestedRevision: fromRevision,
+			label: fromRevision,
+			hash: 'a'.repeat(40),
+			shortHash: 'aaaaaaa',
+		},
+		to: {
+			kind: 'revision',
+			requestedRevision: 'HEAD',
+			label: 'HEAD',
+			hash: 'b'.repeat(40),
+			shortHash: 'bbbbbbb',
+		},
+		effectiveFromHash: 'a'.repeat(40),
+		files: [],
+		firstBodyCandidates: [],
+		limits: GIT_REVIEW_DOCUMENT_LIMITS,
+	};
+}
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -118,7 +159,7 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.dialogOpen).toBe(false);
 	});
 
-	it('does not load without a selected chat', async () => {
+	it('does not load without a selected project', async () => {
 		const controller = new GitCompareSurfaceController(createGitSurfaceTestDeps());
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 
@@ -126,6 +167,22 @@ describe('GitCompareSurfaceController', () => {
 		await controller.target.activate();
 
 		expect(compare).not.toHaveBeenCalled();
+	});
+
+	it('compares without a chat and retains the selected project when a chat opens', async () => {
+		const controller = new GitCompareSurfaceController(createGitSurfaceTestDeps());
+		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
+		controller.setPresentationVisible(true);
+		await controller.target.selectTarget(candidate());
+		expect(compare).toHaveBeenCalledOnce();
+		expect(compare).toHaveBeenCalledWith(
+			expect.objectContaining({ nodeId: 'local', projectPath: '/project', chatId: null }),
+		);
+		setProject(controller, 'different-chat', '/other');
+		await controller.target.activate();
+		expect(compare).toHaveBeenCalledOnce();
+		expect(controller.target.activeProjectPath).toBe('/project');
+		controller.dispose();
 	});
 
 	it('restores independent ranges for chats sharing the same target', async () => {
@@ -165,6 +222,80 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.toKind).toBe('revision');
 		expect(controller.comparison.toRevision).toBe('HEAD');
 	});
+
+	it.each(['folder', 'node'] as const)(
+		'loads project preferences once when pinning the current %s and retains edits on refocus',
+		async (choice) => {
+			const deps = createGitSurfaceTestDeps();
+			const resolution = new ProjectResolutionStore(async (target) => ({
+				target,
+				resolution: { kind: 'available', effectiveProjectKey: '/project' },
+			}));
+			deps.projectSelection = {
+				projectResolution: resolution,
+				projectBasePath: () => '/project',
+			};
+			deps.comparisonPreferences.rememberUserSelection(
+				{ nodeId: 'local', chatId: null, projectPath: '/project' },
+				{ ...revisionComparison, fromRevision: 'project-only' },
+			);
+			deps.comparisonPreferences.rememberChat(
+				{ nodeId: 'local', chatId: 'chat' },
+				{ ...revisionComparison, fromRevision: 'chat-only' },
+			);
+			const controller = new GitCompareSurfaceController(deps);
+			const readSnapshot = vi.mocked(getGitComparisonSnapshot);
+			readSnapshot.mockImplementation(async (_project, from) => comparisonSnapshot(from.revision));
+			const pendingSnapshot = Promise.withResolvers<GitComparisonSnapshotReady>();
+			try {
+				setProject(controller, 'chat', '/project', '/project');
+				controller.setPresentationVisible(true);
+				await controller.target.activate();
+				await vi.waitFor(() => expect(controller.comparison.snapshot).not.toBeNull());
+				expect(controller.comparison.fromRevision).toBe('chat-only');
+				readSnapshot.mockImplementationOnce((_project, _from, _to, _mode, options) => {
+					options?.signal?.addEventListener(
+						'abort',
+						() => {
+							pendingSnapshot.reject(new DOMException('Aborted', 'AbortError'));
+						},
+						{ once: true },
+					);
+					return pendingSnapshot.promise;
+				});
+				if (choice === 'folder') await controller.target.selectTarget(candidate());
+				else {
+					const pendingTargets = deferred<{ targets: GitTargetCandidate[] }>();
+					api.getGitTargetCandidates.mockReturnValueOnce(pendingTargets.promise);
+					await controller.target.selectNode('local');
+					expect(readSnapshot).toHaveBeenCalledOnce();
+					pendingTargets.resolve({ targets: [candidate()] });
+				}
+				await controller.target.activate();
+				await vi.waitFor(() => expect(readSnapshot).toHaveBeenCalledTimes(2));
+				expect(controller.target.projectSelection.followingChat).toBe(false);
+				expect(controller.comparison.fromRevision).toBe('project-only');
+				expect(readSnapshot.mock.calls[1][4]?.signal?.aborted).toBe(false);
+				pendingSnapshot.resolve(comparisonSnapshot('project-only'));
+				await vi.waitFor(() => expect(controller.comparison.isLoading).toBe(false));
+				expect(controller.comparison.snapshot?.from.requestedRevision).toBe('project-only');
+
+				controller.comparison.openDialog({
+					fromRevision: 'unfinished-edit',
+					toKind: 'working-tree',
+				});
+				controller.setPresentationVisible(false);
+				controller.setPresentationVisible(true);
+				await controller.target.activate();
+				expect(readSnapshot).toHaveBeenCalledTimes(2);
+				expect(controller.comparison.dialogOpen).toBe(true);
+				expect(controller.comparison.fromRevision).toBe('unfinished-edit');
+			} finally {
+				controller.dispose();
+				resolution.destroy();
+			}
+		},
+	);
 
 	it('restores merge-base mode with revision endpoints', async () => {
 		const deps = createGitSurfaceTestDeps();
@@ -233,7 +364,7 @@ describe('GitCompareSurfaceController', () => {
 		expect(rememberUserSelection).not.toHaveBeenCalled();
 	});
 
-	it('reuses the chat range across selected targets', async () => {
+	it('uses project preferences rather than chat preferences after explicit target selection', async () => {
 		const projectTarget = candidate();
 		const otherTarget = candidate('/other', {
 			repoRoot: '/other-repo',
@@ -258,14 +389,13 @@ describe('GitCompareSurfaceController', () => {
 
 		await controller.target.selectTarget(otherTarget);
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
-		expect(controller.comparison.fromRevision).toBe('origin/main');
-		expect(controller.comparison.toKind).toBe('revision');
-		expect(controller.comparison.toRevision).toBe('HEAD');
+		expect(controller.comparison.fromRevision).toBe('HEAD');
+		expect(controller.comparison.toKind).toBe('working-tree');
 
 		await controller.target.selectTarget(projectTarget);
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(3));
-		expect(controller.comparison.fromRevision).toBe('origin/main');
-		expect(controller.comparison.toRevision).toBe('HEAD');
+		expect(controller.comparison.fromRevision).toBe('HEAD');
+		expect(controller.comparison.toKind).toBe('working-tree');
 	});
 
 	it('remembers confirmed chat state before switching targets', async () => {
@@ -296,8 +426,8 @@ describe('GitCompareSurfaceController', () => {
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
 
 		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
-		expect(controller.comparison.fromRevision).toBe('origin/main');
-		expect(controller.comparison.toKind).toBe('revision');
+		expect(controller.comparison.fromRevision).toBe('HEAD');
+		expect(controller.comparison.toKind).toBe('working-tree');
 	});
 
 	it('remembers only a successful user comparison for the active session', async () => {
@@ -745,6 +875,37 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.fromRevision).toBe('main');
 		expect(controller.comparison.toRevision).toBe('feature');
 		expect(freshness).toHaveBeenCalledOnce();
+	});
+
+	it('loads the next chat when a same-target invalidation settles during activation', async () => {
+		const deps = createGitSurfaceTestDeps();
+		deps.comparisonPreferences.rememberChat(
+			{ nodeId: 'local', chatId: 'chat-b' },
+			{ ...revisionComparison, fromRevision: 'chat-b-revision' },
+		);
+		const readSnapshot = vi.mocked(getGitComparisonSnapshot);
+		readSnapshot.mockImplementation(async (_project, from) => comparisonSnapshot(from.revision));
+		const controller = new GitCompareSurfaceController(deps);
+		try {
+			setProject(controller, 'chat-a');
+			controller.setPresentationVisible(true);
+			await controller.target.activate();
+			await vi.waitFor(() => expect(controller.comparison.snapshot).not.toBeNull());
+			expect(readSnapshot).toHaveBeenCalledOnce();
+
+			const pendingTargets = deferred<{ targets: GitTargetCandidate[] }>();
+			api.getGitTargetCandidates.mockReturnValueOnce(pendingTargets.promise);
+			const invalidation = controller.refreshForInvalidation('/canonical/project', 1);
+			pendingTargets.resolve({ targets: [candidate()] });
+			setProject(controller, 'chat-b');
+			await invalidation;
+			await controller.target.activate();
+
+			await vi.waitFor(() => expect(readSnapshot).toHaveBeenCalledTimes(2));
+			expect(controller.comparison.snapshot?.from.requestedRevision).toBe('chat-b-revision');
+		} finally {
+			controller.dispose();
+		}
 	});
 
 	it('restores the same symbolic range after branch checkout', async () => {

@@ -13,7 +13,7 @@ export const GIT_COMPARISON_PROJECT_PREFERENCE_LIMIT = 20;
 
 export interface GitComparisonPreferenceContext {
 	nodeId: string;
-	chatId: string;
+	chatId: string | null;
 	projectPath: string;
 }
 
@@ -107,7 +107,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 		context: GitComparisonPreferenceContext,
 		specification: GitComparisonSpecification,
 	): void {
-		if (!isNonEmptyString(context.chatId)) return;
+		if (context.chatId !== null && !isNonEmptyString(context.chatId)) return;
 		const record = this.#readRecord();
 		this.#rememberChatEntry(record, context, specification);
 		const [projectPath] = projectPathAndAncestors(context.projectPath);
@@ -127,6 +127,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 		context: Pick<GitComparisonPreferenceContext, 'nodeId' | 'chatId'>,
 		specification: GitComparisonSpecification,
 	): void {
+		if (!isNonEmptyString(context.chatId)) return;
 		record.entries = rememberEntry(
 			record.entries,
 			(entry) => entry.nodeId === context.nodeId && entry.chatId === context.chatId,

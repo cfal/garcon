@@ -1,12 +1,8 @@
 <script lang="ts">
-	import Folder from '@lucide/svelte/icons/folder';
 	import GitBranchSelector from './GitBranchSelector.svelte';
-	import GitTargetDialog from './GitTargetDialog.svelte';
+	import GitProjectSelector from './GitProjectSelector.svelte';
 	import NewBranchModal from './NewBranchModal.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
-	import { getRemoteSettings, getTransientLayers, getExecutionNodes } from '$lib/context';
-	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
-	import * as m from '$lib/paraglide/messages.js';
 
 	let {
 		target,
@@ -18,32 +14,6 @@
 		disabled?: boolean;
 	} = $props();
 
-	const remoteSettings = getRemoteSettings();
-	const transientLayers = getTransientLayers();
-	const nodes = getExecutionNodes();
-	const nodeLabel = $derived(nodes.label(target.nodeId));
-	const activePath = $derived(target.activeWorktreePath ?? target.activeProjectPath ?? '');
-	const displayPath = $derived(formatFrontEllipsisPath(activePath, isMobile ? 22 : 32));
-	const projectBasePath = $derived(
-		nodes.get(target.nodeId)?.projectBasePath ??
-			(target.nodeId === 'local' ? remoteSettings.snapshot?.projectBasePath : null) ??
-			target.baseProjectPath ??
-			'/',
-	);
-	const pinnedProjectPaths = $derived(
-		(target.nodeId === 'local'
-			? remoteSettings.snapshot?.paths.pinnedProjectPaths
-			: remoteSettings.snapshot?.paths.byNode?.[target.nodeId]?.pinnedPaths) ?? [],
-	);
-
-	function openTargetDialog(): void {
-		if (disabled || !target.activeProjectPath) return;
-		void remoteSettings.ensureLoadedInBackground();
-		transientLayers.open('main-inert', () => {
-			target.showTargetDialog = true;
-		});
-	}
-
 	function toggleBranchSelector(): void {
 		const projectPath = target.activeProjectPath;
 		if (disabled || !projectPath) return;
@@ -53,42 +23,17 @@
 		}
 		void target.branches.openBranchDropdown(projectPath);
 	}
-
-	function formatFrontEllipsisPath(path: string, maxLength: number): string {
-		const normalized = path.trim();
-		if (!normalized || normalized.length <= maxLength) return normalized;
-		const separator = normalized.includes('\\') && !normalized.includes('/') ? '\\' : '/';
-		const prefix = normalized.startsWith(separator)
-			? `${separator}...${separator}`
-			: `...${separator}`;
-		const segments = normalized.split(/[\\/]+/).filter(Boolean);
-		const kept: string[] = [];
-		for (let index = segments.length - 1; index >= 0; index -= 1) {
-			const candidate = [segments[index], ...kept];
-			const label = prefix + candidate.join(separator);
-			if (label.length > maxLength && kept.length > 0) break;
-			if (label.length > maxLength) {
-				const remaining = Math.max(1, maxLength - prefix.length);
-				return prefix + segments[segments.length - 1].slice(-remaining);
-			}
-			kept.unshift(segments[index]);
-		}
-		return prefix + kept.join(separator);
-	}
 </script>
 
-<div class="flex min-w-0 shrink items-center gap-1">
-	<button
-		type="button"
-		class="inline-flex h-8 min-w-0 max-w-48 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-		onclick={openTargetDialog}
-		disabled={disabled || !activePath}
-		aria-label={`${nodeLabel}: ${activePath || m.git_panel_select_project()}`}
-		title={`${nodeLabel}: ${activePath || m.git_panel_select_project()}`}
-	>
-		<Folder class="h-4 w-4 shrink-0" />
-		<span class="min-w-0 truncate">{nodeLabel}: {displayPath || m.git_panel_select_project()}</span>
-	</button>
+<GitProjectSelector
+	selection={target.projectSelection}
+	path={target.activeWorktreePath ?? target.activeProjectPath}
+	disabled={!target.canChooseProject}
+	{isMobile}
+	onSelectNode={(nodeId) => void target.selectNode(nodeId)}
+	onSelectFolder={(candidate) => void target.selectTarget(candidate)}
+	onGoToChatProject={() => target.goToChatProject()}
+>
 	<GitBranchSelector
 		currentBranch={target.branches.currentBranch || 'HEAD'}
 		refs={target.branches.refs}
@@ -97,8 +42,10 @@
 		isLoading={target.branches.isLoadingBranches}
 		{disabled}
 		{isMobile}
-		triggerClass="h-8 max-w-40 px-2 text-xs sm:max-w-80"
-		labelClass="max-w-24 text-xs"
+		triggerClass="h-8 min-w-26 max-w-40 px-2 text-xs sm:max-w-80"
+		iconClass="shrink-0"
+		chevronClass="shrink-0"
+		labelClass="min-w-0 max-w-24 text-xs"
 		onToggle={toggleBranchSelector}
 		onClose={() => target.branches.closeBranchDropdown()}
 		onCreateBranch={() => target.openNewBranchDialog()}
@@ -114,21 +61,7 @@
 			}
 		}}
 	/>
-</div>
-
-{#if target.showTargetDialog && target.activeProjectPath}
-	<GitTargetDialog
-		nodeId={target.nodeId}
-		initialPath={target.activeProjectPath}
-		{projectBasePath}
-		{pinnedProjectPaths}
-		{isMobile}
-		onConfirm={(candidate) => void target.selectTarget(candidate)}
-		onTogglePinnedProjectPath={(path) =>
-			void togglePinnedProjectPathOptimistically(remoteSettings, path, { nodeId: target.nodeId })}
-		onClose={() => (target.showTargetDialog = false)}
-	/>
-{/if}
+</GitProjectSelector>
 
 {#if target.branches.showNewBranchModal}
 	<NewBranchModal

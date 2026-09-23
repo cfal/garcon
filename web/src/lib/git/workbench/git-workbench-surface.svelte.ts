@@ -44,6 +44,7 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 		});
 		this.target = new GitTargetSessionController({
 			kind: 'git',
+			projectSelection: deps.projectSelection,
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
 			onUnavailable: () => {

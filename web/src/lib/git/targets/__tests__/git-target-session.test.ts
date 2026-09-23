@@ -184,7 +184,7 @@ describe('GitTargetSessionController', () => {
 		setProject(session, '/old', 'chat-old');
 		session.setPresentationVisible(true);
 		const activation = session.activate();
-		session.showTargetDialog = true;
+		session.projectSelection.showFolderDialog = true;
 		session.branches.showBranchDropdown = true;
 
 		session.setProjectState({
@@ -194,9 +194,9 @@ describe('GitTargetSessionController', () => {
 				projectPath: '/new',
 			},
 		});
-		expect(signal?.aborted).toBe(false);
-		expect(session.showTargetDialog).toBe(true);
-		expect(session.branches.showBranchDropdown).toBe(true);
+		expect(signal?.aborted).toBe(true);
+		expect(session.projectSelection.showFolderDialog).toBe(false);
+		expect(session.branches.showBranchDropdown).toBe(false);
 		load.resolve({ targets: [candidate('/old/worktree')] });
 		await activation;
 
@@ -222,7 +222,7 @@ describe('GitTargetSessionController', () => {
 		setProject(session, '/project', 'chat-project');
 		session.setPresentationVisible(true);
 		const activation = session.activate();
-		session.showTargetDialog = true;
+		session.projectSelection.showFolderDialog = true;
 		session.branches.showBranchDropdown = true;
 
 		session.setProjectState({
@@ -232,7 +232,7 @@ describe('GitTargetSessionController', () => {
 		});
 
 		expect(signal?.aborted).toBe(true);
-		expect(session.showTargetDialog).toBe(false);
+		expect(session.projectSelection.showFolderDialog).toBe(false);
 		expect(session.branches.showBranchDropdown).toBe(false);
 		expect(session.isLoadingTargets).toBe(false);
 		load.resolve({ targets: [candidate('/stale')] });
@@ -348,7 +348,7 @@ describe('GitTargetSessionController', () => {
 		expect(session.activeProjectPath).toBe('/recovered');
 	});
 
-	it('restores only its own cached target when switching chat projects', async () => {
+	it('retains an explicit worktree across chat switches and returns to the actual chat project', async () => {
 		api.getGitTargetCandidates
 			.mockResolvedValueOnce({
 				targets: [
@@ -382,11 +382,16 @@ describe('GitTargetSessionController', () => {
 
 		setProject(session, '/chat-b', 'chat-b');
 		await session.activate();
-		expect(session.activeProjectPath).toBe('/chat-b');
+		expect(session.activeProjectPath).toBe('/repo/worktree-a');
 
 		setProject(session, '/chat-a', 'chat-a');
 		await session.activate();
 		expect(session.activeProjectPath).toBe('/repo/worktree-a');
+		api.getGitTargetCandidates.mockReset();
+		api.getGitTargetCandidates.mockResolvedValue({ targets: [candidate('/chat-a')] });
+		session.goToChatProject();
+		await session.activate();
+		expect(session.activeProjectPath).toBe('/chat-a');
 	});
 
 	it('keeps an explicitly selected repository as the discovery anchor', async () => {
@@ -410,7 +415,7 @@ describe('GitTargetSessionController', () => {
 		]);
 		expect(session.activeProjectPath).toBe('/selected');
 
-		await session.refreshForInvalidation('chat', 1);
+		await session.refreshForInvalidation('/selected', 1);
 
 		expect(api.getGitTargetCandidates.mock.calls.map(([{ projectPath }]) => projectPath)).toEqual([
 			'/chat',
@@ -614,7 +619,7 @@ describe('GitTargetSessionController', () => {
 		api.getGitTargetCandidates.mockReturnValueOnce(load.promise);
 		const { session } = createSession({});
 		setProject(session, '/chat');
-		session.showTargetDialog = true;
+		session.projectSelection.showFolderDialog = true;
 		session.branches.showBranchDropdown = true;
 		session.setPresentationVisible(true);
 		const activation = session.activate();
@@ -624,7 +629,7 @@ describe('GitTargetSessionController', () => {
 		await activation;
 
 		expect(session.isLoadingTargets).toBe(false);
-		expect(session.showTargetDialog).toBe(false);
+		expect(session.projectSelection.showFolderDialog).toBe(false);
 		expect(session.branches.showBranchDropdown).toBe(false);
 		session.dispose();
 		expect(session.activeTarget).toBeNull();
