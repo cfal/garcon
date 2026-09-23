@@ -25,7 +25,6 @@
 		isMobile?: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onNavigateToChat: () => void;
-		onRetryCapability: () => void;
 	}
 
 	let {
@@ -33,7 +32,6 @@
 		isMobile = false,
 		onSendToChat,
 		onNavigateToChat,
-		onRetryCapability,
 	}: PullRequestsPanelProps = $props();
 
 	const projectPath = $derived(pullRequests.projectPath);
@@ -113,7 +111,7 @@
 					<button
 						type="button"
 						class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-						onclick={onRetryCapability}>{m.common_retry()}</button
+						onclick={() => pullRequests.retryCapability()}>{m.common_retry()}</button
 					>
 				</div>
 			</div>

@@ -172,7 +172,6 @@
 				isMobile={presentation === 'mobile'}
 				{onSendToChat}
 				onNavigateToChat={() => void workspace.focusChat()}
-				onRetryCapability={() => controller.retryCapability()}
 			/>
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'commit'}
