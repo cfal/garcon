@@ -1223,7 +1223,7 @@ function createService(overrides = {}) {
       get: (agentId) => integrations.get(agentId),
       require: (agentId) => integrations.get(agentId),
     },
-    endpointResolver: overrides.endpointResolver ?? {},
+    endpointResolver: overrides.endpointResolver ?? { resolveSelection: (input) => input },
     catalog: overrides.catalog ?? {},
     reopenProducer: overrides.reopenProducer ?? (() => {}),
     onCommitted: overrides.onCommitted,
@@ -1353,6 +1353,7 @@ function targetResolutionDeps({
   return {
     integrations: { get: (agentId) => integrations.get(agentId), require: (agentId) => integrations.get(agentId) },
     endpointResolver: {
+      describePrevious(input) { return this.resolveSelection(input); },
       resolveSelection: ({ model }) => ({
         model,
         apiProviderId: null,

@@ -263,6 +263,7 @@ function normalizeApiProviders(value: unknown): ApiProviderCatalogEntry[] {
 			if (
 				typeof e.id !== 'string' ||
 				typeof e.label !== 'string' ||
+				!Number.isSafeInteger(e.revision) || Number(e.revision) < 1 ||
 				typeof e.createdAt !== 'string' ||
 				typeof e.updatedAt !== 'string' ||
 				!Array.isArray(e.endpoints)
@@ -276,6 +277,7 @@ function normalizeApiProviders(value: unknown): ApiProviderCatalogEntry[] {
 			const templateId = normalizeTemplateId(e.templateId);
 			return {
 				id: e.id,
+				revision: Number(e.revision),
 				label: e.label,
 				...(templateId ? { templateId } : {}),
 				createdAt: e.createdAt,

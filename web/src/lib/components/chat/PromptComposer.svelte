@@ -4,6 +4,7 @@
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import ComposerExecutionNotice from './ComposerExecutionNotice.svelte';
+	import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
@@ -119,6 +120,7 @@
 	const rootModelCatalog = getModelCatalog();
 	const nodes = getExecutionNodes();
 	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
+	const providerAvailable = $derived(isCustomProviderSelectionAvailable(modelCatalog, agentState));
 	const filesAvailable = $derived(nodes.filesAvailable(agentState.nodeId));
 
 	$effect(() => {
@@ -631,7 +633,7 @@
 				directAdmissionPending ||
 				promptTransformPending ||
 				!nodes.isReady(agentState.nodeId) ||
-				!modelCatalog.isValidated,
+				!modelCatalog.isValidated || !providerAvailable,
 			composerState.inputText,
 			composerState.images.length,
 		) && !hasQueuedAttachmentConflict,
@@ -708,7 +710,7 @@
 				onClose={() => ui.closeFileMenu()}
 			/>
 		{/if}
-		{#if !showProjectNotice}<ComposerExecutionNotice nodeId={agentState.nodeId} {nodes} catalog={modelCatalog} />{/if}
+		{#if !showProjectNotice}<ComposerExecutionNotice nodeId={agentState.nodeId} {nodes} catalog={modelCatalog} {providerAvailable} />{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {

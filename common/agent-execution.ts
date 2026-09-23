@@ -11,6 +11,7 @@ export interface AgentCredentialReference {
   readonly kind: 'api-provider-endpoint';
   readonly apiProviderId: string;
   readonly endpointId: string;
+  readonly revision: number;
 }
 
 export interface AgentEndpointSelection {

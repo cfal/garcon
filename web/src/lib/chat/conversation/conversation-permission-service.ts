@@ -1,5 +1,6 @@
 import * as m from '$lib/paraglide/messages.js';
 import type { PermissionMode } from '$lib/types/chat';
+import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 import { sendPermissionDecision } from '$lib/api/chats.js';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
@@ -14,7 +15,7 @@ import type { ConversationExecutionSelection } from './conversation-execution-dr
 export interface ConversationPermissionServiceOptions {
 	readonly deps: Pick<
 		SessionControllerDeps,
-		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell' | 'canSubmitToNode'
+		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell' | 'canSubmitToNode' | 'modelCatalogForNode'
 	>;
 	readonly acceptedInputs: AcceptedInputSubmissionService;
 	readonly queue: ConversationQueueController;
@@ -81,7 +82,8 @@ export class ConversationPermissionService {
 		const { deps } = this.options;
 		const chat = deps.sessions.byId[chatId];
 		if (!chat) return;
-		if ((choice === 'bypass' || choice === 'approve-edits') && !deps.canSubmitToNode(chat.nodeId ?? 'local')) {
+		if ((choice === 'bypass' || choice === 'approve-edits') && (!deps.canSubmitToNode(chat.nodeId ?? 'local')
+			|| !isCustomProviderSelectionAvailable(deps.modelCatalogForNode(chat.nodeId ?? 'local'), chat))) {
 			deps.chatState.appendLocalNoticeForChat(
 				chatId,
 				'error',

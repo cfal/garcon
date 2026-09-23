@@ -97,6 +97,9 @@ test('Local and two public workers coexist and retain chats and settings for del
       expect((await nodeSnapshots(client)).map((node) => node.availability)).toEqual(['ready', 'ready', 'ready']);
 
       const agent = fixture.directAgents.openAi;
+      for (const node of [inbound, outbound]) {
+        await client.put(`/api/v1/api-provider-assignments?nodeId=${node.id}&apiProviderId=${agent.provider.providerId}`, {});
+      }
       const chatA = fixture.newChatId();
       const chatB = fixture.newChatId();
       const localChat = fixture.newChatId();

@@ -22,6 +22,7 @@ function makeRouter(overrides = {}) {
     singleQuery: overrides.singleQuery === null ? null : { run },
   };
   const endpointResolver = {
+    describePrevious(input) { return this.resolveSelection(input); },
     resolveSelection: mock((request) => ({
       model: request.model.startsWith('endpoint:') ? request.model.slice('endpoint:'.length) : request.model,
       apiProviderId: request.apiProviderId,
@@ -58,6 +59,12 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter.runSingleQuery', () => {
+  it('does not convert an incomplete explicit provider selection into native execution', async () => {
+    const { router, endpointResolver, run } = makeRouter();
+    endpointResolver.resolveSelection.mockImplementation(() => { throw new Error('Selection incomplete'); });
+    await expect(router.runSingleQuery('prompt', { agentId: 'test', apiProviderId: 'profile_one' })).rejects.toThrow('Selection incomplete');
+    expect(run).not.toHaveBeenCalled();
+  });
   it('routes through the selected integration with parsed defaults', async () => {
     const { router, integration, run } = makeRouter();
 

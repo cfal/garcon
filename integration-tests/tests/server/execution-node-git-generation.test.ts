@@ -9,6 +9,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
     await withIntegrationFixture(`git-generation-${executionBackend}`, async fixture => {
       const { client, directAgents, dirs, executionDirs } = fixture;
       const agent = directAgents.openAi;
+      await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${agent.provider.providerId}`, {});
       const generation = {
         agentId: agent.agentId, model: agent.provider.model, thinkingMode: 'none',
         apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,

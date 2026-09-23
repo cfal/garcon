@@ -37,6 +37,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-integration-settings-refresh', migrate);
     await runner.run('agent-execution-mode-refresh', migrate);
     await runner.run('fork-ordinal-cleanup', migrate);
+    await runner.run('provider-assignments', migrate);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -71,6 +72,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-integration-settings-refresh', async () => { events.push('settings-refresh'); });
     await runner.run('agent-execution-mode-refresh', async () => { events.push('execution-mode-refresh'); });
     await runner.run('fork-ordinal-cleanup', async () => { events.push('fork-ordinal-cleanup'); });
+    await runner.run('provider-assignments', async () => { events.push('provider-assignments'); });
     await runner.finish();
 
     expect(events).toEqual([
@@ -82,6 +84,7 @@ describe('WorkspaceMigrationRunner', () => {
       'settings-refresh',
       'execution-mode-refresh',
       'fork-ordinal-cleanup',
+      'provider-assignments',
     ]);
     await expect(fs.stat(queuesDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(workspaceDir, 'pending-user-inputs.json'))).rejects.toMatchObject({
@@ -113,10 +116,11 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-integration-settings-refresh', cleanup);
     await runner.run('agent-execution-mode-refresh', cleanup);
     await runner.run('fork-ordinal-cleanup', cleanup);
+    await runner.run('provider-assignments', cleanup);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledTimes(6);
+    expect(cleanup).toHaveBeenCalledTimes(7);
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 
@@ -138,6 +142,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-integration-settings-refresh', previous);
     await runner.run('agent-execution-mode-refresh', executionModeRefresh);
     await runner.run('fork-ordinal-cleanup', async () => undefined);
+    await runner.run('provider-assignments', async () => undefined);
     await runner.finish();
 
     expect(previous).not.toHaveBeenCalled();
@@ -165,6 +170,7 @@ describe('WorkspaceMigrationRunner', () => {
         cleanup.mockImplementation(async () => undefined);
       } else {
         await runner.run('fork-ordinal-cleanup', cleanup);
+        await runner.run('provider-assignments', async () => undefined);
         await runner.finish();
       }
     }

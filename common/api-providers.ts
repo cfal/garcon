@@ -34,11 +34,26 @@ export interface OpenAiEndpointCapabilities {
 
 export interface ApiProviderCatalogEntry {
   id: string;
+  revision: number;
   label: string;
   templateId?: ApiProviderTemplateId;
   createdAt: string;
   updatedAt: string;
   endpoints: ApiProviderEndpointCatalogEntry[];
+}
+
+export interface ApiProviderAssignments {
+  revision: number;
+  assignments: Record<string, string[]>;
+}
+
+export interface ApiProviderManagement {
+  providers: ApiProviderCatalogEntry[];
+  assignments: ApiProviderAssignments;
+}
+
+export interface ApiProviderCreateResult extends ApiProviderCatalogEntry {
+  assignment: { nodeId: string; status: 'assigned' | 'not-assigned' | 'unknown'; error?: string };
 }
 
 export interface ApiProviderEndpointCatalogEntry {
@@ -60,6 +75,7 @@ export interface ApiProviderModelDiscoveryRequest {
   apiKey?: string;
   apiProviderId?: string | null;
   endpointId?: string | null;
+  revision?: number;
   modelDiscovery?: ModelDiscoveryKind;
 }
 

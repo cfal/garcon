@@ -3,8 +3,8 @@ import type { AgentHost } from '@garcon/server-agent-interface';
 import { resolveAgentEndpoint } from '../resolve-endpoint.js';
 
 describe('resolveAgentEndpoint', () => {
-  test('resolves credentials through the host reader', async () => {
-    const resolveCredential = mock(async () => ({ kind: 'token', value: 'secret' }));
+  test.each(['secret', '', null])('distinguishes an explicit key from denied credential resolution (%s)', async (value) => {
+    const resolveCredential = mock(async () => value === null ? null : { kind: 'token', value });
     const endpoint = {
       apiProviderId: 'provider',
       endpointId: 'endpoint',
@@ -17,6 +17,7 @@ describe('resolveAgentEndpoint', () => {
       headers: {},
       credential: {
         kind: 'api-provider-endpoint' as const,
+        revision: 1,
         apiProviderId: 'provider',
         endpointId: 'endpoint',
       },
@@ -34,12 +35,13 @@ describe('resolveAgentEndpoint', () => {
       environment: { get: () => undefined },
       apiProviders: { resolveCredential },
     } satisfies AgentHost;
-    const result = await resolveAgentEndpoint(
+    const result = resolveAgentEndpoint(
       host,
       endpoint,
       new AbortController().signal,
     );
-    expect(result).toEqual({ selection: endpoint, credential: 'secret' });
+    if (value === null) await expect(result).rejects.toMatchObject({ code: 'API_PROVIDER_UNAVAILABLE' });
+    else expect(await result).toEqual({ selection: endpoint, credential: value });
     expect(resolveCredential).toHaveBeenCalledTimes(1);
   });
 });

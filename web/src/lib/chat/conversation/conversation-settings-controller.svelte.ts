@@ -41,6 +41,7 @@ export interface ConversationSettingsControllerOptions {
 		| 'selectionFor'
 		| 'selectionValueFor'
 		| 'isLocalModel'
+		| 'getModelForSelection'
 		| 'getPermissionModes'
 		| 'getThinkingModes'
 	>;
@@ -116,9 +117,11 @@ export class ConversationSettingsController {
 		const currentModel = sessions.selectedChat?.model ?? agentState.model;
 		const currentEndpointId =
 			sessions.selectedChat?.modelEndpointId ?? agentState.modelEndpointId;
+		const previousSelection = modelCatalog.getModelForSelection(agentId, currentModel, currentEndpointId);
 		const wasLocal = modelCatalog.isLocalModel(agentId, currentModel, currentEndpointId);
 		const isLocal = modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
-		if (wasLocal !== isLocal) {
+		// Unavailable selections need the server's historical classification.
+		if (previousSelection && wasLocal !== isLocal) {
 			const target = isLocal ? m.chat_model_kind_local() : m.chat_model_kind_cloud();
 			chatState.appendLocalNotice(
 				'error',

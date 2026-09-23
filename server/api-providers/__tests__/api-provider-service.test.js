@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ApiProviderService } from '../service.ts';
 import { ApiProviderStore } from '../store.ts';
+import { ApiProviderAssignmentStore } from '../assignments.ts';
+import { ApiProviderAccess } from '../access.ts';
 import { discoverApiProviderModels } from '../discovery.ts';
 
 const createdDirs = [];
@@ -14,12 +16,17 @@ async function tempService(options = {}) {
   createdDirs.push(dir);
   const store = new ApiProviderStore(path.join(dir, 'api-providers.json'));
   await store.init();
+  const assignments = new ApiProviderAssignmentStore(dir, () => () => {});
+  await assignments.migrate([], []);
+  await assignments.initialize();
+  const access = new ApiProviderAccess(store, assignments, () => true);
   const service = new ApiProviderService({
     store,
+    access,
     discoverModels: options.discoverModels ?? ((_nodeId, request) => discoverApiProviderModels(request)),
     isApiProviderReferenced: options.isApiProviderReferenced ?? (() => false),
   });
-  return { service, store };
+  return { service, store, assignments, access };
 }
 
 function openAiInput(overrides = {}) {
@@ -89,9 +96,10 @@ describe('ApiProviderService', () => {
     const { service, store } = await tempService({ discoverModels });
     const created = await service.create(openAiInput());
     const nodeId = '22222222-2222-4222-8222-222222222222';
+    await service.assign(nodeId, created.id);
     await service.discoverModels({
       protocol: 'openai-compatible', baseUrl: 'api.acme.test/v1/',
-      endpointId: created.endpoints[0].id, apiProviderId: created.id,
+      endpointId: created.endpoints[0].id, apiProviderId: created.id, revision: created.revision,
     }, nodeId);
     expect(discoverModels).toHaveBeenLastCalledWith(nodeId, {
       protocol: 'openai-compatible', baseUrl: 'https://api.acme.test/v1',
@@ -117,7 +125,7 @@ describe('ApiProviderService', () => {
     const discovered = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'https://api.acme.test/alternate/v1',
-      endpointId: endpoint.id,
+      endpointId: endpoint.id, apiProviderId: created.id, revision: created.revision,
       modelDiscovery: 'openai-models',
     });
 
@@ -130,6 +138,27 @@ describe('ApiProviderService', () => {
     }));
   });
 
+  it('never dispatches unassigned, mismatched or stale stored-key probes, but permits an entered key', async () => {
+    const discoverModels = mock(async () => ({ success: true, models: [] }));
+    const { service, store } = await tempService({ discoverModels });
+    const first = await service.create(openAiInput());
+    const second = await service.create(openAiInput({ label: 'Another account' }));
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const request = { protocol: 'openai-compatible', baseUrl: first.endpoints[0].baseUrl,
+      apiProviderId: first.id, endpointId: first.endpoints[0].id, revision: first.revision };
+    await expect(service.discoverModels(request, nodeId)).rejects.toMatchObject({ code: 'API_PROVIDER_UNAVAILABLE' });
+    await service.assign(nodeId, first.id);
+    await expect(service.discoverModels({ ...request, endpointId: second.endpoints[0].id }, nodeId))
+      .rejects.toMatchObject({ code: 'API_PROVIDER_UNAVAILABLE' });
+    await store.updateApiProvider(first.id, { endpoint: { apiKey: 'rotated' } });
+    await expect(service.discoverModels(request, nodeId)).rejects.toMatchObject({ code: 'API_PROVIDER_CONFIGURATION_CHANGED' });
+    expect(discoverModels).not.toHaveBeenCalled();
+    await service.unassign(nodeId, first.id);
+    await service.discoverModels({ ...request, apiKey: 'explicit-draft-key' }, nodeId);
+    expect(discoverModels).toHaveBeenCalledTimes(1);
+    expect(discoverModels.mock.calls[0][1].apiKey).toBe('explicit-draft-key');
+  });
+
   it('requires an explicit API key when stored provider references target a different origin', async () => {
     const { service } = await tempService();
     const created = await service.create(openAiInput());
@@ -140,13 +169,13 @@ describe('ApiProviderService', () => {
     const endpointResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'https://untrusted.example/v1',
-      endpointId: endpoint.id,
+      endpointId: endpoint.id, apiProviderId: created.id, revision: created.revision,
       modelDiscovery: 'openai-models',
     });
     const providerResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'https://untrusted.example/v1',
-      apiProviderId: created.id,
+      apiProviderId: created.id, endpointId: created.endpoints[0].id, revision: created.revision,
       modelDiscovery: 'openai-models',
     });
 
@@ -160,7 +189,7 @@ describe('ApiProviderService', () => {
     await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'https://untrusted.example/v1',
-      endpointId: endpoint.id,
+      endpointId: endpoint.id, apiProviderId: created.id, revision: created.revision,
       apiKey: 'replacement-secret',
       modelDiscovery: 'openai-models',
     });
@@ -187,13 +216,13 @@ describe('ApiProviderService', () => {
     const endpointResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'http://192.168.1.5:11434/v1',
-      endpointId: created.endpoints[0].id,
+      endpointId: created.endpoints[0].id, apiProviderId: created.id, revision: created.revision,
       modelDiscovery: 'ollama-tags',
     });
     const providerResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'http://192.168.1.5:11434/v1',
-      apiProviderId: created.id,
+      apiProviderId: created.id, endpointId: created.endpoints[0].id, revision: created.revision,
       modelDiscovery: 'ollama-tags',
     });
 
@@ -226,13 +255,13 @@ describe('ApiProviderService', () => {
     const endpointResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'http://192.168.1.5:11434/v1',
-      endpointId: created.endpoints[0].id,
+      endpointId: created.endpoints[0].id, apiProviderId: created.id, revision: created.revision,
       modelDiscovery: 'ollama-tags',
     });
     const providerResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'http://192.168.1.5:11434/v1',
-      apiProviderId: created.id,
+      apiProviderId: created.id, endpointId: created.endpoints[0].id, revision: created.revision,
       modelDiscovery: 'ollama-tags',
     });
 

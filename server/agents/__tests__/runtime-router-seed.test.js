@@ -90,6 +90,7 @@ function makeRouter(overrides = {}) {
     getActiveTurn: mock(() => activeTurn),
   };
   const endpointResolver = {
+    describePrevious(input) { return this.resolveSelection(input); },
     resolveSelection: mock((request) => ({
       model: request.model,
       apiProviderId: request.apiProviderId ?? null,

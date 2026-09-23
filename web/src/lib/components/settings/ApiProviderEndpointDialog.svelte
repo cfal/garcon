@@ -6,7 +6,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Select from '$lib/components/ui/select';
 	import { untrack } from 'svelte';
-	import { getModelCatalog } from '$lib/context';
+	import { getModelCatalog, getApiProviders, getExecutionNodes } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import type { ApiProtocol } from '$shared/api-providers';
@@ -19,6 +19,7 @@
 		protocol,
 		endpointId = null,
 		templateId = 'custom',
+		duplicate = false,
 		onOpenChange = () => undefined,
 	} = $props<{
 		nodeId?: string;
@@ -26,16 +27,22 @@
 		protocol: ApiProtocol;
 		endpointId?: string | null;
 		templateId?: ApiProviderTemplateId;
+		duplicate?: boolean;
 		onOpenChange?: (open: boolean) => void;
 	}>();
 
 	const rootModelCatalog = getModelCatalog();
+	const providers = getApiProviders();
+	const nodes = getExecutionNodes();
 	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
 	const dialog = new ApiProviderEndpointDialogState({
 		get modelCatalog() { return modelCatalog; },
+		providers,
+		isNodeReady: () => nodes.isReady(nodeId),
 		getProtocol: () => protocol,
 		getEndpointId: () => endpointId,
 		getTemplateId: () => templateId,
+		getDuplicate: () => duplicate,
 		onSaved: () => onOpenChange(false),
 	});
 
@@ -77,6 +84,12 @@
 				void dialog.save();
 			}}
 		>
+			{#if dialog.apiProviderId}
+				<p class="text-sm text-muted-foreground">Changes affect every node and workspace using this shared profile.</p>
+			{/if}
+			{#if !dialog.canProbe}
+				<p class="text-sm text-muted-foreground">Testing requires a ready node and an assigned profile or a newly entered key.</p>
+			{/if}
 			<div class="grid gap-2">
 				<label class="text-sm font-medium" for="api-provider-label"
 					>{m.settings_api_provider_dialog_display_name()}</label
@@ -241,7 +254,7 @@
 				>
 					{dialog.isTesting
 						? m.settings_api_provider_dialog_testing()
-						: m.settings_api_provider_dialog_test()}
+						: `Test from ${nodes.label(nodeId)}`}
 				</Button>
 				<Button type="submit" disabled={!dialog.canSave}>
 					{dialog.isSaving

@@ -41,6 +41,7 @@ import {
   ChatExecutionControlUpdatedMessage,
   ChatTransientFeedMutationMessage,
   SettingsChangedMessage,
+  ApiProvidersInvalidatedMessage,
   ExecutionNodesChangedMessage,
   TranscriptSearchStatusMessage,
   ScheduledPromptsInvalidatedMessage,
@@ -99,6 +100,7 @@ export interface ServerEventWiring {
   notifyChatPreamblesInvalidated(chatId: string, revision: number): void;
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
   broadcastTicketsInvalidated(revision: number): void;
+  broadcastApiProvidersInvalidated(): void;
   waitForIdle(): Promise<void>;
 }
 
@@ -657,6 +659,9 @@ export function wireServerEvents({
     },
     broadcastTicketsInvalidated(revision: number): void {
       broadcast(new TicketsInvalidatedMessage(revision));
+    },
+    broadcastApiProvidersInvalidated(): void {
+      broadcast(new ApiProvidersInvalidatedMessage());
     },
     waitForIdle,
   };

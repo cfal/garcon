@@ -215,6 +215,7 @@ export class AgentRuntimeRouter {
         carriedContext: carryover.context,
       };
       assertExecutionAdmissionOpen(opts);
+      this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
       const handle = await integration.execution.start(request, { signal: opts.executionAdmission?.signal });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -271,6 +272,7 @@ export class AgentRuntimeRouter {
         attachments: prepared.attachments,
       };
       assertExecutionAdmissionOpen(opts);
+      this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
       const handle = await integration.execution.resume(request, { signal: opts.executionAdmission?.signal });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -349,6 +351,7 @@ export class AgentRuntimeRouter {
       if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
       const integration = this.#directory.require(entry.agentId, entry.nodeId);
       const selection = this.#endpointResolver.resolveSelection({
+        nodeId: entry.nodeId,
         agentId: entry.agentId,
         model: entry.model,
         apiProviderId: entry.apiProviderId,
@@ -380,6 +383,7 @@ export class AgentRuntimeRouter {
         attachments: [],
       };
       assertExecutionAdmissionOpen(opts);
+      this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
       const handle = await compaction.compact(request, { signal: opts.executionAdmission?.signal });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -553,6 +557,7 @@ export class AgentRuntimeRouter {
       const integration = this.#directory.require(source.agentId, source.nodeId);
       if (!integration.forking) return null;
       const selection = this.#endpointResolver.resolveSelection({
+        nodeId: source.nodeId,
         agentId: source.agentId,
         model: source.model,
         apiProviderId: source.apiProviderId,
@@ -646,7 +651,8 @@ export class AgentRuntimeRouter {
     const integration = this.#directory.require(agentId, options.nodeId);
     if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
     const model = typeof options.model === 'string' ? options.model : '';
-    const selection = model ? this.#endpointResolver.resolveSelection({
+    const selection = model || options.apiProviderId || options.modelEndpointId ? this.#endpointResolver.resolveSelection({
+      nodeId: options.nodeId,
       agentId,
       model,
       apiProviderId: typeof options.apiProviderId === 'string' ? options.apiProviderId : null,
@@ -688,13 +694,13 @@ export class AgentRuntimeRouter {
     entry: ReturnType<typeof requireAgentChatEntry>,
     opts: Pick<RunAgentTurnOptions, 'model' | 'apiProviderId' | 'modelEndpointId'>,
   ) {
-    const previous = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
+    const previous = this.#endpointResolver.describePrevious({
       model: persistedEntry?.model || entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
     const selection = this.#endpointResolver.resolveSelection({
+      nodeId: entry.nodeId,
       agentId: entry.agentId,
       model: opts.model ?? entry.model,
       apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,

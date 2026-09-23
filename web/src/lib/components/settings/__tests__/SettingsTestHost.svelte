@@ -4,6 +4,7 @@
 	import Settings from '../Settings.svelte';
 	import {
 		setAppShell,
+		setApiProviders,
 		setFileSessions,
 		setGhCapability,
 		setLocalSettings,
@@ -19,6 +20,7 @@
 		type LocalSettingsSnapshot,
 	} from '$lib/stores/local-settings.svelte.js';
 	import { onDestroy, untrack } from 'svelte';
+	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte';
 	import { getThemeProfile, resolveThemeId } from '$lib/theme/themes.js';
 
 	interface SettingsTestHostProps {
@@ -195,6 +197,11 @@
 	});
 
 	setAppShell(untrack(() => appShell));
+	setApiProviders(new ApiProvidersStore(() => {}, {
+		read: async () => ({ providers: [], assignments: { version: 1, revision: 0, assignments: {} } }),
+		assign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
+		unassign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }), delete: async () => ({ success: true }),
+	}));
 	const files: Pick<FileSessionRegistry, 'clearRecovery'> = {
 		clearRecovery: () => onClearRecovery(),
 	};

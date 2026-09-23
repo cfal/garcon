@@ -66,7 +66,9 @@ import {
 } from './agents/core-record-migration.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
-import { ApiProviderService } from './api-providers/service.js';
+import type { ApiProviderAccess } from './api-providers/access.js';
+import { createApiProviderPolicy } from './api-providers/composition.js';
+import { AgentCallError } from '@garcon/server-agent-interface';
 import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
@@ -221,6 +223,7 @@ export async function startServer(): Promise<void> {
     // User-managed API provider store and resolver.
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
+    let providerAccess: ApiProviderAccess | null = null;
 
     const carryOver = new CarryOverTranscriptStore({ workspaceDir });
     await carryOver.initialize();
@@ -230,18 +233,20 @@ export async function startServer(): Promise<void> {
       projectBasePath: config.projectBasePath,
       integrations: defaultAgentIntegrations,
       workspaceDir,
-      async resolveCredential({ reference, signal }) {
+      async resolveCredential({ nodeId, reference, signal }) {
         signal.throwIfAborted();
-        const resolved = apiProviderStore.getEndpoint(reference.endpointId);
-        if (!resolved || resolved.apiProvider.id !== reference.apiProviderId) return null;
-        return { kind: 'api-key', value: resolved.endpoint.apiKey };
+        if (!providerAccess) throw new AgentCallError('rejected', 'Provider assignments are not ready', 'API_PROVIDER_STORAGE_UNAVAILABLE');
+        return providerAccess.resolveCredential(nodeId, reference);
       },
     });
     const retainNodeReferences = executionNodes.retainReferences;
+    const retainProviderReferences = apiProviderStore.referenceWrites.retain;
+    const providerPolicy = createApiProviderPolicy(apiProviderStore, executionNodes, workspaceDir);
+    const { access, assignments: providerAssignments } = providerPolicy;
     const terminalManager = new TerminalController(executionNodes);
     const terminalStream = new TerminalStreamHandler(terminalManager);
-    const chatRegistry = new ChatRegistry(workspaceDir, { retainNodeReferences });
-    const settings = new SettingsStore(workspaceDir, { retainNodeReferences });
+    const chatRegistry = new ChatRegistry(workspaceDir, { retainNodeReferences, retainProviderReferences });
+    const settings = new SettingsStore(workspaceDir, { retainNodeReferences, retainProviderReferences });
     const recentTitleIcons = new RecentTitleIconStore();
     settings.onSessionNameChanged((_chatId, title) => {
       try {
@@ -256,8 +261,9 @@ export async function startServer(): Promise<void> {
     const projectBasePath = executionNodes.localInfo.projectBasePath;
     const resolveTicketProject = createTicketProjectResolver((nodeId) => executionNodes.projectService(nodeId));
     const endpointResolver = new ApiProviderEndpointResolver(
+      (nodeId) => access.list(nodeId),
+      (agentId, nodeId) => directory.get(agentId, nodeId)?.descriptor.supportedEndpointProtocols ?? [],
       () => apiProviderStore.list(),
-      (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],
     );
     await workspaceMigrations.run('core-record-migration', () => (
       migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
@@ -283,6 +289,8 @@ export async function startServer(): Promise<void> {
       refreshAgentExecutionModeCoreRecords({ workspaceDir, integrations: integrationRegistry })
     ));
     await workspaceMigrations.run('fork-ordinal-cleanup', () => removeLegacyForkOrdinals(workspaceDir));
+    await providerPolicy.initialize(workspaceMigrations);
+    providerAccess = access;
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
@@ -320,6 +328,7 @@ export async function startServer(): Promise<void> {
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       retainNodeReferences,
+      retainProviderReferences,
       registry: chatRegistry,
       integrations: directory,
       ledger: transcriptLedger,
@@ -341,15 +350,7 @@ export async function startServer(): Promise<void> {
     if (workspaceMigrations.initialVersion >= 5) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
-    const apiProviders = new ApiProviderService({
-      store: apiProviderStore,
-      discoverModels: (nodeId, request) => executionNodes.requireNode(nodeId).discoverApiProviderModels(request),
-      isApiProviderReferenced(apiProviderId) {
-        return Object.values(chatRegistry.listAllChats()).some(
-          (entry) => entry.apiProviderId === apiProviderId,
-        );
-      },
-    });
+    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, settings]);
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
     executionNodes.onAvailabilityChanged((nodeId) => modelCatalogResponseCache.clear(nodeId));
     executionNodes.onChanged(() => {
@@ -365,6 +366,7 @@ export async function startServer(): Promise<void> {
     const selectionAdmissionLock = new KeyedPromiseLock();
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     let eventWiring: ServerEventWiring | null = null;
+    const stopObservingProviders = providerPolicy.observe(modelCatalogResponseCache, () => eventWiring);
     let unsubscribeSearchStatus = () => {};
     // Constructed below but captured by the carried-context callback, which only
     // runs once a session starts.
@@ -648,10 +650,12 @@ export async function startServer(): Promise<void> {
       chatTags: chatBoardRuntime.chatTags,
       chatMutationLock,
     });
+    const scheduledPromptStore = new ScheduledPromptStore(workspaceDir, retainNodeReferences, retainProviderReferences);
     const scheduledPrompts = new ScheduledPromptScheduler({
       inspectProject,
       retainNodeReferences,
-      store: new ScheduledPromptStore(workspaceDir, retainNodeReferences),
+      retainProviderReferences,
+      store: scheduledPromptStore,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: new ScheduledPromptDispatcher({ commands: chatCommands, chatIds }),
       chats: chatRegistry,
@@ -734,6 +738,7 @@ export async function startServer(): Promise<void> {
       for (const id of configuredNodes) {
         if (!current.has(id)) {
           void settings.forgetExecutionNode(id).catch((error) => logger.warn('Could not prune execution-node preferences', error));
+          void providerAssignments.prune([...current]).catch(() => logger.warn('Could not prune provider assignments'));
           void agentOwnership.retireRemovedNode(id).catch((error) => logger.warn('Could not retire removed-node cleanup', error));
         }
       }
@@ -913,6 +918,7 @@ export async function startServer(): Promise<void> {
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();
       executionNodes.quiesce();
+      stopObservingProviders();
       handoffs.shutdown();
       let abortTimedOut = false;
       let cleanupFailed = false;

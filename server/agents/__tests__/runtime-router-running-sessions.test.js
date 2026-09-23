@@ -55,6 +55,7 @@ function makeRouter(execution) {
       list: mock(() => [integration]),
     },
     endpointResolver: {
+      describePrevious(input) { return this.resolveSelection(input); },
       resolveSelection: mock((request) => ({
         model: request.model,
         apiProviderId: null,

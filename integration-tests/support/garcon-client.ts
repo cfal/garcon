@@ -419,7 +419,7 @@ export class GarconTestClient {
   }
 
   async createOpenAiProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
-    const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${encodeURIComponent(this.nodeId)}`, {
       templateId: 'custom',
       label: 'Integration Fake OpenAI',
       endpoint: {
@@ -445,7 +445,7 @@ export class GarconTestClient {
 
   async createOpenAiResponsesProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
     const model = 'integration-responses-echo';
-    const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${encodeURIComponent(this.nodeId)}`, {
       templateId: 'custom',
       label: 'Integration Fake OpenAI Responses',
       endpoint: {
@@ -471,7 +471,7 @@ export class GarconTestClient {
 
   async createAnthropicProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
     const model = 'integration-anthropic-echo';
-    const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${encodeURIComponent(this.nodeId)}`, {
       templateId: 'custom',
       label: 'Integration Fake Anthropic',
       endpoint: {

@@ -104,7 +104,7 @@ async function buildCatalogResponse(modelCatalog: ModelCatalog, nodeId: string):
   const body = {
     catalog: {
       agents: await modelCatalog.agents.getAgentCatalogEntries(nodeId),
-      apiProviders: modelCatalog.apiProviders.getCatalog(),
+      apiProviders: modelCatalog.apiProviders.getCatalog(nodeId),
     },
   };
 

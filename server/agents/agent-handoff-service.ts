@@ -146,6 +146,7 @@ export class AgentHandoffService {
       );
     }
     const selection = this.deps.endpointResolver.resolveSelection({
+      nodeId,
       agentId: requested.agentId,
       model: requested.model,
       apiProviderId: requested.apiProviderId,
@@ -181,6 +182,7 @@ export class AgentHandoffService {
           kind: 'api-provider-endpoint',
           apiProviderId: selection.apiProviderId!,
           endpointId: selection.endpointId!,
+          revision: endpoint.apiProvider.revision,
         },
       });
     }
@@ -299,6 +301,7 @@ export class AgentHandoffService {
           this.#requireUnchangedSource(input.chatId, sourceFence);
           context.assertAdmissionActive();
           this.deps.integrations.require(input.target.agentId, input.target.nodeId);
+          this.deps.endpointResolver.resolveSelection(input.target);
           decisionAttempted = true;
           const intent = await this.deps.ownership.decideHandoff({
             operationId,

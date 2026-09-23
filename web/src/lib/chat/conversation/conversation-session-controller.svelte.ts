@@ -63,6 +63,7 @@ import {
 	type ConversationExecutionSelection,
 } from './conversation-execution-draft-state.svelte.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
+import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'activeChatId'
@@ -624,15 +625,21 @@ export class ConversationSessionController {
 		}
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
-		const nodeId = deps.sessions.selectedChatId === chatId ? deps.agentState.nodeId : selected.nodeId ?? 'local';
-		if (!deps.canSubmitToNode(nodeId)) {
+		const startup = deps.sessions.startupByChatId[chatId];
+		let selection: Parameters<typeof isCustomProviderSelectionAvailable>[1] & { nodeId?: string | null } = selected;
+		if (selected.status === 'draft' && startup) {
+			selection = startup;
+		} else if (deps.sessions.selectedChatId === chatId) {
+			selection = deps.agentState;
+		}
+		const nodeId = selection.nodeId ?? 'local';
+		if (!deps.canSubmitToNode(nodeId) || !isCustomProviderSelectionAvailable(deps.modelCatalogForNode(nodeId), selection)) {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId, messageOverride ?? '', imageOverride ?? [])
 				: 'no-op';
 		}
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
 		const isDraft = selected.status === 'draft';
-		const startup = deps.sessions.startupByChatId[chatId];
 		const draft = deps.composerState.draftSnapshot(chatId);
 		const text = messageOverride ?? draft.text.trim();
 		const submissionImages = imageOverride ?? draft.attachments;
@@ -797,7 +804,8 @@ export class ConversationSessionController {
 	async submitComposerWithSteerPreference(chatId: string): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)
-			|| !deps.canSubmitToNode(deps.agentState.nodeId)) {
+			|| !deps.canSubmitToNode(deps.agentState.nodeId)
+			|| !isCustomProviderSelectionAvailable(deps.modelCatalogForNode(deps.agentState.nodeId), deps.agentState)) {
 			return 'no-op';
 		}
 		const selected = deps.sessions.byId[chatId];

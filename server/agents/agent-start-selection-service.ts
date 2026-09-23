@@ -23,7 +23,7 @@ export class AgentStartSelectionService {
     const entry = await this.deps.agents.getAgentCatalogEntry(agentId, { strict: true, nodeId });
     return { catalog: {
       agents: entry ? [entry] : [],
-      apiProviders: this.deps.apiProviders.getCatalog(),
+      apiProviders: this.deps.apiProviders.getCatalog(effectiveNodeId(nodeId)),
     } };
   }
 

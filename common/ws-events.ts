@@ -352,6 +352,10 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) {}
 }
 
+export class ApiProvidersInvalidatedMessage {
+  readonly type = 'api-providers-invalidated' as const;
+}
+
 export class ExecutionNodesChangedMessage {
   readonly type = 'execution-nodes-changed' as const;
   constructor(readonly nodes: readonly ExecutionNodeSnapshot[]) {}
@@ -452,6 +456,7 @@ export type ServerWsMessage =
   | ChatBoardsInvalidatedMessage
   | TicketsInvalidatedMessage
   | SettingsChangedMessage
+  | ApiProvidersInvalidatedMessage
   | ExecutionNodesChangedMessage
   | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
@@ -889,6 +894,8 @@ export function parseServerWsMessage(
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;
     }
+    case 'api-providers-invalidated':
+      return Object.keys(data).length === 1 ? new ApiProvidersInvalidatedMessage() : null;
     case 'execution-nodes-changed': {
       const nodes = parseExecutionNodes(data.nodes);
       return nodes ? new ExecutionNodesChangedMessage(nodes) : null;

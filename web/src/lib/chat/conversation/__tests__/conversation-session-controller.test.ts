@@ -667,7 +667,7 @@ function createDeps(chat = createRunningChat()) {
 			openNewChatDialog: vi.fn(),
 		},
 		modelCatalog: {
-			getModelForSelection: vi.fn((_agentId: string, model: string) => ({ value: model, label: model })),
+			getModelForSelection: vi.fn<SessionControllerDeps['modelCatalog']['getModelForSelection']>((_agentId, model) => ({ value: model, label: model })),
 			isLocalModel: vi.fn(() => false),
 			selectionFor: vi.fn<SessionControllerDeps['modelCatalog']['selectionFor']>(
 				(_provider, model) => ({
@@ -2067,7 +2067,13 @@ describe('ConversationSessionController', () => {
 		deps.agentState.modelProtocol = 'openai-compatible';
 		deps.composerState.inputText = 'continue recovered chat';
 
-		await new ConversationSessionController(deps).submitForChat('chat-1');
+		const controller = new ConversationSessionController(deps);
+		expect(await controller.submitForChat('chat-1')).toBe('no-op');
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('continue recovered chat');
+		expect(deps.agentState.apiProviderId).toBe('provider-1');
+		deps.modelCatalog.getModelForSelection.mockReturnValue({ value: 'integration-echo', label: 'Synthetic', apiProviderId: 'provider-1' });
+		await controller.submitForChat('chat-1');
 
 		expect(mockRunChat).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -2460,6 +2466,28 @@ describe('ConversationSessionController', () => {
 		} finally {
 			vi.stubGlobal('FileReader', originalFileReader);
 		}
+	});
+
+	it.each(['submit', 'steer', 'bypass', 'approve-edits'])('preserves inputs when an unassigned provider blocks %s', async (route) => {
+		const { deps } = createDeps(createRunningChat({ apiProviderId: 'profile_one', modelEndpointId: 'profile_one_openai' }));
+		deps.agentState.apiProviderId = 'profile_one';
+		deps.agentState.modelEndpointId = 'profile_one_openai';
+		deps.composerState.inputText = 'Keep this input';
+		const request: PendingPermissionRequest = {
+			permissionOccurrenceId: 'plan-exit-1',
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		};
+		deps.conversationUi.pendingPermissionRequests = [request];
+		const controller = new ConversationSessionController(deps);
+		if (route === 'submit') expect(await controller.submitForChat('chat-1')).toBe('no-op');
+		else if (route === 'steer') expect(await controller.submitComposerWithSteerPreference('chat-1')).toBe('no-op');
+		else controller.handleExitPlanModeForChat('chat-1', request.permissionOccurrenceId, route, 'Synthetic plan');
+		await flushPromises();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockStartChat).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('Keep this input');
+		expect(deps.conversationUi.pendingPermissionRequests).toEqual([request]);
+		expect(deps.conversationUi.finishPlanModeForChat).not.toHaveBeenCalled();
 	});
 
 	it.each(['bypass', 'approve-edits'])('retains %s plan approval until the durable node admits input', async (choice) => {

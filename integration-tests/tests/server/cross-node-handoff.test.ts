@@ -8,6 +8,7 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
     await withIntegrationFixture(`cross-node-handoff-${backend}`, async (fixture) => {
       const client = fixture.client;
       const agent = fixture.directAgents.openAi;
+      await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${agent.provider.providerId}`, {});
       const chatId = fixture.newChatId();
       const nativeId = () => waitForPersistedChat({
         directories: fixture.dirs, chatId, select: (chat) => chat.agentSessionId,

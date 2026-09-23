@@ -56,8 +56,8 @@ export class AgentCatalogService {
     return this.deps.endpointResolver.modelSupportsImages(input);
   }
 
-  hasEndpointModels(agentId: string): boolean {
-    return this.deps.endpointResolver.getModelOptions(agentId).length > 0;
+  hasEndpointModels(agentId: string, nodeId?: string | null): boolean {
+    return this.deps.endpointResolver.getModelOptions(agentId, effectiveNodeId(nodeId)).length > 0;
   }
 
   requiresStrictModelDiscovery(agentId: string, nodeId?: string | null): boolean {
@@ -72,7 +72,7 @@ export class AgentCatalogService {
     if (!integration) return null;
     const snapshot = await this.#snapshot(agentId, query);
     const endpointModels = integration.endpoints
-      ? this.deps.endpointResolver.getModelOptions(agentId)
+      ? this.deps.endpointResolver.getModelOptions(agentId, effectiveNodeId(query.nodeId))
       : [];
     const models = dedupeModels([...snapshot.models, ...endpointModels]);
     return {

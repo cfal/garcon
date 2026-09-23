@@ -23,8 +23,9 @@ test.each(['remote-controller-dials', 'remote-node-dials'] as const)('endpoint p
           modelDiscovery: 'openai-models', supportsImages: false,
         },
       };
-      const saved = await client.post<ApiProviderCatalogEntry>('/api/v1/api-providers', input);
-      const discovery = { protocol: 'openai-compatible', baseUrl: input.endpoint.baseUrl, endpointId: saved.endpoints[0]!.id };
+      const saved = await client.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${client.nodeId}`, input);
+      const discovery = { protocol: 'openai-compatible', baseUrl: input.endpoint.baseUrl,
+        apiProviderId: saved.id, endpointId: saved.endpoints[0]!.id, revision: saved.revision };
       for (const [path, body] of [['test', input], ['models', discovery]] as const) {
         const result = await client.post<ApiProviderModelDiscoveryResponse>(`/api/v1/api-providers/${path}?nodeId=${client.nodeId}`, body);
         expect(result).toEqual({ success: true, models: [{ value: 'synthetic-worker-model', label: 'synthetic-worker-model' }] });
@@ -36,6 +37,8 @@ test.each(['remote-controller-dials', 'remote-node-dials'] as const)('endpoint p
           .rejects.toMatchObject({ status: 503, body: { errorCode: 'EXECUTION_NODE_UNAVAILABLE' } });
       }
       expect(calls).toHaveLength(2);
+      await expect(client.post('/api/v1/api-providers/models', discovery)).rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
+      await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${saved.id}`, {});
       expect(await client.post<ApiProviderModelDiscoveryResponse>('/api/v1/api-providers/models', discovery)).toMatchObject({ success: true });
       expect(calls).toHaveLength(3);
     }, { executionBackend });

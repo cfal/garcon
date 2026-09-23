@@ -1,5 +1,6 @@
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentHost } from '@garcon/server-agent-interface';
+import { AgentCallError } from '@garcon/server-agent-interface';
 
 export interface ResolvedAgentEndpoint {
   readonly selection: AgentEndpointSelection;
@@ -19,8 +20,9 @@ export async function resolveAgentEndpoint(
     signal,
   });
   signal.throwIfAborted();
+  if (!credential) throw new AgentCallError('rejected', 'Provider credential is unavailable', 'API_PROVIDER_UNAVAILABLE');
   return {
     selection,
-    credential: credential?.value ?? null,
+    credential: credential.value,
   };
 }

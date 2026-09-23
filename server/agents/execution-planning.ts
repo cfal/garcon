@@ -28,6 +28,7 @@ export function toAgentEndpointSelection(
     || !selection.endpointId
     || !selection.protocol
   ) return null;
+  if (selection.endpoint) return selection.endpoint;
   return {
     apiProviderId: selection.apiProviderId,
     endpointId: selection.endpointId,
@@ -42,6 +43,7 @@ export function toAgentEndpointSelection(
       kind: 'api-provider-endpoint',
       apiProviderId: selection.apiProviderId,
       endpointId: selection.endpointId,
+      revision: reference.apiProvider.revision,
     },
   };
 }

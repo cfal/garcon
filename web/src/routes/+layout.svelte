@@ -13,6 +13,8 @@
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 	import { ExecutionNodesRouter } from '$lib/events/execution-nodes-router.svelte.js';
+	import { ApiProvidersRouter } from '$lib/events/api-providers-router.svelte.js';
+	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
@@ -52,6 +54,7 @@
 		setScheduledPrompts,
 		setPreambles,
 		setExecutionNodes,
+		setApiProviders,
 		setChatPreambleSelectionInvalidationHub,
 		setSnippets,
 		setWorkspaceLayout,
@@ -310,6 +313,9 @@
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	const executionNodesRouter = new ExecutionNodesRouter(ws, executionNodes);
+	const apiProviders = new ApiProvidersStore(() => modelCatalog.invalidateAll());
+	setApiProviders(apiProviders);
+	const apiProvidersRouter = new ApiProvidersRouter(ws, apiProviders);
 	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
 	const ticketsRouter = new TicketsRouter(ws, ticketsInvalidations);
 	settingsRouter.start();
@@ -318,6 +324,7 @@
 	preamblesRouter.start();
 	snippetsRouter.start();
 	executionNodesRouter.start();
+	apiProvidersRouter.start();
 	chatBoardsRouter.start();
 	ticketsRouter.start();
 	$effect(() => {
@@ -328,6 +335,7 @@
 		preamblesRouter.tick();
 		snippetsRouter.tick();
 		executionNodesRouter.tick();
+		apiProvidersRouter.tick();
 		chatBoardsRouter.tick();
 		ticketsRouter.tick();
 	});
@@ -344,6 +352,7 @@
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 		untrack(() => void executionNodes.refresh());
+		untrack(() => { apiProviders.invalidate(); void modelCatalog.refreshIfStale(); });
 		// A reconnect also refreshes an already-open chat selection editor;
 		// its dirty draft is preserved by the controller's refresh path.
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
@@ -439,6 +448,7 @@
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		executionNodesRouter.destroy();
+		apiProvidersRouter.destroy();
 		ghCapability.destroy();
 		chatBoardsRouter.destroy();
 		ticketsRouter.destroy();

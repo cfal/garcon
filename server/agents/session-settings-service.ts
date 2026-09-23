@@ -39,8 +39,8 @@ export class AgentSessionSettingsService {
 
   async validateConfiguration(input: AgentConfigurationInput): Promise<void> {
     const integration = this.deps.directory.require(input.agentId, input.nodeId);
-    if (!integration.configurationValidation) return;
     const selection = this.deps.endpointResolver.resolveSelection(input);
+    if (!integration.configurationValidation) return;
     await integration.configurationValidation.validate({
       model: selection.model,
       permissionMode: normalizePermissionMode(input.permissionMode),
@@ -61,13 +61,13 @@ export class AgentSessionSettingsService {
       const entry = this.deps.registry.getChat(chatId);
       if (!entry) throw new Error(`Session not found: ${chatId}`);
       const integration = this.deps.directory.require(entry.agentId, entry.nodeId);
-      const previous = this.deps.endpointResolver.resolveSelection({
-        agentId: entry.agentId,
+      const previous = this.deps.endpointResolver.describePrevious({
         model: entry.model,
         apiProviderId: entry.apiProviderId,
         modelEndpointId: entry.modelEndpointId,
       });
       const next = this.deps.endpointResolver.resolveSelection({
+        nodeId: entry.nodeId,
         agentId: entry.agentId,
         model: patch.model ?? entry.model,
         apiProviderId: patch.apiProviderId !== undefined ? patch.apiProviderId : entry.apiProviderId,
@@ -117,6 +117,7 @@ export class AgentSessionSettingsService {
         endpoint,
       };
       await integration.configurationValidation?.validate(configuration);
+      this.deps.endpointResolver.resolveEndpointReference(next);
       if (entry.agentSessionId && integration.sessionConfiguration) {
         await integration.sessionConfiguration.apply(
           entry.agentSessionId,
@@ -129,7 +130,7 @@ export class AgentSessionSettingsService {
               integration.descriptor.supportedThinkingModes,
             ),
             settings: currentSettings,
-            endpoint: toAgentEndpointSelection(this.deps.endpointResolver, previous),
+            endpoint: previous.endpoint ?? null,
           },
         );
       }

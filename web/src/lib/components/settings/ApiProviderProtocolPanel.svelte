@@ -11,15 +11,14 @@
 	import { cn } from '$lib/utils/cn.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import PencilIcon from '@lucide/svelte/icons/pencil';
-	import TrashIcon from '@lucide/svelte/icons/trash';
-	import { getModelCatalog } from '$lib/context';
+	import { onMount } from 'svelte';
+	import { getApiProviders, getExecutionNodes } from '$lib/context';
 	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
 	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents';
 	import { templatesForProtocol, type ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import ApiProviderEndpointDialog from './ApiProviderEndpointDialog.svelte';
 	import AgentCard from './AgentCard.svelte';
-	import { deleteApiProviderEndpoint } from './api-provider-endpoint-dialog-state.svelte';
+	import ApiProviderProfileRow from './ApiProviderProfileRow.svelte';
 
 	interface AuthStatus {
 		authenticated: boolean;
@@ -62,13 +61,13 @@
 		onCompleteLogin?: (code: string) => void;
 	} = $props();
 
-	const rootModelCatalog = getModelCatalog();
-	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
+	const providers = getApiProviders();
+	const nodes = getExecutionNodes();
+	onMount(() => providers.retain());
 	let dialogOpen = $state(false);
 	let editingEndpointId = $state<string | null>(null);
 	let createTemplateId = $state<ApiProviderTemplateId>('custom');
-	let deleteEndpointId = $state<string | null>(null);
-	let error = $state<string | null>(null);
+	let duplicate = $state(false);
 	let oauthOpen = $state(false);
 	const templateOptions = $derived(templatesForProtocol(protocol));
 
@@ -77,7 +76,7 @@
 			apiProvider: ApiProviderCatalogEntry;
 			endpoint: ApiProviderCatalogEntry['endpoints'][number];
 		}> = [];
-		for (const apiProvider of modelCatalog.apiProviderCatalog) {
+		for (const apiProvider of providers.providers) {
 			for (const endpoint of apiProvider.endpoints) {
 				if (endpoint.protocol === protocol) rows.push({ apiProvider, endpoint });
 			}
@@ -93,26 +92,15 @@
 
 	function beginCreate(templateId: ApiProviderTemplateId) {
 		editingEndpointId = null;
+		duplicate = false;
 		createTemplateId = templateId;
-		error = null;
 		dialogOpen = true;
 	}
 
 	function beginEdit(endpointId: string) {
 		editingEndpointId = endpointId;
-		error = null;
+		duplicate = false;
 		dialogOpen = true;
-	}
-
-	async function confirmDelete() {
-		if (!deleteEndpointId) return;
-		error = null;
-		try {
-			await deleteApiProviderEndpoint(modelCatalog, deleteEndpointId);
-			deleteEndpointId = null;
-		} catch (err) {
-			error = err instanceof Error ? err.message : String(err);
-		}
 	}
 
 	function templateMenuLabel(templateId: ApiProviderTemplateId): string {
@@ -156,15 +144,17 @@
 		</DropdownMenu>
 	</div>
 
-	{#if error}
+	<p class="text-xs text-muted-foreground">Assigned nodes can receive this profile's credentials. Removing access does not revoke keys already received.</p>
+	{#if providers.error}
 		<div
 			class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
 		>
-			{error}
+			{providers.error}
+			<Button variant="outline" size="sm" onclick={() => providers.refresh()}>Retry</Button>
 		</div>
 	{/if}
 
-	{#if oauthAgent && auth}
+	{#if oauthAgent && auth && nodes.isReady(nodeId)}
 		<AgentCard
 			agentId={oauthAgent.id}
 			agentName={oauthAgent.name}
@@ -183,74 +173,18 @@
 
 	<div class="space-y-2">
 		{#each endpointRows as row (row.endpoint.id)}
-			<div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
-				<div class="flex items-start justify-between gap-3">
-					<div class="min-w-0 space-y-1">
-						<div class="flex items-center gap-2">
-							<div class="truncate text-sm font-medium text-foreground">
-								{row.apiProvider.label}
-							</div>
-						</div>
-						<div class="truncate text-xs text-muted-foreground">{row.endpoint.baseUrl}</div>
-						<div class="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-							<span
-								>{m.settings_api_providers_model_count({ count: row.endpoint.models.length })}</span
-							>
-							<span
-								>{m.settings_api_providers_default_model({
-									model: row.endpoint.defaultModel,
-								})}</span
-							>
-							<span
-								>{row.endpoint.hasApiKey
-									? m.settings_api_providers_key_configured()
-									: m.settings_api_providers_no_key()}</span
-							>
-						</div>
-					</div>
-
-					<div class="flex shrink-0 items-center gap-1">
-						<Button variant="outline" size="sm" onclick={() => beginEdit(row.endpoint.id)}>
-							<PencilIcon class="mr-1 size-3" />
-							{m.settings_api_providers_edit()}
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							onclick={() => {
-								deleteEndpointId = row.endpoint.id;
-							}}
-						>
-							<TrashIcon class="size-4" />
-						</Button>
-					</div>
-				</div>
-
-				{#if deleteEndpointId === row.endpoint.id}
-					<div
-						class="mt-3 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2"
-					>
-						<span class="text-sm text-destructive">{m.settings_api_providers_confirm_delete()}</span
-						>
-						<Button variant="destructive" size="sm" onclick={confirmDelete}
-							>{m.settings_api_providers_delete()}</Button
-						>
-						<Button
-							variant="outline"
-							size="sm"
-							onclick={() => {
-								deleteEndpointId = null;
-							}}>{m.settings_api_providers_cancel()}</Button
-						>
-					</div>
-				{/if}
-			</div>
+			<svelte:boundary>
+				<ApiProviderProfileRow profile={row.apiProvider} endpoint={row.endpoint} onEdit={() => beginEdit(row.endpoint.id)}
+					onDuplicate={() => { beginEdit(row.endpoint.id); duplicate = true; }} />
+				{#snippet failed()}<p class="text-sm text-destructive">Unable to display provider.</p>{/snippet}
+			</svelte:boundary>
 		{/each}
 	</div>
 
 	{#if dialogOpen}
 		<ApiProviderEndpointDialog
 			{nodeId}
+			{duplicate}
 			open={dialogOpen}
 			{protocol}
 			endpointId={editingEndpointId}

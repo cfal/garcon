@@ -97,11 +97,7 @@
 			<div class="flex-1 min-h-0 overflow-y-auto px-6 py-6" bind:this={scrollContainer}>
 				<Tabs.Content value="providers" class="mt-0 space-y-6">
 					{@render tabDescription(m.settings_providers_description())}
-					{#if executionNodes.isReady(nodeId)}
-						<ApiProvidersSection {settingsAuth} {nodeId} />
-					{:else}
-						<p class="text-sm text-muted-foreground">{executionNodes.label(nodeId)} is unavailable.</p>
-					{/if}
+					<ApiProvidersSection {settingsAuth} {nodeId} />
 				</Tabs.Content>
 
 				<Tabs.Content value="other-agents" class="mt-0 space-y-6">

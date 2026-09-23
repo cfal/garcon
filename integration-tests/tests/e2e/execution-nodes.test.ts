@@ -97,6 +97,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       const inboundDescriptor = await fixture.page.$eval('#execution-node-url', (element) => (element as HTMLInputElement).value);
       const inbound = await nodeByLabel(fixture, 'Inbound Worker');
       expect(inbound.availability).toBe('offline');
+      await fixture.integration.client.put(`/api/v1/api-provider-assignments?nodeId=${inbound.id}&apiProviderId=${fixture.integration.directAgents.openAi.provider.providerId}`, {});
       const inboundUrl = new URL(inboundDescriptor);
       inboundUrl.protocol = 'ws:';
       inboundUrl.host = new URL(fixture.baseUrl).host;

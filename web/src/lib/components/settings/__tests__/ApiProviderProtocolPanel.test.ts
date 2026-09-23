@@ -1,10 +1,55 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ApiProviderProtocolPanelTestHost from './ApiProviderProtocolPanelTestHost.svelte';
 
 describe('ApiProviderProtocolPanel', () => {
 	afterEach(() => {
 		cleanup();
+	});
+
+	it('restores a failed unassignment and retries revocation on the next click', async () => {
+		const unassign = vi.fn(async () => {
+			throw new Error('Assignment write failed');
+		});
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible',
+			title: 'OpenAI Providers',
+			description: '',
+			addLabel: 'Add provider',
+			unassign,
+			apiProviderCatalog: [
+				{
+					id: 'custom',
+					revision: 1,
+					label: 'Custom',
+					templateId: 'custom',
+					createdAt: '2026-01-01T00:00:00Z',
+					updatedAt: '2026-01-01T00:00:00Z',
+					endpoints: [
+						{
+							id: 'custom_openai',
+							protocol: 'openai-compatible',
+							baseUrl: 'https://example.test/v1',
+							hasApiKey: true,
+							supportsImages: false,
+							capabilities: { chatCompletions: true, responses: false },
+							defaultModel: 'model',
+							models: [],
+							modelDiscovery: 'none',
+						},
+					],
+				},
+			],
+		});
+		const checkbox = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Local' });
+		expect(checkbox.checked).toBe(true);
+		await fireEvent.click(checkbox);
+		await screen.findByText('Assignment write failed');
+		await waitFor(() => expect(checkbox.closest('fieldset')?.disabled).toBe(false));
+		expect(checkbox.checked).toBe(true);
+		await fireEvent.click(checkbox);
+		await waitFor(() => expect(unassign).toHaveBeenCalledTimes(2));
+		expect(unassign).toHaveBeenLastCalledWith('local', 'custom');
 	});
 
 	it('shows protocol-specific Anthropic add-provider templates', async () => {
@@ -107,6 +152,7 @@ describe('ApiProviderProtocolPanel', () => {
 			apiProviderCatalog: [
 				{
 					id: 'openrouter',
+					revision: 1,
 					label: 'OpenRouter',
 					templateId: 'openrouter',
 					createdAt: '2026-01-01T00:00:00.000Z',
@@ -144,6 +190,7 @@ describe('ApiProviderProtocolPanel', () => {
 			apiProviderCatalog: [
 				{
 					id: 'zebra',
+					revision: 1,
 					label: 'Zebra AI',
 					templateId: 'custom',
 					createdAt: '2026-01-01T00:00:00.000Z',
@@ -164,6 +211,7 @@ describe('ApiProviderProtocolPanel', () => {
 				},
 				{
 					id: 'alpha',
+					revision: 1,
 					label: 'Alpha Corp',
 					templateId: 'custom',
 					createdAt: '2026-01-01T00:00:00.000Z',
@@ -184,6 +232,7 @@ describe('ApiProviderProtocolPanel', () => {
 				},
 				{
 					id: 'middle',
+					revision: 1,
 					label: 'Middle Inc',
 					templateId: 'custom',
 					createdAt: '2026-01-01T00:00:00.000Z',

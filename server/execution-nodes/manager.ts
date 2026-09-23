@@ -227,7 +227,7 @@ export class ExecutionNodeManager {
           || !this.options.integrations.some((integration) => integration.integrationId === call.integrationId)) {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
         }
-        return this.options.resolveCredential({ agentId: call.integrationId, reference: call.request.reference, signal });
+        return this.options.resolveCredential({ nodeId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
       }), reportError, entry.inventory);
       entry.node.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;

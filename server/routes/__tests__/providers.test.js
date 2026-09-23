@@ -272,11 +272,12 @@ describe('agent auth login routes', () => {
     parseJsonBody.mockImplementationOnce(() => Promise.resolve(input));
     const handler = routes['/api/v1/api-providers'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/api-providers', { method: 'POST' }));
+    const url = new URL('http://localhost/api/v1/api-providers?nodeId=local');
+    const response = await handler(new Request(url, { method: 'POST' }), url);
     const body = await response.json();
 
     expect(response.status).toBe(201);
-    expect(apiProviders.create).toHaveBeenCalledWith(input);
+    expect(apiProviders.create).toHaveBeenCalledWith(input, 'local');
     expect(body.id).toBe('custom_one');
   });
 
@@ -287,7 +288,8 @@ describe('agent auth login routes', () => {
     ));
     const handler = routes['/api/v1/api-providers'].POST;
 
-    const response = await handler(new Request('http://localhost/api/v1/api-providers', { method: 'POST' }));
+    const url = new URL('http://localhost/api/v1/api-providers');
+    const response = await handler(new Request(url, { method: 'POST' }), url);
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
@@ -387,7 +389,8 @@ describe('agent auth login routes', () => {
 
     parseJsonBody.mockImplementationOnce(() => Promise.resolve(providerInput));
     const handler = routes['/api/v1/api-providers'].POST;
-    const response = await handler(new Request('http://localhost/api/v1/api-providers', { method: 'POST' }));
+    const url = new URL('http://localhost/api/v1/api-providers');
+    const response = await handler(new Request(url, { method: 'POST' }), url);
     expect(response.status).toBe(201);
 
     await responseCache.getSnapshot({ agents, apiProviders });
@@ -413,7 +416,7 @@ describe('agent auth login routes', () => {
     expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
 
     const handler = routes['/api/v1/api-providers'].DELETE;
-    const request = new Request('http://localhost/api/v1/api-providers?id=custom_one', { method: 'DELETE' });
+    const request = new Request('http://localhost/api/v1/api-providers?id=custom_one&acknowledgeSharedImpact=true', { method: 'DELETE' });
     const response = await handler(request, new URL(request.url));
     expect(response.status).toBe(200);
 

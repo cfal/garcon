@@ -34,6 +34,7 @@ export interface IntegrationHostFactoryOptions {
   readonly nodeId?: string;
   readonly instanceId?: string;
   readonly resolveCredential: (request: {
+    readonly nodeId: string;
     readonly agentId: string;
     readonly reference: AgentCredentialReference;
     readonly signal: AbortSignal;
@@ -270,6 +271,7 @@ export class IntegrationHostFactory implements AgentHostFactory {
     );
     const apiProviders: AgentApiProviderReader = {
       resolveCredential: ({ reference, signal }) => this.#options.resolveCredential({
+        nodeId: this.#options.nodeId ?? 'local',
         agentId,
         reference,
         signal,

@@ -2,7 +2,8 @@
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 	import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
 
-	let { nodeId, nodes, catalog }: {
+	let { nodeId, nodes, catalog, providerAvailable = true }: {
+		providerAvailable?: boolean;
 		nodeId: string;
 		nodes: Pick<ExecutionNodesStore, 'isReady' | 'hasSnapshot' | 'get' | 'label'>;
 		catalog: Pick<ModelCatalogStore, 'isValidated' | 'error' | 'forceRefresh'>;
@@ -26,4 +27,6 @@
 			>
 		{:else}Loading models...{/if}
 	</div>
+{:else if !providerAvailable}
+	<p role="status" class="break-words px-4 py-2 text-sm text-muted-foreground">The selected provider or model is unavailable on this node.</p>
 {/if}

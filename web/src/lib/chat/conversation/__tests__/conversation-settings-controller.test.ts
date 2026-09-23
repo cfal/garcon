@@ -86,14 +86,21 @@ function createHarness() {
 		setModelSelection: vi.fn(),
 	};
 	const modelCatalog = {
-		selectionFor: vi.fn(() => ({
-			model: 'opus',
-			apiProviderId: null,
-			modelEndpointId: null,
-			modelProtocol: null,
-		})),
+		getModelForSelection: vi.fn<
+			ConversationSettingsControllerOptions['modelCatalog']['getModelForSelection']
+		>(() => ({ value: 'opus', label: 'Opus' })),
+		selectionFor: vi.fn<ConversationSettingsControllerOptions['modelCatalog']['selectionFor']>(
+			() => ({
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			}),
+		),
 		selectionValueFor: vi.fn((_: unknown, model: string) => model),
-		isLocalModel: vi.fn(() => false),
+		isLocalModel: vi.fn<ConversationSettingsControllerOptions['modelCatalog']['isLocalModel']>(
+			() => false,
+		),
 		getPermissionModes: vi.fn(() => ['default'] as const),
 		getThinkingModes: vi.fn(() => ['none'] as const),
 	};
@@ -104,15 +111,29 @@ function createHarness() {
 		patchSelection: vi.fn(),
 	};
 	const options = {
-		get sessions() { return sessions; },
-		get agentState() { return agentState; },
-		get modelCatalog() { return modelCatalog; },
-		get chatState() { return chatState; },
-		get agentSwitch() { return agentSwitch; },
-		get executionDraft() { return executionDraft; },
+		get sessions() {
+			return sessions;
+		},
+		get agentState() {
+			return agentState;
+		},
+		get modelCatalog() {
+			return modelCatalog;
+		},
+		get chatState() {
+			return chatState;
+		},
+		get agentSwitch() {
+			return agentSwitch;
+		},
+		get executionDraft() {
+			return executionDraft;
+		},
 	} satisfies ConversationSettingsControllerOptions;
 	return {
 		controller: new ConversationSettingsController(options),
+		modelCatalog,
+		chatState,
 		sessions,
 		agentState,
 		executionDraft,
@@ -122,6 +143,46 @@ function createHarness() {
 describe('ConversationSettingsController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(updateChatModel).mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			model: 'opus',
+		});
+	});
+
+	it('lets the server validate repair of an unavailable local-model selection', () => {
+		const { controller, sessions, modelCatalog, chatState } = createHarness();
+		sessions.selectedChat.model = 'old-local';
+		sessions.selectedChat.modelEndpointId = 'unassigned_endpoint';
+		modelCatalog.getModelForSelection.mockReturnValue(null);
+		modelCatalog.isLocalModel.mockImplementation((_, model) => model === 'replacement');
+		modelCatalog.selectionFor.mockReturnValue({
+			model: 'replacement',
+			apiProviderId: 'assigned',
+			modelEndpointId: 'assigned_endpoint',
+			modelProtocol: 'anthropic-messages',
+		});
+
+		controller.handleModelChange('replacement');
+
+		expect(updateChatModel).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			model: 'replacement',
+			apiProviderId: 'assigned',
+			modelEndpointId: 'assigned_endpoint',
+			modelProtocol: 'anthropic-messages',
+		});
+		expect(chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('still blocks a known cloud-to-local switch before updating the chat', () => {
+		const { controller, modelCatalog, chatState } = createHarness();
+		modelCatalog.isLocalModel.mockImplementation((_, model) => model === 'local-model');
+
+		controller.handleModelChange('local-model');
+
+		expect(updateChatModel).not.toHaveBeenCalled();
+		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
 	});
 
 	it('ignores an older agent-settings response after a newer mutation settles', async () => {

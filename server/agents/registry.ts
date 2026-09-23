@@ -487,7 +487,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
       const nativeReady = status?.authenticated === true;
       const endpointReady = integration.endpoints !== null
-        && this.#catalog.hasEndpointModels(integration.descriptor.id);
+        && this.#catalog.hasEndpointModels(integration.descriptor.id, nodeId);
       return [integration.descriptor.id, {
         ready: nativeReady || endpointReady,
         nativeReady,

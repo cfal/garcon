@@ -5,6 +5,7 @@ function makeResolver() {
   return new ApiProviderEndpointResolver(() => [
     {
       id: 'acme',
+      revision: 1,
       label: 'Acme',
       templateId: 'custom',
       createdAt: '2026-05-03T00:00:00.000Z',
@@ -86,7 +87,7 @@ describe('ApiProviderEndpointResolver', () => {
       modelEndpointId: 'acme_openai',
     });
 
-    expect(selection).toEqual({
+    expect(selection).toMatchObject({
       model: 'acme-code',
       apiProviderId: 'acme',
       endpointId: 'acme_openai',
@@ -123,7 +124,7 @@ describe('ApiProviderEndpointResolver', () => {
       modelEndpointId: 'acme_anthropic',
     });
 
-    expect(selection).toEqual({
+    expect(selection).toMatchObject({
       model: 'acme-claude',
       apiProviderId: 'acme',
       endpointId: 'acme_anthropic',

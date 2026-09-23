@@ -10,7 +10,7 @@ test('provider settings test and fetch models through the selected execution nod
   try {
     await withE2eFixture('execution-node-provider-discovery', async (fixture) => {
       const { client } = fixture.integration;
-      await client.post('/api/v1/api-providers', {
+      await client.post(`/api/v1/api-providers?nodeId=${client.nodeId}`, {
         templateId: 'custom', label: 'Synthetic discovery endpoint',
         endpoint: {
           protocol: 'openai-compatible', baseUrl: `http://localhost:${endpoint.port}/v1`,
@@ -54,18 +54,12 @@ test('provider settings test and fetch models through the selected execution nod
         finally { Reflect.deleteProperty(select, 'querySelector'); }
       }, client.nodeId);
       await app.waitForText('Synthetic discovery endpoint');
-      await fixture.page.evaluate(() => {
-        const label = [...document.querySelectorAll('div')].find((element) => element.childElementCount === 0 && element.textContent?.trim() === 'Synthetic discovery endpoint');
-        const row = label?.closest('.rounded-lg');
-        const edit = [...(row?.querySelectorAll('button') ?? [])].find((element) => element.textContent?.trim() === 'Edit');
-        if (!edit) throw new Error('Synthetic endpoint edit action is missing');
-        edit.click();
-      });
+      await app.clickButton('Edit Synthetic discovery endpoint');
       await app.waitForButtonEnabled('Fetch models');
       await app.clickButton('Fetch models');
       await app.waitForText('Fetched 1 model(s).');
-      await app.waitForButtonEnabled('Test');
-      await app.clickButton('Test');
+      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('button')].some((button) => button.textContent?.trim().startsWith('Test from ') && !button.disabled));
+      await fixture.page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim().startsWith('Test from '))!.click());
       await app.waitForText('OpenAI-compatible endpoint accepted.');
       expect(await fixture.page.evaluate(() => JSON.parse(document.documentElement.dataset.probeNodes ?? '[]'))).toEqual([client.nodeId, client.nodeId]);
       const localCatalogRequests = await fixture.page.evaluate(() => (JSON.parse(document.documentElement.dataset.catalogNodes ?? '[]') as string[]).filter((nodeId) => nodeId === 'local').length);

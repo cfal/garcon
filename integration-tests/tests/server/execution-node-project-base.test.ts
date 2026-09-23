@@ -10,6 +10,7 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
   test(`worker base changes refresh metadata and enforce new boundaries without controller restart (${backend})`, async () => {
     await withIntegrationFixture(`project-base-${backend}`, async (fixture) => {
       const { client, executionDirs, dirs } = fixture;
+      await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${fixture.directAgents.openAi.provider.providerId}`, {});
       const nodeId = client.nodeId;
       const pid = fixture.garcon.pid;
       const originalPath = executionDirs.project;

@@ -61,7 +61,7 @@ export default function createModelsRoutes({
 }): RouteMap {
   const catalog = async (nodeId: string) => ({
     agents: await modelCatalog.agents.getAgentCatalogEntries(nodeId),
-    apiProviders: modelCatalog.apiProviders.getCatalog(),
+    apiProviders: modelCatalog.apiProviders.getCatalog(nodeId),
   });
 
   async function getModels(request: Request, url: URL): Promise<Response> {

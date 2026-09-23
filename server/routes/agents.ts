@@ -42,7 +42,7 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     try {
       return Response.json({
         agents: await agents.getAgentCatalogEntries(executionNodeIdFromUrl(url)),
-        apiProviders: apiProviders.getCatalog(),
+        apiProviders: apiProviders.getCatalog(executionNodeIdFromUrl(url)),
       });
     } catch (error) {
       return jsonErrorFromUnknown(error);

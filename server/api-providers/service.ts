@@ -9,6 +9,8 @@ import {
   isApiProviderTemplateId,
   labelForProtocol,
   type ApiProviderCatalogEntry,
+  type ApiProviderCreateResult,
+  type ApiProviderManagement,
   type ApiProviderModelDiscoveryRequest,
   type ApiProviderModelDiscoveryResponse,
   type ApiProviderTemplateId,
@@ -17,8 +19,14 @@ import {
   type OpenAiEndpointCapabilities,
 } from '../../common/api-providers.js';
 import type { ApiProviderStore, CreateApiProviderInput, StoredApiProvider, UpdateApiProviderInput } from './store.js';
+import type { ApiProviderAccess } from './access.js';
+import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
+import { AtomicJsonWriteError } from '../lib/json-file-store.js';
 
 export interface ApiProviderInput {
+  revision?: number;
+  apiProviderId?: string;
+  endpointId?: string;
   templateId: ApiProviderTemplateId;
   label: string;
   endpoint: {
@@ -35,6 +43,7 @@ export interface ApiProviderInput {
 }
 
 interface ApiProviderModelDiscoveryFlatInput {
+  revision?: number;
   protocol: ApiProtocol;
   baseUrl: string;
   apiKey?: string;
@@ -50,6 +59,7 @@ interface StoredDiscoveryCredentialResult {
 
 export interface ApiProviderServiceDeps {
   store: ApiProviderStore;
+  access: ApiProviderAccess;
   isApiProviderReferenced(apiProviderId: string): boolean;
   discoverModels(nodeId: string, request: ApiProviderDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse>;
 }
@@ -66,7 +76,7 @@ function redactApiProviderForCatalog(apiProvider: StoredApiProvider): ApiProvide
 }
 
 function requireObject(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${field} must be an object`);
   }
   return value as Record<string, unknown>;
@@ -197,12 +207,17 @@ function flattenApiProviderInput(input: ApiProviderInput): CreateApiProviderInpu
 function flattenApiProviderPatch(input: Partial<ApiProviderInput>): UpdateApiProviderInput {
   const root = requireObject(input, 'API provider');
   const result: UpdateApiProviderInput = {};
+  if (root.revision !== undefined) {
+    if (!Number.isSafeInteger(root.revision) || Number(root.revision) < 1) throw new ValidationDomainError('Invalid provider revision');
+    result.revision = Number(root.revision);
+  }
   const label = optionalString(root.label, 'label');
   if (label !== undefined) result.label = label;
   const inputEndpoint = optionalObject(root.endpoint, 'endpoint');
   if (inputEndpoint) {
     const protocol = inputEndpoint.protocol === undefined ? undefined : normalizeProtocol(inputEndpoint.protocol);
     const endpoint: UpdateApiProviderInput['endpoint'] = {};
+    if (inputEndpoint.id !== undefined) endpoint.id = requireString(inputEndpoint.id, 'endpoint.id');
     if (inputEndpoint.baseUrl !== undefined) endpoint.baseUrl = normalizeApiProviderBaseUrl(inputEndpoint.baseUrl);
     if (inputEndpoint.apiKey !== undefined) {
       if (typeof inputEndpoint.apiKey !== 'string') throw new Error('endpoint.apiKey must be a string');
@@ -245,6 +260,7 @@ function flattenApiProviderModelDiscoveryInput(input: ApiProviderModelDiscoveryR
   const protocol = normalizeProtocol(root.protocol);
   return {
     protocol,
+    revision: typeof root.revision === 'number' ? root.revision : undefined,
     baseUrl: normalizeApiProviderBaseUrl(root.baseUrl),
     apiKey: typeof root.apiKey === 'string' && root.apiKey.length > 0 ? root.apiKey : undefined,
     apiProviderId: normalizeOptionalLookupId(root.apiProviderId, 'apiProviderId'),
@@ -260,13 +276,44 @@ function hasSameOrigin(left: string, right: string): boolean {
 export class ApiProviderService {
   constructor(private readonly deps: ApiProviderServiceDeps) {}
 
-  getCatalog(): ApiProviderCatalogEntry[] {
-    return this.deps.store.redactedList() as ApiProviderCatalogEntry[];
+  getCatalog(nodeId = 'local'): ApiProviderCatalogEntry[] {
+    return this.deps.access.list(nodeId).map(redactApiProviderForCatalog);
   }
 
-  async create(input: ApiProviderInput): Promise<ApiProviderCatalogEntry> {
+  management(): ApiProviderManagement {
+    return { providers: this.deps.store.redactedList(), assignments: this.deps.access.assignments.snapshot() };
+  }
+
+  async assign(nodeId: string, providerId: string): Promise<ApiProviderManagement> {
+    await this.deps.access.assign(nodeId, providerId);
+    return this.management();
+  }
+
+  async unassign(nodeId: string, providerId: string): Promise<ApiProviderManagement> {
+    await this.deps.access.unassign(nodeId, providerId);
+    return this.management();
+  }
+
+  async create(input: ApiProviderInput, nodeId = 'local'): Promise<ApiProviderCreateResult> {
+    this.deps.access.assertNode(nodeId);
     const apiProvider = await this.deps.store.createApiProvider(flattenApiProviderInput(input));
-    return redactApiProviderForCatalog(apiProvider);
+    try {
+      await this.deps.access.assign(nodeId, apiProvider.id);
+      return { ...redactApiProviderForCatalog(apiProvider), assignment: { nodeId, status: 'assigned' } };
+    } catch (error) {
+      const uncertain = (error instanceof AtomicJsonWriteError && error.renamed)
+        || (error instanceof DomainError && error.code === 'API_PROVIDER_STORAGE_UNAVAILABLE');
+      return {
+        ...redactApiProviderForCatalog(apiProvider),
+        assignment: {
+          nodeId,
+          status: uncertain ? 'unknown' : 'not-assigned',
+          error: uncertain
+            ? 'Profile saved, but assignment durability is unknown. Reconcile configuration before retrying.'
+            : 'Profile saved without a node assignment. Refresh and assign the existing profile.',
+        },
+      };
+    }
   }
 
   async update(id: string, input: Partial<ApiProviderInput>): Promise<ApiProviderCatalogEntry> {
@@ -276,21 +323,28 @@ export class ApiProviderService {
 
   async delete(id: string): Promise<void> {
     await this.deps.store.deleteApiProvider(id, this.deps.isApiProviderReferenced);
+    await this.deps.access.assignments.removeProvider(id);
   }
 
   async test(input: ApiProviderInput, nodeId = 'local'): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderInput(input);
+    this.deps.access.assertNode(nodeId);
+    const stored = !flat.apiKey && input.apiProviderId
+      ? this.#storedApiKeyForDiscovery({ ...flat, apiProviderId: input.apiProviderId, endpointId: input.endpointId, revision: input.revision }, nodeId)
+      : null;
+    if (stored?.hasKeyForDifferentOrigin) return { success: false, error: 'Enter the API key for this base URL before testing.' };
     return this.deps.discoverModels(nodeId, {
-      protocol: flat.protocol, baseUrl: flat.baseUrl, apiKey: flat.apiKey,
+      protocol: flat.protocol, baseUrl: flat.baseUrl, apiKey: flat.apiKey || stored?.apiKey,
       modelDiscovery: flat.modelDiscovery ?? 'none',
     });
   }
 
   async discoverModels(input: ApiProviderModelDiscoveryRequest, nodeId = 'local'): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderModelDiscoveryInput(input);
+    this.deps.access.assertNode(nodeId);
     const usesCredentials = flat.modelDiscovery !== 'ollama-tags';
-    const storedCredential = flat.apiKey || !usesCredentials ? null : this.#storedApiKeyForDiscovery(flat);
-    if (storedCredential?.hasKeyForDifferentOrigin) {
+    const storedCredential = flat.apiKey ? null : this.#storedApiKeyForDiscovery(flat, nodeId);
+    if (usesCredentials && storedCredential?.hasKeyForDifferentOrigin) {
       return {
         success: false,
         error: 'Enter the API key for this base URL before fetching models.',
@@ -304,39 +358,15 @@ export class ApiProviderService {
 
   #storedApiKeyForDiscovery(input: Pick<
     ApiProviderModelDiscoveryFlatInput,
-    'apiProviderId' | 'endpointId' | 'protocol' | 'baseUrl'
-  >): StoredDiscoveryCredentialResult {
-    let hasKeyForDifferentOrigin = false;
-    if (input.endpointId) {
-      const resolved = this.deps.store.getEndpoint(input.endpointId);
-      if (resolved?.endpoint.protocol === input.protocol) {
-        if (hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)) {
-          return {
-            apiKey: resolved.endpoint.apiKey || undefined,
-            hasKeyForDifferentOrigin: false,
-          };
-        }
-        if (resolved.endpoint.apiKey) hasKeyForDifferentOrigin = true;
-      }
+    'apiProviderId' | 'endpointId' | 'protocol' | 'baseUrl' | 'revision'
+  >, nodeId: string): StoredDiscoveryCredentialResult {
+    if (!input.apiProviderId && !input.endpointId) return { hasKeyForDifferentOrigin: false };
+    if (!input.apiProviderId || !input.endpointId || !Number.isSafeInteger(input.revision) || Number(input.revision) < 1) {
+      throw new ValidationDomainError('Saved discovery requires provider, endpoint, and revision');
     }
-    if (input.apiProviderId) {
-      const apiProvider = this.deps.store.getApiProvider(input.apiProviderId);
-      const protocolEndpoints = apiProvider?.endpoints.filter(
-        (entry) => entry.protocol === input.protocol,
-      );
-      const endpoint = protocolEndpoints?.find(
-        (entry) => hasSameOrigin(entry.baseUrl, input.baseUrl),
-      );
-      if (endpoint) {
-        return {
-          apiKey: endpoint.apiKey || undefined,
-          hasKeyForDifferentOrigin: false,
-        };
-      }
-      if (protocolEndpoints?.some((entry) => entry.apiKey)) {
-        hasKeyForDifferentOrigin = true;
-      }
-    }
-    return { hasKeyForDifferentOrigin };
+    const { endpoint } = this.deps.access.require(nodeId, input.apiProviderId, input.endpointId, input.revision);
+    if (endpoint.protocol !== input.protocol) throw new DomainError('API_PROVIDER_UNAVAILABLE', 'Endpoint protocol does not match', 409);
+    if (!hasSameOrigin(endpoint.baseUrl, input.baseUrl)) return { hasKeyForDifferentOrigin: Boolean(endpoint.apiKey) };
+    return { apiKey: endpoint.apiKey || undefined, hasKeyForDifferentOrigin: false };
   }
 }

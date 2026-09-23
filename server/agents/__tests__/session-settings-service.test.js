@@ -31,6 +31,7 @@ function makeService(thinkingMode = 'high') {
     },
   };
   const endpointResolver = {
+    describePrevious(input) { return this.resolveSelection(input); },
     resolveSelection: ({ model, apiProviderId, modelEndpointId }) => ({
       model,
       apiProviderId: apiProviderId ?? null,
@@ -48,10 +49,18 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat, entry, integration };
+  return { service, updateChat, entry, integration, endpointResolver };
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('enforces assignment policy even without an integration configuration-validation facet', async () => {
+    const { service, endpointResolver, integration } = makeService();
+    expect(integration.configurationValidation).toBeNull();
+    endpointResolver.resolveSelection = mock(() => { throw new Error('Synthetic unavailable provider'); });
+    await expect(service.validateConfiguration({ agentId: 'amp', model: 'synthetic', apiProviderId: 'profile_one',
+      modelEndpointId: 'profile_one_openai', permissionMode: 'default', thinkingMode: 'none',
+      agentSettings: { ownerId: 'amp', schemaVersion: 2, values: {} } })).rejects.toThrow('Synthetic unavailable provider');
+  });
   it('preflights a new configuration without applying settings or saving a chat', async () => {
     const { service, updateChat, integration } = makeService();
     const validate = mock(async () => undefined);

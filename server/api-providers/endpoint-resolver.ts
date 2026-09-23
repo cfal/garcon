@@ -7,6 +7,9 @@ import type {
   AgentModelOption,
 } from '../../common/agents.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import type { AgentEndpointSelection } from '../../common/agent-execution.js';
+import { effectiveNodeId } from '../../common/execution-nodes.js';
+import { DomainError } from '../lib/domain-error.js';
 import {
   endpointModelOptionValue,
   rawModelFromEndpointOptionValue,
@@ -22,6 +25,8 @@ export interface ResolvedModelSelection {
   endpointId: string | null;
   protocol: ApiProtocol | null;
   isLocal: boolean;
+  nodeId?: string;
+  endpoint?: AgentEndpointSelection;
 }
 
 export type ModelSelectionErrorCode =
@@ -41,15 +46,16 @@ export class ModelSelectionError extends Error {
 
 export class ApiProviderEndpointResolver {
   constructor(
-    private readonly getApiProviders: () => StoredApiProvider[],
-    private readonly getSupportedProtocols: (agentId: AgentId) => readonly string[] = () => [],
+    private readonly getApiProviders: (nodeId: string) => StoredApiProvider[],
+    private readonly getSupportedProtocols: (agentId: AgentId, nodeId: string) => readonly string[] = () => [],
+    private readonly getHistoricalProviders: () => StoredApiProvider[] = () => getApiProviders('local'),
   ) {}
 
-  getModelOptions(agentId: AgentId): AgentModelOption[] {
+  getModelOptions(agentId: AgentId, nodeId = 'local'): AgentModelOption[] {
     const options: AgentModelOption[] = [];
-    for (const apiProvider of this.getApiProviders()) {
+    for (const apiProvider of this.getApiProviders(nodeId)) {
       for (const endpoint of apiProvider.endpoints) {
-        if (!this.#endpointSupportsAgent(agentId, endpoint)) continue;
+        if (!this.#endpointSupportsAgent(agentId, endpoint, nodeId)) continue;
         for (const model of endpoint.models) {
           const rawModel = model.rawModel || model.value;
           options.push({
@@ -70,6 +76,7 @@ export class ApiProviderEndpointResolver {
   }
 
   resolveSelection(input: {
+    nodeId?: string | null;
     agentId?: AgentId;
     model: string;
     apiProviderId?: string | null;
@@ -92,8 +99,9 @@ export class ApiProviderEndpointResolver {
       throw new ModelSelectionError('API provider selections require apiProviderId and modelEndpointId.', 'SELECTION_INCOMPLETE');
     }
 
-    const resolved = this.#requireEndpoint(input.apiProviderId, input.modelEndpointId);
-    this.#assertEndpointCompatible(agentId, resolved.endpoint);
+    const nodeId = effectiveNodeId(input.nodeId);
+    const resolved = this.#requireEndpoint(input.apiProviderId, input.modelEndpointId, nodeId);
+    this.#assertEndpointCompatible(agentId, resolved.endpoint, nodeId);
 
     const matchedModel = this.#resolveModel(resolved.apiProvider, resolved.endpoint, input.model);
     return {
@@ -102,10 +110,13 @@ export class ApiProviderEndpointResolver {
       endpointId: resolved.endpoint.id,
       protocol: resolved.endpoint.protocol,
       isLocal: matchedModel.isLocal,
+      nodeId,
+      endpoint: buildEndpointSelection(resolved.apiProvider, resolved.endpoint, matchedModel),
     };
   }
 
   modelSupportsImages(input: {
+    nodeId?: string | null;
     agentId?: AgentId;
     model: string;
     apiProviderId?: string | null;
@@ -113,8 +124,9 @@ export class ApiProviderEndpointResolver {
   }): boolean {
     const agentId = input.agentId;
     if (!agentId || !input.apiProviderId || !input.modelEndpointId) return false;
-    const resolved = this.#requireEndpoint(input.apiProviderId, input.modelEndpointId);
-    this.#assertEndpointCompatible(agentId, resolved.endpoint);
+    const nodeId = effectiveNodeId(input.nodeId);
+    const resolved = this.#requireEndpoint(input.apiProviderId, input.modelEndpointId, nodeId);
+    this.#assertEndpointCompatible(agentId, resolved.endpoint, nodeId);
     const selectedRawModel = rawModelFromEndpointOptionValue(resolved.endpoint.id, input.model);
     const matched = resolved.endpoint.models.find((m) => {
       const rawModel = m.rawModel || m.value;
@@ -128,13 +140,46 @@ export class ApiProviderEndpointResolver {
     endpoint: StoredApiProviderEndpoint;
   } | null {
     if (!selection.apiProviderId || !selection.endpointId) return null;
-    return this.#requireEndpoint(selection.apiProviderId, selection.endpointId);
+    const reference = this.#requireEndpoint(selection.apiProviderId, selection.endpointId, effectiveNodeId(selection.nodeId));
+    if (selection.endpoint && reference.apiProvider.revision !== selection.endpoint.credential?.revision) {
+      throw new DomainError('API_PROVIDER_CONFIGURATION_CHANGED', 'Provider configuration changed. Refresh and try again.', 409);
+    }
+    return reference;
   }
 
-  #requireEndpoint(apiProviderId: string, endpointId: string): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } {
-    const apiProvider = this.getApiProviders().find((entry) => entry.id === apiProviderId);
+  describePrevious(input: {
+    model: string;
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+  }): ResolvedModelSelection {
+    if (!input.apiProviderId && !input.modelEndpointId) {
+      return { model: input.model, apiProviderId: null, endpointId: null, protocol: null, isLocal: false };
+    }
+    const profile = this.getHistoricalProviders().find((entry) => entry.id === input.apiProviderId);
+    const endpoint = profile?.endpoints.find((entry) => entry.id === input.modelEndpointId);
+    if (!profile || !endpoint) {
+      throw new DomainError('API_PROVIDER_UNAVAILABLE', 'The previous provider is missing. Start a new chat to change its execution configuration.', 409);
+    }
+    const rawModel = rawModelFromEndpointOptionValue(endpoint.id, input.model);
+    const model = endpoint.models.find((entry) => (entry.rawModel || entry.value) === rawModel);
+    if (!model && endpoint.modelDiscovery !== 'ollama-tags' && profile.templateId !== 'ollama') {
+      throw new DomainError('API_PROVIDER_UNAVAILABLE', 'The previous model classification is unknown. Start a new chat to change its execution configuration.', 409);
+    }
+    const isLocal = model?.isLocal === true || endpoint.modelDiscovery === 'ollama-tags' || profile.templateId === 'ollama';
+    return {
+      model: input.model,
+      apiProviderId: profile.id,
+      endpointId: endpoint.id,
+      protocol: endpoint.protocol,
+      isLocal,
+      endpoint: buildEndpointSelection(profile, endpoint, { rawModel, isLocal }),
+    };
+  }
+
+  #requireEndpoint(apiProviderId: string, endpointId: string, nodeId: string): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } {
+    const apiProvider = this.getApiProviders(nodeId).find((entry) => entry.id === apiProviderId);
     if (!apiProvider) {
-      throw new ModelSelectionError(`Unknown API provider: ${apiProviderId}`, 'API_PROVIDER_NOT_FOUND');
+      throw new DomainError('API_PROVIDER_UNAVAILABLE', 'This provider is unavailable on the selected execution node.', 409);
     }
     const endpoint = apiProvider.endpoints.find((entry) => entry.id === endpointId);
     if (!endpoint) {
@@ -143,8 +188,8 @@ export class ApiProviderEndpointResolver {
     return { apiProvider, endpoint };
   }
 
-  #assertEndpointCompatible(agentId: AgentId, endpoint: StoredApiProviderEndpoint): void {
-    if (!this.#endpointSupportsAgent(agentId, endpoint)) {
+  #assertEndpointCompatible(agentId: AgentId, endpoint: StoredApiProviderEndpoint, nodeId: string): void {
+    if (!this.#endpointSupportsAgent(agentId, endpoint, nodeId)) {
       throw new ModelSelectionError(
         `${endpoint.protocol} endpoint cannot be used with ${agentId}.`,
         'ENDPOINT_NOT_EXPOSED',
@@ -152,8 +197,8 @@ export class ApiProviderEndpointResolver {
     }
   }
 
-  #endpointSupportsAgent(agentId: AgentId, endpoint: StoredApiProviderEndpoint): boolean {
-    return this.getSupportedProtocols(agentId).includes(endpoint.protocol);
+  #endpointSupportsAgent(agentId: AgentId, endpoint: StoredApiProviderEndpoint, nodeId: string): boolean {
+    return this.getSupportedProtocols(agentId, nodeId).includes(endpoint.protocol);
   }
 
   #resolveModel(apiProvider: StoredApiProvider, endpoint: StoredApiProviderEndpoint, selectedModel: string): {
@@ -173,6 +218,30 @@ export class ApiProviderEndpointResolver {
       isLocal: matched.isLocal === true || endpoint.modelDiscovery === 'ollama-tags' || apiProvider.templateId === 'ollama',
     };
   }
+}
+
+function buildEndpointSelection(
+  profile: StoredApiProvider,
+  endpoint: StoredApiProviderEndpoint,
+  model: { rawModel: string; isLocal: boolean },
+): AgentEndpointSelection {
+  return {
+    apiProviderId: profile.id,
+    endpointId: endpoint.id,
+    providerLabel: profile.label,
+    protocol: endpoint.protocol,
+    baseUrl: endpoint.baseUrl,
+    model: model.rawModel,
+    isLocal: model.isLocal,
+    capabilities: endpoint.capabilities ?? null,
+    headers: { ...endpoint.headers },
+    credential: {
+      kind: 'api-provider-endpoint',
+      apiProviderId: profile.id,
+      endpointId: endpoint.id,
+      revision: profile.revision,
+    },
+  };
 }
 
 export function assertSameApiProviderBoundary(previous: ResolvedModelSelection, next: ResolvedModelSelection): void {

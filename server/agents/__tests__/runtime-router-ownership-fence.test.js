@@ -4,6 +4,7 @@ import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 import { createProducerFixture } from './producer-fixture.ts';
 import { AgentCallError } from '@garcon/server-agent-interface';
+import { DomainError } from '../../lib/domain-error.ts';
 
 function makeRouter(hasPendingOwnershipTransfer) {
   const producer = createProducerFixture();
@@ -37,6 +38,11 @@ function makeRouter(hasPendingOwnershipTransfer) {
   const createCarriedContext = mock(async () => ({ kind: 'no-history' }));
   const resolveFileMentions = mock(resolveFileMentionsInCommand);
   const adoption = { ensure: mock(transcript.adoption.ensure) };
+  const endpointResolver = {
+    resolveSelection: mock(() => ({ model: 'model-a', apiProviderId: null, endpointId: null, protocol: null, isLocal: false })),
+    resolveEndpointReference: mock(() => null),
+    describePrevious(input) { return this.resolveSelection(input); },
+  };
   const router = new AgentRuntimeRouter({
     resolveFileMentions,
     registry: {
@@ -47,16 +53,7 @@ function makeRouter(hasPendingOwnershipTransfer) {
       require: mock(() => integration),
       list: mock(() => [integration]),
     },
-    endpointResolver: {
-      resolveSelection: mock(() => ({
-        model: 'model-a',
-        apiProviderId: null,
-        endpointId: null,
-        protocol: null,
-        isLocal: false,
-      })),
-      resolveEndpointReference: mock(() => null),
-    },
+    endpointResolver,
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',
     createCarriedContext,
@@ -64,7 +61,7 @@ function makeRouter(hasPendingOwnershipTransfer) {
     hasPendingOwnershipTransfer,
     adoption,
   });
-  return { router, execution, transcript, producer, integration, entry, createCarriedContext, resolveFileMentions, adoption };
+  return { router, execution, transcript, producer, integration, entry, createCarriedContext, resolveFileMentions, adoption, endpointResolver };
 }
 
 describe('AgentRuntimeRouter ownership fence', () => {
@@ -76,6 +73,22 @@ describe('AgentRuntimeRouter ownership fence', () => {
   const launch = (router, method, opts) => method === 'compactSession'
     ? router.compactSession('chat-1', opts)
     : router[method]('chat-1', 'hello', opts);
+
+  it.each(launches)('rechecks provider policy after asynchronous preparation before %s dispatch', async (_operation, method) => {
+    const { router, execution, integration, producer, endpointResolver } = makeRouter(() => false);
+    const bind = producer.producers.bind;
+    let revoked = false;
+    producer.producers.bind = mock(async (...args) => { const binding = await bind(...args); revoked = true; return binding; });
+    endpointResolver.resolveEndpointReference.mockImplementation(() => {
+      if (revoked) throw new DomainError('API_PROVIDER_UNAVAILABLE', 'Synthetic revoked assignment', 409);
+      return null;
+    });
+    await expect(launch(router, method, { turnId: 'turn-1' })).rejects.toMatchObject({ code: 'API_PROVIDER_UNAVAILABLE' });
+    expect(execution.start).not.toHaveBeenCalled();
+    expect(execution.resume).not.toHaveBeenCalled();
+    expect(integration.compaction.compact).not.toHaveBeenCalled();
+    expect(router.isChatRunning('chat-1')).toBe(false);
+  });
 
   it.each(launches)('settles an unknown producer-binding failure before %s dispatch', async (_operation, method) => {
     const { router, execution, transcript, producer, integration } = makeRouter(() => false);

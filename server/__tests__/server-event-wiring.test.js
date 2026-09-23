@@ -280,6 +280,7 @@ function createExecutionFixture(directory, ensureAdopted) {
     registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
     integrations: { require: () => integration, get: () => integration, list: () => [integration] },
     endpointResolver: {
+      describePrevious(input) { return this.resolveSelection(input); },
       resolveSelection: () => ({ model: 'model-a', apiProviderId: null, endpointId: null, protocol: null, isLocal: false }),
       resolveEndpointReference: () => null,
     },
