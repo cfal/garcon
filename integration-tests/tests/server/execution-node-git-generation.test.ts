@@ -27,7 +27,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
         ['local', dirs.project, client.nodeId, 'Synthetic controller diff', 'Synthetic worker diff'],
       ]) {
         const held = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
-        const pending = client.post<{ message: string }>('/api/v1/git/generate-commit-message', {
+        const pending = client.post<{ message: string; directoryPrefix: string }>('/api/v1/git/generate-commit-message', {
           ...generation, nodeId, project, generationNodeId, files: ['example.txt'],
         });
         const request = await held.received;
@@ -40,6 +40,10 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
         label: 'Synthetic offline generator', direction: 'node-connects',
       });
       const requestsBefore = fixture.fakeProviders.openAi.requests().length;
+      await expect(client.post('/api/v1/git/generate-commit-message', {
+        nodeId: 'local', project: dirs.project, generationNodeId: client.nodeId,
+        agentId: 'synthetic-unsupported-agent', model: 'synthetic-model', files: ['example.txt'],
+      })).rejects.toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
       await expect(client.post('/api/v1/git/generate-commit-message', {
         ...generation, nodeId: 'local', project: dirs.project, generationNodeId: offline.id, files: ['example.txt'],
       })).rejects.toMatchObject({ status: 503 });
