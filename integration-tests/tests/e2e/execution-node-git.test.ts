@@ -204,8 +204,8 @@ test('selected lines from multiple remote files use one review document before r
   await withE2eFixture('execution-node-git-grouped-staging', async fixture => {
     const { client, executionDirs, directAgents } = fixture.integration;
     await initializeFixtureRepository(executionDirs.project);
-    await writeFile(join(executionDirs.project, 'a.txt'), 'Synthetic first selection\n');
-    await writeFile(join(executionDirs.project, 'b.txt'), 'Synthetic second selection\n');
+    await writeFile(join(executionDirs.project, 'a.txt'), 'Synthetic first omitted before\nSynthetic first selection\nSynthetic first omitted after\n');
+    await writeFile(join(executionDirs.project, 'b.txt'), 'Synthetic second omitted one\nSynthetic second omitted two\nSynthetic second selection\nSynthetic second omitted four\nSynthetic second final selection\n');
     const chatId = fixture.integration.newChatId();
     const accepted = await client.startDirectChat({ chatId, projectPath: executionDirs.project, content: 'Synthetic grouped staging chat', agent: directAgents.openAi });
     await client.waitForTurnTerminal(chatId, accepted.turnId);
@@ -214,22 +214,38 @@ test('selected lines from multiple remote files use one review document before r
     await app.openChat(chatId);
     await openGit(fixture);
     await showGitDiff(fixture);
-    await waitForDiff(fixture, 'Synthetic second selection');
+    await waitForDiff(fixture, 'Synthetic second final selection');
     await fixture.page.$eval(GIT_PANEL, panel => {
-      const lines = [...panel.querySelectorAll<HTMLButtonElement>('button[aria-label="Add new line 1 to chat"]')];
-      if (lines.length !== 2) throw new Error(`Expected two added lines, got ${lines.length}`);
-      for (const line of lines) line.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+      for (const [text, number] of [
+        ['Synthetic first selection', 2],
+        ['Synthetic second selection', 3],
+        ['Synthetic second final selection', 5],
+      ]) {
+        const row = [...panel.querySelectorAll('[data-git-virtual-row]')]
+          .find(element => element.textContent?.includes(String(text)));
+        const line = row?.querySelector(`button[aria-label="Add new line ${number} to chat"]`);
+        if (!line) throw new Error(`Missing selected line: ${text}`);
+        line.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+      }
     });
-    await app.waitForButton('Stage (2)');
+    await app.waitForButton('Stage (3)');
     const [staged] = await Promise.all([
       Promise.all(['a.txt', 'b.txt'].map(file => fixture.page.waitForResponse(response =>
         new URL(response.url()).pathname === '/api/v1/git/stage-selection'
         && JSON.parse(response.request().postData() ?? '{}').file === file))),
-      app.clickButton('Stage (2)'),
+      app.clickButton('Stage (3)'),
     ]);
     expect(staged.map(response => response.status())).toEqual([200, 200]);
     expect(await runFixtureGit(executionDirs.project, 'show', ':a.txt')).toBe('Synthetic first selection\n');
-    expect(await runFixtureGit(executionDirs.project, 'show', ':b.txt')).toBe('Synthetic second selection\n');
+    expect(await runFixtureGit(executionDirs.project, 'show', ':b.txt')).toBe('Synthetic second selection\nSynthetic second final selection\n');
+    for (const [file, omitted] of [
+      ['a.txt', ['Synthetic first omitted before', 'Synthetic first omitted after']],
+      ['b.txt', ['Synthetic second omitted one', 'Synthetic second omitted two', 'Synthetic second omitted four']],
+    ] as const) {
+      const remaining = await runFixtureGit(executionDirs.project, 'diff', '--no-ext-diff', '--unified=0', '--', file);
+      expect(remaining.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')))
+        .toEqual(omitted.map(line => `+${line}`));
+    }
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);

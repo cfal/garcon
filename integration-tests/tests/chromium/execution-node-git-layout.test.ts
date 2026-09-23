@@ -43,6 +43,24 @@ test('execution-node Git labels and GitHub host controls fit desktop and mobile'
       '[data-workspace-surface-id="singleton:git"] [data-git-surface-toolbar] button',
     )?.hasAttribute('disabled') === false);
 
+    phase('mobile Git target');
+    await page.setViewportSize({ width: 390, height: 900 });
+    const mobilePanel = page.locator('.mobile-shell [data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
+    const mobileTarget = mobilePanel.getByRole('button', { name: `${label}: ${executionDirs.project}`, exact: true });
+    await mobileTarget.waitFor({ state: 'visible' });
+    expect(await mobileTarget.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await mobilePanel.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      const controls = [...element.querySelectorAll<HTMLElement>('[data-git-surface-toolbar] button')]
+        .filter(button => button.checkVisibility({ checkVisibilityCSS: true }));
+      return controls.length > 0 && controls.every(control => {
+        const rect = control.getBoundingClientRect();
+        return rect.width > 0 && rect.left >= bounds.left && rect.right <= bounds.right;
+      });
+    })).toBe(true);
+    await page.screenshot({ path: join(artifacts, 'execution-node-git-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Remote Settings', exact: true }).click();
