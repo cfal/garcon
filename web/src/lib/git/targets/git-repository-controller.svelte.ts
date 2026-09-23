@@ -281,7 +281,7 @@ export class GitRepositoryController {
 			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Git action failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
-			return false;
+			throw err;
 		} finally {
 			if (this.isCurrentContext(project, contextGeneration)) setLoading(false);
 		}
@@ -371,7 +371,7 @@ export class GitRepositoryController {
 			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
-			return false;
+			throw err;
 		} finally {
 			if (this.isCurrentContext(project, contextGeneration)) this.isCommitting = false;
 		}
@@ -398,7 +398,7 @@ export class GitRepositoryController {
 					`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
-			return false;
+			throw err;
 		} finally {
 			if (this.isCurrentContext(project, contextGeneration)) this.isCreatingInitialCommit = false;
 		}
@@ -424,7 +424,7 @@ export class GitRepositoryController {
 			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Discard failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
-			return false;
+			throw err;
 		}
 	}
 
@@ -448,7 +448,7 @@ export class GitRepositoryController {
 			if (this.isCurrentContext(project, contextGeneration)) {
 				this.surfaceError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
-			return false;
+			throw err;
 		}
 	}
 

@@ -91,7 +91,12 @@
 	): Promise<T | null> {
 		const target = activeTarget;
 		if (!target || !wb.ensureFreshForGitMutation()) return null;
-		return wb.runLocalGitMutation(target, () => action(target));
+		try {
+			return await wb.runLocalGitMutation(target, () => action(target));
+		} catch {
+			// The coordinator publishes failures for the captured target, even after disconnection.
+			return null;
+		}
 	}
 
 	function openCommit(): void {

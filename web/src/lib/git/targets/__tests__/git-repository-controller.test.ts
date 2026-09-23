@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GitRemoteStatus } from '$lib/api/git.js';
 import { GitRepositoryController } from '$lib/git/targets/git-repository-controller.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
+import { ApiError } from '$lib/api/client.js';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => null,
@@ -378,6 +380,43 @@ describe('GitRepositoryController', () => {
 	});
 
 	describe('confirmAndExecute', () => {
+		it.each(['suspend', 'switch'] as const)(
+			'publishes uncertain push failures for the captured target after %s',
+			async (transition) => {
+				const project = { nodeId: 'remote', projectPath: '/project' };
+				controller.resetForProject(project, { deferMetadata: true });
+				const push = deferred<Awaited<ReturnType<typeof gitPush>>>();
+				vi.mocked(gitPush).mockReturnValueOnce(push.promise);
+				const onMutationError = vi.fn();
+				const onChanged = vi.fn();
+				const mutations = new GitMutationCoordinator({ onMutationError, onChanged });
+				const failure = new ApiError(
+					503,
+					'Push outcome is unknown. Inspect the remote.',
+					'GIT_MUTATION_OUTCOME_UNKNOWN',
+				);
+				const pending = mutations.run({
+					...project,
+					surfaceId: 'singleton:git',
+					effectiveProjectKey: '/project',
+					execute: () => controller.handlePush(project),
+				});
+				const rejected = expect(pending).rejects.toBe(failure);
+				if (transition === 'suspend') controller.suspend();
+				else
+					controller.resetForProject(
+						{ nodeId: 'local', projectPath: '/other' },
+						{ deferMetadata: true },
+					);
+				push.reject(failure);
+				await rejected;
+				expect(onMutationError).toHaveBeenCalledExactlyOnceWith(failure, 'remote', '/project');
+				expect(onChanged).toHaveBeenCalledExactlyOnceWith('remote', '/project', '/project');
+				expect(controller.lastError).toBeNull();
+				expect(mutations.pendingCount('singleton:git')).toBe(0);
+			},
+		);
+
 		it('returns true for a successful confirmed pull', async () => {
 			vi.mocked(gitPull).mockResolvedValue({ success: true });
 			vi.mocked(getGitStatus).mockResolvedValue({
