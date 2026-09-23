@@ -1324,6 +1324,7 @@ export class SpaDriver {
       (expected) =>
         [...document.querySelectorAll('button')].some(
           (element) =>
+            !element.closest('[aria-hidden="true"]') &&
             (element.getAttribute('aria-label') || element.textContent?.trim()) === expected,
         ),
       { timeout: options.timeout ?? 20_000 },

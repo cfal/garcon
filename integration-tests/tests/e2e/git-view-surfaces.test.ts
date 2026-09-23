@@ -636,8 +636,8 @@ describe('Lightpanda standalone Git views', () => {
         '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
           '[aria-hidden="false"]',
       );
-      await app.waitForButton(chatProject);
-      await app.clickButton(chatProject);
+      await app.waitForButton(`Local: ${chatProject}`);
+      await app.clickButton(`Local: ${chatProject}`);
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Git target"]');
       await app.fill('#git-target-path-input', selectedProject);
       await fixture.page.waitForFunction(
@@ -668,7 +668,7 @@ describe('Lightpanda standalone Git views', () => {
           );
         },
         { timeout: 20_000 },
-        selectedProject,
+        `Local: ${selectedProject}`,
       );
       expect(
         await fixture.page.evaluate((expectedPath) => {
@@ -679,7 +679,7 @@ describe('Lightpanda standalone Git views', () => {
           return [...(panel?.querySelectorAll('button') ?? [])].some(
             (element) => element.getAttribute('aria-label') === expectedPath,
           );
-        }, selectedProject),
+        }, `Local: ${selectedProject}`),
       ).toBe(true);
       fixture.assertNoBrowserErrors();
     });

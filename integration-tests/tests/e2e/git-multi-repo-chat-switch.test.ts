@@ -78,8 +78,8 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       );
 
       // Switch the workbench target to repo B from within chat A.
-      await app.waitForButton(repoA);
-      await app.clickButton(repoA);
+      await app.waitForButton(`Local: ${repoA}`);
+      await app.clickButton(`Local: ${repoA}`);
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Git target"]');
       await app.fill('#git-target-path-input', repoB);
       await fixture.page.waitForFunction(
@@ -137,7 +137,7 @@ describe('Lightpanda Git multi-repo chat switching', () => {
           );
         },
         { timeout: 20_000 },
-        { panelSelector: GIT_PANEL, expectedPath: repoB },
+        { panelSelector: GIT_PANEL, expectedPath: `Local: ${repoB}` },
       );
       // A refresh round-trip settles the retained surface's async target
       // application before user-level review interactions begin.
@@ -267,6 +267,7 @@ async function clickPanelButton(
       const panel = document.querySelector(panelSelector);
       const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
         (element) => {
+          if (element.closest('[aria-hidden="true"]')) return false;
           if (element.hasAttribute('data-surface-action-measure')) return false;
           const accessible =
             element.getAttribute('aria-label') || element.textContent?.trim() || '';
@@ -287,6 +288,7 @@ async function clickPanelButton(
       const panel = document.querySelector(panelSelector);
       const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
         (element) => {
+          if (element.closest('[aria-hidden="true"]')) return false;
           if (element.hasAttribute('data-surface-action-measure')) return false;
           const accessible =
             element.getAttribute('aria-label') || element.textContent?.trim() || '';
