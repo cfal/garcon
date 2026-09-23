@@ -1,5 +1,6 @@
 import { assertGitWorkingPath } from './operation-context.js';
 import { promises as fs } from 'fs';
+import path from 'path';
 import { resolvePathWithinProject } from './run.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from './types.js';
 
@@ -47,6 +48,7 @@ async function inspectUntrackedFile(
 ): Promise<UntrackedFileSummary> {
   signal?.throwIfAborted();
   const resolvedPath = resolvePathWithinProject(projectPath, filePath);
+  await assertGitWorkingPath(path.dirname(resolvedPath));
   const pathStats = await fs.lstat(resolvedPath);
   signal?.throwIfAborted();
   if (!pathStats.isFile()) {

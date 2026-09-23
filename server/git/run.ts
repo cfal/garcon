@@ -1,6 +1,8 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
+import { ProjectBoundaryError } from '../lib/path-boundary.js';
+import { literalGitPathspec } from './pathspecs.js';
 import { assertGitWorkingPath, gitOperationOptions, isGitCancellation, markGitOutputTruncated, markGitMutationDispatched, trackGitProcess } from './operation-context.js';
 import type {
   GitCommandOptions,
@@ -368,7 +370,7 @@ export async function isFileUntracked(projectPath: string, file: string): Promis
   try {
     const { stdout } = await runGit(
       projectPath,
-      ['status', '--porcelain', '--', file],
+      ['status', '--porcelain', '--', literalGitPathspec(file)],
       readOnlyGitOptions(),
     );
     return stdout.trimStart().startsWith('??');
@@ -383,7 +385,7 @@ export function resolvePathWithinProject(projectPath: string, file: string): str
   const resolvedFile = path.resolve(resolvedRoot, file);
   const normalizedRoot = `${resolvedRoot}${path.sep}`;
   if (!resolvedFile.startsWith(normalizedRoot) && resolvedFile !== resolvedRoot) {
-    throw new Error('The requested file path resolves outside the project root.');
+    throw new ProjectBoundaryError('The requested file path resolves outside the project root.');
   }
   return resolvedFile;
 }

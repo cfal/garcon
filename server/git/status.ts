@@ -757,7 +757,7 @@ export function createStatusOperations() {
   }
 
   function pathspecStdin(paths: string[]): string {
-    return paths.map((filePath) => `${filePath}\0`).join('');
+    return paths.map((filePath) => `${literalGitPathspec(filePath)}\0`).join('');
   }
 
   async function stagePaths({ projectPath, paths, mode }: StagePathsOptions): Promise<GitMutationResult> {

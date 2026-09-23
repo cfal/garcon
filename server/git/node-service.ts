@@ -14,7 +14,7 @@ import { createGitOperations } from './git-service.js';
 import { createGhOperations } from '../gh/gh-service.js';
 import { withGitOperation, gitOutputTruncated, restrictGitWorkingRoot } from './operation-context.js';
 import { withRepositoryMutation } from './repository-coordination.js';
-import { readOnlyGitOptions, runGit } from './run.js';
+import { readOnlyGitOptions, resolvePathWithinProject, runGit } from './run.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { gitServiceError } from './service-errors.js';
 import type { GitCommandTrace, GitReviewRouteMetrics, GitStageProvenance } from './types.js';
@@ -103,8 +103,7 @@ export class LocalGitRuntime {
             Object.assign(input, { documentId: input.document.documentId });
           }
           if ('worktreePath' in input) input.worktreePath = await this.#path(path.resolve(projectPath, toNativePath(input.worktreePath)));
-          const files = 'file' in input ? [input.file] : 'paths' in input ? input.paths : 'files' in input ? input.files : [];
-          for (const file of files) await resolveRealWithinBase(projectPath, toNativePath(file));
+          await this.#validateFiles(method, request, projectPath);
           const invoke = this.#operations[method] as (input: GitRequests[GitMethod] & GitStageProvenance & { signal?: AbortSignal }) => Promise<GitResults[K]>;
           const result = await invoke(input);
           const diagnostics = { ...metrics, phases: metrics.phases.slice(0, 128), commands: trace.slice(0, 128).map(({ args, durationMs, stdoutBytes, stderrBytes }) => ({ command: args[0], durationMs, stdoutBytes, stderrBytes })) };
@@ -121,6 +120,24 @@ export class LocalGitRuntime {
         return isGitMutation(method) ? withRepositoryMutation(projectPath, execute) : execute();
       });
     } catch (error) { throw gitServiceError(error); }
+  }
+
+  async #validateFiles(method: GitMethod, request: ExecutionGitRequests[GitMethod], projectPath: string): Promise<void> {
+    const files = 'file' in request ? [request.file] : 'paths' in request ? request.paths
+      : 'files' in request ? request.files : 'selectedFile' in request && request.selectedFile ? [request.selectedFile] : [];
+    for (const file of files) {
+      const resolved = resolvePathWithinProject(projectPath, toNativePath(file));
+      // Object/index reads must remain independent of today's symlink targets.
+      // Review-body access is checked where its registered source is known.
+      if (method === 'getFileHistory' || method === 'getBlame' || method === 'getReviewDocumentFileBodies'
+        || method === 'getWorkbenchSnapshot' || 'mode' in request && request.mode === 'unstage') continue;
+      if (method === 'getConflictDetails' || method === 'markConflictResolved'
+        || method === 'acceptConflictSide' || method === 'discard' || method === 'deleteUntracked') {
+        await resolveRealWithinBase(projectPath, resolved);
+      } else {
+        await resolveRealWithinBase(projectPath, resolved === projectPath ? resolved : path.dirname(resolved));
+      }
+    }
   }
 
   async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: NodeCallOptions): Promise<ExecutionGhResults[K]> {

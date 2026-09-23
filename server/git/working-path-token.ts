@@ -1,4 +1,6 @@
 import { promises as fs } from 'fs';
+import path from 'path';
+import { assertGitWorkingPath } from './operation-context.js';
 import { chunkGitPathspecs } from './pathspecs.js';
 import { parsePorcelainV1Z } from './porcelain-status.js';
 import { readOnlyGitOptions, resolvePathWithinProject, runGit } from './run.js';
@@ -40,8 +42,10 @@ async function worktreeToken(
   projectPath: string,
   filePath: string,
 ): Promise<Omit<GitWorkingPathToken, 'path' | 'indexEntry' | 'status'>> {
+  const resolved = resolvePathWithinProject(projectPath, filePath);
+  await assertGitWorkingPath(path.dirname(resolved));
   try {
-    const stats = await fs.lstat(resolvePathWithinProject(projectPath, filePath), { bigint: true });
+    const stats = await fs.lstat(resolved, { bigint: true });
     const worktreeKind = stats.isFile()
       ? 'file'
       : stats.isSymbolicLink()
