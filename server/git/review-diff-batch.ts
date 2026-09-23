@@ -1,6 +1,8 @@
 import { promises as fs } from 'fs';
-import { buildFullFileAddedPatch } from './full-file-patch.js';
-import { exactGitPathspecs } from './pathspecs.js';
+import path from 'path';
+import { assertGitWorkingPath } from './operation-context.js';
+import { createTemporaryGitIndex, removeTemporaryGitIndex } from './temporary-index.js';
+import { exactGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import type {
   RegisteredGitReviewDocument,
   RegisteredGitReviewFile,
@@ -14,7 +16,6 @@ import {
 } from './rendered-diff.js';
 import {
   GitOutputLimitError,
-  isBinaryFile,
   readOnlyGitOptions,
   resolvePathWithinProject,
   runGitTraced,
@@ -176,6 +177,7 @@ async function loadUntrackedBody(
   try {
     signal?.throwIfAborted();
     const filePath = resolvePathWithinProject(document.repoRoot, file.path);
+    await assertGitWorkingPath(path.dirname(filePath));
     const stats = await fs.lstat(filePath);
     signal?.throwIfAborted();
     if (!stats.isFile()) {
@@ -194,27 +196,36 @@ async function loadUntrackedBody(
         `File exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`,
       );
     }
-    if (await isBinaryFile(filePath)) {
-      return limitedPatchFileBody(
-        file.path,
-        file.bodyFingerprint,
-        'binary',
-        'Binary diff is not available.',
-      );
+    await assertGitWorkingPath(filePath);
+    const temporaryIndex = await createTemporaryGitIndex(document.repoRoot, signal);
+    try {
+      // The copied index preserves indexed attributes without exposing intent-to-add in the real index.
+      const options = readOnlyGitOptions({
+        signal,
+        env: { GIT_INDEX_FILE: temporaryIndex },
+        maxStdoutBytes: GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes,
+        truncateStdout: false,
+      });
+      await runGitTraced(document.repoRoot, ['add', '-N', '--', literalGitPathspec(file.path)], undefined, options);
+      const { stdout } = await measureGitReviewPhase(routeMetrics, 'body-git', () => runGitTraced(
+        document.repoRoot,
+        ['diff', '--no-color', '--no-ext-diff', '--no-textconv', `-U${document.context}`, '--', literalGitPathspec(file.path)],
+        undefined,
+        options,
+      ));
+      signal?.throwIfAborted();
+      return measureGitReviewPhaseSync(routeMetrics, 'patch-scan', () => compactRenderedPatch(
+        file.path, file.bodyFingerprint, stdout,
+      ));
+    } finally {
+      await removeTemporaryGitIndex(temporaryIndex);
     }
-    const content = await fs.readFile(filePath, 'utf8');
-    signal?.throwIfAborted();
-    return measureGitReviewPhaseSync(
-      routeMetrics,
-      'patch-scan',
-      () => compactRenderedPatch(
-        file.path,
-        file.bodyFingerprint,
-        buildFullFileAddedPatch(content),
-      ),
-    );
   } catch (error) {
     if (signal?.aborted) throw error;
+    if (error instanceof GitOutputLimitError && error.stream === 'stdout') {
+      return limitedPatchFileBody(file.path, file.bodyFingerprint, 'file-too-many-bytes',
+        `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`);
+    }
     return errorPatchFileBody(
       file.path,
       file.bodyFingerprint,

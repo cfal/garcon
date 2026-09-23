@@ -1323,12 +1323,11 @@ async function stageSelection({
 
   // For untracked files, create an empty index entry so git diff works.
   let didIntentToAdd = false;
-  if (!reverse && await isFileUntracked(projectPath, file)) {
-    await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
-    didIntentToAdd = true;
-  }
-
   try {
+    if (!reverse && await isFileUntracked(projectPath, file)) {
+      didIntentToAdd = true;
+      await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
+    }
     // Frontend sends indices from the same diff that git apply --cached
     // operates on, so no translation is needed. Unstaged tab uses
     // `git diff`, staged tab uses `git diff --cached`.
@@ -1397,12 +1396,11 @@ async function stageHunk({
   const isUnstage = mode === 'unstage';
 
   let didIntentToAdd = false;
-  if (!isUnstage && await isFileUntracked(projectPath, file)) {
-    await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
-    didIntentToAdd = true;
-  }
-
   try {
+    if (!isUnstage && await isFileUntracked(projectPath, file)) {
+      didIntentToAdd = true;
+      await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
+    }
     const diffArgs = tabDiffArgs(contextLines, file, isUnstage);
     const fullPatch = displayedPatch ?? (await runGit(projectPath, diffArgs, readOnlyGitOptions())).stdout;
     if (!fullPatch.trim()) {

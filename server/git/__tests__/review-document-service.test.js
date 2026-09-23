@@ -215,6 +215,7 @@ describe('Git review documents', () => {
   it('retries transient body errors instead of caching them', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-review-document-'));
     temporaryDirectories.push(projectPath);
+    await git(projectPath, ['init']);
     const registry = new GitReviewDocumentRegistry();
     const document = registry.register({
       sourceCacheKey: 'comparison:transient-body',
