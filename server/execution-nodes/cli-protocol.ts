@@ -5,6 +5,7 @@ import { DomainError } from '../lib/domain-error.js';
 
 export const CLI_REQUEST_BYTES = 1024 * 1024;
 export const CLI_REPLY_BYTES = 8 * 1024 * 1024;
+export const CLI_SMALL_REPLY_BYTES = 64 * 1024;
 export const CLI_ENVELOPE_BYTES = 1024;
 
 const read = { mutation: false, timeoutMs: 30_000, pool: 'short' } as const;

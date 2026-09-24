@@ -122,22 +122,37 @@ test.each([false, true])('revocation after handler settlement still fences RPC p
 });
 
 test.each([false, true])('oversize and queue-pressure replies preserve read/mutation classification: mutation=%s', async (mutation) => {
-  let oversized = true;
+  let output = '\0'.repeat(1_500_000);
   const operation = mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats';
-  const route = () => Response.json({ output: oversized ? '\0'.repeat(1_500_000) : 'small' });
+  const route = () => Response.json({ output });
   const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }));
   try {
     await expect(pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
-    oversized = false;
+    output = 'x'.repeat(128 * 1024);
     pair.block();
     pair.controller.transport.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'x'.repeat(CLI_REPLY_BYTES) }));
     const busy = pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null));
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     pair.unblock();
     await expect(busy).rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_SERVICE_BUSY' });
     expect(pair.worker.transport.connected).toBe(true);
+    output = 'small';
     expect((await pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null))).body).toEqual({ output: 'small' });
+  } finally { pair.close(); }
+});
+
+test.each([false, true])('small replies retain the shared queue headroom during bulk traffic: mutation=%s', async (mutation) => {
+  const route = () => Response.json({ confirmed: true });
+  const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }));
+  try {
+    pair.block();
+    pair.controller.transport.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'x'.repeat(CLI_REPLY_BYTES) }));
+    const pending = pair.worker.call('', 'controllerCli.request', request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null));
+    await new Promise((resolve) => setImmediate(resolve));
+    pair.unblock();
+    expect((await pending).body).toEqual({ confirmed: true });
+    expect(pair.worker.transport.connected).toBe(true);
   } finally { pair.close(); }
 });
 

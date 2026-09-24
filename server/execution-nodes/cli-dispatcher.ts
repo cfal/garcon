@@ -6,7 +6,7 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRpc, GuardRpcReply } from './rpc.js';
 import type { AgentRpcRequest } from './agent-protocol.js';
 import { CliAdmission } from './cli-admission.js';
-import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, cliPolicy, parseControllerCliRequest, type CliHttpResponse } from './cli-protocol.js';
+import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliPolicy, parseControllerCliRequest, type CliHttpResponse } from './cli-protocol.js';
 
 export interface CliDispatchAccess {
   readonly nodeId: string;
@@ -91,7 +91,8 @@ export class ControllerCliDispatcher {
   }
 
   admitReply(request: AgentRpcRequest, rpc: AgentRpc, bytes: number): void {
-    if (request.method !== 'controllerCli.request' || rpc.transport.channel.queuedBytes + bytes <= CLI_REPLY_BYTES) return;
+    if (request.method !== 'controllerCli.request' || bytes <= CLI_SMALL_REPLY_BYTES
+      || rpc.transport.channel.queuedBytes + bytes <= CLI_REPLY_BYTES) return;
     if (cliPolicy(request.request.http).mutation) {
       throw new DomainError('CLI_OUTCOME_UNKNOWN', 'The CLI operation may have reached Garcon; its outcome is unknown', 503);
     }
