@@ -125,7 +125,8 @@ test.each([false, true])('oversize and queue-pressure replies preserve read/muta
   let output = '\0'.repeat(1_500_000);
   const operation = mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats';
   const route = () => Response.json({ output });
-  const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }));
+  const admitted = Promise.withResolvers<void>();
+  const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }), undefined, admitted.resolve);
   try {
     await expect(pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
@@ -133,7 +134,7 @@ test.each([false, true])('oversize and queue-pressure replies preserve read/muta
     pair.block();
     pair.controller.transport.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'x'.repeat(CLI_REPLY_BYTES) }));
     const busy = pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null));
-    await new Promise((resolve) => setImmediate(resolve));
+    await admitted.promise;
     pair.unblock();
     await expect(busy).rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_SERVICE_BUSY' });
     expect(pair.worker.transport.connected).toBe(true);
@@ -144,12 +145,13 @@ test.each([false, true])('oversize and queue-pressure replies preserve read/muta
 
 test.each([false, true])('small replies retain the shared queue headroom during bulk traffic: mutation=%s', async (mutation) => {
   const route = () => Response.json({ confirmed: true });
-  const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }));
+  const admitted = Promise.withResolvers<void>();
+  const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }), undefined, admitted.resolve);
   try {
     pair.block();
     pair.controller.transport.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'x'.repeat(CLI_REPLY_BYTES) }));
     const pending = pair.worker.call('', 'controllerCli.request', request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null));
-    await new Promise((resolve) => setImmediate(resolve));
+    await admitted.promise;
     pair.unblock();
     expect((await pending).body).toEqual({ confirmed: true });
     expect(pair.worker.transport.connected).toBe(true);
@@ -159,18 +161,20 @@ test.each([false, true])('small replies retain the shared queue headroom during 
 test('simultaneous bulk completions cannot overbook the shared-channel reply budget', async () => {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+  const admitted = Promise.withResolvers<void>();
   let count = 0;
+  let replies = 0;
   const pair = cliPair(dispatcher({ '/api/v1/chats': { GET: async () => {
     if (++count === 3) entered.resolve();
     await release.promise;
     return Response.json({ data: 'x'.repeat(3 * 1024 * 1024) });
-  } } }));
+  } } }), undefined, () => { if (++replies === 3) admitted.resolve(); });
   try {
     const pending = Promise.allSettled(Array.from({ length: 3 }, () => pair.worker.call('', 'controllerCli.request', request())));
     await entered.promise;
     pair.block();
     release.resolve();
-    await new Promise((resolve) => setImmediate(resolve));
+    await admitted.promise;
     expect(pair.controller.transport.channel.queuedBytes).toBeLessThan(CLI_REPLY_BYTES);
     expect(pair.controller.transport.connected).toBe(true);
     pair.unblock();

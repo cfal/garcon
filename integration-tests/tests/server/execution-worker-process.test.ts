@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ExecutionNodeProcess } from '../../support/execution-backend.js';
@@ -7,6 +7,7 @@ import { WebSocketLink } from '../../../server/execution-nodes/websocket-link.js
 import { parseConnectionUrl } from '../../../server/execution-nodes/connection-url.js';
 import { RemoteExecutionNode } from '../../../server/execution-nodes/remote.js';
 import { AgentRpc } from '../../../server/execution-nodes/rpc.js';
+import { discoverRuntime } from '../../../cli/discovery.js';
 import { withTimeout } from '../../support/deferred.js';
 
 for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as const) {
@@ -78,6 +79,16 @@ test('re-adding a running worker under a new node identity requires restarting t
         controller.dial(url.href);
         const rpc = await withTimeout(session.promise, 10_000, () => worker!.logs.join('\n'));
         await rpc.transport.ready;
+        const reverseCalls: string[] = [];
+        rpc.handle(async (call) => {
+          reverseCalls.push(call.method);
+          return { serverInstanceId: 'synthetic-controller', defaultNodeId: nodeId, workspaceName: null };
+        });
+        const runDirectory = join(directories.workspace, 'run');
+        const descriptor = (await readdir(runDirectory)).find((name) => name.startsWith('cli-') && name.endsWith('.json'))!;
+        await expect(discoverRuntime({ runtimeFile: join(runDirectory, descriptor), configDir: '/missing', workspace: 'unused' }))
+          .rejects.toThrow('HTTP 503');
+        expect(reverseCalls).toEqual([]);
         const description = await rpc.call('', 'node.describe', null);
         expect(description.info.nodeId).toBe('22222222-2222-4222-8222-222222222222');
         await expect(rpc.call('', 'projects.inspect', { projectPath: directories.project }))
