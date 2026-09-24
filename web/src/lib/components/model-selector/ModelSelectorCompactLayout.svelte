@@ -132,7 +132,7 @@
 			onCancel();
 			return;
 		}
-		if (!selector.handleModelKeydown(event, visiblePageSize)) return;
+		if (!selector.handleModelKeydown(event, visiblePageSize, false)) return;
 		if (event.key === 'Enter' && selector.effortSelectionEnabled && selector.open) {
 			pane = 'effort';
 		}
@@ -149,12 +149,12 @@
 	}
 
 	function handleModelSelect(modelValue: string): void {
-		selector.selectModel(modelValue);
+		selector.selectModel(modelValue, false);
 		if (selector.effortSelectionEnabled && selector.open) pane = 'effort';
 	}
 
 	function handleRecentSelect(recent: ModelSelectorRecentOption): void {
-		selector.selectRecent(recent);
+		selector.selectRecent(recent, false);
 		if (selector.effortSelectionEnabled && selector.open) pane = 'effort';
 	}
 </script>

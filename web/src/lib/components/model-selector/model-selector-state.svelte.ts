@@ -430,7 +430,7 @@ export class ModelSelectorState {
 		this.activeModelIndex = Math.min(Math.max(index, 0), rows.length - 1);
 	}
 
-	handleModelKeydown(event: KeyboardEvent, visiblePageSize: number): boolean {
+	handleModelKeydown(event: KeyboardEvent, visiblePageSize: number, commitOnSelect = true): boolean {
 		const rows = this.filteredModelRows.items;
 		if (rows.length === 0) return false;
 
@@ -460,7 +460,7 @@ export class ModelSelectorState {
 		}
 		if (event.key === 'Enter') {
 			const row = this.activeModelRow;
-			if (row) this.selectModel(row.value);
+			if (row) this.selectModel(row.value, commitOnSelect);
 			return true;
 		}
 
@@ -492,12 +492,12 @@ export class ModelSelectorState {
 		this.resetActiveModelIndex();
 	}
 
-	selectModel(modelValue: string): void {
+	selectModel(modelValue: string, commitOnSelect = true): void {
 		this.showBrowsePane();
 		this.#draftTargetChanged = true;
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
-		if (!this.effortSelectionEnabled) {
+		if (commitOnSelect || !this.effortSelectionEnabled) {
 			this.#commitDraftSelection();
 			this.#finishClose();
 		}
@@ -510,9 +510,9 @@ export class ModelSelectorState {
 		this.#finishClose();
 	}
 
-	selectRecent(recent: ModelSelectorRecentOption): void {
+	selectRecent(recent: ModelSelectorRecentOption, commitOnSelect = true): void {
 		if (!this.isAgentSelectable(recent.agentId)) return;
-		if (this.effortSelectionEnabled) {
+		if (this.effortSelectionEnabled && !commitOnSelect) {
 			this.#draftTargetChanged = true;
 			this.#setDraftSelection(
 				recent.agentId,
@@ -529,6 +529,7 @@ export class ModelSelectorState {
 			apiProviderId: recent.apiProviderId,
 			modelEndpointId: recent.modelEndpointId,
 			modelProtocol: recent.modelProtocol,
+			...(this.effortSelectionEnabled ? { thinkingMode: this.thinkingMode } : {}),
 		});
 		this.#finishClose();
 	}

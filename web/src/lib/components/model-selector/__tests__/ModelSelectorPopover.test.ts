@@ -211,7 +211,7 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByText('Codex Model 0')).toBeTruthy();
 	});
 
-	it('stages a desktop generation model until an effort is selected', async () => {
+	it('commits a desktop model click with the current effort and closes', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHost, {
@@ -225,12 +225,6 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.input(input, { target: { value: 'model-119' } });
 		await fireEvent.click(await screen.findByText('Model 119'));
 
-		expect(onChange).not.toHaveBeenCalled();
-		expect(
-			screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ }),
-		).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name: /Max Maximum reasoning depth/ }));
-
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
 				agentId: 'claude',
@@ -239,9 +233,49 @@ describe('ModelSelectorPopover', () => {
 				apiProviderId: null,
 				modelEndpointId: null,
 				modelProtocol: null,
-				thinkingMode: 'max',
+				thinkingMode: 'none',
 			});
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
+	});
+
+	it('commits a desktop keyboard model selection while effort is visible', async () => {
+		const onChange = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'high' },
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			onChange,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0 .* High/ }));
+		const input = await screen.findByPlaceholderText('Filter models...');
+		await fireEvent.input(input, { target: { value: 'model-119' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+				modelValue: 'model-119', thinkingMode: 'high',
+			}));
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+		});
+	});
+
+	it('refreshes the catalog every time the picker opens and reveals a new provider', async () => {
+		const onForceRefresh = vi.fn().mockResolvedValue(undefined);
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'settings' },
+			onChange: vi.fn(),
+			onForceRefresh,
+			refreshRevealsEndpoint: true,
+		});
+		const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
+		await fireEvent.click(trigger);
+		await waitFor(() => expect(onForceRefresh).toHaveBeenCalledTimes(1));
+		expect(await screen.findByRole('button', { name: 'Acme' })).toBeTruthy();
+		await closePopoverByOutsideClick();
+		await fireEvent.click(trigger);
+		await waitFor(() => expect(onForceRefresh).toHaveBeenCalledTimes(2));
+		await fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
+		expect(within(screen.getByRole('listbox', { name: 'Model' })).getByText('Endpoint Model')).toBeTruthy();
 	});
 
 	it('omits effort selection for an agent that advertises no reasoning modes', async () => {
@@ -351,7 +385,6 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
-		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
@@ -361,8 +394,9 @@ describe('ModelSelectorPopover', () => {
 				apiProviderId: 'acme',
 				modelEndpointId: 'acme-claude',
 				modelProtocol: 'anthropic-messages',
-				thinkingMode: 'high',
+				thinkingMode: 'none',
 			});
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 		});
 	});
 
