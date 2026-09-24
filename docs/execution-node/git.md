@@ -1,8 +1,8 @@
 # Git On Execution Nodes
 
-Status: architecture and design, 2026-09-22. Git and GitHub CLI node services are not implemented. Source behavior was inspected at [68b14cedb20e6ec54ecff012c05db3dcb007a276](https://github.com/cfal/garcon/tree/68b14cedb20e6ec54ecff012c05db3dcb007a276). Method names below describe the proposed boundary, not a shipped protocol.
+Status: implemented. This document records the design and current contract. The original behavior below was inspected at [68b14cedb20e6ec54ecff012c05db3dcb007a276](https://github.com/cfal/garcon/tree/68b14cedb20e6ec54ecff012c05db3dcb007a276) on 2026-09-22 and is historical, not the current service boundary.
 
-This follows [Execution Node Interfaces](./interface.md), [Execution Nodes In The App](./app-integration.md), [Files](./files.md), and [Terminals](./terminal.md). Earlier documents describe their implementation stages. The current tree already has typed Files and Terminal node services; Git remains unsupported and Git/gh HTTP routes remain Local-only.
+This follows [Execution Node Interfaces](./interface.md), [Execution Nodes In The App](./app-integration.md), [Files](./files.md), and [Terminals](./terminal.md). Typed Git and GitHub services now use the same [validating runtime](../../server/git/node-service.ts) for Local and remote nodes. The [HTTP routes](../../server/routes/git.ts) select the node; [remote adapters](../../server/execution-nodes/remote-git.ts) carry requests over the shared session.
 
 ## Scope And Decisions
 
@@ -20,12 +20,12 @@ Reuse the existing Git implementation. Do not build a second Git engine or make 
 
 No repository synchronization, cloning workflow, cross-node worktree migration, SSH-key forwarding, credential synchronization, new GitHub write operations, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the node. Remoting is not an OS sandbox.
 
-## Existing Behavior
+## Original Behavior
 
 | Area | Behavior to retain or deliberately adapt |
 | --- | --- |
 | [Node contract](../../server-agents/interface/src/contracts/execution-node.ts) | `git: false` and `getGitService(): Promise<never>`; no `gh` accessor. Files and Terminal have typed services. |
-| [Route composition](../../server/routes/index.ts) | Git and gh are still wrapped by `localMachineRoutes`. The [Git routes](../../server/routes/git.ts) construct one controller-local service and apply controller-global path checks. |
+| Route composition at the design baseline | Git and GitHub routes were Local-only. That wrapper has since been removed; filesystem validation now runs on the selected node. |
 | [Git service](../../server/git/git-service.ts) | Composes status, diff, history, comparisons, review documents, porcelain operations, worktrees, and quick summaries. Also contains HTTP error translation and an agent dependency; neither belongs in a machine-service contract. |
 | [Git runner](../../server/git/run.ts) | Spawns the real `git` executable with argv, captures bounded output, propagates abort, and retries recognized lock failures within one deadline. Defaults: 30 seconds, 64 MiB stdout, two MiB stderr prefix. These are subprocess limits, not safe RPC message sizes. |
 | [Status/commit operations](../../server/git/status.ts) | Selected-file and whole-index commit semantics differ. Selected-file commit uses a temporary index and reports `commitScope` and `indexSynchronized`. Commit coordination is keyed by canonical Git common directory. Network operations suppress terminal credential prompts and derive a timeout from controller HTTP configuration. |
@@ -69,7 +69,7 @@ Introduce typed `ExecutionGitService` and `ExecutionGhService` contracts under `
 
 Capability means the node implements the service, not that every directory is a repository or every remote is authenticated. Missing Git/gh executables and per-repository auth failures are typed service outcomes, not node-wide startup failures. A node without `gh` must still support Git. Probe lazily or within a bounded check; never make an offline remote or an optional executable block controller startup.
 
-Extract filesystem-only Git operations from `createGitService({ agents, ... })`. Keep agent orchestration and `toHttpError()` at the controller boundary. Existing subprocess/classification helpers remain reusable implementation code under `server/git/` and `server/gh/`; nothing belongs in an individual provider package.
+Filesystem-only operations live in `createGitOperations` and `createGhOperations`, shared by Local and remote node services. Agent orchestration and HTTP error mapping remain at the controller boundary. Subprocess/classification helpers remain reusable implementation code under `server/git/` and `server/gh/`; nothing belongs in an individual provider package.
 
 Construct node services with explicit node configuration and lifetime guards. Remove their dependency on controller-global project-base and HTTP-timeout configuration. Local routes must enter the same validating service as remote requests, not retain a privileged bypass. Remove the Local-only Git/gh wrapper only once all routes, including comparison subroutes and generation, route explicitly.
 
@@ -164,12 +164,12 @@ The authoritative `GitReviewDocumentRegistry` moves to each node service. It bin
 
 Qualify browser/controller document references by stable node and serving `instanceId`. Do not use provider integration scope for machine resources. The registry's existing numeric `generation` is source supersession within that registry, not the node serving instance or terminal process runtime.
 
-- Same logical node session: ordinary replay may continue using its documents, subject to their TTL and supersession.
-- Fresh serving instance, worker restart, or controller restart that creates a fresh node session: discard document and transfer references. Refresh visible Git surfaces and obtain new documents.
+- Documents belong to the worker process, subject to their TTL and supersession. Reconnect refreshes visible surfaces without replaying operations.
+- Worker restart changes the serving instance and invalidates document references. Obtain new documents before acting on retained UI selections.
 - Offline node: retain displayed data and draft text as unavailable/stale, but disable mutations against stale review selections. Do not clear another node's caches.
 - Node removal: prune that node's ephemeral capabilities, request maps, and cached documents; no durable Git registry is needed.
 
-Unlike PTYs, Git review documents do not need process-lifetime survival. They are derived and cheap to re-request. Reusing a path or document UUID cannot bypass an instance mismatch. Multi-call remote reads capture one session backing; subsequent chunks/body requests must not drift onto a replacement session through a fresh accessor lookup.
+Unlike PTYs, Git review documents do not need process-lifetime survival. They are derived and cheap to re-request. Reusing a path or document UUID cannot bypass an instance mismatch. Each remote call captures one session backing; its result cannot be attributed to a replacement session.
 
 Keep before/after mutable-file freshness checks, document leases, exact-file membership, body fingerprints, immutable commit hashes, and existing limited-result behavior. A read is a bounded observation, not a filesystem transaction against editors or external Git processes. Branch labels can move; resolved hashes define an immutable comparison, while freshness indicates changed endpoints.
 
@@ -181,38 +181,19 @@ Under mutation coordination, validate the submitted identities against the docum
 
 ## Framing, Limits, And Cancellation
 
-Use the current typed RPC envelope, RPC UUID, transport ordinals, replay, and Noise connection. No Git producer stream, terminal-style output replay, or progress stream is needed for the current UI. Browser HTTP remains the app-facing transport.
+Git and GitHub queries return ordinary typed results inline over the authenticated execution-node RPC. A result may contain at most **4 MiB of serialized JSON**, including escaping, on Local and remote nodes. Larger results fail explicitly with `GIT_RESULT_TOO_LARGE`; no result is silently truncated to fit transport.
 
-Not all query results fit one RPC. Review batches allow ten million raw patch bytes, with up to five million per file; JSON escaping, paths, summaries, and PR metadata can exceed the 16 MiB message limit. A 64 MiB subprocess stdout cap is not a transport budget. Encryption record fragmentation does not relax application limits.
+The browser loads one review file body per request, accepting more round trips instead of partial-batch continuation. Each body has a separate 3 MiB serialized limit, leaving room for the reply envelope. An oversized file uses the existing `file-too-many-bytes` display state without stopping other files. The document-wide 10 MB patch budget is unchanged. Other callers may still request batches, but the complete reply must fit the 4 MiB result limit.
 
-Use bounded, pull-based result transfer for potentially large Git/gh queries, following the implemented [Files remote adapter](../../server/execution-nodes/remote-files.ts) and [transfer lifecycle](../../server/execution-nodes/file-transfers.ts). A query produces one immutable, serialized response; the remote adapter reconstructs and validates it before returning the ordinary typed result. The browser never sees transfer machinery.
+There are no retained results, transfer references, chunk readers, assembly pools, or expiry timers. Ordinary socket framing remains. The result cap leaves space for RPC envelopes and nested JSON escaping below the 16 MiB session-packet limit. Existing semantic body/row/file limits, subprocess output bounds, and eight-query admission limits remain independent safeguards.
 
-```text
-git.<query>(request)       -> inline typed result | { transfer, size }
-gh.<query>(request)        -> inline typed result | { transfer, size }
-gitResults.readChunk({ transfer, offset }) -> { offset, dataBase64, eof }
-gitResults.close(transfer) -> closed
-```
+Git requests are bounded to 4 MiB of encoded JSON and 100,000 paths. Oversized requests fail before mutation with HTTP 413 / `GIT_REQUEST_TOO_LARGE`; users must select fewer paths. Staging and selected-file commits each remain one request, with no client batching or partial-batch reconciliation.
 
-The method set remains explicit; the notation above is not permission for arbitrary RPC invocation. Result-transfer references carry node, serving instance, owning session, kind, and ID. A result reference cannot be used as a Files handle or across nodes/sessions. The original query runs once; each chunk reads its frozen result rather than re-running Git against changing state.
+Mutation replies are also inline. A result that exceeds the size limit after a mutation produces `GIT_MUTATION_OUTCOME_UNKNOWN`, never a safe-to-repeat rejection. Diagnostic stdout/stderr retain their separate bounds and explicit truncation flags.
 
-Starting bounds, adjustable through named internal constants after measurement:
+Propagate the operation deadline through RPC, subprocesses, and lock waits. Cancellation stops undispatched work and requests interruption of dispatched subprocesses; it is not rollback. Temporary-index cleanup and repository locks remain node-owned until native operations settle. Connection loss never automatically retries a mutation.
 
-- Use 256 KiB decoded chunks, like Files. Keep inline results within a similarly small serialized budget including envelope overhead.
-- Limit one serialized query result to 32 MiB and retained result bytes to 64 MiB per node serving instance; bound result count and admitted concurrent query assembly separately. Reserve capacity before expensive production, not after accumulating an unbounded result.
-- Expire idle result handles after two minutes; close eagerly on success, error, or cancellation. Owning-session retirement closes remaining handles. Do not let reads keep a transfer alive beyond its overall operation deadline.
-- Preserve existing semantic body/row/file limits. Count actual encoded bytes as well as raw patch bytes. Return explicit limited results where the contract supports them; otherwise fail with a typed result-too-large error before transport send. Never slice JSON or report silently incomplete success.
-- Bound browser/controller assembly, worker transient objects, pending subprocesses, prefetch work, and aggregate RPCs as well as retained result bytes. The existing registry's cache limit is not a cap on active leases or transient allocations. Reject excess work with a service-busy error, not an unbounded wait queue.
-
-Extract small shared chunk/expiry helpers only where they remove actual duplication with Files. Do not rebrand all RPCs as a general stream framework. Large mutation inputs such as path/line arrays or commit messages are validated against explicit domain byte/count caps; reject excess inputs before mutation. There is no staged arbitrary-command upload protocol.
-
-Mutation results stay small and inline. Cap diagnostic stdout/stderr separately with an explicit truncation flag where needed. Do not fail serialization after a successful commit merely because a hook printed too much, and never classify such a case as a safe-to-repeat mutation. A subprocess failure after side effects remains distinct from output presentation.
-
-Propagate a single operation deadline through HTTP, RPC, subprocesses, lock waits, and chunk retrieval. Today browser HTTP commonly times out at 30 seconds, RPC defaults to 120 seconds, and PR diff collection can request 60 seconds. Align explicit per-operation budgets before exposing the remote path; per-chunk timeouts must not reset the total budget. Network Git's HTTP-derived timeout policy belongs to controller call options, not worker-global controller configuration.
-
-Cancellation stops undispatched work and requests abort of dispatched subprocesses. It is best-effort interruption, not rollback. Temporary-index cleanup and lock release must run even when the caller vanishes. Native-process settlement, not delivery of an RPC error, controls release of an in-flight mutation lock. Read transfer/session cleanup does not imply that a previously dispatched push or hook was undone.
-
-One channel still has head-of-line blocking and shared failure modes. Sequential chunk requests and fixed admission caps are not a new traffic scheduler. Preserve existing Git visible-versus-prefetch behavior without extending it into a cross-service priority system. Measure interference with chat/terminal traffic; do not promise latency isolation.
+One shared channel can delay chat and terminal traffic under load. Fixed size/admission bounds are not a traffic scheduler or a latency-isolation promise. Larger results require a separate product decision.
 
 ## Mutation Ordering And Uncertain Results
 
@@ -228,7 +209,7 @@ Bound admission before queueing, check cancellation while waiting, and revalidat
 | Confirmed mutation result | Return the exact result; invalidate views for the captured node/repository. Preserve warnings such as `indexSynchronized: false`. |
 | Git exits with an error after starting | Preserve the operation-specific error and refresh state. Pull/stash/conflict/multi-step failures can leave real changes; failure does not mean unchanged. |
 | Connection/deadline lost after possible dispatch, or mutation reply cannot be validated | Return an explicit `GIT_MUTATION_OUTCOME_UNKNOWN`-class error. Keep drafts, invalidate captured repository views, and require inspection before another deliberate mutation. |
-| Brief reconnect preserves the existing logical session | Let transport deduplication deliver the original request/result if still live. Do not create a replacement application request. |
+| Connection loss | The RPC fails; a mutation may have applied. Refresh before an explicit retry. There is no transport replay. |
 | Fresh session or worker/controller restart | Reads may be requested again from a fresh snapshot. Never replay Git mutations from disk or browser recovery. |
 
 No new mutation idempotency/result ledger is required. RPC IDs correlate calls, not durable operation identities. The existing bounded native lock-contention retry is not a general license to retry a failed multi-command operation, lost response, network error, or hook failure. A generic `retryable` error field must not trigger mutation replay.
@@ -290,7 +271,7 @@ Acceptance includes independent views on different nodes, chat switching after e
 
 - [GitTarget](../../web/src/lib/git/targets/git-target.ts) and [target sessions](../../web/src/lib/git/targets/git-target-session.svelte.ts): add node to identity, cached target selection, fallback targets, discovery, and branch-change fencing. A fallback target must retain its captured node; it is not permission to fall back to Local.
 - Workbench, history, comparison, commit, PR, review-body, and performance registries: key by node plus their existing project/target/document identity. Preserve existing bounded caches and stale-response generations. A matching path or commit hash on another node is not the same view.
-- [Project invalidations](../../web/src/lib/git/surface/git-project-invalidation.svelte.ts): change path-only keys to node-qualified keys. Mutations and file saves invalidate the affected node/target, including related views where needed, not every same-path repository across nodes.
+- [Project invalidations](../../web/src/lib/git/surface/git-project-invalidation.svelte.ts): retain one revision per node. Mutations and file saves refresh visible Git views on that host, including unrelated repositories. Other hosts are untouched; independent panel selections remain unchanged. No path history, containment matching, or eviction floors are retained.
 - [Review drafts](../../web/src/lib/git/review/git-review-drafts.svelte.ts) and commit text remain browser-owned. Preserve current context-change protection; don't combine comments or selections from two nodes. Global presentation preferences such as tree width and branch sort can remain global.
 - Replace Local-only Git gates in workspace context, portable surfaces, chat quick actions, New Chat, and sidebar worktree controls with node readiness plus Git capability. `gh` actions additionally use the selected node's gh status. Files and Terminal capabilities remain independent.
 - Git file links carry the owning node/root into the already node-qualified Files interface. A review from a remote node must never open a controller-local same-path file.
@@ -319,7 +300,7 @@ Documentation validation is not implementation verification. The implementation 
 | Layer | Coverage |
 | --- | --- |
 | Contracts/Local behavior | Extend [Git route tests](../../server/routes/__tests__/git-workbench.test.js), [browser API contracts](../../web/src/lib/api/__tests__/git-contract.test.ts), and service tests under `server/git/__tests__/` and `server/gh/__tests__/`. Validate every operation DTO, error domain, optional field, and concrete result; exercise Local through the same service boundary. |
-| Node transport | Add `server/execution-nodes/__tests__/git-rpc.test.ts` and `gh-rpc.test.ts`: capability checks, captured session, malformed/oversized requests, scoped document/result references, chunk offsets/EOF/UTF-8, cancellation, expiry, resource bounds, and mutation uncertainty. |
+| Node transport | `server/execution-nodes/__tests__/git-rpc.test.ts` and `gh-rpc.test.ts`: capability checks, captured session, malformed/oversized requests and results, scoped documents, cancellation, resource bounds, and mutation uncertainty. |
 | Real-process integration | Add `integration-tests/tests/server/execution-node-git.test.ts` and `execution-node-gh.test.ts`, using public worker fixtures and isolated roots. Reuse [worktree](../../integration-tests/tests/server/git-worktrees.test.ts), [comparison](../../integration-tests/tests/server/git-comparison.test.ts), and [refs](../../integration-tests/tests/server/git-refs.test.ts) scenarios against Local and workers. |
 | Frontend state | Extend target-session, workbench/history chat-switch, commit-controller, review, mutation, PR-store, gh-capability, New Chat, and sidebar tests. Use held promises for same-path node switches and stale mutation/generation publication, not timing sleeps. |
 | Browser | Extend [multi-repository switching](../../integration-tests/tests/e2e/git-multi-repo-chat-switch.test.ts), [Git surfaces](../../integration-tests/tests/e2e/git-view-surfaces.test.ts), [comparison](../../integration-tests/tests/e2e/git-comparison.test.ts), and [comment draft](../../integration-tests/tests/e2e/git-changes-comment-draft.test.ts) coverage with a remote worker. Add focused execution-node Git acceptance for node labels, worktree selection, remote file links, and offline recovery. |
@@ -332,7 +313,7 @@ Required scenarios:
 - Two mutations on linked worktrees share node-process coordination; independent repositories remain usable. Session replacement while old native work is pending must not create an overlapping second coordination owner. Aborted waiters must not later run.
 - Partial-stage request after displayed content/index/context changes rejects as stale, rather than applying the same numeric indices to different lines. Evict a cached body, change `diff.interHunkContext` to merge two hunks without changing file contents, and verify the old hunk selection rejects on patch-digest mismatch. A refreshed document must clear old numeric selections. Test untracked intent-to-add and cleanup as well.
 - Review body loads across mutable-file changes, immutable revision snapshots, stale/expired documents, old-instance references, idle expiry, active leases, and bounded cache/result pressure.
-- Result encoding near limits, JSON escaping expansion, large PR diffs/comments, stdout limits, diagnostic truncation, malformed chunks, abort during assembly, and failure to close a handle. Ordinary oversized queries must not send an oversized session message.
+- Result encoding near limits, JSON escaping expansion, large PR diffs/comments, stdout limits, diagnostic truncation, and cancellation. Ordinary oversized queries must not send an oversized session message.
 - Disconnect before dispatch, during mutation, and after side effects before reply. No automatic commit/push/stash/worktree retry, no false success, no lost commit draft. Ordinary Git conflicts can change state even when the response is a confirmed error.
 - Repository node A with generation node B, Auto Local, explicit generation failure without fallback, target switches during generation, and user edits during generation. No repository path is accidentally resolved on B.
 - Isolated fake `gh` executable with node-specific cwd/environment and synthetic JSON/diffs: missing binary, per-node auth/host status, PR detail, optional-comment failure, network errors, and cancellation. No real GitHub credentials or live PR mutations are required.
@@ -341,7 +322,7 @@ Required scenarios:
 
 Use disposable repositories and bare local remotes for real Git mutation tests. Use deterministic hooks/fake runners or held transport delivery to place failures after side effects; do not depend on live network timing. Keep fixtures synthetic and tests resource-bounded. No paid model calls, external push, live GitHub account, or new provider SACS tier is needed for this boundary.
 
-For implementation, run `bun run check`, `bun run test`, the focused integration/browser suites above, and a timed fresh `bun run start --port 0` startup check after code changes. Use the configured integration runners and isolated servers; do not disrupt a user's running controller. This documentation-only change runs link/format checks and independent design review, not those implementation gates.
+For implementation changes, run `bun run check`, `bun run test`, the focused integration/browser suites above, and a timed fresh `bun run start --port 0` startup check. Use the configured integration runners and isolated servers; do not disrupt a user's running controller.
 
 ## Deferred Work
 

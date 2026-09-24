@@ -1,6 +1,6 @@
 # Files On Execution Nodes
 
-Status: architecture and design, 2026-09-21. Implementation uses the existing shared Noise WebSocket. No scheduler, pacing, priorities, or second channel is included; congestion isolation is deferred, likely to a second channel if needed.
+Status: architecture, updated 2026-09-24. Files use bounded inline RPC over the existing shared Noise WebSocket. No bulk transfer subsystem, scheduler, or second channel is included.
 
 This follows [Execution Node Interfaces](./interface.md) and [Execution Nodes In The App](./app-integration.md). Current implementation references were checked at `808d869658325b62c60c23782e986f76ded8b7a3`. Earlier documents describe their respective stages; the source now includes mandatory Noise encryption on execution-node connections.
 
@@ -21,11 +21,11 @@ This is not filesystem synchronization, cross-node file copying, a general uploa
 - Files are a node-level service, not an agent capability. They do not depend on the chat's provider, model, or native session.
 - Browser requests continue through the controller's authenticated HTTP API. The controller-to-node hop uses Noise WebSocket transport.
 - No worker REST listener or custom Noise-over-HTTP protocol. Both existing connection directions must remain usable, including workers that can only make outbound connections.
-- Small operations use typed RPC. Content transfers use bounded chunks and ephemeral transfer references behind the file-service adapter.
-- Writes stage content before a revision-checked commit. An uncertain commit is not automatically retried.
+- All operations use typed RPC. Content is limited to 4 MiB and carried inline as base64.
+- Writes decode the complete request before a revision-checked save. An uncertain save is not automatically retried.
 - File RPCs use the existing shared Noise WebSocket. Fragmentation only accommodates message size limits. Traffic scheduling versus a second channel remains a future decision, not implementation scope.
 
-Method names and tuning values below are proposals, not an already implemented protocol.
+The limits below describe the supported protocol.
 
 ## Existing Building Blocks
 
@@ -91,7 +91,7 @@ An already-open file tab retains its own identity after chat selection or owners
 
 ## Service Surface
 
-The service exposes domain operations; chunking is an internal remote-adapter concern.
+The service exposes domain operations; bounded base64 encoding is an internal remote-adapter concern.
 
 | Operation | Contract |
 | --- | --- |
@@ -101,7 +101,7 @@ The service exposes domain operations; chunking is an internal remote-adapter co
 | Read text/content | Return bounded content and its revision. Raw-byte transport supports both text and binary viewers. |
 | Save text | Accept content, expected revision, and explicit conflict policy; return the written revision only after confirmed success. |
 
-Keep the existing browser HTTP shape where practical, adding node qualification and necessary bounded-list metadata. The remote facade assembles or stages content without exposing transport details to editor code. In-process calls do not need serialization, base64, or artificial network chunks.
+Keep the existing browser HTTP shape, adding node qualification and bounded-list metadata. The remote facade encodes complete bounded files without exposing transport details to editor code. In-process calls do not need serialization or base64.
 
 Directory bounds must cover encoded bytes as well as entry counts. The current recursive file list has depth/result limits, but those alone do not bound the size of long paths, and the tree route is not a paged transfer. Exact paging versus capped-result behavior is still to be chosen. Do not accumulate an unlimited listing at the controller after making each individual RPC small.
 
@@ -112,112 +112,30 @@ There are several independent identities on the current execution-node connectio
 | Identity | Meaning |
 | --- | --- |
 | Logical transport session | The continuity lifetime that can survive a brief physical reconnection. |
-| Transport `ordinal` | Monotonic per direction within that session, across all application messages. Supports replay, duplicate suppression, and gap detection. |
 | RPC `id` | A UUID for one request, echoed by its result, error, or cancellation. |
 | Producer `binding` | Routes chat events to one exact controller publication lease, scoped by node, serving instance, and integration. Lifecycle events also identify their run. |
 | Transcript row identity | Controller-owned durable conversation identity, independent of transport numbering. |
 
-[MessageSession](../../server/execution-nodes/message-session.ts) carries:
-
-```ts
-type Packet =
-  | { kind: 'message'; ordinal: number; body: string }
-  | { kind: 'receipt'; through: number };
-```
-
-`body` is the serialized application envelope. Noise encrypts this packet and handles encrypted-record fragmentation beneath it. A cumulative receipt confirms transport acceptance, not an RPC's completion or a durable write.
-
-Files reuse the request/result/error/cancel envelope. Add a transfer reference and byte offset inside file requests, not a new transcript-style event stream or another reliable-delivery algorithm. Each chunk has its own RPC ID; the transfer reference groups the chunks.
-
-A transfer reference identifies one read snapshot or staged write, owned by a node serving generation and its file-transport session. It is ephemeral and is never persisted in `chats.json`, a ledger, or browser recovery. Validate its node, generation, kind, and owning session before use. Files are not provider resources: do not assign them to an arbitrary integration just to reuse an agent-scoped resource type.
-
-## Transfer Lifecycle
-
-An illustrative wire surface is:
+Files reuse the typed request/result/error/cancel RPC envelope. Reads and text saves each use one request and one result:
 
 ```text
-files.openRead(target)                         -> transfer, size, revision
-files.readChunk(transfer, offset, maxBytes)     -> offset, data, eof
-files.beginWrite(target, size, revision, policy) -> transfer
-files.writeChunk(transfer, offset, data)        -> nextOffset
-files.commitWrite(transfer)                    -> revision
-files.close(transfer)                          -> closed
+files.read(target) -> { data: base64, path, revision }
+files.save({ target, data: base64, expectedRevision, conflictResolution }) -> saved revision
 ```
 
-Here `revision` on `beginWrite` is the expected destination revision, and `policy` is the existing reject/overwrite choice. The target and conflict policy are captured at creation; later chunk calls cannot retarget the write. Offsets and lengths count decoded bytes, not base64 characters or JavaScript string code units.
+The method set is explicit. There are no application-level chunks, transfer handles, staged uploads, transfer expiry, or crash-staging cleanup.
 
-### Reads
+## Size Limits And Writes
 
-The simplest initial implementation uses the existing bounded versioned read to obtain bytes and a revision, then serves an immutable snapshot in chunks. A file changing after that read does not mix new bytes into the remaining chunks. This preserves the current best-effort revision semantics rather than claiming filesystem snapshot isolation.
+Files are limited to **4 MiB** for viewing and text saves, on Local and remote nodes. Image reads remain binary internally; the editor still saves UTF-8 text, not arbitrary uploaded binaries. Oversized files fail with `FILE_TOO_LARGE`; they are not silently truncated.
 
-Snapshot bytes count against an aggregate node budget. Chunking bounds wire messages, not total memory: a worker snapshot and controller assembly can each hold a full file. Enforce the actual bytes read as well as the initial stat size, including files that grow during the read. A temporary spool or genuinely incremental reader can be introduced later if measured memory use requires it.
+Base64 keeps the complete file below 6 MiB even when its text contains control characters that would expand heavily under JSON escaping. The existing 16 MiB session-packet limit and lower-level socket framing remain independent bounds. Validate encoded length, decoded length, and encoding before accepting a save.
 
-The remote facade requests another bounded chunk only when it has capacity. It checks the returned offset, total size, and EOF, and exposes only a complete successful read. Decode UTF-8 after byte assembly, or with a streaming decoder; independently decoding arbitrary byte chunks can corrupt characters split across chunks.
+A read uses the existing versioned-file snapshot and returns bytes with its revision. A save reaches the file service only after the complete request is decoded. Under the existing node-owned save lock, re-resolve containment and target identity, then check the expected revision immediately before writing. Preserve in-place filesystem write semantics and explicit overwrite. External writers remain outside this lock.
 
-### Writes
+At most eight content reads or saves run concurrently per process; metadata and directory queries do not consume these slots. Reads and saves use a 30-second remote call deadline. Cancellation is best effort, not rollback. A lost save confirmation produces `FILE_SAVE_OUTCOME_UNKNOWN`; the editor keeps its buffer and reconciles the captured target before a deliberate next save. Nothing automatically resends a mutation.
 
-The worker creates private staging storage and reserves transfer capacity before accepting content. Chunks write to staging, never directly to the destination. Validate encoded and decoded lengths, total size, contiguous offsets, and transfer ownership. Serialize operations within each write transfer; asynchronous RPC handlers are not inherently ordered merely because their messages arrived in order.
-
-Commit requires all declared bytes. Under the node-owned save lock, re-resolve the destination, recheck containment and target identity, and apply the expected-revision/conflict policy immediately before writing. Return the revision of the actual completed write. A chunk acknowledgement means staged acceptance, not a saved file.
-
-Staging protects the destination from an incomplete network upload. It does not by itself make the final filesystem write atomic or crash-durable. Preserve current save semantics initially unless replacement semantics are deliberately changed. In particular, switching from in-place writes to atomic rename affects hard links, permissions, and file identity; that is not an incidental transport optimization. External processes remain outside Garcon's save lock, so revision checks are not a transactional compare-and-swap against every filesystem writer.
-
-Never automatically retry a commit whose outcome is unknown. Keep the editor dirty/uncertain and reconcile by reading the captured target before a deliberate next save. Matching bytes can establish the current content, not prove the history of a lost response.
-
-### Cancellation And Cleanup
-
-Closing a transfer releases snapshots, handles, reservations, and uncommitted staging. Make close idempotent. Forward browser aborts through the controller to file RPC cancellation and transfer cleanup; also apply worker-owned expiry because callers can disappear without sending close.
-
-Use bounded transfer lifetimes and cleanup on owning-session replacement or node disposal. Expiry must not race a live commit or interpret cancellation as undoing a dispatched write. Crash leftovers in worker-owned staging may be removed on startup; never scan/delete arbitrary project temporary files, and never resume a staged write automatically.
-
-## Size Limits And Backpressure
-
-Current bounds, before file-service changes:
-
-| Layer | Bound |
-| --- | --- |
-| Garcon production session packet | 16 MiB of encoded JSON, including envelopes; the standalone `MessageSession` default is only 1 MiB. |
-| Noise application message | 16 MiB; larger messages are not made valid by encrypted-record fragmentation. |
-| Noise encrypted frame | At most 65,535 bytes; fragmentation/reassembly is internal to the library. |
-| Retained outgoing replay | 32 MiB / 4,096 messages per direction. Incoming pre-readiness replay is bounded separately. |
-| Garcon socket-buffer guard | More than 4 MiB buffered causes continuity failure on a subsequent send. This is a safety guard, not a bulk scheduler. |
-| RPC concurrency | 256 outgoing and 256 incoming calls; file traffic must not consume the entire shared allowance. |
-| Existing file viewer | 25 MiB per file, independently of transport limits. |
-
-Sources: [session transport](../../server/execution-nodes/session-transport.ts), [WebSocket link](../../server/execution-nodes/websocket-link.ts), [RPC](../../server/execution-nodes/rpc.ts), and the pinned Noise library's [limits](https://github.com/cfal/noise-ws/blob/536eb503e81a1f9d90436006d3821e2080630488/src/options.ts#L5) and [send checks](https://github.com/cfal/noise-ws/blob/536eb503e81a1f9d90436006d3821e2080630488/src/connection.ts#L60).
-
-A reasonable starting point is 256 KiB of raw bytes per chunk, encoded as base64 in the existing JSON RPC. That is about 342 KiB plus envelopes, well below the message cap; a 25 MiB file takes 100 chunks. Base64 costs roughly one-third extra payload bandwidth, but avoids changing today's string-only Garcon transport. The Noise library supports binary messages; using them here would still require new Garcon framing and replay support.
-
-The exact chunk size, in-flight window, concurrent-transfer count, snapshot/staging budgets, and expiry are tuning decisions. Regardless of channel topology:
-
-- Bound aggregate outstanding file bytes and RPCs per node, not only per transfer.
-- Advance from chunk completion and receiver capacity, not transport receipts alone. Never enqueue an entire file's chunks at once.
-- Bound both memory and temporary disk use, and reject excess admissions with typed file errors.
-- Reject or split oversized content/list responses before transport serialization can exhaust the session. An ordinary oversized file request must not disconnect running chats.
-- Preserve per-transfer operation ordering without creating a general-purpose stream multiplexer prematurely.
-- Propagate an overall operation deadline. Browser reads/saves currently have 30-second limits while RPCs default to 120 seconds; per-chunk timeouts alone cannot bound a whole transfer or prevent work after an HTTP timeout.
-
-Keep file-size product policy separate from these limits. Retain the existing viewer cap; define an explicit text-save cap rather than accidentally deriving it from base64 size, a generic HTTP body limit, or replay capacity. No larger-file support is implied by chunking.
-
-## Future Congestion Isolation
-
-### Shared WebSocket With Scheduling
-
-File RPCs share the existing logical session, replay sequence, authenticated connection, and reconnect lifecycle with agent work. This needs no second connection setup or association protocol.
-
-If measurements later justify scheduling, it would reserve capacity for control/chat traffic and pace bulk chunks against socket capacity. That is not part of this implementation. Scheduling would need to happen before assigning transport ordinals; queued messages already in the ordered stream cannot be overtaken. Small chunks alone cannot eliminate head-of-line delay or isolate file-induced session failure completely.
-
-### Separate Noise WebSocket
-
-File traffic has its own socket buffers, RPC budget, and transport ordinals. Bulk congestion or a file-channel failure need not retire the chat connection. Both channels still share machine and network capacity; a second socket is not a bandwidth guarantee.
-
-This adds connection ownership, authentication/association, readiness, retry, and shutdown work. Preserve the configured connection direction: an outbound-only worker must initiate the secondary connection too. Bind it to the authenticated node and current serving generation, use a fresh Noise handshake/key state, and reject stale associations. Do not create a second independent `InProcessExecutionNode` or let a file-channel reconnect replace the provider serving generation.
-
-The secondary channel's exact association and reconnect policy are not specified here. It may abort its transfers on channel replacement; it does not need durable resume. Parent serving-generation retirement always invalidates its file transfers. Do not assume ordering between chat and file channels; commit depends on accepted chunks, not on relative arrival of unrelated messages.
-
-### Decision Boundary
-
-The initial implementation shares the existing WebSocket without traffic scheduling or pacing. Keep the file contract, identities, transfer lifecycle, and revision handling independent of future congestion isolation. If measured chat/Stop latency becomes a problem, reconsider scheduling versus secondary-channel ownership; a second channel is the preferred direction, not a current commitment.
+File traffic shares the authenticated execution-node connection. Its bounded send queue provides backpressure, not latency isolation. No traffic scheduler or second connection is included. Larger files or stronger congestion isolation require a separate product decision.
 
 ## Failure And UI Behavior
 
@@ -228,8 +146,7 @@ When switching nodes, try the current directory on the destination before defaul
 | Observation | Behavior |
 | --- | --- |
 | Node unavailable before dispatch | Fail explicitly; do not fall back to controller-local files. Preserve open documents and unsaved buffers. |
-| Brief disconnect with surviving transport/transfer lifetime | Existing transport may replay retained requests/results with duplicate suppression. Do not independently resend application mutations. |
-| Owning file session or serving generation replaced | Invalidate old handles and discard uncommitted transfers. A new read starts from a new snapshot; no concatenation across sessions. |
+| Connection lost after possible dispatch | Report an uncertain save; never resend it automatically. Reads may be requested again. |
 | Missing, inaccessible, outside-root, or oversized file | Return the corresponding file error, not generic provider failure or empty successful content. |
 | Revision conflict | Preserve the buffer and use the existing conflict workflow. Overwrite remains an explicit user choice. |
 | Commit may have run but its result is lost | Surface uncertainty, retain the buffer, and require reconciliation before another save. Cancellation is not rollback. |
@@ -241,15 +158,15 @@ Enable remote browsing, file links, and editor actions only after the correspond
 
 ## Verification Criteria
 
-The implementation must demonstrate these boundaries, not just successful chunk round-trips:
+The implementation must demonstrate these boundaries:
 
 - Local and two workers with identical path strings but different contents: browse, read, save, recovery, and simultaneous panels never cross nodes.
 - Both connection directions, including an outbound-only worker with no reachable worker REST endpoint.
 - Node-side project-base and symlink checks, target changes during awaited resolution, and independent Git/terminal guards after Files is enabled.
-- Byte-boundary and over-limit cases: binary data, split UTF-8 characters, malformed chunks, invalid offsets, incomplete writes, and large directory responses.
+- Byte-boundary and over-limit cases: image bytes, UTF-8 text, malformed base64, escaped content, and large directory responses.
 - Consistent read snapshots and revision-aware writes, including two concurrent saves, external changes, and conflict/overwrite behavior.
-- Deterministic disconnects before dispatch, during chunks, and after commit but before its reply. No blind save retry, false-success UI, or stale transfer reuse.
-- Cancellation, expiry, session replacement, and crash-staging cleanup with bounded memory/disk/RPC usage and retained editor buffers.
+- Deterministic disconnects before dispatch and after a save but before its reply. No blind retry or false-success UI.
+- Cancellation and session replacement with bounded memory/RPC usage and retained editor buffers.
 - Ordinary bounded file transfers coexist with chat traffic. No congestion isolation or latency guarantee under bulk load is implied.
 
-Use unit/contract tests for parsers and transfer state, isolated real-process controller/worker tests for IO and transport failure, and browser coverage for project selection, file identity, editor conflicts, and buffer preservation. No paid provider calls are needed to validate the file service.
+Use unit/contract tests for parsers and size limits, isolated real-process controller/worker tests for IO and transport failure, and browser coverage for project selection, file identity, editor conflicts, and buffer preservation. No paid provider calls are needed to validate the file service.

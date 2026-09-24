@@ -1,8 +1,14 @@
 # Execution Nodes In The App
 
-Status: proposed second stage, 2026-09-19. Researched against `agent-integration-remote` at `2bf52dafc`. The commands, configuration, APIs, and UI described below are proposed, not already available.
+Status: historical second-stage proposal, researched on 2026-09-19 against `2bf52dafc`. Subsequent implementation supersedes its transport and UI details. See [Current Transport](./transport.md), [Files](./files.md), [Git](./git.md), and [Terminals](./terminal.md) for the newer boundaries. The text below preserves the original proposal, not a current module or feature inventory.
 
-Predecessor: [Execution Node Interfaces](./interface.md), the implemented provider-remoting boundary. The [transcript-ledger-v5 design](../transcript-ledger-v5-design.md), revision 38, remains authoritative for transcript ownership, interruption, handoff, and manual Reload. This document extends execution selection to multiple nodes; it does not replace those lifecycle rules.
+Current composer policy: pending agent, host, and destination-folder choices are
+ephemeral. Leaving a chat or reloading resets them to its saved execution owner
+and folder. Composer text and recovered file drafts retain their existing
+persistence. An explicitly confirmed destination remains selected while staying
+in that chat, until submission or cancellation.
+
+Predecessor: [Execution Node Interfaces](./interface.md), the historical provider-remoting design. The current [transcript-ledger-v5 design](../transcript-ledger-v5-design.md) remains authoritative for transcript ownership, interruption, handoff, and manual Reload. This document extends execution selection to multiple nodes; it does not replace those lifecycle rules.
 
 ## Goal
 

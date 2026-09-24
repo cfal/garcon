@@ -1,6 +1,6 @@
 # Execution Node Interfaces
 
-Status: implemented provider-remoting stage, updated 2026-09-19 against branch `agent-integration-remote` through commit `2bf52dafc`. This is an architecture reference: ownership, interfaces, lifetimes, failure semantics, and deliberate limits. It supersedes the original root-level draft. The second stage is described in [Execution Nodes In The App](./EXECUTION_NODE_APP_INTEGRATION.md).
+Status: historical first-stage design, implemented through commit `2bf52dafc` on 2026-09-19 and superseded by subsequent multi-node and encrypted-transport work. Its single-node configuration, unencrypted transport, replay, per-session provider lifetime, retry timing, and module inventory are not current operational guidance. Current transport has no replay and keeps native turns alive across disconnects. See [Current Transport](./transport.md), [Files](./files.md), [Git](./git.md), and [Terminals](./terminal.md). The historical second-stage proposal is [Execution Nodes In The App](./app-integration.md).
 
 The [transcript-ledger-v5 design](../transcript-ledger-v5-design.md), revision 38, governs transcript acceptance, execution state, interruption, and manual Reload. This design does not introduce a second transcript authority or durable execution recovery.
 
@@ -109,6 +109,11 @@ Stable node identity, transport process `runtimeId`, logical session identity, a
 
 Execution handles belong to one operation and never transfer to a successor. The goal preparation/expiry/handoff state machine, successor slots, goal RPCs, endpoint, and UI capability have been deleted rather than retained behind a disabled flag.
 
+Garcon-managed Codex app-servers disable the upstream `goals` feature before loading
+threads. Existing native goal records remain untouched but cannot expose goal tools
+or start automatic turns through Garcon. Clearing a goal after resume would race
+the [upstream idle continuation](https://github.com/openai/codex/blob/fe74a774532af67b5a4a3dec03ce9469e17f89af/codex-rs/ext/goal/src/runtime.rs#L401-L440).
+
 ### Producer Binding And Acceptance
 
 [ProducerBindings](../../server/agents/producer-bindings.ts) installs the exact controller lease route before calling `producers.bind`, and dispatch waits for registration. Events may precede the execution start/resume reply. Every native operation captures its own publisher; an event never discovers the latest transcript sink by chat ID.
@@ -116,6 +121,8 @@ Execution handles belong to one operation and never transfer to a successor. The
 Worker emission snapshots normalized events and hands them to bounded transport. A transport receipt means transport acceptance, not provider completion or durable controller ledger acceptance. The controller sink remains synchronous: validate the lease, canonicalize the event, commit, then schedule broadcasts through the per-chat event queue. Transport ordinals never become ledger ordinals.
 
 Closing a lease immediately removes the controller route, evicts its cached acquisition, and rejects late/replayed events even while worker close is pending. Every cached or concurrent acquisition checks lease closure. Old bindings cannot publish into a replacement transcript view.
+
+On the execution node, closing a binding cancels admission and best-effort aborts its active native operation, including a session established after closure. A start still pending when its binding closes rejects with `STALE_RESOURCE`; completed operations are never aborted.
 
 Run terminal does not close the producer binding. Late rows and session facts remain admissible while the binding is open; old terminals, notices, and actionable permissions cannot affect a newer run. Preserve session-before-dependent-output and row-before-terminal-derived-broadcast ordering. Do not import generic process drain-before-exit rules into this normalized transcript contract.
 
@@ -322,9 +329,9 @@ All shipped integrations are wired through [defaultAgentIntegrations](../../serv
 | Coverage | Evidence |
 | --- | --- |
 | All ten integration contracts through local and both remote dial modes | [integration-conformance.test.ts](../../server/execution-nodes/__tests__/integration-conformance.test.ts) |
-| Lost receipts, duplicate/stale frames, repeated partial replay, gaps, budgets, consumer failure | [message-session.test.ts](../../server/execution-nodes/__tests__/message-session.test.ts), [session-transport.test.ts](../../server/execution-nodes/__tests__/session-transport.test.ts) |
-| Real WebSocket authentication, replay ordering, no duplicate mutation | [websocket-link.test.js](../../server/execution-nodes/__tests__/websocket-link.test.js), [rpc-replay.test.ts](../../server/execution-nodes/__tests__/rpc-replay.test.ts) |
-| Replay-progress deadlines, no-progress automatic redial, async offline rejection, query deadline grace | [remote-deadlines.test.ts](../../server/execution-nodes/__tests__/remote-deadlines.test.ts) |
+| Bounded send queues, backpressure, connection loss, consumer failure | [message-session.test.ts](../../server/execution-nodes/__tests__/message-session.test.ts), [session-transport.test.ts](../../server/execution-nodes/__tests__/session-transport.test.ts) |
+| Real WebSocket authentication, fresh-session replacement, no mutation retry | [websocket-link.test.js](../../server/execution-nodes/__tests__/websocket-link.test.js), [rpc-disconnect.test.ts](../../server/execution-nodes/__tests__/rpc-disconnect.test.ts) |
+| Async offline rejection and provider query deadlines after setup | [remote-deadlines.test.ts](../../server/execution-nodes/__tests__/remote-deadlines.test.ts) |
 | Stable facades, stale replies/events, independent restart, bounded cleanup | [session-replacement.test.ts](../../server/execution-nodes/__tests__/session-replacement.test.ts), [execution-node-restart.test.ts](../../integration-tests/tests/server/execution-node-restart.test.ts) |
 | Immutable operation handles, native session-ID reuse, late rows, closed bindings | [execution-lifecycle.test.ts](../../server/execution-nodes/__tests__/execution-lifecycle.test.ts), [producer-bindings.test.js](../../server/agents/__tests__/producer-bindings.test.js) |
 | Permission single-flight, history cancellation, immutable event snapshots | [resource-lifecycle.test.ts](../../server/execution-nodes/__tests__/resource-lifecycle.test.ts) |

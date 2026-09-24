@@ -1,8 +1,8 @@
 # Terminals On Execution Nodes
 
-Status: architecture and design, updated 2026-09-22. Remote terminals are not implemented. Channel topology, PTY lifetime, replay policy, session limits, creation targets, and host-picker behavior are decided below; wire method names remain illustrative.
+Status: implemented on Local and remote execution nodes, updated 2026-09-24. The contracts below govern channel topology, PTY lifetime, replay, session limits, creation targets, and host selection. Illustrative wire names are not a replacement for the typed service contract.
 
-This follows [Execution Node Interfaces](./interface.md), [Execution Nodes In The App](./app-integration.md), and [Files On Execution Nodes](./files.md). Source behavior was inspected at `808d869658325b62c60c23782e986f76ded8b7a3`. The Files implementation can proceed independently; this proposal should reuse its node-scoped service and transport infrastructure where appropriate, not introduce a competing transport framework.
+This follows [Execution Node Interfaces](./interface.md), [Execution Nodes In The App](./app-integration.md), and [Files On Execution Nodes](./files.md). The historical baseline was inspected at `808d869658325b62c60c23782e986f76ded8b7a3`. Terminals reuse the node-scoped service and transport infrastructure shared with Files and agents.
 
 ## Decisions
 
@@ -29,9 +29,19 @@ Out of scope: durable terminal recovery, command execution queues, cross-node pr
 
 ## Current Implementation
 
+The process-owned [TerminalRuntime](../../server/terminals/node-service.ts) lends a service to each replaceable execution-node session. Local uses that service directly; [RemoteExecutionTerminalService](../../server/execution-nodes/remote-terminals.ts) adapts the same contract over Noise RPC and attachment-qualified events. [TerminalController](../../server/terminals/controller.ts) owns browser routing and authentication, not remote PTY lifetime.
+
+The [terminal service contract](../../server-agents/interface/src/contracts/terminals.ts) supports list, create, rename, terminate, attach, input, resize, and peer cleanup. Lists return process-runtime identity and an attachment epoch. Creates check the expected runtime; attaches check the listed epoch. Qualified IDs preserve node, runtime, and session identity through browser state and layout.
+
+The browser keeps per-node inventories, bounded fragments, sequence-gap recovery, and retained xterm renderers. Creation menus offer available hosts with per-node admission. Default names contain the host; custom titles retain host context in the mobile picker. An attachment indicator remains visible at narrow widths.
+
+## Historical Baseline
+
+This section describes the pre-remoting implementation at the revision above, not the current service boundary. Subsequent sections specify the implemented contract and deliberate limits.
+
 ### Controller And PTY
 
-[TerminalManager](../../server/terminals/terminal-manager.ts) currently lives once in the controller, outside `InProcessExecutionNode`. Its state is entirely in memory:
+[TerminalManager](../../server/terminals/terminal-manager.ts) lived once in the controller, outside `InProcessExecutionNode`. Its state was entirely in memory:
 
 - Sessions are partitioned by server-derived principal and identified by a random terminal UUID.
 - Each principal can retain eight sessions, including exited sessions not yet removed.
@@ -44,7 +54,7 @@ Out of scope: durable terminal recovery, command execution queues, cross-node pr
 
 The installed `bun-pty` version is 0.4.10, recorded in [bun.lock](../../bun.lock). Its API delivers strings, uses a streaming UTF-8 decoder internally, and exposes `write`, `resize`, and `kill`. This is the existing implementation to reuse, not replace with pipes or a home-grown PTY engine. A kill request and the library's exit callback must not be treated as proof that every descendant process has died.
 
-The [node contract](../../server-agents/interface/src/contracts/execution-node.ts) still advertises `terminals: false`, and `getTerminalService()` is unsupported for both node implementations. Local terminal routes bypass it; current remote-target guards and project-resolution UI reject remote terminal creation.
+The node contract then advertised `terminals: false`, and `getTerminalService()` was unsupported for both implementations. Local routes bypassed it; remote-target guards and project-resolution UI rejected remote terminal creation.
 
 ### Browser Protocol
 
@@ -92,7 +102,7 @@ Current limits worth preserving or deliberately revisiting:
 | Request-result cache | Ten minutes; 256 entries per principal and 4,096 total. |
 | xterm scrollback | 4,096 lines, independent of server replay. |
 
-## Proposed Boundary
+## Implemented Boundary
 
 ```text
 Browser terminal registry + retained xterm runtime
@@ -112,7 +122,7 @@ Local terminal manager     Remote facade
                           bun-pty
 ```
 
-Replace the unsupported `ExecutionNode.getTerminalService()` placeholder with a typed node service. Move PTY ownership, output sequence/replay, attachment arbitration, and idempotency into that service. Local routes call the same implementation directly. Do not split local and remote terminal behavior into independent managers with subtly different contracts.
+`ExecutionNode.getTerminalService()` exposes a typed node service. PTY ownership, output sequence/replay, attachment arbitration, and idempotency live in its process-owned manager. Local routes call the same implementation directly. Do not split local and remote terminal behavior into independent managers with subtly different contracts.
 
 The controller retains HTTP/browser authentication, trusted principal derivation, node selection, socket delivery queues, and stream-to-browser routing. The node receives an explicit delegated principal identity from the authenticated controller, not browser-supplied claims or a copied browser bearer token. Avoid importing server HTTP principal types into the shared node interface; use a narrow transportable authority contract.
 
@@ -131,7 +141,7 @@ browser identity:     existing clientId
 operation identity:   existing requestId, scoped to principal/node/terminalRuntimeId
 ```
 
-`terminalRuntimeId` identifies the process-lifetime terminal manager. It remains stable through controller reconnects/restarts and fresh provider-serving `instanceId` values, and changes when the execution-node process restarts. An existing process-lifetime worker runtime identifier can be reused where its lifetime matches; the provider's serving `instanceId` cannot. Report terminal runtime identity in the terminal service's list/metadata contract, independently of provider manifests.
+`terminalRuntimeId` identifies the process-lifetime terminal manager. It remains stable through controller reconnects/restarts and changes when the execution-node process restarts. The worker's provider `instanceId` now also has process lifetime, but terminal identity remains independent in the service's list/metadata contract.
 
 Attachments additionally belong to one authenticated controller connection/session. A replacement controller obtains new attachment authority over the same surviving terminal reference; it never reuses an old connection's attachment. Partition sessions by the stable configured node relationship and server-derived principal, not an ephemeral controller runtime ID. Reauthentication for the same relationship/principal restores access; a different node identity or principal must not silently adopt another namespace's terminals.
 
@@ -178,7 +188,7 @@ The terminal manager lives for the execution-node process. Its sessions, replay 
 | --- | --- |
 | Browser tab/socket disconnect or authorization expiry | Detach that browser; keep the PTY and bounded replay. |
 | Renderer move/hide | Keep the existing runtime/process behavior; no new PTY. |
-| Node-link interruption, whether brief or longer than replay grace | Detach transport-bound authority; keep the PTY and bounded replay for as long as the node process lives. |
+| Node-link interruption | Detach transport-bound authority; keep the PTY and bounded replay for as long as the node process lives. |
 | Fresh logical session or provider-serving generation | Replace connection adapters and attachments only. Preserve the terminal runtime, PTYs, and terminal references. |
 | Remote controller restart or shutdown | Keep remote PTYs. The new controller lists the surviving runtime and obtains fresh attachments. |
 | Node connector disabled, removed, or reconfigured while worker survives | Remove access/attachments, not the PTYs. Connector management is not an implicit Terminate command. |
@@ -186,11 +196,11 @@ The terminal manager lives for the execution-node process. Its sessions, replay 
 | Explicit terminal termination | Remove that terminal and request PTY cleanup. |
 | Execution-node process shutdown/restart or crash | Runtime state is lost; orderly shutdown requests PTY cleanup. Do not claim descendant-process death solely from a crash or lost connection. |
 
-The existing 30-second logical-session resumption grace is a transport bound, not a PTY lifetime. There is no detached-terminal timeout that kills long-running jobs. Switching between mobile data and Wi-Fi, or losing the controller for hours, may lose old output from the bounded replay tail but must not kill the shell or reset its terminal identity.
+There is no node-link replay grace or detached-terminal timeout that kills long-running jobs. Switching between mobile data and Wi-Fi, or losing the controller for hours, may lose old output from the bounded terminal replay tail but must not kill the shell or reset its terminal identity.
 
 For Local, the controller process is also the execution-node process. Restarting it ends Local terminal management as today. Remote workers are separate processes, so controller restart does not end their terminals. This is the same process-lifetime rule, not a requirement to introduce a Local supervisor.
 
-Current worker composition creates a fresh `InProcessExecutionNode` for a fresh logical session. Terminal ownership must therefore be lifted above that replaceable object. Its `dispose()` releases that session's terminal attachments, not the process-owned manager. Worker shutdown alone owns manager shutdown; controller-side remote-facade disposal must not request remote manager shutdown.
+Worker composition retains one `InProcessExecutionNode` and terminal runtime for the process. Connection cleanup releases that session's terminal attachments, not the manager. Worker shutdown alone owns manager shutdown; controller-side remote-facade disposal must not request remote manager shutdown.
 
 Distinguish process retirement from a lost caller during create. Fence admissions and clean up late spawns when the terminal manager itself is shutting down. If only the controller connection disappears after creation was dispatched, keep the created PTY/result discoverable by the same principal; do not compensate for an unknown reply by killing a possibly running job. Cancel pending attachment publication and old browser routes independently.
 
@@ -204,9 +214,9 @@ Preserve one ordered operation path per terminal. Do not dispatch each remote in
 
 Check attachment generation, authorization, process state, and retirement immediately before native writes. Enforce decoded input bytes, queued bytes/count, and sane dimensions at the node, not only in the browser parser. A long paste needs bounded ordered chunks or an explicit error; it must not be silently truncated or turn into one oversized RPC.
 
-On a detected node-link interruption, retire affected input attachments, disable browser input, and reattach with fresh authority after recovery. Keep the PTY through both resumable and fresh logical sessions, but do not intentionally queue new keystrokes while disconnected. Worker-side revocation ensures retained transport messages for an old attachment are rejected rather than becoming delayed typing after reattachment.
+On a detected node-link interruption, retire affected input attachments, disable browser input, and reattach with fresh authority after recovery. Keep the PTY, but do not queue new keystrokes while disconnected or resend uncertain input.
 
-This is not instantaneous distributed revocation: input already dispatched or executed before the worker observes the break may have taken effect. Never resend it to resolve uncertainty. Transport replay within one session suppresses duplicates, but does not provide exactly-once shell execution or cancel earlier side effects. Fresh controller/provider sessions preserve the terminal reference but invalidate old attachments; an actual terminal-runtime change invalidates both.
+This is not instantaneous distributed revocation: input already dispatched or executed before the worker observes the break may have taken effect. Never resend it to resolve uncertainty. Fresh connections preserve the terminal reference but invalidate old attachments; an actual terminal-runtime change invalidates both.
 
 When a node reconnects, list that node's terminal runtime and restore eligible attachments even if the browser's primary `/ws` stayed connected throughout. Browser-socket readiness alone does not describe remote terminal readiness. Reconcile only the affected node, without blocking Local or another healthy node.
 
@@ -218,17 +228,16 @@ Keep these identities independent:
 
 | Identifier | Purpose |
 | --- | --- |
-| Node transport ordinal | Link replay/deduplication across all messages on that logical channel. |
 | RPC UUID | Correlates one control call and result/error. |
 | Terminal output sequence | Orders retained PTY output and browser catch-up for one terminal within its process-lifetime runtime. |
 | Fragment index/count | Reassembles one output sequence; never advances the received sequence until complete. |
 | Attachment ID | Fences which browser subscription may consume events and send input. |
 
-The authoritative terminal replay tail belongs on the execution node. Controller socket queues are bounded delivery state, not a second terminal history. A browser reconnect uses its terminal output cursor, never the node transport receipt or transcript ledger cursor.
+The authoritative terminal replay tail belongs on the execution node. Controller socket queues are bounded delivery state, not a second terminal history. A browser reconnect uses its terminal output cursor, never the transcript ledger cursor.
 
 Split large PTY notifications and replay into bounded application messages before passing them to the node transport. Keep UTF-8 and ANSI data intact; transport fragments may split bytes, but decode only after complete reassembly or through a streaming decoder. The existing PTY API is UTF-8 text, not a promise of arbitrary lossless binary transport.
 
-Accept duplicate complete sequences only by discarding them. A jump without an explicit truncation boundary must stop that attachment and trigger bounded reattach/replay, not silently skip output. The current browser registry deduplicates by sequence but does not enforce this gap check; remoting needs it. Bound fragment count, assembled bytes, and lifetime, and discard incomplete fragments on attachment/session replacement.
+The browser registry discards duplicate complete sequences. A jump without an explicit truncation boundary stops that attachment and triggers bounded reattach/replay, rather than silently skipping output. Fragment count, assembled bytes, and lifetime are bounded; attachment/session replacement discards incomplete fragments.
 
 Output loss is allowed only with visible truncation, unlike normalized chat rows. Retained text is a tail, not an emulator snapshot: a full-screen program or ANSI mode may depend on discarded output. Preserve the existing warning and best-effort restoration. Users can run `reset` themselves after connectivity problems; do not automatically inject that command, reset a retained renderer, or add screen-state reconstruction.
 
@@ -247,6 +256,8 @@ Terminal output is an unbounded producer, unlike a bounded file snapshot. A sing
 - Keep the PTY draining into its bounded replay tail while delivery is detached. Emit truncation when needed on reattach; dropping delivery must not kill or indefinitely block the user's job.
 - Check the browser renderer boundary too: xterm `write()` is asynchronous, and a drained network socket does not prove the renderer has consumed its queued text. Keep queued renderer work bounded; a render-credit protocol is not automatically required.
 
+The renderer admits up to 16 MiB of queued UTF-16 text, leaving headroom above a full one-MiB UTF-8 replay tail. If that queue fills, the registry detaches delivery without advancing the rejected sequence. Once xterm drains accepted text, it automatically restores from the last accepted cursor. A throttled hidden tab resumes when parsing runs again. This does not retain rejected output locally; the node's bounded tail and explicit truncation policy still apply.
+
 The current node send path treats exhausted socket/replay budgets as continuity failure. Basic output admission must stop avoidable terminal overload before handing more messages to that path; it is a bounded accept-or-detach check, not prioritized delivery. If the shared connection nevertheless fails, recover attachments through the normal reconnect path without terminating PTYs.
 
 The installed PTY abstraction has no general pause/resume interface. Do not add OS-level flow control now: blocking a long-running program to preserve every output byte is not the intended policy. Reuse straightforward message-size and capacity checks introduced for Files where suitable, without imposing terminal truncation on provider rows or treating terminal input like retryable file reads.
@@ -257,7 +268,7 @@ One channel does not guarantee latency or failure isolation between workloads. A
 
 Retain create/terminate request IDs end to end, independently of the RPC UUID. Cache them in the process-owned terminal manager where side effects occur, preserving unexpired entries across controller sessions. Retry only the same captured operation within its known terminal-runtime/cache lifetime; bind the request ID to its original target, and reject changed parameters rather than silently creating a different shell. Create includes the terminal runtime expected from List so a request for a crashed worker cannot silently create a new shell on its replacement.
 
-The browser currently treats every typed `ApiError` as a definitive create failure. That assumption is insufficient once a controller can return a typed error after losing a worker reply. Preserve the pending create and its request ID when dispatch is uncertain. A retry after idempotency expiry or terminal-runtime change requires authoritative list reconciliation and a deliberate new create, not automatic replay into an empty cache. A mere provider-serving generation change must not clear terminal idempotency or cause another spawn.
+The browser distinguishes typed `terminal-outcome-unknown` create errors from definitive refusals, preserving the pending create and its request ID when dispatch is uncertain. A retry after idempotency expiry or terminal-runtime change requires authoritative list reconciliation and a deliberate new create, not automatic replay into an empty cache. A mere provider-serving generation change must not clear terminal idempotency or cause another spawn.
 
 Termination success means the terminal session was removed and cleanup requested, not that all descendants were verified dead. If the reply is lost, retain the target/request ID and reconcile against that node's list; do not remove the UI and claim success solely because the node is offline. A stale terminal runtime is different from an idempotent removal of an already-missing terminal in the current runtime.
 
@@ -292,7 +303,7 @@ The host choice overrides the default node, not the filesystem namespace:
 - New Terminal from an existing terminal makes its node explicit and defaults to the same node and initial directory unless the user chooses another target. Do not claim to know its current shell directory after `cd`.
 - Existing terminals remain on their captured node across chat switches, handoffs, desktop/mobile moves, and renderer parking.
 
-[TerminalPlacementService](../../web/src/lib/workspace/terminal-placement-service.ts) currently obtains only a string from [workspace project resolution](../../web/src/lib/workspace/workspace-project-path-resolution.ts), which rejects remotes. Replace that contract with a captured node/path target. Preserve the creation target in retry state, placement rollback, and termination cleanup.
+[TerminalPlacementService](../../web/src/lib/workspace/terminal-placement-service.ts) obtains a captured node/path target from [workspace project resolution](../../web/src/lib/workspace/workspace-project-path-resolution.ts). Retry state preserves that target, and placement rollback and termination cleanup remain scoped to the created terminal.
 
 ### Labels And Placement
 
@@ -304,7 +315,7 @@ Preserve explicit user titles from Rename; clearing a title restores the host-ba
 
 Qualify [workspace surface references](../../web/src/lib/workspace/surface-types.ts) and list-driven layout reconciliation. Do not key a retained xterm solely by a potentially colliding terminal ID, and do not remount it on unrelated chat/node selection. Keep tab close, hide, process exit, and explicit terminate as distinct operations. A disconnected remote tab can still be hidden without falsely claiming its process was terminated.
 
-The session cap is eight per principal per node, counting exited retained sessions as today. Change today's global UI count/gate to apply to the selected node, and keep aggregate controller queue budgets independent. Do not introduce distributed controller-wide terminal quotas. Detached sessions still count; reaching the limit asks the user to terminate a session, not evict a long-running job.
+The session cap is eight per principal per node, counting exited retained sessions. UI admission applies to the selected node; aggregate controller queue budgets remain independent. Do not introduce distributed controller-wide terminal quotas. Detached sessions still count; reaching the limit asks the user to terminate a session, not evict a long-running job.
 
 ## Security And Operational Limits
 
@@ -341,4 +352,4 @@ Existing focused coverage lives under [terminal manager tests](../../server/term
 - Toolbar, tabs, and terminal menus use `Local <number>` / `<node label> <number>` consistently; custom titles survive, clearing a title restores the default, and node-label edits or terminal removal do not renumber or remount surviving sessions.
 - Rapid chat/node switches and desktop/mobile renderer moves without focus loss, unnecessary xterm remount, retargeted input, or a hidden terminal being accidentally terminated.
 
-Use deterministic fake/interleaving tests for ownership and failure races, plus isolated real-process and browser tests for the cross-boundary behavior. The document does not claim these new scenarios have been implemented or verified. No paid provider calls are required for terminal-service acceptance.
+Deterministic ownership/interleaving coverage lives in the manager, node-service, controller, registry, and placement tests. Isolated real-worker and browser coverage lives in `integration-tests/tests/server/execution-node-terminals.test.ts`, `integration-tests/tests/e2e/execution-node-terminals.test.ts`, and the terminal lifecycle Chromium tests. The criteria above remain a verification checklist, not a claim that every possible interleaving is covered. No paid provider calls are required for terminal-service acceptance.

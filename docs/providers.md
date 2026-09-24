@@ -1,6 +1,6 @@
 # Custom Providers On Execution Nodes
 
-Status: proposed architecture and implementation scope, 2026-09-23. Node-specific provider assignments are not implemented. Source inspection and Oracle consultation used [9f0020dc9d25f3f7d354df8d8e34baae8c477e26](https://github.com/cfal/garcon/tree/9f0020dc9d25f3f7d354df8d8e34baae8c477e26). Migration and multi-controller decisions are called out below rather than treated as already approved.
+Status: implemented architecture, 2026-09-24. One controller owns its configuration directory and workspace. Node-specific assignments, legacy-seed migration, mutation invalidation, and explicit shared-deletion acknowledgement are implemented. Original design research used [9f0020dc9d25f3f7d354df8d8e34baae8c477e26](https://github.com/cfal/garcon/tree/9f0020dc9d25f3f7d354df8d8e34baae8c477e26); the decisions below describe the resulting implementation.
 
 This extends [Execution Nodes In The App](./execution-node/app-integration.md) and the [node interface](./execution-node/interface.md). It changes custom-provider availability policy, not where agents execute or how the controller connects to a worker.
 
@@ -39,9 +39,9 @@ Assignments in one workspace:
 
 Provider assignments are configuration, not an execution queue. Nothing is replayed from them at startup. Cross-node repository movement, CLI bridging, and stronger per-chat worker isolation remain separate work.
 
-## Current Behavior
+## Prior Behavior
 
-Remote custom-provider execution already exists. The missing feature is scope, not configuration forwarding:
+Before node assignments, remote custom-provider execution already forwarded configuration and credentials. The implementation retains this flow and adds node-qualified admission:
 
 1. The controller resolves the selected provider, endpoint, and model from its global store.
 2. [Execution planning](../server/agents/execution-planning.ts) constructs an `AgentEndpointSelection` containing provider/endpoint IDs, label, URL, protocol, selected model, local-model classification, capabilities, headers, and a credential reference.
@@ -51,7 +51,7 @@ Remote custom-provider execution already exists. The missing feature is scope, n
 
 The full stored provider object is not sent in the startup frame. Execution metadata is sent with the request; credentials are resolved separately. Management metadata, discovery preferences, and the complete saved model list stay controller-owned.
 
-| Area | Existing behavior and required change |
+| Area | Pre-assignment behavior and implemented change |
 | --- | --- |
 | [Provider store](../server/api-providers/store.ts) | `getConfigDir()/api-providers.json`, atomic `0600` writes, global provider and endpoint IDs, no node scope. Retain profile ownership here. |
 | [Node configuration](../server/execution-nodes/config-store.ts) | `workspaceDir/execution-nodes.json`. Node IDs identify configured trust relationships within a workspace. Assignments must respect this ownership. |
@@ -78,7 +78,7 @@ interface ApiProviderAssignmentSnapshot {
 
 The file contains IDs only, not copied endpoint configuration or keys. `local` is an ordinary assignment key. Labels are never identity. Missing membership means unavailable, not inheritance from Local or all nodes.
 
-Validate the complete file before publication: version, revision, node/provider ID syntax, object shape, duplicate entries, and bounded collection sizes. Corrupt or unreadable assignment state must fail closed for custom-provider use and surface a configuration error. It must never trigger the legacy grant-all migration.
+Validate the complete file before publication: version, revision, node/provider ID syntax, object shape, duplicate entries, and bounded collection sizes. Missing, corrupt, or unreadable post-migration assignment state stops controller startup with a configuration error. It never triggers the legacy grant-all migration. An uncertain runtime write makes assignments unavailable until the controller is restarted after configuration repair.
 
 Syntactically valid references to removed profiles or unknown nodes do not grant anything. Preserve or report unresolved references without converting them to Local. Node existence and profile existence are checked again when admitting use. Unknown-node assignments can be pruned during explicit node cleanup.
 
@@ -127,7 +127,7 @@ Omitted node identity may mean Local only at an intentional API default. Interna
 | Cross-node handoff | Validate the destination profile before the durable ownership decision and again at execution. Failure after ownership commits does not reverse ownership or select another account. |
 | One-shot generation | Titles, commit messages, refinement, test calls, and other single queries obey the same assignment rules on the generation node. Auto retains its existing Local semantics. The repository node is not necessarily the generation node. |
 | Configuration validation | Run common provider-access checks before an optional integration-specific validation facet. A null facet must not bypass policy. |
-| Catalog/readiness/image support | Use the selected node throughout, including `hasEndpointModels`, endpoint model enumeration, and image capability checks. |
+| Catalog/readiness/image support | Use the selected node throughout, including `hasEndpointModels`, endpoint model enumeration, and image capability checks. A provider-storage outage omits custom models from catalog/readiness listings without hiding native integrations; management reports the error, and selection, reference, image, and credential checks still fail closed. |
 
 An explicit incomplete provider/endpoint selection is invalid; it must not become native execution merely because the model string is missing. Keep provider support behind existing nullable integration facets.
 
@@ -178,7 +178,7 @@ Editing a shared profile affects every assignment. Key rotation can update the s
 
 Before profile deletion, check current-workspace durable selections, including chats, scheduled new chats, saved generation/default selections, and relevant in-progress ownership decisions. Treat recents and historical transcript labels as soft references, not perpetual deletion blockers. Make replacement/unassignment and global deletion separate operations with explicit impact.
 
-The current deletion callback checks only current-workspace chats. That is not global referential integrity: other workspaces can share the same profile store. Do not report "unused everywhere" from a local check. Global deletion semantics and concurrent-controller visibility must follow the explicit deployment decision below. References that can no longer resolve must fail closed and remain repairable, never be redirected to a same-label profile.
+Deletion checks current-workspace chats, settings, schedules, ownership records, and pending reference writes. The API requires `acknowledgeSharedImpact=true` because profiles may serve several nodes. Archived workspaces are not scanned; unresolved references remain repairable, never redirected to a same-label profile.
 
 ### Node Removal And Restart
 
@@ -225,9 +225,11 @@ Notify other connected browser clients, not only the initiating dialog. A typed 
 
 Clear or stale persisted catalog snapshots as well as instantiated stores. Refresh visible consumers on demand. Preserve saved unavailable selections and user text; New Chat, scheduled submission, active-chat controls, keyboard shortcuts, and plan approval must share admission rules. Client cache validation improves UX but never grants server-side authority.
 
+Malformed stored generation targets remain readable and repairable per setting: the snapshot preserves the explicit target in `ui` and omits that key from `uiEffective` when it cannot be resolved. The browser displays the saved target rather than substituting Local. Writes and execution still validate strictly; choosing Auto is an explicit repair, not load-time recovery. Non-string, non-null stored node IDs normalize to an invalid empty ID, never to an absent Local default.
+
 ## Migration
 
-Recommended default, pending product confirmation: preserve the availability that existing users already have, but only through an explicit one-time migration.
+Implemented policy: preserve legacy availability only through an explicit one-time migration. Global provider schema version 2 records the legacy seed and profile revisions; workspace migration version 9 materializes assignments.
 
 1. When upgrading the global provider-store schema, capture the IDs of profiles that existed under the legacy global policy. Persist that seed atomically with initial profile revisions. Profiles created afterward must not enter the seed.
 2. Add an ordered [workspace migration](../server/migrations/README.md) for existing workspaces. Materialize assignments from that legacy seed to Local and the workspace's already-configured remote nodes, including offline/disabled nodes. Use persisted topology, not successful connections.
@@ -236,7 +238,7 @@ Recommended default, pending product confirmation: preserve the availability tha
 
 The legacy seed matters because an old workspace may first be opened after new profiles have been created in the global store. Assigning all profiles present at that later startup would silently grant newly introduced accounts.
 
-Install a fail-closed policy before remote credential requests can be served. Do not expose a permissive window while migrations run, and do not block startup on an offline node. After migration, a missing or corrupt assignment file is an error/empty authorization state, not grounds to repeat the legacy grant. Migration metadata is not a permanent wildcard.
+Install a fail-closed policy before remote credential requests can be served. Do not expose a permissive window while migrations run, and do not block startup on an offline node. After migration, a missing or corrupt assignment file blocks startup until repaired; it is neither a usable empty authorization state nor grounds to repeat the legacy grant. Migration metadata is not a permanent wildcard.
 
 No chat-registry routing rewrite is required. Existing node/provider/endpoint IDs retain their meaning. Unknown profiles/nodes remain explicit unavailable selections. Do not rewrite them to native auth or clear unrelated user settings.
 
@@ -246,18 +248,15 @@ Controller persistence is not exclusive controller possession. Workers receive k
 
 Unassignment blocks subsequent admissions and credential releases. It cannot erase a previously disclosed key or guarantee that admitted native work stops. Strong revocation requires rotation at the upstream provider. This scope does not introduce a distributed cancellation/revocation protocol.
 
-### Concurrent Controllers: Open Decision
+### Single Controller Ownership
 
-Different workspaces may point at the same global config directory. `ApiProviderStore` currently caches reads and uses a process-local write lock. Atomic rename does not serialize writers across controller processes, and invalidation broadcasts do not reach another controller.
+The controller exclusively leases both its config directory and workspace at startup. Concurrent controllers sharing either directory are unsupported and refused. Profile mutations use one in-process lock; supplied revisions reject stale browser edits. Atomic private writes publish the in-memory snapshot before notifying catalogs and browsers, only after durability is confirmed.
 
-Before implementation, choose and document one supported policy:
+Profiles are loaded at startup, not watched or re-read before each use. Edit configuration through the owning controller, or stop it before editing files manually and then restart. External edits made while it runs are ignored and may be overwritten by subsequent mutations.
 
-- A single writer owns shared profile configuration; other controllers reload/restart to observe external edits. This needs an enforceable writer restriction or explicit operational constraint, not an implication that the current lock is cross-process.
-- Concurrent writers are supported with config-directory-wide mutation serialization, revision checks, and an explicit reload/invalidation policy. A filesystem watcher alone does not prevent lost writes. Immediate global revocation would require stronger freshness than periodic reload.
+Malformed storage blocks startup. Uncertain write durability makes the running store unavailable until restart rather than authorizing from a possibly stale snapshot. Committed changes immediately invalidate catalog caches and connected browsers; no cross-controller change propagation is needed.
 
-Do not promise immediate cross-controller edit, deletion, or rotation visibility without implementing it. Workspace-local assignments do not require a distributed store. The initial recommendation is to avoid adding a cross-controller coherence protocol unless concurrent editing is a required workflow, while clearly limiting the supported shared-store behavior.
-
-Global deletion must likewise distinguish known current-workspace references from references in other workspaces. If exhaustive global protection is required, it needs an authoritative workspace/reference inventory; a best-effort scan of conventional directories cannot discover arbitrary `--workspace-dir` locations. Otherwise require explicit global impact acknowledgement and preserve unavailable-reference behavior in other workspaces.
+These guarantees do not revoke credentials already disclosed to a worker or provider process.
 
 ## Implementation Boundaries
 
@@ -269,7 +268,7 @@ Global deletion must likewise distinguish known current-workspace references fro
 | Management and discovery | Extend [provider service](../server/api-providers/service.ts), [HTTP routes](../server/routes/api-providers.ts), typed notifications, node-removal cleanup, and reference/deletion checks. |
 | Browser | Extend [provider API](../web/src/lib/api/api-providers.ts), [catalog store](../web/src/lib/agents/model-catalog-store.svelte.ts), settings composition, and [endpoint dialog state](../web/src/lib/components/settings/api-provider-endpoint-dialog-state.svelte.ts). Add assignment management without duplicating the existing model selector. |
 
-This is a bounded but cross-cutting change, not a transport rewrite. The configuration relation is small; consistent enforcement, repair paths, migration, and tests account for most of the work. The consultation estimate was roughly three to five focused engineering days, excluding any newly required cross-controller coherence system.
+This is a cross-cutting configuration and admission change, not a transport rewrite. The configuration relation is small; consistent enforcement, repair paths, migration, and tests account for most of the work.
 
 ## Verification Criteria
 
@@ -283,16 +282,16 @@ Use synthetic endpoints and credentials, real public controller/worker startup, 
 - Execution tests: start/resume, queued dequeue, compaction, fork, handoff, every generation caller, optional configuration-validation facets, and explicit incomplete selections. Verify no request reaches an unassigned endpoint and no request falls back to Local/native/another account.
 - Lifecycle tests: preserve invalid saved targets, repair a chat after unassignment, schedule/generation failure without data loss, unassignment versus admitted work, node deletion cleanup, and profile deletion/reference-publication interleavings.
 - Browser tests: add/use existing/duplicate/remove, offline configuration, shared edit impact, model selection, multiple connected clients, persisted catalog invalidation, deferred stale responses, all submit paths, and retained draft text. Rapidly switch nodes/chats without remounting heavy chat UI or moving focus/scroll unexpectedly.
-- Deployment tests: exercise whichever shared-config writer/reload policy is selected. Never infer multi-controller safety from single-process unit tests.
+- Deployment tests: reject a second config/workspace owner, load external edits on restart, and exercise mutation notifications and revision checks.
 
 Extend the existing suites under `server/api-providers/__tests__`, `server/execution-nodes/__tests__`, and provider-settings/catalog frontend tests. Add black-box coverage under `integration-tests/tests/server` and browser workflow coverage under `integration-tests/tests/e2e`. Test the common denial/selection logic independently as well as through HTTP, RPC, and persistence boundaries.
 
 Implementation gates are `bun run check`, `bun run test` with applicable web coverage, focused integration/browser suites, and a timed fresh `bun run start --port 0` startup check. This document does not claim those implementation gates have run.
 
-## Decisions Before Implementation
+## Recorded Decisions
 
-- Confirm preserving legacy availability through explicit migration versus requiring all remote assignments to be made again. Preservation is the recommendation, not a permanent default grant.
-- Confirm the node-level credential trust and prospective unassignment semantics; stronger per-run isolation/revocation would expand scope.
-- Decide shared-config concurrent-writer, external-edit visibility, and global deletion guarantees before implementing persistence lifecycle around them.
+- Preserve legacy availability through a fixed seed and one-time workspace migration, not a permanent default grant.
+- Trust assignments at node level; unassignment blocks future admissions and credential release, not already-disclosed keys.
+- Support one controller per config directory and workspace; serialize its mutations in-process and load manual edits on restart.
 
 Field overrides, account selection by implicit node fallback, per-run credential capabilities, worker-side configuration replication, and distributed revocation remain out of scope.

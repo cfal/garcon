@@ -13,17 +13,19 @@ to a remote ledger. Core installs that binding's route to the exact producer
 lease before registering it with the integration; no event resolves the current
 sink by chat ID. Closing the original lease rejects late/replayed events even
 before worker cleanup. Run completion does not close its binding.
+Closing a binding cancels admission and best-effort aborts its active native
+operation, including a session established after closure. A pending start
+rejects with `STALE_RESOURCE`; completed operations are never aborted.
 
 Local dispatch may reach the sink synchronously. Remote emission snapshots and
-hands normalized events to bounded, ordered, duplicate-suppressed transport;
-its return and transport ACK do not promise ledger acceptance. Transport
-sequences are ephemeral, never ledger ordinals. A replay gap terminates the
-logical session rather than dropping a row and delivering its terminal. Runtime
-restart does not recover execution or retry mutations. Either side may establish
-a fresh logical session without a coordinated restart. Old references and
-buffered events are discarded; a surviving worker fences old bindings and
-attempts bounded best-effort cleanup, without requiring confirmed native process
-death. A surviving controller reports lost worker execution and releases the
+hands normalized events to bounded, ordered socket delivery; its return does
+not promise ledger acceptance. Connection loss terminates the session without
+replay or automatic mutation retry. A surviving worker keeps its integrations
+and native turns alive, detaches old producer bindings, drops their later output,
+and denies their pending permissions. New work for the same chat on that
+integration is rejected until the detached turn ends. Either side may establish
+a fresh session without a coordinated restart. A surviving controller reports
+lost worker execution with a manual Reload warning and releases the
 affected ownership; controller startup still synthesizes no run endings and
 starts execution state empty. Residual native work and missing final rows are
 accepted losses. The existing transcript-may-have-changed warning remains
@@ -1318,8 +1320,8 @@ is durability. Worker emission is only transport handoff:
   order and the established chat-messages-before-terminal-derived-state
   contract. A crash before broadcast is harmless; reconnect reads the
   committed rows.
-- The controller ledger does not buffer. Bounded remote replay retains events
-  not yet handed to the controller; these are not ledger-accepted. There is no
+- The controller ledger does not buffer. A bounded socket queue holds unsent
+  events; these are not ledger-accepted and are discarded on disconnect. There is no
   ledger flush or distributed publish/close protocol. The loss window
   is events the provider emitted that core had not yet handled at crash,
   plus the NORMAL power-loss window (4.3); a later active history load may
@@ -2439,6 +2441,12 @@ relevant-entry definition under the 10.2 obligation.
   conversation-relevant rollout entry, excluding turn markers. Note the
   stateful Responses API can itself desync from the rollout across a
   crash — the same accepted risk class this design carries.
+  Garcon starts app-server with `features.goals=false` before loading threads,
+  preventing persisted goals from launching native turns outside Garcon's run
+  ownership. Existing goal records are not cleared or migrated; standalone native
+  use may still activate them. The pinned upstream
+  [resume and idle gates](https://github.com/openai/codex/blob/fe74a774532af67b5a4a3dec03ce9469e17f89af/codex-rs/ext/goal/src/runtime.rs#L401-L440)
+  honor this feature flag before restoring or continuing a goal.
 - **OpenCode**: part-id dedup at translation; provider errors emit as normal
   `provider-row`s; real-binary scripted tier retained. A typed
   `session.status` retry arm is attached only to the session's active turn and
