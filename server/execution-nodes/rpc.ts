@@ -32,14 +32,14 @@ export interface RpcCallOptions extends Omit<NodeCallOptions, 'timeoutMs'> {
   readonly timeoutMs?: number | null;
 }
 
-export type GuardRpcReply = (guard: () => void) => void;
+type RpcReplyGuard = (bytes: number) => void;
+export type GuardRpcReply = (guard: RpcReplyGuard) => void;
 type RpcHandler = (request: AgentRpcRequest, signal: AbortSignal, guardReply: GuardRpcReply) => Promise<unknown>;
 
 export class AgentRpc {
   readonly #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
   readonly #incoming = new Map<string, AbortController>();
   #handler: RpcHandler | null = null;
-  #admitReply: ((request: AgentRpcRequest, bytes: number) => void) | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
   #terminal: ((frame: TerminalNotification) => void) | null = null;
   #terminalDetach: ((request: AgentRpcMethods['terminals.detach']['request']) => Promise<unknown>) | null = null;
@@ -56,7 +56,6 @@ export class AgentRpc {
     this.#retired = true;
     this.#unsubscribe();
     this.#handler = null;
-    this.#admitReply = null;
     this.#producer = null;
     this.#terminal = null;
     this.#terminalDetach = null;
@@ -69,10 +68,7 @@ export class AgentRpc {
     this.#incoming.clear();
   }
 
-  handle(
-    handler: RpcHandler,
-    admitReply?: (request: AgentRpcRequest, bytes: number) => void,
-  ): void { this.#handler = handler; this.#admitReply = admitReply ?? null; }
+  handle(handler: RpcHandler): void { this.#handler = handler; }
   onProducer(handler: (frame: AgentProducerFrame) => void): void { this.#producer = handler; }
   onTerminal(handler: (frame: TerminalNotification) => void): void { this.#terminal = handler; }
   publishTerminal(frame: TerminalNotification): boolean {
@@ -182,23 +178,23 @@ export class AgentRpc {
     const controller = new AbortController();
     this.#incoming.set(frame.id, controller);
     const handler = this.#handler;
-    let replyGuard: (() => void) | undefined;
+    let replyGuard: RpcReplyGuard | undefined;
     const current = () => !this.#retired && this.#incoming.get(frame.id) === controller;
     void Promise.resolve().then(() => {
       if (!current() || controller.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
       return handler(frame, controller.signal, (guard) => { replyGuard = guard; });
     }).then((value) => {
-      if (current()) this.#reply({ type: 'result', id: frame.id, value }, frame, replyGuard);
+      if (current()) this.#reply({ type: 'result', id: frame.id, value }, replyGuard);
     }, (error) => {
       if (current()) this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
     }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
   }
 
-  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>, request?: AgentRpcRequest, guard?: () => void): void {
+  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>, guard?: RpcReplyGuard): void {
     let payload = JSON.stringify(frame);
-    if (request) {
-      try { guard?.(); this.#admitReply?.(request, Buffer.byteLength(payload)); }
+    if (guard) {
+      try { guard(Buffer.byteLength(payload)); }
       catch (error) { payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame); }
     }
     if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {

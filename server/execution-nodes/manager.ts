@@ -263,7 +263,7 @@ export class ExecutionNodeManager {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
         }
         return this.options.resolveCredential({ nodeId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
-      }, (call, bytes) => this.#cliDispatcher?.admitReply(call, rpc, bytes)), reportError, entry.inventory);
+      }), reportError, entry.inventory);
       entry.node.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
         if (value === 'ready') {

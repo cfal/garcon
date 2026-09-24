@@ -4,7 +4,6 @@ import { DomainError } from '../lib/domain-error.js';
 import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRpc, GuardRpcReply } from './rpc.js';
-import type { AgentRpcRequest } from './agent-protocol.js';
 import { CliAdmission } from './cli-admission.js';
 import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliPolicy, parseControllerCliRequest, type CliHttpResponse } from './cli-protocol.js';
 
@@ -51,7 +50,12 @@ export class ControllerCliDispatcher {
       try { this.#assertAdmission(access); }
       catch (error) { throw policy.mutation ? interrupted() : error; }
     };
-    guardReply(assertPublication);
+    guardReply((bytes) => {
+      assertPublication();
+      if (bytes <= CLI_SMALL_REPLY_BYTES || access.rpc.transport.channel.queuedBytes + bytes <= CLI_REPLY_BYTES) return;
+      if (policy.mutation) throw interrupted();
+      throw new DomainError('CLI_SERVICE_BUSY', 'Execution-node channel is busy; retry the read later', 503, true);
+    });
     const cancelled = Promise.withResolvers<never>();
     const onAbort = () => cancelled.reject(interrupted());
     signal.addEventListener('abort', onAbort, { once: true });
@@ -88,15 +92,6 @@ export class ControllerCliDispatcher {
     // Reservations follow actual handler settlement, not the lifetime of its cancelled waiter or RPC.
     try { return await Promise.race([work, cancelled.promise]); }
     finally { signal.removeEventListener('abort', onAbort); }
-  }
-
-  admitReply(request: AgentRpcRequest, rpc: AgentRpc, bytes: number): void {
-    if (request.method !== 'controllerCli.request' || bytes <= CLI_SMALL_REPLY_BYTES
-      || rpc.transport.channel.queuedBytes + bytes <= CLI_REPLY_BYTES) return;
-    if (cliPolicy(request.request.http).mutation) {
-      throw new DomainError('CLI_OUTCOME_UNKNOWN', 'The CLI operation may have reached Garcon; its outcome is unknown', 503);
-    }
-    throw new DomainError('CLI_SERVICE_BUSY', 'Execution-node channel is busy; retry the read later', 503, true);
   }
 
   #assertAdmission(access: CliDispatchAccess): void {

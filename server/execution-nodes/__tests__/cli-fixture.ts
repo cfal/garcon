@@ -18,12 +18,13 @@ export function cliPair(
   const worker = new AgentRpc(right);
   controller.handle(async (call, signal, guardReply) => {
     const access = { nodeId: CLI_NODE_ID, rpc: controller, signal, assertCurrent };
-    if (call.method === 'controllerCli.describe') return dispatcher.describe(access, guardReply);
-    if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, guardReply);
+    const observeReply: typeof guardReply = (guard) => guardReply((bytes) => {
+      try { guard(bytes); }
+      finally { onReplyAdmission(); }
+    });
+    if (call.method === 'controllerCli.describe') return dispatcher.describe(access, observeReply);
+    if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, observeReply);
     throw new Error('Unexpected reverse call');
-  }, (call, bytes) => {
-    try { dispatcher.admitReply(call, controller, bytes); }
-    finally { onReplyAdmission(); }
   });
   return { controller, worker, block() { writable = false; }, unblock() { writable = true; },
     close() { left.close(); right.close(); } };
