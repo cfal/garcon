@@ -30,6 +30,7 @@ export interface ExecutionNodeSnapshot {
   readonly label: string;
   readonly kind: 'local' | 'remote';
   readonly enabled: boolean;
+  readonly allowControllerCli: boolean;
   readonly direction: ExecutionNodeDirection | null;
   readonly availability: 'ready' | 'offline';
   readonly instanceId: string | null;
@@ -45,6 +46,7 @@ export interface ExecutionNodeSnapshot {
 
 export type CreateExecutionNodeRequest = {
   readonly label: string;
+  readonly allowControllerCli?: boolean;
   readonly allowInsecureDevelopment?: boolean;
   readonly allowUnverifiedTls?: boolean;
 } & (
@@ -55,6 +57,7 @@ export type CreateExecutionNodeRequest = {
 export interface UpdateExecutionNodeRequest {
   readonly label?: string;
   readonly enabled?: boolean;
+  readonly allowControllerCli?: boolean;
   readonly connection?: {
     readonly direction: ExecutionNodeDirection;
     readonly connectionUrl: string;
@@ -83,22 +86,26 @@ function isConnectionUrl(value: unknown): value is string {
 
 export function parseCreateExecutionNodeRequest(value: unknown): CreateExecutionNodeRequest | null {
   if (!isRecord(value) || !isLabel(value.label)
+    || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
     || value.allowInsecureDevelopment !== undefined && typeof value.allowInsecureDevelopment !== 'boolean'
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean') return null;
-  const common = { label: value.label.trim(), allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
+  const common = { label: value.label.trim(),
+    ...(value.allowControllerCli === undefined ? {} : { allowControllerCli: value.allowControllerCli }),
+    allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
   if (value.direction === 'node-connects' && value.allowUnverifiedTls !== true
-    && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment', 'allowUnverifiedTls'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli'])) {
     return { ...common, direction: 'node-connects' };
   }
   if (value.direction === 'controller-connects' && isConnectionUrl(value.connectionUrl)
-    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli'])) {
     return { ...common, direction: 'controller-connects', connectionUrl: value.connectionUrl };
   }
   return null;
 }
 
 export function parseUpdateExecutionNodeRequest(value: unknown): UpdateExecutionNodeRequest | null {
-  if (!isRecord(value) || Object.keys(value).length === 0 || !hasOnlyKeys(value, ['label', 'enabled', 'connection'])
+  if (!isRecord(value) || Object.keys(value).length === 0 || !hasOnlyKeys(value, ['label', 'enabled', 'connection', 'allowControllerCli'])
+    || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
     || value.label !== undefined && !isLabel(value.label)
     || value.enabled !== undefined && typeof value.enabled !== 'boolean') return null;
   const connection = value.connection;
@@ -111,12 +118,14 @@ export function parseUpdateExecutionNodeRequest(value: unknown): UpdateExecution
   return {
     ...(value.label === undefined ? {} : { label: (value.label as string).trim() }),
     ...(value.enabled === undefined ? {} : { enabled: value.enabled as boolean }),
+    ...(value.allowControllerCli === undefined ? {} : { allowControllerCli: value.allowControllerCli as boolean }),
     ...(connection === undefined ? {} : { connection: connection as NonNullable<UpdateExecutionNodeRequest['connection']> }),
   };
 }
 
 export function parseExecutionNodeSnapshot(value: unknown): ExecutionNodeSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices'])
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli'])
+    || typeof value.allowControllerCli !== 'boolean'
     || !isExecutionNodeId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
     || (value.availability !== 'ready' && value.availability !== 'offline')
     || !(value.instanceId === null || typeof value.instanceId === 'string' && value.instanceId.length > 0 && value.instanceId.length <= 128)

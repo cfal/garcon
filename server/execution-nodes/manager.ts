@@ -110,11 +110,13 @@ export class ExecutionNodeManager {
   list(): readonly ExecutionNodeSnapshot[] {
     return [{
       id: LOCAL_EXECUTION_NODE_ID, label: 'Local', kind: 'local', enabled: true, direction: null,
+      allowControllerCli: true,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
       instanceId: this.localInfo.instanceId,
       lastError: null, machineServices: { files: true, git: true, gh: true, terminals: true },
     }, ...[...this.#remotes.values()].map((entry): ExecutionNodeSnapshot => ({
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
+      allowControllerCli: entry.config.allowControllerCli,
       direction: entry.config.connection.kind,
       availability: this.isReady(entry.config.id) ? 'ready' : 'offline',
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,

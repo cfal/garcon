@@ -26,6 +26,18 @@ function fixture() {
 }
 
 describe('ExecutionNodeEditor', () => {
+	it('changes the CLI grant without rewriting enable or connection state', async () => {
+		const { editor, transport } = fixture();
+		await editor.edit(remoteExecutionNode);
+		expect(editor.allowControllerCli).toBe(false);
+		editor.allowControllerCli = true;
+		await editor.save();
+		expect(transport.updateExecutionNode).toHaveBeenLastCalledWith(remoteExecutionNode.id, { label: remoteExecutionNode.label, allowControllerCli: true });
+		await editor.save();
+		expect(transport.updateExecutionNode).toHaveBeenLastCalledWith(remoteExecutionNode.id, { label: remoteExecutionNode.label });
+		editor.clear();
+		expect(editor.allowControllerCli).toBe(false);
+	});
 	it('refreshes creation after a held pre-create snapshot without WebSocket delivery', async () => {
 		const { editor, nodes, read } = fixture();
 		const response = Promise.withResolvers<readonly ExecutionNodeSnapshot[]>();
@@ -46,6 +58,7 @@ describe('ExecutionNodeEditor', () => {
 		expect(await editor.save()).toBe(true);
 		expect(transport.createExecutionNode).toHaveBeenCalledWith({
 			label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false,
+			allowControllerCli: false,
 		});
 		expect(editor.id).toBe(remoteExecutionNode.id);
 		expect(editor.connectionUrl).toBe(connection.connectionUrl);
@@ -63,6 +76,7 @@ describe('ExecutionNodeEditor', () => {
 		await editor.save();
 		expect(transport.createExecutionNode).toHaveBeenCalledWith({
 			label: 'Worker', direction: 'controller-connects', allowInsecureDevelopment: true, allowUnverifiedTls: false,
+			allowControllerCli: false,
 			connectionUrl: 'ws://worker.test:1234/execution-node#secret=synthetic',
 		});
 	});

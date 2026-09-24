@@ -14,6 +14,7 @@ export interface RemoteNodeConfig {
   readonly id: string;
   readonly label: string;
   readonly enabled: boolean;
+  readonly allowControllerCli: boolean;
   readonly secret: string;
   readonly connection:
     | { readonly kind: 'node-connects'; readonly advertisedUrl: string }
@@ -76,6 +77,7 @@ export class ExecutionNodeConfigStore {
       const parsed = request.direction === 'controller-connects' ? parseConnectionUrl(request.connectionUrl) : null;
       const node: RemoteNodeConfig = {
         id, label: request.label, enabled: true, allowInsecureDevelopment,
+        allowControllerCli: request.allowControllerCli ?? false,
         allowUnverifiedTls: parsed?.socketUrl.startsWith('wss:') === true && request.allowUnverifiedTls === true,
         secret: parsed?.secret ?? createNodeSecret(),
         connection: parsed
@@ -96,6 +98,7 @@ export class ExecutionNodeConfigStore {
         ...previous,
         ...(request.label === undefined ? {} : { label: request.label }),
         ...(request.enabled === undefined ? {} : { enabled: request.enabled }),
+        ...(request.allowControllerCli === undefined ? {} : { allowControllerCli: request.allowControllerCli }),
       };
       if (request.connection) {
         const { direction, connectionUrl, allowInsecureDevelopment } = request.connection;
@@ -141,6 +144,7 @@ function parseStoredNode(value: unknown): RemoteNodeConfig {
   if (!isRecord(value) || !isRemoteNodeId(value.id) || typeof value.label !== 'string'
     || !value.label.trim() || value.label.length > 100 || typeof value.enabled !== 'boolean'
     || !isNodeSecret(value.secret) || typeof value.allowInsecureDevelopment !== 'boolean'
+    || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean'
     || !isRecord(value.connection)) throw new Error('Invalid execution-node configuration');
   const options = { nodeId: value.id, allowInsecureDevelopment: value.allowInsecureDevelopment };
@@ -151,6 +155,7 @@ function parseStoredNode(value: unknown): RemoteNodeConfig {
       : null;
   if (!connection || connection.kind === 'node-connects' && value.allowUnverifiedTls === true) throw new Error('Invalid execution-node connection configuration');
   return { id: value.id, label: value.label, enabled: value.enabled, secret: value.secret, connection,
+    allowControllerCli: value.allowControllerCli === true,
     allowInsecureDevelopment: value.allowInsecureDevelopment,
     allowUnverifiedTls: connection.kind === 'controller-connects' && connection.targetUrl.startsWith('wss:') && value.allowUnverifiedTls === true };
 }

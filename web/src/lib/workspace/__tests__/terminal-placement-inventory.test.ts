@@ -28,6 +28,7 @@ it.each(['local', remoteId])(
 				projectBasePath: '/project',
 				lastError: null,
 				machineServices: { terminals: true, files: true, git: false, gh: false },
+				allowControllerCli: false,
 			})),
 		);
 		const metadata: TerminalMetadata = {

@@ -207,6 +207,14 @@
 						disabled={editor.busy}
 					/>Enabled</label
 				>{/if}
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" bind:checked={editor.allowControllerCli} disabled={editor.busy} aria-describedby="execution-node-cli-warning" />
+				Allow workspace CLI access
+			</label>
+			<p id="execution-node-cli-warning" class="text-xs text-muted-foreground">
+				Trusts every process using this node's OS account to manage workspace chats and tickets,
+				run agents on Local and other nodes, and approve permission requests, including bypass execution.
+			</p>
 			{#if editor.error}<p role="alert" class="break-words text-sm text-destructive">
 					{editor.error}
 				</p>{/if}

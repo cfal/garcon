@@ -10,6 +10,7 @@ export class ExecutionNodeEditor {
 	allowInsecureDevelopment = $state(false);
 	allowUnverifiedTls = $state(false);
 	enabled = $state(true);
+	allowControllerCli = $state(false);
 	busy = $state(false);
 	error = $state<string | null>(null);
 	confirmDelete = $state(false);
@@ -19,6 +20,7 @@ export class ExecutionNodeEditor {
 	#originalInsecure = false;
 	#originalUnverifiedTls = false;
 	#originalEnabled = true;
+	#originalControllerCli = false;
 
 	constructor(private readonly nodes: ExecutionNodesStore, private readonly transport = api) {}
 
@@ -37,6 +39,7 @@ export class ExecutionNodeEditor {
 		this.allowInsecureDevelopment = false;
 		this.allowUnverifiedTls = false;
 		this.enabled = true;
+		this.allowControllerCli = false;
 		this.busy = false;
 		this.error = null;
 		this.confirmDelete = false;
@@ -48,6 +51,7 @@ export class ExecutionNodeEditor {
 		this.label = node.label;
 		this.direction = node.direction ?? 'node-connects';
 		this.enabled = this.#originalEnabled = node.enabled;
+		this.allowControllerCli = this.#originalControllerCli = node.allowControllerCli;
 		const version = this.#version;
 		this.busy = true;
 		try {
@@ -78,6 +82,7 @@ export class ExecutionNodeEditor {
 				const nodes = await this.transport.updateExecutionNode(this.id, {
 					label: this.label.trim(),
 					...(this.enabled !== this.#originalEnabled ? { enabled: this.enabled } : {}),
+					...(this.allowControllerCli !== this.#originalControllerCli ? { allowControllerCli: this.allowControllerCli } : {}),
 					...(connectionChanged ? { connection: { direction: this.direction, connectionUrl: this.connectionUrl.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment, allowUnverifiedTls } } : {}),
 				});
 				if (this.nodes.nodes === previousNodes) this.nodes.applySnapshot(nodes);
@@ -86,6 +91,7 @@ export class ExecutionNodeEditor {
 			} else {
 				const result = await this.transport.createExecutionNode({
 					label: this.label.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment, allowUnverifiedTls,
+					allowControllerCli: this.allowControllerCli,
 					...(this.direction === 'node-connects' ? { direction: 'node-connects' } : { direction: 'controller-connects', connectionUrl: this.connectionUrl.trim() }),
 				});
 				await this.nodes.refreshAfterMutation();
@@ -99,6 +105,7 @@ export class ExecutionNodeEditor {
 			this.#originalInsecure = this.allowInsecureDevelopment;
 			this.allowUnverifiedTls = this.#originalUnverifiedTls = allowUnverifiedTls;
 			this.#originalEnabled = this.enabled;
+			this.#originalControllerCli = this.allowControllerCli;
 			return true;
 		} catch (error) {
 			if (version === this.#version) this.error = error instanceof Error ? error.message : 'Unable to save execution node';

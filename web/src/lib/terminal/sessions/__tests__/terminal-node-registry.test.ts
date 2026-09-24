@@ -42,6 +42,7 @@ function node(
 		projectBasePath: '/project',
 		lastError: null,
 		machineServices: { terminals: true, files: true, git: false, gh: false },
+		allowControllerCli: false,
 	};
 }
 function terminal(nodeId: string, sequence = 1, runtime = runtimeId): TerminalMetadata {

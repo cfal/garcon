@@ -29,6 +29,18 @@ async function fixture() {
   return { root, manager };
 }
 
+test('grant-only updates do not require idle or replace the connector', async () => {
+  const { manager } = await fixture();
+  const node = await manager.create({ direction: 'node-connects', label: 'Worker' });
+  const original = manager.inboundLink(node.id);
+  const assertIdle = mock(() => { throw new Error('busy'); });
+  manager.setGuards({ assertIdle, assertRemovable: () => {} });
+  await manager.update(node.id, { allowControllerCli: true });
+  expect(manager.inboundLink(node.id)).toBe(original);
+  expect(manager.list().find((value) => value.id === node.id)?.allowControllerCli).toBe(true);
+  expect(assertIdle).not.toHaveBeenCalled();
+});
+
 function waitReady(manager: ExecutionNodeManager, id: string): Promise<void> {
   if (manager.isReady(id)) return Promise.resolve();
   return new Promise((resolve) => {

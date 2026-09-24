@@ -41,6 +41,7 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'node-connects',
     availability: 'offline', instanceId: null, projectBasePath: null, lastError: null,
     machineServices: { files: false, git: false, gh: false, terminals: false },
+    allowControllerCli: false,
   };
   expect(parseExecutionNodes([remote])).toEqual([remote]);
   const ready = { ...remote, availability: 'ready', instanceId: 'synthetic-instance', projectBasePath: '/' };

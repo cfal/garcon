@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ExecutionNodeConfigStore } from '../config-store.js';
@@ -17,6 +17,22 @@ async function fixture() {
   await store.initialize();
   return { root, store };
 }
+
+test('CLI access defaults off, persists separately, and older stored nodes remain denied', async () => {
+  const { root, store } = await fixture();
+  const node = await store.create({ direction: 'node-connects', label: 'Worker' });
+  expect(node.allowControllerCli).toBe(false);
+  await store.update(node.id, { allowControllerCli: true });
+  const restarted = new ExecutionNodeConfigStore(root);
+  await restarted.initialize();
+  expect(restarted.require(node.id).allowControllerCli).toBe(true);
+  const file = join(root, 'execution-nodes.json');
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  delete stored.nodes[0].allowControllerCli;
+  await writeFile(file, JSON.stringify(stored));
+  await restarted.initialize();
+  expect(restarted.require(node.id).allowControllerCli).toBe(false);
+});
 
 test('node configuration is private, durable, and never persists a Local node', async () => {
   const { root, store } = await fixture();
