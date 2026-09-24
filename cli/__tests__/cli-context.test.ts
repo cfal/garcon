@@ -21,6 +21,21 @@ function runtimeResponse(input: string | URL | Request, controller = 'controller
 }
 
 describe('CLI endpoint context', () => {
+  test('catalogs, native lookups and project defaults use the authenticated node', async () => {
+    const client = new GarconClient({ ...connection, fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/models')) {
+        expect(url.searchParams.get('nodeId')).toBe(connection.defaultNodeId);
+        return Response.json({ catalog: { agents: [], apiProviders: [] } });
+      }
+      expect(JSON.parse(String(init?.body)).nodeId).toBe(connection.defaultNodeId);
+      return Response.json(url.pathname.endsWith('/project-default')
+        ? { project: '/worker/project', kind: 'folder' } : { chatId: request.chatId });
+    } });
+    await client.getModelCatalog();
+    await client.lookupNativeSession({ nativeSessionId: 'native' });
+    await client.getTicketProjectDefault('/worker/project');
+  });
   test('pins inherited runtime, ignores ambient selectors, and accepts workspace only as an assertion', () => {
     const env = { GARCON_CLI_RUNTIME: '/private/runtime.json', GARCON_WORKSPACE: 'wrong', GARCON_CONFIG_DIR: '/wrong' };
     expect(parseCliArgs(['list', 'agents', '--workspace', 'right'], env)).toMatchObject({

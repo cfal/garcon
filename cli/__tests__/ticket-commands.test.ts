@@ -62,7 +62,7 @@ describe('ticket CLI execution', () => {
     const testCase = harness((url, body) => {
       if (url.pathname.endsWith('/bootstrap')) return Response.json({ storeId: STORE, collectionRevision: 0, viewerKey: 'local' });
       if (url.pathname.endsWith('/project-default')) {
-        expect(body).toEqual({ directory: '/workspace/linked' });
+        expect(body).toEqual({ directory: '/workspace/linked', nodeId: 'local' });
         return Response.json({ project: '/workspace/base', kind: 'repository' });
       }
       expect(url.pathname).toBe('/api/v1/tickets/mutate');

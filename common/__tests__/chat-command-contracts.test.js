@@ -139,6 +139,7 @@ describe('chat command request parsers', () => {
       agentSettings: agentSettings(),
       model: 'opus',
       expectedAgentId: 'claude',
+      expectedAgentOwnershipEpoch: 'epoch-1',
       tagsToAdd: ['CLI', 'cli', ' Review '],
       permissionFallbackPolicy: 'require-explicit-bypass',
     });
@@ -147,6 +148,7 @@ describe('chat command request parsers', () => {
     expect(parsed.thinkingMode).toBeUndefined();
     expect(parsed.agentSettings).toEqual(agentSettings());
     expect(parsed.expectedAgentId).toBe('claude');
+    expect(parsed.expectedAgentOwnershipEpoch).toBe('epoch-1');
     expect(parsed.tagsToAdd).toEqual(['cli', 'review']);
     expect(parsed.permissionFallbackPolicy).toBe('require-explicit-bypass');
   });

@@ -340,7 +340,7 @@ describe('main', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(submitted).toEqual({ nativeSessionId: 'session-123', agent: 'codex' });
+    expect(submitted).toEqual({ nodeId: 'local', nativeSessionId: 'session-123', agent: 'codex' });
     expect(capture.stdout.join('')).toBe(`${CHAT_ID}\n`);
     expect(capture.stderr.join('')).toBe('');
   });

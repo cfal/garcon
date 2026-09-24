@@ -13,6 +13,7 @@ export interface NormalizedAgentRunCommandInput {
   readonly images?: RunAgentTurnOptions['images'];
   readonly options: RunAgentTurnOptions;
   readonly expectedAgentId?: string;
+  readonly expectedAgentOwnershipEpoch?: string;
   readonly tagsToAdd?: string[];
   readonly permissionFallbackPolicy?: 'require-explicit-bypass';
   readonly handoff?: AgentHandoffRequest;
@@ -53,6 +54,7 @@ export function agentRunCommandPayload(
     modelEndpointId: options?.modelEndpointId,
     modelProtocol: options?.modelProtocol,
     expectedAgentId: input.expectedAgentId,
+    expectedAgentOwnershipEpoch: input.expectedAgentOwnershipEpoch,
     tagsToAdd: input.tagsToAdd,
     permissionFallbackPolicy: input.permissionFallbackPolicy,
     handoff: input.handoff,

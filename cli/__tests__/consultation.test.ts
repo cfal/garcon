@@ -5,7 +5,6 @@ import type {
   StartChatCommandResponse,
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
-import type { ChatListResponse } from '@garcon/common/chat-list';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
@@ -144,10 +143,10 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
 } {
   return {
     starts: [], runs: [], titles: [],
+    defaultNodeId: 'local',
     async getChatSnapshot() { return snapshot(); },
     async getModelCatalog() { return catalog(); },
     async getSettings() { return settings; },
-    async listChats() { throw new Error('chat list should not be loaded'); },
     async startChat(request) { this.starts.push(request); return accepted; },
     async runChat(request) { this.runs.push(request); return { ...accepted, commandType: 'agent-run' }; },
     async updateChatTitle(request) {
@@ -166,6 +165,30 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
 }
 
 describe('runConsultation', () => {
+  test('uses the snapshot node and captured epoch across a held catalog request', async () => {
+    const nodeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const selected = snapshot();
+    selected.chat.nodeId = nodeId;
+    const loading = Promise.withResolvers<ModelCatalogResponse>();
+    const entered = Promise.withResolvers<void>();
+    const testClient = client({
+      async getChatSnapshot() { return structuredClone(selected); },
+      async getModelCatalog(agent, _signal, node) {
+        expect([agent, node]).toEqual(['codex', nodeId]);
+        entered.resolve();
+        return loading.promise;
+      },
+    });
+    const pending = runConsultation({ kind: 'resume', workspace: 'default', configDir: '/config',
+      chatId: CHAT_ID, model: 'gpt-5.4', prompt: 'Continue', readsPromptFromStdin: false, json: false,
+    }, 'Continue', testClient, output());
+    await entered.promise;
+    selected.chat.nodeId = 'local';
+    selected.chat.agentOwnershipEpoch = 'epoch-2';
+    loading.resolve(catalog());
+    await pending;
+    expect(testClient.runs[0]?.expectedAgentOwnershipEpoch).toBe('epoch-1');
+  });
   test('starts asynchronously and returns after acceptance without reading a receipt', async () => {
     const invocation: StartAsyncCliInvocation = {
       kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
@@ -174,6 +197,7 @@ describe('runConsultation', () => {
     };
     let receiptRead = false;
     const testClient = client({
+      defaultNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       async getTurnReceipt() {
         receiptRead = true;
         return receipt;
@@ -193,6 +217,7 @@ describe('runConsultation', () => {
     });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Async review' }]);
     expect(testClient.starts[0]).not.toHaveProperty('orderedPreambleIds');
+    expect(testClient.starts[0]?.nodeId).toBe(testClient.defaultNodeId);
   });
 
   test('preserves the accepted async handle when title update fails', async () => {
@@ -422,12 +447,7 @@ describe('runConsultation', () => {
   });
 
   test('validates resume overrides against the persisted agent catalog', async () => {
-    const chats = {
-      sessions: [{ id: CHAT_ID, agentId: 'codex', agentOwnershipEpoch: 'epoch-1' }],
-      total: 1,
-      lastSelectedChatId: null,
-    } as ChatListResponse;
-    const testClient = client({ async listChats() { return chats; } });
+    const testClient = client();
     const invocation: CliInvocation = {
       kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
       model: 'gpt-5.4', permissionMode: 'plan', thinkingMode: 'high',
@@ -439,17 +459,13 @@ describe('runConsultation', () => {
     expect(testClient.runs[0]).toMatchObject({
       model: 'gpt-5.4', apiProviderId: null, modelEndpointId: null,
       modelProtocol: null, permissionMode: 'plan', thinkingMode: 'high',
+      expectedAgentOwnershipEpoch: 'epoch-1',
     });
     expect(testClient.runs[0]).not.toHaveProperty('tagsToAdd');
   });
 
   test('uses expectedAgentId when the explicit resume agent still owns the chat', async () => {
-    const chats = {
-      sessions: [{ id: CHAT_ID, agentId: 'codex', agentOwnershipEpoch: 'epoch-1' }],
-      total: 1,
-      lastSelectedChatId: null,
-    } as ChatListResponse;
-    const testClient = client({ async listChats() { return chats; } });
+    const testClient = client();
 
     await runConsultation({
       kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
@@ -461,12 +477,12 @@ describe('runConsultation', () => {
   });
 
   test('submits an explicit cross-agent resume as one fenced handoff', async () => {
-    const chats = {
-      sessions: [{ id: CHAT_ID, agentId: 'claude', agentOwnershipEpoch: 'epoch-7' }],
-      total: 1,
-      lastSelectedChatId: null,
-    } as ChatListResponse;
-    const testClient = client({ async listChats() { return chats; } });
+    const testClient = client({ async getChatSnapshot() {
+      const value = snapshot();
+      value.chat.agentId = 'claude';
+      value.chat.agentOwnershipEpoch = 'epoch-7';
+      return value;
+    } });
 
     await runConsultation({
       kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,

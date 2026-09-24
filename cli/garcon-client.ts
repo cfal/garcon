@@ -400,12 +400,14 @@ export class GarconClient {
   async getModelCatalog(
     agentId?: string,
     signal?: AbortSignal,
+    nodeId: string = this.defaultNodeId,
   ): Promise<ModelCatalogResponse> {
-    const query = agentId === undefined ? '' : `?agent=${encodeURIComponent(agentId)}`;
+    const query = new URLSearchParams(agentId === undefined ? {} : { agent: agentId });
+    query.set('nodeId', nodeId);
     const value = await this.#request(
       'catalog resolution',
       'GET',
-      `/api/v1/models${query}`,
+      `/api/v1/models?${query}`,
       undefined,
       signal,
     );
@@ -683,7 +685,7 @@ export class GarconClient {
       'native session lookup',
       'POST',
       '/api/v1/chats/lookup-native-session',
-      request,
+      { nodeId: this.defaultNodeId, ...request },
       signal,
     );
     try {
@@ -1125,7 +1127,7 @@ export class GarconClient {
   }
 
   async getTicketProjectDefault(directory: string, signal?: AbortSignal) {
-    return this.#ticketResponse('POST', '/project-default', { directory }, parseTicketProjectDefault, signal);
+    return this.#ticketResponse('POST', '/project-default', { directory, nodeId: this.defaultNodeId }, parseTicketProjectDefault, signal);
   }
 
   async listTickets(query: TicketListQuery, signal?: AbortSignal) {

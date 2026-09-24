@@ -2818,6 +2818,23 @@ describe('ChatCommandService', () => {
     expect(queue.runReservedTurn.mock.calls.at(-1)[2]).not.toHaveProperty('contextTransition');
   });
 
+  it('rejects catalog settings from a previous node but replays an exact accepted run before the ownership fence', async () => {
+    const { service, chats, queue } = makeService();
+    const chat = chats.getChat(SOURCE_CHAT_ID);
+    chat.agentOwnershipEpoch = 'node-a-epoch';
+    const input = { chatId: SOURCE_CHAT_ID, command: 'continue', clientRequestId: 'fenced-run',
+      clientMessageId: 'fenced-message', expectedAgentId: chat.agentId, expectedAgentOwnershipEpoch: 'node-a-epoch' };
+    const accepted = await service.submitRun(input);
+    chat.nodeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    chat.agentOwnershipEpoch = 'node-b-epoch';
+    await expect(service.submitRun({ ...input, clientRequestId: 'new-run', clientMessageId: 'new-message' }))
+      .rejects.toMatchObject({ code: 'STALE_CHAT_OWNERSHIP' });
+    expect((await service.submitRun(input)).turnId).toBe(accepted.turnId);
+    await expect(service.submitRun({ ...input, expectedAgentOwnershipEpoch: 'node-b-epoch' }))
+      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps accepted runs accepted when post-admission tag persistence fails', async () => {
     const { service, queue } = makeService({
       chatTags: {

@@ -674,7 +674,7 @@ describe('GarconClient', () => {
       method: 'POST',
       authorization: `Bearer ${connection.localCapability}`,
       contentType: 'application/json',
-      body: { nativeSessionId: 'session-123', agent: 'codex' },
+      body: { nodeId: 'local', nativeSessionId: 'session-123', agent: 'codex' },
     });
   });
 

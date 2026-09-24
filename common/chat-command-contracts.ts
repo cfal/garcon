@@ -235,6 +235,7 @@ export interface AgentRunCommandRequest {
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
   expectedAgentId?: string;
+  expectedAgentOwnershipEpoch?: string;
   tagsToAdd?: string[];
   permissionFallbackPolicy?: 'require-explicit-bypass';
   handoff?: AgentHandoffRequest;
@@ -581,6 +582,7 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
     );
   }
   const expectedAgentId = optionalNonEmptyString(body, 'expectedAgentId');
+  const expectedAgentOwnershipEpoch = optionalNonEmptyString(body, 'expectedAgentOwnershipEpoch');
   const permissionFallbackPolicy = body.permissionFallbackPolicy;
   if (
     permissionFallbackPolicy !== undefined
@@ -612,6 +614,7 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
     ...(modelEndpointId === undefined ? {} : { modelEndpointId }),
     ...(modelProtocol === undefined ? {} : { modelProtocol }),
     ...(expectedAgentId === undefined ? {} : { expectedAgentId }),
+    ...(expectedAgentOwnershipEpoch === undefined ? {} : { expectedAgentOwnershipEpoch }),
     ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
     ...(permissionFallbackPolicy === 'require-explicit-bypass'
       ? { permissionFallbackPolicy }

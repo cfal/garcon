@@ -115,6 +115,7 @@ export class SessionCommands {
           : {}),
       },
       expectedAgentId: input.expectedAgentId,
+      expectedAgentOwnershipEpoch: input.expectedAgentOwnershipEpoch,
       tagsToAdd: input.tagsToAdd,
       permissionFallbackPolicy: input.permissionFallbackPolicy,
       handoff: input.handoff,
@@ -129,6 +130,9 @@ export class SessionCommands {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
     this.support.assertContent(input.command, input.images);
+    if (input.expectedAgentOwnershipEpoch !== undefined && input.expectedAgentOwnershipEpoch !== chat.agentOwnershipEpoch) {
+      throw new CommandValidationError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed while selecting execution settings', 409);
+    }
     if (input.expectedAgentId !== undefined && input.expectedAgentId !== chat.agentId) {
       throw new CommandValidationError(
         'EXPECTED_AGENT_MISMATCH',

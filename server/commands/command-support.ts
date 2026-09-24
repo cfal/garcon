@@ -194,6 +194,7 @@ export interface NormalizedSubmitRunInput {
   clientMessageId: string;
   options: RunAgentTurnOptions;
   expectedAgentId?: string;
+  expectedAgentOwnershipEpoch?: string;
   tagsToAdd?: string[];
   permissionFallbackPolicy?: 'require-explicit-bypass';
   handoff?: AgentHandoffRequest;
