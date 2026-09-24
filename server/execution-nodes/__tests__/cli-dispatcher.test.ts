@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { ControllerCliDispatcher } from '../cli-dispatcher.js';
+import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
+import type { GuardRpcReply } from '../rpc.js';
 import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliPolicy, parseControllerCliRequest, type CliOperation, type ControllerCliRequest } from '../cli-protocol.js';
 import { DomainError } from '../../lib/domain-error.js';
 import { cliPair, CLI_NODE_ID } from './cli-fixture.js';
@@ -99,6 +100,25 @@ test('revocation fences late mutation completion even after access is re-enabled
     gate.resolve();
     await expect(pending).rejects.toMatchObject({ code: 'CLI_OUTCOME_UNKNOWN' });
   } finally { gate.resolve(); pair.close(); }
+});
+
+test.each([false, true])('revocation after handler settlement still fences RPC publication: mutation=%s', async (mutation) => {
+  const lease = new AbortController();
+  class RevokingDispatcher extends ControllerCliDispatcher {
+    override async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply) {
+      const reply = await super.request(value, { ...access, signal: AbortSignal.any([access.signal, lease.signal]) }, guardReply);
+      lease.abort();
+      return reply;
+    }
+  }
+  const pair = cliPair(new RevokingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
+    routes: { '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
+      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } } }));
+  try {
+    await expect(pair.worker.call('', 'controllerCli.request', request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null)))
+      .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
+    expect(lease.signal.aborted).toBe(true);
+  } finally { pair.close(); }
 });
 
 test.each([false, true])('oversize and queue-pressure replies preserve read/mutation classification: mutation=%s', async (mutation) => {

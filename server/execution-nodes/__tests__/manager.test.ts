@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ExecutionNodeManager } from '../manager.js';
 import { WebSocketLink, EXECUTION_NODE_NOISE_CONTEXT } from '../websocket-link.js';
-import { AgentRpc } from '../rpc.js';
+import { AgentRpc, type GuardRpcReply } from '../rpc.js';
 import { serveAgentNode } from '../agent-worker.js';
 import { integrationFixture } from './integration-fixture.js';
 import { nodeConnectionUrl } from '../connection-url.js';
@@ -13,7 +13,7 @@ import { DomainError } from '../../lib/domain-error.js';
 import { createServerSocketHandlers, type WsConnectionData } from '../../ws/server-sockets.js';
 import { PrimarySocketDelivery } from '../../ws/primary-delivery.js';
 import { WebSocketAdmissionController } from '../../lib/websocket-capacity.js';
-import { ControllerCliDispatcher } from '../cli-dispatcher.js';
+import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -106,6 +106,45 @@ test('reverse CLI dispatch checks initialization, node grant, revocation lease a
     manager.quiesce();
     await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
   } finally { release.resolve(); }
+});
+
+test.each(['context', 'read', 'mutation'] as const)('quiescence after handler settlement fences Noise RPC publication: %s', async (operation) => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'CLI worker', direction: 'node-connects', allowControllerCli: true });
+  const { url } = sharedListener(manager);
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, allowInsecureDevelopment: true });
+  cleanups.push(() => link.dispose());
+  const connected = Promise.withResolvers<AgentRpc>();
+  link.onSession((transport) => {
+    const rpc = new AgentRpc(transport);
+    const serving = serveAgentNode(integrationFixture(root, transport.nodeId).node, rpc);
+    cleanups.push(() => serving.dispose());
+    connected.resolve(rpc);
+  });
+  link.dial(url(config.id));
+  const rpc = await connected.promise;
+  await waitReady(manager, config.id);
+  class QuiescingDispatcher extends ControllerCliDispatcher {
+    override describe(access: CliDispatchAccess, guardReply: GuardRpcReply) {
+      const context = super.describe(access, guardReply);
+      manager.quiesce();
+      return context;
+    }
+    override async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply) {
+      const reply = await super.request(value, access, guardReply);
+      manager.quiesce();
+      return reply;
+    }
+  }
+  manager.setCliDispatcher(new QuiescingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
+    routes: { '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
+      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } } }));
+  const pending = operation === 'context' ? rpc.call('', 'controllerCli.describe', null)
+    : rpc.call('', 'controllerCli.request', { expectedServerInstanceId: 'controller', http: {
+      operation: operation === 'mutation' ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats',
+      query: [], body: operation === 'mutation' ? {} : null,
+    } });
+  await expect(pending).rejects.toMatchObject({ code: operation === 'mutation' ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
 });
 
 function sharedListener(manager: ExecutionNodeManager, limits?: NoiseServerOptions) {

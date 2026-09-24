@@ -238,7 +238,7 @@ export class ExecutionNodeManager {
         allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
       link.onError(reportError);
-      entry.node = new RemoteExecutionNode(config.id, link, (rpc) => rpc.handle(async (call, signal) => {
+      entry.node = new RemoteExecutionNode(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
           const lease = entry.cliLease;
           const assertCurrent = () => {
@@ -254,9 +254,9 @@ export class ExecutionNodeManager {
           const access = { nodeId: config.id, rpc, signal: AbortSignal.any([signal, lease.signal]), assertCurrent };
           if (call.method === 'controllerCli.describe') {
             if (call.request !== null) throw new DomainError('VALIDATION_FAILED', 'Invalid CLI context request', 400);
-            return this.#cliDispatcher.describe(access);
+            return this.#cliDispatcher.describe(access, guardReply);
           }
-          return this.#cliDispatcher.request(call.request, access);
+          return this.#cliDispatcher.request(call.request, access, guardReply);
         }
         if (call.method !== 'credentials.resolve' || !this.#current(entry)
           || !this.options.integrations.some((integration) => integration.integrationId === call.integrationId)) {

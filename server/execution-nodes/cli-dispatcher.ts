@@ -3,7 +3,7 @@ import type { JsonValue } from '../../common/json.js';
 import { DomainError } from '../lib/domain-error.js';
 import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import type { AgentRpc } from './rpc.js';
+import type { AgentRpc, GuardRpcReply } from './rpc.js';
 import type { AgentRpcRequest } from './agent-protocol.js';
 import { CliAdmission } from './cli-admission.js';
 import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, cliPolicy, parseControllerCliRequest, type CliHttpResponse } from './cli-protocol.js';
@@ -25,15 +25,16 @@ export class ControllerCliDispatcher {
     readonly isShuttingDown: () => boolean;
   }) {}
 
-  describe(access: CliDispatchAccess): CliContext {
+  describe(access: CliDispatchAccess, guardReply: GuardRpcReply): CliContext {
     this.#assertAdmission(access);
+    guardReply(() => this.#assertAdmission(access));
     const release = this.#admission.acquire(access.nodeId, 'short');
     try {
       return { serverInstanceId: this.options.serverInstanceId, defaultNodeId: access.nodeId, workspaceName: this.options.workspaceName };
     } finally { release(); }
   }
 
-  async request(value: unknown, access: CliDispatchAccess): Promise<CliHttpResponse> {
+  async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply): Promise<CliHttpResponse> {
     this.#assertAdmission(access);
     const request = parseControllerCliRequest(value);
     if (request.expectedServerInstanceId !== this.options.serverInstanceId) {
@@ -50,6 +51,7 @@ export class ControllerCliDispatcher {
       try { this.#assertAdmission(access); }
       catch (error) { throw policy.mutation ? interrupted() : error; }
     };
+    guardReply(assertPublication);
     const cancelled = Promise.withResolvers<never>();
     const onAbort = () => cancelled.reject(interrupted());
     signal.addEventListener('abort', onAbort, { once: true });
