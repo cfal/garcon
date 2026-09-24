@@ -28,6 +28,10 @@ type RpcFrame = AgentRpcRequest | AgentProducerFrame | TerminalNotification
   | { readonly type: 'error'; readonly id: string; readonly error: Failure }
   | { readonly type: 'cancel'; readonly id: string };
 
+export interface RpcCallOptions extends Omit<NodeCallOptions, 'timeoutMs'> {
+  readonly timeoutMs?: number | null;
+}
+
 export class AgentRpc {
   readonly #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
   readonly #incoming = new Map<string, AbortController>();
@@ -94,8 +98,12 @@ export class AgentRpc {
   }
 
   async call<K extends keyof AgentRpcMethods>(
-    integrationId: string, method: K, request: AgentRpcMethods[K]['request'], options?: NodeCallOptions,
+    integrationId: string, method: K, request: AgentRpcMethods[K]['request'], options?: RpcCallOptions,
   ): Promise<AgentRpcMethods[K]['result']> {
+    const timeoutMs = options?.timeoutMs === undefined ? 120_000 : options.timeoutMs;
+    if (timeoutMs !== null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2 ** 31 - 1)) {
+      throw new AgentCallError('not-dispatched', 'Invalid execution-node deadline');
+    }
     if (this.#retired || options?.signal?.aborted || !this.transport.connected) throw new AgentCallError('not-dispatched', 'Execution node is unavailable');
     if (this.#pending.size >= 256) throw new AgentCallError('not-dispatched', 'Execution-node request budget exhausted');
     const id = crypto.randomUUID();
@@ -115,10 +123,10 @@ export class AgentRpc {
       pending.reject(new AgentCallError('unknown', 'Execution-node call cancelled after possible dispatch'));
       try { if (!this.#retired) this.transport.send(JSON.stringify({ type: 'cancel', id } satisfies RpcFrame)); } catch { /* Continuity failure already fences the call. */ }
     };
-    const timer = setTimeout(cancel, options?.timeoutMs ?? 120_000);
-    timer.unref();
+    const timer = timeoutMs === null ? null : setTimeout(cancel, timeoutMs);
+    timer?.unref();
     options?.signal?.addEventListener('abort', cancel, { once: true });
-    const cleanup = () => { clearTimeout(timer); options?.signal?.removeEventListener('abort', cancel); };
+    const cleanup = () => { if (timer) clearTimeout(timer); options?.signal?.removeEventListener('abort', cancel); };
     this.#pending.set(id, { ...result, cleanup });
     try {
       this.transport.send(payload);
@@ -180,9 +188,9 @@ export class AgentRpc {
 
   #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>): void {
     let payload = JSON.stringify(frame);
-    if (!this.transport.channel.fitsFrame(payload)) {
+    if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {
       payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
-        new AgentCallError('unknown', 'Execution-node reply exceeds the message size limit'),
+        new AgentCallError('unknown', 'Execution-node reply exceeds the message or queue budget'),
       ) } satisfies RpcFrame);
     }
     this.transport.send(payload);
