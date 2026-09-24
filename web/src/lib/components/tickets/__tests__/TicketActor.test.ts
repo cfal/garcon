@@ -6,9 +6,16 @@ import TicketActor from '../TicketActor.svelte';
 afterEach(cleanup);
 
 const chatId = '1000000000000001';
+it('renders a missing execution node by its durable identity without human or observed attribution', () => {
+	const nodeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+	render(TicketActor, { actor: { kind: 'node', nodeId, declaredChatId: null }, chats: [], username: 'local', onOpenChat: vi.fn() });
+	expect(screen.getByText(nodeId)).toBeTruthy();
+	expect(screen.queryByText('You')).toBeNull();
+});
 it.each([
 	{ kind: 'chat', chatId, provenance: 'observed' },
 	{ kind: 'user', username: 'local', principalMode: 'local', declaredChatId: chatId },
+	{ kind: 'node', nodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', declaredChatId: chatId },
 ] satisfies Actor[])('opens the %j actor chat without source navigation', async (actor) => {
 	const onOpenChat = vi.fn();
 	const props = {

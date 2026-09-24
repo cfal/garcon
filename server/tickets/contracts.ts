@@ -7,7 +7,7 @@ import { validateTicketInput } from './errors.js';
 
 export type TicketAuthority =
   | { readonly kind: 'chat'; readonly chatId: string }
-  | { readonly kind: 'principal'; readonly mode: 'authenticated' | 'local'; readonly key: string };
+  | { readonly kind: 'principal'; readonly mode: ServerPrincipal['mode']; readonly key: string };
 
 export interface TicketCaller {
   readonly authority: TicketAuthority;
@@ -28,6 +28,11 @@ export function ticketAuthorityKey(authority: TicketAuthority): string {
 }
 
 export function deriveTicketCaller(principal: ServerPrincipal, fromChatId?: string): TicketCaller {
+  if (principal.mode === 'execution-node') return validateTicketCaller({
+    actor: { kind: 'node', nodeId: principal.nodeId, declaredChatId: fromChatId ?? null },
+    authority: { kind: 'principal', mode: 'execution-node', key: principal.nodeId },
+    owner: fromChatId ? { kind: 'chat', chatId: fromChatId } : { kind: 'node', nodeId: principal.nodeId },
+  });
   const actor: TicketActor = { kind: 'user', username: principal.username,
     principalMode: principal.mode, declaredChatId: fromChatId ?? null };
   const authority: TicketAuthority = { kind: 'principal', mode: principal.mode, key: principal.key };

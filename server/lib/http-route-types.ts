@@ -1,4 +1,5 @@
 export type ServerPrincipal =
+  | { mode: 'execution-node'; key: string; nodeId: string; expiresAtMs: null }
   | { mode: 'authenticated'; key: string; username: string; expiresAtMs: number }
   | { mode: 'local'; key: 'local'; username: 'local'; expiresAtMs: null };
 

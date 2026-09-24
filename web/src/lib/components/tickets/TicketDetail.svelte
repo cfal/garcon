@@ -23,6 +23,7 @@
 	import TicketDiscussion from './TicketDiscussion.svelte';
 	import TicketActivity from './TicketActivity.svelte';
 	import TicketChatReference from './TicketChatReference.svelte';
+	import TicketNodeReference from './TicketNodeReference.svelte';
 	import TicketRelationships from './TicketRelationships.svelte';
 	import TicketMarkdown from './TicketMarkdown.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -219,6 +220,7 @@
 			<dd class="ticket-assignee-value">
 				{#if ticket.assignee?.kind === 'chat'}
 					<TicketChatReference chatId={ticket.assignee.chatId} {chats} {onOpenChat} />
+				{:else if ticket.assignee?.kind === 'node'}<TicketNodeReference nodeId={ticket.assignee.nodeId} />
 				{:else}<span>{ticket.assignee?.username ?? m.tickets_unassigned()}</span>{/if}
 				{#if ownAssignment || (ticket.status !== 'closed' && !ticket.assignee)}
 					<button

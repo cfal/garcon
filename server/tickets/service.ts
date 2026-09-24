@@ -38,7 +38,7 @@ export class TicketService {
 
   executeHttp(value: HttpTicketMutationRequest, caller: TicketCaller, signal?: AbortSignal): TicketWriteResult {
     const request = validateTicketInput(() => parseHttpTicketMutationRequest(value));
-    if (caller.actor.kind !== 'user' || caller.actor.declaredChatId !== (request.fromChatId ?? null)) {
+    if (caller.actor.kind === 'chat' || caller.actor.declaredChatId !== (request.fromChatId ?? null)) {
       throw new TicketDomainError('TICKET_UNAUTHORIZED', 'Ticket caller does not match the authenticated request.');
     }
     const context: TicketMutationContext = { ...caller, expectedStoreId: request.expectedStoreId, source: null,
@@ -127,7 +127,7 @@ export class TicketService {
   }
 
   #requireReferences(payload: TicketMutationPayload, context: TicketMutationContext): void {
-    if (context.actor.kind === 'user' && context.actor.declaredChatId) this.#requireChat(context.actor.declaredChatId);
+    if (context.actor.kind !== 'chat' && context.actor.declaredChatId) this.#requireChat(context.actor.declaredChatId);
     if (context.actor.kind === 'chat') this.#requireChat(context.actor.chatId);
     if (payload.action === 'claim' || payload.action === 'release') this.#requireOwner(context.owner, context);
     if (payload.action === 'create' && payload.input.assignee) this.#requireOwner(payload.input.assignee, context);
@@ -136,6 +136,12 @@ export class TicketService {
 
   #requireOwner(owner: TicketOwner, context: TicketMutationContext): void {
     if (owner.kind === 'chat') return this.#requireChat(owner.chatId);
+    if (owner.kind === 'node') {
+      if (context.actor.kind !== 'node' || owner.nodeId !== context.actor.nodeId) {
+        throw new TicketDomainError('TICKET_VALIDATION_FAILED', 'A node assignment must name the authenticated execution node.');
+      }
+      return;
+    }
     if (context.actor.kind !== 'user' || owner.username !== context.actor.username) {
       throw new TicketDomainError('TICKET_VALIDATION_FAILED', 'A user assignment must name the current authenticated user.');
     }

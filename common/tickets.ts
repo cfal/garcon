@@ -23,10 +23,12 @@ export const TICKET_LIMITS = {
 } as const;
 
 export type TicketOwner =
+  | { readonly kind: 'node'; readonly nodeId: string }
   | { readonly kind: 'chat'; readonly chatId: string }
   | { readonly kind: 'user'; readonly username: string };
 
 export type TicketActor =
+  | { readonly kind: 'node'; readonly nodeId: string; readonly declaredChatId: string | null }
   | { readonly kind: 'chat'; readonly chatId: string; readonly provenance: 'observed' }
   | { readonly kind: 'user'; readonly username: string;
       readonly principalMode: 'authenticated' | 'local'; readonly declaredChatId: string | null };
@@ -188,6 +190,7 @@ export interface TicketProjectDefault {
 }
 
 export function ticketOwnerKey(owner: TicketOwner): string {
+  if (owner.kind === 'node') return `node:${owner.nodeId}`;
   if (owner.kind === 'chat') return `chat:${owner.chatId}`;
   return `user:${owner.username}`;
 }

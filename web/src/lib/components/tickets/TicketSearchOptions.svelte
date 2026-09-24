@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Filter from '@lucide/svelte/icons/list-filter';
+	import { getExecutionNodes, hasExecutionNodes } from '$lib/context';
 	import {
 		TICKET_STATUSES,
 		ticketAssigneeQuery,
@@ -32,6 +33,15 @@
 		onFilter: (change: Pick<TicketListQuery, 'label' | 'ready' | 'includeClosed'>) => boolean;
 	} = $props();
 	const labelId = $props.id();
+	const nodes = hasExecutionNodes() ? getExecutionNodes() : null;
+	const nodeOptions = $derived.by(() => {
+		const options = (nodes?.nodes ?? []).filter((node) => node.kind === 'remote').map(({ id, label }) => ({ id, label }));
+		const assignee = controller.query.assignee;
+		if (assignee && assignee !== 'unassigned' && assignee.kind === 'node' && !options.some((node) => node.id === assignee.nodeId)) {
+			options.push({ id: assignee.nodeId, label: assignee.nodeId });
+		}
+		return options;
+	});
 </script>
 
 <div class="ticket-filter-options">
@@ -63,6 +73,12 @@
 			<option value="">{m.tickets_any_assignee()}</option>
 			<option value="unassigned">{m.tickets_unassigned()}</option>
 			<option value={`user:${username}`}>{m.tickets_me()}</option>
+			{#each nodeOptions as node (node.id)}
+				<svelte:boundary>
+					<option value={`node:${node.id}`}>{node.label}</option>
+					{#snippet failed()}<option disabled>{node.id}</option>{/snippet}
+				</svelte:boundary>
+			{/each}
 			{#each chats as chat (chat.id)}
 				<option value={`chat:${chat.id}`}>{chat.title || chat.id}</option>
 			{/each}

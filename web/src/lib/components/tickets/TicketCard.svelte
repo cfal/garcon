@@ -4,6 +4,7 @@
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Link2 from '@lucide/svelte/icons/link-2';
 	import TicketStatusMenu from './TicketStatusMenu.svelte';
+	import TicketNodeReference from './TicketNodeReference.svelte';
 	import { ticketPriorityLabel, isTicketProjectPath } from './ticket-presentation.js';
 	import { ticketDraggable } from './ticket-drag.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -67,12 +68,14 @@
 		{#if ticket.commentCount}<span class="ticket-indicator" title={m.tickets_comments()}
 				><MessageSquare size={12} />{ticket.commentCount}</span
 			>{/if}
-		<span
+		{#if ticket.assignee?.kind === 'node'}
+			<span class="ticket-owner"><TicketNodeReference nodeId={ticket.assignee.nodeId} /></span>
+		{:else}<span
 			class="ticket-owner"
 			title={ticket.assignee?.kind === 'chat' ? ticket.assignee.chatId : ticket.assignee?.username}
 			>{ticket.assignee?.kind === 'chat'
 				? m.tickets_chat({ id: `…${ticket.assignee.chatId.slice(-4)}` })
 				: (ticket.assignee?.username ?? m.tickets_unassigned())}</span
-		>
+		>{/if}
 	</div>
 </article>

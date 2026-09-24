@@ -62,7 +62,7 @@ export async function runTicketCommand(command: TicketCliCommand, client: Ticket
   if (ticketBytes(JSON.stringify(request)) > TICKET_LIMITS.requestBytes) {
     throw argumentError('Encoded ticket request exceeds 64 KiB; reduce the submitted body');
   }
-  output.diagnostic(ticketRetryDiagnostic(request, kind));
+  output.diagnostic(ticketRetryDiagnostic(request, kind, command.runtimeFile));
   signal?.throwIfAborted();
   onSubmissionStarted?.();
   try {

@@ -22,10 +22,14 @@ export function ticketShellArgument(value: string): string {
   return `$'${quoted}'`;
 }
 
-export function ticketRetryDiagnostic(request: HttpTicketMutationRequest, kind?: 'repository' | 'folder' | 'explicit'): string {
+export function ticketRetryDiagnostic(request: HttpTicketMutationRequest, kind?: 'repository' | 'folder' | 'explicit', runtimeFile?: string): string {
   const flags = [`--request-id ${ticketShellArgument(request.requestId)}`,
     `--expected-store-id ${ticketShellArgument(request.expectedStoreId)}`];
   const lines = [`Request: ${request.requestId}`, `Store: ${request.expectedStoreId}`];
+  if (runtimeFile) {
+    flags.push(`--runtime-file ${ticketShellArgument(runtimeFile)}`);
+    lines.push('Retry from this execution node. Switching to Local or another node does not deduplicate this request.');
+  }
   if (request.payload.action === 'create') {
     lines.push(`Project (${kind ?? 'explicit'}): ${ticketLineOutput(request.payload.input.project)}`);
     flags.push(`--project ${ticketShellArgument(request.payload.input.project)}`);
@@ -38,11 +42,12 @@ const statuses: Record<TicketStatus, string> = { open: 'Open', 'in-progress': 'I
 const priorities = ['Urgent', 'High', 'Normal', 'Low'];
 
 function ownerText(owner: TicketOwner | null): string {
+  if (owner?.kind === 'node') return `Node ${owner.nodeId}`;
   return owner === null ? 'Unassigned' : owner.kind === 'chat' ? `Chat ${owner.chatId}` : owner.username;
 }
 
 function actorText(actor: TicketActor): string {
-  return actor.kind === 'chat' ? `Chat ${actor.chatId}` : actor.username
+  return actor.kind === 'chat' ? `Chat ${actor.chatId}` : (actor.kind === 'node' ? `Node ${actor.nodeId}` : actor.username)
     + (actor.declaredChatId ? ` (declared for chat ${actor.declaredChatId})` : '');
 }
 
