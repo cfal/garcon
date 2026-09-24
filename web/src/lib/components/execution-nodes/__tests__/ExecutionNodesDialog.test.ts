@@ -48,7 +48,7 @@ describe('ExecutionNodesDialog', () => {
 		const url = await screen.findByLabelText('Connection URL') as HTMLInputElement;
 		expect(url.value).toBe(connection.connectionUrl);
 		expect(url.type).toBe('text');
-		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false });
+		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'node-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false, allowControllerCli: false });
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy connection URL' }));
 		expect(copyToClipboard).toHaveBeenCalledWith(connection.connectionUrl, expect.any(HTMLElement), expect.any(Function));
 		await fireEvent.keyDown(url, { key: 'Escape' });
@@ -79,7 +79,7 @@ describe('ExecutionNodesDialog', () => {
 		vi.mocked(api.createExecutionNode).mockRejectedValueOnce(new Error('Invalid connection address'));
 		await fireEvent.submit(url.closest('form')!);
 		expect((await screen.findByText('Invalid connection address')).getAttribute('role')).toBe('alert');
-		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true, allowUnverifiedTls: false });
+		expect(api.createExecutionNode).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true, allowUnverifiedTls: false, allowControllerCli: false });
 		expect((url as HTMLInputElement).value).toBe(descriptor);
 	});
 
