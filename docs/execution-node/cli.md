@@ -1,6 +1,6 @@
 # CLI Access Through Execution Nodes
 
-Status: architecture and design, 2026-09-23. The CLI gateway is not implemented. Source was inspected at [9f0020dc9d25f3f7d354df8d8e34baae8c477e26](https://github.com/cfal/garcon/tree/9f0020dc9d25f3f7d354df8d8e34baae8c477e26). New configuration, endpoint-context fields, and RPC names below are proposed contracts.
+Status: implemented and reviewed, 2026-09-24. Opus and Astra reviewed the design against `e9a9cfcf5` and the implementation through `3279b49e0`; `ce725e1d5` adds the final requested regression coverage. The [current transport contract](./transport.md) supersedes older replay and chunk-transfer proposals. Source links below identify the original investigation baseline; the corrections in this document govern implementation.
 
 This extends [Execution Node Interfaces](./interface.md) and [Execution Nodes In The App](./app-integration.md), which deliberately excluded a spawned-CLI bridge. It retains the single-channel policy from [Files](./files.md), [Terminals](./terminal.md), and [Git](./git.md). Existing CLI behavior is documented in [Garcon CLI And Server](../cli.md).
 
@@ -12,7 +12,7 @@ The CLI continues to use HTTP. It does not open a WebSocket, implement Noise, un
 
 This is transparent application transport, not an unchanged-binary compatibility claim. Today's CLI assumes that its HTTP endpoint and controller are the same process, and several node-sensitive calls omit node identity. Those assumptions must change for both endpoint types.
 
-Recommended authority policy: explicit controller-side, per-node opt-in to workspace-level CLI access. This is broader than the existing controller-interpreted agent-command authority. Do not silently grant it merely because a worker connects. The policy is a proposal to confirm before implementation, not an existing permission.
+Authority policy: explicit controller-side, per-node opt-in to workspace-level CLI access, default off. This is broader than controller-interpreted agent-command authority and includes authorizing execution on other hosts, including Local. Do not silently grant it merely because a worker connects.
 
 ## Scope
 
@@ -23,7 +23,7 @@ Recommended authority policy: explicit controller-side, per-node opt-in to works
 - Keep argument parsing, stdin, cwd resolution, receipt polling, and output-file writes on the machine running the CLI.
 - Keep retained remote terminals usable after controller restart without changing their process-lifetime guarantee.
 
-No additional controller-worker channel, traffic scheduler, generic HTTP proxy, controller-side CLI subprocess, durable forwarding queue, new mutation ledger, or automatic agent recovery. Per-chat CLI capabilities, explicit cross-node CLI selection flags, remote directory-picker work, and remote ticket project inference are separate work. Controller-interpreted commands extracted from normalized provider output keep their existing path and authorization rules.
+No additional controller-worker channel, traffic scheduler, generic HTTP proxy, controller-side CLI subprocess, durable forwarding queue, new mutation ledger, result cache, or automatic agent recovery. Per-chat CLI capabilities and explicit cross-node CLI selection flags are separate work. Existing node-aware ticket project inference is reused. Controller-interpreted provider-output commands keep their existing path and authorization rules.
 
 ## Existing Behavior
 
@@ -33,9 +33,9 @@ No additional controller-worker channel, traffic scheduler, generic HTTP proxy, 
 | [CLI HTTP client](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/cli/garcon-client.ts) | Centralizes authenticated JSON HTTP requests and response parsing. Selected idempotent submissions reuse their command IDs after verifying the same controller instance. There is no CLI WebSocket client. |
 | [CLI orchestration](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/cli/consultation.ts) | New starts send the CLI's cwd but no node ID. Catalog calls also omit node identity, including calls during resume and handoff. A proxy alone would route some remote work to Local. |
 | [Receipt polling](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/cli/receipt-poller.ts) | Synchronous start/resume/wait uses separate bounded HTTP requests for receipts, with bounded transport recovery. It does not stream the entire agent turn through one request. |
-| [Worker composition](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/server/execution-nodes/worker.ts) | Deliberately disables spawned-CLI controller discovery. `TerminalRuntime` is process-owned; provider-serving nodes and RPC objects are replaced inside `link.onSession`. |
+| [Worker composition](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/server/execution-nodes/worker.ts) | Deliberately disables spawned-CLI discovery. At current HEAD, the node, providers, and PTYs survive reconnect; only serving/RPC bindings are replaced. Reuse the existing process-level `currentRpc` binding. |
 | [Reverse RPC](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/server/execution-nodes/manager.ts) | The controller currently accepts only `credentials.resolve`. Adding CLI access extends this explicit reverse-service boundary; it must not expose every controller route. |
-| [RPC implementation](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/server/execution-nodes/rpc.ts) | Already supports concurrent bidirectional calls, UUID correlation, cancellation, and bounded same-session delivery. A controller handler can call back into the worker without a new connection. |
+| [RPC implementation](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/server/execution-nodes/rpc.ts) | Supports concurrent bidirectional calls, UUID correlation, and cancellation. Current HEAD retires every disconnected session without replay. A handler can call back into the worker without another connection. |
 | [HTTP route contracts](https://github.com/cfal/garcon/blob/9f0020dc9d25f3f7d354df8d8e34baae8c477e26/server/lib/http-route-types.ts) | Raw route handlers are callable with a request and explicit principal context. Reuse these handlers or their owning services instead of performing an authenticated HTTP request back into the controller. |
 
 ## Ownership
@@ -61,7 +61,7 @@ Controller HTTP boundary                 Worker CLI gateway
 
 The worker gateway owns its local listener, descriptor, local capability, admission limits, and adaptation to one captured RPC session per request. It is not a second controller and does not load controller application stores.
 
-The controller dispatcher owns the allowlist, delegated authority, controller-generation check, request validation, application dispatch, and bounded response transfers. It receives the originating node from the authenticated link, not an HTTP header or a caller-supplied principal.
+The controller dispatcher owns the allowlist, delegated authority, controller-generation check, request validation, application dispatch, and bounded inline replies. It receives the originating node from the authenticated link, not an HTTP header or a caller-supplied principal.
 
 The same shared socket carries agent, Files, Terminal, Git, credential-resolution, and CLI traffic. The loopback listener is local IPC, not an additional network connection between controller and worker. There is no new public worker API. Bind the gateway only to a numeric loopback address on a random port, never to `0.0.0.0`; the execution-node network listener remains a separate existing concern.
 
@@ -96,11 +96,11 @@ Separate proving the local HTTP endpoint from selecting the controller generatio
 
 Keep the existing named-workspace discovery path for a controller-local CLI. Add an explicit runtime-file selection for worker contexts, proposed as `--runtime-file <path>` and inherited `GARCON_CLI_RUNTIME`.
 
-The worker publishes a private gateway descriptor, for example `cli-runtime.json` under its private runtime directory. It contains the local endpoint URL, endpoint process identity, pid/start metadata, and an independently generated local capability. It does not pretend that the worker directory is a controller workspace or contain the controller's filesystem path, bearer token, or node secret.
+The worker publishes `<workspaceDir>/run/cli-<runtimeId>.json` in a private directory (0700), with file mode 0600. A shared fixed filename is unsafe: multiple worker processes can use the same storage directory. Each process owns a distinct descriptor path and capability. The descriptor contains endpoint URL/identity and pid/start metadata, not a controller workspace path, bearer token, or node secret.
 
 Reuse secure descriptor reading/writing: atomic publication, owner-only permissions, regular-file and owner checks, and no symlink following. Use a tagged descriptor schema where local-directory semantics differ. The controller, worker, and CLI ship together; an old schema or mismatched build is a clear error, not a legacy fallback.
 
-Runtime-file selection is explicit context. An invalid, missing, disabled, or disconnected gateway never falls back to named-workspace discovery. Conflicting explicit connection selectors are rejected; `--workspace` cannot retarget a gateway to another controller workspace. The authenticated context supplies the actual workspace name used in CLI output. Descriptor cleanup must check ownership/instance so an old process cannot remove a successor's descriptor.
+Runtime-file selection is explicit, fail-closed context. An invalid, missing, disabled, or disconnected gateway never falls back to named-workspace discovery. Inherited `GARCON_CLI_RUNTIME` pins that runtime and overrides inherited workspace/config settings. Reject a different explicit runtime or `--config-dir`; require `--server` to match the descriptor. An explicit `--workspace` is an assertion against the authenticated context, not a retarget. Cleanup removes only the process-owned descriptor. A controller clears inherited `GARCON_CLI_RUNTIME` before spawning children.
 
 ### Two Discovery Requests
 
@@ -115,11 +115,13 @@ The second response is a small shared contract, illustratively:
 interface CliContext {
   readonly serverInstanceId: string;
   readonly defaultNodeId: string;
-  readonly workspaceName: string;
+  readonly workspaceName: string | null;
 }
 ```
 
 For direct controller HTTP, `defaultNodeId` is `local`. For a worker gateway, it is the authenticated originating node. This is an execution default, not a visibility or authorization filter. It does not constrain list/search to that node.
+
+Controllers started with `--workspace-dir` have no workspace name. Report null in context and automation metadata, never their private path or an invented `default`. Preserve existing named-workspace output.
 
 The gateway may prove its own identity while disconnected, but context discovery must return unavailable then. It must not present stale cached controller context as live verification. Reject discovery while the dispatcher is initializing, the node is not ready, CLI access is disabled, or the controller is quiescing.
 
@@ -145,13 +147,15 @@ An entirely unmodified CLI is not a safe target: it would interpret the gateway 
 
 ## Delegated Authority
 
-Propose `allowControllerCli: boolean` on controller-owned remote-node configuration, default false, exposed explicitly in the node editor. Enabling it grants the trusted worker OS account access to the allowlisted CLI operations across this controller workspace, including chats hosted on other nodes. Explain that scope in the permission UI; it is not just permission to inspect the worker's own jobs.
+Add `allowControllerCli: boolean` on controller-owned remote-node configuration, default false, exposed explicitly in the node editor. Enabling it grants the trusted worker OS account allowlisted workspace-wide authority, including agent execution and permission responses on Local and other hosts. State that command-execution authority plainly in the permission UI. Missing saved values default false; grant-only updates neither require idleness nor replace the connector.
 
 Every reverse call checks the current node entry, link/session ownership, readiness, CLI grant, and controller lifecycle before dispatch. Use `integrationId: ''` for this node-level reverse service; do not treat it as an individual provider facet. Install the dispatcher only after its application dependencies exist, without making remote connection readiness block startup.
 
 Introduce an explicit delegated-node principal with stable node-based authority. Never authenticate a forwarded request using `LOCAL_SERVER_PRINCIPAL`, a fabricated human username, or caller-supplied identity. Node labels are mutable presentation, not authority keys. Shared principal/actor validation and consumers such as ticket attribution must represent this origin honestly and retain their existing author/edit rules. Supplied `--parent` and `--from-chat` values remain declared relations or attribution, not observed provider provenance.
 
-Changing or revoking CLI access does not replace the main node connector or terminate PTYs and agents. It closes new bridge admissions, rejects further result retrieval, and cancels outstanding bridge waits best effort. Already accepted application work is not rolled back or implicitly stopped. Removal/disable/session retirement also fence the relevant dispatcher and results.
+Tickets gain explicit UUID-based node actor and node owner variants. A claim without `--from-chat` belongs to the node; declared chat ownership remains supported. Update validation, owner keys/filters, CLI formatting, and UI presentation. Labels do not enter fingerprints or comment-edit authority. Durable retries deduplicate only from the same origin; retry hints must preserve the runtime selector and warn against switching to Local or another node. Older builds cannot read node-attributed tickets; no dual format is required.
+
+Changing or revoking CLI access does not replace the connector or terminate PTYs/agents. It invalidates a node/session authorization lease and cancels bridge waits best effort. Revoke/re-enable cannot authorize late completion under the old lease. Already accepted work is not rolled back. Check current entry configuration, verified readiness, exact RPC backing, and quiescence on each call, not captured connector configuration. Capture these checks with the original lease and cancellation signal in a per-call RPC reply guard, including context discovery. Run that guard synchronously immediately before enqueue; validation at handler completion alone leaves a promise-continuation race.
 
 This is an OS-account trust boundary, not isolation between processes using that account. The private descriptor and local capability prevent unrelated users or unauthenticated local HTTP clients from gaining access; they do not identify which agent issued a shell command. No browser CORS access is enabled.
 
@@ -164,12 +168,10 @@ Add an explicit typed reverse-service family to the existing protocol:
 ```text
 controllerCli.describe() -> live CliContext
 controllerCli.request({ expectedServerInstanceId, http })
-  -> inline HTTP reply | HTTP reply metadata plus a bounded result reference
-controllerCli.readResult({ reference, offset }) -> { offset, dataBase64, eof }
-controllerCli.closeResult({ reference }) -> closed
+  -> { status, body, retryAfter? }
 ```
 
-`http` is an enumerated method/path request union, not an arbitrary URL. It carries query pairs and the existing operation's JSON request DTO. Preserve repeated query values and their order where the API uses them; do not collapse a query into a single-value object. Requests and responses retain their shared application types and runtime parsers. One RPC family does not imply an untyped public invocation API.
+`http` carries an enumerated method/path operation, ordered query pairs, and a JSON body, not an arbitrary URL or executable operation. The CLI and raw application handlers retain the existing typed DTOs and runtime parsers; the relay independently validates its narrower authority envelope, including explicit node targets and the restricted settings patch. Do not duplicate all application parsers inside the gateway. Preserve repeated query values and their order rather than collapsing them into a single-value object.
 
 The normal `AgentRpc` envelope supplies the RPC UUID, request/result/error/cancel frames, and transport correlation. Existing `clientRequestId`, `clientMessageId`, turn IDs, and ticket operation identities stay inside the application body unchanged. They are not replaced by the RPC UUID or message ordinal.
 
@@ -198,7 +200,7 @@ The following is the current CLI surface, not permission to expose every route u
 
 Exclude node management and its credentials, provider credential administration, authentication/account routes, Files/Git/Terminal APIs, and any route not needed by the CLI. Restricting a broad endpoint requires validating nested payload fields, not only allowing its URL. In particular, forwarding an unrestricted settings patch would defeat the allowlist.
 
-Keep remote ticket project inference's existing unsupported result; attaching the correct node to that request prevents controller-local inference but does not implement the deferred feature. Likewise, do not expand CLI commands merely because their underlying browser APIs exist.
+Ticket project inference is implemented on the selected node at current HEAD. Send the context default node with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 
 ## Execution Targeting
 
@@ -209,15 +211,18 @@ Origin and target are different identities. Origin is derived from the authentic
 | New `start` / `start-async` | Explicitly send `context.defaultNodeId`; resolve cwd on the CLI machine and validate it again through that node's project service. |
 | Standalone agent/model catalog | Use the context default node. Provider endpoint definitions remain controller-owned; discovery still executes on the selected node. |
 | Native-session lookup | Include the context default node to avoid same-native-ID ambiguity across hosts. |
-| Existing-chat resume/settings selection | Read the chat's durable node and use that node's catalog. Do not use the HTTP endpoint's default indiscriminately. |
+| Existing-chat resume/settings selection | Use the already-fetched snapshot's durable node/agent/epoch and that node's catalog. Do not fetch the full chat list or use the HTTP endpoint's default. |
 | Agent handoff without a node override | Preserve the existing chat node and use its destination-agent catalog. Do not move execution just because the CLI ran on another worker. |
 | Fork/fork-run | Keep the source-chat node and existing fork/handoff semantics. |
 | Read/search/status/wait/stop | Keep the explicit chat identity and existing ownership/control fences; no caller-node filter or retargeting. |
 | Export/handoff output file | Write on the CLI machine, never on the controller by interpreting the requested output path remotely. |
+| Ticket project inference | Send the context default node and CLI directory to the existing resolver. |
 
 Require explicit node fields for bridged node-sensitive requests where omission would otherwise mean Local. Do not repair them by blindly rewriting every node or path at the gateway. The context default is not an authorization ceiling: an existing chat may legitimately belong to another node. New cross-node selection flags are not required to make this bridge useful.
 
 Preserve existing ownership epochs, transcript-view checks, permission occurrence/control IDs, and stale-result handling. After an awaited chat lookup, a changed owner may require fresh selection or typed rejection; a matching agent name or filesystem path does not identify the same node. Use portable node paths at the shared boundary without applying controller-native path resolution to worker paths.
+
+Catalog-dependent ordinary runs need an optional expected ownership epoch. Include it in the command fingerprint and check it under the existing chat mutation lock, after exact-command replay lookup. This prevents same-agent cross-node handoffs from applying settings selected from the previous node. Minimal resumes still use atomic server-side selection; handoffs retain their existing epoch fence.
 
 ## Process And Connection Lifetimes
 
@@ -230,11 +235,12 @@ Bind the gateway to the authenticated stable node relationship. A changed node i
 | Event | Behavior |
 | --- | --- |
 | Worker starts before its controller | Gateway exists, context/application calls report unavailable, and process startup remains non-blocking. |
-| Brief physical disconnect with continuity retained | Reject new forwarding while disconnected; already-sent requests can settle through ordinary same-session replay. |
-| Logical session expires or is replaced | Retire pending calls/results on that backing. Keep the local gateway and PTYs; new invocations can use a fresh authorized session. |
+| Private gateway startup fails | Warn and continue serving the execution node. Keep the process-unique runtime selector pinned to the unavailable descriptor so provider/PTY CLI calls fail closed rather than falling back to another Local workspace. |
+| Any physical disconnect | Retire the RPC session and reject sent calls without confirmed replies as uncertain. Unsent calls fail definitively. No replay or resumption. |
+| Fresh connection | New requests can use its authorized backing; old calls never migrate. Keep process-owned providers, local gateway, and PTYs. |
 | Controller restarts | Existing invocations retain the old `serverInstanceId` and fail their fence. Fresh invocations discover the new instance. No execution state is recovered by this gateway. |
-| CLI process exits or aborts its HTTP request | Close the wait/result transfer and request best-effort cancellation. Keep unsettled handler work accounted for; do not infer an agent Stop or transaction rollback. |
-| CLI permission revoked | Close CLI admissions and result access without stopping the node's other services. |
+| CLI process exits or aborts its HTTP request | Close the wait and request best-effort cancellation. Keep unsettled handler work accounted for; do not infer Stop or rollback. |
+| CLI permission revoked | Invalidate its authorization lease and close admissions without stopping other services. |
 | Worker process exits | Stop the local gateway and retire its descriptor/capability. Ordinary worker shutdown still owns PTY cleanup. |
 
 Distinguish endpoint process identity, controller `serverInstanceId`, configured node UUID, logical RPC session, and application command identity. Neither worker `runtimeId` nor provider-serving `instanceId` can substitute for the controller command-ledger generation.
@@ -245,12 +251,14 @@ The stable gateway credential removes a protection present in direct HTTP: contr
 
 Use explicit bridge outcomes in the standard error envelope, with names such as `CLI_CONTROLLER_UNAVAILABLE`, `CLI_CONTROLLER_CHANGED`, `CLI_ACCESS_DENIED`, `CLI_SERVICE_BUSY`, `CLI_REQUEST_TOO_LARGE`, `CLI_RESULT_TOO_LARGE`, and `CLI_OUTCOME_UNKNOWN`. Final names belong in the shared error-code contract. The CLI must recognize definite admission/restart rejections instead of treating every 5xx bridge error as an ambiguous mutation.
 
+Status/classification: CHANGED is 409, ACCESS_DENIED 403, size failures 413, UNAVAILABLE/BUSY 503 retryable without mutation dispatch, and OUTCOME_UNKNOWN 503 with possible dispatch. Classify unknown outcomes like transport loss before operation-specific rules, including steer. A later definitive rejection must not erase uncertainty from an earlier attempt. Controller changes and access loss stop recovery; ticket retries remain explicit. The five-second redial may outlast existing CLI retries, which must fail honestly rather than silently expand.
+
 | Observation | Required handling |
 | --- | --- |
 | Rejected before forwarding or controller dispatch | Definitive no-dispatch error; no hidden queue or automatic relocation. |
 | Complete validated application response | Preserve its status/body, including application-specific partial success or error semantics. |
 | Link/cancellation/deadline loss after possible dispatch | Report uncertainty unless a definitive application result exists. Do not describe this as an operation that never ran. |
-| Short reconnect of the same logical session | Reuse transport deduplication for the original RPC request/result; do not invent a replacement request. |
+| Reconnect | Old requests remain uncertain; there is no gateway resend. Only existing application-ID recovery can submit a new RPC after generation verification. |
 | CLI contract permits exact submission recovery | Keep the same application IDs/body and verify the same controller generation; perform the dispatch-time fence on every attempt. |
 | Controller generation changes | Stop recovery for that invocation. Do not replay process-ephemeral commands into the new controller. |
 
@@ -260,41 +268,37 @@ Receipt polling remains in the CLI. Waiting for a turn does not reserve one reve
 
 ## Bounds, Results, And Deadlines
 
-The shared application frame limit is 16 MiB, not an acceptable size for routine CLI sends. JSON escaping and transport-envelope encoding add bytes; socket/replay budgets are smaller aggregate constraints in other dimensions. A large export must not retire the connection carrying chat and terminal traffic.
+Use one bounded inline reply, matching the current transport. Do not restore deleted Files/Git transfers or introduce CLI result handles. Starting limits, subject to resource-bounded tests:
 
-Keep small replies inline. For larger JSON responses, freeze one serialized response and return a scoped, pull-based result reference. Reuse the bounded transfer pattern from Files/Git without invoking the underlying application operation for each chunk. The gateway assembles and validates the complete response before returning ordinary HTTP JSON. The CLI does not see transfer handles or chunk RPCs.
+- One MiB encoded request including envelope; retain smaller domain limits.
+- Eight MiB encoded reply including envelope, below the 16 MiB application-frame ceiling.
+- Refuse bulk CLI replies when queued bytes plus reply exceed eight MiB, leaving capacity for other traffic. Replies at or below 64 KiB use the ordinary shared queue budget so small mutation acknowledgments are not needlessly replaced with uncertainty. Return a small busy error for rejected bulk reads or unknown outcome for potentially committed mutations. Generic RPC reply admission also falls back to a small uncertain error instead of blindly overflowing the queue.
+- Separate per-node admission pools: two long operations and six short operations, including discovery and polling, with controller-wide caps. Long forks must not occupy every polling slot. This is fail-fast admission, not priority scheduling.
+- Bound gateway HTTP concurrency and response-drain lifetimes, including slow readers.
 
-Result references belong to the authenticated node, controller generation, exact RPC session, and delegated principal. They cannot be used as Files/Git handles or on a replacement backing. Close on completion, local HTTP abort, authorization loss, expiry, and session retirement. No durable transfer resume or result ledger is added.
+Keep reverse credential resolution and controller-to-worker callbacks independent of CLI admission. A canceled wait does not release the reservation for an unsettled handler/producer, including across session replacement. After confirmed acceptance, agent execution belongs to existing controller admission, not a bridge slot held for the whole turn.
 
-Starting internal bounds, subject to resource-bounded tests:
+Full chat lists and exports can exceed the cap. Fail explicitly, never truncate JSON or change export contents, watermark semantics, or privacy rules. Existing handlers may materialize complete results before encoding; limit concurrent producers. This stage does not claim a hard bound on every transient allocation or introduce a second bounded export pipeline. The [transcript-ledger design](../transcript-ledger-v5-design.md) remains authoritative.
 
-- At most 1 MiB encoded CLI request, including its envelope; preserve any smaller operation limit such as ticket requests. Reject before mutation instead of introducing request-upload sessions.
-- Approximately 256 KiB maximum inline response, with explicit envelope headroom; 256 KiB decoded result chunks.
-- At most 32 MiB encoded result; no silent truncation or partial JSON success. Existing application truncation/limited-result contracts remain explicit and distinct.
-- Four active relay requests and eight retained result handles per node; 64 MiB retained result bytes per node and a separate 128 MiB controller-wide retained-result cap. Admission rejects excess work instead of queueing it indefinitely.
-- Two-minute idle result expiry, never beyond the original operation deadline when one exists. Bound simultaneous production/assembly separately from retained handles, including a controller-wide production admission cap.
+If a mutation may have committed but its reply cannot be delivered or validated, report uncertainty, not a safely retryable size/admission rejection. Return known receipts where their contracts permit.
 
-Result reads and cleanup must not acquire an admission slot held by the request they are completing. Keep reverse credential resolution and controller-to-worker callbacks independent of CLI admission. A canceled HTTP/RPC wait does not release the reservation for a still-running controller handler or response producer; release that reservation only when the work settles, including across session replacement. Once a handler returns a confirmed acceptance, subsequent agent execution belongs to existing controller admission, not a bridge slot held for the whole turn.
+The trusted operation registry supplies deadlines: ordinary calls 30 seconds; export/handoff artifacts 120 seconds; a run with agent handoff ten minutes; existing fork/fork-run/search-maintenance calls no deadline. Add explicit `timeoutMs: null` RPC support with no timer, not Infinity or an overflowing timer. Propagate HTTP abort best effort. No-deadline calls still obey authorization, admission, and session lifetime.
 
-Account bytes and reserve capacity before large production/assembly. The existing export implementation builds a complete document; checking its JSON length after construction only protects the wire, not generation memory. Large-response producers need an optional bounded collector/budget that fails the request without changing export contents, watermark semantics, or privacy rules. Do not introduce a second transcript export implementation. The [transcript-ledger design](../transcript-ledger-v5-design.md) remains authoritative.
+The gateway owns real HTTP idle-timeout policy; synthetic controller requests have no socket to extend. Cancellation never implies rollback or agent Stop. Release unsettled-work reservations on settlement.
 
-Mutation replies must have a bounded confirmation/error representation. If an application operation may have committed but its response cannot be delivered or validated, return uncertainty, not a safely retryable size/admission rejection. Return known application receipts wherever their contract permits; do not truncate authored results to manufacture success.
+Use explicit HTTP response-drain accounting, not Bun's `pendingRequests` counter: that counter can fall before a slow client has consumed a buffered response. The gateway uses Node-compatible HTTP response close events, bounded writes with backpressure, a 16-response budget, a 32-connection ceiling, and a 30-second idle drain timeout. Bulk reply admission runs synchronously at RPC publication so simultaneous completions cannot each consume the same available queue capacity.
 
-Use operation-specific deadlines from the allowlist, not a caller-controlled arbitrary timeout or the generic RPC default everywhere. Today ordinary CLI HTTP requests use 30 seconds, export/handoff-document requests use 120 seconds, a run with agent handoff permits ten minutes, and some fork/maintenance calls explicitly have no deadline. Preserve those distinctions, propagating the HTTP abort signal through the captured RPC and existing handler. Explicit no-deadline support for the narrow existing operations must remain subject to admission limits, authorization, and session lifetime; do not simulate it with repeated requests or a new job scheduler.
-
-The gateway owns its actual HTTP idle-timeout policy for long requests. Synthetic controller requests have no Bun socket to extend. Chunk reads inherit the remaining operation budget rather than restarting a fresh full deadline on every chunk. Cancellation is best effort; release temporary response storage promptly and unsettled-work reservations on settlement, without claiming accepted work was undone.
-
-These bounds are not cross-service scheduling. One shared channel still permits head-of-line blocking and shared failure. Measure chat/terminal latency under CLI exports and polling; reconsider another channel only if demonstrated interference requires it.
+One shared channel still permits head-of-line delay and shared failure. Noise fragments large replies; that is not traffic isolation. Measure chat/terminal latency under exports and polling; reconsider a second channel only for demonstrated interference.
 
 ## Implementation Boundaries
 
 1. Extend shared runtime discovery/context and expected-controller fencing for direct HTTP first. Make `GarconClient` context-aware while preserving existing CLI behavior and tests.
 2. Make CLI node selection explicit for starts, catalogs, native lookup, and existing-chat operations. Keep transport selection out of command semantics.
 3. Define the typed CLI HTTP allowlist, controller dispatcher, delegated-node principal, and explicit node permission. Reuse existing handlers and error contracts; deny unregistered routes by default.
-4. Add the process-owned loopback gateway and reverse RPC adapters, including result bounds, cancellation, session fencing, and private descriptor lifecycle.
+4. Add the process-owned loopback gateway and reverse RPC adapters, including inline bounds, cancellation, session fencing, and process-unique private descriptors.
 5. Wire provider/PTY discovery, node-editor permission, public worker startup, and deterministic cross-boundary acceptance. Remove the deliberate CLI-unavailable setup only when the new fail-closed context is installed.
 
-The implementation should not copy all controller routes into the worker, introduce a general process service, or add per-command remote implementations. Frontend work is limited to the explicit node permission; unrelated directory pickers and ticket project inference remain outside scope.
+The implementation must not copy all routes into the worker, introduce a general process service, or add per-command remote implementations. Frontend work covers the node permission and honest ticket actor/owner presentation. Existing ticket project inference is reused.
 
 ## Verification Criteria
 
@@ -306,16 +310,42 @@ Documentation is not implementation verification. Required coverage includes:
 - Generation fencing: controller restart between context discovery and dispatch, between retry verification and dispatch, and during polling. A surviving gateway must not authorize an old request against the new controller. New commands from a retained PTY can discover it afterward.
 - Targeting: Local plus workers with identical cwd/native-session fixtures; worker-local start, same-node child creation, existing-chat operations on another node, node-correct resume/handoff catalogs, and controller-local CLI use with remote existing chats.
 - Duplex behavior: a gateway request requiring a callback into the same worker, with credential resolution and producer traffic active; no connection-wide deadlock or starvation caused by CLI serialization.
-- Delivery: held/disconnected transport before dispatch, after acceptance before reply, same-session replay, replacement session, exact-ID recovery, cancellation, uncertain fork/mutation outcomes, and existing ticket explicit-retry behavior. No gateway mutation replay.
-- Bounds: escaped JSON near limits, oversized export, admission/retained-byte pressure, chunk offsets/EOF, stale/cross-session handles, expiry, aborted assembly, and both operation-specific and no-deadline cancellation paths. Repeated cancellation/session replacement cannot admit unbounded unsettled work; saturated admissions cannot deadlock result retrieval or cleanup.
+- Delivery: disconnect before dispatch and after acceptance, fresh sessions, exact-ID recovery, cancellation, and uncertain fork/mutation outcomes. A later definite rejection cannot erase earlier uncertainty. Test ticket explicit retries with the same versus different node authority; no gateway replay.
+- Bounds: escaped JSON, oversized export/list, queue pressure, slow HTTP readers, separate long/short admission, and finite/no-deadline cancellation. Repeated cancellation/session replacement cannot admit unbounded unsettled work.
 - Public worker integration in both connection directions, with CLI processes actually spawned from a remote PTY and provider tool execution. Retain the shell across controller restart and long disconnects without retaining an old CLI request's authority.
 - Provider sandbox reachability: verify that the inherited descriptor and loopback endpoint are usable under supported provider policies. Do not disable sandboxes or broadly enable networking to make a gateway test pass; any required narrow provider integration needs explicit review.
 - Single-channel load: bounded CLI exports/polling together with Files, Git, noisy PTYs, and chat. Confirm explicit failures under pressure and measure latency without claiming isolation.
 
-Use synthetic fixtures, isolated controller/worker roots, scripted provider coverage, and held-promise/transport interleavings. No paid/live-provider calls are needed. After implementation run the repository checks, unit suites, focused CLI/worker integration suites, and a timed fresh server startup. This documentation-only task requires document/link checks, not those implementation gates.
+Use synthetic fixtures, isolated roots, scripted providers, and held-promise/transport interleavings. No paid/live-provider calls. Run repository checks/tests, relevant real-process/browser gates, and a timed fresh server startup. Design documents must not be committed.
 
 ## Decision Boundaries
 
 The recommended initial design is a same-path HTTP gateway, one shared Noise connection, explicit workspace-level node permission, and a context-aware but transport-agnostic CLI. A Unix-domain socket could replace only the local HTTP transport later; it is not required for controller reachability or privacy on the network hop.
 
-Confirm the workspace-level permission before implementing it. Exact numeric admission/transfer tuning can change based on tests without changing the boundary. Full unbounded export parity, mutually untrusted per-chat workloads, explicit cross-node CLI targeting, and a second network channel require separate scope discussion rather than being prerequisites for ordinary remote CLI access.
+Workspace-wide permission is accepted as explicit opt-in. Inline caps and no replay follow the current transport design. Exact admission tuning can change with tests. Full unbounded exports, mutually untrusted per-chat workloads, cross-node CLI flags, and a second channel require separate scope discussion. Network-restricted provider sandboxes may deny loopback just as they do for controller-local CLI; do not weaken their policies. Verify the support matrix before claiming sandboxed-provider parity.
+
+## Provider Reachability
+
+Environment inheritance is necessary but does not grant sandbox access. The CLI gateway does not alter provider permissions or sandbox settings.
+
+| Caller policy | Gateway support |
+| --- | --- |
+| Worker PTY under the worker OS account | Supported through the inherited private descriptor and loopback capability. |
+| Claude Bash with a user-approved command and no network sandbox restriction | Supported; acceptance uses the real pinned CLI and a scripted model, without live credentials. |
+| Codex `workspace-write`, `networkAccess: false` on Linux | Unsupported for direct loopback HTTP. The sandbox network namespace and seccomp policy block host-loopback connections. |
+| Codex with an independently selected network-capable policy | Potentially reachable; this bridge never selects or broadens that policy. No parity claim without a policy-specific test. |
+| Other provider sandboxes or externally managed network proxies | Environment inheritance only; reachability depends on that policy and is not guaranteed by this feature. |
+
+Upstream evidence is pinned to Codex `rust-v0.156.0`, commit `fe74a774532af67b5a4a3dec03ce9469e17f89af`: the [workspace sandbox contract](https://github.com/openai/codex/blob/fe74a774532af67b5a4a3dec03ce9469e17f89af/codex-rs/protocol/src/protocol.rs#L1095-L1111) has a broad network boolean, not a host/port exception; [Linux isolation](https://github.com/openai/codex/blob/fe74a774532af67b5a4a3dec03ce9469e17f89af/codex-rs/linux-sandbox/README.md#L81-L89) and [seccomp restrictions](https://github.com/openai/codex/blob/fe74a774532af67b5a4a3dec03ce9469e17f89af/codex-rs/linux-sandbox/src/landlock.rs#L201-L231) prevent direct loopback access. The [managed proxy](https://github.com/openai/codex/blob/fe74a774532af67b5a4a3dec03ce9469e17f89af/codex-rs/network-proxy/README.md#L20-L65) is a separate configured route, not a narrow exception to that boolean. Supporting it or Unix-domain IPC requires separate policy and filesystem-access verification.
+
+## Verification Record
+
+- `bun run check` passed, including zero Svelte errors or warnings. Server and integration type checks passed again after the final test-only follow-up.
+- The full root `bun run test` passed, including all server/provider tests, 594 CLI tests, and 6,713 web tests across 588 files. The final test-only follow-up also passed its focused 23-test worker/gateway/dispatcher run.
+- `bun run build` passed. The built-SPA Lightpanda grant/revoke test passed without replacing the worker instance.
+- Public-worker acceptance passed in both connection directions, including retained PTYs across controller restart, node-scoped ticket retries, owning-node model selection, permission-approved scripted Claude execution, and gateway failure without Local fallback. The direct-controller CLI/ticket subset passed all 25 tests using the repository's 30-second integration timeout.
+- A fresh isolated `bun run start --port 0` listened on `0.0.0.0` and shut down under the test timeout. Existing servers were left untouched.
+- Both reviewers confirmed the publication, small-reply admission, and optional-gateway startup fixes. Their final coverage request is included in `ce725e1d5`.
+- No paid/live-provider tests or simultaneous Files/Git/PTY/CLI latency benchmark were run. Deterministic shared-channel pressure and real duplex workflows are covered; they do not establish traffic isolation.
+
+Implementation commits exclude this document and all other design documents.
