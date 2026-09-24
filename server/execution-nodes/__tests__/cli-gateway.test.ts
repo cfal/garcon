@@ -54,6 +54,10 @@ test('private process-unique descriptors prove a live endpoint and never expose 
     await expect(f.discover()).resolves.toMatchObject({ instanceId: 'controller' });
     await expect(discoverRuntime({ configDir: '/missing', workspace: 'ignored', runtimeFile: second.runtimeFile })).rejects.toThrow('context unavailable');
   } finally { await second.dispose(); }
+  await expect(stat(second.runtimeFile)).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(f.discover()).resolves.toMatchObject({ instanceId: 'controller' });
+  await f.gateway.dispose();
+  await expect(stat(f.gateway.runtimeFile)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
 test('gateway authentication, grant, method allowlist, generation and JSON fences precede raw handler dispatch', async () => {

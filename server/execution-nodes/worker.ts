@@ -5,7 +5,7 @@ import { serveAgentNode } from './agent-worker.js';
 import { InProcessExecutionNode } from './in-process.js';
 import { WebSocketLink } from './websocket-link.js';
 import { TerminalRuntime } from '../terminals/node-service.js';
-import { startCliGateway } from './cli-gateway.js';
+import { cliGatewayRuntimeFile, startCliGateway } from './cli-gateway.js';
 
 export interface ExecutionWorkerOptions {
   readonly secret: string;
@@ -32,8 +32,14 @@ export async function runExecutionWorker(
   let serving: ReturnType<typeof serveAgentNode> | null = null;
   let node: InProcessExecutionNode | null = null;
   let currentRpc: AgentRpc | null = null;
-  const gateway = await startCliGateway({ workspaceDir: options.workspaceDir, runtimeId: link.runtimeId, currentRpc: () => currentRpc });
-  process.env.GARCON_CLI_RUNTIME = gateway.runtimeFile;
+  // A missing private descriptor must not fall back to an unrelated controller on this host.
+  process.env.GARCON_CLI_RUNTIME = cliGatewayRuntimeFile(options.workspaceDir, link.runtimeId);
+  const gateway = await startCliGateway({ workspaceDir: options.workspaceDir, runtimeId: link.runtimeId, currentRpc: () => currentRpc })
+    .catch((error: unknown) => {
+      console.warn(JSON.stringify({ type: 'execution-node-cli-unavailable',
+        message: error instanceof Error ? error.message : 'CLI gateway could not start' }));
+      return null;
+    });
   const terminals = new TerminalRuntime({ projectBasePath: options.projectBasePath, terminalRuntimeId: link.runtimeId });
   const stopped = Promise.withResolvers<void>();
   let stopping = false;
@@ -41,7 +47,7 @@ export async function runExecutionWorker(
     if (stopping) return;
     stopping = true;
     try {
-      await gateway.dispose();
+      await gateway?.dispose();
       await link.dispose();
       await serving?.dispose();
       await node?.dispose();

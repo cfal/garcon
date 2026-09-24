@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverRuntime } from '../../../cli/discovery.js';
@@ -155,3 +155,33 @@ test('a real permission-approved Claude tool inherits worker CLI discovery and c
     }, { executionBackend: 'remote-node-dials', projectRoots: 'separate', serverEnvironment: environment.serverEnvironment });
   } finally { environment.dispose(); }
 }, 120_000);
+
+test('gateway startup failure keeps worker execution and terminals available without falling back to Local CLI', async () => {
+  await withIntegrationFixture('execution-cli-unavailable', async (fixture) => {
+    const client = fixture.client;
+    const nodeId = client.nodeId;
+    const local = await discoverRuntime({ configDir: fixture.dirs.config, workspace: 'cli-no-gateway' });
+    expect(local.defaultNodeId).toBe('local');
+    const chatId = fixture.newChatId();
+    const turn = await client.startChat(client.directStartRequest({ chatId, projectPath: fixture.executionDirs.project,
+      agent: fixture.directAgents.openAi, content: 'Synthetic task without CLI.' }));
+    await client.waitForTurnTerminal(chatId, turn.turnId!);
+    expect((await client.getChatSnapshot(chatId)).chat.nodeId).toBe(nodeId);
+    const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?nodeId=${nodeId}`);
+    const { terminal } = await client.post<TerminalCreateResponse>('/api/v1/terminals', {
+      nodeId, expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: 'cli-unavailable-shell',
+      requestedInitialWorkingDirectory: fixture.executionDirs.project,
+    });
+    const attachment = await attach(client, terminal.terminalId, inventory);
+    client.sendTerminal({ type: 'terminal-input', terminalId: terminal.terminalId, attachmentId: attachment, data: 'stty -echo\r' });
+    const command = `GARCON_CONFIG_DIR=${shellQuote(fixture.dirs.config)} GARCON_WORKSPACE=cli-no-gateway ${shellQuote(process.execPath)} ${shellQuote(CLI)} list agents --json`;
+    const output = await shellCommand(client, terminal.terminalId, attachment, command);
+    expect(output).toContain('cannot read a secure runtime descriptor');
+    expect(output).toContain(join(fixture.executionDirs.workspace, 'run', 'cli-'));
+    expect(output).not.toContain('"agents":');
+    await client.delete('/api/v1/terminals', { terminalId: terminal.terminalId, requestId: 'cli-unavailable-shell-end' });
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate', namedWorkspace: 'cli-no-gateway',
+    serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' },
+    prepareWorkspace: (directories) => writeFile(join(directories.workspace, 'run'), 'Synthetic gateway directory blocker'),
+  });
+}, 60_000);

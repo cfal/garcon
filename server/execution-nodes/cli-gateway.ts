@@ -56,6 +56,10 @@ async function readBody(request: IncomingMessage): Promise<JsonValue | null> {
   catch { throw new DomainError('VALIDATION_FAILED', 'Malformed JSON', 400); }
 }
 
+export function cliGatewayRuntimeFile(workspaceDir: string, runtimeId: string): string {
+  return join(workspaceDir, 'run', `cli-${runtimeId}.json`);
+}
+
 export async function startCliGateway(options: {
   readonly workspaceDir: string;
   readonly runtimeId: string;
@@ -152,7 +156,7 @@ export async function startCliGateway(options: {
     await closed;
   };
   const runDir = join(options.workspaceDir, 'run');
-  const runtimeFile = join(runDir, `cli-${options.runtimeId}.json`);
+  const runtimeFile = cliGatewayRuntimeFile(options.workspaceDir, options.runtimeId);
   const { workspaceDir: _workspaceDir, ...identity } = runtime.identity;
   const descriptor: CliGatewayDescriptor = { ...identity, kind: 'execution-node-cli', pid: process.pid,
     baseUrl: `http://127.0.0.1:${address.port}`, localCapability: runtime.localCapability };
