@@ -226,7 +226,7 @@ export async function discoverRuntime(
       });
       if (!response.ok) throw new CliError('discovery', `CLI context unavailable (HTTP ${response.status})`, 3);
       const context = parseCliContext(await response.json());
-      const expectedWorkspace = options.expectedWorkspace ?? (options.runtimeFile ? undefined : options.workspace);
+      const expectedWorkspace = options.expectedWorkspace;
       if (expectedWorkspace !== undefined && expectedWorkspace !== context.workspaceName) {
         throw new CliError('discovery', '--workspace does not match the authenticated CLI context', 3);
       }

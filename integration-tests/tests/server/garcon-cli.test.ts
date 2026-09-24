@@ -28,6 +28,7 @@ function spawnCli(arguments_: string[]) {
       ...process.env,
       GARCON_CONFIG_DIR: '',
       GARCON_WORKSPACE: '',
+      GARCON_CLI_RUNTIME: '',
     },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -176,16 +177,20 @@ describe('garcon-cli', () => {
 
   test('discovers a running named workspace through a sibling symlink', async () => {
     await withIntegrationFixture('garcon-cli-workspace-symlink', async (fixture) => {
-      const listedAgents = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
-        'list', 'agents', '--json',
-      ]);
+      const alias = `${WORKSPACE}-alias`;
+      await fs.symlink(path.basename(fixture.dirs.workspace), path.join(fixture.dirs.config, `workspace-${alias}`), 'dir');
+      for (const workspace of [WORKSPACE, alias]) {
+        const listedAgents = await runCli([
+          '--config-dir', fixture.dirs.config,
+          '--workspace', workspace,
+          'list', 'agents', '--json',
+        ]);
 
-      expect(listedAgents).toMatchObject({ exitCode: 0, stderr: '' });
-      expect(JSON.parse(listedAgents.stdout).agents).toContainEqual(
-        expect.objectContaining({ id: fixture.directAgents.openAi.agentId }),
-      );
+        expect(listedAgents).toMatchObject({ exitCode: 0, stderr: '' });
+        expect(JSON.parse(listedAgents.stdout).agents).toContainEqual(
+          expect.objectContaining({ id: fixture.directAgents.openAi.agentId }),
+        );
+      }
     }, {
       namedWorkspace: WORKSPACE,
       prepareWorkspace: async (dirs) => {

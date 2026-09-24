@@ -222,7 +222,7 @@ describe('discoverRuntime', () => {
       workspace: 'review',
     }, {
       fetch: async (input) => String(input).endsWith('/cli/context')
-        ? Response.json({ serverInstanceId: descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review' })
+        ? Response.json({ serverInstanceId: descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review-target' })
         : Response.json({
         schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
         instanceId: descriptor.instanceId,
@@ -235,6 +235,7 @@ describe('discoverRuntime', () => {
     });
 
     expect(connection.workspaceDir).toBe(targetWorkspaceDir);
+    expect(connection.workspaceName).toBe('review-target');
   });
 
   test('rejects a workspace symlink that escapes the config directory', async () => {
