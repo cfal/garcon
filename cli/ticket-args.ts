@@ -60,7 +60,7 @@ export function parseTicketCliCommand(positionals: readonly string[], values: Re
     const action = positionals[1] as TicketAction;
     if (!TICKET_ACTIONS.includes(action)) throw argumentError(`ticket requires one verb: ${TICKET_ACTIONS.join(', ')}`);
     const reading = action === 'list' || action === 'read' || action === 'history';
-    const allowed = new Set(['workspace', 'config-dir', 'server', 'json', ...actionOptions[action],
+    const allowed = new Set(['workspace', 'config-dir', 'runtime-file', 'server', 'json', ...actionOptions[action],
       ...(!reading ? ['request-id', 'expected-store-id', 'from-chat'] : [])]);
     for (const key of Object.keys(values)) {
       if (!allowed.has(key)) throw argumentError(`--${key} cannot be used with ticket ${action}`);

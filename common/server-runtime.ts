@@ -1,7 +1,29 @@
+import { isExecutionNodeId } from './execution-nodes.js';
+
 export const SERVER_RUNTIME_SCHEMA_VERSION = 1 as const;
 export const SERVER_RUNTIME_FILENAME = 'server-runtime.json';
 export const LOCAL_CAPABILITY_PREFIX = 'garcon_local_';
 export const SERVER_RUNTIME_PROOF_CONTEXT = 'garcon-runtime-proof-v1';
+export const CLI_SERVER_INSTANCE_HEADER = 'X-Garcon-Server-Instance';
+
+export interface CliContext {
+  readonly serverInstanceId: string;
+  readonly defaultNodeId: string;
+  readonly workspaceName: string | null;
+}
+
+export function parseCliContext(value: unknown): CliContext {
+  const raw = runtimeRecord(value);
+  if (!isExecutionNodeId(raw.defaultNodeId)
+    || !(raw.workspaceName === null || typeof raw.workspaceName === 'string' && raw.workspaceName.length > 0)) {
+    throw new ServerRuntimeContractError('invalid CLI context');
+  }
+  return {
+    serverInstanceId: requiredString(raw, 'serverInstanceId'),
+    defaultNodeId: raw.defaultNodeId,
+    workspaceName: raw.workspaceName,
+  };
+}
 
 export interface ServerRuntimeProbe {
   schemaVersion: typeof SERVER_RUNTIME_SCHEMA_VERSION;
@@ -22,6 +44,12 @@ export interface ServerRuntimeDescriptor extends ServerRuntimeIdentity {
   localCapability: string;
 }
 
+export interface CliGatewayDescriptor extends Omit<ServerRuntimeDescriptor, 'workspaceDir'> {
+  readonly kind: 'execution-node-cli';
+}
+
+export type CliRuntimeDescriptor = ServerRuntimeDescriptor | CliGatewayDescriptor;
+
 export class ServerRuntimeContractError extends Error {
   constructor(message: string) {
     super(message);
@@ -40,6 +68,18 @@ export function parseServerRuntimeProbe(value: unknown): ServerRuntimeProbe {
 }
 
 export function parseServerRuntimeDescriptor(value: unknown): ServerRuntimeDescriptor {
+  const raw = runtimeRecord(value);
+  return { ...parseRuntimeEndpoint(raw), workspaceDir: requiredString(raw, 'workspaceDir') };
+}
+
+export function parseCliRuntimeDescriptor(value: unknown): CliRuntimeDescriptor {
+  const raw = runtimeRecord(value);
+  if (raw.kind === 'execution-node-cli') return { ...parseRuntimeEndpoint(raw), kind: raw.kind };
+  if (raw.kind !== undefined) throw new ServerRuntimeContractError('unsupported runtime kind');
+  return parseServerRuntimeDescriptor(raw);
+}
+
+function parseRuntimeEndpoint(value: unknown): Omit<ServerRuntimeDescriptor, 'workspaceDir'> {
   const raw = runtimeRecord(value);
   requireSchema(raw);
   const pid = raw.pid;
@@ -67,7 +107,6 @@ export function parseServerRuntimeDescriptor(value: unknown): ServerRuntimeDescr
   return {
     schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
     instanceId: requiredString(raw, 'instanceId'),
-    workspaceDir: requiredString(raw, 'workspaceDir'),
     startedAt,
     pid: Number(pid),
     baseUrl: parsedUrl.toString().replace(/\/$/, ''),

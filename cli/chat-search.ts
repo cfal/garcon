@@ -235,10 +235,9 @@ export async function runChatSearch(
 function formatTranscriptSearchEnableCommand(connection: CliConnectionOptions): string {
   return [
     'garcon-cli',
-    '--workspace',
-    shellQuote(connection.workspace),
-    '--config-dir',
-    shellQuote(connection.configDir),
+    ...(connection.runtimeFile
+      ? ['--runtime-file', shellQuote(connection.runtimeFile)]
+      : ['--workspace', shellQuote(connection.workspace), '--config-dir', shellQuote(connection.configDir)]),
     ...(connection.serverUrl === undefined
       ? []
       : ['--server', shellQuote(connection.serverUrl)]),
@@ -279,10 +278,9 @@ function searchReadCommandTokens(
   const data = (value: string): SearchReadCommandToken => ({ value, syntax: false });
   const includedCategories = readIncludesForSearchRole(anchor.role);
   return [
-    syntax('--workspace'),
-    data(connection.workspace),
-    syntax('--config-dir'),
-    data(connection.configDir),
+    ...(connection.runtimeFile
+      ? [syntax('--runtime-file'), data(connection.runtimeFile)]
+      : [syntax('--workspace'), data(connection.workspace), syntax('--config-dir'), data(connection.configDir)]),
     ...(connection.serverUrl === undefined
       ? []
       : [syntax('--server'), data(connection.serverUrl)]),

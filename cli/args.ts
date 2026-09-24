@@ -177,6 +177,7 @@ Chat research:
 Options:
   --workspace <name>           Named Garcon data workspace (default: default)
   --config-dir <path>          Garcon config root (default: ~/.garcon)
+  --runtime-file <path>        Private CLI runtime descriptor (pins the endpoint)
   --server <url>               Assert the workspace descriptor's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
   --parent <chat-id>           Record an existing parent for a new delegated chat
@@ -233,6 +234,7 @@ Use -- before prompt text that begins with an option-like token.
 The cli tag records creation through garcon-cli; resume, resume-async, and stop never add it.`;
 
 export interface CliEnvironment {
+  GARCON_CLI_RUNTIME?: string;
   GARCON_CONFIG_DIR?: string;
   GARCON_WORKSPACE?: string;
   HOME?: string;
@@ -251,6 +253,8 @@ export interface CliConnectionOptions {
   workspace: string;
   configDir: string;
   serverUrl?: string;
+  runtimeFile?: string;
+  expectedWorkspace?: string;
 }
 
 interface CliInvocationBase extends CliSelectionOptions, CliConnectionOptions {
@@ -499,6 +503,7 @@ const SINGLE_STRING_OPTIONS = [
   ...TICKET_STRING_OPTIONS,
   'workspace',
   'config-dir',
+  'runtime-file',
   'server',
   'cwd',
   'parent',
@@ -662,7 +667,7 @@ type ControlCommandKind =
   | 'rename'
   | 'set-tags';
 
-const CONNECTION_OPTION_KEYS = ['workspace', 'config-dir', 'server'] as const;
+const CONNECTION_OPTION_KEYS = ['workspace', 'config-dir', 'runtime-file', 'server'] as const;
 
 function optionSet(...keys: string[]): ReadonlySet<string> {
   return new Set([...CONNECTION_OPTION_KEYS, ...keys]);
@@ -1484,6 +1489,7 @@ export function parseCliArgs(
         ...TICKET_PARSE_OPTIONS,
         workspace: { type: 'string' },
         'config-dir': { type: 'string' },
+        'runtime-file': { type: 'string' },
         server: { type: 'string' },
         cwd: { type: 'string' },
         parent: { type: 'string' },
@@ -1557,7 +1563,14 @@ export function parseCliArgs(
   if (values.version === true) return { kind: 'version' };
 
   const explicitConfigDir = nonEmptyOption(values['config-dir'] as string | undefined, '--config-dir');
-  const environmentConfigDir = resolvedEnvironmentValue(environment.GARCON_CONFIG_DIR);
+  const inheritedRuntime = resolvedEnvironmentValue(environment.GARCON_CLI_RUNTIME);
+  const explicitRuntime = nonEmptyOption(values['runtime-file'] as string | undefined, '--runtime-file');
+  if (inheritedRuntime && explicitRuntime && path.resolve(inheritedRuntime) !== path.resolve(explicitRuntime)) {
+    throw argumentError('--runtime-file conflicts with GARCON_CLI_RUNTIME');
+  }
+  const runtimeFile = inheritedRuntime ?? explicitRuntime;
+  if (runtimeFile && explicitConfigDir) throw argumentError('--config-dir cannot be used with a runtime file');
+  const environmentConfigDir = runtimeFile ? undefined : resolvedEnvironmentValue(environment.GARCON_CONFIG_DIR);
   const configDir = path.resolve(
     environmentConfigDir
       ?? explicitConfigDir
@@ -1565,7 +1578,7 @@ export function parseCliArgs(
   );
   const explicitWorkspace = nonEmptyOption(values.workspace as string | undefined, '--workspace');
   const workspace = validateWorkspace(
-    resolvedEnvironmentValue(environment.GARCON_WORKSPACE) ?? explicitWorkspace ?? 'default',
+    (runtimeFile ? undefined : resolvedEnvironmentValue(environment.GARCON_WORKSPACE)) ?? explicitWorkspace ?? 'default',
   );
   const serverUrl = nonEmptyOption(values.server as string | undefined, '--server');
   const agentId = nonEmptyOption(values.agent as string | undefined, '--agent');
@@ -1578,6 +1591,8 @@ export function parseCliArgs(
   const connection = {
     workspace,
     configDir,
+    ...(runtimeFile ? { runtimeFile: path.resolve(runtimeFile) } : {}),
+    ...(runtimeFile && explicitWorkspace ? { expectedWorkspace: explicitWorkspace } : {}),
     ...(serverUrl === undefined ? {} : { serverUrl }),
   };
 
@@ -1663,8 +1678,7 @@ export function parseCliArgs(
     return {
       kind: 'list',
       resource,
-      workspace,
-      configDir,
+      ...connection,
       json: values.json === true,
       ...(serverUrl === undefined ? {} : { serverUrl }),
       ...(agentId === undefined ? {} : { agentId }),
@@ -1700,8 +1714,7 @@ export function parseCliArgs(
   const promptInput = parsePrompt(parsed.positionals, commandName === 'resume' ? 2 : 1);
 
   const shared = {
-    workspace,
-    configDir,
+    ...connection,
     ...(serverUrl === undefined ? {} : { serverUrl }),
     ...(agentId === undefined ? {} : { agentId }),
     ...(providerId === undefined ? {} : { providerId }),

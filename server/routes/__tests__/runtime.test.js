@@ -5,6 +5,13 @@ import { createServerRuntimeProof } from '../../lib/server-runtime.js';
 import { createRuntimeRoutes } from '../runtime.js';
 
 describe('runtime route', () => {
+  it('exposes authenticated CLI context without filesystem metadata', async () => {
+    for (const workspaceName of ['review', null]) {
+      const handler = createRuntimeRoutes({ identity: { instanceId: 'controller' } }, workspaceName)['/api/v1/cli/context'].GET;
+      expect(isNoAuthHandler(handler)).toBe(false);
+      expect(await (await handler()).json()).toEqual({ serverInstanceId: 'controller', defaultNodeId: 'local', workspaceName });
+    }
+  });
   it('exposes only a fresh instance proof without authentication', async () => {
     const runtime = {
       identity: {

@@ -21,7 +21,7 @@ import type {
 export const CLI_AUTOMATION_SCHEMA_VERSION = 1 as const;
 
 export interface CliAutomationContext {
-  readonly workspace: string;
+  readonly workspace: string | null;
   readonly serverInstanceId: string;
 }
 

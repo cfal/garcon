@@ -55,6 +55,25 @@ async function fixture(overrides: Record<string, unknown> = {}): Promise<{
 }
 
 describe('discoverRuntime', () => {
+  test('explicit gateway discovery separates endpoint and controller identities without a local workspace', async () => {
+    const testFixture = await fixture({ kind: 'execution-node-cli', workspaceDir: undefined });
+    const nodeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const options = { configDir: '/missing', workspace: 'ignored', runtimeFile: testFixture.descriptorPath };
+    const fetch: typeof globalThis.fetch = async (input) => String(input).endsWith('/cli/context')
+      ? Response.json({ serverInstanceId: 'controller', defaultNodeId: nodeId, workspaceName: null })
+      : Response.json({ schemaVersion: 1, instanceId: testFixture.descriptor.instanceId,
+        proof: runtimeProof(String(testFixture.descriptor.localCapability), String(testFixture.descriptor.instanceId), input) });
+    expect(await discoverRuntime(options, { fetch })).toMatchObject({
+      instanceId: 'controller', endpointInstanceId: testFixture.descriptor.instanceId,
+      defaultNodeId: nodeId, workspaceName: null, workspaceDir: null,
+    });
+    await expect(discoverRuntime({ ...options, expectedWorkspace: 'default' }, { fetch })).rejects.toThrow('--workspace');
+    await expect(discoverRuntime({ ...options, runtimeFile: `${testFixture.descriptorPath}.missing` }, { fetch })).rejects.toThrow('secure runtime descriptor');
+    if (process.platform !== 'win32') {
+      await fs.symlink(testFixture.descriptorPath, `${testFixture.descriptorPath}.link`);
+      await expect(discoverRuntime({ ...options, runtimeFile: `${testFixture.descriptorPath}.link` }, { fetch })).rejects.toThrow('secure runtime descriptor');
+    }
+  });
   test('verifies the credential-free probe before returning the capability', async () => {
     const testFixture = await fixture();
     const authorizationHeaders: Array<string | null> = [];
@@ -64,6 +83,7 @@ describe('discoverRuntime', () => {
     }, {
       fetch: async (input, init) => {
         authorizationHeaders.push(new Headers(init?.headers).get('authorization'));
+        if (String(input).endsWith('/cli/context')) return Response.json({ serverInstanceId: testFixture.descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review' });
         return Response.json({
           schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
           instanceId: testFixture.descriptor.instanceId,
@@ -76,10 +96,13 @@ describe('discoverRuntime', () => {
       },
     });
 
-    expect(authorizationHeaders).toEqual([null]);
+    expect(authorizationHeaders).toEqual([null, `Bearer ${testFixture.descriptor.localCapability}`]);
     expect(connection).toEqual({
       baseUrl: 'http://127.0.0.1:8080',
       instanceId: testFixture.descriptor.instanceId,
+      endpointInstanceId: testFixture.descriptor.instanceId,
+      defaultNodeId: 'local',
+      workspaceName: 'review',
       localCapability: testFixture.descriptor.localCapability,
       workspaceDir: testFixture.workspaceDir,
     });
@@ -94,6 +117,7 @@ describe('discoverRuntime', () => {
       workspace: 'review',
     }, {
       fetch: async (input) => {
+        if (String(input).endsWith('/cli/context')) return Response.json({ serverInstanceId: rotatedInstanceId, defaultNodeId: 'local', workspaceName: 'review' });
         probes += 1;
         const capability = probes === 1
           ? String(testFixture.descriptor.localCapability)
@@ -197,7 +221,9 @@ describe('discoverRuntime', () => {
       configDir: testFixture.configDir,
       workspace: 'review',
     }, {
-      fetch: async (input) => Response.json({
+      fetch: async (input) => String(input).endsWith('/cli/context')
+        ? Response.json({ serverInstanceId: descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review' })
+        : Response.json({
         schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
         instanceId: descriptor.instanceId,
         proof: runtimeProof(

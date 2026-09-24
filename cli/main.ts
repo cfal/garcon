@@ -136,7 +136,7 @@ async function canonicalProjectDirectory(cwd: string): Promise<string> {
 }
 
 async function connectedClient(
-  command: { configDir: string; workspace: string; serverUrl?: string },
+  command: { configDir: string; workspace: string; serverUrl?: string; runtimeFile?: string; expectedWorkspace?: string },
   options: MainOptions,
 ): Promise<GarconClient> {
   const discover = options.discoverRuntime ?? discoverRuntime;
@@ -144,6 +144,8 @@ async function connectedClient(
     configDir: command.configDir,
     workspace: command.workspace,
     serverUrl: command.serverUrl,
+    runtimeFile: command.runtimeFile,
+    expectedWorkspace: command.expectedWorkspace,
     signal: options.signal,
   }, { fetch: options.fetch });
   return new GarconClient({ ...connection, fetch: options.fetch });
@@ -326,7 +328,7 @@ export async function main(
       const result = await stopChat(command.chatId, client, options.signal);
       if (command.json) {
         output.result(JSON.stringify(stopJsonEnvelope({
-          workspace: command.workspace,
+          workspace: client.workspaceName,
           serverInstanceId: client.serverInstanceId,
         }, result), null, 2));
       } else {
@@ -352,7 +354,7 @@ export async function main(
       }, client, options.signal);
       if (command.json) {
         output.result(JSON.stringify(resumeAsyncJsonEnvelope({
-          workspace: command.workspace,
+          workspace: client.workspaceName,
           serverInstanceId: client.serverInstanceId,
         }, result), null, 2));
       } else {
@@ -366,7 +368,7 @@ export async function main(
         : command.message);
       const client = await connectedClient(command, options);
       const automationContext = {
-        workspace: command.workspace,
+        workspace: client.workspaceName,
         serverInstanceId: client.serverInstanceId,
       };
       const forkDependencies = {
@@ -433,7 +435,7 @@ export async function main(
       if (command.json) {
         const response = await addRow(command, validatedContent, client, options.signal);
         output.result(JSON.stringify(addRowJsonEnvelope({
-          workspace: command.workspace,
+          workspace: client.workspaceName,
           serverInstanceId: client.serverInstanceId,
         }, response), null, 2));
       } else {
@@ -455,7 +457,7 @@ export async function main(
       const result = await startConsultationAsync(invocation, prompt, client, options.signal);
       if (invocation.json) {
         output.result(JSON.stringify(startAsyncJsonEnvelope({
-          workspace: invocation.workspace,
+          workspace: client.workspaceName,
           serverInstanceId: client.serverInstanceId,
         }, result), null, 2));
       } else {
@@ -473,7 +475,7 @@ export async function main(
         );
         reportTagMutationOutcome(result.accepted.tagMutation, output);
         const context = {
-          workspace: invocation.workspace,
+          workspace: client.workspaceName,
           serverInstanceId: client.serverInstanceId,
         };
         output.result(JSON.stringify(invocation.kind === 'start'

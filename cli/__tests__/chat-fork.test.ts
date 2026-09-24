@@ -94,6 +94,9 @@ function clientOptions(fetch: typeof globalThis.fetch) {
   return {
     baseUrl: 'http://garcon.test',
     instanceId: 'instance-1',
+    endpointInstanceId: 'instance-1',
+    defaultNodeId: 'local',
+    workspaceName: 'default',
     capability: 'capability-1',
     fetch,
   };

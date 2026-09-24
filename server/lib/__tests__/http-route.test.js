@@ -48,6 +48,18 @@ function resetConfigMocks() {
 }
 
 describe('http route wrapping', () => {
+  for (const disabled of [false, true]) {
+    it(`fences CLI requests before handler dispatch with auth disabled=${disabled}`, async () => {
+      isAuthDisabled.mockReturnValue(disabled);
+      const handler = mock(() => Response.json({ ok: true }));
+      const wrapped = wrapRoute(handler, '/api/private', 'POST', { serverInstanceId: 'current' });
+      const stale = await wrapped(new Request('http://localhost/api/private', { headers: { 'X-Garcon-Server-Instance': 'old' } }));
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ errorCode: 'CLI_CONTROLLER_CHANGED', retryable: false });
+      expect(handler).not.toHaveBeenCalled();
+      expect((await wrapped(new Request('http://localhost/api/private', { headers: { 'X-Garcon-Server-Instance': 'current' } }))).status).toBe(200);
+    });
+  }
   for (const mode of ['authenticated', 'disabled', 'public']) {
     it(`rejects ${mode} routes once shutdown begins`, async () => {
       if (mode === 'disabled') isAuthDisabled.mockReturnValue(true);

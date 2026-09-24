@@ -6,10 +6,11 @@ import path from 'node:path';
 import {
   SERVER_RUNTIME_FILENAME,
   ServerRuntimeContractError,
-  parseServerRuntimeDescriptor,
+  parseCliRuntimeDescriptor,
+  parseCliContext,
   parseServerRuntimeProbe,
   runtimeProofPayload,
-  type ServerRuntimeDescriptor,
+  type CliRuntimeDescriptor,
 } from '@garcon/common/server-runtime';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
@@ -20,14 +21,19 @@ const DESCRIPTOR_RECHECK_DELAY_MS = 50;
 export interface RuntimeConnection {
   baseUrl: string;
   instanceId: string;
+  endpointInstanceId: string;
+  defaultNodeId: string;
+  workspaceName: string | null;
   localCapability: string;
-  workspaceDir: string;
+  workspaceDir: string | null;
 }
 
 export interface RuntimeDiscoveryOptions {
   configDir: string;
   workspace: string;
   serverUrl?: string;
+  runtimeFile?: string;
+  expectedWorkspace?: string;
   signal?: AbortSignal;
 }
 
@@ -86,8 +92,7 @@ async function canonicalWorkspace(configDir: string, workspace: string): Promise
   }
 }
 
-async function readRuntimeDescriptor(workspaceDir: string): Promise<ServerRuntimeDescriptor> {
-  const descriptorPath = path.join(workspaceDir, SERVER_RUNTIME_FILENAME);
+async function readRuntimeDescriptor(descriptorPath: string, workspaceDir: string | null): Promise<CliRuntimeDescriptor> {
   let handle: fsPromises.FileHandle | undefined;
   try {
     if (process.platform === 'win32') {
@@ -98,6 +103,7 @@ async function readRuntimeDescriptor(workspaceDir: string): Promise<ServerRuntim
     handle = await fsPromises.open(descriptorPath, fs.constants.O_RDONLY | noFollow);
     const descriptorStat = await handle.stat();
     if (!descriptorStat.isFile()) throw new Error('runtime descriptor must be a regular file');
+    if (descriptorStat.size > 16_384) throw new Error('runtime descriptor is too large');
     if (process.platform !== 'win32' && (descriptorStat.mode & 0o077) !== 0) {
       throw new Error('runtime descriptor must be readable only by its owner');
     }
@@ -109,8 +115,8 @@ async function readRuntimeDescriptor(workspaceDir: string): Promise<ServerRuntim
       throw new Error('runtime descriptor must be owned by the current user');
     }
     const raw = JSON.parse(await handle.readFile('utf8')) as unknown;
-    const descriptor = parseServerRuntimeDescriptor(raw);
-    if (descriptor.workspaceDir !== workspaceDir) {
+    const descriptor = parseCliRuntimeDescriptor(raw);
+    if (workspaceDir !== null && (!('workspaceDir' in descriptor) || descriptor.workspaceDir !== workspaceDir)) {
       throw new Error('runtime descriptor belongs to a different workspace');
     }
     return descriptor;
@@ -128,7 +134,7 @@ async function readRuntimeDescriptor(workspaceDir: string): Promise<ServerRuntim
     }
     throw new CliError(
       'discovery',
-      `cannot read a secure runtime descriptor for ${workspaceDir}`,
+      `cannot read a secure runtime descriptor at ${descriptorPath}`,
       3,
       { cause: error },
     );
@@ -187,12 +193,13 @@ export async function discoverRuntime(
   options: RuntimeDiscoveryOptions,
   dependencies: RuntimeDiscoveryDependencies = {},
 ): Promise<RuntimeConnection> {
-  const workspaceDir = await canonicalWorkspace(options.configDir, options.workspace);
+  const workspaceDir = options.runtimeFile ? null : await canonicalWorkspace(options.configDir, options.workspace);
+  const descriptorPath = options.runtimeFile ?? path.join(workspaceDir!, SERVER_RUNTIME_FILENAME);
   const fetchFn = dependencies.fetch ?? fetch;
   const wait = dependencies.delay ?? abortableDelay;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const descriptor = await readRuntimeDescriptor(workspaceDir);
+    const descriptor = await readRuntimeDescriptor(descriptorPath, workspaceDir);
     const baseUrl = parseLoopbackServerUrl(descriptor.baseUrl);
     if (
       options.serverUrl !== undefined
@@ -212,9 +219,26 @@ export async function discoverRuntime(
       options.signal,
     );
     if (verified) {
+      const response = await fetchFn(`${baseUrl}/api/v1/cli/context`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${descriptor.localCapability}` },
+        redirect: 'error',
+        signal: AbortSignal.any([AbortSignal.timeout(RUNTIME_PROBE_TIMEOUT_MS), ...(options.signal ? [options.signal] : [])]),
+      });
+      if (!response.ok) throw new CliError('discovery', `CLI context unavailable (HTTP ${response.status})`, 3);
+      const context = parseCliContext(await response.json());
+      const expectedWorkspace = options.expectedWorkspace ?? (options.runtimeFile ? undefined : options.workspace);
+      if (expectedWorkspace !== undefined && expectedWorkspace !== context.workspaceName) {
+        throw new CliError('discovery', '--workspace does not match the authenticated CLI context', 3);
+      }
+      if ('workspaceDir' in descriptor && context.serverInstanceId !== descriptor.instanceId) {
+        throw new CliError('discovery', 'controller changed during discovery; start a new CLI invocation', 3);
+      }
       return {
         baseUrl,
-        instanceId: descriptor.instanceId,
+        instanceId: context.serverInstanceId,
+        endpointInstanceId: descriptor.instanceId,
+        defaultNodeId: context.defaultNodeId,
+        workspaceName: context.workspaceName,
         localCapability: descriptor.localCapability,
         workspaceDir,
       };

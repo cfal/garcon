@@ -10,6 +10,7 @@ import {
   type RouteMap,
 } from './http-route-types.js';
 import { createLogger } from './log.js';
+import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 
 const logger = createLogger('lib:http-route');
 
@@ -22,7 +23,15 @@ type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
 
 export interface HttpRouteAuthOptions {
   localCapability?: string;
+  serverInstanceId?: string;
   isShuttingDown?: () => boolean;
+}
+
+export function cliInstanceMismatch(request: Request, expected: string | undefined): Response | null {
+  const supplied = request.headers.get(CLI_SERVER_INSTANCE_HEADER);
+  return supplied !== null && supplied !== expected
+    ? jsonError('Garcon restarted; start a new CLI invocation', 409, 'CLI_CONTROLLER_CHANGED', false)
+    : null;
 }
 
 export function serverShuttingDownResponse(): Response {
@@ -95,6 +104,8 @@ export function wrapRoute(
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
+      const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
+      if (mismatch) return mismatch;
       return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL });
     };
   }
@@ -115,6 +126,8 @@ export function wrapRoute(
       if ((handler as MarkedRouteHandler)[noStoreRouteMarker]) errorResponse.headers.set('Cache-Control', 'no-store');
       return compressHttpResponse(req, errorResponse);
     }
+    const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
+    if (mismatch) return mismatch;
     return invokeRouteHandler(handler, req, server, { principal });
   };
 }

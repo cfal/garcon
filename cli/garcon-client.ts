@@ -91,6 +91,7 @@ import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
 import { probeRuntime, type RuntimeConnection } from './discovery.js';
+import { CLI_SERVER_INSTANCE_HEADER, parseCliContext } from '@garcon/common/server-runtime';
 import type { HttpTicketMutationRequest } from '@garcon/common/ticket-commands';
 import { ticketSearchParams } from '@garcon/common/ticket-query';
 import { parseTicketWriteResult } from '@garcon/common/ticket-records';
@@ -345,6 +346,7 @@ function retryAfterMilliseconds(value: string | null): number | null {
 function isAmbiguousSubmissionError(error: unknown): boolean {
   if (error instanceof GarconTransportError) return true;
   if (error instanceof GarconHttpError) {
+    if (error.errorCode?.startsWith('CLI_')) return false;
     return error.status === 408
       || error.status === 425
       || error.status === 429
@@ -373,6 +375,9 @@ function isAmbiguousSteerSubmissionError(error: unknown): boolean {
 export class GarconClient {
   readonly #baseUrl: string;
   readonly #instanceId: string;
+  readonly #endpointInstanceId: string;
+  readonly defaultNodeId: string;
+  readonly workspaceName: string | null;
   readonly #capability: string;
   readonly #fetch: typeof fetch;
   readonly #submissionDelay: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -380,6 +385,9 @@ export class GarconClient {
   constructor(options: GarconClientOptions) {
     this.#baseUrl = options.baseUrl;
     this.#instanceId = options.instanceId;
+    this.#endpointInstanceId = options.endpointInstanceId;
+    this.defaultNodeId = options.defaultNodeId;
+    this.workspaceName = options.workspaceName;
     this.#capability = options.localCapability;
     this.#fetch = options.fetch ?? fetch;
     this.#submissionDelay = options.submissionDelay ?? abortableDelay;
@@ -996,13 +1004,20 @@ export class GarconClient {
   }
 
   async verifyRuntime(signal?: AbortSignal): Promise<boolean> {
-    return probeRuntime(
+    if (!await probeRuntime(
       this.#baseUrl,
-      this.#instanceId,
+      this.#endpointInstanceId,
       this.#capability,
       this.#fetch,
       signal,
-    );
+    )) return false;
+    try {
+      const context = parseCliContext(await this.#request('runtime verification', 'GET', '/api/v1/cli/context', undefined, signal));
+      return context.serverInstanceId === this.#instanceId && context.defaultNodeId === this.defaultNodeId;
+    } catch (error) {
+      if (error instanceof GarconHttpError && error.errorCode === 'CLI_CONTROLLER_CHANGED') return false;
+      throw error;
+    }
   }
 
   async #submitTurn<TResponse extends AgentTurnCommandResponse>(
@@ -1045,6 +1060,7 @@ export class GarconClient {
     signal?: AbortSignal,
   ): Promise<TResponse> {
     const ambiguous = options.ambiguous ?? isAmbiguousSubmissionError;
+    let uncertain = false;
     for (let attempt = 0; attempt < SUBMISSION_ATTEMPTS; attempt += 1) {
       try {
         const accepted = options.parse(
@@ -1064,7 +1080,13 @@ export class GarconClient {
         }
         return accepted;
       } catch (error) {
-        if (!ambiguous(error) || signal?.aborted) throw error;
+        if (!ambiguous(error) || signal?.aborted) {
+          if (uncertain) throw new CliError('transport recovery',
+            `${options.ambiguityDescription} may have been accepted; recovery stopped: ${error instanceof Error ? error.message : String(error)}`,
+            3, { cause: error });
+          throw error;
+        }
+        uncertain = true;
         if (attempt === SUBMISSION_ATTEMPTS - 1) {
           throw new CliError(
             'transport recovery',
@@ -1165,6 +1187,7 @@ export class GarconClient {
         headers: {
           Accept: 'application/json',
           Authorization: `Bearer ${this.#capability}`,
+          [CLI_SERVER_INSTANCE_HEADER]: this.#instanceId,
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -1186,12 +1209,13 @@ export class GarconClient {
       const message = responseError
         ? responseError
         : `Garcon server returned HTTP ${response.status}`;
+      if (errorCode === 'CLI_OUTCOME_UNKNOWN') throw new GarconTransportError(phase, message);
       throw new GarconHttpError(
         response.status === 401 || response.status === 403 ? 'authentication' : phase,
         `${message} (HTTP ${response.status}${errorCode ? `, ${errorCode}` : ''})`,
         response.status,
         errorCode,
-        envelope?.retryable === true || response.status >= 500,
+        envelope?.retryable ?? response.status >= 500,
         retryAfterMilliseconds(response.headers.get('Retry-After')),
         responseError,
       );

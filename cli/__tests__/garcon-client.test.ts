@@ -15,6 +15,9 @@ import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-c
 const connection = {
   baseUrl: 'http://127.0.0.1:8080',
   instanceId: 'instance',
+  endpointInstanceId: 'instance',
+  defaultNodeId: 'local',
+  workspaceName: 'default',
   localCapability: 'garcon_local_secret',
   workspaceDir: '/config/workspace-default',
 };
@@ -43,6 +46,7 @@ function accepted(request: AgentRunCommandRequest): Response {
 
 function runtimeResponse(input: string | URL | Request, instanceId = connection.instanceId): Response {
   const url = new URL(input instanceof Request ? input.url : input);
+  if (url.pathname === '/api/v1/cli/context') return Response.json({ serverInstanceId: instanceId, defaultNodeId: 'local', workspaceName: 'default' });
   const challenge = url.searchParams.get('challenge') ?? '';
   const proof = crypto.createHmac('sha256', connection.localCapability)
     .update(runtimeProofPayload(instanceId, challenge))
@@ -986,7 +990,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         bodies.push(String(init?.body));
         if (attempts === 1) throw new TypeError('connection reset');
@@ -1049,7 +1053,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         bodies.push(String(init?.body));
         if (attempts === 1) throw new TypeError('connection reset');
@@ -1068,7 +1072,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         bodies.push(String(init?.body));
         if (attempts === 1) {
@@ -1109,7 +1113,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         bodies.push(String(init?.body));
         return attempts === 1
@@ -1128,7 +1132,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         return new Response('{"success":', { status: 202 });
       },
@@ -1146,7 +1150,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         return attempts === 1
           ? Response.json({ error: 'try again' }, { status })
@@ -1164,7 +1168,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) {
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) {
           return runtimeResponse(input, 'replacement-instance');
         }
         submissions += 1;
@@ -1236,7 +1240,7 @@ describe('GarconClient', () => {
     const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
-      fetch: async (input) => String(input).includes('/api/v1/runtime')
+      fetch: async (input) => String(input).match(/\/api\/v1\/(runtime|cli\/context)/)
         ? runtimeResponse(input)
         : Response.json({ success: true, status: 'accepted' }),
     });
@@ -1249,7 +1253,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         return attempts === 1
           ? Response.json({
@@ -1351,7 +1355,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         bodies.push(String(init?.body));
         return attempts === 1
@@ -1369,7 +1373,7 @@ describe('GarconClient', () => {
     const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
-      fetch: async (input) => String(input).includes('/api/v1/runtime')
+      fetch: async (input) => String(input).match(/\/api\/v1\/(runtime|cli\/context)/)
         ? runtimeResponse(input)
         : Response.json({ success: true, status: 'accepted' }),
     });
@@ -1437,7 +1441,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         bodies.push(String(init?.body));
         if (attempts === 1) throw new TypeError('connection reset');
@@ -1456,7 +1460,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         submissions += 1;
         return stopAccepted({ outcome: 'stopped-somehow' });
       },
@@ -1474,7 +1478,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         submissions += 1;
         return stopAccepted({ control: { serverInstanceId: 'instance' } });
       },
@@ -1492,7 +1496,7 @@ describe('GarconClient', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime')) {
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) {
           return runtimeResponse(input, 'replacement-instance');
         }
         submissions += 1;
@@ -1622,7 +1626,7 @@ describe('GarconClient fork', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime?')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         bodies.push(String(init?.body));
         attempts += 1;
         if (attempts === 1) throw new TypeError('connection reset');
@@ -1665,7 +1669,7 @@ describe('GarconClient fork', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
-        if (String(input).includes('/api/v1/runtime?')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         attempts += 1;
         return Response.json({
           success: true,
@@ -1692,7 +1696,7 @@ describe('GarconClient fork', () => {
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
-        if (String(input).includes('/api/v1/runtime?')) return runtimeResponse(input);
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         bodies.push(String(init?.body));
         const responseChat = bodies.length === 1
           ? forkedChat({ parentChat: { ...parentChat, chatId: '1785337200123455' } })
@@ -1723,7 +1727,7 @@ describe('GarconClient fork', () => {
     const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
-      fetch: async (input) => String(input).includes('/api/v1/runtime?')
+      fetch: async (input) => String(input).match(/\/api\/v1\/(runtime|cli\/context)/)
         ? runtimeResponse(input)
         : Response.json({
           success: true,
@@ -1846,7 +1850,7 @@ describe('GarconClient add-row', () => {
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
         const url = String(input);
-        if (url.includes('/api/v1/runtime?')) return runtimeResponse(input);
+        if (url.match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         bodies.push(String(init?.body));
         postAttempts += 1;
         if (postAttempts === 1) throw new TypeError('connection reset');

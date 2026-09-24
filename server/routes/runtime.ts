@@ -1,10 +1,17 @@
-import { isRuntimeProbeChallenge } from '@garcon/common/server-runtime';
+import { isRuntimeProbeChallenge, type CliContext } from '@garcon/common/server-runtime';
 import { markRouteNoAuth } from '../lib/http-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { createServerRuntimeProof, type ServerRuntimeState } from '../lib/server-runtime.js';
 
-export function createRuntimeRoutes(runtime: ServerRuntimeState): RouteMap {
+export function createRuntimeRoutes(runtime: ServerRuntimeState, workspaceName: string | null = null): RouteMap {
   return {
+    '/api/v1/cli/context': {
+      GET: () => Response.json({
+        serverInstanceId: runtime.identity.instanceId,
+        defaultNodeId: 'local',
+        workspaceName,
+      } satisfies CliContext, { headers: { 'Cache-Control': 'no-store' } }),
+    },
     '/api/v1/runtime': {
       GET: markRouteNoAuth((_request, url) => {
         const challenge = url.searchParams.get('challenge');

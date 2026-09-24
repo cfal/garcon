@@ -13,6 +13,9 @@ const CHAT_ID = '1785337200123456';
 const stubDiscovery = async () => ({
   baseUrl: 'http://127.0.0.1:8080',
   instanceId: 'instance',
+  endpointInstanceId: 'instance',
+  defaultNodeId: 'local',
+  workspaceName: 'default',
   localCapability: 'cap',
   workspaceDir: '/tmp/ws',
 });

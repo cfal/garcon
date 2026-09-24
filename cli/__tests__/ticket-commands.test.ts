@@ -30,6 +30,7 @@ function harness(handle: (url: URL, body: unknown) => Response | Promise<Respons
   const run = (args: string[], extra: { readStdin?: () => Promise<string>; signal?: AbortSignal } = {}) => main(['ticket', ...args], {
     fetch: fetcher, output: createCliOutput({ write: (text) => stdout.push(text) }, { write: (text) => stderr.push(text) }),
     discoverRuntime: async () => ({ baseUrl: 'http://localhost:8080', instanceId: 'synthetic-instance',
+      endpointInstanceId: 'synthetic-instance', defaultNodeId: 'local', workspaceName: 'default',
       localCapability: 'synthetic-capability', workspaceDir: '/workspace' }), ...extra,
   });
   return { run, calls, stdout, stderr };

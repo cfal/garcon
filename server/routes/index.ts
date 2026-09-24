@@ -104,6 +104,7 @@ export default function createAllRoutes(workspaceDir: string, {
   searchIndex,
   transcriptSearchSettings,
   runtimeState,
+  workspaceName,
   commandLedger,
   transientFeeds,
   chatRows,
@@ -143,6 +144,7 @@ export default function createAllRoutes(workspaceDir: string, {
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
   runtimeState: ServerRuntimeState;
+  workspaceName?: string | null;
   commandLedger: CommandLedger;
   transientFeeds: ChatTransientFeedStore;
   chatRows: ChatRowService;
@@ -157,7 +159,7 @@ export default function createAllRoutes(workspaceDir: string, {
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
   return {
     ...createExecutionNodeRoutes(executionNodes),
-    ...createRuntimeRoutes(runtimeState),
+    ...createRuntimeRoutes(runtimeState, workspaceName),
     ...createAgentTurnReceiptRoutes(commandLedger),
     ...createChatSnapshotRoutes({
       summaries: chatListProjector,

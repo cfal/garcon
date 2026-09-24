@@ -201,6 +201,7 @@ export async function startServer(): Promise<void> {
     // which the ladder would never hand to its callback.
     await resumeInterruptedCarryOverRollback(workspaceDir);
     const runtimeState = createServerRuntimeState(workspaceDir);
+    delete process.env.GARCON_CLI_RUNTIME;
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
       const result = await migrateWorkspaceChatIds(workspaceDir);
@@ -774,6 +775,7 @@ export async function startServer(): Promise<void> {
       searchIndex: chatSearch,
       transcriptSearchSettings,
       runtimeState,
+      workspaceName: config.workspaceName,
       commandLedger,
       transientFeeds,
       chatRows,
@@ -812,7 +814,7 @@ export async function startServer(): Promise<void> {
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
-      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, isShuttingDown: () => shuttingDown }),
+      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
       error(error) {
         if (error instanceof MalformedJsonError) {
           return malformedJsonResponse();
