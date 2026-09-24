@@ -170,6 +170,20 @@ describe('chat search', () => {
     }
   });
 
+  test('generated read commands retain the worker runtime and explicit workspace assertion', () => {
+    const connection = { ...command, runtimeFile: '/private/runtime.json', expectedWorkspace: 'remote' };
+    const result = buildChatSearchResult(connection, chatList([chat()]), response(), 1);
+    const hit = result.results[0]!;
+    const args = buildSearchReadCommandArguments(connection, hit, hit.snippets[0]!);
+    expect(args).not.toContain('--config-dir');
+    expect(parseCliArgs(args, { GARCON_CLI_RUNTIME: connection.runtimeFile })).toMatchObject({
+      kind: 'read', runtimeFile: connection.runtimeFile, expectedWorkspace: 'remote',
+    });
+    expect(formatChatSearchResult(result, false, connection)).toContain(
+      "garcon-cli --runtime-file '/private/runtime.json' --workspace 'remote' read",
+    );
+  });
+
   test.each([
     {
       role: 'assistant' as const,

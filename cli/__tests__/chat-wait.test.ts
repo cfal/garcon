@@ -108,7 +108,7 @@ describe('runChatWait', () => {
     expect(capture.results).toEqual([JSON.stringify(failed, null, 2)]);
   });
 
-  test('names the effective workspace when an exact receipt is missing', async () => {
+  test.each([undefined, '/private/runtime.json'])('does not invent a workspace for a missing receipt: runtime=%s', async (runtimeFile) => {
     const client: ReceiptClient = {
       async getTurnReceipt() {
         throw new GarconHttpError(
@@ -122,7 +122,12 @@ describe('runChatWait', () => {
       async verifyRuntime() { return true; },
     };
 
-    await expect(runChatWait(command, client, output()))
-      .rejects.toThrow('Garcon workspace "work"');
+    try {
+      await runChatWait({ ...command, runtimeFile }, client, output());
+      throw new Error('Expected missing receipt');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CliError);
+      expect((error as Error).message.includes('Garcon workspace "work"')).toBe(!runtimeFile);
+    }
   });
 });

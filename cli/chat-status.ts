@@ -1,5 +1,6 @@
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
-import type { StatusCliCommand } from './args.js';
+import type { CliConnectionOptions, StatusCliCommand } from './args.js';
+import { connectionCommandPrefix } from './connection-options.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
@@ -30,7 +31,7 @@ export async function runChatStatus(
     if (error instanceof GarconHttpError && error.errorCode === 'SESSION_NOT_FOUND') {
       throw new CliError(
         'chat status',
-        `Session not found in Garcon workspace "${command.workspace}" `
+        `Session not found${command.runtimeFile ? '' : ` in Garcon workspace "${command.workspace}"`} `
           + '(HTTP 404, SESSION_NOT_FOUND)',
         2,
         { cause: error },
@@ -45,7 +46,7 @@ export async function runChatStatus(
 
 export function formatChatStatus(
   snapshot: ChatSnapshotResponse,
-  connection?: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  connection?: CliConnectionOptions,
 ): string {
   const lines = [
     `chat id: ${snapshot.chat.id}`,
@@ -144,13 +145,13 @@ export function formatChatStatus(
 }
 
 function permissionAnswerCommand(
-  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  connection: CliConnectionOptions,
   snapshot: ChatSnapshotResponse,
   permissionOccurrenceId: string,
   runId: string,
 ): string {
   return [
-    ...permissionCommandPrefix(connection),
+    ...connectionCommandPrefix(connection),
     'permission-answer',
     shellQuote(snapshot.chat.id),
     shellQuote(permissionOccurrenceId),
@@ -164,14 +165,14 @@ function permissionAnswerCommand(
 }
 
 function permissionDecisionCommand(
-  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  connection: CliConnectionOptions,
   snapshot: ChatSnapshotResponse,
   permissionOccurrenceId: string,
   runId: string,
   decision: 'allow' | 'deny',
 ): string {
   return [
-    ...permissionCommandPrefix(connection),
+    ...connectionCommandPrefix(connection),
     'permission-decision',
     shellQuote(snapshot.chat.id),
     shellQuote(permissionOccurrenceId),
@@ -181,19 +182,4 @@ function permissionDecisionCommand(
     '--server-instance',
     shellQuote(snapshot.transientFeed.serverInstanceId),
   ].join(' ');
-}
-
-function permissionCommandPrefix(
-  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
-): string[] {
-  return [
-    'garcon-cli',
-    '--workspace',
-    shellQuote(connection.workspace),
-    '--config-dir',
-    shellQuote(connection.configDir),
-    ...(connection.serverUrl === undefined
-      ? []
-      : ['--server', shellQuote(connection.serverUrl)]),
-  ];
 }

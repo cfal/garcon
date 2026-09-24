@@ -30,6 +30,7 @@ export async function runChatWait(
       error instanceof CliError
       && error.cause instanceof GarconHttpError
       && error.cause.errorCode === 'TURN_RECEIPT_NOT_FOUND'
+      && !command.runtimeFile
     ) {
       throw new CliError(
         error.phase,

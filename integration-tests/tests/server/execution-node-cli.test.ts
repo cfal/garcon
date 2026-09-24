@@ -25,7 +25,11 @@ async function runtimeFile(fixture: IntegrationFixture): Promise<string> {
 }
 
 async function runCli(fixture: IntegrationFixture, args: string[], runtime: string) {
-  const child = Bun.spawn([process.execPath, CLI, ...args], {
+  return runWorkerCommand(fixture, [process.execPath, CLI, ...args], runtime);
+}
+
+async function runWorkerCommand(fixture: IntegrationFixture, argv: string[], runtime: string) {
+  const child = Bun.spawn(argv, {
     cwd: fixture.executionDirs.project,
     env: { ...process.env, GARCON_CLI_RUNTIME: runtime, GARCON_WORKSPACE: 'unrelated-inherited-workspace', GARCON_CONFIG_DIR: '/missing' },
     stdout: 'pipe', stderr: 'pipe',
@@ -68,6 +72,9 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       await client.patch(`/api/v1/execution-nodes/${nodeId}`, { allowControllerCli: true });
       const connection = await discover();
       expect(connection).toMatchObject({ defaultNodeId: nodeId, workspaceName: 'cli-node-integration' });
+      const missing = await runCli(fixture, ['status', fixture.newChatId(), '--messages', '0'], runtime);
+      expect(missing).toMatchObject({ exitCode: 2, stdout: '' });
+      expect(missing.stderr).toContain('Session not found (HTTP 404, SESSION_NOT_FOUND)');
       const oldInvocation = new GarconClient(connection);
       const agent = fixture.directAgents.openAi;
       const started = await runCli(fixture, ['start', '--cwd', fixture.executionDirs.project, '--agent', agent.agentId,
@@ -146,8 +153,16 @@ test('a real permission-approved Claude tool inherits worker CLI discovery and c
       const permission = await fixture.client.waitForTransientPermission(chatId,
         (row) => row.message.type === 'permission-request' && row.message.requestedTool.type === 'bash-tool-use',
         { afterIndex: cursor, timeoutMs: 60_000 });
-      await fixture.client.sendPermissionDecision({ clientRequestId: crypto.randomUUID(), chatId,
-        permissionOccurrenceId: permission.permissionOccurrenceId, allow: true, alwaysAllow: false });
+      const runtime = await runtimeFile(fixture);
+      const status = await runCli(fixture, ['status', chatId, '--messages', '0'], runtime);
+      expect(status, status.stderr).toMatchObject({ exitCode: 0 });
+      const allow = /^allow command: (garcon-cli .+)$/m.exec(status.stdout)?.[1];
+      expect(allow).toContain(permission.permissionOccurrenceId);
+      expect(allow).toContain('--runtime-file');
+      expect(allow).not.toContain('--config-dir');
+      const decision = await runWorkerCommand(fixture, ['/bin/sh', '-c',
+        `${shellQuote(process.execPath)} ${shellQuote(CLI)}${allow!.slice('garcon-cli'.length)}`], runtime);
+      expect(decision, decision.stderr).toMatchObject({ exitCode: 0 });
       await fixture.client.waitForTurnTerminal(chatId, turn.turnId!, { afterIndex: cursor, timeoutMs: 60_000 });
       const result = JSON.parse(await readFile(output, 'utf8'));
       expect(result.agents).toContainEqual(expect.objectContaining({ id: 'claude' }));

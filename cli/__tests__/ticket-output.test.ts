@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ticketBodyOutput, ticketJsonOutput, ticketLineOutput, ticketRetryDiagnostic, ticketShellArgument } from '../ticket-output.js';
 import { readTicketStdin } from '../ticket-stdin.js';
+import { parseCliArgs } from '../args.js';
 
 describe('ticket terminal output', () => {
   test('escapes terminal controls and bidi in single-line, multiline and lossless JSON output', () => {
@@ -25,6 +26,27 @@ describe('ticket terminal output', () => {
     const process = Bun.spawn(['bash', '-c', `printf '%s' ${ticketShellArgument(project)}`], { stdout: 'pipe', stderr: 'pipe' });
     expect(await new Response(process.stdout).text()).toBe(project);
     expect(await process.exited).toBe(0);
+  });
+
+  test.each([undefined, '/private/runtime.json'])('ticket retry additions do not repeat explicit connection flags: runtime=%s', async (runtimeFile) => {
+    const env = runtimeFile ? { GARCON_CLI_RUNTIME: runtimeFile } : {};
+    const original = ['--workspace', 'work', ...(runtimeFile ? [] : ['--config-dir', '/config']),
+      '--server', 'http://127.0.0.1:8080', 'ticket', 'claim', 'G-1', '--expected-revision', '1'];
+    const diagnostic = ticketRetryDiagnostic({ requestId: '11111111-1111-4111-8111-111111111111',
+      expectedStoreId: '22222222-2222-4222-8222-222222222222',
+      payload: { action: 'claim', ticketId: 'G-1', expectedRevision: 1 } }, undefined, runtimeFile);
+    const flags = diagnostic.split('with: ')[1]!;
+    const child = Bun.spawn(['bash', '-c', `printf '%s\\0' ${flags}`], { stdout: 'pipe', stderr: 'pipe' });
+    const appended = (await new Response(child.stdout).text()).split('\0').slice(0, -1);
+    expect(await child.exited).toBe(0);
+    expect(parseCliArgs([...original, ...appended], env)).toMatchObject({
+      kind: 'ticket', workspace: 'work', serverUrl: 'http://127.0.0.1:8080',
+      retry: { requestId: '11111111-1111-4111-8111-111111111111', expectedStoreId: '22222222-2222-4222-8222-222222222222' },
+      ...(runtimeFile ? { runtimeFile, expectedWorkspace: 'work' } : { configDir: '/config' }),
+    });
+    expect(diagnostic).not.toContain('--config-dir');
+    expect(diagnostic).not.toContain('--workspace');
+    expect(diagnostic).not.toContain('--server');
   });
 });
 
