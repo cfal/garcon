@@ -16,7 +16,7 @@ describe('persistent Tickets integration', () => {
       const workspaceFiles = await readdir(fixture.dirs.workspace);
       expect(workspaceFiles).toContain('tickets.sqlite');
       expect(workspaceFiles).not.toContain('issues.sqlite');
-      const retiredRoute = await fetch(`${fixture.garcon.baseUrl}/api/v1/issues/bootstrap`);
+      const retiredRoute = await fixture.client.fetch(`/api/v1/issues/bootstrap`);
       expect(retiredRoute.status).toBe(404);
       expect(await retiredRoute.text()).toBe('Not found');
       const request = (payload: TicketMutationPayload, fromChatId?: string): HttpTicketMutationRequest => ({

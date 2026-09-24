@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createConnection, type Socket } from 'node:net';
+import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
-async function pausedBrowser(baseUrl: string) {
+async function pausedBrowser(baseUrl: string, authToken: string | null) {
   const url = new URL(baseUrl);
   const socket = createConnection({ host: url.hostname, port: Number(url.port) });
   const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
@@ -22,6 +23,7 @@ async function pausedBrowser(baseUrl: string) {
     socket.once('error', reject);
     socket.once('connect', () => socket.write([
       'GET /ws HTTP/1.1', `Host: ${url.host}`, 'Connection: Upgrade', 'Upgrade: websocket',
+      `Sec-WebSocket-Protocol: ${webSocketProtocolsForAuth(authToken).join(', ')}`,
       'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==', '', '',
     ].join('\r\n')));
   });
@@ -72,7 +74,7 @@ async function expectDropped(browser: Awaited<ReturnType<typeof pausedBrowser>>)
 
 test('direct replies drop a slow browser at its budget without affecting another browser', async () => {
   await withIntegrationFixture('primary-direct-backpressure', async (fixture) => {
-    const browser = await pausedBrowser(fixture.garcon.baseUrl);
+    const browser = await pausedBrowser(fixture.garcon.baseUrl, fixture.garcon.authToken);
     try {
       const frame = maskedTextFrame(JSON.stringify({ type: 'ws-ping', clientRequestId: 'x'.repeat(256 * 1024), sentAt: 1 }));
       for (let index = 0; index < 64 && !browser.socket.destroyed; index++) await writeFrame(browser.socket, frame);
@@ -85,7 +87,7 @@ test('direct replies drop a slow browser at its budget without affecting another
 
 test('broadcasts drop a slow browser while a healthy subscriber stays connected', async () => {
   await withIntegrationFixture('primary-broadcast-backpressure', async (fixture) => {
-    const browser = await pausedBrowser(fixture.garcon.baseUrl);
+    const browser = await pausedBrowser(fixture.garcon.baseUrl, fixture.garcon.authToken);
     try {
       for (let index = 0; index < 128; index++) {
         await fixture.client.updateSettings({ ui: { commitMessage: { customPrompt: `${index}:${'x'.repeat(31_000)}` } } });

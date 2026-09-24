@@ -1,3 +1,4 @@
+import type { GarconTestClient } from "../../support/garcon-client.js";
 import { describe, expect, test } from "bun:test";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,8 +20,8 @@ async function runGit(projectPath: string, args: string[]): Promise<void> {
   }
 }
 
-async function getJson<T>(baseUrl: string, endpoint: string): Promise<T> {
-  const response = await fetch(`${baseUrl}${endpoint}`);
+async function getJson<T>(client: GarconTestClient, endpoint: string): Promise<T> {
+  const response = await client.fetch(endpoint);
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -69,7 +70,7 @@ describe("Git worktree HTTP API", () => {
           isCurrent: boolean;
           isPathMissing: boolean;
         }>;
-      }>(fixture.garcon.baseUrl, `/api/v1/git/worktrees?${query}`);
+      }>(fixture.client, `/api/v1/git/worktrees?${query}`);
       expect(worktrees).toMatchObject([
         {
           path: projectPath,
@@ -102,7 +103,7 @@ describe("Git worktree HTTP API", () => {
           source: "chat-project" | "worktree";
           isMissing: boolean;
         }>;
-      }>(fixture.garcon.baseUrl, `/api/v1/git/targets?${query}`);
+      }>(fixture.client, `/api/v1/git/targets?${query}`);
       expect(targets[0]).toMatchObject({
         worktreePath: projectPath,
         branch: "main",

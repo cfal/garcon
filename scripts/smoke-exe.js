@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -110,8 +110,23 @@ async function stopProcess(processHandle) {
   ]);
 }
 
-async function assertBundledPreambles(url) {
-  const response = await fetch(`${url}/api/v1/preambles`);
+async function authenticatedFetch(url, credentials) {
+  const unauthenticated = await fetch(`${url}/api/v1/preambles`);
+  if (unauthenticated.status !== 401) throw new Error('Smoke server must reject unauthenticated API requests');
+  const response = await fetch(`${url}/api/v1/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(credentials),
+  });
+  const login = await response.json();
+  if (!response.ok || typeof login.token !== 'string') throw new Error('Smoke server authentication failed');
+  return (input, init = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${login.token}`);
+    return fetch(input, { ...init, headers });
+  };
+}
+
+async function assertBundledPreambles(url, apiFetch) {
+  const response = await apiFetch(`${url}/api/v1/preambles`);
   if (!response.ok) {
     throw new Error(`Expected GET /api/v1/preambles to succeed, received ${response.status}`);
   }
@@ -123,8 +138,8 @@ async function assertBundledPreambles(url) {
   }
 }
 
-async function assertCompiledExecutionNode(url, executablePath, workspaceDir) {
-  const response = await fetch(`${url}/api/v1/execution-nodes`, {
+async function assertCompiledExecutionNode(url, executablePath, workspaceDir, apiFetch) {
+  const response = await apiFetch(`${url}/api/v1/execution-nodes`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -152,7 +167,7 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir) {
     const deadline = Date.now() + STARTUP_TIMEOUT_MS;
     while (true) {
       if (worker.exitCode !== null) throw new Error(`Compiled worker exited with code ${worker.exitCode}: ${await workerErrors}`);
-      const snapshot = await fetch(`${url}/api/v1/execution-nodes`).then((result) => result.json());
+      const snapshot = await apiFetch(`${url}/api/v1/execution-nodes`).then((result) => result.json());
       if (snapshot.nodes?.some((node) => node.id === configured.id && node.availability === 'ready')) break;
       if (Date.now() >= deadline) throw new Error('Compiled worker did not become ready');
       await delay(50);
@@ -160,20 +175,20 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir) {
     const inspectionUrl = new URL('/api/v1/chats/validate-start', url);
     inspectionUrl.searchParams.set('nodeId', configured.id);
     inspectionUrl.searchParams.set('path', workspaceDir);
-    const inspection = await fetch(inspectionUrl);
+    const inspection = await apiFetch(inspectionUrl);
     if (!inspection.ok || !(await inspection.json()).valid) {
       throw new Error('Compiled worker project inspection failed');
     }
     const terminalsUrl = `${url}/api/v1/terminals`;
-    const inventory = await fetch(`${terminalsUrl}?nodeId=${configured.id}`).then(result => result.json());
-    const created = await fetch(terminalsUrl, {
+    const inventory = await apiFetch(`${terminalsUrl}?nodeId=${configured.id}`).then(result => result.json());
+    const created = await apiFetch(terminalsUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ nodeId: configured.id, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
         requestId: 'compiled-terminal', requestedInitialWorkingDirectory: workspaceDir }),
     });
     const terminal = await created.json();
     if (!created.ok || !terminal.terminal?.terminalId) throw new Error(`Compiled worker PTY failed: ${JSON.stringify(terminal)}`);
-    const removed = await fetch(terminalsUrl, {
+    const removed = await apiFetch(terminalsUrl, {
       method: 'DELETE', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ terminalId: terminal.terminal.terminalId, requestId: 'compiled-terminal-stop' }),
     });
@@ -183,12 +198,12 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir) {
   }
 }
 
-async function waitForTranscriptResult(url, token, chatId, getServerOutput) {
+async function waitForTranscriptResult(url, token, chatId, getServerOutput, apiFetch) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   let lastStatus = 0;
   let lastBody = '';
   while (Date.now() < deadline) {
-    const response = await fetch(`${url}/api/v1/chats/search`, {
+    const response = await apiFetch(`${url}/api/v1/chats/search`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: token }),
@@ -272,6 +287,13 @@ async function run() {
   }
 
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-exe-smoke-'));
+  const configDir = path.join(workspaceDir, 'config');
+  const credentials = { username: 'smoke', password: crypto.randomUUID() };
+  await mkdir(configDir, { mode: 0o700 });
+  await writeFile(path.join(configDir, 'auth.json'), JSON.stringify({
+    username: credentials.username,
+    passwordHash: await Bun.password.hash(credentials.password, { algorithm: 'bcrypt', cost: 12 }),
+  }), { mode: 0o600 });
   const spawnServer = () => Bun.spawn({
     cmd: [
       executablePath,
@@ -279,7 +301,8 @@ async function run() {
       '0',
       '--bind-address',
       '0.0.0.0',
-      '--disable-auth',
+      '--config-dir',
+      configDir,
       '--workspace-dir',
       workspaceDir,
       '--project-base-dir',
@@ -293,13 +316,14 @@ async function run() {
   let child = spawnServer();
   try {
     let started = await waitForServerUrl(child);
+    const apiFetch = await authenticatedFetch(started.url, credentials);
     const searchDatabase = path.join(workspaceDir, 'transcript-search', 'index.sqlite');
 
     if (await Bun.file(searchDatabase).exists()) {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
-    await assertBundledPreambles(started.url);
-    await assertCompiledExecutionNode(started.url, executablePath, workspaceDir);
+    await assertBundledPreambles(started.url, apiFetch);
+    await assertCompiledExecutionNode(started.url, executablePath, workspaceDir, apiFetch);
     await stopProcess(child);
 
     await writeFile(
@@ -375,6 +399,7 @@ async function run() {
       'embeddedworkertoken',
       SMOKE_CHAT_ID,
       started.getOutput,
+      apiFetch,
     );
     await stopProcess(child);
 
@@ -385,6 +410,7 @@ async function run() {
       'embeddedworkertoken',
       SMOKE_CHAT_ID,
       started.getOutput,
+      apiFetch,
     );
   } finally {
     await stopProcess(child);

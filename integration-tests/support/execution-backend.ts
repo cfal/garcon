@@ -111,6 +111,7 @@ export class ExecutionBackendFixture {
   #workerLaunch: Parameters<typeof ExecutionNodeProcess.start>[0] | null = null;
   #nodeId: string | null = null;
   #controllerUrl: string | null = null;
+  #controllerAuthToken: string | null = null;
 
   constructor(
     readonly backend: ExecutionBackend,
@@ -145,6 +146,7 @@ export class ExecutionBackendFixture {
           ? { port: Number(new URL(this.#controllerUrl).port) } : {}),
       });
       this.#controllerUrl = controller.baseUrl;
+      this.#controllerAuthToken = controller.authToken;
       if (this.backend === 'remote-controller-dials') {
         if (!this.#worker) await launchWorker(this.#workerLaunch?.connection ?? { kind: 'listen', port: 0 });
         if (!this.#nodeId) {
@@ -199,7 +201,9 @@ export class ExecutionBackendFixture {
 
   async #request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
     const response = await fetch(`${this.#controllerUrl}${path}`, {
-      method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+      method, headers: { 'Content-Type': 'application/json',
+        ...(this.#controllerAuthToken ? { Authorization: `Bearer ${this.#controllerAuthToken}` } : {}),
+      }, body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`Execution-node fixture request failed (${response.status})`);
     return response.json() as Promise<T>;

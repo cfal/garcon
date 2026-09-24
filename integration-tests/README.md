@@ -43,6 +43,10 @@ Keep scenario policy in the test and reusable mechanics in `support/`. Extend `G
 
 Use `withIntegrationFixture` so every test receives fresh config, workspace, project, home, server, WebSocket client, and both fake-provider states. Direct helpers take an explicit agent configuration; use `fixture.directAgents.openAi` or `fixture.directAgents.anthropic` so protocol selection is visible at each call site.
 
+Controllers bind `0.0.0.0` with authentication enabled. Each fixture seeds random credentials before startup, and its HTTP, WebSocket, and browser clients authenticate automatically. Use `fixture.client.fetch()` for raw controller requests; plain `fetch()` remains unauthenticated for negative tests. Controller restarts preserve the fixture's signing secret so existing browser tokens remain valid.
+
+For additional Chromium contexts, call `authenticateChromiumContext(context, integration)` before navigation. Playwright `page.request` calls do not inherit browser local storage; use the authenticated fixture client or pass `Authorization: Bearer ${integration.garcon.authToken}` explicitly. Raw WebSocket upgrades must pass `webSocketProtocolsForAuth(integration.garcon.authToken)` from `common/ws-auth.ts`.
+
 ```ts
 test('preserves the invariant', async () => {
   await withIntegrationFixture('descriptive-artifact-name', async (fixture) => {

@@ -51,7 +51,7 @@ test('node onboarding is available offline and keeps credentials out of public s
     const nodes = await nodeSnapshots(client);
     expect(nodes[1]).toMatchObject({ id: created.id, availability: 'offline', projectBasePath: null });
     expect(JSON.stringify(nodes)).not.toContain(secret);
-    const reveal = await fetch(`${fixture.garcon.baseUrl}/api/v1/execution-nodes/${created.id}/connection`);
+    const reveal = await fixture.client.fetch(`/api/v1/execution-nodes/${created.id}/connection`);
     expect(reveal.headers.get('cache-control')).toBe('no-store');
     expect(await reveal.json()).toEqual({ connectionUrl: created.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: false });
     await expect(client.get(`/api/v1/models?nodeId=${created.id}`)).rejects.toMatchObject({ status: 503 });
@@ -142,7 +142,7 @@ test('Local and two public workers coexist and retain chats and settings for del
 
       const localFile = join(fixture.dirs.project, 'input.txt');
       await writeFile(localFile, 'Controller content');
-      const blocked = await fetch(`${fixture.garcon.baseUrl}/api/v1/files/text?projectPath=${encodeURIComponent(fixture.dirs.project)}&path=input.txt`, {
+      const blocked = await fixture.client.fetch(`/api/v1/files/text?projectPath=${encodeURIComponent(fixture.dirs.project)}&path=input.txt`, {
         method: 'PUT', headers: { 'Content-Type': 'Application/JSON' },
         body: JSON.stringify({ nodeId: outbound.id, content: 'Do not write', expectedRevision: 'v1:synthetic', conflictResolution: 'overwrite' }),
       });
@@ -157,7 +157,8 @@ test('Local and two public workers coexist and retain chats and settings for del
       await client.delete(`/api/v1/execution-nodes/${inbound.id}`);
       await expect(client.get(`/api/v1/models?nodeId=${inbound.id}`)).rejects.toMatchObject({ status: 503 });
       const requestCount = fixture.fakeProviders.openAi.requests().length;
-      await expect(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' })).rejects.toBeDefined();
+      await expect(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' }))
+        .rejects.toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
 
       for (const worker of workers) await worker.stop();

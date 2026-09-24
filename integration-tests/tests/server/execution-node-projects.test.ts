@@ -7,11 +7,12 @@ import { parseTerminalStreamServerMessage } from '../../../common/terminal.js';
 import { assertRealWithinBase } from '../../../server/lib/path-boundary.js';
 import { userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 
-async function terminalResponse(baseUrl: string) {
+async function terminalResponse(baseUrl: string, authToken: string | null) {
   const received = Promise.withResolvers<unknown>();
   const closed = Promise.withResolvers<void>();
-  const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/ws`);
+  const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/ws`, webSocketProtocolsForAuth(authToken));
   socket.addEventListener('open', () => socket.send(JSON.stringify({
     type: 'terminal-attach', terminalId: 'synthetic-terminal', clientId: 'synthetic-client',
     afterSequence: 0, intent: 'restore',
@@ -75,7 +76,7 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
         .toMatchObject({ nodeId, status: 'not-git-repository' });
       expect(await client.get(`/api/v1/gh/status?nodeId=${nodeId}`)).toMatchObject({ nodeId });
       expect(await client.get(`/api/v1/terminals?nodeId=${nodeId}`)).toMatchObject({ success: true, terminals: [] });
-      expect(await terminalResponse(fixture.garcon.baseUrl)).toMatchObject({
+      expect(await terminalResponse(fixture.garcon.baseUrl, fixture.garcon.authToken)).toMatchObject({
         type: 'terminal-error', code: 'terminal-validation', message: 'Terminal attachment identity is required.',
       });
       await expect(client.post('/api/v1/tickets/project-default', { nodeId, directory: fixture.dirs.project }))

@@ -1,8 +1,16 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isolatedEnvironment } from './garcon-process.js';
 
 export async function runFixtureGit(project: string, ...args: string[]): Promise<string> {
-  const child = Bun.spawn(['git', ...args], { cwd: project, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn(['git', ...args], {
+    cwd: project,
+    env: isolatedEnvironment(project, {
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    }),
+    stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+  });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   if (code !== 0) throw new Error(`Fixture git ${args[0]} failed: ${stderr}`);
   return stdout;

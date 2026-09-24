@@ -1,3 +1,4 @@
+import { webSocketProtocolsForAuth } from '../../common/ws-auth.js';
 import {
   type AgentCatalog,
   type AgentId,
@@ -204,7 +205,8 @@ interface GarconWebSocket {
 
 export interface GarconTestClientOptions {
   nodeId?: string;
-  createWebSocket?: (url: string) => GarconWebSocket;
+  authToken?: string | null;
+  createWebSocket?: (url: string, protocols: string[]) => GarconWebSocket;
   redactSensitiveDiagnostics?: boolean;
 }
 
@@ -319,7 +321,8 @@ async function responseBody(response: Response): Promise<unknown> {
 export class GarconTestClient {
   readonly nodeId: string;
   readonly #baseUrl: string;
-  readonly #createWebSocket: (url: string) => GarconWebSocket;
+  readonly #authToken: string | null;
+  readonly #createWebSocket: (url: string, protocols: string[]) => GarconWebSocket;
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #exchanges: HttpExchange[] = [];
   readonly #eventRecords: EventRecord[] = [];
@@ -331,7 +334,8 @@ export class GarconTestClient {
   private constructor(baseUrl: string, options: GarconTestClientOptions) {
     this.nodeId = options.nodeId ?? 'local';
     this.#baseUrl = baseUrl.replace(/\/$/, '');
-    this.#createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
+    this.#authToken = options.authToken ?? null;
+    this.#createWebSocket = options.createWebSocket ?? ((url, protocols) => new WebSocket(url, protocols));
     this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
   }
 
@@ -343,6 +347,14 @@ export class GarconTestClient {
 
   get baseUrl(): string {
     return this.#baseUrl;
+  }
+
+  fetch(path: string, init: RequestInit = {}): Promise<Response> {
+    const url = new URL(path, this.#baseUrl);
+    if (url.origin !== this.#baseUrl) throw new Error('Fixture requests must stay on the controller origin');
+    const headers = new Headers(init.headers);
+    if (this.#authToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${this.#authToken}`);
+    return fetch(url, { ...init, headers });
   }
 
   markEvents(): number {
@@ -379,7 +391,7 @@ export class GarconTestClient {
     this.assertProtocolHealthy();
     if (this.#socket && this.#socket.readyState === WEB_SOCKET_OPEN) return;
     const wsUrl = this.#baseUrl.replace(/^http/, 'ws') + '/ws';
-    const socket = this.#createWebSocket(wsUrl);
+    const socket = this.#createWebSocket(wsUrl, webSocketProtocolsForAuth(this.#authToken));
     this.#socket = socket;
     const opened = new Deferred<void>();
     socket.addEventListener('open', () => opened.resolve());
@@ -1179,7 +1191,7 @@ export class GarconTestClient {
     path: string,
     body?: unknown,
   ): Promise<{ response: Response; parsed: unknown }> {
-    const response = await fetch(`${this.#baseUrl}${path}`, {
+    const response = await this.fetch(path, {
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),

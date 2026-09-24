@@ -13,6 +13,7 @@ import type {
 } from '../../../common/cli-presentation.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
+  authenticateChromiumContext,
   withChromiumFixture,
   type ChromiumFixture,
 } from '../../support/chromium-fixture.js';
@@ -454,6 +455,7 @@ describe('Chromium transcript chat rows', () => {
       const observerContext = await fixture.browser.newContext({
         viewport: { width: 1440, height: 900 },
       });
+      await authenticateChromiumContext(observerContext, fixture.integration);
       await allowDirectChats(observerContext);
       await installSocketTracker(observerContext);
       const observerPage = await observerContext.newPage();

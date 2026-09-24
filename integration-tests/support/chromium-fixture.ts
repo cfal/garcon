@@ -43,6 +43,19 @@ export async function closeChromiumBrowser(browser: Browser): Promise<void> {
   );
 }
 
+export async function authenticateChromiumContext(
+  context: BrowserContext,
+  integration: IntegrationFixture,
+): Promise<void> {
+  const authToken = integration.garcon.authToken;
+  if (!authToken) throw new Error('Chromium fixture requires an authenticated controller.');
+  await context.addInitScript((authToken) => {
+    if (location.hostname === '127.0.0.1' && !globalThis.localStorage.getItem('bearer-token')) {
+      globalThis.localStorage.setItem('bearer-token', authToken);
+    }
+  }, authToken);
+}
+
 export async function createChromiumFixture(
   integrationOptions: IntegrationFixtureOptions = {},
   sharedBrowser?: Browser,
@@ -57,6 +70,7 @@ export async function createChromiumFixture(
     context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
     });
+    await authenticateChromiumContext(context, integration);
     await context.addInitScript(() => {
       const key = 'pref_local_settings';
       try {

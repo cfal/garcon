@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
+import { fixtureAuthToken, prepareFixtureAuth } from './fixture-auth.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const LOG_CAPACITY = 2_000;
@@ -16,10 +17,8 @@ export interface GarconProcessOptions {
   startupTimeoutMs?: number;
   environment?: Record<string, string>;
   redactEnvironmentValues?: boolean;
-  disableAuth?: boolean;
+  authentication?: 'existing';
   port?: number;
-  onExecutionNodeListening?: (url: string) => void;
-  onExecutionNodeReady?: () => void;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -95,6 +94,7 @@ export class GarconProcess {
   readonly #stdoutPump: Promise<void>;
   readonly #stderrPump: Promise<void>;
   #baseUrl = '';
+  #authToken: string | null = null;
   #expectedExit = false;
   #unexpectedExit: string | null = null;
   #exitCode: number | null = null;
@@ -103,12 +103,9 @@ export class GarconProcess {
     child: GarconChild,
     ready: Deferred<string>,
     redactedEnvironment: Record<string, string>,
-    onExecutionNodeListening?: (url: string) => void,
-    onExecutionNodeReady?: () => void,
   ) {
     this.#child = child;
     let readinessText = '';
-    let executionNodeDiscovered = false;
     const inspectText = (text: string) => {
       readinessText = `${readinessText}${text}`.slice(-2_000);
       const match = SERVER_READY_PATTERN.exec(readinessText);
@@ -117,15 +114,9 @@ export class GarconProcess {
         clientUrl.hostname = '127.0.0.1';
         ready.resolve(clientUrl.origin);
       }
-      const executionNode = /Execution node listening at (ws:\/\/[^\s]+)/.exec(readinessText);
-      if (executionNode && !executionNodeDiscovered) {
-        executionNodeDiscovered = true;
-        onExecutionNodeListening?.(executionNode[1]);
-      }
     };
     const captureLine = (line: string) => {
       this.#logs.push(redactSensitiveEnvironmentText(line, redactedEnvironment));
-      if (line.includes('[server-events] Execution node ready')) onExecutionNodeReady?.();
     };
     this.#stdoutPump = pumpLines(child.stdout, 'stdout', inspectText, captureLine);
     this.#stderrPump = pumpLines(child.stderr, 'stderr', inspectText, captureLine);
@@ -142,6 +133,7 @@ export class GarconProcess {
     const ready = new Deferred<string>();
     const environment = isolatedEnvironment(options.homeDir, options.environment);
     await mkdir(environment.TMPDIR, { recursive: true });
+    const credentials = options.authentication === 'existing' ? null : await prepareFixtureAuth(options.configDir);
     const workspaceArguments = options.workspaceName
       ? ['--workspace', options.workspaceName]
       : ['--workspace-dir', options.workspaceDir];
@@ -153,7 +145,6 @@ export class GarconProcess {
         String(options.port ?? 0),
         '--bind-address',
         '0.0.0.0',
-        ...(options.disableAuth === false ? [] : ['--disable-auth']),
         '--config-dir',
         options.configDir,
         ...workspaceArguments,
@@ -170,8 +161,6 @@ export class GarconProcess {
       child,
       ready,
       options.redactEnvironmentValues ? options.environment ?? {} : {},
-      options.onExecutionNodeListening,
-      options.onExecutionNodeReady,
     );
 
     try {
@@ -180,6 +169,7 @@ export class GarconProcess {
         options.startupTimeoutMs ?? 20_000,
         () => `Timed out waiting for Garcon startup.\n${instance.describeLogs()}`,
       );
+      if (credentials) instance.#authToken = await fixtureAuthToken(instance.#baseUrl, credentials);
       return instance;
     } catch (error) {
       await instance.#terminateAfterStartupFailure();
@@ -189,6 +179,10 @@ export class GarconProcess {
 
   get baseUrl(): string {
     return this.#baseUrl;
+  }
+
+  get authToken(): string | null {
+    return this.#authToken;
   }
 
   get pid(): number | null {

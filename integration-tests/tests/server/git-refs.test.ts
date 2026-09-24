@@ -1,3 +1,4 @@
+import type { GarconTestClient } from "../../support/garcon-client.js";
 import { describe, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -42,7 +43,7 @@ async function commitAt(
 }
 
 async function getRefs(
-  baseUrl: string,
+  client: GarconTestClient,
   project: string,
   sort?: GitRefSort,
   options: { query?: string; limit?: number } = {},
@@ -54,7 +55,7 @@ async function getRefs(
   }
   if (options.query) params.set("query", options.query);
   if (options.limit) params.set("limit", String(options.limit));
-  const response = await fetch(`${baseUrl}/api/v1/git/refs?${params}`);
+  const response = await client.fetch(`/api/v1/git/refs?${params}`);
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -89,7 +90,7 @@ describe("Git refs HTTP API", () => {
       );
 
       const defaultName = await getRefs(
-        fixture.garcon.baseUrl,
+        fixture.client,
         project,
         undefined,
         { query: "candidate" },
@@ -100,7 +101,7 @@ describe("Git refs HTTP API", () => {
       ]);
 
       const newest = await getRefs(
-        fixture.garcon.baseUrl,
+        fixture.client,
         project,
         { key: "updated", direction: "desc" },
         { query: "candidate", limit: 1 },
@@ -113,7 +114,7 @@ describe("Git refs HTTP API", () => {
       ]);
 
       const oldest = await getRefs(
-        fixture.garcon.baseUrl,
+        fixture.client,
         project,
         { key: "updated", direction: "asc" },
         { query: "candidate" },
@@ -132,7 +133,7 @@ describe("Git refs HTTP API", () => {
       ]);
 
       const tags = await getRefs(
-        fixture.garcon.baseUrl,
+        fixture.client,
         project,
         { key: "updated", direction: "desc" },
         { query: "release" },
@@ -154,8 +155,8 @@ describe("Git refs HTTP API", () => {
         project,
         sort: "updated",
       });
-      const invalidResponse = await fetch(
-        `${fixture.garcon.baseUrl}/api/v1/git/refs?${invalid}`,
+      const invalidResponse = await fixture.client.fetch(
+        `/api/v1/git/refs?${invalid}`,
       );
       expect(invalidResponse.status).toBe(400);
       expect(await invalidResponse.json()).toMatchObject({
@@ -168,8 +169,8 @@ describe("Git refs HTTP API", () => {
   test("preserves the non-repository API error", async () => {
     await withIntegrationFixture("git-refs-non-repository", async (fixture) => {
       const params = new URLSearchParams({ project: fixture.dirs.project });
-      const response = await fetch(
-        `${fixture.garcon.baseUrl}/api/v1/git/refs?${params}`,
+      const response = await fixture.client.fetch(
+        `/api/v1/git/refs?${params}`,
       );
 
       expect(response.status).toBe(400);

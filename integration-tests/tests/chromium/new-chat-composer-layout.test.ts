@@ -53,6 +53,9 @@ describe("Chromium New Chat composer layout", () => {
         const modelUpdate = await fixture.page.request.put(
           `${fixture.integration.garcon.baseUrl}/api/v1/api-providers?id=${encodeURIComponent(directProvider.providerId)}`,
           {
+            headers: {
+              Authorization: `Bearer ${fixture.integration.garcon.authToken}`,
+            },
             data: {
               endpoint: {
                 models: [

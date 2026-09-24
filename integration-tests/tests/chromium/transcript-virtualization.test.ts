@@ -5279,7 +5279,7 @@ async function verifyReusedPermissionOccurrence(
     async (input) => {
       const stale = await fetch('/api/v1/chats/permissions/decision', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bearer-token')}` },
         body: JSON.stringify(input),
       });
       return { status: stale.status, body: (await stale.json()) as unknown };

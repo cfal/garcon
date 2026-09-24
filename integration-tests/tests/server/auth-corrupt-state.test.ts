@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GarconProcess } from '../../support/garcon-process.js';
+import { prepareFixtureAuth } from '../../support/fixture-auth.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -28,7 +29,7 @@ function processOptions(directories: Awaited<ReturnType<typeof createDirectories
     workspaceDir: directories.workspace,
     projectDir: directories.project,
     homeDir: directories.home,
-    disableAuth: false,
+    authentication: 'existing' as const,
   };
 }
 
@@ -65,6 +66,7 @@ describe('corrupt auth state', () => {
     const corruptBytes = '{"jwtSecret":"runtime-secret"';
     let garcon: GarconProcess | null = null;
     try {
+      await prepareFixtureAuth(directories.config);
       garcon = await GarconProcess.start(processOptions(directories));
       await writeFile(authPath, corruptBytes, { mode: 0o600 });
 

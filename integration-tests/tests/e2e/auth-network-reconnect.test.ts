@@ -5,7 +5,9 @@ import { SpaDriver } from '../../support/spa-driver.js';
 describe('Lightpanda auth reconnect recovery', () => {
   test('preserves a stored session and protected route while auth is unavailable', async () => {
     await withE2eFixture('auth-network-reconnect', async (fixture) => {
-      await fixture.page.evaluateOnNewDocument(() => {
+      const savedToken = fixture.integration.garcon.authToken;
+      if (!savedToken) throw new Error('Fixture authentication is missing');
+      await fixture.page.evaluateOnNewDocument((token) => {
         const scope = globalThis as typeof globalThis & {
           __garconAuthApiAvailable?: boolean;
           __garconAuthStatusAttempts?: number;
@@ -13,7 +15,7 @@ describe('Lightpanda auth reconnect recovery', () => {
         const nativeFetch = globalThis.fetch;
         scope.__garconAuthApiAvailable = false;
         scope.__garconAuthStatusAttempts = 0;
-        localStorage.setItem('bearer-token', 'saved-token');
+        localStorage.setItem('bearer-token', token);
         globalThis.fetch = Object.assign(
           async (input: RequestInfo | URL, init?: RequestInit) => {
             const rawUrl = typeof input === 'string' || input instanceof URL
@@ -36,7 +38,7 @@ describe('Lightpanda auth reconnect recovery', () => {
           },
           { preconnect: nativeFetch.preconnect },
         );
-      });
+      }, savedToken);
 
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
@@ -50,7 +52,7 @@ describe('Lightpanda auth reconnect recovery', () => {
         }).__garconAuthStatusAttempts,
       }))).toEqual({
         pathname: '/',
-        token: 'saved-token',
+        token: savedToken,
         attempts: 5,
       });
 
@@ -64,7 +66,7 @@ describe('Lightpanda auth reconnect recovery', () => {
       await fixture.waitForSpaWebSocket();
 
       expect(await fixture.page.evaluate(() => localStorage.getItem('bearer-token')))
-        .toBe('saved-token');
+        .toBe(savedToken);
       const recoveredAttemptCount = await fixture.page.evaluate(() =>
         (globalThis as typeof globalThis & {
           __garconAuthStatusAttempts?: number;

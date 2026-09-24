@@ -1005,7 +1005,7 @@ describe('garcon-cli', () => {
         workspaceName: WORKSPACE,
         projectDir: fixture.dirs.project,
         homeDir: fixture.dirs.home,
-        disableAuth: false,
+        authentication: 'existing',
       });
 
       const started = await runCli(startArguments(fixture, 'cli-authenticated'));
@@ -1036,7 +1036,7 @@ describe('garcon-cli', () => {
         workspaceName: WORKSPACE,
         projectDir: fixture.dirs.project,
         homeDir: fixture.dirs.home,
-        disableAuth: false,
+        authentication: 'existing',
       });
 
       const unauthenticated = await fetch(

@@ -108,7 +108,9 @@ describe("Lightpanda Chat Board", () => {
       await app.clickDialogButton("Apply tag changes");
       await fixture.page.waitForFunction(
         async (id) => {
-          const response = await fetch("/api/v1/chats");
+          const response = await fetch("/api/v1/chats", {
+            headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` },
+          });
           const body = (await response.json()) as {
             sessions?: { id: string; tags: string[] }[];
           };
@@ -179,7 +181,9 @@ describe("Lightpanda Chat Board", () => {
       await app.clickDialogButton("Apply tag changes");
       await fixture.page.waitForFunction(
         async (id) => {
-          const response = await fetch("/api/v1/chats");
+          const response = await fetch("/api/v1/chats", {
+            headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` },
+          });
           const body = (await response.json()) as {
             sessions?: { id: string; tags: string[] }[];
           };
