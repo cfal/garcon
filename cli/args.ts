@@ -1680,7 +1680,6 @@ export function parseCliArgs(
       resource,
       ...connection,
       json: values.json === true,
-      ...(serverUrl === undefined ? {} : { serverUrl }),
       ...(agentId === undefined ? {} : { agentId }),
       ...(providerId === undefined ? {} : { providerId }),
       ...(endpointId === undefined ? {} : { endpointId }),
@@ -1715,7 +1714,6 @@ export function parseCliArgs(
 
   const shared = {
     ...connection,
-    ...(serverUrl === undefined ? {} : { serverUrl }),
     ...(agentId === undefined ? {} : { agentId }),
     ...(providerId === undefined ? {} : { providerId }),
     ...(endpointId === undefined ? {} : { endpointId }),

@@ -288,12 +288,11 @@ async function submitResume(
     if (invocation.agentId !== undefined) request.expectedAgentId = invocation.agentId;
   }
   if (needsCatalog && !request.handoff) {
-    const owner = chat;
-    const catalog = await client.getModelCatalog(owner.agentId, signal, nodeId);
-    request.expectedAgentOwnershipEpoch = owner.agentOwnershipEpoch;
-    validateExplicitModes(catalog, owner.agentId, invocation);
+    const catalog = await client.getModelCatalog(chat.agentId, signal, nodeId);
+    request.expectedAgentOwnershipEpoch = chat.agentOwnershipEpoch;
+    validateExplicitModes(catalog, chat.agentId, invocation);
     if (invocation.model !== undefined) {
-      Object.assign(request, resolveModelSelection(catalog, owner.agentId, {
+      Object.assign(request, resolveModelSelection(catalog, chat.agentId, {
         model: invocation.model,
         providerId: invocation.providerId,
         endpointId: invocation.endpointId,

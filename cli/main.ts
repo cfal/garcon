@@ -1,6 +1,6 @@
 import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
-import { CLI_HELP, parseCliArgs, type ParsedCliCommand } from './args.js';
+import { CLI_HELP, parseCliArgs, type CliConnectionOptions, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { resumeChatAsync, stopChat } from './chat-control.js';
 import { addRow, runAddRow, validateAddRowContent } from './chat-row.js';
@@ -136,7 +136,7 @@ async function canonicalProjectDirectory(cwd: string): Promise<string> {
 }
 
 async function connectedClient(
-  command: { configDir: string; workspace: string; serverUrl?: string; runtimeFile?: string; expectedWorkspace?: string },
+  command: CliConnectionOptions,
   options: MainOptions,
 ): Promise<GarconClient> {
   const discover = options.discoverRuntime ?? discoverRuntime;
