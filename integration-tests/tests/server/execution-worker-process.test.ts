@@ -6,6 +6,7 @@ import { ExecutionNodeProcess } from '../../support/execution-backend.js';
 import { WebSocketLink } from '../../../server/execution-nodes/websocket-link.js';
 import { parseConnectionUrl } from '../../../server/execution-nodes/connection-url.js';
 import { RemoteExecutionNode } from '../../../server/execution-nodes/remote.js';
+import { AgentRpc } from '../../../server/execution-nodes/rpc.js';
 import { withTimeout } from '../../support/deferred.js';
 
 for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as const) {
@@ -72,10 +73,20 @@ test('re-adding a running worker under a new node identity requires restarting t
         controller.dial(url.href);
         await withTimeout(connected, 10_000, () => worker!.logs.join('\n'));
       } else {
+        const session = Promise.withResolvers<AgentRpc>();
+        const unsubscribe = controller.onSession((transport) => session.resolve(new AgentRpc(transport)));
+        controller.dial(url.href);
+        const rpc = await withTimeout(session.promise, 10_000, () => worker!.logs.join('\n'));
+        await rpc.transport.ready;
+        const description = await rpc.call('', 'node.describe', null);
+        expect(description.info.nodeId).toBe('22222222-2222-4222-8222-222222222222');
+        await expect(rpc.call('', 'projects.inspect', { projectPath: directories.project }))
+          .rejects.toMatchObject({ outcome: 'not-dispatched' });
+        rpc.retireUnknown();
+        unsubscribe();
         const failure = Promise.withResolvers<string>();
         const remote = new RemoteExecutionNode(nodeId, controller, undefined, failure.resolve);
         try {
-          controller.dial(url.href);
           const message = await withTimeout(failure.promise, 10_000, () => worker!.logs.join('\n'));
           expect(message).toContain('restart the worker to serve');
           expect(remote.availability).toBe('offline');

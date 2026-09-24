@@ -56,12 +56,18 @@ export async function runExecutionWorker(
     lastError = message;
   });
   link.onSession((transport) => {
-    if (node && transport.nodeId !== node.id) {
-      transport.close(new Error('The retained worker belongs to a different execution node'));
-      return;
-    }
     void serving?.dispose();
     const rpc = new AgentRpc(transport);
+    if (node && transport.nodeId !== node.id) {
+      currentRpc = null;
+      const retained = node;
+      // Description lets the controller report the required restart without rebinding retained processes.
+      rpc.handle(async (call) => {
+        if (call.method === 'node.describe') return { info: await retained.getInfo(), integrations: [] };
+        throw new AgentCallError('not-dispatched', 'Restart the worker to serve a different execution node');
+      });
+      return;
+    }
     currentRpc = rpc;
     transport.onFailure(() => { if (currentRpc === rpc) currentRpc = null; });
     node ??= new InProcessExecutionNode({
