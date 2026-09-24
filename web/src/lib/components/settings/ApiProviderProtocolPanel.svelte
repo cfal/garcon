@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button';
-	import { buttonVariants } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		DropdownMenu,
@@ -18,6 +17,10 @@
 	import ApiProviderEndpointDialog from './ApiProviderEndpointDialog.svelte';
 	import ApiProviderProfileRow from './ApiProviderProfileRow.svelte';
 
+	type ProviderDialogRequest =
+		| { kind: 'create'; templateId: ApiProviderTemplateId }
+		| { kind: 'edit' | 'duplicate'; endpointId: string };
+
 	let {
 		protocol,
 		title,
@@ -32,10 +35,7 @@
 
 	const providers = getApiProviders();
 	onMount(() => providers.retain());
-	let dialogOpen = $state(false);
-	let editingEndpointId = $state<string | null>(null);
-	let createTemplateId = $state<ApiProviderTemplateId>('custom');
-	let duplicate = $state(false);
+	let dialogRequest = $state<ProviderDialogRequest | null>(null);
 	const templateOptions = $derived(templatesForProtocol(protocol));
 
 	const endpointRows = $derived.by(() => {
@@ -57,17 +57,16 @@
 		);
 	});
 
-	function beginCreate(templateId: ApiProviderTemplateId) {
-		editingEndpointId = null;
-		duplicate = false;
-		createTemplateId = templateId;
-		dialogOpen = true;
+	function beginCreate(templateId: ApiProviderTemplateId): void {
+		dialogRequest = { kind: 'create', templateId };
 	}
 
-	function beginEdit(endpointId: string) {
-		editingEndpointId = endpointId;
-		duplicate = false;
-		dialogOpen = true;
+	function beginEdit(endpointId: string): void {
+		dialogRequest = { kind: 'edit', endpointId };
+	}
+
+	function beginDuplicate(endpointId: string): void {
+		dialogRequest = { kind: 'duplicate', endpointId };
 	}
 
 	function templateMenuLabel(templateId: ApiProviderTemplateId): string {
@@ -131,10 +130,7 @@
 					profile={row.apiProvider}
 					endpoint={row.endpoint}
 					onEdit={() => beginEdit(row.endpoint.id)}
-					onDuplicate={() => {
-						beginEdit(row.endpoint.id);
-						duplicate = true;
-					}}
+					onDuplicate={() => beginDuplicate(row.endpoint.id)}
 				/>
 				{#snippet failed()}<p class="text-sm text-destructive">
 						Unable to display provider.
@@ -143,15 +139,15 @@
 		{/each}
 	</div>
 
-	{#if dialogOpen}
+	{#if dialogRequest}
 		<ApiProviderEndpointDialog
-			{duplicate}
-			open={dialogOpen}
+			open
 			{protocol}
-			endpointId={editingEndpointId}
-			templateId={createTemplateId}
+			duplicate={dialogRequest.kind === 'duplicate'}
+			endpointId={dialogRequest.kind === 'create' ? null : dialogRequest.endpointId}
+			templateId={dialogRequest.kind === 'create' ? dialogRequest.templateId : 'custom'}
 			onOpenChange={(open) => {
-				dialogOpen = open;
+				if (!open) dialogRequest = null;
 			}}
 		/>
 	{/if}

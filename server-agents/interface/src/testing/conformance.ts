@@ -5,7 +5,7 @@ import type {
 } from '../index.js';
 
 const REQUIRED_FACET_METHODS = {
-  producers: ['bind', 'close', 'subscribe'],
+  producers: ['bind', 'close', 'detach', 'subscribe'],
   permissions: ['respond'],
   execution: ['start', 'resume', 'abort', 'runningSessions'],
   catalog: ['snapshot'],

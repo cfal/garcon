@@ -384,6 +384,111 @@ describe('ChatExecutionCoordinator', () => {
     await coordinator.releaseDirectTurn(successor);
   });
 
+  for (const failureAt of ['capture', 'dispatch']) {
+    it(`queues server control after unavailable ${failureAt} and exact-attempt settlement`, async () => {
+      const unavailable = new DomainError('EXECUTION_NODE_UNAVAILABLE', 'Node reconnecting', 503);
+      const attempted = deferred();
+      const fixture = createFixture({ turnRunner: {
+        captureSteerTarget: mock(async () => {
+          if (failureAt === 'capture') {
+            attempted.resolve();
+            throw unavailable;
+          }
+          return { providerTurnId: 'provider-turn-1' };
+        }),
+        steerInput: mock(async () => { attempted.resolve(); throw unavailable; }),
+      } });
+      coordinator = fixture.coordinator;
+      const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+      const delivery = coordinator.deliverServerControlInput(
+        'chat-1', interAgentInput(), new AbortController().signal,
+      );
+      let outcome;
+      void delivery.then(value => { outcome = value; }, error => { outcome = error; });
+      await attempted.promise;
+      await Promise.resolve();
+      expect(outcome).toBeUndefined();
+      expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
+
+      await coordinator.releaseDirectTurn(reservation);
+      const successor = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-2' });
+      expect(await delivery).toBe('queued');
+      expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toHaveLength(1);
+      expect(fixture.turnRunner.captureSteerTarget).toHaveBeenCalledTimes(1);
+      expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(failureAt === 'capture' ? 0 : 1);
+      expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+      await coordinator.releaseDirectTurn(successor);
+    });
+
+    it(`schedules control input only after unavailable ${failureAt} and emitting-attempt settlement`, async () => {
+      const attempted = deferred();
+      const fixture = createFixture({ turnRunner: {
+        captureSteerTarget: mock(async () => {
+          if (failureAt === 'capture') {
+            attempted.resolve();
+            throw new Error('Synthetic capture failure');
+          }
+          return { providerTurnId: 'provider-turn-1' };
+        }),
+        steerInput: mock(async () => {
+          attempted.resolve();
+          throw new DomainError('EXECUTION_NODE_UNAVAILABLE', 'Node reconnecting', 503);
+        }),
+      } });
+      coordinator = fixture.coordinator;
+      const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+      const onControlRun = mock(() => undefined);
+      const delivery = coordinator.deliverControlInput(
+        'chat-1', 'Synthetic command feedback', 'view-1', 'turn-1',
+        new AbortController().signal, onControlRun,
+      );
+      void delivery.catch(() => undefined);
+      await attempted.promise;
+      expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+      await coordinator.releaseDirectTurn(reservation);
+      await delivery;
+      expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(onControlRun).toHaveBeenCalledTimes(1);
+      expect(fixture.turnRunner.captureSteerTarget).toHaveBeenCalledTimes(1);
+      expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    });
+  }
+
+  it('keeps user target capture fail-fast when the node is unavailable', async () => {
+    const unavailable = new DomainError('EXECUTION_NODE_UNAVAILABLE', 'Node reconnecting', 503);
+    const fixture = createFixture({ turnRunner: {
+      captureSteerTarget: mock(async () => { throw unavailable; }),
+    } });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await expect(coordinator.captureSteerTarget('chat-1')).rejects.toBe(unavailable);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it('cancels control fallback while waiting after failed target capture', async () => {
+    const attempted = deferred();
+    const fixture = createFixture({ turnRunner: {
+      captureSteerTarget: mock(async () => {
+        attempted.resolve();
+        throw new Error('Synthetic capture failure');
+      }),
+    } });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const abort = new AbortController();
+    const delivery = coordinator.deliverControlInput(
+      'chat-1', 'Synthetic command feedback', 'view-1', 'turn-1', abort.signal, mock(() => undefined),
+    );
+    void delivery.catch(() => undefined);
+    await attempted.promise;
+    await Promise.resolve();
+    abort.abort(new Error('Synthetic source removed'));
+    await expect(delivery).rejects.toThrow('Synthetic source removed');
+    await coordinator.releaseDirectTurn(reservation);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+  });
+
   it('does not fall back after steering accepts without preparing delivery', async () => {
     const fixture = createFixture({
       turnRunner: {

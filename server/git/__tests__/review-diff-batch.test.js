@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs/promises';
+import { promises as nativeFs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { loadReviewDiffBatches, planReviewDiffBatches } from '../review-diff-batch.js';
+import { loadReviewDiffBatches, planReviewDiffBatches, limitGitReviewResponseBodies } from '../review-diff-batch.js';
+import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
+import { validateGitResult } from '../../../common/git-result-validation.js';
 
 const temporaryDirectories = [];
 
@@ -132,6 +135,78 @@ describe('planReviewDiffBatches', () => {
 });
 
 describe('loadReviewDiffBatches', () => {
+  it.each(['x', '\t'])('bounds individual encoded bodies without shrinking the document budget (%p)', async (character) => {
+    const { document, files } = await createRevisionDocument();
+    const content = `${character.repeat(9999)}\n`.repeat(250);
+    for (const [index, file] of files.entries()) {
+      await fs.writeFile(path.join(document.repoRoot, file.path), character === '\t' && index > 0 ? 'small change\n' : content);
+    }
+    await git(document.repoRoot, ['add', '.']);
+    await git(document.repoRoot, ['commit', '-m', 'bounded review']);
+    document.source.toHash = await git(document.repoRoot, ['rev-parse', 'HEAD']);
+    const loaded = await loadReviewDiffBatches(document, files);
+    const bodies = limitGitReviewResponseBodies(loaded.bodies);
+    expect(loaded.errors).toEqual({});
+    expect(bodies.map(body => body.bodyState)).toEqual(character === 'x' ? ['loaded', 'loaded'] : ['too-large', 'loaded']);
+    if (character === 'x') {
+      expect(bodies.reduce((total, body) => total + body.patchBytes, 0)).toBeGreaterThan(GIT_MAX_RESULT_BYTES);
+    }
+    const scope = { nodeId: 'local', instanceId: 'synthetic-instance' };
+    for (const [index, body] of bodies.entries()) {
+      expect(body.limitReason).toBe(character === '\t' && index === 0 ? 'file-too-many-bytes' : undefined);
+      const response = { ...scope, status: 'ready', documentId: document.id,
+        files: { [body.path]: body }, errors: loaded.errors };
+      expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(GIT_MAX_RESULT_BYTES);
+      expect(() => validateGitResult('getReviewDocumentFileBodies', response, scope)).not.toThrow();
+    }
+  });
+
+  it('loads an untracked group with one scratch index while preserving attributes and literal paths', async () => {
+    const { document } = await createRevisionDocument();
+    const root = document.repoRoot;
+    await fs.writeFile(path.join(root, '.gitattributes'), '*.txt text eol=lf\n');
+    await git(root, ['add', '.gitattributes']);
+    await fs.rm(path.join(root, '.gitattributes'));
+    const names = ['new.txt', 'space name.txt', 'line\nname.txt', ':literal.txt', 'other.txt'];
+    const files = names.map(name => ({ ...reviewFile(name), change: { kind: 'tree-diff', rawStatus: '?', status: 'added' } }));
+    document.source = { kind: 'workbench', mode: 'working' };
+    for (const file of files) await fs.writeFile(path.join(root, file.path), 'synthetic\r\n');
+    const before = await fs.readFile(path.join(root, '.git', 'index'));
+    const copy = spyOn(nativeFs, 'copyFile');
+    const trace = [];
+    try {
+      const result = await loadReviewDiffBatches(document, files, trace);
+      expect(result.errors).toEqual({});
+      expect(result.bodies.map(body => body.path)).toEqual(names);
+      for (const body of result.bodies) {
+        expect(body.bodyState).toBe('loaded');
+        expect(body.patch).toContain('+synthetic\n');
+        expect(body.patch).not.toContain('\r');
+      }
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(trace.filter(entry => entry.args[0] === 'add')).toHaveLength(1);
+      expect(trace.filter(entry => entry.args[0] === 'diff')).toHaveLength(1);
+      expect(await fs.readFile(path.join(root, '.git', 'index'))).toEqual(before);
+      expect((await fs.readdir(path.join(root, '.git'))).filter(name => name.startsWith('.garcon-index-'))).toEqual([]);
+    } finally { copy.mockRestore(); }
+  });
+
+  it('isolates a failed untracked path and cleans every scratch index', async () => {
+    const { document } = await createRevisionDocument();
+    const root = document.repoRoot;
+    document.source = { kind: 'workbench', mode: 'working' };
+    await fs.writeFile(path.join(root, '.gitignore'), 'ignored.txt\n');
+    const files = ['valid.txt', 'ignored.txt'].map(name => ({ ...reviewFile(name), change: { kind: 'tree-diff', rawStatus: '?', status: 'added' } }));
+    for (const file of files) await fs.writeFile(path.join(root, file.path), 'synthetic\n');
+    const before = await fs.readFile(path.join(root, '.git', 'index'));
+    const result = await loadReviewDiffBatches(document, files);
+    expect(result.bodies.find(body => body.path === 'valid.txt')?.bodyState).toBe('loaded');
+    expect(result.errors['ignored.txt']).toBeDefined();
+    expect(result.metrics.bisectionCount).toBe(1);
+    expect(await fs.readFile(path.join(root, '.git', 'index'))).toEqual(before);
+    expect((await fs.readdir(path.join(root, '.git'))).filter(name => name.startsWith('.garcon-index-'))).toEqual([]);
+  });
+
   it('loads multiple revision files with one Git diff process', async () => {
     const { document, files } = await createRevisionDocument();
     const trace = [];

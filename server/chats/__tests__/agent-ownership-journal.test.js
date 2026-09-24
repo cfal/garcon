@@ -485,6 +485,61 @@ describe('AgentOwnershipJournal', () => {
     expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
   });
 
+  it.each([false, true])('retries only the ready node native cleanup (restart=%s)', async (restart) => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const otherNodeId = '33333333-3333-4333-8333-333333333333';
+    const registry = createRegistry({
+      chat: chat('source-agent', { nodeId }),
+      other: chat('source-agent', { nodeId: otherNodeId }),
+    });
+    const release = mock(async () => {});
+    const available = new Set();
+    const native = createIntegrations(release);
+    const options = {
+      workspaceDir, registry, ledger: { deleteChat: mock(() => {}) },
+      integrations: { get: (agentId, node) => available.has(node) ? native.get(agentId) : null },
+    };
+    let journal = new AgentOwnershipJournal(options);
+    await journal.initialize();
+    await journal.delete('chat');
+    await journal.delete('other');
+    await journal.waitForProviderCleanup();
+    if (restart) {
+      journal = new AgentOwnershipJournal(options);
+      await journal.initialize();
+      await journal.waitForProviderCleanup();
+    }
+    expect(release).not.toHaveBeenCalled();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(2);
+    const ledgerDeletes = options.ledger.deleteChat.mock.calls.length;
+    available.add(nodeId);
+    await Promise.all([journal.retryProviderCleanup(nodeId), journal.retryProviderCleanup(nodeId)]);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0][0].chat.chatId).toBe('chat');
+    expect(journal.referencesNode(nodeId)).toBe(false);
+    expect(journal.referencesNode(otherNodeId)).toBe(true);
+    expect(options.ledger.deleteChat).toHaveBeenCalledTimes(ledgerDeletes);
+  });
+
+  it('retains a failed readiness cleanup and retries on the next readiness edge', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const release = mock(async () => { throw new Error('Synthetic release failure'); });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir, registry: createRegistry({ chat: chat('source-agent', { nodeId }) }),
+      integrations: createIntegrations(release), ledger: { deleteChat: mock(() => {}) },
+    });
+    await journal.initialize();
+    await journal.delete('chat');
+    await journal.waitForProviderCleanup();
+    await journal.retryProviderCleanup(nodeId);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(journal.hasPending('chat')).toBe(true);
+    release.mockImplementation(async () => {});
+    await journal.retryProviderCleanup(nodeId);
+    expect(release).toHaveBeenCalledTimes(3);
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+  });
+
   it('retires cleanup queued behind an in-flight release without resurrecting the intent', async () => {
     const nodeId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat('source-agent', { nodeId }) });

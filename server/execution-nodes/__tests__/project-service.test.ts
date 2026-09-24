@@ -116,9 +116,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       const off = remote.node.onAvailabilityChanged((value) => {
         if (value === 'ready') { off(); ready.resolve(); }
       });
-      remote.controller.current!.close();
       await ready.promise;
-      expect(remote.generations).toHaveLength(2);
+      expect(remote.generations).toHaveLength(1);
       expect(await remote.node.getProjectService()).toBe(projects);
       await writeFile(join(f.project, 'input.txt'), 'replacement content');
       expect(await projects.resolveFileMentions(request)).toContain('replacement content');

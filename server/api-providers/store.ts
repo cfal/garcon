@@ -2,9 +2,8 @@
 // Credentials stay server-side; catalog responses expose only redacted flags.
 
 import crypto from 'crypto';
-import { promises as fs, readFileSync, watchFile, unwatchFile } from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
-import lockfile from 'proper-lockfile';
 import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { ApiProviderReferenceWrites } from './reference-writes.js';
 import {
@@ -25,7 +24,6 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { DomainError } from '../lib/domain-error.js';
 
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
-const writeLocks = new KeyedPromiseLock();
 const MODEL_DISCOVERY_KINDS = new Set<ModelDiscoveryKind>([
   'none',
   'anthropic-models',
@@ -326,9 +324,8 @@ function applyApiKeyPatch(
 
 export class ApiProviderStore {
   #snapshot: ApiProviderStoreSnapshot = { version: 2, legacyProviderIds: [], apiProviders: [] };
-  #bytes: string | null = null;
   #unavailable = false;
-  #initialized = false;
+  readonly #writeLock = new KeyedPromiseLock();
   readonly referenceWrites = new ApiProviderReferenceWrites((id) => this.getApiProvider(id) !== null);
   readonly #listeners = new Set<() => void>();
 
@@ -337,15 +334,17 @@ export class ApiProviderStore {
   async init(): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     await this.withLock(async () => {
-      const snapshot = await this.#read();
+      const snapshot = await readJsonStateFile<ApiProviderStoreSnapshot>({
+        filePath: this.filePath,
+        empty: () => ({ version: 2, legacyProviderIds: [], apiProviders: [] }),
+        normalize: normalizeSnapshot,
+      });
       await this.#write(snapshot);
-      this.#snapshot = snapshot;
-      this.#initialized = true;
     });
   }
 
   get legacyProviderIds(): readonly string[] {
-    this.#refresh();
+    this.#assertAvailable();
     return this.#snapshot.legacyProviderIds;
   }
 
@@ -354,40 +353,12 @@ export class ApiProviderStore {
     return () => this.#listeners.delete(listener);
   }
 
-  observe(): () => void {
-    const listener = () => {
-      try {
-        this.#refresh();
-      } catch {
-        this.#notify();
-      }
-    };
-    watchFile(this.filePath, { interval: 1000, persistent: false }, listener);
-    return () => unwatchFile(this.filePath, listener);
-  }
-
   #notify(): void {
     for (const listener of this.#listeners) listener();
   }
 
-  #refresh(): void {
-    this.#assertAvailable();
-    try {
-      // Small configuration reads are synchronous so admission cannot use an old account snapshot.
-      const bytes = readFileSync(this.filePath, 'utf8');
-      if (bytes === this.#bytes) return;
-      const snapshot = normalizeSnapshot(JSON.parse(bytes));
-      this.#snapshot = snapshot;
-      const changed = this.#bytes !== null;
-      this.#bytes = bytes;
-      if (changed) this.#notify();
-    } catch {
-      throw new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE', 'Provider configuration is unavailable. Restore its configuration file.', 503);
-    }
-  }
-
   list(): StoredApiProvider[] {
-    this.#refresh();
+    this.#assertAvailable();
     return this.#snapshot.apiProviders;
   }
 
@@ -422,7 +393,7 @@ export class ApiProviderStore {
     }
 
     return this.withLock(async () => {
-      const snapshot = await this.#read();
+      const snapshot = structuredClone(this.#snapshot);
       const now = new Date().toISOString();
       const id = createApiProviderId(label);
       const endpointId = `${id}_${endpointSuffix(input.protocol)}`;
@@ -449,14 +420,13 @@ export class ApiProviderStore {
       };
       snapshot.apiProviders.push(apiProvider);
       await this.#write(snapshot);
-      this.#snapshot = snapshot;
       return apiProvider;
     });
   }
 
   async updateApiProvider(id: string, input: UpdateApiProviderInput): Promise<StoredApiProvider> {
     return this.withLock(async () => {
-      const snapshot = await this.#read();
+      const snapshot = structuredClone(this.#snapshot);
       const apiProvider = snapshot.apiProviders.find((entry) => entry.id === id);
       if (!apiProvider) throw new Error(`Unknown API provider: ${id}`);
       if (input.revision !== undefined && input.revision !== apiProvider.revision) {
@@ -494,21 +464,19 @@ export class ApiProviderStore {
       }
 
       await this.#write(snapshot);
-      this.#snapshot = snapshot;
       return apiProvider;
     });
   }
 
   async deleteApiProvider(id: string, isReferenced: (apiProviderId: string) => boolean): Promise<void> {
     return this.withLock(async () => {
-      const snapshot = await this.#read();
+      const snapshot = structuredClone(this.#snapshot);
       const apiProvider = snapshot.apiProviders.find((entry) => entry.id === id);
       if (!apiProvider) return;
       const release = this.referenceWrites.deleting(id, () => isReferenced(id));
       try {
         snapshot.apiProviders = snapshot.apiProviders.filter((entry) => entry.id !== id);
         await this.#write(snapshot);
-        this.#snapshot = snapshot;
       } finally {
         release();
       }
@@ -516,35 +484,9 @@ export class ApiProviderStore {
   }
 
   async withLock<T>(fn: () => Promise<T>): Promise<T> {
-    const directory = await fs.realpath(path.dirname(this.filePath));
-    return writeLocks.runExclusive(path.join(directory, path.basename(this.filePath)), async () => {
-      const release = await lockfile.lock(directory, {
-        realpath: false, lockfilePath: path.join(directory, '.api-providers.lock'),
-        retries: { retries: 40, minTimeout: 25, maxTimeout: 250, factor: 1.2 },
-        stale: 30_000, update: 5000,
-        onCompromised: () => {
-          // Bun can continue pending work after an uncaught callback error.
-          process.stderr.write('API provider configuration lock lost (ECOMPROMISED); exiting to prevent stale writes.\n');
-          process.exit(1);
-        },
-      });
-      try {
-        return await fn();
-      } finally {
-        await release();
-      }
-    });
-  }
-
-  async #read(): Promise<ApiProviderStoreSnapshot> {
-    this.#assertAvailable();
-    return readJsonStateFile({
-      filePath: this.filePath,
-      empty: () => {
-        if (this.#initialized) throw new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE', 'Provider configuration is missing.', 503);
-        return { version: 2, legacyProviderIds: [], apiProviders: [] };
-      },
-      normalize: normalizeSnapshot,
+    return this.#writeLock.runExclusive('profiles', () => {
+      this.#assertAvailable();
+      return fn();
     });
   }
 
@@ -556,7 +498,7 @@ export class ApiProviderStore {
       this.#notify();
       throw error;
     }
-    this.#bytes = null;
+    this.#snapshot = snapshot;
     this.#notify();
   }
 

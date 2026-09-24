@@ -5,21 +5,11 @@ import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/c
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
 	INITIAL_VISIBLE_MESSAGES,
-	type ActiveTranscriptPort,
 	type ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
-import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
-import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import type { ConversationSessionsPort } from './conversation-sessions-port.js';
-import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
+import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { JsonValue } from '$shared/json';
-import type { SessionAgentId } from '$lib/types/app';
-import type { ApiProtocol } from '$shared/api-providers';
 import type {
 	PermissionDecisionPayload,
 	QueueEntryPlacement,
@@ -37,11 +27,9 @@ import { ConversationQueueController } from '$lib/chat/conversation/conversation
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
 import { NodeHandoffProjectState } from './node-handoff-project.svelte.js';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import { ConversationPermissionService } from './conversation-permission-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
-import type { ProjectTarget } from '$shared/project-resolution';
 import { classifySubmission } from '$lib/chat/conversation/submission-classifier.js';
 import {
 	errorDetail,
@@ -64,111 +52,13 @@ import {
 } from './conversation-execution-draft-state.svelte.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
-type SessionTranscriptState = Pick<
-	ActiveTranscriptPort,
-	| 'activeChatId'
-	| 'entries'
-	| 'chatMessages'
-	| 'getCursor'
-	| 'isUserScrolledUp'
-	| 'activateChat'
-	| 'appendLocalNotice'
-	| 'clearOptimisticUserInput'
-	| 'markOptimisticUserInputDelivered'
-	| 'clearLocalNotices'
-	| 'loadMessages'
-	| 'upsertOptimisticUserInput'
-	| 'excludedResendOrdinals'
-	| 'clearResendExclusions'
-> & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
-	hasMountedPresentation(chatId: string): boolean;
-	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
-	appendLocalNoticeForChat(
-		chatId: string,
-		noticeType: Parameters<ActiveTranscriptPort['appendLocalNotice']>[0],
-		content: string,
-	): void;
-	clearLocalNoticesForChat(chatId: string, throughRevision?: number): void;
-	noticeRevisionForChat(chatId: string): number;
-};
+import type {
+	SessionControllerDeps,
+	SessionTranscriptLoadTarget,
+	PanelTranscriptSnapshotLoader,
+} from './conversation-session-controller-types.js';
+export type { SessionControllerDeps } from './conversation-session-controller-types.js';
 
-type SessionTranscriptLoadTarget = Pick<
-	ActiveTranscriptPort,
-	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
-> & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
-};
-
-type PanelTranscriptSnapshotLoader = (options: ChatLoadMessagesOptions) => Promise<boolean>;
-
-type SessionComposerState = Pick<
-	ComposerState,
-	| 'inputText'
-	| 'images'
-	| 'contentRevision'
-	| 'isSubmitting'
-	| 'clearAfterSubmit'
-	| 'clearImages'
-	| 'draftSnapshot'
-	| 'draftRevision'
-	| 'isDraftEmpty'
-	| 'restoreDraftIfRevision'
-	| 'restoreDraft'
-	| 'saveDraft'
->;
-
-type SessionAgentState = Pick<
-	AgentState,
-	| 'agentId'
-	| 'nodeId'
-	| 'projectPath'
-	| 'model'
-	| 'apiProviderId'
-	| 'modelEndpointId'
-	| 'modelProtocol'
-	| 'permissionMode'
-	| 'thinkingMode'
-	| 'agentSettings'
-	| 'setAgentId'
-	| 'setAgentSettings'
-	| 'setModelSelection'
->;
-
-type SessionLifecycleState = Pick<
-	ConversationLifecycleState,
-	| 'currentChatId'
-	| 'loadingStatus'
-	| 'beginTurn'
-	| 'beginStopping'
-	| 'clearTurnStatus'
-	| 'restoreStopping'
-	| 'applyProcessingPhase'
-	| 'markTurnRunning'
-	| 'setCurrentChatId'
-	| 'setLoadingStatus'
->;
-
-type SessionConversationUiState = Pick<
-	ConversationUiPort,
-	| 'pendingPermissionRequests'
-	| 'previousPermissionMode'
-	| 'activateTransientFeed'
-	| 'getExecutionControl'
-	| 'setExecutionControlFromLiveUpdate'
-	| 'setExecutionControlFromRefresh'
-	| 'isExecutionControlSocketInstanceConfirmed'
-	| 'setPendingPermissionRequests'
-	| 'setPreviousPermissionMode'
-	| 'pendingPermissionsFor'
-	| 'updatePendingPermissionsForChat'
-	| 'beginPlanModeForChat'
-	| 'previousPermissionModeFor'
-	| 'finishPlanModeForChat'
-	| 'setTransientFeedFromSnapshot'
->;
-
-type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
 interface DirectAdmissionBarrier {
 	settled: Promise<void>;
 	release: () => void;
@@ -182,62 +72,6 @@ function createDirectAdmissionBarrier(): DirectAdmissionBarrier {
 	return { settled, release };
 }
 
-export interface SessionControllerDeps {
-	sessions: ConversationSessionsPort;
-	chatState: SessionTranscriptState;
-	composerState: SessionComposerState;
-	agentState: SessionAgentState;
-	lifecycle: SessionLifecycleState;
-	lifecycleForChat(chatId: string): SessionLifecycleState;
-	conversationUi: SessionConversationUiState;
-	startupCoordinator: SessionStartupCoordinator;
-	modelCatalog: {
-		getModelForSelection: ModelCatalogStore['getModelForSelection'];
-		isLocalModel: (
-			agentId: SessionAgentId,
-			model: string,
-			modelEndpointId?: string | null,
-		) => boolean;
-		selectionFor: (
-			agentId: SessionAgentId,
-			model: string,
-			modelEndpointId?: string | null,
-		) => {
-			model: string;
-			apiProviderId: string | null;
-			modelEndpointId: string | null;
-			modelProtocol: ApiProtocol | null;
-		};
-		selectionValueFor: (
-			agentId: SessionAgentId,
-			model: string,
-			modelEndpointId?: string | null,
-		) => string;
-		getAgentLabel: (agentId: SessionAgentId) => string;
-		getDefaultAgentSettings: (agentId: SessionAgentId) => AgentSettingsEnvelope;
-		getPermissionModes: (agentId: SessionAgentId) => readonly PermissionMode[];
-		getThinkingModes: (agentId: SessionAgentId) => readonly ThinkingMode[];
-		supportsFork: (agentId: SessionAgentId) => boolean;
-		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
-		supportsSteering: (agentId: SessionAgentId) => boolean;
-	};
-	getExecutionDefaults(
-		agentId: SessionAgentId,
-		nodeId?: string,
-	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
-	modelCatalogForNode(nodeId: string): SessionControllerDeps['modelCatalog'];
-	canSubmitToNode(nodeId: string): boolean;
-	appShell: {
-		openNewChatDialog: (opts: { prefill: string }) => void;
-	};
-	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	navigation: { navigateToChat?: (chatId: string) => void };
-	requestProcessingSnapshot: (source: 'admission' | 'stop-probe') => Promise<unknown>;
-	setIsViewportPinnedToBottom: (v: boolean) => void;
-	setInitialBottomRestorePending: (chatId: string | null) => void;
-	scrollToBottom: () => void;
-	onProjectUnavailable?: (target: ProjectTarget) => Promise<void> | void;
-}
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
 	#pendingDirectAdmissions = $state.raw<ReadonlyMap<string, DirectAdmissionBarrier>>(new Map());
@@ -252,8 +86,15 @@ export class ConversationSessionController {
 	readonly nodeHandoff: NodeHandoffProjectState;
 
 	constructor(private deps: SessionControllerDeps) {
-		this.nodeHandoff = new NodeHandoffProjectState((nodeId, selection) => deps.canSubmitToNode(nodeId)
-			&& Boolean(deps.modelCatalogForNode(nodeId).getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId)));
+		this.nodeHandoff = new NodeHandoffProjectState(
+			(nodeId, selection) =>
+				deps.canSubmitToNode(nodeId) &&
+				Boolean(
+					deps
+						.modelCatalogForNode(nodeId)
+						.getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId),
+				),
+		);
 		this.#executionDraft = new ConversationExecutionDraftState({
 			get activeChatId() {
 				return deps.sessions.selectedChatId;
@@ -276,7 +117,8 @@ export class ConversationSessionController {
 			agentState: deps.agentState,
 			modelCatalog: deps.modelCatalog,
 			modelCatalogForNode: deps.modelCatalogForNode,
-			chooseDestination: (chatId, nodeId, path, model) => this.nodeHandoff.ask(chatId, nodeId, path, model),
+			chooseDestination: (chatId, nodeId, path, model) =>
+				this.nodeHandoff.ask(chatId, nodeId, path, model),
 			executionDraft: this.#executionDraft,
 			getExecutionDefaults: deps.getExecutionDefaults,
 		});
@@ -340,7 +182,10 @@ export class ConversationSessionController {
 		if (!selection) return null;
 		return {
 			...selection,
-			...resolveConversationModelSelection(selection, this.deps.modelCatalogForNode(selection.nodeId ?? 'local')),
+			...resolveConversationModelSelection(
+				selection,
+				this.deps.modelCatalogForNode(selection.nodeId ?? 'local'),
+			),
 		};
 	}
 
@@ -367,6 +212,7 @@ export class ConversationSessionController {
 
 	#resetSelectionState(): void {
 		const { deps } = this;
+		this.#executionDraft.activate(null);
 		deps.chatState.activateChat(null);
 		deps.lifecycle.setCurrentChatId(null);
 		deps.conversationUi.activateTransientFeed(null);
@@ -374,10 +220,20 @@ export class ConversationSessionController {
 		deps.setInitialBottomRestorePending(null);
 	}
 
+	#reconcileExecutionSelection(chatId: string | null): void {
+		if (!chatId || chatId !== this.deps.sessions.selectedChatId) return;
+		const selection = this.#executionDraft.reconcileDurable();
+		if (selection) this.#applyExecutionSelection(selection);
+	}
+
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
-		if (this.nodeHandoff.target && this.nodeHandoff.target.chatId !== chatId) this.nodeHandoff.cancel();
-		if (chatId === this.#lastChatId) return;
+		if (this.nodeHandoff.target && this.nodeHandoff.target.chatId !== chatId)
+			this.nodeHandoff.cancel();
+		if (chatId === this.#lastChatId) {
+			this.#reconcileExecutionSelection(chatId);
+			return;
+		}
 		// Route selection can arrive before the chat-list record. Defers the
 		// transition so hydration can retry without poisoning the dedupe key.
 		if (chatId && !this.deps.sessions.byId[chatId]) return;
@@ -623,17 +479,23 @@ export class ConversationSessionController {
 			if (ownsComposer) return 'no-op';
 			await this.#pendingDirectAdmissions.get(chatId)?.settled;
 		}
+		this.#reconcileExecutionSelection(chatId);
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		const startup = deps.sessions.startupByChatId[chatId];
-		let selection: Parameters<typeof isCustomProviderSelectionAvailable>[1] & { nodeId?: string | null } = selected;
+		let selection: Parameters<typeof isCustomProviderSelectionAvailable>[1] & {
+			nodeId?: string | null;
+		} = selected;
 		if (selected.status === 'draft' && startup) {
 			selection = startup;
 		} else if (deps.sessions.selectedChatId === chatId) {
 			selection = deps.agentState;
 		}
 		const nodeId = selection.nodeId ?? 'local';
-		if (!deps.canSubmitToNode(nodeId) || !isCustomProviderSelectionAvailable(deps.modelCatalogForNode(nodeId), selection)) {
+		if (
+			!deps.canSubmitToNode(nodeId) ||
+			!isCustomProviderSelectionAvailable(deps.modelCatalogForNode(nodeId), selection)
+		) {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId, messageOverride ?? '', imageOverride ?? [])
 				: 'no-op';
@@ -774,6 +636,7 @@ export class ConversationSessionController {
 				if (!startup) return 'rejected';
 				return submitDraftRoute(deps, this.#acceptedInputs, { ...context, startup });
 			}
+			this.#reconcileExecutionSelection(chatId);
 			const currentChat = deps.sessions.byId[chatId];
 			const handoff = this.#executionDraft.handoffRequest(currentChat?.agentOwnershipEpoch ?? '');
 			const outcome = await submitRunRoute(
@@ -788,8 +651,8 @@ export class ConversationSessionController {
 					if (!acceptedSelection) {
 						throw new Error('Accepted handoff projection has incomplete execution settings');
 					}
-					this.#executionDraft.acceptDurable(acceptedSelection);
 					if (deps.sessions.selectedChatId === chatId) {
+						this.#executionDraft.acceptDurable(acceptedSelection);
 						this.#applyExecutionSelection(acceptedSelection);
 					}
 				},
@@ -803,9 +666,16 @@ export class ConversationSessionController {
 
 	async submitComposerWithSteerPreference(chatId: string): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
-		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)
-			|| !deps.canSubmitToNode(deps.agentState.nodeId)
-			|| !isCustomProviderSelectionAvailable(deps.modelCatalogForNode(deps.agentState.nodeId), deps.agentState)) {
+		this.#reconcileExecutionSelection(chatId);
+		if (
+			deps.sessions.selectedChatId !== chatId ||
+			this.isDirectAdmissionPending(chatId) ||
+			!deps.canSubmitToNode(deps.agentState.nodeId) ||
+			!isCustomProviderSelectionAvailable(
+				deps.modelCatalogForNode(deps.agentState.nodeId),
+				deps.agentState,
+			)
+		) {
 			return 'no-op';
 		}
 		const selected = deps.sessions.byId[chatId];
@@ -820,7 +690,9 @@ export class ConversationSessionController {
 			chatId,
 			chat: selected,
 			text,
-			supportsSteering: deps.modelCatalog.supportsSteering(selected.agentId as SessionAgentId),
+			supportsSteering: deps
+				.modelCatalogForNode(selected.nodeId ?? 'local')
+				.supportsSteering(selected.agentId),
 			handoffPending: this.#executionDraft.isHandoffPending,
 		});
 	}
@@ -975,6 +847,7 @@ export class ConversationSessionController {
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
+		this.#reconcileExecutionSelection(this.deps.sessions.selectedChatId);
 		this.#settings.handleModelSelectionChange(next);
 	}
 

@@ -19,9 +19,17 @@ test('provider settings support offline grants and independent profiles; remote 
     await app.waitForText('The selected provider or model is unavailable on this node.');
     expect(await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => (element as HTMLTextAreaElement).value)).toBe('Synthetic preserved draft');
     const requests = fixture.integration.fakeProviders.openAi.requests().length;
+    let runRequests = 0;
+    const onRequest = (request: { url(): string }) => {
+      if (new URL(request.url()).pathname === '/api/v1/chats/run') runRequests++;
+    };
+    fixture.page.on('request', onRequest);
     await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => {
       element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
+    await fixture.page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500)));
+    expect(runRequests).toBe(0);
+    expect(await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => (element as HTMLTextAreaElement).value)).toBe('Synthetic preserved draft');
     expect(fixture.integration.fakeProviders.openAi.requests()).toHaveLength(requests);
     expect(await fixture.page.$eval('button[aria-label="Send message"]', (element) => (element as HTMLButtonElement).disabled)).toBe(true);
     await client.put(assignment, {});
@@ -29,6 +37,8 @@ test('provider settings support offline grants and independent profiles; remote 
     await app.submitComposerWithEnter('Synthetic preserved draft', 'Send message');
     await app.waitForChatProcessing(false);
     await app.waitForText('echo:Synthetic preserved draft');
+    expect(runRequests).toBe(1);
+    fixture.page.off('request', onRequest);
 
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Server Settings');
@@ -51,6 +61,8 @@ test('provider settings support offline grants and independent profiles; remote 
     await app.clickButton('Duplicate Integration Fake OpenAI');
     await fixture.page.waitForSelector('#api-provider-label');
     expect(await fixture.page.$eval('#api-provider-api-key', (element) => (element as HTMLInputElement).value)).toBe('');
+    expect(await fixture.page.$eval('#api-provider-api-key', (element) => (element as HTMLInputElement).required)).toBe(true);
+    expect(await fixture.page.$eval('#api-provider-api-key', (element) => element.closest('form')?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled)).toBe(true);
     await app.fill('#api-provider-label', 'Independent account');
     await app.fill('#api-provider-api-key', 'synthetic-independent-key');
     await app.clickButton('Save', { last: true });

@@ -3,17 +3,18 @@ import {
   type AgentHistoryImport,
   type AgentIntegration,
   type AgentImportedTranscriptRow,
+  type AgentProducerBinding,
   type ExecutionNode,
   type ExecutionNodeInfo,
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import { NULLABLE_AGENT_FACETS, type AgentRpcRequest, type IntegrationManifest } from './agent-protocol.js';
 import type { AgentRpc } from './rpc.js';
-import { FileTransfers } from './file-transfers.js';
-import { validateFileRpcRequest, invalidFileTransfer } from './file-protocol.js';
+import { decodeFileText, validateFileRpcRequest, invalidFileData } from './file-protocol.js';
 import { TerminalWorker } from './terminal-worker.js';
 import { GitWorker } from './git-worker.js';
 import { isGitRpcMethod, type GitRpcRequest } from './git-protocol.js';
+import { historyPages } from './history-pages.js';
 
 interface HistoryReader {
   readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
@@ -22,29 +23,27 @@ interface HistoryReader {
   reading: boolean;
 }
 
-export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeoutMs = 2000) {
+export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc) {
   let info: ExecutionNodeInfo;
   let disposed = false;
-  let cleanup: Promise<void> | null = null;
-  let fileTransfers: FileTransfers | null = null;
   let terminalWorker: TerminalWorker | null = null;
   let gitWorker: GitWorker | null = null;
   let disconnectTerminals = () => {};
   const unsubscribeAvailability = rpc.transport.onAvailability((connected) => { if (!connected) disconnectTerminals(); });
   const integrations = new Map<string, AgentIntegration>();
+  const bindings = new Map<string, { integration: AgentIntegration; ref: AgentProducerBinding }>();
   const readers = new Map<string, AgentResourceTable<'history-reader', HistoryReader>>();
   const readerResources = new Set<HistoryReader>();
   const subscriptions = new Set<() => void>();
   const ready = (async () => {
     info = await node.getInfo();
-    gitWorker = new GitWorker(node, { nodeId: info.nodeId, instanceId: info.instanceId, sessionId: rpc.transport.id });
+    gitWorker = new GitWorker(node, { nodeId: info.nodeId, instanceId: info.instanceId });
     if (info.services.terminals) {
       const service = await node.getTerminalService();
       terminalWorker = new TerminalWorker(service, rpc);
       disconnectTerminals = () => { terminalWorker?.disconnect(); service.disconnect(); };
       if (disposed) { disconnectTerminals(); throw new AgentCallError('not-dispatched', 'Worker session retired'); }
     }
-    if (info.services.files) fileTransfers = new FileTransfers(await node.getFilesService(), { nodeId: info.nodeId, instanceId: info.instanceId, sessionId: rpc.transport.id });
     for (const id of info.integrationIds) {
       const integration = await node.getAgentIntegration(id);
       if (disposed) throw new AgentCallError('not-dispatched', 'Worker session retired');
@@ -53,10 +52,11 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
       subscriptions.add(integration.producers.subscribe((notification) => rpc.publish({ type: 'producer', notification })));
     }
   })();
-  const dispose = (): Promise<void> => {
-    if (cleanup) return cleanup;
+  const dispose = async (): Promise<void> => {
+    if (disposed) return;
     disposed = true;
-    gitWorker?.dispose();
+    for (const { integration, ref } of bindings.values()) integration.producers.detach(ref);
+    bindings.clear();
     unsubscribeAvailability();
     disconnectTerminals();
     unsubscribe();
@@ -69,21 +69,6 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
       void resource.iterator.return?.().catch(() => undefined);
     }
     readerResources.clear();
-    cleanup = (async () => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          Promise.all([fileTransfers?.dispose(), node.dispose()]),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Worker session cleanup timed out')), cleanupTimeoutMs);
-            timer.unref();
-          }),
-        ]);
-      } catch (error) {
-        console.warn('Execution-node cleanup incomplete:', error instanceof Error ? error.message : String(error));
-      } finally { clearTimeout(timer); }
-    })();
-    return cleanup;
   };
   // Registration precedes readiness so an immediate describe cannot outrun dispatch installation.
   let unsubscribe = () => {};
@@ -109,7 +94,7 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
     }
     if (call.method === 'projects.resolveFileMentions') return (await node.getProjectService()).resolveFileMentions(call.request, { signal });
     if (call.method.startsWith('files.')) {
-      if (call.integrationId !== '') throw invalidFileTransfer();
+      if (call.integrationId !== '') throw invalidFileData();
       validateFileRpcRequest(call.method, call.request);
     }
     switch (call.method) {
@@ -122,19 +107,31 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
       case 'files.list': return (await node.getFilesService()).list(call.request, { signal });
       case 'files.identity': return (await node.getFilesService()).identity(call.request, { signal });
       case 'files.revision': return (await node.getFilesService()).revision(call.request, { signal });
-      case 'files.openRead': return required(fileTransfers).openRead(call.request, signal);
-      case 'files.readChunk': return required(fileTransfers).readChunk(call.request, signal);
-      case 'files.beginWrite': return required(fileTransfers).beginWrite(call.request, signal);
-      case 'files.writeChunk': return required(fileTransfers).writeChunk(call.request, signal);
-      case 'files.commitWrite': return required(fileTransfers).commitWrite(call.request, signal);
-      case 'files.close': return required(fileTransfers).close(call.request);
+      case 'files.read': {
+        const { bytes, ...metadata } = await (await node.getFilesService()).read(call.request, { signal });
+        return { ...metadata, data: Buffer.from(bytes).toString('base64') };
+      }
+      case 'files.save': {
+        const { data, ...target } = call.request;
+        return (await node.getFilesService()).save({ ...target, content: decodeFileText(data) }, { signal });
+      }
     }
     const integration = integrations.get(call.integrationId);
     if (!integration) throw new AgentCallError('not-dispatched', 'Unknown integration', 'OPERATION_UNSUPPORTED');
     const options = { signal };
     switch (call.method) {
-      case 'producers.bind': return integration.producers.bind(call.request, options);
-      case 'producers.close': return integration.producers.close(call.request, options);
+      case 'producers.bind': {
+        await integration.producers.bind(call.request, options);
+        if (disposed) integration.producers.detach(call.request.binding);
+        else bindings.set(call.request.binding.id, { integration, ref: call.request.binding });
+        return;
+      }
+      case 'producers.close': {
+        if (bindings.get(call.request.id)?.integration !== integration) throw new AgentCallError('rejected', 'Producer binding belongs to a retired session', 'STALE_RESOURCE');
+        await integration.producers.close(call.request, options);
+        bindings.delete(call.request.id);
+        return;
+      }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
       case 'execution.start': return integration.execution.start(call.request, options);
       case 'execution.resume': return integration.execution.resume(call.request, options);
@@ -164,9 +161,13 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc, cleanupTimeou
         if (call.request.source !== 'nativeHistoryImport' && call.request.source !== 'legacyHistoryImport') {
           throw new AgentCallError('rejected', 'Unknown history source');
         }
+        if (call.request.source === 'nativeHistoryImport'
+          && (await integration.execution.runningSessions(options)).some((session) => session.agentSessionId === call.request.request.chat.agentSessionId)) {
+          throw new AgentCallError('rejected', 'The turn is still running on the execution node. Reload from native history after it finishes.', 'SESSION_BUSY');
+        }
         const history: AgentHistoryImport = required(integration[call.request.source]);
         const controller = new AbortController();
-        const iterator = history.load({ ...call.request.request, signal: controller.signal })[Symbol.asyncIterator]();
+        const iterator = historyPages(history.load({ ...call.request.request, signal: controller.signal }));
         const table = readers.get(call.integrationId)!;
         const resource: HistoryReader = { iterator, controller, timer: null, reading: false };
         let ref;

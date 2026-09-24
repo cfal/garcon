@@ -2,12 +2,13 @@ import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import type { ExecutionGitService, ExecutionGhService, NodeCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
-import type { GitMethod, GitRequests, GitResults } from '../../common/git.js';
-import { GIT_MAX_CONCURRENT_QUERIES, GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitNodeScope } from '../../common/git-execution.js';
+import type { GitMethod } from '../../common/git.js';
+import { GIT_MAX_CONCURRENT_QUERIES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitNodeScope } from '../../common/git-execution.js';
 import { GitServiceError } from '../../common/git-error.js';
 import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
 import { isRecord } from '../../common/json.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
 import { assertRealWithinBase, resolveRealWithinBase } from '../lib/path-boundary.js';
 import { toNativePath, toNodePath } from '../execution-nodes/node-path.js';
 import { createGitOperations } from './git-service.js';
@@ -17,7 +18,9 @@ import { withRepositoryMutation } from './repository-coordination.js';
 import { readOnlyGitOptions, resolvePathWithinProject, runGit } from './run.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { gitServiceError } from './service-errors.js';
-import type { GitCommandTrace, GitReviewRouteMetrics, GitStageProvenance } from './types.js';
+import { notRepositoryQuickSummary } from './quick-summary.js';
+import { notRepositoryFingerprint, notRepositorySnapshot } from './diff-engine.js';
+import type { GitCommandTrace, GitReviewRouteMetrics, GitOperationOptions } from './types.js';
 import type { GitReviewDocumentRegistry } from './review-document-registry.js';
 
 interface GitNodeOptions extends GitNodeScope {
@@ -51,7 +54,15 @@ export class LocalGitRuntime {
   dispose(): void { this.#abort.abort(); }
 
   async #path(input: string): Promise<string> {
-    return assertRealWithinBase(toNativePath(this.configuration.projectBasePath), toNativePath(input));
+    const native = toNativePath(input);
+    try {
+      return await assertRealWithinBase(toNativePath(this.configuration.projectBasePath), native);
+    } catch (error) {
+      // A non-directory ancestor still needs canonical containment validation.
+      const parent = path.dirname(native);
+      if (hasNodeErrorCode(error, 'ENOTDIR') && parent !== native) return path.join(await this.#path(parent), path.basename(native));
+      throw error;
+    }
   }
 
   #available(options?: NodeCallOptions): void {
@@ -62,8 +73,21 @@ export class LocalGitRuntime {
 
   async #repository(projectPath: string, options?: NodeCallOptions): Promise<string> {
     this.#available(options);
-    const project = await this.#path(projectPath);
-    if (!(await stat(project)).isDirectory()) throw new GitServiceError('GIT_INVALID_INPUT', 'Git project must be a directory');
+    let project: string;
+    try { project = await this.#path(projectPath); }
+    catch (error) {
+      if (hasNodeErrorCode(error, 'ENOENT')) throw new GitServiceError('GIT_NOT_REPO', 'Git project directory is unavailable');
+      throw error;
+    }
+    try {
+      if (!(await stat(project)).isDirectory()) throw new GitServiceError('GIT_NOT_REPO', 'Git project must be a directory');
+    } catch (error) {
+      if (hasNodeErrorCode(error, 'ENOENT') || hasNodeErrorCode(error, 'ENOTDIR')) {
+        throw new GitServiceError('GIT_NOT_REPO', 'Git project directory is unavailable');
+      }
+      if (error instanceof GitServiceError) throw error;
+      throw new GitServiceError('GIT_INVALID_INPUT', 'Git project directory is inaccessible');
+    }
     restrictGitWorkingRoot(project);
     try {
       const { stdout } = await runGit(project, ['rev-parse', '--show-toplevel'], readOnlyGitOptions({ signal: options?.signal }));
@@ -104,8 +128,7 @@ export class LocalGitRuntime {
           }
           if ('worktreePath' in input) input.worktreePath = await this.#path(path.resolve(projectPath, toNativePath(input.worktreePath)));
           await this.#validateFiles(method, request, projectPath);
-          const invoke = this.#operations[method] as (input: GitRequests[GitMethod] & GitStageProvenance & { signal?: AbortSignal }) => Promise<GitResults[K]>;
-          const result = await invoke(input);
+          const result = await this.#operations[method](input as GitOperationOptions<K>);
           const diagnostics = { ...metrics, phases: metrics.phases.slice(0, 128), commands: trace.slice(0, 128).map(({ args, durationMs, stdoutBytes, stderrBytes }) => ({ command: args[0], durationMs, stdoutBytes, stderrBytes })) };
           const response = { ...portableResult(result), nodeId: this.configuration.nodeId, instanceId: this.configuration.instanceId, diagnostics,
             ...(isGitMutation(method) && gitOutputTruncated() ? { outputTruncated: true } : {}) };
@@ -114,12 +137,20 @@ export class LocalGitRuntime {
             if (isGitMutation(method)) throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation could not be confirmed. Inspect the repository before trying again.');
             throw error;
           }
-          if (!isGitMutation(method) && Buffer.byteLength(JSON.stringify(response)) > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git query result exceeds the transfer limit');
           return response;
         };
         return isGitMutation(method) ? withRepositoryMutation(projectPath, execute) : execute();
       });
-    } catch (error) { throw gitServiceError(error); }
+    } catch (error) {
+      const failure = gitServiceError(error);
+      if (failure instanceof GitServiceError && failure.code === 'GIT_NOT_REPO') {
+        const result = method === 'getQuickSummary' ? notRepositoryQuickSummary(request.projectPath)
+          : method === 'getWorkingTreeFingerprint' ? notRepositoryFingerprint(request.projectPath)
+          : method === 'getWorkbenchSnapshot' ? notRepositorySnapshot(request.projectPath) : null;
+        if (result) return { ...result, nodeId: this.configuration.nodeId, instanceId: this.configuration.instanceId } as ExecutionGitResults[K];
+      }
+      throw failure;
+    }
   }
 
   async #validateFiles(method: GitMethod, request: ExecutionGitRequests[GitMethod], projectPath: string): Promise<void> {
@@ -144,7 +175,6 @@ export class LocalGitRuntime {
     const requiresFileContainment = method === 'getConflictDetails'
       || method === 'markConflictResolved'
       || method === 'acceptConflictSide'
-      || method === 'discard'
       || method === 'deleteUntracked';
 
     for (const file of files) {
@@ -171,7 +201,6 @@ export class LocalGitRuntime {
       });
       const result = { ...payload, nodeId: this.configuration.nodeId, instanceId: this.configuration.instanceId };
       validateGhResult(method, result, this.configuration);
-      if (Buffer.byteLength(JSON.stringify(result)) > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'GitHub query result exceeds the transfer limit');
       return result;
     } catch (error) { throw gitServiceError(error, 'gh'); }
   }

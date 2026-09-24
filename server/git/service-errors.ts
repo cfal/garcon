@@ -8,10 +8,12 @@ import { classifyGhError } from '../gh/gh-error-classifier.js';
 import { GitOutputLimitError } from './run.js';
 import { GhOutputLimitError } from '../gh/run.js';
 import { isGitCancellation } from './operation-context.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
 
 export function gitServiceError(error: unknown, domain: 'git' | 'gh' = 'git'): Error {
   if (error instanceof GitServiceError || error instanceof AgentCallError) return error;
   if (domain === 'git' && error instanceof Error && /Executable not found.*git|command not found.*git/i.test(error.message)) return new GitServiceError('GIT_MISSING', 'Git is not installed on this execution node');
+  if (hasNodeErrorCode(error, 'ENOENT') || hasNodeErrorCode(error, 'ENOTDIR')) return new GitServiceError('GIT_INVALID_INPUT', 'Git path is unavailable');
   if (isProjectBoundaryError(error)) return new GitServiceError('GIT_OUTSIDE_BASE', error.message);
   if (error instanceof GitOutputLimitError || error instanceof GhOutputLimitError) return new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git result exceeds the operation limit');
   if (isGitCancellation(error)) return new GitServiceError('GIT_TIMEOUT', 'Git operation expired or was cancelled');

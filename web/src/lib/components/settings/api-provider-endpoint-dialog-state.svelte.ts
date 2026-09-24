@@ -47,6 +47,7 @@ export class ApiProviderEndpointDialogState {
 	testMessage = $state<string | null>(null);
 	apiProviderId = $state<string | null>(null);
 	revision = $state<number | undefined>();
+	#duplicateRequiresApiKey = $state(false);
 	#savedEndpointId: string | null = null;
 	#contextVersion = 0;
 
@@ -72,13 +73,13 @@ export class ApiProviderEndpointDialogState {
 		if (this.templateId === 'together')
 			return m.settings_api_provider_dialog_api_key_placeholder_together();
 		if (this.templateId === 'zai') return m.settings_api_provider_dialog_api_key_placeholder_zai();
-		if (this.templateId === 'ollama')
+		if (this.templateId === 'ollama' && !this.#duplicateRequiresApiKey)
 			return m.settings_api_provider_dialog_api_key_placeholder_ollama();
 		return m.settings_api_provider_dialog_api_key_placeholder();
 	}
 
 	get apiKeyRequired(): boolean {
-		return apiProviderTemplate(this.protocol, this.templateId)?.apiKeyRequired === true;
+		return this.#duplicateRequiresApiKey || apiProviderTemplate(this.protocol, this.templateId)?.apiKeyRequired === true;
 	}
 
 	get title(): string {
@@ -193,6 +194,7 @@ export class ApiProviderEndpointDialogState {
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
 		this.openAiCapabilities = this.openAiCapabilitiesFrom(found.endpoint.capabilities);
 		if (this.options.getDuplicate?.()) {
+			this.#duplicateRequiresApiKey = found.endpoint.hasApiKey;
 			this.apiProviderId = null;
 			this.#savedEndpointId = null;
 			this.revision = undefined;
@@ -204,6 +206,7 @@ export class ApiProviderEndpointDialogState {
 		this.clearProbeResults();
 		this.isSaving = false;
 		this.apiKey = '';
+		this.#duplicateRequiresApiKey = false;
 	}
 
 	clearProbeResults(): void {
@@ -219,6 +222,7 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	beginCreate(): void {
+		this.#duplicateRequiresApiKey = false;
 		const template =
 			apiProviderTemplate(this.protocol, this.options.getTemplateId?.() ?? 'custom') ??
 			apiProviderTemplate(this.protocol, 'custom');

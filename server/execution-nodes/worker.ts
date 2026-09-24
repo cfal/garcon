@@ -1,10 +1,10 @@
 import { join } from 'node:path';
+import { AgentCallError } from '@garcon/server-agent-interface';
 import { defaultAgentIntegrations } from '../agents/default-agent-integrations.js';
 import { AgentRpc } from './rpc.js';
 import { serveAgentNode } from './agent-worker.js';
 import { InProcessExecutionNode } from './in-process.js';
 import { WebSocketLink } from './websocket-link.js';
-import { cleanupAbandonedFileStaging } from './file-staging.js';
 import { TerminalRuntime } from '../terminals/node-service.js';
 
 export interface ExecutionWorkerOptions {
@@ -29,6 +29,8 @@ export async function runExecutionWorker(
   const link = new WebSocketLink({ role: 'worker', secret: options.secret,
     allowInsecureDevelopment: options.allowInsecureDevelopment, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveAgentNode> | null = null;
+  let node: InProcessExecutionNode | null = null;
+  let currentRpc: AgentRpc | null = null;
   const terminals = new TerminalRuntime({ projectBasePath: options.projectBasePath, terminalRuntimeId: link.runtimeId });
   const stopped = Promise.withResolvers<void>();
   let stopping = false;
@@ -38,14 +40,12 @@ export async function runExecutionWorker(
     try {
       await link.dispose();
       await serving?.dispose();
+      await node?.dispose();
     } finally { terminals.shutdown(); stopped.resolve(); }
   };
   const onSignal = () => { void stop(); };
   process.on('SIGTERM', onSignal);
   process.on('SIGINT', onSignal);
-  void cleanupAbandonedFileStaging().catch(() => {
-    console.warn('Execution-node file staging cleanup incomplete; uploads will retry cleanup');
-  });
   let lastError: string | null = null;
   link.onError((message) => {
     if (message !== lastError) console.warn(JSON.stringify({ type: 'execution-node-unavailable', message }));
@@ -54,11 +54,16 @@ export async function runExecutionWorker(
   link.onSession((transport) => {
     void serving?.dispose();
     const rpc = new AgentRpc(transport);
-    const node = new InProcessExecutionNode({
+    currentRpc = rpc;
+    transport.onFailure(() => { if (currentRpc === rpc) currentRpc = null; });
+    node ??= new InProcessExecutionNode({
       id: transport.nodeId, workspaceDir: options.workspaceDir, projectBasePath: options.projectBasePath,
       integrations: defaultAgentIntegrations,
       terminalRuntime: terminals,
-      resolveCredential: ({ agentId, reference, signal }) => rpc.call(agentId, 'credentials.resolve', { reference }, { signal }),
+      resolveCredential: ({ agentId, reference, signal }) => {
+        if (!currentRpc) throw new AgentCallError('not-dispatched', 'Execution-node controller is disconnected');
+        return currentRpc.call(agentId, 'credentials.resolve', { reference }, { signal });
+      },
     });
     serving = serveAgentNode(node, rpc);
     transport.onAvailability((connected) => {

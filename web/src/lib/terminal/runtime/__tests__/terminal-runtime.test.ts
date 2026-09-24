@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type {
+	TerminalMetadata,
+	TerminalStreamClientMessage,
+	TerminalStreamServerMessage,
+} from '$shared/terminal';
 import {
 	TERMINAL_FALLBACK_FONT_FAMILY,
 	TERMINAL_FONT_FAMILY,
@@ -98,7 +104,13 @@ function createRuntime(
 	onResize = vi.fn(),
 	fontResolver: TerminalFontResolver = { load: () => Promise.resolve(TERMINAL_FONT_FAMILY) },
 ): TerminalRuntime {
-	return new TerminalRuntime({ onInput, onResize, initialTheme: {}, fontResolver });
+	return new TerminalRuntime({
+		onInput,
+		onResize,
+		onOutputDrained: vi.fn(),
+		initialTheme: {},
+		fontResolver,
+	});
 }
 
 async function attach(runtime: TerminalRuntime, host: HTMLElement): Promise<number> {
@@ -185,16 +197,152 @@ describe('TerminalRuntime', () => {
 
 	it('bounds pending renderer bytes until xterm acknowledges consumption', () => {
 		const runtime = createRuntime();
-		const chunk = 'x'.repeat(512 * 1024);
-		runtime.write(chunk);
-		runtime.write(chunk);
-		expect(() => runtime.write('overflow')).toThrow();
+		const chunk = 'x'.repeat(4 * 1024 * 1024);
+		expect(runtime.write(chunk)).toBe(true);
+		expect(runtime.write(chunk)).toBe(true);
+		expect(runtime.write('overflow')).toBe(false);
 		expect(fakes.terminals[0].write).toHaveBeenCalledTimes(2);
 		fakes.terminals[0].write.mock.calls[0][1]();
-		expect(() => runtime.write(chunk)).not.toThrow();
+		expect(runtime.write(chunk)).toBe(true);
 		runtime.dispose();
 		expect(() => runtime.write('retired')).toThrow();
 	});
+
+	async function outputFixture() {
+		const runtimeId = '00000000-0000-4000-8000-000000000001';
+		const terminalId = `local/${runtimeId}/00000000-0000-4000-8000-000000000002`;
+		const metadata: TerminalMetadata = {
+			terminalId,
+			displaySequence: 1,
+			title: null,
+			initialWorkingDirectory: '/project',
+			processStatus: 'running',
+			attachmentStatus: 'attached',
+			createdAt: '2026-01-01T00:00:00Z',
+			exitCode: null,
+			latestOutputSequence: 0,
+		};
+		const sent: TerminalStreamClientMessage[] = [];
+		let receive!: (message: TerminalStreamServerMessage) => void;
+		const registry = new TerminalRegistry({
+			connection: {
+				isConnected: true,
+				sendMessage: () => true,
+				addMessageConsumer: () => () => {},
+				onConnectionChange: () => () => {},
+			},
+			getClientId: () => 'browser',
+			listTerminals: async () => ({
+				success: true,
+				terminalRuntimeId: runtimeId,
+				attachmentEpoch: 'epoch',
+				terminals: [metadata],
+			}),
+			createRuntime: (options) => new TerminalRuntime(options),
+			createTransport: (options) => {
+				receive = options.onMessage;
+				return {
+					status: 'connected',
+					connect() {},
+					suspend() {},
+					destroy() {},
+					send: (message) => {
+						sent.push(message);
+						return true;
+					},
+				};
+			},
+		});
+		const latestAttachment = () => sent.findLast((message) => message.type === 'terminal-attach')!;
+		await registry.list();
+		await registry.attach(terminalId, 'restore');
+		receive({
+			type: 'terminal-attached',
+			terminal: metadata,
+			replay: [],
+			attachmentId: latestAttachment().attachmentId,
+		});
+		return {
+			registry,
+			terminalId,
+			sent,
+			latestAttachment,
+			emit: (sequence: number, data: string) =>
+				receive({
+					type: 'terminal-output',
+					terminalId,
+					sequence,
+					data,
+					attachmentId: latestAttachment().attachmentId,
+				}),
+		};
+	}
+
+	it('accepts a full replay tail followed by live output while parsing is deferred', async () => {
+		const fixture = await outputFixture();
+		try {
+			fixture.emit(1, 'x'.repeat(1024 * 1024));
+			fixture.emit(2, 'live output');
+			expect(fixture.registry.sessions[fixture.terminalId].lastReceivedSequence).toBe(2);
+			expect(fixture.sent.filter((message) => message.type === 'terminal-detach')).toHaveLength(0);
+			expect(fakes.terminals[0].write).toHaveBeenCalledTimes(2);
+		} finally {
+			fixture.registry.destroy();
+		}
+	});
+
+	it('drains an overflowing renderer before automatically restoring its accepted cursor', async () => {
+		const fixture = await outputFixture();
+		try {
+			for (let sequence = 1; sequence <= 8; sequence++)
+				fixture.emit(sequence, 'x'.repeat(1024 * 1024));
+			fixture.emit(9, 'replayed after drain');
+			expect(fixture.registry.sessions[fixture.terminalId].lastReceivedSequence).toBe(8);
+			expect(fixture.sent.filter((message) => message.type === 'terminal-detach')).toHaveLength(1);
+			await fixture.registry.attach(fixture.terminalId, 'restore');
+			expect(fixture.sent.filter((message) => message.type === 'terminal-attach')).toHaveLength(1);
+			for (const [, consumed] of fakes.terminals[0].write.mock.calls.slice(0, 7)) consumed();
+			await Promise.resolve();
+			expect(fixture.sent.filter((message) => message.type === 'terminal-attach')).toHaveLength(1);
+			fakes.terminals[0].write.mock.calls[7][1]();
+			await vi.waitFor(() =>
+				expect(fixture.sent.filter((message) => message.type === 'terminal-attach')).toHaveLength(
+					2,
+				),
+			);
+			expect(fixture.latestAttachment()).toMatchObject({ afterSequence: 8, intent: 'restore' });
+			fixture.emit(9, 'replayed after drain');
+			expect(fixture.registry.sessions[fixture.terminalId].lastReceivedSequence).toBe(9);
+			expect(
+				fakes.terminals[0].write.mock.calls
+					.map(([data]) => data)
+					.filter((data) => data === 'replayed after drain'),
+			).toHaveLength(1);
+		} finally {
+			fixture.registry.destroy();
+		}
+	});
+
+	it.each(['removed', 'logged out'])(
+		'does not restore a drained terminal after it is %s',
+		async (reason) => {
+			const fixture = await outputFixture();
+			try {
+				for (let sequence = 1; sequence <= 8; sequence++)
+					fixture.emit(sequence, 'x'.repeat(1024 * 1024));
+				fixture.emit(9, 'overflow');
+				if (reason === 'removed') fixture.registry.disposeTerminatedSession(fixture.terminalId);
+				else fixture.registry.authChanged(false);
+				for (const [, consumed] of fakes.terminals[0].write.mock.calls) consumed();
+				await Promise.resolve();
+				expect(fixture.sent.filter((message) => message.type === 'terminal-attach')).toHaveLength(
+					1,
+				);
+			} finally {
+				fixture.registry.destroy();
+			}
+		},
+	);
 
 	it('applies themes and disposes browser resources explicitly', async () => {
 		const runtime = createRuntime();
@@ -208,7 +356,12 @@ describe('TerminalRuntime', () => {
 	});
 
 	it('updates the terminal font size without replacing the runtime', () => {
-		const runtime = new TerminalRuntime({ onInput: vi.fn(), onResize: vi.fn(), initialTheme: {} });
+		const runtime = new TerminalRuntime({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onOutputDrained: vi.fn(),
+			initialTheme: {},
+		});
 		const scheduleFit = vi.spyOn(runtime, 'scheduleFit');
 
 		runtime.applyFontSize(18);
@@ -266,7 +419,12 @@ describe('TerminalRuntime', () => {
 	});
 
 	it('retries async runtime creation after the stylesheet fails to load', async () => {
-		const options = { onInput: vi.fn(), onResize: vi.fn(), initialTheme: {} };
+		const options = {
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onOutputDrained: vi.fn(),
+			initialTheme: {},
+		};
 		const firstCreation = createTerminalRuntime(options);
 		const firstLink = document.head.querySelector<HTMLLinkElement>(
 			'link[data-terminal-runtime-stylesheet]',

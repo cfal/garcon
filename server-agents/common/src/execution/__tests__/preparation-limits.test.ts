@@ -1,5 +1,5 @@
 import { expect, test, spyOn } from 'bun:test';
-import { AgentIntegrationError, createAgentResourceRef, type AgentResumeRequestV5, type AgentChatReference } from '@garcon/server-agent-interface';
+import { AgentCallError, AgentIntegrationError, createAgentResourceRef, type AgentResumeRequestV5, type AgentChatReference } from '@garcon/server-agent-interface';
 import { createAgentProducerAdapter } from '../producer-adapter.js';
 import { createAgentSteering } from '../control-adapters.js';
 import { createAgentProjectPathUpdates } from '../project-path-adapter.js';
@@ -50,13 +50,43 @@ test('a full steering table rejects without arming an orphaned timer', async () 
   }
 });
 
-test('a definitive path refusal permits a corrected destination', async () => {
+test.each([
+  'SESSION_BUSY', 'SESSION_NOT_FOUND', 'OPERATION_UNSUPPORTED',
+  'TRANSCRIPT_UNAVAILABLE', 'PROJECT_PATH_DESTINATION_REJECTED',
+] as const)('a %s path refusal permits a corrected destination', async (code) => {
   let attempts = 0;
   const paths = createAgentProjectPathUpdates(scope, async () => {
-    if (attempts++ === 0) throw new AgentIntegrationError('PROJECT_PATH_DESTINATION_REJECTED', 'Wrong project', false);
+    if (attempts++ === 0) throw new AgentIntegrationError(code, 'Path update refused', false);
   });
-  await expect(paths.prepare({ chat, nextProjectPath: '/wrong' })).rejects.toThrow('Wrong project');
+  await expect(paths.prepare({ chat, nextProjectPath: '/wrong' })).rejects.toMatchObject({ code });
   expect(await paths.prepare({ chat, nextProjectPath: '/correct' })).toBeNull();
+  expect(attempts).toBe(2);
+});
+
+test.each([
+  new AgentIntegrationError('TIMEOUT', 'Timed out', true),
+  new AgentIntegrationError('UNAVAILABLE', 'Unavailable', true),
+  new AgentIntegrationError('PROVIDER_FAILURE', 'Native failure', false),
+  new AgentCallError('unknown', 'Lost result', 'SESSION_BUSY'),
+  new AgentCallError('unknown', 'Lost refusal', 'PROJECT_PATH_DESTINATION_REJECTED'),
+])('keeps an uncertain path preparation blocked: %s', async (error) => {
+  let attempts = 0;
+  const paths = createAgentProjectPathUpdates(scope, async () => {
+    attempts++;
+    throw error;
+  });
+  await expect(paths.prepare({ chat, nextProjectPath: '/next' })).rejects.toBe(error);
+  await expect(paths.prepare({ chat, nextProjectPath: '/retry' })).rejects.toThrow('reconciliation');
+  expect(attempts).toBe(1);
+});
+
+test.each(['rejected', 'not-dispatched'] as const)('permits retry after a %s path preparation', async (outcome) => {
+  let attempts = 0;
+  const paths = createAgentProjectPathUpdates(scope, async () => {
+    if (attempts++ === 0) throw new AgentCallError(outcome, 'No change', 'UNAVAILABLE');
+  });
+  await expect(paths.prepare({ chat, nextProjectPath: '/next' })).rejects.toMatchObject({ outcome });
+  expect(await paths.prepare({ chat, nextProjectPath: '/retry' })).toBeNull();
   expect(attempts).toBe(2);
 });
 

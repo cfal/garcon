@@ -422,12 +422,6 @@
 		});
 	});
 
-	// Checks host GitHub CLI readiness once after app authentication.
-	$effect(() => {
-		if (!auth.isAuthenticated) return;
-		untrack(() => {});
-	});
-
 	// Keeps root-global remote values synchronized after both HTTP refreshes
 	// and settings-changed WebSocket updates.
 	$effect(() => {

@@ -33,6 +33,23 @@ describe('ApiProviderStore', () => {
     expect(store.redactedList()).toEqual([]);
   });
 
+  it('loads external edits only at startup', async () => {
+    const store = await tempStore();
+    await store.init();
+    const filePath = path.join(createdDirs.at(-1), 'api-providers.json');
+    const saved = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    saved.legacyProviderIds = ['synthetic_profile'];
+    let notifications = 0;
+    store.onChanged(() => { notifications++; });
+    await fs.writeFile(filePath, JSON.stringify(saved));
+    expect(store.list()).toEqual([]);
+    expect(store.legacyProviderIds).toEqual([]);
+    expect(notifications).toBe(0);
+    const restarted = new ApiProviderStore(filePath);
+    await restarted.init();
+    expect(restarted.legacyProviderIds).toEqual(['synthetic_profile']);
+  });
+
   it('quarantines corrupt provider state without overwriting stored secrets', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-api-providers-'));
     createdDirs.push(dir);
@@ -51,6 +68,8 @@ describe('ApiProviderStore', () => {
   it('creates user-managed providers from templates without exposing API keys', async () => {
     const store = await tempStore();
     await store.init();
+    const observed = [];
+    store.onChanged(() => observed.push(store.redactedList()));
 
     const provider = await store.createApiProvider({
       templateId: 'openrouter',
@@ -79,6 +98,7 @@ describe('ApiProviderStore', () => {
     expect(redacted.endpoints[0].hasApiKey).toBe(true);
     expect('apiKey' in redacted.endpoints[0]).toBe(false);
     expect('headers' in redacted.endpoints[0]).toBe(false);
+    expect(observed).toEqual([[redacted]]);
   });
 
   it('does not publish provider mutations that fail to persist', async () => {

@@ -1,4 +1,6 @@
 import {
+  GENERATION_UI_SETTING_KEYS,
+  generationSelectionNodeError,
   parseNodeProjectPreferences,
   parseNodeProjectPreferencesPatch,
 } from '../../common/settings.js';
@@ -12,6 +14,7 @@ import {
   sanitizeExecutionDefaultsSettings,
 } from './startup-recents.js';
 import type { ProjectSettings, SettingsStoreContext } from './types.js';
+import { ValidationDomainError } from '../lib/domain-error.js';
 
 export class UiSettingsStore {
   #context: SettingsStoreContext;
@@ -26,6 +29,10 @@ export class UiSettingsStore {
   }
 
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
+    for (const key of GENERATION_UI_SETTING_KEYS) {
+      const error = generationSelectionNodeError(patch[key]);
+      if (error) throw new ValidationDomainError(error);
+    }
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });

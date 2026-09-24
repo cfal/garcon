@@ -42,6 +42,67 @@ describe('RemoteSettingsSection', () => {
 		vi.clearAllMocks();
 	});
 
+	it.each(['not-a-node', '', '22222222-2222-4222-8222-222222222222'])(
+		'shows an unavailable saved generator and requires explicit Auto repair (%s)',
+		async (nodeId) => {
+			const store = new RemoteSettingsStore();
+			store.applySnapshot(
+				makeRemoteSettingsSnapshot({
+					ui: { chatTitle: { nodeId, enabled: true } },
+					uiEffective: {},
+				}),
+			);
+			setTestRemoteSettingsStore(store);
+			mockRemoteSettingsUpdate(store);
+			render(RemoteSettingsSectionTestHost);
+			expect(screen.getByText(/Unavailable node/)).toBeTruthy();
+			const auto = screen.getAllByRole('button', { name: 'Auto (Local)' })[0];
+			expect(auto.getAttribute('aria-pressed')).toBe('false');
+			expect(updateRemoteSettings).not.toHaveBeenCalled();
+			await fireEvent.click(auto);
+			await waitFor(() =>
+				expect(updateRemoteSettings).toHaveBeenCalledWith({ ui: { chatTitle: { enabled: true } } }),
+			);
+			await waitFor(() => expect(screen.queryByText(/Unavailable node/)).toBeNull());
+		},
+	);
+
+	it.each([
+		['chatTitle', 'Automatically generate chat titles'],
+		['agentSwitchCompaction', 'Enable agent switch compaction'],
+	] as const)(
+		'repairs a disabled unavailable %s selection without enabling it',
+		async (settingsKey, label) => {
+			const store = new RemoteSettingsStore();
+			const preferences = settingsKey === 'chatTitle' ? { enabled: false } : {};
+			store.applySnapshot(
+				makeRemoteSettingsSnapshot({
+					ui: {
+						[settingsKey]: {
+							...preferences,
+							nodeId: '22222222-2222-4222-8222-222222222222',
+							model: 'synthetic-model',
+						},
+					},
+					uiEffective: {},
+				}),
+			);
+			setTestRemoteSettingsStore(store);
+			mockRemoteSettingsUpdate(store);
+			render(RemoteSettingsSectionTestHost);
+			const toggle = screen.getByRole('switch', { name: label });
+			expect(toggle.getAttribute('aria-checked')).toBe('false');
+			const card = within(toggle.parentElement!.parentElement!);
+			expect(card.getByText(/Unavailable node/)).toBeTruthy();
+			await fireEvent.click(card.getByRole('button', { name: 'Auto (Local)' }));
+			await waitFor(() =>
+				expect(updateRemoteSettings).toHaveBeenCalledWith({ ui: { [settingsKey]: preferences } }),
+			);
+			await waitFor(() => expect(card.queryByRole('button', { name: 'Auto (Local)' })).toBeNull());
+			expect(toggle.getAttribute('aria-checked')).toBe('false');
+		},
+	);
+
 	it('enables transcript search through the remote feature patch', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeRemoteSettingsSnapshot());
@@ -83,9 +144,9 @@ describe('RemoteSettingsSection', () => {
 		const parent = screen.getByRole('switch', { name: 'Enable agent commands' });
 		expect(parent.getAttribute('aria-checked')).toBe('true');
 		expect(screen.getByText(/Allows agents to discover chat IDs/)).toBeTruthy();
-		expect(screen.getByRole('link', { name: 'Learn more in Garcon Skills' }).getAttribute('href')).toBe(
-			'https://github.com/cfal/garcon-skills',
-		);
+		expect(
+			screen.getByRole('link', { name: 'Learn more in Garcon Skills' }).getAttribute('href'),
+		).toBe('https://github.com/cfal/garcon-skills');
 		expect(screen.getByRole('switch', { name: 'Enable chat ID auto-discovery' })).toBeTruthy();
 		expect(screen.getByRole('switch', { name: 'Enable send message' })).toBeTruthy();
 
@@ -108,8 +169,9 @@ describe('RemoteSettingsSection', () => {
 		await fireEvent.click(parent);
 		await waitFor(() => {
 			expect(store.snapshot?.features.agentCommands.enabled).toBe(true);
-			expect(screen.getByRole('switch', { name: 'Enable send message' }).getAttribute('aria-checked'))
-				.toBe('false');
+			expect(
+				screen.getByRole('switch', { name: 'Enable send message' }).getAttribute('aria-checked'),
+			).toBe('false');
 		});
 	});
 
@@ -128,20 +190,25 @@ describe('RemoteSettingsSection', () => {
 		expect(store.snapshot?.features.agentCommands.sendMessage).toBe(true);
 	});
 
-	it.each([['startAgent', 'Enable start agent'], ['resumeAgent', 'Enable child lifecycle commands'], ['schedule', 'Enable scheduling'], ['tickets', 'Enable ticket commands']] as const)(
-		'persists the %s command gate', async (key, name) => {
-			const store = new RemoteSettingsStore();
-			store.applySnapshot(makeRemoteSettingsSnapshot());
-			setTestRemoteSettingsStore(store);
-			mockRemoteSettingsUpdate(store);
-			render(RemoteSettingsSectionTestHost);
-			await fireEvent.click(screen.getByRole('switch', { name }));
-			await waitFor(() => {
-				expect(updateRemoteSettings).toHaveBeenCalledWith({ features: { agentCommands: { [key]: false } } });
-				expect(store.snapshot?.features.agentCommands[key]).toBe(false);
+	it.each([
+		['startAgent', 'Enable start agent'],
+		['resumeAgent', 'Enable child lifecycle commands'],
+		['schedule', 'Enable scheduling'],
+		['tickets', 'Enable ticket commands'],
+	] as const)('persists the %s command gate', async (key, name) => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot());
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+		await fireEvent.click(screen.getByRole('switch', { name }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				features: { agentCommands: { [key]: false } },
 			});
-		},
-	);
+			expect(store.snapshot?.features.agentCommands[key]).toBe(false);
+		});
+	});
 
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {
 		const store = new RemoteSettingsStore();
@@ -255,22 +322,22 @@ describe('RemoteSettingsSection', () => {
 		const commitModel = screen.getByText('Commit message model');
 		const refinementModel = screen.getByText('Prompt refinement model');
 		expect(
-			compactionToggle.compareDocumentPosition(commitModel)
-				& Node.DOCUMENT_POSITION_FOLLOWING,
+			compactionToggle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		expect(
 			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		expect(
-			commitModel.compareDocumentPosition(refinementModel)
-				& Node.DOCUMENT_POSITION_FOLLOWING,
+			commitModel.compareDocumentPosition(refinementModel) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		expect(screen.queryByText('Generate commit messages')).toBeNull();
 		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
 		expect(screen.queryByRole('textbox', { name: /generation prompt/i })).toBeNull();
 		expect(screen.getAllByRole('button', { name: 'Edit generation prompt' })).toHaveLength(2);
 		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(3);
-		expect(refinementModel.parentElement?.parentElement?.querySelector('[role="switch"]')).toBeNull();
+		expect(
+			refinementModel.parentElement?.parentElement?.querySelector('[role="switch"]'),
+		).toBeNull();
 	});
 
 	it('configures the compaction context window and preserves it across nested saves', async () => {
@@ -378,12 +445,14 @@ describe('RemoteSettingsSection', () => {
 		setTestRemoteSettingsStore(store);
 		let finishSave!: () => void;
 		vi.mocked(updateRemoteSettings).mockImplementationOnce(
-			() => new Promise((resolve) => {
-				finishSave = () => resolve({
-					success: true,
-					settings: snapshot,
-				});
-			}),
+			() =>
+				new Promise((resolve) => {
+					finishSave = () =>
+						resolve({
+							success: true,
+							settings: snapshot,
+						});
+				}),
 		);
 		render(RemoteSettingsSectionTestHost);
 
@@ -465,18 +534,17 @@ describe('RemoteSettingsSection', () => {
 		setTestRemoteSettingsStore(store);
 		vi.mocked(testGenerationModel)
 			.mockResolvedValueOnce({ success: true, target: 'chatTitle', durationMs: 8_432 })
-			.mockRejectedValueOnce(
-				new ApiError(422, 'unsupported', 'GENERATION_TEST_UNSUPPORTED_EFFORT'),
-			)
-			.mockRejectedValueOnce(
-				new ApiError(422, 'unsafe', 'GENERATION_TEST_UNSAFE_AGENT'),
-			);
+			.mockRejectedValueOnce(new ApiError(422, 'unsupported', 'GENERATION_TEST_UNSUPPORTED_EFFORT'))
+			.mockRejectedValueOnce(new ApiError(422, 'unsafe', 'GENERATION_TEST_UNSAFE_AGENT'));
 
 		render(RemoteSettingsSectionTestHost);
 
-		const [titleTestButton, commitTestButton, refinementTestButton] = screen.getAllByRole('button', {
-			name: 'Test model',
-		});
+		const [titleTestButton, commitTestButton, refinementTestButton] = screen.getAllByRole(
+			'button',
+			{
+				name: 'Test model',
+			},
+		);
 		const [titleTestStatus] = screen.getAllByRole('status');
 		expect(titleTestStatus.textContent).toBe('');
 		await fireEvent.click(titleTestButton);
@@ -582,9 +650,7 @@ describe('RemoteSettingsSection', () => {
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
 
-		await fireEvent.click(
-			screen.getAllByRole('button', { name: /Claude .* Opus .* Default/ })[0],
-		);
+		await fireEvent.click(screen.getAllByRole('button', { name: /Claude .* Opus .* Default/ })[0]);
 		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
@@ -696,7 +762,9 @@ describe('RemoteSettingsSection', () => {
 
 	it('clears a saved custom app title when disabled', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeRemoteSettingsSnapshot({ ui: { appIdentity: { title: 'Garcon - Work' } } }));
+		store.applySnapshot(
+			makeRemoteSettingsSnapshot({ ui: { appIdentity: { title: 'Garcon - Work' } } }),
+		);
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 
@@ -821,9 +889,11 @@ describe('RemoteSettingsSection', () => {
 
 		await fireEvent.click(editCommitPrompt);
 		expect(
-			(screen.getByRole('textbox', {
-				name: 'Edit commit generation prompt',
-			}) as HTMLTextAreaElement).value,
+			(
+				screen.getByRole('textbox', {
+					name: 'Edit commit generation prompt',
+				}) as HTMLTextAreaElement
+			).value,
 		).toBe('Summarize {{files}} with {{diff}}');
 		vi.mocked(updateRemoteSettings).mockClear();
 
@@ -873,19 +943,13 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.getByText('{{USER_PROMPT}}')).toBeTruthy();
 
 		await fireEvent.input(prompt, { target: { value: 'Rewrite this draft.' } });
-		expect(
-			screen.getByText('The generation prompt must include {{USER_PROMPT}}.'),
-		).toBeTruthy();
-		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(
-			true,
-		);
+		expect(screen.getByText('The generation prompt must include {{USER_PROMPT}}.')).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
 
 		await fireEvent.input(prompt, {
 			target: { value: 'x'.repeat(GENERATION_PROMPT_TEMPLATE_MAX_LENGTH + 1) },
 		});
-		expect(
-			screen.getByText('The generation prompt cannot exceed 32000 characters.'),
-		).toBeTruthy();
+		expect(screen.getByText('The generation prompt cannot exceed 32000 characters.')).toBeTruthy();
 
 		await fireEvent.input(prompt, { target: { value: 'Rewrite: {{USER_PROMPT}}' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));

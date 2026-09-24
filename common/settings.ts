@@ -15,7 +15,7 @@ import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-inte
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
-import { isExecutionNodeId, isRemoteNodeId, parseNodeId } from './execution-nodes.js';
+import { isRemoteNodeId, parseNodeId, LOCAL_EXECUTION_NODE_ID } from './execution-nodes.js';
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from './generation-prompts';
 import {
   parseAgentSwitchContextWindowTokens,
@@ -291,6 +291,17 @@ function safeOptionalProtocol(value: unknown): ApiProtocol | null {
   return null;
 }
 
+export function generationSelectionNodeError(value: unknown): string | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const nodeId = parseNodeId(raw.nodeId);
+  if (!nodeId) return 'Invalid execution node ID';
+  if (nodeId !== LOCAL_EXECUTION_NODE_ID && (
+    !isAgentId(raw.agentId) || typeof raw.model !== 'string' || !raw.model.trim()
+  )) return 'An explicit execution node requires an agent and model';
+  return null;
+}
+
 function normalizeGenerationSelection(
   value: unknown,
 ): GenerationSelectionUiSettings | undefined {
@@ -299,8 +310,8 @@ function normalizeGenerationSelection(
 
   const normalized: GenerationSelectionUiSettings = {};
   if (raw.nodeId !== undefined) {
-    if (raw.nodeId !== null && !isExecutionNodeId(raw.nodeId)) throw new Error('Invalid execution node ID');
-    normalized.nodeId = raw.nodeId;
+    // Retains an invalid explicit target as unavailable rather than converting it to Local.
+    normalized.nodeId = raw.nodeId === null || typeof raw.nodeId === 'string' ? raw.nodeId : '';
   }
   if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;

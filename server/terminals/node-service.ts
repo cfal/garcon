@@ -111,13 +111,6 @@ export class LocalExecutionTerminalService implements ExecutionTerminalService {
     this.manager.detachPeer(authority, subscription.peer);
   }
 
-  detachTerminal(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string): void {
-    const subscription = this.#subscriptions.get(peer);
-    if (subscription) this.manager.detachTerminal(authority, subscription.peer, terminalId);
-    // Each remote subscription owns exactly one terminal; the Local adapter may share a peer.
-    if (subscription && subscription.peer.ownedTerminalIds.size === 0) this.detachPeer(authority, peer);
-  }
-
   disconnect(): void {
     this.#epoch = crypto.randomUUID();
     for (const [peer, subscription] of this.#subscriptions) this.detachPeer(subscription.authority, peer);

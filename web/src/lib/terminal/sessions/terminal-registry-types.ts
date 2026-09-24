@@ -51,6 +51,13 @@ export interface TerminalClientSession {
 	replayTruncatedAt: number | null;
 }
 
+export interface TerminalNodeInventory {
+	status: 'loading' | 'ready' | 'failed';
+	runtimeId?: string;
+	epoch?: string;
+	error: string | null;
+}
+
 export interface TerminalRegistryDeps {
 	nodes?: Pick<ExecutionNodesStore, 'nodes' | 'label' | 'onChanged'>;
 	connection: PrimaryWsConnectionPort;

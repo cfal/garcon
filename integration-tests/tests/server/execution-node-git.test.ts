@@ -2,10 +2,55 @@ import { expect, test } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ExecutionGitResults, GitReviewDocumentRef } from '../../../common/git-execution.js';
+import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-node-dials'] as const) {
+  test(`Git review loads bounded files independently without exhausting the document (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-body-limit-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const project = fixture.executionDirs.project;
+      const target = { nodeId: client.nodeId, project };
+      await initializeFixtureRepository(project);
+      const plain = `${'x'.repeat(9999)}\n`.repeat(250);
+      for (const [file, content] of [['a.txt', plain], ['b.txt', plain], ['escaped.txt', plain.replaceAll('x', '\t')], ['small.txt', 'small change\n']]) {
+        await writeFile(join(project, file), content);
+      }
+      const snapshot = await client.post<ExecutionGitResults['getWorkbenchSnapshot']>('/api/v1/git/workbench/snapshot', { ...target, mode: 'working', context: 5 });
+      if (snapshot.status !== 'ready') throw new Error('Expected workbench');
+      expect(snapshot.reviewSummary.limits.maxLoadedPatchBytes).toBe(10_000_000);
+      const document: GitReviewDocumentRef = { nodeId: client.nodeId, instanceId: snapshot.instanceId, documentId: snapshot.reviewSummary.documentId };
+      let loadedBytes = 0;
+      for (const file of ['a.txt', 'b.txt', 'escaped.txt', 'small.txt']) {
+        const response = await client.post<ExecutionGitResults['getReviewDocumentFileBodies']>('/api/v1/git/review-documents/files', { ...target, document, files: [file], purpose: 'visible' });
+        if (response.status !== 'ready') throw new Error('Expected ready review body');
+        expect(response.errors).toEqual({});
+        const body = response.files[file];
+        expect(body.bodyState).toBe(file === 'escaped.txt' ? 'too-large' : 'loaded');
+        expect(body.limitReason).toBe(file === 'escaped.txt' ? 'file-too-many-bytes' : undefined);
+        loadedBytes += body.patchBytes;
+      }
+      expect(loadedBytes).toBeGreaterThan(GIT_MAX_RESULT_BYTES);
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
+  test(`Git HTTP rejects oversized results without retiring the node (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-result-limit-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const project = fixture.executionDirs.project;
+      const target = { nodeId: client.nodeId, project };
+      await initializeFixtureRepository(project);
+      const message = join(project, '.git', 'oversized-message');
+      await writeFile(message, 'x'.repeat(GIT_MAX_RESULT_BYTES));
+      await runFixtureGit(project, 'commit', '--allow-empty', '-q', '-F', message);
+      await expect(client.post('/api/v1/git/history/commits', target))
+        .rejects.toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
+      expect(await client.get(`/api/v1/git/status?${new URLSearchParams(target)}`))
+        .toMatchObject({ nodeId: client.nodeId, branch: 'main' });
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
   test(`Git HTTP reads, staging, mutations and documents belong to the selected node (${executionBackend})`, async () => {
     await withIntegrationFixture(`git-http-${executionBackend}`, async fixture => {
       const { client } = fixture;

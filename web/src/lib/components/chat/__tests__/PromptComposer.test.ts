@@ -150,6 +150,27 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
 	});
 
+	it('submits file mentions with click and Enter when the ready node has no Files capability', async () => {
+		const catalog = new ModelCatalogStore();
+		catalog.forNode(remoteExecutionNode.id).lastValidatedAt = Date.now();
+		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+		vi.spyOn(catalog.forNode(remoteExecutionNode.id), 'refreshIfStale').mockResolvedValue();
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedNodeId: remoteExecutionNode.id,
+			nodes: [localExecutionNode, remoteExecutionNode], catalog, onsubmit,
+		});
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		const text = 'Read @README.md';
+		await inputAtCaret(textarea, text, text.length);
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		expect(send.disabled).toBe(false);
+		await fireEvent.click(send);
+		expect(onsubmit).toHaveBeenCalledTimes(1);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).toHaveBeenCalledTimes(2);
+	});
+
 	it('refreshes again when an unvalidated catalog is invalidated during its first load', async () => {
 		const catalog = new ModelCatalogStore();
 		const remote = catalog.forNode(remoteExecutionNode.id);

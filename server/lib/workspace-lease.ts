@@ -27,6 +27,29 @@ export class WorkspaceInUseError extends Error {
   }
 }
 
+export async function acquireControllerLease(
+  configDir: string,
+  workspaceDir: string,
+  options: WorkspaceLeaseOptions = {},
+): Promise<WorkspaceLease> {
+  const configLease = await acquireWorkspaceLease(configDir, options);
+  try {
+    await fs.mkdir(workspaceDir, { recursive: true });
+    if (await fs.realpath(workspaceDir) === configLease.workspaceDir) return configLease;
+    const workspaceLease = await acquireWorkspaceLease(workspaceDir, options);
+    return {
+      workspaceDir: workspaceLease.workspaceDir,
+      async release() {
+        try { await workspaceLease.release(); }
+        finally { await configLease.release(); }
+      },
+    };
+  } catch (error) {
+    await configLease.release();
+    throw error;
+  }
+}
+
 export async function acquireWorkspaceLease(
   workspaceDir: string,
   options: WorkspaceLeaseOptions = {},

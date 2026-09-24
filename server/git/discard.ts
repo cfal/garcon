@@ -2,6 +2,7 @@ import { assertGitWorkingPath, markGitMutationDispatched } from './operation-con
 import type { GitMutationResult } from '../../common/git.js';
 import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
+import { resolveRealWithinBase } from '../lib/path-boundary.js';
 import { literalGitPathspec } from './pathspecs.js';
 import { parsePorcelainV1Z, UNMERGED_STATUSES } from './porcelain-status.js';
 import {
@@ -72,6 +73,7 @@ export async function discard({ projectPath, file }: FileOptions): Promise<GitMu
 
   if (status === '??') {
     const filePath = resolvePathWithinProject(projectPath, file);
+    await resolveRealWithinBase(projectPath, filePath);
     await assertGitWorkingPath(filePath);
     const stats = await fs.stat(filePath);
     if (stats.isDirectory()) {

@@ -106,7 +106,7 @@
 
 	$effect(() => {
 		if (typeof window.matchMedia !== 'function') return;
-		const compactMaxWidth = (showAgent && sourceSelectionEnabled && showEffort ? 899 : 639) + (showNode ? 176 : 0);
+		const compactMaxWidth = (showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) + (showNode ? 176 : 0);
 		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
 		const updateLayout = () => {
 			isCompactLayout = mediaQuery.matches;

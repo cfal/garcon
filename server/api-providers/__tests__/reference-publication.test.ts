@@ -145,9 +145,7 @@ test.each(['confirmed', 'failed', 'uncertain'] as const)('removing the last chat
 test('unknown historical provider references can be retained and removed without reauthorization', async () => {
   const { root, store, provider, chats, settings } = await fixture();
   await settings.setUiSettings({ chatTitle: { apiProviderId: provider.id, modelEndpointId: provider.endpoints[0]!.id, agentId: 'test', model: 'synthetic-model' } });
-  const external = new ApiProviderStore(join(root, 'api-providers.json'));
-  await external.init();
-  await external.deleteApiProvider(provider.id, () => false);
+  await store.deleteApiProvider(provider.id, () => false);
   await settings.setUiSettings({ promptRefinement: {} });
   await settings.setUiSettings({ chatTitle: {} });
   expect(settings.referencesApiProvider(provider.id)).toBe(false);

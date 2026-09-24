@@ -1,8 +1,9 @@
 import type { ApiProtocol } from '../../common/api-providers.js';
-import type { AgentModelOption } from '../../common/agents.js';
+import { isAgentId, type AgentModelOption } from '../../common/agents.js';
 import { normalizeThinkingMode, type ThinkingMode } from '../../common/chat-modes.js';
 import { isRecord } from '../../common/json.js';
-import { parseNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
+import { parseNodeId } from '../../common/execution-nodes.js';
+import { generationSelectionNodeError } from '../../common/settings.js';
 import { ValidationDomainError } from '../lib/domain-error.js';
 
 type GenerationModelMap = Record<string, AgentModelOption[]>;
@@ -31,10 +32,6 @@ export interface EffectiveGenerationConfig {
 }
 
 type EffectiveGenerationUiConfig = Record<string, unknown> & EffectiveGenerationConfig;
-
-function isAgent(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value);
-}
 
 function pickAutoAgent(
   authByAgent: GenerationAuthMap,
@@ -80,12 +77,11 @@ export function resolveEffectiveGenerationConfig({
 }: EffectiveGenerationInput): EffectiveGenerationConfig {
   const cfg = isRecord(persisted) ? persisted : {};
   const persistedEnabled = typeof cfg.enabled === 'boolean' ? cfg.enabled : null;
-  const persistedAgent = isAgent(cfg.agentId) ? cfg.agentId : null;
+  const persistedAgent = isAgentId(cfg.agentId) ? cfg.agentId : null;
   const persistedModel = typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model : '';
-  const nodeId = parseNodeId(cfg.nodeId);
-  if (!nodeId || (nodeId !== LOCAL_EXECUTION_NODE_ID && (!persistedAgent || !persistedModel))) {
-    throw new ValidationDomainError('An explicit execution node requires an agent and model');
-  }
+  const nodeError = generationSelectionNodeError(cfg);
+  if (nodeError) throw new ValidationDomainError(nodeError);
+  const nodeId = parseNodeId(cfg.nodeId)!;
   const autoAgent = pickAutoAgent(authByAgent, readinessByAgent ?? {}, generationByAgent);
   const selectedAgent = persistedAgent
     ?? autoAgent
@@ -118,4 +114,11 @@ export function resolveEffectiveGenerationUiConfig(
 ): EffectiveGenerationUiConfig {
   const config = isRecord(input.persisted) ? input.persisted : {};
   return { ...config, ...resolveEffectiveGenerationConfig({ ...input, persisted: config }) };
+}
+
+export function resolveGenerationUiSnapshot(
+  input: EffectiveGenerationInput,
+): EffectiveGenerationUiConfig | undefined {
+  if (generationSelectionNodeError(input.persisted)) return undefined;
+  return resolveEffectiveGenerationUiConfig(input);
 }

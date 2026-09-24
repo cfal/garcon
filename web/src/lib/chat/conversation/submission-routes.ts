@@ -18,6 +18,7 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 import { ApiError } from '$lib/api/client.js';
 import type { ProjectTarget } from '$shared/project-resolution';
+import { effectiveNodeId } from '$shared/execution-nodes';
 
 type RouteDeps = Pick<
 	SessionControllerDeps,
@@ -76,18 +77,18 @@ export function rejectUnavailableDraftStart(
 ): ConversationSubmissionOutcome {
 	const draft = deps.composerState.draftSnapshot(chatId);
 	const retainedText = draft.text === text ? text : [text, draft.text].filter(Boolean).join('\n\n');
-	deps.composerState.restoreDraftIfRevision(
-		chatId,
-		draft.revision,
-		retainedText,
-		[...new Set([...attachments, ...draft.attachments])],
-	);
+	deps.composerState.restoreDraftIfRevision(chatId, draft.revision, retainedText, [
+		...new Set([...attachments, ...draft.attachments]),
+	]);
 	// A blocked automatic start becomes an editable draft, never a reconnect retry.
 	deps.sessions.patchDraftStartup(chatId, { firstMessage: '', initialImages: [] });
 	deps.chatState.appendLocalNoticeForChat(
 		chatId,
 		'error',
-		m.chat_notice_failed_start_chat({ detail: 'Execution node or model catalog is unavailable. The initial prompt is kept in the composer.' }),
+		m.chat_notice_failed_start_chat({
+			detail:
+				'Execution node or model catalog is unavailable. The initial prompt is kept in the composer.',
+		}),
 	);
 	return 'rejected';
 }
@@ -330,9 +331,11 @@ function refreshUnavailableProject(
 	error: unknown,
 ): void {
 	if (!(error instanceof ApiError) || error.errorCode !== 'PROJECT_UNAVAILABLE') return;
-	const target: ProjectTarget = context.chat.status === 'draft'
-		? { kind: 'path', projectPath: context.chat.projectPath }
-		: { kind: 'chat', chatId: context.chatId, projectPath: context.chat.projectPath };
+	const nodeId = effectiveNodeId(context.chat.nodeId);
+	const target: ProjectTarget =
+		context.chat.status === 'draft'
+			? { kind: 'path', nodeId, projectPath: context.chat.projectPath }
+			: { kind: 'chat', nodeId, chatId: context.chatId, projectPath: context.chat.projectPath };
 	try {
 		void Promise.resolve(deps.onProjectUnavailable?.(target)).catch(() => undefined);
 	} catch {

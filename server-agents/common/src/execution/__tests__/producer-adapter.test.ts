@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
@@ -202,6 +202,278 @@ describe('createAgentProducerAdapter', () => {
     expect(fixture.events).toEqual([]);
   });
 
+  it.each([false, true])('aborts a closed binding during pending startup (session published: %s)', async (published) => {
+    const fixture = await createFixture();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const session = { agentSessionId: 'closed-session', nativeSession: null, nativeSeedReceipt: null };
+    let admissionSignal: AbortSignal | undefined;
+    fixture.runtime.start = async (request, publish) => {
+      admissionSignal = request.admission.signal;
+      if (published) publish({ type: 'session', session });
+      started.resolve();
+      await release.promise;
+      return session;
+    };
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    const starting = fixture.adapter.execution.start(fixture.request);
+    await started.promise;
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    expect(admissionSignal?.aborted).toBe(true);
+    expect(abort).toHaveBeenCalledTimes(published ? 1 : 0);
+    release.resolve();
+    await expect(starting).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abort).toHaveBeenLastCalledWith('closed-session');
+    expect(fixture.events).toHaveLength(published ? 1 : 0);
+  });
+
+  it.each([false, true])('normalizes cancelled startup after binding closure (session published: %s)', async (published) => {
+    const fixture = await createFixture();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const session = { agentSessionId: 'cancelled-session', nativeSession: null, nativeSeedReceipt: null };
+    fixture.runtime.start = async (request, publish) => {
+      if (published) publish({ type: 'session', session });
+      started.resolve();
+      await release.promise;
+      request.admission.signal.throwIfAborted();
+      return session;
+    };
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    const starting = fixture.adapter.execution.start(fixture.request);
+    await started.promise;
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    release.resolve();
+    await expect(starting).rejects.toMatchObject({ outcome: 'rejected', code: 'STALE_RESOURCE' });
+    expect(abort).toHaveBeenCalledTimes(published ? 1 : 0);
+    if (published) expect(abort).toHaveBeenCalledWith('cancelled-session');
+  });
+
+  it('preserves caller cancellation when the producer binding remains open', async () => {
+    const fixture = await createFixture();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cancellation = new AbortController();
+    fixture.runtime.start = async (request) => {
+      started.resolve();
+      await release.promise;
+      request.admission.signal.throwIfAborted();
+      return { agentSessionId: 'cancelled-session', nativeSession: null, nativeSeedReceipt: null };
+    };
+    const starting = fixture.adapter.execution.start(fixture.request, { signal: cancellation.signal });
+    await started.promise;
+    cancellation.abort();
+    release.resolve();
+    await expect(starting).rejects.toBe(cancellation.signal.reason);
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+  });
+
+  it('aborts the active operation before retiring its binding', async () => {
+    const fixture = await createFixture(() => {});
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    const handle = await fixture.adapter.execution.start(fixture.request);
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    expect(abort).toHaveBeenCalledWith('session-1');
+    await expect(fixture.adapter.execution.abort(handle)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+  });
+
+  it('detaches output without aborting and rejects new work until native completion', async () => {
+    let publish!: AgentRuntimePublisher;
+    const fixture = await createFixture((event) => { publish = event.publish; });
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    await fixture.adapter.execution.start(fixture.request);
+    const before = [...fixture.events];
+    fixture.adapter.producers.detach(fixture.request.producerBinding);
+    publish({ type: 'rows', rows: runtimeRows([new AssistantMessage(TS, 'detached output')]) });
+    const replacement = createAgentResourceRef(scope, 'producer');
+    await fixture.adapter.producers.bind({ binding: replacement, chatId: fixture.request.chatId });
+    const next = { ...fixture.request, producerBinding: replacement, runId: 'next' };
+    await expect(fixture.adapter.execution.start(next)).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    await expect(fixture.adapter.execution.resume({ ...next, agentSessionId: 'session-1', nativeSession: null }))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    await expect(fixture.adapter.runExisting({ ...next, agentSessionId: 'session-1', nativeSession: null }, async () => undefined))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    publish({ type: 'run-ended', runId: fixture.request.runId, outcome: 'finished' });
+    expect(fixture.events).toEqual(before);
+    expect(abort).not.toHaveBeenCalled();
+    await expect(fixture.adapter.execution.start(fixture.request)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(() => fixture.adapter.producers.detach(fixture.request.producerBinding)).not.toThrow();
+    await fixture.adapter.execution.start(next);
+  });
+
+  it('denies pending and future detached permissions without publishing them', async () => {
+    let publish!: AgentRuntimePublisher;
+    const fixture = await createFixture((event) => { publish = event.publish; });
+    await fixture.adapter.execution.start(fixture.request);
+    const decisions = [mock(async () => {}), mock(async () => {})];
+    const requestPermission = (index: number) => publish({
+      type: 'permission', runId: fixture.request.runId,
+      lifecycle: permissionRequest(`permission-${index}`, new BashToolUseMessage(TS, `tool-${index}`, 'pwd')),
+      decision: { permissionOccurrenceId: `permission-${index}`, respond: decisions[index]! },
+    });
+    requestPermission(0);
+    const permission = fixture.events.at(-1);
+    fixture.adapter.producers.detach(fixture.request.producerBinding);
+    requestPermission(1);
+    await Promise.resolve();
+    for (const respond of decisions) expect(respond).toHaveBeenCalledWith({ allow: false });
+    expect(fixture.events.filter(event => event.type === 'permission')).toHaveLength(1);
+    if (permission?.type !== 'permission' || !permission.decision) throw new Error('Expected permission');
+    await expect(fixture.adapter.permissions.respond({ response: permission.decision.response, decision: { allow: true } }))
+      .rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    publish({ type: 'run-ended', runId: fixture.request.runId, outcome: 'finished' });
+  });
+
+  it('immediately releases an idle detached binding', async () => {
+    const fixture = await createFixture();
+    fixture.adapter.producers.detach(fixture.request.producerBinding);
+    await expect(fixture.adapter.execution.start(fixture.request)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+  });
+
+  it('aborts a session published after closure without waiting for startup to return', async () => {
+    const fixture = await createFixture();
+    const started = Promise.withResolvers<AgentRuntimePublisher>();
+    const release = Promise.withResolvers<void>();
+    const session = { agentSessionId: 'late-session', nativeSession: null, nativeSeedReceipt: null };
+    fixture.runtime.start = async (_request, publish) => {
+      started.resolve(publish);
+      await release.promise;
+      return session;
+    };
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    const starting = fixture.adapter.execution.start(fixture.request);
+    const publish = await started.promise;
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    publish({ type: 'session', session });
+    expect(abort).toHaveBeenCalledWith('late-session');
+    expect(fixture.events).toEqual([]);
+    release.resolve();
+    await expect(starting).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a binding closed when best-effort native abort fails', async () => {
+    const fixture = await createFixture(() => {});
+    fixture.runtime.abort = async () => { throw new Error('Synthetic native abort failure'); };
+    const handle = await fixture.adapter.execution.start(fixture.request);
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    await expect(fixture.adapter.execution.abort(handle)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(fixture.warnings).toEqual([{
+      message: 'Failed to abort execution for a closed producer binding',
+      fields: { chatId: fixture.request.chatId, reason: 'Synthetic native abort failure' },
+    }]);
+  });
+
+  it('does not abort a completed operation on binding closure', async () => {
+    const fixture = await createFixture();
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    await fixture.adapter.execution.start(fixture.request);
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    expect(abort).not.toHaveBeenCalled();
+  });
+
+  it('does not abort a replacement when a closed pending start settles with its session', async () => {
+    const fixture = await createFixture();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    fixture.runtime.start = async () => {
+      started.resolve();
+      await release.promise;
+      return { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null };
+    };
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    const starting = fixture.adapter.execution.start(fixture.request);
+    await started.promise;
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    const replacement = createAgentResourceRef(scope, 'producer');
+    await fixture.adapter.producers.bind({ binding: replacement, chatId: fixture.request.chatId });
+    const handle = await fixture.adapter.execution.resume({
+      ...fixture.request, runId: 'replacement', producerBinding: replacement,
+      agentSessionId: 'session-1', nativeSession: null,
+    });
+    release.resolve();
+    await expect(starting).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(abort).not.toHaveBeenCalled();
+    await expect(fixture.adapter.execution.abort(handle)).resolves.toBe(true);
+    expect(abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts a closed startup even while a replacement startup has no session yet', async () => {
+    const fixture = await createFixture();
+    const entered = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    const release = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    fixture.runtime.start = async (request) => {
+      const index = request.runId === fixture.request.runId ? 0 : 1;
+      entered[index]!.resolve();
+      await release[index]!.promise;
+      return { agentSessionId: `session-${index}`, nativeSession: null, nativeSeedReceipt: null };
+    };
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    const starting = fixture.adapter.execution.start(fixture.request);
+    await entered[0]!.promise;
+    await fixture.adapter.producers.close(fixture.request.producerBinding);
+    const replacement = createAgentResourceRef(scope, 'producer');
+    await fixture.adapter.producers.bind({ binding: replacement, chatId: fixture.request.chatId });
+    const replacing = fixture.adapter.execution.start({
+      ...fixture.request, runId: 'replacement', producerBinding: replacement,
+    });
+    await entered[1]!.promise;
+    release[0]!.resolve();
+    await expect(starting).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abort).toHaveBeenLastCalledWith('session-0');
+    release[1]!.resolve();
+    const handle = await replacing;
+    await expect(fixture.adapter.execution.abort(handle)).resolves.toBe(true);
+    expect(abort).toHaveBeenLastCalledWith('session-1');
+  });
+
+  it('retains late-row bindings without spending completed execution slots', async () => {
+    let publishLateRows = () => { throw new Error('First publisher was not captured'); };
+    const fixture = await createFixture(({ publish, runId }) => {
+      if (runId === 'run-0') {
+        publishLateRows = () => publish({ type: 'rows', rows: runtimeRows([new AssistantMessage(TS, 'late first-chat output')]) });
+      }
+      publish({ type: 'run-ended', runId, outcome: 'finished' });
+    });
+    for (let index = 0; index < 4097; index++) {
+      const chatId = `chat-${index + 1}`;
+      const producerBinding = index === 0 ? fixture.request.producerBinding : createAgentResourceRef(scope, 'producer');
+      if (index > 0) await fixture.adapter.producers.bind({ binding: producerBinding, chatId });
+      const handle = await fixture.adapter.execution.start({ ...fixture.request, chatId, runId: `run-${index}`, producerBinding });
+      await expect(fixture.adapter.execution.abort(handle)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    }
+    expect(await fixture.adapter.execution.runningSessions()).toEqual([]);
+    expect(fixture.events).toHaveLength(4097 * 2);
+    publishLateRows();
+    expect(fixture.events.at(-1)).toMatchObject({
+      type: 'rows', rows: [{ message: { content: 'late first-chat output' } }],
+    });
+    expect(fixture.warnings).toEqual([]);
+  });
+
+  it('releases execution slots when native dispatch fails', async () => {
+    const fixture = await createFixture(undefined, new Error('synthetic launch failure'));
+    for (let index = 0; index < 4097; index++) {
+      const chatId = `chat-${index + 1}`;
+      const producerBinding = index === 0 ? fixture.request.producerBinding : createAgentResourceRef(scope, 'producer');
+      if (index > 0) await fixture.adapter.producers.bind({ binding: producerBinding, chatId });
+      await expect(fixture.adapter.execution.start({ ...fixture.request, chatId, runId: `run-${index}`, producerBinding }))
+        .rejects.toThrow('synthetic launch failure');
+    }
+    expect(fixture.events).toEqual([]);
+    expect(fixture.warnings).toEqual([]);
+  });
+
   it('preserves a late permission fact without restoring its response authority', async () => {
     const fixture = await createFixture(({ publish, runId }) => {
       publish({ type: 'run-ended', runId, outcome: 'finished' });
@@ -342,6 +614,7 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
 
   await adapter.execution.start({ ...baseRequest, runId: 'run-a', producerBinding: bindingA } satisfies AgentStartRequestV5);
   closedA = true;
+  await adapter.producers.close(bindingA);
   await adapter.execution.start({ ...baseRequest, runId: 'run-b', producerBinding: bindingB } satisfies AgentStartRequestV5);
   delivered.length = 0;
 

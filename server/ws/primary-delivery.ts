@@ -47,12 +47,14 @@ class BoundedPrimarySocket implements PrimaryWebSocket {
 
 export class PrimarySocketDelivery implements WebSocketMessagePublisher {
   readonly #sockets = new Map<NativeSocket, BoundedPrimarySocket>();
+  #closed = false;
 
   constructor(readonly backpressureLimit: number) {}
 
   add(socket: NativeSocket): PrimaryWebSocket {
     const peer = new BoundedPrimarySocket(socket, this.backpressureLimit);
     this.#sockets.set(socket, peer);
+    if (this.#closed) peer.close(1001, 'Server shutting down');
     return peer;
   }
 
@@ -63,6 +65,11 @@ export class PrimarySocketDelivery implements WebSocketMessagePublisher {
     peer?.retire();
     this.#sockets.delete(socket);
     return peer;
+  }
+
+  close(): void {
+    this.#closed = true;
+    for (const peer of this.#sockets.values()) peer.close(1001, 'Server shutting down');
   }
 
   publish(topic: string, payload: string, compress?: boolean): number {

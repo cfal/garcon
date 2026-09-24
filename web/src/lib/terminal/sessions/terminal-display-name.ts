@@ -15,3 +15,9 @@ export function terminalDisplayName(
 ): string {
 	return metadata.title ?? defaultTerminalDisplayName(metadata, hostLabel);
 }
+
+export function terminalContextName(metadata: TerminalDisplayMetadata, hostLabel: string): string {
+	return metadata.title
+		? `${hostLabel}: ${metadata.title}`
+		: defaultTerminalDisplayName(metadata, hostLabel);
+}

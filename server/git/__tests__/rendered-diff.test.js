@@ -107,6 +107,16 @@ describe('splitPatchesFromRawDiff', () => {
 });
 
 describe('scanUnifiedPatch', () => {
+  it.each([['x', 450], ['\t', 250]])('limits encoded bodies below the raw patch budget (%p)', (character, rows) => {
+    const patch = `diff --git a/example.txt b/example.txt\n@@ -0,0 +1,${rows} @@\n${`+${character.repeat(9999)}\n`.repeat(rows)}`;
+    expect(Buffer.byteLength(patch)).toBeLessThan(5_000_000);
+    expect(compactRenderedPatch('example.txt', 'synthetic-fingerprint', patch)).toMatchObject({
+      bodyState: 'too-large',
+      limitReason: 'file-too-many-bytes',
+      patch: null,
+    });
+  });
+
   it('matches the legacy parser and keeps the patch as the compact body', () => {
     const patch = `diff --git a/src/file.ts b/src/file.ts
 --- a/src/file.ts

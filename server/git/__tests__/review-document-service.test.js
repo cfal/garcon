@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createGitService } from '../git-service.js';
+import { createGitOperations } from '../git-service.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 import { createReviewDocumentOperations } from '../review-document-service.js';
 import { withGitOperation } from '../operation-context.js';
@@ -39,14 +39,7 @@ async function createRepository(paths = ['a.txt', 'b.txt']) {
 }
 
 function createService() {
-  return createGitService({
-    agents: { runSingleQuery: async () => 'chore: test' },
-    classifyGitError: (error) => ({
-      code: 'UNKNOWN',
-      status: 500,
-      message: error instanceof Error ? error.message : String(error),
-    }),
-  });
+  return createGitOperations();
 }
 
 afterEach(async () => {

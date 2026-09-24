@@ -59,7 +59,10 @@ export interface ConversationAgentSwitchDeps {
 		path: string,
 		model: NodeHandoffModel,
 	): Promise<NodeHandoffDestination | null>;
-	executionDraft: Pick<ConversationExecutionDraftState, 'replaceSelection' | 'resetToDurable'>;
+	executionDraft: Pick<
+		ConversationExecutionDraftState,
+		'replaceSelection' | 'replaceDestination' | 'resetToDurable' | 'isHandoffPending'
+	>;
 	getExecutionDefaults(
 		agentId: SessionAgentId,
 		nodeId?: string,
@@ -91,8 +94,11 @@ export class ConversationAgentSwitchService {
 
 		let agentId = next.agentId;
 		let modelValue = next.modelValue;
-		let projectPath = this.deps.agentState.projectPath;
+		let projectPath = this.deps.executionDraft.isHandoffPending
+			? this.deps.agentState.projectPath
+			: durable.projectPath;
 		let model: ResolvedModelSelection;
+		let confirmedDestination = false;
 		if (nodeId !== effectiveNodeId(this.deps.agentState.nodeId)) {
 			const current = this.deps.agentState;
 			const catalog = this.deps.modelCatalogForNode(current.nodeId);
@@ -111,6 +117,7 @@ export class ConversationAgentSwitchService {
 				...model,
 			});
 			if (!destination) return;
+			confirmedDestination = true;
 			projectPath = destination.projectPath;
 			model = destination.selection;
 			agentId = destination.selection.agentId;
@@ -128,6 +135,15 @@ export class ConversationAgentSwitchService {
 			this.deps.sessions.selectedChat.agentOwnershipEpoch !== durable.agentOwnershipEpoch
 		)
 			return;
+		if (
+			!this.deps.sessions.isDraft(chatId) &&
+			agentId === durable.agentId &&
+			nodeId === effectiveNodeId(durable.nodeId)
+		) {
+			const selection = this.deps.executionDraft.resetToDurable();
+			if (selection) this.#applyAgentState(selection);
+			return;
+		}
 		const defaults = this.deps.getExecutionDefaults(agentId, nodeId);
 		const selection: ConversationExecutionSelection = {
 			nodeId,
@@ -148,7 +164,8 @@ export class ConversationAgentSwitchService {
 			this.deps.sessions.patchChat(chatId, selection);
 			return;
 		}
-		this.deps.executionDraft.replaceSelection(selection);
+		if (confirmedDestination) this.deps.executionDraft.replaceDestination(selection);
+		else this.deps.executionDraft.replaceSelection(selection);
 	}
 
 	#applyAgentState(selection: ConversationExecutionSelection, modelValue?: string): void {

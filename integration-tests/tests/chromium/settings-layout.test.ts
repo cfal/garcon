@@ -16,7 +16,7 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     for (const width of [1440, 768, 390, 320]) {
       phase(`server settings at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['Execution Nodes', 'Providers', 'Other Agents', 'Github', 'General']) {
+      for (const name of ['Execution Nodes', 'Providers', 'Other Agents', 'GitHub', 'General']) {
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();
@@ -27,7 +27,7 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
         const bounds = (await dialog.boundingBox())!;
         expect(bounds.x).toBeGreaterThanOrEqual(0);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
-        if (name === 'Providers' || name === 'Github') {
+        if (name === 'Providers' || name === 'GitHub') {
           await browserExpect(panel.getByRole('heading', { name: 'Local', exact: true })).toBeVisible();
           await browserExpect(panel.getByRole('heading', { name: 'Integration worker', exact: true })).toBeVisible();
           expect(await panel.getByRole('combobox').count()).toBe(0);
@@ -74,4 +74,39 @@ test('new-chat execution node and project fields have matching heights', async (
     }
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
+
+test('scheduled-chat node and path fields align for mouse and touch input', async () => {
+  await withChromiumFixture('scheduled-chat-field-alignment', async ({ page, context, integration, assertNoBrowserErrors }) => {
+    await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('button', { name: 'More actions', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add Scheduled Prompt', exact: true });
+    const picker = dialog.locator('[data-execution-node-picker]');
+    const project = dialog.locator('#scheduled-project-path');
+    await browserExpect(project).toBeVisible();
+    const cdp = await context.newCDPSession(page);
+    const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+    await mkdir(artifacts, { recursive: true });
+    for (const touch of [false, true]) {
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: touch });
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(touch);
+      for (const width of [1440, 768, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await browserExpect(dialog).toHaveCSS('width', `${Math.min(width, 768)}px`);
+        const pickerRect = (await picker.boundingBox())!;
+        const projectRect = (await project.boundingBox())!;
+        expect(pickerRect.height).toBe(projectRect.height);
+        expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
+        expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        const bounds = (await dialog.boundingBox())!;
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        await page.screenshot({ path: join(artifacts, `scheduled-chat-fields-${touch ? 'touch' : 'mouse'}-${width}.png`) });
+      }
+    }
+    await cdp.detach();
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-controller-dials' });
 }, 90_000);

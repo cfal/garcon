@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { acquireWorkspaceLease, WorkspaceInUseError } from '../workspace-lease.js';
+import { acquireControllerLease, acquireWorkspaceLease, WorkspaceInUseError } from '../workspace-lease.js';
 
 const directories = [];
 
@@ -17,6 +17,29 @@ async function temporaryDirectory(label) {
 }
 
 describe('workspace lease', () => {
+  it('one controller owns the config directory even with distinct workspaces', async () => {
+    const root = await temporaryDirectory('garcon-controller-lease-');
+    const config = path.join(root, 'config');
+    const first = await acquireControllerLease(config, path.join(root, 'first'), { retries: 0 });
+    try {
+      await expect(acquireControllerLease(config, path.join(root, 'second'), { retries: 0 })).rejects.toBeInstanceOf(WorkspaceInUseError);
+      await expect(acquireWorkspaceLease(path.join(root, 'first'), { retries: 0 })).rejects.toBeInstanceOf(WorkspaceInUseError);
+    } finally { await first.release(); }
+    const next = await acquireControllerLease(config, path.join(root, 'second'), { retries: 0 });
+    await next.release();
+  });
+
+  it('acquires an identical config/workspace path only once and cleans up partial acquisition', async () => {
+    const root = await temporaryDirectory('garcon-controller-shared-path-');
+    const first = await acquireControllerLease(root, root, { retries: 0 });
+    const otherConfig = path.join(root, 'config');
+    try {
+      await expect(acquireControllerLease(otherConfig, root, { retries: 0 })).rejects.toBeInstanceOf(WorkspaceInUseError);
+      const recovered = await acquireWorkspaceLease(otherConfig, { retries: 0 });
+      await recovered.release();
+    } finally { await first.release(); }
+  });
+
   it('rejects a second owner and allows acquisition after release', async () => {
     const workspace = await temporaryDirectory('garcon-workspace-lease-');
     const first = await acquireWorkspaceLease(workspace, { retries: 0, staleMs: 2_000, updateMs: 1_000 });

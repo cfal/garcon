@@ -186,10 +186,10 @@ describe('GitHistorySurfaceController', () => {
 		const context: { controller?: GitHistorySurfaceController } = {};
 		const gitMutations = new GitMutationCoordinator({
 			onChanged: async (nodeId, effectiveProjectKey) => {
-				invalidations.markChanged(nodeId, effectiveProjectKey);
+				invalidations.markChanged(nodeId);
 				await context.controller?.refreshForInvalidation(
 					effectiveProjectKey,
-					invalidations.version(nodeId, effectiveProjectKey),
+					invalidations.version(nodeId),
 				);
 			},
 		});
@@ -206,8 +206,7 @@ describe('GitHistorySurfaceController', () => {
 						}),
 				}),
 			gitMutations,
-			invalidationVersion: (nodeId: string, effectiveProjectKey: string) =>
-				invalidations.version(nodeId, effectiveProjectKey),
+			invalidationVersion: (nodeId: string) => invalidations.version(nodeId),
 			reviewDisplay: new GitReviewDisplaySettingsStore(),
 		} satisfies GitSurfaceControllerDeps;
 		const controller = new GitHistorySurfaceController(deps);

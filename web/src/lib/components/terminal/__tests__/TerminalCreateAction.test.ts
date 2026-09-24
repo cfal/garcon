@@ -5,6 +5,16 @@ import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.
 import TerminalCreateMenuHarness from './TerminalCreateMenuHarness.svelte';
 
 afterEach(cleanup);
+
+it('keeps the launcher creation progress visible and blocks another create', async () => {
+	const oncreate = vi.fn();
+	render(TerminalCreateAction, { terminals: hosts(), oncreate, busy: true, showLabel: true });
+	const button = screen.getByRole('button', { name: 'Creating terminal' });
+	expect(button.textContent).toContain('Creating terminal');
+	expect(button.getAttribute('aria-busy')).toBe('true');
+	await fireEvent.click(button);
+	expect(oncreate).not.toHaveBeenCalled();
+});
 function hosts(remoteAvailable = true, localFull = false) {
 	return {
 		hosts: [
@@ -15,6 +25,26 @@ function hosts(remoteAvailable = true, localFull = false) {
 		canCreate: (nodeId: string) => (nodeId === 'local' ? !localFull : remoteAvailable),
 	} satisfies Pick<TerminalRegistry, 'hosts' | 'hasRemoteHosts' | 'canCreate'>;
 }
+
+it('explains the single-host limit on the direct button without spawning', async () => {
+	const oncreate = vi.fn();
+	render(TerminalCreateAction, { terminals: hosts(false, true), oncreate });
+	const button = screen.getByRole('button', { name: 'Terminal limit reached' });
+	expect(button.getAttribute('title')).toBe('Terminal limit reached');
+	expect(button.getAttribute('aria-disabled')).toBe('true');
+	await fireEvent.click(button);
+	expect(oncreate).not.toHaveBeenCalled();
+});
+
+it('explains the single-host limit in the overflow menu', async () => {
+	const oncreate = vi.fn();
+	render(TerminalCreateMenuHarness, { terminals: hosts(false, true), oncreate });
+	await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+	const action = screen.getByRole('menuitem', { name: 'Terminal limit reached' });
+	expect(action.getAttribute('aria-disabled')).toBe('true');
+	await fireEvent.click(action);
+	expect(oncreate).not.toHaveBeenCalled();
+});
 
 it('opens a host chooser without spawning and preserves per-host admission', async () => {
 	const oncreate = vi.fn();

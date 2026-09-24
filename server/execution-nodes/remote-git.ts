@@ -1,15 +1,10 @@
 import { AgentCallError, type ExecutionGitService, type ExecutionGhService, type NodeCallOptions } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../common/git.js';
-import { GIT_MAX_RESULT_BYTES, GIT_RESULT_CHUNK_BYTES, GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults } from '../../common/git-execution.js';
+import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults } from '../../common/git-execution.js';
 import { validateGitRequest, validateGhRequest } from '../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../common/git-result-validation.js';
 import { GitServiceError } from '../../common/git-error.js';
-import { isRecord } from '../../common/json.js';
 import type { RemoteSessionBacking } from './remote.js';
-import type { AgentRpc } from './rpc.js';
-import { decodeGitChunk, invalidGitResult, validateGitResultRef, type GitReply, type GitResultRef, type GitResultScope } from './git-protocol.js';
-
-let assembling = 0;
 
 export class RemoteGitServices {
   readonly git: ExecutionGitService;
@@ -77,8 +72,7 @@ export class RemoteGitServices {
     const mutation = isGitMutation(method);
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-        const reply = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs: callOptions.timeoutMs }, callOptions);
-        const result = await receiveResult(backing, reply, callOptions, mutation);
+        const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs: callOptions.timeoutMs }, callOptions);
         validateGitResult(method, result, backing.info);
         return result;
       });
@@ -97,11 +91,10 @@ export class RemoteGitServices {
     if (!backing.info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this node', 'OPERATION_UNSUPPORTED');
     return withDeadline(options, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
       const budgetMs = callOptions.timeoutMs;
-      let reply: GitReply<unknown>;
-      if (method === 'getStatus') reply = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, callOptions);
-      else if (method === 'listPullRequests') reply = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, callOptions);
-      else reply = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, callOptions);
-      const result = await receiveResult(backing, reply, callOptions);
+      let result: unknown;
+      if (method === 'getStatus') result = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, callOptions);
+      else if (method === 'listPullRequests') result = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, callOptions);
+      else result = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, callOptions);
       validateGhResult(method, result, backing.info);
       return result;
     });
@@ -116,40 +109,4 @@ async function withDeadline<T>(options: NodeCallOptions | undefined, maximum: nu
   const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
   try { return await operation({ timeoutMs, signal }); }
   finally { clearTimeout(timer); }
-}
-
-async function receiveResult(backing: RemoteSessionBacking, reply: unknown, options: NodeCallOptions, mutation = false): Promise<unknown> {
-  const { rpc, info } = backing;
-  const scope: GitResultScope = { nodeId: info.nodeId, instanceId: info.instanceId, sessionId: rpc.transport.id };
-  if (!isRecord(reply) || reply.nodeId !== scope.nodeId || reply.instanceId !== scope.instanceId || reply.sessionId !== scope.sessionId) throw invalidGitResult();
-  if (reply.kind === 'inline') {
-    if (reply.value === undefined || Buffer.byteLength(JSON.stringify(reply.value)) > GIT_RESULT_CHUNK_BYTES) throw invalidGitResult();
-    return reply.value;
-  }
-  if (reply.kind !== 'transfer') throw invalidGitResult();
-  validateGitResultRef(reply.transfer, scope);
-  const transfer = reply.transfer;
-  try {
-    if (mutation || !Number.isSafeInteger(reply.size) || typeof reply.size !== 'number' || reply.size < 1 || reply.size > GIT_MAX_RESULT_BYTES) throw invalidGitResult();
-    if (assembling >= 4) throw new GitServiceError('GIT_SERVICE_BUSY', 'Too many Git responses are being assembled');
-    assembling++;
-    try {
-      const buffer = Buffer.allocUnsafe(reply.size);
-      let offset = 0;
-      do {
-        const chunk = await rpc.call('', 'gitResults.readChunk', { transfer, offset }, options);
-        const data = decodeGitChunk(chunk?.data);
-        if (chunk.offset !== offset || data.length === 0 || offset + data.length > buffer.length || chunk.eof !== (offset + data.length === buffer.length)) throw invalidGitResult();
-        buffer.set(data, offset);
-        offset += data.length;
-      } while (offset < buffer.length);
-      try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer)); }
-      catch { throw invalidGitResult(); }
-    } finally { assembling--; }
-  } finally { await closeResult(rpc, transfer); }
-}
-
-async function closeResult(rpc: AgentRpc, transfer: GitResultRef): Promise<void> {
-  try { await rpc.call('', 'gitResults.close', transfer, { timeoutMs: 1000 }); }
-  catch { /* Absolute expiry releases unreachable results. */ }
 }

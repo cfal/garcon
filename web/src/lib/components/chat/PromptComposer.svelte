@@ -545,10 +545,11 @@
 	}
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
-		if (!ui.showFileMenu && !ui.showSlashMenu) return false;
-		const menu = ui.showFileMenu ? fileMentionMenu : slashCommandMenu;
+		const showFileMenu = filesAvailable && ui.showFileMenu;
+		if (!showFileMenu && !ui.showSlashMenu) return false;
+		const menu = showFileMenu ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
-		if (menu && !ui.showFileMenu && event.key === 'Enter') return false;
+		if (menu && !showFileMenu && event.key === 'Enter') return false;
 		if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) return false;
 		event.preventDefault();
 		return true;

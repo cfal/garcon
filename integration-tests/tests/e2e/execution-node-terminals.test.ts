@@ -5,7 +5,8 @@ import { SpaDriver } from '../../support/spa-driver.js';
 
 test('terminal host menus capture directories and preserve names across desktop/mobile', async () => {
   await withE2eFixture('execution-node-terminals', async fixture => {
-    const { client, executionDirs, dirs } = fixture.integration;
+    const { client, executionDirs, dirs, directAgents } = fixture.integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
     const app = new SpaDriver(fixture.page, fixture.integration);
     const list = (nodeId: string) => client.get<TerminalListResponse>(`/api/v1/terminals?nodeId=${nodeId}`);
     await app.setViewport(1440, 900);

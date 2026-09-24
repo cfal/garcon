@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ReadTextResponse, SaveTextResponse, FileIdentityResponse } from '../../../common/file-contracts.js';
+import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 import type { ExecutionNodeSnapshot } from '../../../common/execution-nodes.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -49,7 +50,7 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       const privateDirectory = join(projectPath, 'private');
       await mkdir(privateDirectory);
       await chmod(privateDirectory, 0);
-      const content = 'file contents\n'.repeat(1_300_000);
+      const content = 'x'.repeat(MAX_FILE_VIEW_BYTES - 5);
       await writeFile(join(projectPath, 'file.txt'), content);
       await writeFile(join(fixture.dirs.project, 'file.txt'), 'controller file');
       const query = new URLSearchParams({ nodeId, projectPath, path: 'file.txt' });
@@ -67,6 +68,13 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       expect((await readFile(join(projectPath, 'file.txt'), 'utf8')) === `${content}saved`).toBe(true);
       expect(await readFile(join(fixture.dirs.project, 'file.txt'), 'utf8')).toBe('controller file');
       await expect(client.put(`/api/v1/files/text?${query}`, { content: 'stale', expectedRevision: result.revision, conflictResolution: 'reject' })).rejects.toMatchObject({ status: 409, body: { errorCode: 'FILE_REVISION_CONFLICT' } });
+      await expect(client.put(`/api/v1/files/text?${query}`, { content: 'x'.repeat(MAX_FILE_VIEW_BYTES + 1), expectedRevision: saved.revision, conflictResolution: 'reject' }))
+        .rejects.toMatchObject({ status: 413, body: { errorCode: 'FILE_TOO_LARGE' } });
+      expect(await readFile(join(projectPath, 'file.txt'), 'utf8')).toBe(`${content}saved`);
+      await writeFile(join(projectPath, 'large.txt'), 'x'.repeat(MAX_FILE_VIEW_BYTES + 1));
+      const oversized = new URLSearchParams({ nodeId, projectPath, path: 'large.txt' });
+      await expect(client.get(`/api/v1/files/text?${oversized}`))
+        .rejects.toMatchObject({ status: 413, body: { errorCode: 'FILE_TOO_LARGE' } });
       const wrongRoot = new URLSearchParams({ nodeId, projectPath: fixture.dirs.project, path: 'file.txt' });
       await expect(client.get(`/api/v1/files/text?${wrongRoot}`)).rejects.toMatchObject({ status: 403 });
       await fixture.crashAndRestartGarcon({ preserveExecutionWorker: true });

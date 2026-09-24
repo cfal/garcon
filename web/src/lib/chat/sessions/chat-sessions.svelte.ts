@@ -34,10 +34,6 @@ import type {
 } from '$shared/chat-tag-mutations';
 import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
-	chatExecutionDraftStorageKey,
-	removeLocalStorageItem,
-} from '$lib/utils/local-persistence.js';
-import {
 	ChatArchiveProjectionState,
 	type ChatArchiveProjectionOperation,
 } from './chat-archive-projection-state.svelte.js';
@@ -800,7 +796,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
 		this.#tagReconciliation.remove(chatId);
-		removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 		if (!this.#baseById[chatId]) return;
 		this.#projectBindings.publish(chatId, null);
 

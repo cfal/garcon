@@ -119,6 +119,58 @@ function addedSyntaxSegments(controller: GitDiffDocumentController) {
 }
 
 describe('GitDiffDocumentController', () => {
+	it('loads one file per request and continues after an oversized file', async () => {
+		const controller = new GitDiffDocumentController();
+		const paths = ['large.ts', 'a.ts', 'b.ts'];
+		const oversized: GitReviewFileBody = {
+			...body('large.ts'),
+			bodyState: 'too-large',
+			category: 'large',
+			isTooLarge: true,
+			renderedRowCount: 0,
+			patchBytes: 0,
+			patch: null,
+			patchIndex: null,
+			limitReason: 'file-too-many-bytes',
+		};
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) => ({
+			...bodyResponse(
+				'doc',
+				requested.map(({ path }) => path),
+			),
+			files: Object.fromEntries(
+				requested.map(({ path }) => [path, path === 'large.ts' ? oversized : body(path)]),
+			),
+		}));
+		try {
+			controller.open(
+				{
+					project: '/project',
+					documentId: 'doc',
+					files: paths.map(file),
+					limits: { ...limits, maxLoadedRows: 20 },
+					firstBodyCandidates: paths,
+				},
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					loadBodies,
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+				},
+			);
+			await vi.waitFor(() => expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded'));
+			expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded');
+			expect(controller.fileBodies['large.ts']?.limitReason).toBe('file-too-many-bytes');
+			expect(
+				loadBodies.mock.calls.map(([, requested]) => requested.map(({ path }) => path)),
+			).toEqual(paths.map((path) => [path]));
+			expect(controller.aggregateLimit).toBeNull();
+		} finally {
+			controller.clear();
+		}
+	});
+
 	it('highlights the initial visible body without waiting for viewport demand', async () => {
 		const highlighter = vi.fn(async (input: GitDiffSyntaxFileInput) => highlightedAttempt(input));
 		const syntax = new GitDiffSyntaxController({

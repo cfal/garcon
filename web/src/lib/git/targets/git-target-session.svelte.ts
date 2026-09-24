@@ -31,7 +31,7 @@ export interface GitTargetSessionDeps {
 	kind: GitTargetSurfaceKind;
 	projectSelection?: GitProjectSelectionDeps;
 	createBranchSelector(): GitBranchSelectorState;
-	invalidationVersion(nodeId: string, effectiveProjectKey: string): number;
+	invalidationVersion(nodeId: string): number;
 	canChangeTarget(): boolean;
 	onUnavailable?(): void;
 	onProjectSelectionChanged?(): void;
@@ -349,9 +349,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	async refreshForInvalidation(effectiveProjectKey: string, version: number): Promise<boolean> {
-		const handled = this.#handledInvalidationVersions.get(effectiveProjectKey) ?? 0;
-		const pending = this.#pendingInvalidationVersions.get(effectiveProjectKey) ?? 0;
-		const deferred = this.#deferredBranchInvalidationVersions.get(effectiveProjectKey) ?? 0;
+		const key = JSON.stringify([this.nodeId, effectiveProjectKey]);
+		const handled = this.#handledInvalidationVersions.get(key) ?? 0;
+		const pending = this.#pendingInvalidationVersions.get(key) ?? 0;
+		const deferred = this.#deferredBranchInvalidationVersions.get(key) ?? 0;
 		if (
 			!this.presentationVisible ||
 			effectiveProjectKey !== this.effectiveProjectKey ||
@@ -361,10 +362,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 			return false;
 		}
 		if (this.branchChangePending) {
-			storeMostRecent(this.#deferredBranchInvalidationVersions, effectiveProjectKey, version);
+			storeMostRecent(this.#deferredBranchInvalidationVersions, key, version);
 			return false;
 		}
-		storeMostRecent(this.#pendingInvalidationVersions, effectiveProjectKey, version);
+		storeMostRecent(this.#pendingInvalidationVersions, key, version);
 		const applicationGeneration = this.#targetApplicationGeneration;
 		const contextGeneration = this.#contextGeneration;
 		try {
@@ -375,16 +376,16 @@ export class GitTargetSessionController implements PortableSingletonController {
 				effectiveProjectKey !== this.effectiveProjectKey ||
 				contextGeneration !== this.#contextGeneration ||
 				applicationGeneration !== this.#targetApplicationGeneration ||
-				this.#pendingInvalidationVersions.get(effectiveProjectKey) !== version
+				this.#pendingInvalidationVersions.get(key) !== version
 			) {
 				return false;
 			}
 			await this.#applyTarget('invalidation', true);
-			storeMostRecent(this.#handledInvalidationVersions, effectiveProjectKey, version);
+			storeMostRecent(this.#handledInvalidationVersions, key, version);
 			return true;
 		} finally {
-			if (this.#pendingInvalidationVersions.get(effectiveProjectKey) === version) {
-				this.#pendingInvalidationVersions.delete(effectiveProjectKey);
+			if (this.#pendingInvalidationVersions.get(key) === version) {
+				this.#pendingInvalidationVersions.delete(key);
 			}
 		}
 	}
@@ -450,10 +451,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		if (!projectPath || !effectiveProjectKey || !identity || !this.canChangeTarget) {
 			return false;
 		}
-		const invalidationVersionBefore = this.deps.invalidationVersion(
-			this.nodeId,
-			effectiveProjectKey,
-		);
+		let checkoutVersion = 0;
 		let changed = false;
 		let reconciled = false;
 		this.branchChangePending = true;
@@ -471,6 +469,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 				return false;
 			}
 			changed = await mutate();
+			checkoutVersion = this.deps.invalidationVersion(nodeId);
 			if (!changed) return false;
 			if (identity !== this.identity || contextGeneration !== this.#contextGeneration) return true;
 			const nextBranch = typeof branch === 'string' ? branch : branch();
@@ -490,7 +489,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 				this.branchChangePending = false;
 				await this.#settleBranchInvalidation(
 					effectiveProjectKey,
-					invalidationVersionBefore,
+					checkoutVersion,
 					changed,
 					reconciled,
 				);
@@ -500,16 +499,17 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	async #settleBranchInvalidation(
 		effectiveProjectKey: string,
-		versionBefore: number,
+		checkoutVersion: number,
 		changed: boolean,
 		reconciled: boolean,
 	): Promise<void> {
-		const deferred = this.#deferredBranchInvalidationVersions.get(effectiveProjectKey) ?? 0;
-		this.#deferredBranchInvalidationVersions.delete(effectiveProjectKey);
+		const key = JSON.stringify([this.nodeId, effectiveProjectKey]);
+		const deferred = this.#deferredBranchInvalidationVersions.get(key) ?? 0;
+		this.#deferredBranchInvalidationVersions.delete(key);
 		if (effectiveProjectKey !== this.effectiveProjectKey) return;
-		const currentVersion = this.deps.invalidationVersion(this.nodeId, effectiveProjectKey);
-		if (reconciled && currentVersion === versionBefore + 1) {
-			storeMostRecent(this.#handledInvalidationVersions, effectiveProjectKey, currentVersion);
+		const currentVersion = this.deps.invalidationVersion(this.nodeId);
+		if (reconciled && currentVersion === checkoutVersion) {
+			storeMostRecent(this.#handledInvalidationVersions, key, currentVersion);
 			return;
 		}
 		if (!changed && deferred <= 0) return;
@@ -582,9 +582,6 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.nodeId = nodeId;
 		this.#nodeContextKey = nodeContextKey;
 		this.#sessionRefreshPending = false;
-		this.#handledInvalidationVersions.clear();
-		this.#pendingInvalidationVersions.clear();
-		this.#deferredBranchInvalidationVersions.clear();
 		this.baseProjectPath = projectPath;
 		this.effectiveProjectKey = effectiveProjectKey;
 		this.targets = [];

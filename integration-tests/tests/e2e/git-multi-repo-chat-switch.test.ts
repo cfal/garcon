@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 const GIT_PANEL =
@@ -37,6 +38,68 @@ async function createRepo(projectPath: string, prefix: string): Promise<void> {
 }
 
 describe('Lightpanda Git multi-repo chat switching', () => {
+  test('does not repeat handled Git invalidations on project returns', async () => {
+    await withE2eFixture('git-invalidation-project-returns', async (fixture) => {
+      const repoA = join(fixture.integration.dirs.project, 'repo-a');
+      const repoB = join(fixture.integration.dirs.project, 'repo-b');
+      for (const project of [repoA, repoB]) {
+        await mkdir(project, { recursive: true });
+        await initializeFixtureRepository(project);
+        await writeFile(join(project, 'example.txt'), 'changed\n');
+      }
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_600, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      for (const [prompt, projectPath] of [['invalidation-a', repoA], ['invalidation-b', repoB]] as const) {
+        await app.startOpenAiDirectChat(prompt, { projectPath });
+        await app.waitForText(`echo:${prompt}`);
+      }
+      const chats = (await fixture.integration.client.listChats()).sessions;
+      const chatA = chats.find((chat) => chat.preview.firstMessage === 'invalidation-a');
+      const chatB = chats.find((chat) => chat.preview.firstMessage === 'invalidation-b');
+      if (!chatA || !chatB) throw new Error('Missing project chats');
+      await app.clickSidebarChatContaining('invalidation-a');
+      await app.waitForSelectedChat(chatA.id);
+      await switchToGitSurface(fixture);
+      await fixture.page.waitForSelector(`${GIT_PANEL} [data-git-file-header]`);
+      await fixture.page.$eval(`${GIT_PANEL} [data-git-file-header]`, (header) => {
+        const button = [...header.querySelectorAll<HTMLButtonElement>('button')].find(
+          (candidate) => candidate.textContent?.trim() === 'Stage file',
+        );
+        if (!button) throw new Error('Missing Stage file action');
+        button.click();
+      });
+      await fixture.page.waitForFunction((selector) =>
+        [...(document.querySelector(selector)?.querySelectorAll('button') ?? [])].some(
+          (button) => button.textContent?.replace(/\s+/g, '') === 'Staged(1)',
+        ), { timeout: 20_000 }, GIT_PANEL);
+      await fixture.page.waitForNetworkIdle({ idleTime: 100 });
+      const targetRequests: string[] = [];
+      fixture.page.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.pathname === '/api/v1/git/targets') targetRequests.push(url.searchParams.get('project') ?? '');
+      });
+      for (let visit = 0; visit < 4; visit++) {
+        for (const [prompt, chat] of [['invalidation-b', chatB], ['invalidation-a', chatA]] as const) {
+          await app.clickSidebarChatContaining(prompt);
+          await app.waitForSelectedChat(chat.id);
+          await switchToGitSurface(fixture);
+          await fixture.page.waitForFunction(({ selector, path }) =>
+            [...(document.querySelector(selector)?.querySelectorAll('button') ?? [])].some(
+              (button) => button.getAttribute('aria-label') === path,
+            ),
+          { timeout: 20_000 }, { selector: GIT_PANEL, path: chat.projectPath });
+          await fixture.page.waitForNetworkIdle({ idleTime: 100 });
+        }
+        // The first round consumes the coarse host-wide invalidation in both projects.
+        if (visit === 0) targetRequests.length = 0;
+      }
+      expect(targetRequests).toEqual([repoB, repoA, repoB, repoA, repoB, repoA]);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('keeps listings, targets, and commenting coherent across repo and chat switches', async () => {
     await withE2eFixture('git-multi-repo-chat-switch', async (fixture) => {
       // Both repos live under the fixture's project-base boundary.
@@ -78,8 +141,8 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       );
 
       // Switch the workbench target to repo B from within chat A.
-      await app.waitForButton(`Local: ${repoA}`);
-      await app.clickButton(`Local: ${repoA}`);
+      await app.waitForButton(repoA);
+      await app.clickButton(repoA);
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Git target"]');
       await app.fill('#git-target-path-input', repoB);
       await fixture.page.waitForFunction(
@@ -137,7 +200,7 @@ describe('Lightpanda Git multi-repo chat switching', () => {
           );
         },
         { timeout: 20_000 },
-        { panelSelector: GIT_PANEL, expectedPath: `Local: ${repoB}` },
+        { panelSelector: GIT_PANEL, expectedPath: repoB },
       );
       // A refresh round-trip settles the retained surface's async target
       // application before user-level review interactions begin.

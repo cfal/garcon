@@ -315,7 +315,8 @@
 		onProjectUnavailable: async (target) => {
 			if (
 				target.kind === 'chat' &&
-				sessions.byId[target.chatId]?.projectPath !== target.projectPath
+				(sessions.byId[target.chatId]?.projectPath !== target.projectPath ||
+					(sessions.byId[target.chatId]?.nodeId ?? 'local') !== (target.nodeId ?? 'local'))
 			)
 				return;
 			const lease = projectResolution.retain(target);
@@ -856,7 +857,12 @@
 			{onSteerPreferredSubmit}
 			{onChooseProjectFolder}
 			onModelChange={(next) => controller.handleModelSelectionChange(next)}
-			onNodeChange={(nodeId) => controller.handleModelSelectionChange({ nodeId, agentId: agentState.agentId, modelValue: agentState.model })}
+			onNodeChange={(nodeId) =>
+				controller.handleModelSelectionChange({
+					nodeId,
+					agentId: agentState.agentId,
+					modelValue: agentState.model,
+				})}
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAgentSettingChange={(descriptor, value) =>

@@ -1,5 +1,5 @@
 import type { ServerWebSocket, WebSocketHandler } from 'bun';
-import type { NoiseSocketData } from '@cfal/noise-ws';
+import { MAX_FRAME_BYTES, type NoiseSocketData } from '@cfal/noise-ws';
 import { WsFaultMessage } from '../../common/ws-events.js';
 import type { ServerConfig } from '../config.js';
 import type { Logger } from '../lib/log.js';
@@ -36,22 +36,28 @@ export function createServerSocketHandlers(options: {
     ...PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
     idleTimeout: config.wsIdleTimeoutSeconds,
     sendPings: true,
-    // Noise fragments may queue one complete 16 MiB message before Bun drains.
+    // Browser delivery enforces its own smaller outbound budget.
     backpressureLimit: Math.max(config.wsBackpressureLimit, 32 * 1024 * 1024),
     closeOnBackpressureLimit: true,
-    maxPayloadLength: Math.max(config.wsMaxPayloadLength, 16 * 1024 * 1024),
+    maxPayloadLength: Math.max(config.wsMaxPayloadLength, MAX_FRAME_BYTES),
     open(ws) {
       if (isExecutionSocket(ws)) { execution.open?.(ws); return; }
       if (!isPrimarySocket(ws)) return;
       const result = admission.confirm(ws.data.connectionId);
       if (!result.ok) { ws.close(1013, result.reason); return; }
-      primary.open(delivery.add(ws));
+      const peer = delivery.add(ws);
+      if (peer.readyState === 1) primary.open(peer);
     },
     async message(ws, message) {
       if (isExecutionSocket(ws)) { execution.message(ws, message); return; }
       if (!isPrimarySocket(ws)) return;
       const peer = delivery.get(ws);
       if (!peer || peer.readyState !== 1) return;
+      const bytes = typeof message === 'string' ? Buffer.byteLength(message) : message.byteLength;
+      if (bytes > config.wsMaxPayloadLength) {
+        peer.close(1009, 'Message exceeds the configured size limit');
+        return;
+      }
       let data;
       try { data = JSON.parse(decodeWebSocketMessage(message)); }
       catch { sendWebSocketJson(peer, new WsFaultMessage('Malformed JSON')); return; }

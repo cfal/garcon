@@ -2,7 +2,6 @@ import { describe, expect, it, mock } from 'bun:test';
 import { ChatHandler } from '../chat.ts';
 import { PrimaryWsHandler } from '../primary.ts';
 import { TerminalStreamHandler } from '../terminal-stream.ts';
-import { parseTerminalStreamServerMessage } from '../../../common/terminal.js';
 
 function createFixture() {
   const calls = [];
@@ -78,28 +77,6 @@ function chatHandlerDeps() {
 }
 
 describe('PrimaryWsHandler', () => {
-  it('rejects remote terminal traffic with a typed response and keeps chat available', async () => {
-    const chat = createFixture().chatHandler;
-    const primary = new PrimaryWsHandler({ createHandler: () => chat }, null);
-    const sent = [];
-    const socket = { send(payload) { sent.push(JSON.parse(payload)); return Buffer.byteLength(payload); } };
-    primary.open(socket);
-    primary.drain(socket);
-    for (const type of ['terminal-attach', 'terminal-input', 'terminal-resize']) {
-      await primary.message(socket, { type, terminalId: 'test-terminal' });
-    }
-    expect(sent).toHaveLength(3);
-    for (const message of sent) {
-      expect(parseTerminalStreamServerMessage(message)).toEqual(message);
-      expect(message).toMatchObject({ type: 'terminal-error', code: 'terminal-unsupported' });
-    }
-    expect(chat.message).not.toHaveBeenCalled();
-    await primary.message(socket, { type: 'ws-ping' });
-    expect(chat.message).toHaveBeenCalledTimes(1);
-    primary.close(socket, 1000, 'done');
-    expect(chat.close).toHaveBeenCalledWith(socket, 1000, 'done');
-  });
-
   it('opens chat before terminal and drains terminal output', () => {
     const { calls, primary, socket } = createFixture();
 
@@ -109,7 +86,7 @@ describe('PrimaryWsHandler', () => {
     expect(calls).toEqual(['chat-open', 'terminal-open', 'terminal-drain']);
   });
 
-  for (const type of ['terminal-attach', 'terminal-input', 'terminal-resize']) {
+  for (const type of ['terminal-attach', 'terminal-input', 'terminal-resize', 'terminal-detach']) {
     it(`routes ${type} only to the terminal handler`, async () => {
       const { chatHandler, primary, socket, terminalHandler } = createFixture();
 

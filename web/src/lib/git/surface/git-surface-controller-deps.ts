@@ -7,6 +7,6 @@ export interface GitSurfaceControllerDeps {
 	projectSelection?: GitProjectSelectionDeps;
 	createGitBranchSelector(): GitBranchSelectorState;
 	gitMutations: GitMutationCoordinator;
-	invalidationVersion(nodeId: string, effectiveProjectKey: string): number;
+	invalidationVersion(nodeId: string): number;
 	reviewDisplay: GitReviewDisplaySettingsStore;
 }

@@ -117,8 +117,9 @@ class FakeRuntime {
 
 	constructor(readonly options: TerminalRuntimeOptions) {}
 
-	write(data: string): void {
+	write(data: string): boolean {
 		this.writes.push(data);
+		return true;
 	}
 
 	applyTheme(theme: unknown): void {

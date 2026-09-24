@@ -1,4 +1,5 @@
 import { GIT_REVIEW_DOCUMENT_LIMITS } from './types.js';
+import { GIT_MAX_RESULT_BYTES } from '../../common/git-execution.js';
 import type {
   GitFileReviewCategory,
   GitRenderedDiffRow,
@@ -6,6 +7,8 @@ import type {
   GitReviewFilePatchBody,
   GitReviewLimitReason,
 } from './types.js';
+
+const MAX_ENCODED_BODY_BYTES = GIT_MAX_RESULT_BYTES - 1024 * 1024;
 
 export interface ParsedRenderedPatch {
   rows: GitRenderedDiffRow[];
@@ -371,7 +374,7 @@ export function compactRenderedPatch(
       `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows} rendered rows.`,
     );
   }
-  return {
+  const body: GitReviewFilePatchBody = {
     path,
     bodyFingerprint,
     bodyState: 'loaded',
@@ -382,4 +385,13 @@ export function compactRenderedPatch(
     patchBytes,
     patch: patchText,
   };
+  if (Buffer.byteLength(JSON.stringify(body)) > MAX_ENCODED_BODY_BYTES) {
+    return limitedPatchFileBody(
+      path,
+      bodyFingerprint,
+      'file-too-many-bytes',
+      `Encoded diff exceeds ${MAX_ENCODED_BODY_BYTES} byte display limit.`,
+    );
+  }
+  return body;
 }

@@ -471,17 +471,16 @@ export class TerminalPlacementService {
 			return;
 		}
 		let terminal = this.deps.terminals.orderedSessions.at(-1);
-		if (!terminal && this.deps.terminals.listStatus !== 'ready') {
-			await this.deps.terminals.list();
+		const nodeId = this.creationNodeId(preferredWindowId) ?? this.deps.currentProjectNodeId();
+		if (!terminal && this.deps.terminals.nodeInventories[nodeId]?.status !== 'ready') {
+			await this.deps.terminals.list(nodeId);
 			terminal = this.deps.terminals.orderedSessions.at(-1);
 		}
 		if (terminal) {
 			await this.open(terminal.metadata.terminalId, preferredWindowId);
 			return;
 		}
-		if (this.deps.terminals.listStatus === 'ready') {
-			await this.create(preferredWindowId, `terminal-empty-state:${preferredWindowId}`);
-		}
+		await this.create(preferredWindowId, `terminal-empty-state:${preferredWindowId}`, nodeId);
 	}
 
 	async reconcile(

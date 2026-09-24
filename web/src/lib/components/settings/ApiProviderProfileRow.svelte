@@ -4,6 +4,7 @@
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { getApiProviders, getExecutionNodes } from '$lib/context';
+	import * as m from '$lib/paraglide/messages.js';
 	import type {
 		ApiProviderCatalogEntry,
 		ApiProviderEndpointCatalogEntry,
@@ -39,6 +40,9 @@
 			<div class="break-all text-xs text-muted-foreground">{endpoint.baseUrl}</div>
 			<div class="break-words text-xs text-muted-foreground">
 				{endpoint.models.length} models · {endpoint.defaultModel}
+			</div>
+			<div class="text-xs text-muted-foreground">
+				{endpoint.hasApiKey ? m.settings_api_providers_key_configured() : m.settings_api_providers_no_key()}
 			</div>
 		</div>
 		<div class="flex shrink-0 gap-1">

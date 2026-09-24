@@ -15,6 +15,7 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 
 let stylesheetPromise: Promise<void> | null = null;
+const MAX_QUEUED_OUTPUT_BYTES = 16 * 1024 * 1024;
 
 function loadTerminalStylesheet(): Promise<void> {
 	if (stylesheetPromise) return stylesheetPromise;
@@ -39,6 +40,7 @@ function loadTerminalStylesheet(): Promise<void> {
 export interface TerminalRuntimeOptions {
 	onInput(data: string): void;
 	onResize(size: { cols: number; rows: number }): void;
+	onOutputDrained(): void;
 	initialTheme: ITheme;
 	fontResolver?: TerminalFontResolver;
 }
@@ -170,14 +172,17 @@ export class TerminalRuntime {
 		this.scheduleFit();
 	}
 
-	write(data: string): void {
+	write(data: string): boolean {
 		const bytes = data.length * 2;
-		if (this.#disposed || this.#queuedOutputBytes + bytes > 2 * 1024 * 1024)
-			throw new Error('Terminal renderer capacity exceeded');
+		if (this.#disposed) throw new Error('Terminal runtime is disposed');
+		if (bytes > MAX_QUEUED_OUTPUT_BYTES) throw new Error('Terminal renderer capacity exceeded');
+		if (this.#queuedOutputBytes + bytes > MAX_QUEUED_OUTPUT_BYTES) return false;
 		this.#queuedOutputBytes += bytes;
 		this.terminal.write(data, () => {
 			this.#queuedOutputBytes -= bytes;
+			if (!this.#disposed && this.#queuedOutputBytes === 0) this.#options.onOutputDrained();
 		});
+		return true;
 	}
 
 	applyTheme(theme: ITheme): void {

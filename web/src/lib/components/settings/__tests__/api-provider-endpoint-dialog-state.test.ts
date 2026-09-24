@@ -158,6 +158,88 @@ describe('ApiProviderEndpointDialogState', () => {
 		expect(dialog.apiKeyRequired).toBe(true);
 	});
 
+	it.each(['custom', 'ollama'] as const)('requires a fresh key when duplicating a keyed %s profile', async (templateId) => {
+		const provider: ApiProviderCatalogEntry = {
+			id: 'synthetic', revision: 1, label: 'Synthetic', templateId, createdAt: '', updatedAt: '',
+			endpoints: [{
+				id: 'synthetic_openai', protocol: 'openai-compatible', baseUrl: 'https://example.test/v1',
+				defaultModel: 'model', models: [{ value: 'model', label: 'Model' }],
+				supportsImages: false, hasApiKey: true,
+			}],
+		};
+		let duplicate = true;
+		const dialog = new ApiProviderEndpointDialogState({
+			...dialogPorts(makeModelCatalog({ apiProvider: provider, endpoint: provider.endpoints[0]! })),
+			getProtocol: () => 'openai-compatible', getEndpointId: () => 'synthetic_openai',
+			getTemplateId: () => templateId, getDuplicate: () => duplicate,
+		});
+		await dialog.load();
+		expect(dialog.apiProviderId).toBeNull();
+		expect(dialog.apiKey).toBe('');
+		expect(dialog.apiKeyRequired).toBe(true);
+		expect(dialog.canSave).toBe(false);
+		expect(dialog.apiKeyPlaceholder).toBe('API key or token');
+		expect(dialog.canFetchModels).toBe(false);
+		expect(dialog.canTest).toBe(false);
+		await dialog.save();
+		expect(createApiProvider).not.toHaveBeenCalled();
+
+		dialog.apiKey = 'synthetic-new-key';
+		expect(dialog.canSave).toBe(true);
+		vi.mocked(createApiProvider).mockResolvedValueOnce({
+			...provider, id: 'synthetic_copy', assignment: { nodeId: 'local', status: 'assigned' },
+		});
+		await dialog.save();
+		expect(createApiProvider).toHaveBeenCalledWith(expect.objectContaining({
+			apiProviderId: undefined, endpoint: expect.objectContaining({ apiKey: 'synthetic-new-key' }),
+		}), 'local');
+
+		duplicate = false;
+		await dialog.load();
+		expect(dialog.apiKeyRequired).toBe(false);
+		expect(dialog.canSave).toBe(true);
+		expect(dialog.canFetchModels).toBe(true);
+		duplicate = true;
+		await dialog.load();
+		dialog.beginCreate();
+		expect(dialog.apiKeyRequired).toBe(false);
+		await dialog.load();
+		dialog.dispose();
+		expect(dialog.apiKeyRequired).toBe(false);
+
+		provider.endpoints[0]!.hasApiKey = false;
+		await dialog.load();
+		expect(dialog.canSave).toBe(true);
+		expect(dialog.canFetchModels).toBe(true);
+		expect(dialog.payload().endpoint.apiKey).toBeUndefined();
+	});
+
+	it.each([
+		['alibaba-cloud', 'Alibaba Cloud API key'],
+		['fireworks', 'Fireworks.ai API key'],
+		['gemini', 'Gemini API key'],
+		['openrouter', 'OpenRouter API key'],
+		['together', 'Together.ai API key'],
+		['zai', 'Z.AI API key'],
+	] as const)('preserves the %s key hint when duplicating a keyed profile', async (templateId, placeholder) => {
+		const provider: ApiProviderCatalogEntry = {
+			id: 'synthetic', revision: 1, label: 'Synthetic', templateId, createdAt: '', updatedAt: '',
+			endpoints: [{
+				id: 'synthetic_openai', protocol: 'openai-compatible', baseUrl: 'https://example.test/v1',
+				defaultModel: 'model', models: [{ value: 'model', label: 'Model' }],
+				supportsImages: false, hasApiKey: true,
+			}],
+		};
+		const dialog = new ApiProviderEndpointDialogState({
+			...dialogPorts(makeModelCatalog({ apiProvider: provider, endpoint: provider.endpoints[0]! })),
+			getProtocol: () => 'openai-compatible', getEndpointId: () => 'synthetic_openai',
+			getTemplateId: () => templateId, getDuplicate: () => true,
+		});
+		await dialog.load();
+		expect(dialog.apiKeyPlaceholder).toBe(placeholder);
+		expect(dialog.apiKeyRequired).toBe(true);
+	});
+
 	it('prefills Alibaba Cloud Singapore URLs for both protocols', () => {
 		const anthropicDialog = new ApiProviderEndpointDialogState({
 			...dialogPorts(makeModelCatalog()),

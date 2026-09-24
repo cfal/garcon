@@ -2,6 +2,7 @@ import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
 import { compressHttpResponse } from './http-compression.js';
+import { jsonError } from './http-error.js';
 import {
   LOCAL_SERVER_PRINCIPAL,
   type HttpRouteContext,
@@ -21,6 +22,11 @@ type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
 
 export interface HttpRouteAuthOptions {
   localCapability?: string;
+  isShuttingDown?: () => boolean;
+}
+
+export function serverShuttingDownResponse(): Response {
+  return jsonError('The server is shutting down', 503, 'SERVER_SHUTTING_DOWN', true);
 }
 
 interface RequestTimeoutServer {
@@ -88,6 +94,7 @@ export function wrapRoute(
 ): WrappedRouteHandler {
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
+      if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL });
     };
   }
@@ -95,12 +102,15 @@ export function wrapRoute(
   if (isNoAuthHandler(handler)) {
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
+      if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       return invokeRouteHandler(handler, req, server, { principal: null });
     };
   }
 
   return async (req: Request, server?: unknown): Promise<Response> => {
+    if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
     const { errorResponse, principal } = await authenticateHttpRequest(req, authOptions);
+    if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
     if (errorResponse) {
       if ((handler as MarkedRouteHandler)[noStoreRouteMarker]) errorResponse.headers.set('Cache-Control', 'no-store');
       return compressHttpResponse(req, errorResponse);

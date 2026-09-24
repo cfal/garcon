@@ -26,6 +26,20 @@ function socketFixture() {
 }
 
 describe('PrimarySocketDelivery', () => {
+  test('shutdown fences current peers and upgrades admitted before shutdown', () => {
+    const delivery = new PrimarySocketDelivery(1024);
+    const current = socketFixture();
+    const peer = delivery.add(current.socket);
+    delivery.close();
+    const late = socketFixture();
+    const latePeer = delivery.add(late.socket);
+    expect(peer.readyState).toBe(3);
+    expect(latePeer.readyState).toBe(3);
+    expect(current.socket.close).toHaveBeenCalledWith(1001, 'Server shutting down');
+    expect(late.socket.close).toHaveBeenCalledWith(1001, 'Server shutting down');
+    expect(peer.send('late')).toBe(0);
+    expect(latePeer.send('late')).toBe(0);
+  });
   test('bounds direct JSON replies and rejects late writes after overflow', () => {
     const delivery = new PrimarySocketDelivery(16);
     const { socket } = socketFixture();

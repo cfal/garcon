@@ -4,7 +4,7 @@ import path from 'node:path';
 import { gitRpcFixture } from './git-rpc-fixture.js';
 import { runGit } from '../../git/run.js';
 import { RemoteGitServices } from '../remote-git.js';
-import { GitResultTransfers } from '../git-results.js';
+import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`Git queries, review proofs and mutations use the repository host with ${dialer} dialing`, async () => {
@@ -91,41 +91,41 @@ test('invalid Git requests never acquire a remote session', async () => {
     .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
 });
 
-for (const fault of ['offset', 'eof', 'base64', 'utf8', 'node', 'cancel'] as const) {
-  test(`rejects a ${fault} query fault and closes its captured result handle`, async () => {
+for (const fault of ['size', 'escaping', 'node'] as const) {
+  test(`rejects a ${fault} query reply without retaining a transfer`, async () => {
     const fixture = await gitRpcFixture();
     const local = await fixture.local.getGitService();
     const status = await local.getStatus({ projectPath: fixture.projectPath });
-    const queried = spyOn(local, 'getStatus').mockResolvedValue({ ...status, untracked: ['x'.repeat(600_000)],
-      ...(fault === 'node' ? { nodeId: 'other' } : {}) });
-    const read = GitResultTransfers.prototype.readChunk;
-    const controller = new AbortController();
-    const chunks = spyOn(GitResultTransfers.prototype, 'readChunk').mockImplementation(function (request, signal) {
-      const result = read.call(this, request, signal);
-      if (fault === 'cancel') controller.abort();
-      if (fault === 'offset') return { ...result, offset: result.offset + 1 };
-      if (fault === 'eof') return { ...result, eof: !result.eof };
-      if (fault === 'base64') return { ...result, data: '?' };
-      if (fault === 'utf8') {
-        const bytes = Buffer.from(result.data, 'base64'); bytes[0] = 255;
-        return { ...result, data: bytes.toString('base64') };
-      }
-      return result;
+    const text = fault === 'escaping' ? '\u001f'.repeat(Math.ceil(GIT_MAX_RESULT_BYTES / 6)) : 'x'.repeat(GIT_MAX_RESULT_BYTES);
+    const queried = spyOn(local, 'getStatus').mockResolvedValue({
+      ...status, untracked: fault === 'node' ? [] : [text],
+      ...(fault === 'node' ? { nodeId: 'other' } : {}),
     });
-    const close = spyOn(GitResultTransfers.prototype, 'close');
     try {
       const git = await fixture.node.getGitService();
-      const pending = git.getStatus({ projectPath: fixture.projectPath }, { signal: controller.signal });
-      if (fault === 'cancel') await expect(pending).rejects.toThrow();
-      else await expect(pending).rejects.toMatchObject({ code: 'GIT_INVALID_RESULT' });
-      expect(close).toHaveBeenCalledTimes(1);
+      await expect(git.getStatus({ projectPath: fixture.projectPath }))
+        .rejects.toMatchObject({ code: fault === 'node' ? 'GIT_INVALID_RESULT' : 'GIT_RESULT_TOO_LARGE' });
       expect(queried).toHaveBeenCalledTimes(1);
-    } finally {
-      chunks.mockRestore(); close.mockRestore(); queried.mockRestore();
-      await fixture.dispose();
-    }
-  }, 10_000);
+      expect(fixture.node.availability).toBe('ready');
+    } finally { queried.mockRestore(); await fixture.dispose(); }
+  });
 }
+
+test('oversized mutation confirmation is uncertain and never retries', async () => {
+  const fixture = await gitRpcFixture();
+  const local = await fixture.local.getGitService();
+  const create = local.createBranch.bind(local);
+  const dispatched = spyOn(local, 'createBranch').mockImplementation(async (request, options) => ({
+    ...await create(request, options), message: 'x'.repeat(GIT_MAX_RESULT_BYTES),
+  }));
+  try {
+    const git = await fixture.node.getGitService();
+    await expect(git.createBranch({ projectPath: fixture.projectPath, branch: 'created' }))
+      .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+    expect(dispatched).toHaveBeenCalledTimes(1);
+    expect((await runGit(fixture.projectPath, ['branch', '--list', 'created'])).stdout).toContain('created');
+  } finally { dispatched.mockRestore(); await fixture.dispose(); }
+});
 
 test('an invalid mutation reply is uncertain but a pre-dispatch disconnect is definite', async () => {
   const fixture = await gitRpcFixture();

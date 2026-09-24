@@ -1,14 +1,16 @@
 import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ExecutionNodeProcess } from '../../support/execution-backend.js';
 import { WebSocketLink } from '../../../server/execution-nodes/websocket-link.js';
 import { parseConnectionUrl } from '../../../server/execution-nodes/connection-url.js';
+import { RemoteExecutionNode } from '../../../server/execution-nodes/remote.js';
+import { withTimeout } from '../../support/deferred.js';
 
 for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as const) {
   test(`worker harness retains exit classification after connection: ${ending}`, async () => {
-    const root = await mkdtemp(join(homedir(), 'garcon-worker-exit-'));
+    const root = await mkdtemp(join(tmpdir(), 'garcon-worker-exit-'));
     const directories = {
       root, workspace: join(root, 'workspace'), project: join(root, 'project'),
       home: join(root, 'home'), config: join(root, 'config'),
@@ -44,3 +46,46 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
     }
   }, 30_000);
 }
+
+test('re-adding a running worker under a new node identity requires restarting that worker', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'garcon-worker-identity-'));
+  const directories = {
+    root, workspace: join(root, 'workspace'), project: join(root, 'project'),
+    home: join(root, 'home'), config: join(root, 'config'),
+  };
+  const controllers: WebSocketLink[] = [];
+  let worker: ExecutionNodeProcess | null = null;
+  try {
+    for (const directory of Object.values(directories)) await mkdir(directory, { recursive: true });
+    worker = await ExecutionNodeProcess.start({
+      repoRoot: resolve(import.meta.dir, '../../..'), directories, environment: { PATH: '/usr/bin:/bin' },
+      connection: { kind: 'listen', port: 0 },
+    });
+    const connection = parseConnectionUrl(await worker.connectionUrl());
+    const url = new URL(connection.socketUrl);
+    url.hostname = '127.0.0.1';
+    for (const nodeId of ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']) {
+      const controller = new WebSocketLink({ role: 'controller', nodeId, secret: connection.secret, allowInsecureDevelopment: true });
+      controllers.push(controller);
+      if (controllers.length === 1) {
+        const connected = RemoteExecutionNode.connect(controller);
+        controller.dial(url.href);
+        await withTimeout(connected, 10_000, () => worker!.logs.join('\n'));
+      } else {
+        const failure = Promise.withResolvers<string>();
+        const remote = new RemoteExecutionNode(nodeId, controller, undefined, failure.resolve);
+        try {
+          controller.dial(url.href);
+          const message = await withTimeout(failure.promise, 10_000, () => worker!.logs.join('\n'));
+          expect(message).toContain('restart the worker to serve');
+          expect(remote.availability).toBe('offline');
+        } finally { await remote.dispose(); }
+      }
+      await controller.dispose();
+    }
+  } finally {
+    for (const controller of controllers) await controller.dispose();
+    await worker?.stop().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);

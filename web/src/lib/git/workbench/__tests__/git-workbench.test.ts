@@ -1055,9 +1055,10 @@ describe('GitWorkbenchStore', () => {
 					firstBodyCandidates: paths,
 				}),
 			);
-			mockedApi.getGitReviewFileBodies
-				.mockResolvedValueOnce(makeReviewBodies([paths[0]]))
-				.mockReturnValueOnce(prefetch.promise);
+			mockedApi.getGitReviewFileBodies.mockImplementation(
+				async (_target, _document, files, _tab, _context, options) =>
+					options?.purpose === 'prefetch' ? prefetch.promise : makeReviewBodies(files),
+			);
 
 			await wb.setTarget(makeTarget());
 			await vi.waitFor(() => expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded'));

@@ -40,7 +40,6 @@ import {
   assertGitRepository,
   isBinaryFile,
   readGitBlobPrefix,
-  isFileUntracked,
   readOnlyGitOptions,
   resolvePathWithinProject,
   runGit,
@@ -67,7 +66,6 @@ import {
 } from './review-document-registry.js';
 import { captureWorkingPathTokensFromObservation } from './working-path-token.js';
 import { measureGitReviewPhaseSync } from './review-performance.js';
-import { loadUntrackedPatch } from './untracked-patch.js';
 
 const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
@@ -437,18 +435,6 @@ function buildHunkHeader(rawHeader: string, bodyLines: string[], startOffset: nu
     nextOffset,
   };
 }
-
-// Builds git diff args for the diff that the frontend tab displays.
-// Unstaged tab: `git diff` (index vs working tree).
-// Staged tab: `git diff --cached` (HEAD vs index).
-// The same diff is used for both display and `git apply --cached`.
-function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): string[] {
-  return [
-    'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/',
-    ...(isUnstage ? ['--cached'] : []), `-U${contextLines}`, '--', literalGitPathspec(file),
-  ];
-}
-
 
 function hashString(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
@@ -976,7 +962,7 @@ function chooseFirstBodyCandidates(
   return candidates;
 }
 
-function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotResponse {
+export function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotResponse {
   return {
     status: 'not-git-repository',
     project: projectPath,
@@ -989,7 +975,7 @@ function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotRespons
   };
 }
 
-function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprintResponse {
+export function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprintResponse {
   return {
     status: 'not-git-repository',
     project: projectPath,
@@ -1304,35 +1290,16 @@ async function getWorkbenchSnapshot({
   };
 }
 
-async function loadStagingPatch(
-  projectPath: string,
-  file: string,
-  contextLines: number,
-  mode: 'stage' | 'unstage',
-): Promise<string> {
-  if (mode === 'stage' && await isFileUntracked(projectPath, file)) {
-    return loadUntrackedPatch(projectPath, file, contextLines);
-  }
-  const { stdout } = await runGit(
-    projectPath,
-    tabDiffArgs(contextLines, file, mode === 'unstage'),
-    readOnlyGitOptions(),
-  );
-  return stdout;
-}
-
 async function stageSelection({
   projectPath,
   file,
   mode,
   selection,
-  contextLines = 5,
-}: StageSelectionOptions, displayedPatch?: string): Promise<GitMutationResult> {
+}: StageSelectionOptions, patchText: string): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const reverse = mode === 'unstage';
 
-  const patchText = displayedPatch ?? await loadStagingPatch(projectPath, file, contextLines, mode);
   if (!patchText.trim()) {
     throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
   }
@@ -1374,13 +1341,11 @@ async function stageHunk({
   file,
   mode,
   hunkIndex,
-  contextLines = 5,
-}: StageHunkOptions, displayedPatch?: string): Promise<GitMutationResult> {
+}: StageHunkOptions, fullPatch: string): Promise<GitMutationResult> {
   await assertGitRepository(projectPath);
 
   const isUnstage = mode === 'unstage';
 
-  const fullPatch = displayedPatch ?? await loadStagingPatch(projectPath, file, contextLines, mode);
   if (!fullPatch.trim()) {
     throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
   }
@@ -1400,9 +1365,9 @@ async function stageHunk({
 
 export function createDiffEngine(registry: GitReviewDocumentRegistry) {
   const documents = createReviewDocumentOperations(registry);
-  async function displayedPatch(options: StageSelectionOptions | StageHunkOptions): Promise<string | undefined> {
-    if (!options.documentId) return undefined;
+  async function displayedPatch(options: StageSelectionOptions | StageHunkOptions): Promise<string> {
     const stale = () => new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
+    if (!options.documentId || !options.bodyFingerprint || !options.patchDigest) throw stale();
     const lease = registry.acquire(options.projectPath, options.documentId);
     if (!lease) throw stale();
     try {

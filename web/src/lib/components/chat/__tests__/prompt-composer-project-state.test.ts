@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ProjectTarget } from '$shared/project-resolution';
 import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import { PromptComposerProjectState } from '../prompt-composer-project-state.svelte.js';
 
@@ -40,6 +41,46 @@ function deferred<T>() {
 }
 
 describe('PromptComposerProjectState', () => {
+	it.each([undefined, '11111111-1111-4111-8111-111111111111'])(
+		'uses the pending same-node folder for completions and snippets on %s',
+		async (nodeId) => {
+			const selectedChat = chat({ nodeId });
+			let executionTarget = { nodeId: nodeId ?? 'local', projectPath: '/confirmed-folder' };
+			const fetchResolution = vi.fn(async (target: ProjectTarget) => ({
+				target,
+				resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+			}));
+			const projectResolution = new ProjectResolutionStore(fetchResolution);
+			const projectState = new PromptComposerProjectState({
+				selectedChat,
+				get executionTarget() { return executionTarget; },
+				completionDemand: false,
+				projectResolution,
+			});
+			const target = { kind: 'path' as const, ...executionTarget };
+			const lease = projectResolution.retain(target);
+			try {
+				expect(projectState.target).toEqual(target);
+				await lease.resolve();
+				expect(projectState.completionProjectPath).toBe('/confirmed-folder');
+				expect(await projectState.resolveSnippetContext()).toEqual({
+					nodeId: executionTarget.nodeId,
+					chatId: selectedChat.id,
+					projectPath: '/confirmed-folder',
+					context: { type: 'new-chat', chatId: selectedChat.id, ...executionTarget },
+				});
+				executionTarget = { ...executionTarget, projectPath: selectedChat.projectPath };
+				expect(projectState.target).toEqual({
+					kind: 'chat', chatId: selectedChat.id, nodeId, projectPath: selectedChat.projectPath,
+				});
+			} finally {
+				lease.release();
+				projectState.destroy();
+				projectResolution.destroy();
+			}
+		},
+	);
+
 	it('fences expansion results by node even when the project path stays unchanged', () => {
 		const projectResolution = new ProjectResolutionStore();
 		let selectedChat = chat();

@@ -22,6 +22,8 @@ export interface FilesServiceOptions {
 
 // In-flight writes can outlive a serving session, so aliases share process-lifetime locks.
 const saveLocks = new KeyedPromiseLock();
+let activeContentOperations = 0;
+const MAX_FILE_CONTENT_OPERATIONS = 8;
 
 export class LocalExecutionFilesService implements ExecutionFilesService {
   constructor(private readonly options: FilesServiceOptions) {}
@@ -76,7 +78,7 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
   }
 
   async read(request: ExecutionFileTarget, options?: NodeCallOptions) {
-    return this.#run(options, async () => {
+    return this.#runContent(options, async () => {
       const target = await this.#target(request);
       const result = await readVersionedFile(target);
       return { ...result, path: toNodePath(target) };
@@ -84,7 +86,7 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
   }
 
   async save(request: Parameters<ExecutionFilesService['save']>[0], options?: NodeCallOptions) {
-    return this.#run(options, async () => {
+    return this.#runContent(options, async () => {
       this.#validateTarget(request);
       if (!parseSaveTextRequest(request)) throw new ValidationDomainError('Content, expectedRevision, and conflictResolution are required');
       if (Buffer.byteLength(request.content) > MAX_FILE_SAVE_BYTES) throw new FileTooLargeError(MAX_FILE_SAVE_BYTES);
@@ -135,5 +137,14 @@ export class LocalExecutionFilesService implements ExecutionFilesService {
     this.#available(options);
     try { return await operation(); }
     catch (error) { throw fileOperationError(error); }
+  }
+
+  async #runContent<T>(options: NodeCallOptions | undefined, operation: () => Promise<T>): Promise<T> {
+    return this.#run(options, async () => {
+      if (activeContentOperations >= MAX_FILE_CONTENT_OPERATIONS) throw new DomainError('FILE_SERVICE_BUSY', 'Too many active file reads or saves', 503, true);
+      activeContentOperations++;
+      try { return await operation(); }
+      finally { activeContentOperations--; }
+    });
   }
 }

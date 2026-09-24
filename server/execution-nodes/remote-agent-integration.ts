@@ -56,6 +56,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       runningSessions: (options) => call('execution.runningSessions', null, options),
     };
     this.producers = {
+      detach: (binding) => { this.#bindings.delete(binding.id); },
       get scope() { return current().manifests.get(manifest.descriptor.id)!.scope; },
       bind: async (request, options) => {
         const backing = current();
@@ -169,6 +170,13 @@ export class RemoteAgentIntegration implements AgentIntegration {
     if (!isAgentResourceRef(binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new Error('Producer event scope mismatch');
     if (this.#bindings.get(binding.id) !== backing) return;
     let event = notification.event;
+    if (event.type === 'publication-failed') {
+      if (!event.error || typeof event.error.code !== 'string'
+        || (event.error.message !== undefined && typeof event.error.message !== 'string')) {
+        throw new Error('Invalid producer publication failure');
+      }
+      this.#bindings.delete(binding.id);
+    }
     if (event.type === 'rows') event = { ...event, rows: decodeRows(event.rows) };
     if (event.type === 'permission' && event.lifecycle.kind === 'requested') {
       const tool = decodeMessage(event.lifecycle.requestedTool);

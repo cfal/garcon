@@ -42,6 +42,13 @@
 	let open = $state(false);
 	const chooseHost = $derived(mode === 'menu' ? menuChoosesHost : terminals.hasRemoteHosts || open);
 	const disabled = $derived(busy || (!chooseHost && !terminals.canCreate(defaultNodeId)));
+	const label = $derived(
+		busy
+			? m.terminal_creating()
+			: !chooseHost && terminals.hosts.find((host) => host.id === defaultNodeId)?.full
+				? m.terminal_limit_reached()
+				: m.workspace_new_terminal(),
+	);
 	const buttonClass = $derived(
 		controlClass ||
 			`inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 aria-disabled:opacity-50 ${showLabel ? 'px-3' : 'w-8'}`,
@@ -73,7 +80,7 @@
 	{#if chooseHost}
 		<DropdownMenuSub bind:open>
 			<DropdownMenuSubTrigger disabled={busy} data-workspace-window-add-action="new-terminal">
-				<SquareTerminal />{m.workspace_new_terminal()}
+				<SquareTerminal />{label}
 			</DropdownMenuSubTrigger>
 			<DropdownMenuSubContent class="w-64">{@render hostItems()}</DropdownMenuSubContent>
 		</DropdownMenuSub>
@@ -84,7 +91,7 @@
 			onSelect={() => create()}
 			data-workspace-window-add-action="new-terminal"
 		>
-			<SquareTerminal />{m.workspace_new_terminal()}
+			<SquareTerminal />{label}
 		</DropdownMenuItem>
 	{/if}
 {:else}
@@ -94,8 +101,8 @@
 			style={controlStyle}
 			aria-disabled={disabled || undefined}
 			aria-busy={busy || undefined}
-			aria-label={m.workspace_new_terminal()}
-			title={m.workspace_new_terminal()}
+			aria-label={label}
+			title={label}
 			data-workspace-window-add-inline={windowId ? 'new-terminal' : undefined}
 			data-workspace-window-add-action={windowId ? 'new-terminal' : undefined}
 		>
@@ -114,7 +121,7 @@
 						else create();
 					}}
 				>
-					<Icon class="h-4 w-4" />{#if showLabel}{m.workspace_new_terminal()}{/if}
+					<Icon class="h-4 w-4" />{#if showLabel}{label}{/if}
 				</button>
 			{/snippet}
 		</DropdownMenuTrigger>

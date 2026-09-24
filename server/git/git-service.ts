@@ -9,13 +9,10 @@ import { createWorktreeOperations } from './worktrees.js';
 import { createQuickSummaryOperations } from './quick-summary.js';
 import { GitReviewDocumentRegistry } from './review-document-registry.js';
 import { createReviewDocumentOperations } from './review-document-service.js';
-import type { ClassifiedGitError, CreateGitServiceOptions, GitService, GitOperations } from './types.js';
-import { generateCommitMessageForFiles } from './commit-generation.js';
+import type { ClassifiedGitError, GitOperations } from './types.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('git:git-service');
-
-export type { GitService } from './types.js';
 
 function gitDomainErrorToResponse(error: GitDomainError): Response {
   const code = error.code;
@@ -46,28 +43,16 @@ function classifiedGitErrorToResponse(classified: ClassifiedGitError): Response 
   return Response.json(body, { status: classified.status });
 }
 
-export function createGitService({
-  agents,
-  classifyGitError,
-  assertProjectPathAllowed,
-}: CreateGitServiceOptions): GitService {
-  const git = createGitOperations({ assertProjectPathAllowed });
-  return {
-    ...git,
-    generateCommitMessageForFiles: (options) => generateCommitMessageForFiles(agents, {
-      collectCommitMessageContext: (request, callOptions) => git.collectCommitMessageContext({ ...request, signal: callOptions?.signal }),
-    }, options),
-    toHttpError: (error) => gitHttpError(error, classifyGitError),
-  };
-}
-
-export function gitHttpError(error: unknown, classifyGitError: CreateGitServiceOptions['classifyGitError']): Response {
+export function gitHttpError(error: unknown, classifyGitError: (error: unknown) => ClassifiedGitError): Response {
   logger.error('[git]', { code: error instanceof GitDomainError ? error.code : 'GIT_OPERATION_FAILED' });
   if (error instanceof GitDomainError) return gitDomainErrorToResponse(error);
   return classifiedGitErrorToResponse(classifyGitError(error));
 }
 
-export function createGitOperations({ assertProjectPathAllowed, reviewRegistry = new GitReviewDocumentRegistry() }: Pick<CreateGitServiceOptions, 'assertProjectPathAllowed'> & { reviewRegistry?: GitReviewDocumentRegistry } = {}): GitOperations {
+export function createGitOperations({ assertProjectPathAllowed, reviewRegistry = new GitReviewDocumentRegistry() }: {
+  assertProjectPathAllowed?(projectPath: string): Promise<string>;
+  reviewRegistry?: GitReviewDocumentRegistry;
+} = {}): GitOperations {
   const status = createStatusOperations();
   const diff = createDiffEngine(reviewRegistry);
   const commitHistory = createCommitHistoryOperations(reviewRegistry);

@@ -9,7 +9,8 @@
 	let { nodeId, section }: { nodeId: string; section: 'native' | 'other-agents' } = $props();
 	const catalog = getModelCatalog();
 	const nodes = getExecutionNodes();
-	const settingsAuth = $derived(new SettingsAuthState(catalog.forNode(nodeId), nodeId));
+	const authNodeId = $derived(nodeId);
+	const settingsAuth = $derived(new SettingsAuthState(catalog.forNode(authNodeId), authNodeId));
 	let openByAgent = $state<Record<string, boolean>>({});
 	const authContext = $derived.by(() => {
 		const node = nodes.get(nodeId);

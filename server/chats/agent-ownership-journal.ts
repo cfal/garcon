@@ -145,12 +145,12 @@ export class AgentOwnershipJournal {
   retireRemovedNode(nodeId: string): Promise<void> {
     return this.#scheduleProviderCleanup(async () => {
       if (this.#isNodeConfigured(nodeId)) return;
-      for (const intent of this.#journal.ownershipIntents) {
-        if (intent.kind === 'delete' && intent.phase === 'registry-removed' && intentNodes(intent).includes(nodeId)) {
-          await this.#finishDelete(intent.operationId);
-        }
-      }
+      await this.#finishNodeDeletes(nodeId);
     });
+  }
+
+  retryProviderCleanup(nodeId: string): Promise<void> {
+    return this.#scheduleProviderCleanup(() => this.#finishNodeDeletes(nodeId));
   }
 
   roots(): ReadonlySet<string> {
@@ -358,6 +358,14 @@ export class AgentOwnershipJournal {
         reason: error instanceof Error ? error.message : String(error),
       });
     });
+  }
+
+  async #finishNodeDeletes(nodeId: string): Promise<void> {
+    for (const intent of this.#journal.ownershipIntents) {
+      if (intent.kind === 'delete' && intent.phase === 'registry-removed' && intentNodes(intent).includes(nodeId)) {
+        await this.#finishDelete(intent.operationId);
+      }
+    }
   }
 
   async #finishDelete(operationId: string): Promise<void> {

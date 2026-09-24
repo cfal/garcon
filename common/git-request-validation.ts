@@ -1,14 +1,19 @@
 import { isRecord } from './json.js';
 import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
-import { GIT_MAX_REQUEST_BYTES } from './git-execution.js';
+import { GIT_MAX_REQUEST_BYTES, GIT_MAX_REQUEST_PATHS } from './git-execution.js';
 import { GitServiceError } from './git-error.js';
 import type { GhRequests } from './gh.js';
 
 const path = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 4096 && !v.includes('\0');
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 * 1024 && !v.includes('\0');
 const integer = (v: unknown, max = 100_000): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= max;
-const paths = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.length <= 10_000 && v.every(path);
+const paths = (v: unknown): boolean => {
+  if (Array.isArray(v) && v.length > GIT_MAX_REQUEST_PATHS) {
+    throw new GitServiceError('GIT_REQUEST_TOO_LARGE', `Git selection exceeds the ${GIT_MAX_REQUEST_PATHS} path limit.`);
+  }
+  return Array.isArray(v) && v.length > 0 && v.every(path);
+};
 const oneOf = (v: unknown, values: readonly unknown[]) => values.includes(v);
 const fields = (v: Record<string, unknown>, keys: readonly string[]) => Object.keys(v).every(k => keys.includes(k) || v[k] === undefined);
 const optional = (v: unknown, check: (v: unknown) => boolean): boolean => v === undefined || check(v);
@@ -62,7 +67,9 @@ export function validateGitRequest<K extends GitMethod>(method: K, request: unkn
   const fail = (): never => { throw new GitServiceError('GIT_INVALID_INPUT', `Invalid Git ${method} request`); };
   if (!isRecord(request) || !path(request.projectPath) || !fields(request, ['projectPath', ...GIT_REQUEST_FIELDS[method]])) fail();
   const v = request as Record<string, unknown>;
-  if (new TextEncoder().encode(JSON.stringify(v)).length > GIT_MAX_REQUEST_BYTES) fail();
+  if (new TextEncoder().encode(JSON.stringify(v)).length > GIT_MAX_REQUEST_BYTES) {
+    throw new GitServiceError('GIT_REQUEST_TOO_LARGE', 'Git request is too large. Select fewer paths.');
+  }
   for (const key of ['file', 'worktreePath', 'branch', 'ref', 'baseRef', 'remote', 'remoteBranch', 'commit', 'stashRef']) {
     if (!optional(v[key], path)) fail();
   }

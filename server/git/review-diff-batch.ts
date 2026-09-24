@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { assertGitWorkingPath } from './operation-context.js';
-import { loadUntrackedPatch } from './untracked-patch.js';
+import { loadUntrackedPatches } from './untracked-patch.js';
 import { exactGitPathspecs } from './pathspecs.js';
 import type {
   RegisteredGitReviewDocument,
@@ -120,6 +120,7 @@ function splitMatches(
 ): boolean {
   const expected = expectedStatus(document, file);
   const actual = split.rawStatus.slice(0, 1);
+  if (isUntracked(document, file)) return actual === 'A' && !split.originalPath;
   if (expected && expected !== ' ' && expected !== actual) return false;
   return expectedRenameSource(document, file) === (split.originalPath ?? null);
 }
@@ -171,12 +172,11 @@ function diffArgs(
   ];
 }
 
-async function loadUntrackedBody(
+async function validateUntrackedFile(
   document: RegisteredGitReviewDocument,
   file: RegisteredGitReviewFile,
-  routeMetrics?: GitReviewRouteMetrics,
   signal?: AbortSignal,
-): Promise<GitReviewFilePatchBody> {
+): Promise<GitReviewFilePatchBody | null> {
   try {
     signal?.throwIfAborted();
     const filePath = resolvePathWithinProject(document.repoRoot, file.path);
@@ -200,23 +200,9 @@ async function loadUntrackedBody(
       );
     }
     await assertGitWorkingPath(filePath);
-    const patch = await measureGitReviewPhase(routeMetrics, 'body-git', () => loadUntrackedPatch(
-      document.repoRoot, file.path, document.context, {
-        signal,
-        maxStdoutBytes: GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes,
-        truncateStdout: false,
-      },
-    ));
-    signal?.throwIfAborted();
-    return measureGitReviewPhaseSync(routeMetrics, 'patch-scan', () => compactRenderedPatch(
-      file.path, file.bodyFingerprint, patch,
-    ));
+    return null;
   } catch (error) {
     if (signal?.aborted) throw error;
-    if (error instanceof GitOutputLimitError && error.stream === 'stdout') {
-      return limitedPatchFileBody(file.path, file.bodyFingerprint, 'file-too-many-bytes',
-        `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`);
-    }
     return errorPatchFileBody(
       file.path,
       file.bodyFingerprint,
@@ -225,7 +211,7 @@ async function loadUntrackedBody(
   }
 }
 
-async function runTrackedBatch(
+async function runDiffBatch(
   document: RegisteredGitReviewDocument,
   files: RegisteredGitReviewFile[],
   trace: GitCommandTrace[] | undefined,
@@ -235,15 +221,19 @@ async function runTrackedBatch(
 ): Promise<GitReviewFilePatchBody[]> {
   metrics.batchCount += 1;
   try {
-    const { stdout } = await measureGitReviewPhase(
+    const untracked = isUntracked(document, files[0]);
+    const stdout = await measureGitReviewPhase(
       routeMetrics,
       'body-git',
-      () => runGitTraced(
+      async () => untracked ? loadUntrackedPatches(
+        document.repoRoot, files.map(file => file.path), document.context,
+        { signal, maxStdoutBytes: MAX_BATCH_STDOUT_BYTES, truncateStdout: false }, trace,
+      ) : (await runGitTraced(
         document.repoRoot,
         diffArgs(document, files, false),
         trace,
         readOnlyGitOptions({ signal, maxStdoutBytes: MAX_BATCH_STDOUT_BYTES }),
-      ),
+      )).stdout,
     );
     const split = measureGitReviewPhaseSync(
       routeMetrics,
@@ -253,7 +243,7 @@ async function runTrackedBatch(
     const bodies: GitReviewFilePatchBody[] = [];
     for (const file of files) {
       let entry = split.get(file.path);
-      if (!entry || !splitMatches(document, file, entry)) {
+      if (!untracked && (!entry || !splitMatches(document, file, entry))) {
         const fallback = await measureGitReviewPhase(
           routeMetrics,
           'body-git',
@@ -299,7 +289,7 @@ async function runTrackedBatch(
       metrics.bisectionCount += 1;
       const midpoint = Math.ceil(files.length / 2);
       return [
-        ...await runTrackedBatch(
+        ...await runDiffBatch(
           document,
           files.slice(0, midpoint),
           trace,
@@ -307,7 +297,7 @@ async function runTrackedBatch(
           metrics,
           routeMetrics,
         ),
-        ...await runTrackedBatch(
+        ...await runDiffBatch(
           document,
           files.slice(midpoint),
           trace,
@@ -368,25 +358,25 @@ export async function loadReviewDiffBatches(
     const firstUnloaded = untracked[0] ?? tracked[0];
     if (firstUnloaded) bodies.push(responseLimitBody(firstUnloaded, budget));
   }
-  for (
-    let offset = 0;
-    offset < untracked.length && !budget.exhausted;
-    offset += GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency
-  ) {
-    const group = untracked.slice(offset, offset + GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency);
-    const loaded = await mapWithConcurrencyResult(
+  for (const group of planReviewDiffBatches(untracked)) {
+    if (budget.exhausted) break;
+    const validation = await mapWithConcurrencyResult(
       group,
       GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
-      (file) => loadUntrackedBody(document, file, routeMetrics, signal),
+      (file) => validateUntrackedFile(document, file, signal),
     );
-    for (const body of loaded) {
+    const eligible = group.filter((_, index) => validation[index] === null);
+    const loaded = eligible.length ? await runDiffBatch(document, eligible, trace, signal, metrics, routeMetrics) : [];
+    const loadedByPath = new Map(loaded.map(body => [body.path, body]));
+    for (const [index, file] of group.entries()) {
+      const body = validation[index] ?? loadedByPath.get(file.path)!;
       appendWithinResponseBudget(bodies, budget, body);
       if (budget.exhausted) break;
     }
   }
   for (const batch of planReviewDiffBatches(tracked)) {
     if (budget.exhausted) break;
-    const loaded = await runTrackedBatch(
+    const loaded = await runDiffBatch(
       document,
       batch,
       trace,

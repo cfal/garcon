@@ -1,8 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { createAgentResourceRef } from '@garcon/server-agent-interface';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
-import { WebSocketLink } from '../websocket-link.js';
-import { linkOptions, outgoingFault, remoteFixture } from './integration-fixture.js';
+import { remoteFixture } from './integration-fixture.js';
 
 function controlledTimeouts() {
   const set = globalThis.setTimeout;
@@ -37,37 +36,6 @@ function controlledTimeouts() {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
-  test(`stalled replay retires the session before automatic redial (${dialer} dials)`, async () => {
-    let fault!: ReturnType<typeof outgoingFault>;
-    const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = outgoingFault(worker); });
-    const timers = controlledTimeouts();
-    const availability: string[] = [];
-    fixture.node.onAvailabilityChanged((value) => availability.push(value));
-    const replayStarted = Promise.withResolvers<void>();
-    fixture.worker.current!.onAvailability((connected) => { if (connected) replayStarted.resolve(); });
-    const original = fixture.controller.current!;
-    try {
-      fault.inject = (encoded) => JSON.parse(encoded).kind === 'receipt' ? 'drop' : null;
-      fixture.controller.disconnect(); fixture.worker.disconnect();
-      (await timers.next(linkOptions.reconnectDelayMs)).fire();
-      await replayStarted.promise;
-      expect(fixture.controller.current).toBe(original);
-      expect(timers.at(30_000)).toHaveLength(1);
-      timers.at(30_000)[0]![1].fire();
-      expect(fixture.node.availability).toBe('offline');
-      expect(fixture.controller.current).toBeNull();
-      expect(original.channel.attached).toBe(false);
-
-      const replaced = Promise.withResolvers<void>();
-      fixture.node.onAvailabilityChanged((value) => { if (value === 'ready') replaced.resolve(); });
-      fault.inject = () => null;
-      (await timers.next(linkOptions.reconnectDelayMs)).fire();
-      await replaced.promise;
-      expect(fixture.controller.current).not.toBe(original);
-      expect(availability).toEqual(['reconnecting', 'offline', 'ready']);
-    } finally { await fixture.dispose(); timers.restore(); }
-  });
-
   test(`offline asynchronous facades reject through catch (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     try {
@@ -125,63 +93,6 @@ for (const dialer of ['controller', 'worker'] as const) {
         setup.resolve(); result.resolve('cleanup');
         await fixture.dispose(); timers.restore();
       }
-    });
-  }
-
-  for (const finish of ['ready', 'stalled'] as const) {
-    test(`authenticated replay has a progress-refreshed inactivity deadline (${dialer}, ${finish})`, async () => {
-      const timers = controlledTimeouts();
-      const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-      const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-      const observed = Promise.withResolvers<void>();
-      const messages: string[] = [];
-      let receipt: (() => void) | undefined;
-      worker.onSession((session) => {
-        const attach = session.attach.bind(session);
-        session.attach = (socket, received) => attach({
-          close: () => socket.close(),
-          send(encoded) {
-            if (JSON.parse(encoded).kind === 'receipt') receipt = () => socket.send(encoded);
-            else socket.send(encoded);
-          },
-        }, received);
-      });
-      controller.onSession((session) => {
-        session.onMessage((message) => messages.push(message));
-        const attach = session.attach.bind(session);
-        session.attach = (socket, received) => {
-          const hooks = attach(socket, received);
-          return {
-            ...hooks,
-            receive(encoded) { hooks.receive(encoded); observed.resolve(); },
-          };
-        };
-      });
-      try {
-        if (dialer === 'controller') controller.dial(worker.listen());
-        else worker.dial(controller.listen());
-        const sending = await worker.ready;
-        expect(timers.at(5000)).toHaveLength(0);
-        const initial = timers.at(30_000);
-        expect(initial).toHaveLength(1);
-        sending.send('replayed');
-        await observed.promise;
-        expect(timers.pending.has(initial[0]![0])).toBe(false);
-        expect(timers.at(30_000)).toHaveLength(1);
-        expect(messages).toEqual([]);
-        if (finish === 'ready') {
-          receipt!();
-          await controller.ready;
-          expect(messages).toEqual(['replayed']);
-          expect(timers.at(30_000)).toHaveLength(0);
-        } else {
-          const session = controller.current!;
-          timers.at(30_000)[0]![1].fire();
-          expect(session.channel.attached).toBe(false);
-          expect(controller.current).toBeNull();
-          expect(messages).toEqual([]);
-        }
-      } finally { await controller.dispose(); await worker.dispose(); timers.restore(); }
     });
   }
 }

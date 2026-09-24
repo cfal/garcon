@@ -16,8 +16,8 @@ export type FileRevision = string;
 
 export const FILE_REVISION_HEADER = 'X-Garcon-File-Revision';
 export const MAX_FILE_REVISION_LENGTH = 128;
-export const MAX_FILE_VIEW_BYTES = 25 * 1024 * 1024;
-export const MAX_FILE_SAVE_BYTES = 25 * 1024 * 1024;
+export const MAX_FILE_VIEW_BYTES = 4 * 1024 * 1024;
+export const MAX_FILE_SAVE_BYTES = 4 * 1024 * 1024;
 
 export type FileRevisionResponse =
   | { status: 'ready'; revision: FileRevision }

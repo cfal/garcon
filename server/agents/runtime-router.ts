@@ -126,7 +126,20 @@ export class AgentRuntimeRouter {
     readonly handle: AgentExecutionHandle;
   }>();
   readonly #pendingAbortRuns = new Set<string>();
-  readonly #bindings = new ProducerBindings((error) => logger.warn('Producer binding cleanup failed', error));
+  readonly #bindings = new ProducerBindings(
+    (error) => logger.warn('Producer binding failed', error),
+    (chatId, lease, error) => {
+      if (this.#producerLeases.get(chatId)?.lease !== lease) return;
+      const runId = this.#ledger.activeRunId(chatId);
+      if (!runId) return;
+      const active = this.#executionHandles.get(chatId);
+      if (active) this.#abortHandleBestEffort(chatId, active.agentId, active.handle, 'publication failure');
+      else this.#pendingAbortRuns.add(runKey(chatId, runId));
+      this.#executionHandles.delete(chatId);
+      this.#bindings.forgetRun(runId);
+      this.#ledger.failRun(chatId, runId, error);
+    },
+  );
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
@@ -438,15 +451,28 @@ export class AgentRuntimeRouter {
     for (const { chatId, runId } of runs) {
       this.#pendingAbortRuns.delete(runKey(chatId, runId));
       this.#bindings.forgetRun(runId);
-      this.#ledger.failRun(chatId, runId, {
-        code: 'OUTCOME_UNKNOWN',
-        message: 'Execution-node connection lost. Execution outcome is unknown; native history may contain additional output.',
-      });
+      try {
+        this.#ledger.failRun(chatId, runId, {
+          code: 'OUTCOME_UNKNOWN',
+          message: 'Execution node disconnected mid-turn. The turn may still be running on the execution node. Reload from native history after it finishes to recover missing output.',
+        });
+      } catch (error) {
+        logger.warn('Unable to record execution-node loss', {
+          nodeId, chatId, reason: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     // Closing a producer removes its active run, so terminal publication must precede closure.
     for (const [chatId, producer] of leases) {
-      producer.lease.close();
-      if (this.#producerLeases.get(chatId) === producer) this.#producerLeases.delete(chatId);
+      try {
+        producer.lease.close();
+      } catch (error) {
+        logger.warn('Unable to close lost-node producer', {
+          nodeId, chatId, reason: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (this.#producerLeases.get(chatId) === producer) this.#producerLeases.delete(chatId);
+      }
     }
   }
 
@@ -517,14 +543,16 @@ export class AgentRuntimeRouter {
     ) {
       throw new Error('Permission control does not match the request');
     }
+    const entry = this.#registry.getChat(chatId);
+    if (!entry) throw new AgentCallError('rejected', 'Permission chat no longer exists');
+    const integration = this.#directory.require(entry.agentId, entry.nodeId);
     const claim = this.#ledger.claimPermissionResolution(control);
     try {
-      const entry = this.#registry.getChat(chatId);
       const response = claim.decision.response;
-      if (!entry || response.nodeId !== effectiveNodeId(entry.nodeId) || response.integrationId !== entry.agentId) {
+      if (response.nodeId !== effectiveNodeId(entry.nodeId) || response.integrationId !== entry.agentId) {
         throw new AgentCallError('rejected', 'Permission belongs to another execution target');
       }
-      await this.#directory.require(response.integrationId, response.nodeId).permissions.respond({
+      await integration.permissions.respond({
         response: claim.decision.response, decision,
       });
     } catch (error) {
@@ -683,7 +711,7 @@ export class AgentRuntimeRouter {
   }
 
   async discoverSlashCommands(agentId: string, projectPath: string, nodeId?: string | null) {
-    const commands = this.#directory.require(agentId, nodeId).commands;
+    const commands = this.#directory.list(nodeId).find(integration => integration.descriptor.id === agentId)?.commands;
     return commands
       ? [...(await commands.discover(projectPath, new AbortController().signal))]
       : [];

@@ -36,9 +36,7 @@ export function createApiProviderPolicy(store: ApiProviderStore, nodes: Executio
       };
       const offProfiles = store.onChanged(invalidate);
       const offAssignments = assignments.onChanged(invalidate);
-      const stop = store.observe();
       return () => {
-        stop();
         offProfiles();
         offAssignments();
       };

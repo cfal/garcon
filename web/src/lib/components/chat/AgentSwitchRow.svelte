@@ -18,15 +18,24 @@
 
 	const executionNodes = getExecutionNodes();
 	const crossNode = $derived((message.fromNodeId ?? 'local') !== (message.toNodeId ?? 'local'));
-	const fromLabel = $derived(`${crossNode ? executionNodes.label(message.fromNodeId) + ' / ' : ''}${agentLabelFor(message.fromAgentId)}`);
-	const toLabel = $derived(`${crossNode ? executionNodes.label(message.toNodeId) + ' / ' : ''}${agentLabelFor(message.toAgentId)}`);
+	const fromLabel = $derived(
+		`${crossNode ? executionNodes.label(message.fromNodeId) + ' / ' : ''}${agentLabelFor(message.fromAgentId)}`,
+	);
+	const toLabel = $derived(
+		`${crossNode ? executionNodes.label(message.toNodeId) + ' / ' : ''}${agentLabelFor(message.toAgentId)}`,
+	);
 </script>
 
 <ChatEventCard variant="info" compact>
 	{#snippet body()}
 		<div class="flex flex-wrap items-center gap-2">
 			<ArrowRightLeft class="h-4 w-4 flex-shrink-0" />
-			<span class="text-xs font-medium">
+			<span
+				class="text-xs font-medium"
+				title={crossNode
+					? `${message.fromNodeId ?? 'local'} / ${message.toNodeId ?? 'local'}`
+					: undefined}
+			>
 				{m.chat_message_agent_switch({ from: fromLabel, to: toLabel })}
 			</span>
 			{#if message.toModel}

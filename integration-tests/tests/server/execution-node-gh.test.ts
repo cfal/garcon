@@ -6,7 +6,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-node-dials'] as const) {
-  test(`GitHub HTTP uses the node environment and bounded transfers (${executionBackend})`, async () => {
+  test(`GitHub HTTP uses the node environment and bounded results (${executionBackend})`, async () => {
     await withIntegrationFixture(`gh-http-${executionBackend}`, async fixture => {
       const nodeId = fixture.client.nodeId;
       const project = fixture.executionDirs.project;
@@ -22,9 +22,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(list.repo?.nameWithOwner).toBe('synthetic-worker/repository');
       const detail = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
       expect(detail).toMatchObject(scope);
-      expect(detail.body.length).toBe(17 * 1024 * 1024);
+      expect(detail.body.length).toBe(1024 * 1024);
       expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
       expect(detail.threads).toEqual([]);
+
+      const configPath = join(project, 'gh-fixture.json');
+      await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', bodyBytes: 4 * 1024 * 1024 }));
+      await expect(fixture.client.get(`/api/v1/gh/pull-request?${query}&number=1`))
+        .rejects.toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
+      const diff = `diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -0,0 +1,350 @@\n${`+${'\t'.repeat(9999)}\n`.repeat(350)}`
+        + 'diff --git a/small.txt b/small.txt\n--- a/small.txt\n+++ b/small.txt\n@@ -1 +1 @@\n-old\n+small change\n';
+      await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', diff }));
+      const limited = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
+      expect(limited.fileBodies['example.txt']).toMatchObject({ bodyState: 'too-large', limitReason: 'file-too-many-bytes', patch: null });
+      expect(limited.fileBodies['small.txt'].patch).toContain('+small change');
       if (nodeId !== 'local') {
         expect(await fixture.client.get('/api/v1/gh/status?nodeId=local')).toMatchObject({ nodeId: 'local', instanceId: expect.any(String), available: false });
         await expect(fixture.client.get(`/api/v1/gh/pull-requests?${new URLSearchParams({ nodeId, project: fixture.dirs.project })}`)).rejects.toMatchObject({ status: 403 });
@@ -41,7 +52,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await chmod(join(bin, 'gh'), 0o755);
         await symlink(process.execPath, join(bin, 'bun'));
         await symlink(Bun.which('git')!, join(bin, 'git'));
-        await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic-worker', bodyBytes: 17 * 1024 * 1024, commentsFail: true }));
+        await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic-worker', bodyBytes: 1024 * 1024, commentsFail: true }));
       },
     });
   }, 60_000);

@@ -5,9 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
-import { createGitService as createProductionGitService } from "../git-service.js";
+import { createGitService as createTestGitService } from "./git-service-fixture.js";
 import { runGitWithStdin } from "../run.js";
-import { resolveNetworkGitTimeoutMs } from "../status.js";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
@@ -61,7 +60,7 @@ function materializeReviewResponse(response) {
 }
 
 function createGitService(options) {
-  const service = createProductionGitService(options);
+  const service = createTestGitService(options);
   return {
     ...service,
     async getReviewFileBodies(request) {
@@ -302,7 +301,7 @@ describe("GitDomainError", () => {
 });
 
 describe("createGitService", () => {
-  const git = createProductionGitService({
+  const git = createTestGitService({
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });
@@ -1075,20 +1074,8 @@ describe("selected-file commits", () => {
   });
 });
 
-describe("network git timeout", () => {
-  it("caps at the runner default, tightens with the idle budget, and keeps a floor", () => {
-    expect(resolveNetworkGitTimeoutMs(120)).toBe(30_000);
-    expect(resolveNetworkGitTimeoutMs(20)).toBe(18_000);
-    expect(resolveNetworkGitTimeoutMs(2)).toBe(1_000);
-  });
-
-  it("does not tighten when the idle budget is disabled", () => {
-    expect(resolveNetworkGitTimeoutMs(0)).toBe(30_000);
-  });
-});
-
 describe("getStatus", () => {
-  const git = createProductionGitService({
+  const git = createTestGitService({
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });
@@ -1199,7 +1186,7 @@ describe("getStatus", () => {
 });
 
 describe("discard", () => {
-  const git = createProductionGitService({
+  const git = createTestGitService({
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });

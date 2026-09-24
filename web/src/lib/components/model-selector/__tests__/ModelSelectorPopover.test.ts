@@ -32,6 +32,19 @@ function installMatchMedia(matchesCompact: boolean): void {
 	});
 }
 
+function installViewport(width: number): void {
+	vi.mocked(window.matchMedia).mockImplementation((query) => ({
+		matches: width <= Number(/max-width:\s*(\d+)px/.exec(query)?.[1]),
+		media: query,
+		onchange: null,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+		addListener: vi.fn(),
+		removeListener: vi.fn(),
+		dispatchEvent: vi.fn(),
+	}));
+}
+
 async function closePopoverByOutsideClick(): Promise<void> {
 	await waitFor(() => {
 		expect(
@@ -541,6 +554,35 @@ describe('ModelSelectorPopover', () => {
 		await waitFor(() => {
 			expect(window.matchMedia).toHaveBeenCalledWith('(max-width: 899px)');
 		});
+	});
+
+	it.each([
+		{ width: 800, nodes: [localExecutionNode] },
+		{ width: 1000, nodes: [localExecutionNode, remoteExecutionNode] },
+	])('keeps the compact dialog mounted when draft effort support changes at $width px', async ({ width, nodes }) => {
+		installViewport(width);
+		const onChange = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'none' },
+			mode: { node: 'select', agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			includeManagedAgent: true,
+			nodes,
+			onChange,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		const dialog = screen.getByRole('dialog');
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Amp' }));
+
+		expect(screen.getByRole('dialog')).toBe(dialog);
+		expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
+		const input = screen.getByPlaceholderText('Filter models...');
+		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect(onChange).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByText('Amp Medium'));
+		await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+			agentId: 'amp', model: 'medium', nodeId: 'local',
+		})));
 	});
 
 	it('renders a bounded unfiltered model catalog slice', async () => {

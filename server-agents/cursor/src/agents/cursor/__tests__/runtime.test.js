@@ -363,6 +363,33 @@ function createRuntimeHarness(options = {}) {
 }
 
 describe('Cursor ACP runtime', () => {
+  it('returns typed project-path refusals and permits retry after the active turn', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('run-path-refusal');
+    const request = {
+      chatId: 'chat-1',
+      agentSessionId: 'cursor-session',
+      previousProjectPath: '/tmp/project',
+      nextProjectPath: '/next',
+    };
+    try {
+      await runtime.startSession(startRequest({ operation: published.operation }));
+      await acp.waitForClientMethod('session/prompt');
+      await expect(runtime.prepareProjectPathUpdate({ ...request, chatId: 'other-chat' }))
+        .rejects.toMatchObject({ code: 'SESSION_BUSY', message: 'Chat ID mismatch' });
+      await expect(runtime.prepareProjectPathUpdate(request))
+        .rejects.toMatchObject({ code: 'SESSION_BUSY', message: 'Session cursor-session is already running' });
+      expect(acp.killCount()).toBe(0);
+
+      acp.finishPrompt();
+      await published.waitForEvent((event) => event.type === 'run-ended');
+      await expect(runtime.prepareProjectPathUpdate(request)).resolves.toBeUndefined();
+      expect(acp.killCount()).toBe(1);
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it('closes a cold reconnect cancelled by chat deletion before registration', async () => {
     const connected = deferred();
     const { acp, runtime } = createRuntimeHarness({ initializeGate: connected.promise });

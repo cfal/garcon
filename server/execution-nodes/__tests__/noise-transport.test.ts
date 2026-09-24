@@ -64,7 +64,7 @@ function relay(target: string) {
   return { frames, handshakes, tamperNext: () => { tamper = true; }, url: `ws://127.0.0.1:${server.port}/execution-node` };
 }
 
-test('a wire relay sees neither credentials nor large payloads, including after logical-session resumption', async () => {
+test('a wire relay sees neither credentials nor large payloads, including after reconnect', async () => {
   const worker = link('worker');
   const controller = link('controller');
   const wire = relay(worker.listen());
@@ -81,13 +81,13 @@ test('a wire relay sees neither credentials nor large payloads, including after 
   const payload = 'synthetic-private-execution-payload/'.repeat(8192);
   right.send(payload);
   await first.promise;
+  worker.onSession(session => { if (session !== right) void session.ready.then(() => session.send(payload)); });
   controller.disconnect();
   worker.disconnect();
-  right.send(payload);
   await replayed.promise;
   expect(received).toEqual([payload, payload]);
-  expect(controller.current).toBe(left);
-  expect(worker.current).toBe(right);
+  expect(controller.current).not.toBe(left);
+  expect(worker.current).not.toBe(right);
   expect(wire.handshakes.length).toBeGreaterThanOrEqual(2);
   expect(wire.handshakes[0]).not.toEqual(wire.handshakes[1]);
   expect(wire.frames.every((frame) => frame.length <= 65_535)).toBe(true);
@@ -138,7 +138,7 @@ test('binary Noise application messages are not accepted as Garcon JSON', async 
   expect(worker.current).toBeNull();
 });
 
-test('a failed encrypted fragment is discarded and the retained message replays once on a fresh connection', async () => {
+test('a failed encrypted fragment is discarded without replay on a fresh connection', async () => {
   const worker = link('worker');
   const controller = link('controller');
   const noise = createNoiseServer();
@@ -165,13 +165,14 @@ test('a failed encrypted fragment is discarded and the retained message replays 
   controller.dial(`ws://127.0.0.1:${server.port}/execution-node`);
   const [left, right] = await Promise.all([controller.ready, worker.ready]);
   const payload = 'synthetic-large-message/'.repeat(8192);
+  worker.onSession(session => { if (session !== right) void session.ready.then(() => session.send('new session')); });
   failAfter = 2;
-  right.send(payload);
+  expect(() => right.send(payload)).toThrow();
   expect(right.connected).toBe(false);
   await completed.promise;
-  expect(received).toEqual([payload]);
-  expect(controller.current).toBe(left);
-  expect(worker.current).toBe(right);
+  expect(received).toEqual(['new session']);
+  expect(controller.current).not.toBe(left);
+  expect(worker.current).not.toBe(right);
 });
 
 test('plaintext downgrade is rejected without disclosing a Garcon hello', async () => {

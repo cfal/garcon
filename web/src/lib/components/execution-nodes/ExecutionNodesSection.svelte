@@ -217,37 +217,42 @@
 				</p>
 			{/if}
 			<div class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-				{#if editor.id}
-					{#if editor.confirmDelete}
-						<div class="flex flex-wrap gap-2">
-							<Button
-								type="button"
-								variant="destructive"
-								disabled={editor.busy}
-								aria-describedby="execution-node-delete-warning"
-								onclick={removeNode}>{editor.busy ? 'Deleting...' : 'Delete Node'}</Button
-							><Button
-								type="button"
-								variant="ghost"
-								disabled={editor.busy}
-								onclick={() => (editor.confirmDelete = false)}>Cancel</Button
-							>
-						</div>
-					{:else}<Button
+				{#if editor.id && editor.confirmDelete}
+					<div class="flex flex-wrap gap-2">
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={editor.busy}
+							aria-describedby="execution-node-delete-warning"
+							onclick={removeNode}>{editor.busy ? 'Deleting...' : 'Delete Node'}</Button
+						>
+						<Button
 							type="button"
 							variant="ghost"
-							size="icon-sm"
-							aria-label="Delete node"
-							title="Delete node"
 							disabled={editor.busy}
-							onclick={() => (editor.confirmDelete = true)}><Trash2 class="size-4" /></Button
-						>{/if}
-				{:else}<span></span>{/if}
-				{#if !editor.confirmDelete}<Button
+							onclick={() => (editor.confirmDelete = false)}>Cancel</Button
+						>
+					</div>
+				{:else if editor.id}
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Delete node"
+						title="Delete node"
+						disabled={editor.busy}
+						onclick={() => (editor.confirmDelete = true)}><Trash2 class="size-4" /></Button
+					>
+				{:else}
+					<span></span>
+				{/if}
+				{#if !editor.confirmDelete}
+					<Button
 						type="submit"
 						disabled={editor.busy || !editor.label.trim()}
 						>{saveButtonLabel}</Button
-					>{/if}
+					>
+				{/if}
 			</div>
 		</form>
 	{/if}

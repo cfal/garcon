@@ -103,7 +103,7 @@ describe('Settings', () => {
 			expect(screen.getByRole('dialog', { name: 'Server Settings' })).toBeTruthy();
 			expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe('vertical');
 			expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
-				'Execution Nodes', 'Providers', 'Other Agents', 'Github', 'General',
+				'Execution Nodes', 'Providers', 'Other Agents', 'GitHub', 'General',
 			]);
 			expect(screen.getByRole('tab', { name: 'Providers' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
@@ -176,7 +176,7 @@ describe('Settings', () => {
 			expect(screen.getByText('Pi')).toBeTruthy();
 			expect(screen.getByText('pi')).toBeTruthy();
 
-			await fireEvent.click(screen.getByRole('tab', { name: 'Github' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'GitHub' }));
 			expect(screen.getByText('Connected as octocat@github.com')).toBeTruthy();
 			expect(screen.queryByRole('heading', { name: 'Local' })).toBeNull();
 			expect(screen.queryByRole('combobox')).toBeNull();
@@ -421,7 +421,7 @@ describe('Settings', () => {
 				return { state: 'idle', running: false };
 			});
 			vi.mocked(providersApi.getAgentAuthStatus).mockClear();
-			nodeStore.applySnapshot([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+			nodeStore.applySnapshot([{ ...localExecutionNode }, { ...remoteExecutionNode, availability: 'offline' }]);
 			await screen.findByText('Worker is unavailable.');
 			expect((local.getByRole('textbox') as HTMLInputElement).value).toBe('synthetic-oauth-code');
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('claude', 'local');

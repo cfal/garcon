@@ -58,7 +58,7 @@ describe('Codex scripted default effort model switching', () => {
         'gpt-5.5', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol',
         'gpt-5.4', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra',
       ] as const) {
-        const response = await fetch(`${fixture.client.baseUrl}/api/v1/chats/model`, {
+        const response = await fixture.client.fetch(`/api/v1/chats/model`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ chatId, model }),

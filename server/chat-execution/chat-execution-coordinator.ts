@@ -175,7 +175,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     ) => this.#steerInputDelivery.deliverControl(chatId, content, viewId, target);
     this.#controlSteerDelivery = new ControlSteerDelivery(deliverControlSteer);
     this.#controlInputDelivery = new ControlInputDelivery({
-      captureTarget: (chatId) => this.#steerInputDelivery.captureTarget(chatId),
+      captureTarget: (chatId) => this.#steerInputDelivery.captureControlTarget(chatId),
       deliverSteer: deliverControlSteer,
       scheduleRun: (chatId, content, viewId, onReserved) => (
         this.#scheduleControlRun(chatId, content, viewId, onReserved)
@@ -457,7 +457,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       return this.#enqueueServerControlInput(chatId, input, signal);
     }
 
-    const target = await this.#steerInputDelivery.captureTarget(chatId);
+    const target = await this.#steerInputDelivery.captureControlTarget(chatId);
     if (target) {
       const outcome = await this.#controlSteerDelivery.toCapturedTarget(
         chatId,

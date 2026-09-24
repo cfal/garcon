@@ -48,6 +48,32 @@ function resetConfigMocks() {
 }
 
 describe('http route wrapping', () => {
+  for (const mode of ['authenticated', 'disabled', 'public']) {
+    it(`rejects ${mode} routes once shutdown begins`, async () => {
+      if (mode === 'disabled') isAuthDisabled.mockReturnValue(true);
+      const handler = mock(() => Response.json({ ok: true }));
+      if (mode === 'public') markRouteNoAuth(handler);
+      const wrapped = wrapRoute(handler, '/api/private', 'POST', { isShuttingDown: () => true });
+      const response = await wrapped(new Request('http://localhost/api/private'));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ errorCode: 'SERVER_SHUTTING_DOWN', retryable: true });
+      expect(handler).not.toHaveBeenCalled();
+      expect(authenticateHttpRequest).not.toHaveBeenCalled();
+    });
+  }
+
+  it('rechecks shutdown after deferred authentication before invoking a route', async () => {
+    let shuttingDown = false;
+    const authentication = Promise.withResolvers();
+    authenticateHttpRequest.mockImplementationOnce(() => authentication.promise);
+    const handler = mock(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/private', 'POST', { isShuttingDown: () => shuttingDown });
+    const response = wrapped(new Request('http://localhost/api/private'));
+    shuttingDown = true;
+    authentication.resolve({ errorResponse: null, principal: authenticatedPrincipal });
+    expect((await response).status).toBe(503);
+    expect(handler).not.toHaveBeenCalled();
+  });
   it('preserves the no-store route policy on authentication rejection before handler admission', async () => {
     const handler = mock(() => Response.json({ ok: true }));
     const wrapped = wrapRoute(markRouteNoStore(handler), '/api/v1/tickets', 'GET');

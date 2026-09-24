@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createGitService } from '../server/git/git-service.js';
+import { createGitOperations } from '../server/git/git-service.js';
 
 export type GitReviewBenchmarkScenario =
   | 'revision-24'
@@ -132,18 +132,8 @@ async function createFixture(
   };
 }
 
-function createService() {
-  return createGitService({
-    agents: { runSingleQuery: async () => 'chore: benchmark' },
-    classifyGitError: (error) => ({
-      status: 500,
-      message: error instanceof Error ? error.message : String(error),
-    }),
-  });
-}
-
 async function runIteration(fixture: BenchmarkFixture): Promise<IterationResult> {
-  const service = createService();
+  const service = createGitOperations();
   const trace = [];
   const startedAt = performance.now();
   const snapshotStartedAt = performance.now();

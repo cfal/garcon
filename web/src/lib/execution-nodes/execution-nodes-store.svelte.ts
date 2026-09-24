@@ -134,6 +134,5 @@ export class ExecutionNodesStore {
 export function executionNodeStatus(node: ExecutionNodeSnapshot): string {
 	if (!node.enabled) return 'Disabled';
 	if (node.availability === 'ready') return 'Ready';
-	if (node.availability === 'reconnecting') return 'Reconnecting';
 	return node.direction === 'node-connects' ? 'Waiting for connection' : 'Offline';
 }

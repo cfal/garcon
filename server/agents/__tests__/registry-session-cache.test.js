@@ -15,6 +15,7 @@ import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRegistry } from '../registry.ts';
+import createAgentRoutes from '../../routes/agents.ts';
 
 const CHAT_ID = '1783725900000200';
 const AT = '2026-08-15T00:00:00.000Z';
@@ -87,6 +88,28 @@ describe('AgentRegistry session cache', () => {
         : { kind, ownershipEpoch, selectionRevision },
     });
   }
+
+  it('returns a client error for unknown-agent auth and an empty command catalog', async () => {
+    const registry = createRegistry();
+    const routes = createAgentRoutes({ agents: registry });
+    const url = new URL('http://localhost/api/v1/agents/auth?agent=unknown-agent');
+    const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Unknown agent: unknown-agent' });
+    await expect(registry.getSlashCommands('unknown-agent', '/repo')).resolves.toEqual([]);
+  });
+
+  it('preserves node-unavailable responses rather than treating remote agents as unknown', async () => {
+    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const registry = createRegistry();
+    const routes = createAgentRoutes({ agents: registry });
+    const url = new URL(`http://localhost/api/v1/agents/auth?agent=unknown-agent&nodeId=${nodeId}`);
+    const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTION_NODE_UNAVAILABLE' });
+    await expect(registry.getSlashCommands('unknown-agent', '/repo', nodeId))
+      .rejects.toMatchObject({ code: 'EXECUTION_NODE_UNAVAILABLE' });
+  });
 
   function setSelection(orderedPreambleIds, revision = 1) {
     chats.updateChat(CHAT_ID, {

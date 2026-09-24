@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ApiProviderCatalogEntry, ApiProviderManagement } from '../../../common/api-providers.js';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { ApiProvidersInvalidatedMessage } from '../../../common/ws-events.js';
@@ -20,6 +22,11 @@ test.each(['remote-controller-dials', 'remote-node-dials'] as const)('provider g
     const selection = { nodeId: client.nodeId, agentId: agent.agentId, model: agent.provider.model,
       apiProviderId: providerId, modelEndpointId: agent.provider.endpointId, modelProtocol: agent.provider.protocol, thinkingMode: 'none' as const };
     await client.updateSettings({ ui: { promptRefinement: selection } });
+    const generation = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
+    const permittedRefinement = client.refinePrompt({ draft: 'Synthetic permitted generation', target: 'prompt' });
+    await generation.received;
+    generation.releaseText('Synthetic refined prompt');
+    expect(await permittedRefinement).toEqual({ success: true, refinedPrompt: 'Synthetic refined prompt' });
     const observer = await fixture.connectObserver('provider-policy-observer');
     const afterIndex = observer.markEvents();
     await client.delete(assignment);
@@ -27,11 +34,13 @@ test.each(['remote-controller-dials', 'remote-node-dials'] as const)('provider g
     expect((await catalog(client.nodeId)).some((entry) => entry.id === providerId)).toBe(false);
     expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).providers.some((entry) => entry.id === providerId)).toBe(true);
     const before = fixture.fakeProviders.openAi.requests().length;
-    await expect(client.startDirectChat({ chatId: fixture.newChatId(), projectPath: fixture.dirs.project, agent, content: 'Synthetic blocked start' })).rejects.toBeDefined();
+    await expect(client.startDirectChat({ chatId: fixture.newChatId(), projectPath: fixture.dirs.project, agent, content: 'Synthetic blocked start' }))
+      .rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
     const denied = await client.runDirectChat({ chatId, agent, content: 'Synthetic blocked resume' });
     expect(await client.waitForTurnTerminal(chatId, denied.turnId)).toMatchObject({ type: 'agent-run-failed', error: expect.stringContaining('unavailable') });
     await client.waitForProcessing(chatId, false);
-    await expect(client.refinePrompt({ draft: 'Synthetic blocked generation', target: 'prompt' })).rejects.toBeDefined();
+    await expect(client.refinePrompt({ draft: 'Synthetic blocked generation', target: 'prompt' }))
+      .rejects.toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
     expect(fixture.fakeProviders.openAi.requests()).toHaveLength(before);
     await expect(client.delete(`/api/v1/api-providers?id=${providerId}&acknowledgeSharedImpact=true`)).rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_IN_USE' } });
     await fixture.restartGarcon();
@@ -54,4 +63,22 @@ test.each(['remote-controller-dials', 'remote-node-dials'] as const)('provider g
     await client.delete(`/api/v1/api-providers?id=${providerId}&acknowledgeSharedImpact=true`);
     expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).providers.some((entry) => entry.id === providerId)).toBe(false);
   }, { executionBackend });
+}, 45_000);
+
+test('external provider edits take effect after controller restart, not during execution', async () => {
+  await withIntegrationFixture('provider-restart-config', async (fixture) => {
+    const path = join(fixture.dirs.config, 'api-providers.json');
+    const stored = JSON.parse(await readFile(path, 'utf8'));
+    const providerId = fixture.directAgents.openAi.provider.providerId;
+    const provider = stored.apiProviders.find((entry: { id: string }) => entry.id === providerId);
+    const originalLabel = provider.label;
+    provider.label = 'Synthetic offline edit';
+    provider.revision++;
+    await writeFile(path, JSON.stringify(stored));
+    const labels = async () => (await fixture.client.get<ApiProviderManagement>('/api/v1/api-providers'))
+      .providers.find((entry) => entry.id === providerId)?.label;
+    expect(await labels()).toBe(originalLabel);
+    await fixture.restartGarcon();
+    expect(await labels()).toBe('Synthetic offline edit');
+  }, { executionBackend: 'remote-node-dials' });
 }, 45_000);

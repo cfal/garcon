@@ -23,7 +23,7 @@ function hashString(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
-function notRepository(projectPath: string): GitQuickSummaryResponse {
+export function notRepositoryQuickSummary(projectPath: string): GitQuickSummaryResponse {
   return {
     status: 'not-git-repository',
     project: projectPath,
@@ -136,7 +136,7 @@ export function createQuickSummaryOperations() {
     try {
       await fs.access(projectPath);
     } catch {
-      return notRepository(projectPath);
+      return notRepositoryQuickSummary(projectPath);
     }
 
     const [
@@ -165,7 +165,7 @@ export function createQuickSummaryOperations() {
       runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
     ]);
 
-    if (repoRootResult.status === 'rejected') return notRepository(projectPath);
+    if (repoRootResult.status === 'rejected') return notRepositoryQuickSummary(projectPath);
     if (statusResult.status === 'rejected') {
       return unknownSummary(projectPath, errorText(statusResult.reason));
     }

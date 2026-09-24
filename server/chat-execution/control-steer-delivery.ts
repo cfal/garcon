@@ -19,15 +19,17 @@ export class ControlSteerDelivery {
     signal: AbortSignal,
   ): Promise<ControlSteerOutcome> {
     signal.throwIfAborted();
-    try {
-      await this.deliver(chatId, content, transcriptViewId, target);
-      return 'delivered';
-    } catch (error) {
-      signal.throwIfAborted();
-      if (!isDefinitiveControlNonDelivery(error)) throw error;
-      await waitAbortably(target.attempt.waitUntilSettled(), signal);
-      return 'definitive-non-delivery';
+    if (target.providerTarget) {
+      try {
+        await this.deliver(chatId, content, transcriptViewId, target);
+        return 'delivered';
+      } catch (error) {
+        signal.throwIfAborted();
+        if (!isDefinitiveControlNonDelivery(error)) throw error;
+      }
     }
+    await waitAbortably(target.attempt.waitUntilSettled(), signal);
+    return 'definitive-non-delivery';
   }
 }
 
@@ -37,6 +39,7 @@ export function isDefinitiveControlNonDelivery(error: unknown): boolean {
     || error.code === 'STEER_TURN_CHANGED'
     || error.code === 'STEER_TURN_NOT_STEERABLE'
     || error.code === 'OPERATION_UNSUPPORTED'
+    || error.code === 'EXECUTION_NODE_UNAVAILABLE'
     || error.code === 'STEER_NOT_DELIVERED';
 }
 

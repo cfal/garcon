@@ -37,17 +37,16 @@ it('isolates node loss and queue wake-up, and publishes complete node snapshots'
   });
   fixture.node.availability(remote, 'offline');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledWith(remote);
+  expect(fixture.ownershipJournal.retryProviderCleanup).not.toHaveBeenCalled();
   fixture.node.availability(remote, 'ready');
+  expect(fixture.ownershipJournal.retryProviderCleanup.mock.calls).toEqual([[remote]]);
   expect(fixture.queueService.triggerDrain.mock.calls).toEqual([['remote-chat']]);
   fixture.node.changed();
   expect(fixture.published).toContainEqual({ type: 'execution-nodes-changed', nodes });
 });
 
-it('settles terminal node loss but retains resumable disconnects, and drains only when ready', () => {
+it('settles node loss and drains only when ready', () => {
   const fixture = createFixture();
-  fixture.node.availability('local', 'reconnecting');
-  expect(fixture.agentRegistry.executionSessionLost).not.toHaveBeenCalled();
-  expect(fixture.queueService.triggerDrain).not.toHaveBeenCalled();
   fixture.node.availability('local', 'offline');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
   fixture.node.availability('local', 'ready');
@@ -55,6 +54,23 @@ it('settles terminal node loss but retains resumable disconnects, and drains onl
   fixture.node.availability('local', 'disposed');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
   expect(fixture.queueService.triggerDrain).toHaveBeenCalledTimes(1);
+});
+
+it('drains queues even when ready-node native cleanup fails', async () => {
+  const fixture = createFixture({ ownershipJournal: {
+    retryProviderCleanup: mock(async () => { throw new Error('Synthetic cleanup failure'); }),
+  } });
+  fixture.node.availability('local', 'ready');
+  await Promise.resolve();
+  expect(fixture.queueService.triggerDrain).toHaveBeenCalledWith('chat-1');
+});
+
+it('retries native cleanup for nodes that became ready before event wiring', () => {
+  const fixture = createFixture({ nodes: [
+    { id: 'ready-node', availability: 'ready' },
+    { id: 'offline-node', availability: 'offline' },
+  ] });
+  expect(fixture.ownershipJournal.retryProviderCleanup.mock.calls).toEqual([['ready-node']]);
 });
 
 function createFixture(overrides = {}) {
@@ -141,7 +157,12 @@ function createFixture(overrides = {}) {
     phase: mock(() => null),
     ...overrides.processing,
   };
+  const ownershipJournal = {
+    retryProviderCleanup: mock(async () => undefined),
+    ...overrides.ownershipJournal,
+  };
   const wiring = wireServerEvents({
+    ownershipJournal,
     executionNodes: {
       onAvailabilityChanged: (listener) => { node.availability = listener; return () => {}; },
       onChanged: (listener) => { node.changed = listener; return () => {}; },
@@ -187,6 +208,7 @@ function createFixture(overrides = {}) {
     searchIndex,
   });
   return {
+    ownershipJournal,
     node,
     agent,
     agentRegistry,

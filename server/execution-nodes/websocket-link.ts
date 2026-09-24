@@ -1,7 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { connectNoiseWebSocket, createNoiseServer, type NoiseOptions, type NoiseSocketData, type NoiseWebSocket } from '@cfal/noise-ws';
 import { isNodeSecret } from './connection-url.js';
-import { MessageContinuityError, type SessionSocket } from './message-session.js';
+import { MessageContinuityError } from './message-session.js';
+import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-socket.js';
 import { SessionTransport } from './session-transport.js';
 import { version } from '../../package.json';
 
@@ -10,10 +11,7 @@ interface HelloFields {
   readonly type: 'hello';
   readonly version: string;
   readonly runtimeId: string;
-  readonly peerRuntimeId: string | null;
-  readonly sessionId: string | null;
   readonly nonce: string;
-  readonly received: number;
 }
 type Hello = HelloFields & (
   | { readonly role: 'controller'; readonly nodeId: string }
@@ -27,27 +25,25 @@ export interface WebSocketLinkOptions {
   readonly runtimeId?: string;
   readonly allowInsecureDevelopment?: boolean;
   readonly allowUnverifiedTls?: boolean;
-  readonly reconnectGraceMs?: number;
-  readonly maxRetainedBytes?: number;
-  readonly maxRetainedFrames?: number;
+  readonly maxQueuedBytes?: number;
+  readonly maxQueuedFrames?: number;
   readonly reconnectDelayMs?: number;
 }
-
-interface LinkSocket extends SessionSocket { readonly bufferedAmount: number }
 
 export const EXECUTION_NODE_NOISE_CONTEXT = 'garcon-execution-node/v1';
 
 interface Connection {
-  readonly socket: LinkSocket;
+  readonly socket: NoiseWebSocket;
   readonly hello: Hello;
   readonly timeout: ReturnType<typeof setTimeout>;
-  replayTimeout: ReturnType<typeof setTimeout> | null;
   peer: Hello | null;
   session: SessionTransport | null;
   hooks: ReturnType<SessionTransport['attach']> | null;
   heartbeat: ReturnType<typeof setInterval> | null;
   lastReceivedAt: number;
   closed: boolean;
+  authenticated: boolean;
+  frames: SessionSocketFrames | null;
 }
 
 export class WebSocketLink {
@@ -187,7 +183,7 @@ export class WebSocketLink {
         connection = this.#open(socket);
       },
       onMessage: (socket, message) => {
-        if (connection && typeof message === 'string') this.#receive(connection, message);
+        if (connection) this.#receive(connection, message);
         else socket.close();
       },
       onError: () => this.#reportError('Execution-node encrypted connection failed'),
@@ -198,17 +194,15 @@ export class WebSocketLink {
     };
   }
 
-  #open(socket: LinkSocket): Connection {
+  #open(socket: NoiseWebSocket): Connection {
     const hello: Hello = {
       type: 'hello', version,
       ...(this.options.role === 'controller' ? { role: 'controller' as const, nodeId: this.options.nodeId! } : { role: 'worker' as const }),
-      runtimeId: this.runtimeId, peerRuntimeId: this.#current?.peerRuntimeId ?? null,
-      sessionId: this.#current?.id ?? null,
-      nonce: randomBytes(32).toString('hex'), received: this.#current?.channel.received ?? 0,
+      runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
     };
     const connection: Connection = {
-      socket, hello, peer: null, session: null, hooks: null, heartbeat: null, replayTimeout: null,
-      closed: false, lastReceivedAt: Date.now(),
+      socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
+      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(),
       timeout: setTimeout(() => {
         this.#reportError('Execution-node authentication timed out');
         this.#close(connection);
@@ -220,22 +214,23 @@ export class WebSocketLink {
     return connection;
   }
 
-  #receive(connection: Connection, encoded: string): void {
+  #receive(connection: Connection, message: string | Uint8Array): void {
     if (connection.closed || this.#disposed) return;
     connection.lastReceivedAt = Date.now();
     try {
+      let encoded: string;
+      if (typeof message === 'string') encoded = message;
+      else {
+        if (!connection.frames) throw new Error('Unauthenticated session fragment');
+        const complete = connection.frames.receive(message);
+        if (complete === null) return;
+        encoded = complete;
+      }
       if (connection.hooks) {
-        if (encoded === '{"type":"ping"}') { connection.socket.send('{"type":"pong"}'); return; }
+        if (encoded === '{"type":"ping"}') { this.#heartbeat(connection, 'pong'); return; }
         if (encoded === '{"type":"pong"}') return;
-        const received = connection.session!.channel.received;
+        if (typeof message === 'string') throw new MessageContinuityError('Session packets require binary framing');
         connection.hooks.receive(encoded);
-        if (connection.session?.connected) {
-          if (connection.replayTimeout) clearTimeout(connection.replayTimeout);
-          connection.replayTimeout = null;
-          this.#ready.resolve(connection.session);
-        } else if (connection.session!.channel.received > received) {
-          this.#waitForReplay(connection);
-        }
         return;
       }
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
@@ -253,9 +248,11 @@ export class WebSocketLink {
         || !timingSafeEqual(Buffer.from(frame.signature, 'hex'), Buffer.from(this.#signature(connection, connection.peer.role), 'hex'))) {
         throw new Error('Execution-node authentication failed');
       }
+      connection.authenticated = true;
       this.#accept(connection);
-    } catch {
-      this.#reportError(connection.hooks ? 'Execution-node continuity lost' : 'Execution-node authentication failed');
+    } catch (error) {
+      if (error instanceof MessageContinuityError) connection.session?.close(error);
+      this.#reportError(connection.authenticated ? 'Execution-node continuity lost' : 'Execution-node authentication failed');
       this.#close(connection);
     }
   }
@@ -265,51 +262,31 @@ export class WebSocketLink {
     const peer = connection.peer!;
     const nodeId = connection.hello.role === 'controller' ? connection.hello.nodeId
       : peer.role === 'controller' ? peer.nodeId : '';
-    if (connection.hello.sessionId !== (this.#current?.id ?? null)) throw new Error('Superseded handshake');
-    let session = this.#current;
-    const resume = session !== null && peer.runtimeId === session.peerRuntimeId
-      && peer.peerRuntimeId === this.runtimeId && peer.sessionId === session.id && session.nodeId === nodeId;
-    if (session?.channel.attached) throw new Error('Execution-node session already attached');
-    if (!resume) {
-      session?.close(new MessageContinuityError('Execution-node logical session replaced'));
-      const replacement = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, () => {
-        if (this.#current === replacement) this.#current = null;
-        for (const attached of this.#connections) {
-          if (attached.session === replacement) this.#close(attached);
-        }
-      }, this.options, nodeId);
-      this.#current = session = replacement;
-      for (const listener of this.#sessions) listener(replacement);
-    }
+    if (this.#current) throw new Error('Execution-node session already attached');
+    const session = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, () => {
+      if (this.#current === session) this.#current = null;
+      for (const attached of this.#connections) {
+        if (attached.session === session) this.#close(attached);
+      }
+    }, this.options, nodeId);
+    this.#current = session;
+    for (const listener of this.#sessions) listener(session);
     connection.session = session;
-    connection.hooks = session!.attach({
-      canSend: (bytes) => connection.socket.bufferedAmount + bytes < 2 * 1024 * 1024,
-      send: (frame) => {
-        if (connection.socket.bufferedAmount > 4 * 1024 * 1024) {
-          throw new MessageContinuityError('Execution-node socket backpressure budget exhausted');
-        }
-        connection.socket.send(frame);
-      },
-      close: () => this.#close(connection),
-    }, resume ? peer.received : 0);
+    connection.frames = new SessionSocketFrames(connection.socket, () => this.#close(connection));
+    connection.hooks = session.attach(connection.frames);
     if (connection.closed) { connection.hooks.disconnected(); return; }
-    this.#waitForReplay(connection);
+    this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {
       try {
         if (Date.now() - connection.lastReceivedAt > 15_000) this.#close(connection);
-        else connection.socket.send('{"type":"ping"}');
+        else this.#heartbeat(connection, 'ping');
       } catch { this.#close(connection); }
     }, 5000);
     connection.heartbeat.unref();
   }
 
-  #waitForReplay(connection: Connection): void {
-    if (connection.replayTimeout) clearTimeout(connection.replayTimeout);
-    if (connection.closed || connection.session?.connected) return;
-    connection.replayTimeout = setTimeout(() => {
-      connection.session!.close(new MessageContinuityError('Execution-node replay inactivity deadline exceeded'));
-    }, this.options.reconnectGraceMs ?? 30_000);
-    connection.replayTimeout.unref();
+  #heartbeat(connection: Connection, type: 'ping' | 'pong'): void {
+    if (connection.socket.bufferedAmount < SESSION_SOCKET_BUFFER_BYTES) connection.socket.send(JSON.stringify({ type }));
   }
 
   #signature(connection: Connection, purpose: Role | 'session'): string {
@@ -332,8 +309,8 @@ export class WebSocketLink {
     if (connection.closed) return;
     connection.closed = true;
     clearTimeout(connection.timeout);
-    if (connection.replayTimeout) clearTimeout(connection.replayTimeout);
     if (connection.heartbeat) clearInterval(connection.heartbeat);
+    connection.frames?.dispose();
     this.#connections.delete(connection);
     connection.hooks?.disconnected();
   }
@@ -344,8 +321,5 @@ function isHello(value: unknown): value is Hello {
   const frame = value as Record<string, unknown>;
   return frame.type === 'hello' && (frame.role === 'controller' || frame.role === 'worker')
     && ['version', 'runtimeId', 'nonce'].every((key) => typeof frame[key] === 'string' && frame[key].length > 0)
-    && (frame.role === 'controller' ? typeof frame.nodeId === 'string' && frame.nodeId.length > 0 : !('nodeId' in frame))
-    && (frame.peerRuntimeId === null || typeof frame.peerRuntimeId === 'string')
-    && (frame.sessionId === null || typeof frame.sessionId === 'string')
-    && typeof frame.received === 'number' && Number.isSafeInteger(frame.received) && frame.received >= 0;
+    && (frame.role === 'controller' ? typeof frame.nodeId === 'string' && frame.nodeId.length > 0 : !('nodeId' in frame));
 }

@@ -45,14 +45,14 @@
 
 	interface WorkspaceWindowAddCommand {
 		readonly id: string;
-		readonly kind: PortableSingletonKind | 'terminal';
+		readonly kind: PortableSingletonKind;
 		readonly label: string;
 		readonly onclick: () => void;
-		readonly disabled?: boolean;
-		readonly busy?: boolean;
 	}
+	type TerminalAddAction = { readonly id: 'new-terminal'; readonly kind: 'terminal' };
 	type WorkspaceWindowAddAction =
 		| WorkspaceWindowAddCommand
+		| TerminalAddAction
 		| {
 				readonly id: 'chat-views';
 				readonly kind: 'chat-views';
@@ -73,9 +73,6 @@
 	let creatingTerminal = $state(false);
 	let menuChoosesTerminalHost = $state(false);
 	const creationNodeId = $derived(workspace.terminalCreationNodeIdFor(windowId));
-	const terminalLimitReached = $derived(
-		!terminals.hasRemoteHosts && !terminals.canCreate(creationNodeId),
-	);
 	const unplacedTerminalSessions = $derived(
 		terminals.orderedSessions.filter(
 			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
@@ -106,14 +103,7 @@
 		...(chatViewActions.length > 0
 			? [{ id: 'chat-views', kind: 'chat-views', label: m.workspace_chat_views() } as const]
 			: []),
-		{
-			id: 'new-terminal',
-			kind: 'terminal',
-			label: terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal(),
-			onclick: () => void createTerminal(),
-			disabled: terminalLimitReached,
-			busy: creatingTerminal,
-		},
+		{ id: 'new-terminal', kind: 'terminal' },
 	]);
 	const hasUnplacedTerminalSessions = $derived(unplacedTerminalSessions.length > 0);
 	const menuState = new WorkspaceWindowAddMenuState({
@@ -184,7 +174,7 @@
 	}
 </script>
 
-{#snippet addActionMenuItem(action: WorkspaceWindowAddCommand, group?: string)}
+{#snippet addActionMenuItem(action: WorkspaceWindowAddCommand | TerminalAddAction, group?: string)}
 	{#if action.kind === 'terminal'}
 		<TerminalCreateAction
 			{terminals}
@@ -198,9 +188,6 @@
 		<DropdownMenuItem
 			data-workspace-window-add-action={action.id}
 			data-workspace-window-add-group={group}
-			disabled={action.disabled || action.busy}
-			aria-busy={action.busy || undefined}
-			title={action.disabled ? action.label : undefined}
 			onSelect={action.onclick}
 		>
 			<WorkspaceSurfaceIcon kind={action.kind} />
@@ -295,12 +282,9 @@
 				style={addControlStyle()}
 				aria-label={action.label}
 				title={action.label}
-				disabled={action.disabled}
-				aria-disabled={action.busy || undefined}
-				aria-busy={action.busy || undefined}
 				data-workspace-window-add-action={action.id}
 				data-workspace-window-add-inline={action.id}
-				onclick={action.disabled || action.busy ? undefined : action.onclick}
+				onclick={action.onclick}
 			>
 				<WorkspaceSurfaceIcon kind={action.kind} size={titlebarMetrics.iconSizePx} />
 			</button>

@@ -23,7 +23,32 @@ describe('TerminalSurface', () => {
 		render(TerminalSurfaceTestHost, { host: 'mobile' });
 
 		expect(screen.getByRole('option', { name: 'Local 1 - running - Window 1' })).toBeTruthy();
-		expect(screen.getByRole('option', { name: 'Build logs - running' })).toBeTruthy();
+		expect(screen.getByRole('option', { name: 'Local: Build logs - running' })).toBeTruthy();
+	});
+
+	it.each(['detached', 'taken-over'] as const)(
+		'exposes %s status outside hover-only context',
+		(attachmentState) => {
+			render(TerminalSurfaceTestHost, { host: 'mobile', attachmentState });
+			const status = screen.getByRole('status', {
+				name: attachmentState === 'detached' ? 'Detached' : 'Taken over',
+			});
+			expect(status.classList.contains('terminal-context')).toBe(false);
+		},
+	);
+
+	it('shows and retries only the missing terminal host inventory', async () => {
+		const onList = vi.fn();
+		render(TerminalSurfaceTestHost, {
+			host: 'mobile',
+			terminalId: 'missing',
+			nodeError: 'Local inventory failed',
+			onList,
+		});
+		expect(screen.getByText('Local inventory failed')).toBeTruthy();
+		expect(screen.queryByText('Another host failed')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(onList).toHaveBeenCalledWith('local');
 	});
 
 	it('keeps attachment status in the mobile session picker title', async () => {

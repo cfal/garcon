@@ -611,7 +611,11 @@ describe('GitHistoryView', () => {
 		await screen.findByText('List commit');
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 		await screen.findByText('Commit detail');
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalled());
+		expect(requestedPaths(vi.mocked(getGitCommitFileBodies).mock.calls[0]![3])).toEqual([
+			'file-0.ts',
+		]);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.purpose).toBe('visible');
 		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
 		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');

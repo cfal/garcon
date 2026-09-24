@@ -4,6 +4,7 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
+import { effectiveNodeId } from '$shared/execution-nodes';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import {
 	steerSubmissionRejection,
@@ -130,7 +131,7 @@ export interface ConversationSlashCommandDeps {
 	composerState: SlashCommandComposerState;
 	agentState: SlashCommandAgentState;
 	lifecycle: SlashCommandLifecycle;
-	modelCatalog: SlashCommandModelCatalog;
+	modelCatalogForNode(nodeId: string): SlashCommandModelCatalog;
 	navigation: { navigateToChat?(chatId: string): void };
 	refetchTranscript?: (chatId: string) => Promise<void>;
 	// Asks the user whether to continue when the provider cannot materialize a native fork.
@@ -199,12 +200,13 @@ export class ConversationSlashCommandService {
 		}
 
 		const agentId = chat.agentId as SessionAgentId;
+		const modelCatalog = this.deps.modelCatalogForNode(effectiveNodeId(chat.nodeId));
 		const steer = parseSteerCommand(text);
 		if (steer.kind !== 'not-command') {
 			const prompt = steer.kind === 'valid' ? steer.prompt : '';
 			const rejection = steerSubmissionRejection({
 				prompt,
-				supportsSteering: this.deps.modelCatalog.supportsSteering(agentId),
+				supportsSteering: modelCatalog.supportsSteering(agentId),
 				attachmentCount: images.length,
 				handoffPending,
 			});
@@ -215,13 +217,13 @@ export class ConversationSlashCommandService {
 			return { kind: 'steer', content: prompt };
 		}
 
-		if (this.deps.modelCatalog.supportsFork(agentId)) {
+		if (modelCatalog.supportsFork(agentId)) {
 			const fork = parseForkCommand(text);
 			if (fork) {
 				if (
 					chat.status === 'running' &&
 					chat.isProcessing &&
-					!this.deps.modelCatalog.supportsForkWhileRunning(agentId)
+					!modelCatalog.supportsForkWhileRunning(agentId)
 				) {
 					this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return { kind: 'handled', outcome: 'rejected' };
@@ -690,7 +692,7 @@ export class ConversationSlashCommandService {
 				apiProviderId: sourceChat.apiProviderId ?? null,
 				modelEndpointId: sourceChat.modelEndpointId ?? null,
 				modelProtocol: sourceChat.modelProtocol ?? null,
-			}, deps.modelCatalog);
+			}, deps.modelCatalogForNode(effectiveNodeId(sourceChat.nodeId)));
 			const submission = this.acceptedInputs.fork({
 				sourceChatId,
 				chatId: forkChatId,

@@ -1,7 +1,7 @@
 import { parseMultiFileDiffPatches } from '../git/diff-engine.js';
 import { createLogger } from '../lib/log.js';
 import type { GhStatusResponse } from '../../common/gh.js';
-import { classifyGhError, type ClassifiedGhError } from './gh-error-classifier.js';
+import { classifyGhError } from './gh-error-classifier.js';
 import { assertAccessibleDirectory, runGh, runGhJson } from './run.js';
 import { deriveGhStatus, type GhAuthStatusJson } from './gh-status.js';
 import {
@@ -35,34 +35,10 @@ export interface GetPullRequestOptions extends ListPullRequestsOptions {
   number: number;
 }
 
-export interface GhService {
+export interface GhOperations {
   getStatus(signal?: AbortSignal): Promise<GhStatusResponse>;
   listPullRequests(options: ListPullRequestsOptions): Promise<PullRequestListResult>;
   getPullRequest(options: GetPullRequestOptions): Promise<PullRequestDetail>;
-  toHttpError(error: unknown): Response;
-}
-
-export type GhOperations = Omit<GhService, 'toHttpError'>;
-
-function ghDomainErrorToResponse(error: GhDomainError): Response {
-  const status =
-    error.code === 'INVALID_INPUT'
-      ? 400
-      : error.code === 'NOT_FOUND'
-        ? 404
-        : error.code === 'AUTH_FAILED'
-          ? 401
-          : 500;
-  return Response.json({ error: error.message, errorCode: error.code }, { status });
-}
-
-function classifiedGhErrorToResponse(classified: ClassifiedGhError): Response {
-  const body: { error: string; errorCode: string; details?: string } = {
-    error: classified.message,
-    errorCode: classified.code,
-  };
-  if (classified.details) body.details = classified.details;
-  return Response.json(body, { status: classified.status });
 }
 
 async function loadReviewThreads(
@@ -84,16 +60,6 @@ async function loadReviewThreads(
     logger.warn('[gh] failed to load review threads', { code: classifyGhError(error).code });
     return [];
   }
-}
-
-export function createGhService(): GhService {
-  return { ...createGhOperations(), toHttpError: ghHttpError };
-}
-
-export function ghHttpError(error: unknown): Response {
-  logger.error('[gh]', { code: error instanceof GhDomainError ? error.code : classifyGhError(error).code });
-  if (error instanceof GhDomainError) return ghDomainErrorToResponse(error);
-  return classifiedGhErrorToResponse(classifyGhError(error));
 }
 
 export function createGhOperations(statusDirectory = process.cwd()): GhOperations {

@@ -277,7 +277,12 @@ export class ApiProviderService {
   constructor(private readonly deps: ApiProviderServiceDeps) {}
 
   getCatalog(nodeId = 'local'): ApiProviderCatalogEntry[] {
-    return this.deps.access.list(nodeId).map(redactApiProviderForCatalog);
+    try {
+      return this.deps.access.list(nodeId).map(redactApiProviderForCatalog);
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'API_PROVIDER_STORAGE_UNAVAILABLE') return [];
+      throw error;
+    }
   }
 
   management(): ApiProviderManagement {

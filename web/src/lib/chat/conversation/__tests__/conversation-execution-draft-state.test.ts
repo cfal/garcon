@@ -4,7 +4,6 @@ import {
 	ConversationExecutionDraftState,
 	type ConversationExecutionSelection,
 } from '../conversation-execution-draft-state.svelte.js';
-import { chatExecutionDraftStorageKey } from '$lib/utils/local-persistence.js';
 
 function selection(agentId = 'claude'): ConversationExecutionSelection {
 	return {
@@ -23,50 +22,132 @@ function selection(agentId = 'claude'): ConversationExecutionSelection {
 describe('ConversationExecutionDraftState', () => {
 	afterEach(() => localStorage.clear());
 
-	it('persists a cross-agent target and restores it for the same chat', () => {
+	it.each(['chat switch', 'deselection', 'reload'])('drops pending choices after %s', (leave) => {
 		let activeChatId: string | null = 'chat-1';
-		let durableSelection = selection();
+		const durableSelection = { ...selection(), projectPath: '/saved' };
 		const options = {
-			get activeChatId() { return activeChatId; },
-			get durableSelection() { return durableSelection; },
+			get activeChatId() {
+				return activeChatId;
+			},
+			get durableSelection() {
+				return durableSelection;
+			},
 		};
-		const draft = new ConversationExecutionDraftState(options);
+		let draft = new ConversationExecutionDraftState(options);
 		draft.activate('chat-1');
-		draft.replaceSelection(selection('codex'));
+		const pending = { ...selection('codex'), nodeId: 'remote', projectPath: '/chosen' };
+		draft.replaceDestination(pending);
 
 		expect(draft.isHandoffPending).toBe(true);
 		expect(draft.handoffRequest('epoch-1')).toEqual({
-			target: selection('codex'),
+			target: pending,
 			expectedAgentOwnershipEpoch: 'epoch-1',
 		});
-
-		const restored = new ConversationExecutionDraftState(options);
-		expect(restored.activate('chat-1')).toEqual(selection('codex'));
-		expect(restored.isHandoffPending).toBe(true);
-
-		durableSelection = selection('codex');
-		restored.acceptDurable(durableSelection);
-		expect(restored.isHandoffPending).toBe(false);
-		expect(localStorage.getItem(chatExecutionDraftStorageKey('chat-1'))).toBeNull();
-		activeChatId = null;
+		if (leave === 'reload') draft = new ConversationExecutionDraftState(options);
+		else {
+			activeChatId = leave === 'chat switch' ? 'chat-2' : null;
+			draft.activate(activeChatId);
+			expect(draft.isHandoffPending).toBe(false);
+			activeChatId = 'chat-1';
+		}
+		expect(draft.activate('chat-1')).toEqual(durableSelection);
+		expect(draft.handoffRequest('epoch-1')).toBeNull();
+		expect(localStorage.length).toBe(0);
 	});
 
-	it('drops malformed or same-owner persisted targets', () => {
-		const durableSelection = selection();
-		const options = {
-			get activeChatId() { return 'chat-1'; },
-			get durableSelection() { return durableSelection; },
-		};
-		localStorage.setItem(chatExecutionDraftStorageKey('chat-1'), '{broken');
-		const malformed = new ConversationExecutionDraftState(options);
-		expect(malformed.activate('chat-1')).toEqual(durableSelection);
+	it('follows external ownership changes without treating the old owner as an explicit target', () => {
+		let durableSelection = selection();
+		const draft = new ConversationExecutionDraftState({
+			get activeChatId() {
+				return 'chat-1';
+			},
+			get durableSelection() {
+				return durableSelection;
+			},
+		});
+		draft.activate('chat-1');
+		durableSelection = { ...selection('codex'), nodeId: '22222222-2222-4222-8222-222222222222' };
+		expect(draft.handoffRequest('epoch-2')).toBeNull();
+		expect(draft.reconcileDurable()).toBeNull();
+		expect(draft.selection).toEqual(durableSelection);
+	});
 
-		localStorage.setItem(
-			chatExecutionDraftStorageKey('chat-1'),
-			JSON.stringify(durableSelection),
-		);
-		const sameOwner = new ConversationExecutionDraftState(options);
-		expect(sameOwner.activate('chat-1')).toEqual(durableSelection);
-		expect(localStorage.getItem(chatExecutionDraftStorageKey('chat-1'))).toBeNull();
+	it('preserves an explicit target across external changes and clears it when that owner is installed', () => {
+		let durableSelection = selection();
+		const draft = new ConversationExecutionDraftState({
+			get activeChatId() {
+				return 'chat-1';
+			},
+			get durableSelection() {
+				return durableSelection;
+			},
+		});
+		draft.activate('chat-1');
+		const staged = {
+			...selection('codex'),
+			nodeId: '33333333-3333-4333-8333-333333333333',
+			projectPath: '/explicit/destination',
+		};
+		draft.replaceSelection(staged);
+		durableSelection = { ...selection(), nodeId: '22222222-2222-4222-8222-222222222222' };
+		expect(draft.reconcileDurable()).toBeNull();
+		expect(draft.handoffRequest('epoch-2')).toEqual({
+			target: staged,
+			expectedAgentOwnershipEpoch: 'epoch-2',
+		});
+		durableSelection = { ...staged, projectPath: '/installed/destination' };
+		expect(draft.reconcileDurable()).toEqual(durableSelection);
+		expect(draft.handoffRequest('epoch-3')).toBeNull();
+	});
+
+	it.each(['same-node', 'other-node'])(
+		'preserves a confirmed destination after a %s external move and settings edits',
+		(move) => {
+			let durableSelection = { ...selection(), projectPath: '/local' };
+			const options = {
+				get activeChatId() {
+					return 'chat-1';
+				},
+				get durableSelection() {
+					return durableSelection;
+				},
+			};
+			const draft = new ConversationExecutionDraftState(options);
+			draft.activate('chat-1');
+			const staged = {
+				...selection('codex'),
+				nodeId: '33333333-3333-4333-8333-333333333333',
+				projectPath: '/explicit/destination',
+			};
+			draft.replaceSelection(staged);
+			durableSelection = {
+				...selection(),
+				nodeId: move === 'same-node' ? staged.nodeId : '22222222-2222-4222-8222-222222222222',
+				projectPath: '/other',
+			};
+			draft.patchSelection({ model: 'another-model' });
+			expect(draft.handoffRequest('epoch-2')).toEqual({
+				target: { ...staged, model: 'another-model' },
+				expectedAgentOwnershipEpoch: 'epoch-2',
+			});
+		},
+	);
+
+	it('updates a durable project path without rewriting the composer selection on unrelated snapshots', () => {
+		let durableSelection = { ...selection(), projectPath: '/workspace/old' };
+		const draft = new ConversationExecutionDraftState({
+			get activeChatId() {
+				return 'chat-1';
+			},
+			get durableSelection() {
+				return durableSelection;
+			},
+		});
+		draft.activate('chat-1');
+		durableSelection = { ...durableSelection };
+		expect(draft.reconcileDurable()).toBeNull();
+		durableSelection = { ...durableSelection, projectPath: '/workspace/new' };
+		expect(draft.reconcileDurable()).toEqual(durableSelection);
+		expect(draft.isHandoffPending).toBe(false);
 	});
 });

@@ -22,7 +22,7 @@ import {
   type AcpStartRequest,
 } from './runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';
@@ -257,13 +257,13 @@ export class AcpAgentRuntime {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
     if (session.chatId !== request.chatId) {
-      throw new Error('Chat ID mismatch');
+      throw new AgentIntegrationError('SESSION_BUSY', 'Chat ID mismatch', false);
     }
     if (session.activeTurn?.running) {
-      throw new Error(`Session ${agentSessionId} is already running`);
+      throw new AgentIntegrationError('SESSION_BUSY', `Session ${agentSessionId} is already running`, false);
     }
     if ((session.sourceTurn?.pendingPermissions.size ?? 0) > 0) {
-      throw new Error(`Session ${agentSessionId} is waiting for permission`);
+      throw new AgentIntegrationError('SESSION_BUSY', `Session ${agentSessionId} is waiting for permission`, false);
     }
 
     this.#retireSession(session, 'session-complete');

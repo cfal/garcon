@@ -133,14 +133,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.#suspendRequests();
 			return;
 		}
-		if (
-			!this.#projectIdentityPending &&
-			this.#visible &&
-			this.#project &&
-			(!this.hasLoaded || this.#needsRefresh)
-		) {
-			void this.refresh();
-		}
+		this.#activateIfNeeded();
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {

@@ -52,8 +52,15 @@ export class ApiProviderEndpointResolver {
   ) {}
 
   getModelOptions(agentId: AgentId, nodeId = 'local'): AgentModelOption[] {
+    let providers: StoredApiProvider[];
+    try {
+      providers = this.getApiProviders(nodeId);
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'API_PROVIDER_STORAGE_UNAVAILABLE') return [];
+      throw error;
+    }
     const options: AgentModelOption[] = [];
-    for (const apiProvider of this.getApiProviders(nodeId)) {
+    for (const apiProvider of providers) {
       for (const endpoint of apiProvider.endpoints) {
         if (!this.#endpointSupportsAgent(agentId, endpoint, nodeId)) continue;
         for (const model of endpoint.models) {

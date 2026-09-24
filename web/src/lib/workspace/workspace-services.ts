@@ -268,10 +268,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const surfaceFrames = new SurfaceFrameRegistry();
 	const gitQuickSummary = new GitQuickSummaryStore();
 	const gitMutations = new GitMutationCoordinator({
-		onChanged: async (nodeId, effectiveProjectKey, projectPath) => {
-			gitProjectInvalidations.markChanged(nodeId, effectiveProjectKey);
-			if (projectPath !== effectiveProjectKey)
-				gitProjectInvalidations.markChanged(nodeId, projectPath);
+		onChanged: async (nodeId, _effectiveProjectKey, projectPath) => {
+			gitProjectInvalidations.markChanged(nodeId);
 			await gitQuickSummary.refreshFor({ nodeId, projectPath }, 'invalidation');
 		},
 		onMutationError: (error, nodeId, projectPath) => {
@@ -350,8 +348,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				projectSelection,
 				createGitBranchSelector,
 				gitMutations,
-				invalidationVersion: (nodeId, effectiveProjectKey) =>
-					gitProjectInvalidations.version(nodeId, effectiveProjectKey),
+				invalidationVersion: (nodeId) => gitProjectInvalidations.version(nodeId),
 				reviewDisplay: gitReviewDisplay,
 				runMutation: (request) =>
 					gitMutations.run({
@@ -367,8 +364,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createGitBranchSelector,
 		gitMutations,
-		invalidationVersion: (nodeId, effectiveProjectKey) =>
-			gitProjectInvalidations.version(nodeId, effectiveProjectKey),
+		invalidationVersion: (nodeId) => gitProjectInvalidations.version(nodeId),
 		reviewDisplay: gitReviewDisplay,
 		comparisonPreferences,
 	});
@@ -386,16 +382,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			try {
 				return await saveText(request, options);
 			} finally {
-				if (request.projectPath) {
-					const nodeId = effectiveNodeId(request.nodeId);
-					const version = gitProjectInvalidations.markChanged(nodeId, request.projectPath);
-					for (const project of gitQuickSummary.visibleProjects) {
-						if (
-							project.nodeId === nodeId &&
-							gitProjectInvalidations.version(nodeId, project.projectPath) === version
-						)
-							gitQuickSummary.scheduleRefreshFor(project, 'invalidation', 100);
-					}
+				const nodeId = effectiveNodeId(request.nodeId);
+				gitProjectInvalidations.markChanged(nodeId);
+				for (const project of gitQuickSummary.visibleProjects) {
+					if (project.nodeId === nodeId)
+						gitQuickSummary.scheduleRefreshFor(project, 'invalidation', 100);
 				}
 			}
 		},

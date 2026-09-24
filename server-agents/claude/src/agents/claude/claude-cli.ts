@@ -8,8 +8,9 @@ import { buildClaudeCLIEnvironment } from './cli-environment.js';
 import { resolveClaudeModel } from './model-context.js';
 import { configureClaudeSessionModel } from './session-model.js';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type {
-  AgentSteerResult,
+import {
+  AgentIntegrationError,
+  type AgentSteerResult,
 } from '@garcon/server-agent-interface';
 import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
@@ -725,14 +726,14 @@ class ClaudeCliRuntime {
 
     const session = this.#runningSessions.get(agentSessionId);
     if (session && session.chatId !== request.chatId) {
-      throw new Error('Chat ID mismatch');
+      throw new AgentIntegrationError('SESSION_BUSY', 'Chat ID mismatch', false);
     }
     if (session?.activeTurn) {
-      throw new Error('Cannot update project path while Claude is running');
+      throw new AgentIntegrationError('SESSION_BUSY', 'Cannot update project path while Claude is running', false);
     }
     for (const pending of this.#pendingPermissions) {
       if (pending.agentSessionId === agentSessionId) {
-        throw new Error('Cannot update project path while Claude is waiting for permission');
+        throw new AgentIntegrationError('SESSION_BUSY', 'Cannot update project path while Claude is waiting for permission', false);
       }
     }
 

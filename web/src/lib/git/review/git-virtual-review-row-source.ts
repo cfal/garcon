@@ -416,7 +416,8 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			file,
 			view,
 			actionTarget: interaction.actionTarget,
-			selectableLineKeys: () => this.selectableLineKeys(file, body, interaction.activeTab),
+			selectableLineKeys: () =>
+				interaction.actionTarget ? this.selectableLineKeys(file, body, interaction.activeTab) : [],
 		};
 	}
 
@@ -434,7 +435,8 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			file,
 			view,
 			actionTarget: interaction.actionTarget,
-			selectableLineKeys: () => this.selectableLineKeys(file, body, interaction.activeTab),
+			selectableLineKeys: () =>
+				interaction.actionTarget ? this.selectableLineKeys(file, body, interaction.activeTab) : [],
 		};
 	}
 

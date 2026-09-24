@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { executionNodeIdFromUrl, localMachineRoutes } from '../node-target.js';
+import { executionNodeIdFromUrl } from '../node-target.js';
 import { createProjectResolutionRoutes } from '../project-resolution.js';
 import { ProjectAdmission } from '../../projects/project-admission.js';
 import type { IChatRegistry } from '../../chats/store.js';
@@ -15,24 +15,16 @@ function makeChatEntry() {
     preambleSelection: { revision: 0, orderedPreambleIds: [] } }, CHAT_ID);
 }
 
-test('machine routes reject remote query, body, and chat targets before IO', async () => {
-  let calls = 0;
+test('node selectors resolve chat ownership and reject stale or invalid targets', () => {
   const registry = { getChat: () => ({ ...makeChatEntry(), nodeId: NODE_ID }) } satisfies Pick<IChatRegistry, 'getChat'>;
-  const routes = localMachineRoutes({ '/files': { POST: () => { calls++; return Response.json({}); } } }, registry);
-  for (const [query, body] of [
-    [`?nodeId=${NODE_ID}`, {}], ['', { nodeId: NODE_ID }], [`?chatId=${CHAT_ID}`, {}], ['', { chatId: CHAT_ID }],
-  ] as const) {
-    const url = new URL(`http://localhost/files${query}`);
-    const response = await routes['/files']!.POST!(new Request(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }), url);
-    expect(response.status).toBe(501);
-  }
-  expect(calls).toBe(0);
-  const url = new URL('http://localhost/files');
-  expect((await routes['/files']!.POST!(new Request(url, { method: 'POST' }), url)).status).toBe(200);
-  expect(calls).toBe(1);
+  expect(executionNodeIdFromUrl(new URL('http://localhost/'))).toBe('local');
+  expect(executionNodeIdFromUrl(new URL(`http://localhost/?nodeId=${NODE_ID}`))).toBe(NODE_ID);
   expect(executionNodeIdFromUrl(new URL(`http://localhost/?chatId=${CHAT_ID}`), registry)).toBe(NODE_ID);
+  expect(() => executionNodeIdFromUrl(new URL(`http://localhost/?chatId=${CHAT_ID}&nodeId=local`), registry))
+    .toThrow(expect.objectContaining({ code: 'STALE_CHAT_OWNERSHIP' }));
+  for (const query of ['nodeId=invalid', 'nodeId=', 'nodeId=local&nodeId=local']) {
+    expect(() => executionNodeIdFromUrl(new URL(`http://localhost/?${query}`))).toThrow('Invalid execution node ID');
+  }
 });
 
 test('project admission and resolution reject node changes across awaited inspection', async () => {
@@ -52,21 +44,4 @@ test('project admission and resolution reject node changes across awaited inspec
   const response = await routes['/api/v1/projects/resolve']!.GET!(new Request(url), url);
   expect(response.status).toBe(409);
   expect(inspected).toEqual([NODE_ID, NODE_ID]);
-});
-
-test('machine guards use the same JSON parsing and errors as the route', async () => {
-  let calls = 0;
-  const registry = { getChat: () => null } satisfies Pick<IChatRegistry, 'getChat'>;
-  const routes = localMachineRoutes({ '/files': { POST: () => { calls++; return Response.json({}); } } }, registry);
-  const url = new URL('http://localhost/files');
-  for (const [body, expectedStatus] of [
-    [JSON.stringify({ nodeId: NODE_ID }), 501], ['{', 400], ['', 200],
-  ] as const) {
-    const response = await routes['/files']!.POST!(new Request(url, {
-      method: 'POST', headers: { 'Content-Type': 'Application/JSON; charset=UTF-8' }, body,
-    }), url);
-    expect(response.status).toBe(expectedStatus);
-    if (expectedStatus === 400) expect(await response.json()).toMatchObject({ error: 'Malformed JSON' });
-  }
-  expect(calls).toBe(1);
 });

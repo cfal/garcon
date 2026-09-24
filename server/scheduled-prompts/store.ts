@@ -8,7 +8,7 @@ import {
   type ScheduledPrompt,
 } from '../../common/scheduled-prompts.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
-import { AtomicJsonWriteError, syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { effectiveNodeId } from '../../common/execution-nodes.js';
 import type { RetainNodeReferences } from '../execution-nodes/reference-writes.js';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
@@ -266,7 +266,6 @@ export class ScheduledPromptStore {
   readonly #filePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file: ScheduledPromptsFile = emptyFile();
-  readonly #unconfirmedNodeReferences = new Set<string>();
 
   readonly #providerReferences: ApiProviderDurableReferences;
 
@@ -311,10 +310,6 @@ export class ScheduledPromptStore {
 
   list(): ScheduledPrompt[] {
     return this.#file.prompts.map(clonePrompt);
-  }
-
-  referencesNode(nodeId: string): boolean {
-    return this.#unconfirmedNodeReferences.has(nodeId) || scheduleNodes(this.#file).includes(nodeId);
   }
 
   referencesApiProvider(id: string): boolean {
@@ -513,16 +508,8 @@ export class ScheduledPromptStore {
     const nodes = scheduleNodes(file);
     const release = this.retainNodeReferences?.(nodes, [...scheduleNodes(this.#file), ...inheritedNodes]);
     try {
-      try {
-        await this.#providerReferences.publish(scheduleProviders(file), () => this.#write(file), inheritedProviders);
-      } catch (error) {
-        if (error instanceof AtomicJsonWriteError && error.renamed) {
-          for (const id of nodes) this.#unconfirmedNodeReferences.add(id);
-        }
-        throw error;
-      }
+      await this.#providerReferences.publish(scheduleProviders(file), () => this.#write(file), inheritedProviders);
       this.#file = file;
-      this.#unconfirmedNodeReferences.clear();
     } finally {
       release?.();
     }

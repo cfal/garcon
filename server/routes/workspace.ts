@@ -1,8 +1,6 @@
 import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
-import { parseNodeId, LOCAL_EXECUTION_NODE_ID } from '../../common/execution-nodes.js';
-import { isAgentId } from '../../common/agents.js';
 import { isRecord } from '../../common/json.js';
-import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
+import { resolveEffectiveGenerationUiConfig, resolveGenerationUiSnapshot } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
 import { withJsonBody } from '../lib/json-route.js';
@@ -25,6 +23,7 @@ import {
   AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   GENERATION_UI_SETTING_KEYS,
+  generationSelectionNodeError,
   normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
@@ -94,8 +93,10 @@ function resolveUntoggledGenerationUiConfig<
   T extends 'commitMessage' | 'promptRefinement',
 >(
   input: Parameters<typeof resolveEffectiveGenerationUiConfig>[0],
-): NonNullable<RemoteUiEffectiveSettings[T]> {
-  const config = { ...resolveEffectiveGenerationUiConfig(input) };
+): RemoteUiEffectiveSettings[T] {
+  const effective = resolveGenerationUiSnapshot(input);
+  if (!effective) return undefined;
+  const config = { ...effective };
   delete (config as { enabled?: boolean }).enabled;
   return config as NonNullable<RemoteUiEffectiveSettings[T]>;
 }
@@ -107,7 +108,7 @@ export async function buildRemoteSettingsSnapshot({
   projectBasePath,
 }: {
   settings: SettingsStore;
-  agents: AgentRegistryServiceContract;
+  agents: Pick<AgentRegistryServiceContract, 'getAgentAuthStatusMap' | 'getAgentReadinessMap' | 'getAgentCatalogEntries'>;
   telegramSettings?: TelegramSettingsStore | null;
   projectBasePath: string;
 }): Promise<RemoteSettingsSnapshot> {
@@ -126,22 +127,22 @@ export async function buildRemoteSettingsSnapshot({
     );
 
   const persistedCompaction = asPlainObject(ui?.agentSwitchCompaction);
-  const effectiveCompaction = resolveEffectiveGenerationUiConfig({
+  const effectiveCompaction = resolveGenerationUiSnapshot({
     persisted: persistedCompaction,
     ...compactionContext,
   });
   const uiEffective = {
-    chatTitle: resolveEffectiveGenerationUiConfig({
+    chatTitle: resolveGenerationUiSnapshot({
       persisted: asPlainObject(ui?.chatTitle),
       ...chatTitleContext,
     }),
-    agentSwitchCompaction: {
+    agentSwitchCompaction: effectiveCompaction ? {
       ...effectiveCompaction,
       enabled: persistedCompaction.enabled === true,
       contextWindowTokens:
         parseAgentSwitchContextWindowTokens(effectiveCompaction.contextWindowTokens)
         ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
-    },
+    } : undefined,
     commitMessage: resolveUntoggledGenerationUiConfig<'commitMessage'>({
       persisted: asPlainObject(ui?.commitMessage),
       ...commitMessageContext,
@@ -393,12 +394,8 @@ export default function createWorkspaceRoutes(
       }
       const generationUi = asPlainObject(input.ui);
       for (const key of GENERATION_UI_SETTING_KEYS) {
-        const selection = asPlainObject(generationUi[key]);
-        const nodeId = parseNodeId(selection.nodeId);
-        if (!nodeId || (nodeId !== LOCAL_EXECUTION_NODE_ID && (
-          !isAgentId(selection.agentId)
-          || typeof selection.model !== 'string' || !selection.model.trim()
-        ))) return jsonError('A remote generation selection requires a valid node, agent, and model.', 400, 'INVALID_REMOTE_SETTINGS', false);
+        const error = generationSelectionNodeError(generationUi[key]);
+        if (error) return jsonError(error, 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const promptPatchError = generationPromptPatchError(input.ui);
       if (promptPatchError) {

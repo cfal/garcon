@@ -29,9 +29,9 @@ test('real PTY keeps draining and records exit after reliable transport saturati
   } });
   const service = runtime.service('local');
   const retired = Promise.withResolvers<Error>();
-  const transport = new SessionTransport('session', 'runtime', error => retired.resolve(error), { maxRetainedFrames: 4 });
-  const socket = transport.attach({ send() {}, close() {} }, 0);
-  socket.receive(JSON.stringify({ kind: 'receipt', through: 0 }));
+  let writable = true;
+  const transport = new SessionTransport('session', 'runtime', error => retired.resolve(error), { maxQueuedFrames: 4 });
+  transport.attach({ send() {}, close() {}, canSend: () => writable });
   const worker = new TerminalWorker(service, new AgentRpc(transport));
   try {
     const inventory = await service.list(authority);
@@ -42,7 +42,8 @@ test('real PTY keeps draining and records exit after reliable transport saturati
       authority, attachmentId: 'attachment', attachmentEpoch: inventory.attachmentEpoch,
       type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'browser', intent: 'restore', afterSequence: 0,
     } });
-    while (transport.channel.retainedFrames < 4) transport.send('reliable traffic');
+    writable = false;
+    while (transport.channel.queuedFrames < 4) transport.send('reliable traffic');
     pty.write('\n');
     await withTimeout(retired.promise, 5_000, () => 'Terminal output did not exhaust reliable capacity');
     expect(transport.connected).toBe(false);

@@ -56,3 +56,41 @@ test('deadline during repository validation remains a timeout at the HTTP bounda
     await fs.rm(projectPath, { recursive: true, force: true });
   }
 });
+
+test('deadline during upstream discovery does not publish a false missing-remote result', async () => {
+  const parent = path.join(os.homedir(), 'tmp');
+  await fs.mkdir(parent, { recursive: true });
+  const projectPath = await fs.mkdtemp(path.join(parent, 'git-upstream-timeout-'));
+  const runtime = new LocalGitRuntime({ nodeId: 'local', instanceId: 'test', projectBasePath: projectPath, assertAvailable() {} });
+  let spawn;
+  try {
+    await runGit(projectPath, ['init', '-b', 'main']);
+    await runGit(projectPath, ['-c', 'user.name=Synthetic Author', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'initial']);
+    await runGit(projectPath, ['remote', 'add', 'origin', '/synthetic-no-network']);
+    await runGit(projectPath, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    await runGit(projectPath, ['branch', '--set-upstream-to=origin/main']);
+    const routes = createGitRoutes({}, {}, async () => runtime.git, 1_000);
+    const url = new URL('http://localhost/api/v1/git/remote-status');
+    url.searchParams.set('project', projectPath);
+    const handler = routes[url.pathname].GET;
+    const baseline = await handler(new Request(url), url);
+    expect(baseline.status).toBe(200);
+    expect(await baseline.json()).toMatchObject({ hasRemote: true, hasUpstream: true });
+
+    const original = Bun.spawn;
+    let heldProbe = false;
+    spawn = spyOn(Bun, 'spawn').mockImplementation((args, options) => {
+      if (!args.includes('main@{upstream}')) return original(args, options);
+      heldProbe = true;
+      return original([process.execPath, '-e', 'setTimeout(() => {}, 10000)'], options);
+    });
+    const response = await handler(new Request(url), url);
+    expect(heldProbe).toBe(true);
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({ errorCode: 'GIT_TIMEOUT' });
+  } finally {
+    spawn?.mockRestore();
+    runtime.dispose();
+    await fs.rm(projectPath, { recursive: true, force: true });
+  }
+});

@@ -1,10 +1,22 @@
 import { expect, test } from 'bun:test';
-import { connectNoiseWebSocket, createNoiseServer, MAX_MESSAGE_BYTES } from '@cfal/noise-ws';
+import { connectNoiseWebSocket, createNoiseServer, MAX_FRAME_BYTES, MAX_MESSAGE_BYTES } from '@cfal/noise-ws';
 import { LOCAL_SERVER_PRINCIPAL } from '../../lib/http-route-types.js';
 import { WebSocketAdmissionController } from '../../lib/websocket-capacity.js';
 import { PrimarySocketDelivery } from '../primary-delivery.js';
 import { createServerSocketHandlers, type WsConnectionData } from '../server-sockets.js';
 import { publishWebSocketPayload, sendWebSocketPayload } from '../transport.js';
+
+test('shared native frame admission reserves only the Noise frame ceiling', () => {
+  for (const wsMaxPayloadLength of [1024, 1024 * 1024]) {
+    const handlers = createServerSocketHandlers({
+      primary: { open() {}, async message() {}, drain() {}, close() {} },
+      admission: new WebSocketAdmissionController(1), delivery: new PrimarySocketDelivery(1024),
+      config: { wsIdleTimeoutSeconds: 60, wsBackpressureLimit: 1024, wsMaxPayloadLength },
+      execution: { message() {} }, logger: { error() {} },
+    });
+    expect(handlers.maxPayloadLength).toBe(Math.max(wsMaxPayloadLength, MAX_FRAME_BYTES));
+  }
+});
 
 test('shared listener preserves large Noise messages and routes primary replies and broadcasts separately', async () => {
   const noise = createNoiseServer();
@@ -70,3 +82,53 @@ test('shared listener preserves large Noise messages and routes primary replies 
   }
   expect(admission.size).toBe(0);
 }, 10_000);
+
+for (const [kind, oversized] of [
+  ['text', 'x'.repeat(1025)],
+  ['binary', Buffer.alloc(1025)],
+  ['utf8', '\u00e9'.repeat(513)],
+] as const) {
+  test(`primary ${kind} payloads retain their configured byte limit on the shared listener`, async () => {
+    const admission = new WebSocketAdmissionController(1);
+    const received: unknown[] = [];
+    const delivered = Promise.withResolvers<void>();
+    const server = Bun.serve<WsConnectionData>({
+      hostname: '0.0.0.0', port: 0,
+      fetch(request, server) {
+        const connectionId = crypto.randomUUID();
+        admission.tryReserve(connectionId);
+        if (server.upgrade(request, { data: { kind: 'primary', connectionId, principal: LOCAL_SERVER_PRINCIPAL } })) return;
+        admission.release(connectionId);
+        return new Response(null, { status: 400 });
+      },
+      websocket: createServerSocketHandlers({
+        primary: {
+          open() {}, close() {}, drain() {},
+          async message(_peer, data) { received.push(data); delivered.resolve(); },
+        },
+        config: { wsIdleTimeoutSeconds: 60, wsBackpressureLimit: 1024, wsMaxPayloadLength: 1024 },
+        admission, delivery: new PrimarySocketDelivery(1024),
+        execution: { message() {} }, logger: { error() {} },
+      }),
+    });
+    const browser = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
+    const opened = new Promise<void>((resolve, reject) => {
+      browser.onopen = () => resolve();
+      browser.onerror = () => reject(new Error('Browser socket failed'));
+    });
+    const closed = new Promise<CloseEvent>((resolve) => { browser.onclose = resolve; });
+    try {
+      await opened;
+      const atLimit = JSON.stringify({ body: 'x'.repeat(1024 - JSON.stringify({ body: '' }).length) });
+      browser.send(atLimit);
+      await delivered.promise;
+      browser.send(oversized);
+      expect((await closed).code).toBe(1009);
+      expect(received).toEqual([JSON.parse(atLimit)]);
+    } finally {
+      browser.close();
+      await server.stop(true);
+    }
+    expect(admission.size).toBe(0);
+  });
+}

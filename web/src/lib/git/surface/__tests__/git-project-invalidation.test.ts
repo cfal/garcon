@@ -2,21 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { GitProjectInvalidationStore } from '../git-project-invalidation.svelte.js';
 
 describe('node-qualified Git invalidation', () => {
-	it('invalidates containing views only on the captured node', () => {
+	it('keeps one revision per host without invalidating other hosts', () => {
 		const store = new GitProjectInvalidationStore();
-		const version = store.markChanged('remote', '/repo/src');
-		expect(store.version('remote', '/repo')).toBe(version);
-		expect(store.version('remote', '/repo/src/module')).toBe(version);
-		expect(store.version('remote', '/repo-other')).toBe(0);
-		expect(store.version('local', '/repo')).toBe(0);
+		const version = store.markChanged('remote');
+		expect(store.version('remote')).toBe(version);
+		expect(store.version('local')).toBe(0);
+		const next = store.markChanged('remote');
+		expect(next).toBeGreaterThan(version);
+		expect(store.version('remote')).toBe(next);
+		expect(store.version('local')).toBe(0);
 	});
 
 	it('prunes removed nodes without reusing an invalidation revision', () => {
 		const store = new GitProjectInvalidationStore();
-		const removed = store.markChanged('removed', '/repo');
-		store.markChanged('local', '/repo');
+		const removed = store.markChanged('removed');
+		const local = store.markChanged('local');
 		store.pruneNodes(new Set(['local']));
-		expect(store.version('removed', '/repo')).toBe(0);
-		expect(store.markChanged('removed', '/repo')).toBeGreaterThan(removed);
+		expect(store.version('removed')).toBe(0);
+		expect(store.version('local')).toBe(local);
+		expect(store.markChanged('removed')).toBeGreaterThan(local);
+		expect(store.version('removed')).toBeGreaterThan(removed);
 	});
 });

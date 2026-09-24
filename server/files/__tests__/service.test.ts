@@ -17,6 +17,37 @@ afterEach(async () => { await fs.rm(directory, { recursive: true, force: true })
 const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 'file.txt' });
 
 describe('node files service', () => {
+  it('bounds process-wide reads and saves without blocking metadata calls', async () => {
+    const released = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const original = fs.realpath;
+    let calls = 0;
+    const held = spyOn(fs, 'realpath').mockImplementation(async (...args) => {
+      if (++calls <= 8) {
+        if (calls === 8) entered.resolve();
+        await released.promise;
+      }
+      return original(...args);
+    });
+    const reads = Array.from({ length: 8 }, () => service.read(target()));
+    try {
+      await entered.promise;
+      const other = new LocalExecutionFilesService({ nodeId: 'other', projectBasePath: directory });
+      await expect(other.read(target())).rejects.toMatchObject({ code: 'FILE_SERVICE_BUSY' });
+      await expect(other.save({ ...target(), content: 'changed', expectedRevision: null, conflictResolution: 'overwrite' })).rejects.toMatchObject({ code: 'FILE_SERVICE_BUSY' });
+      expect((await other.revision(target())).status).toBe('ready');
+      expect((await other.identity(target())).normalizedRelativePath).toBe('file.txt');
+      expect((await other.list(target())).files).toHaveLength(1);
+      expect((await other.tree({})).entries).toHaveLength(1);
+      expect(await other.browse({})).toHaveLength(1);
+    } finally {
+      released.resolve();
+      await Promise.all(reads);
+      held.mockRestore();
+    }
+    expect(Buffer.from((await service.read(target())).bytes).toString()).toBe('initial');
+  });
+
   it('browses directories without collecting or budgeting unrelated file metadata', async () => {
     const project = target().projectPath;
     await fs.mkdir(path.join(project, 'folder'));

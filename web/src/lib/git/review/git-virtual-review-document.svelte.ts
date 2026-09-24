@@ -15,7 +15,7 @@ import type { DiffMode, GitDiffActionTarget } from '$lib/git/workbench/git-workb
 import type { CommentComposerState } from '$lib/git/review/git-inline-comment.svelte.js';
 import type { GitDiffSyntaxResults } from '$lib/git/review/git-diff-syntax.js';
 import type { GitWorkbenchLoadGuard } from '$lib/git/workbench/git-workbench-types.js';
-import type { GitReviewDocumentRef } from '$lib/api/git-client.js';
+import { gitDocumentKey, type GitReviewDocumentRef } from '$lib/api/git-client.js';
 import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
 import {
 	collectionLimitDecisionFromGitReviewBody,
@@ -151,7 +151,6 @@ export interface BuildVirtualRowsOptions {
 
 type BodyCacheKey = string;
 
-const BODY_BATCH_SIZE = 24;
 const MAX_CACHED_FILE_BODIES = 128;
 export class GitVirtualReviewDocumentController {
 	summary = $state<GitReviewDocumentSummary | null>(null);
@@ -308,7 +307,7 @@ export class GitVirtualReviewDocumentController {
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
 		this.seedCachedBodies(uniquePaths, purpose, guard);
 		if (this.aggregateLimit) return 'limited';
-		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath, guard));
+		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
 		const pending = uniquePaths.filter(
 			(filePath) =>
 				this.loadingBodies.has(filePath) &&
@@ -451,7 +450,8 @@ export class GitVirtualReviewDocumentController {
 	private retainedBodiesForSummary(
 		summary: GitReviewDocumentSummary,
 	): Record<string, GitReviewFileBody> {
-		if (summary.documentId !== this.summary?.documentId) return {};
+		if (!this.summary || gitDocumentKey(this.summary.document) !== gitDocumentKey(summary.document))
+			return {};
 		const files = new Map(summary.files.map((file) => [file.path, file]));
 		return Object.fromEntries(
 			Object.entries(this.fileBodies).filter(([filePath, body]) => {
@@ -472,11 +472,10 @@ export class GitVirtualReviewDocumentController {
 		);
 	}
 
-	private shouldLoadBody(filePath: string, guard: GitWorkbenchLoadGuard): boolean {
+	private shouldLoadBody(filePath: string): boolean {
 		const file = this.summaryForFile(filePath);
 		if (!file || file.bodyState !== 'unloaded') return false;
 		if (this.fileBodies[filePath]) return false;
-		if (this.cacheGet(file, guard)) return false;
 		return !this.loadingBodies.has(filePath);
 	}
 
@@ -523,7 +522,7 @@ export class GitVirtualReviewDocumentController {
 		if (this.bodyScheduler || !this.summary) return;
 		const summary = this.summary;
 		this.bodyScheduler = new GitReviewBodyScheduler({
-			maxBatchFiles: summary.limits.maxBodyBatchFiles || BODY_BATCH_SIZE,
+			maxBatchFiles: 1,
 			load: (paths, purpose, signal) =>
 				getGitReviewFileBodies(
 					{ nodeId: summary.document.nodeId, projectPath },
@@ -562,7 +561,8 @@ export class GitVirtualReviewDocumentController {
 		guard: GitWorkbenchLoadGuard,
 	): void {
 		if (!this.isCurrentGuard(guard)) return;
-		if (result.documentId !== this.summary?.documentId) return;
+		const summary = this.summary;
+		if (!summary || result.documentId !== summary.documentId) return;
 		if (result.status === 'stale' || result.status === 'document-expired') {
 			this.deps.markExternallyStale(result.status);
 			return;
@@ -586,8 +586,7 @@ export class GitVirtualReviewDocumentController {
 				break;
 			}
 			const effectivePurpose =
-				purpose === 'prefetch' &&
-				this.demandReconciler.demandsPath(this.summary!.documentId, filePath)
+				purpose === 'prefetch' && this.demandReconciler.demandsPath(summary.documentId, filePath)
 					? 'visible'
 					: purpose;
 			const decision = decideGitReviewBodyBudget(
@@ -595,7 +594,7 @@ export class GitVirtualReviewDocumentController {
 				effectivePurpose,
 				next,
 				pinnedPaths,
-				this.summary!.limits,
+				summary.limits,
 			);
 			this.evictActiveBodies(next, decision);
 			if (!decision.accept) {
@@ -695,7 +694,7 @@ export class GitVirtualReviewDocumentController {
 
 	private cacheKey(file: GitReviewFileSummary, guard: GitWorkbenchLoadGuard): BodyCacheKey {
 		return JSON.stringify([
-			this.summary?.documentId,
+			this.summary ? gitDocumentKey(this.summary.document) : null,
 			guard.tab,
 			guard.contextLines,
 			file.bodyFingerprint,

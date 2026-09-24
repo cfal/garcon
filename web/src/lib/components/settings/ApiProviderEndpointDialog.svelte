@@ -153,6 +153,7 @@
 					type="password"
 					bind:value={dialog.apiKey}
 					autocomplete="off"
+					required={dialog.apiKeyRequired && !dialog.apiProviderId}
 					placeholder={dialog.apiKeyPlaceholder}
 				/>
 			</div>

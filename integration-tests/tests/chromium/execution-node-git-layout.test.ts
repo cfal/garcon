@@ -73,7 +73,7 @@ test('execution-node Git labels and GitHub host controls fit desktop and mobile'
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
     const checked = page.waitForResponse(response => response.url().includes(`/api/v1/gh/status?nodeId=${client.nodeId}`));
-    await page.getByRole('tab', { name: 'Github', exact: true }).click();
+    await page.getByRole('tab', { name: 'GitHub', exact: true }).click();
     const host = page.getByRole('region', { name: label, exact: true });
     const status = await checked;
     expect(status.status()).toBe(200);

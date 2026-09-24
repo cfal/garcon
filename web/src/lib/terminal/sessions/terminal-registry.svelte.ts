@@ -21,6 +21,7 @@ import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output
 import type {
 	TerminalAttachmentState,
 	TerminalClientSession,
+	TerminalNodeInventory,
 	TerminalRegistryDeps,
 	TerminalRuntimeModule,
 	TerminalSessionRuntime,
@@ -75,22 +76,13 @@ function createClientSession(
 }
 
 export class TerminalRegistry {
-	nodeInventories = $state<
-		Record<
-			string,
-			{
-				status: 'loading' | 'ready' | 'failed';
-				runtimeId?: string;
-				epoch?: string;
-				error: string | null;
-			}
-		>
-	>({});
+	nodeInventories = $state<Record<string, TerminalNodeInventory>>({});
 	readonly #lists = new Map<string, Promise<void>>();
 	readonly #nodeVersions = new Map<string, symbol>();
 	readonly #nodeAvailability = new Map<string, string>();
 	readonly #attachmentIds = new Map<string, string>();
 	readonly #gapRecovery = new Set<string>();
+	readonly #drainingOutput = new Set<string>();
 	readonly #stopNodes: () => void;
 	#initialized = false;
 	#inventoryRetry: ReturnType<typeof setTimeout> | null = null;
@@ -381,7 +373,7 @@ export class TerminalRegistry {
 	}
 
 	async attach(terminalId: string, intent: 'restore' | 'takeover'): Promise<void> {
-		if (!this.sessions[terminalId]) return;
+		if (!this.sessions[terminalId] || this.#drainingOutput.has(terminalId)) return;
 		const request = this.#beginAttachment(terminalId);
 		const nodeId = this.nodeIdFor(terminalId);
 		if (intent === 'takeover') {
@@ -566,7 +558,7 @@ export class TerminalRegistry {
 		}
 		if (message.type === 'terminal-replay-batch') {
 			for (const chunk of message.chunks) {
-				if (this.sessions[message.terminalId]?.attachmentState === 'unavailable') break;
+				if (!this.#attachmentIds.has(message.terminalId)) break;
 				try {
 					this.#applyOutput(
 						message.terminalId,
@@ -587,7 +579,7 @@ export class TerminalRegistry {
 		if (message.type === 'terminal-attached') {
 			this.#upsert(message.terminal, 'attached');
 			for (const chunk of message.replay) {
-				if (this.sessions[message.terminal.terminalId]?.attachmentState === 'unavailable') break;
+				if (!this.#attachmentIds.has(message.terminal.terminalId)) break;
 				this.#applyOutput(message.terminal.terminalId, chunk.sequence, chunk.data);
 			}
 			this.#runtimes.get(message.terminal.terminalId)?.resendSize();
@@ -650,7 +642,13 @@ export class TerminalRegistry {
 			return;
 		}
 		try {
-			runtime.write(data);
+			if (!runtime.write(data)) {
+				this.#rejectOutput(terminalId);
+				this.#drainingOutput.add(terminalId);
+				session.attachmentState = 'connecting';
+				session.runtimeError = null;
+				return;
+			}
 		} catch {
 			this.#rejectOutput(terminalId);
 			return;
@@ -766,6 +764,10 @@ export class TerminalRegistry {
 	async #createRuntime(terminalId: string): Promise<TerminalSessionRuntime> {
 		const options: TerminalRuntimeOptions = {
 			initialTheme: this.#theme.theme,
+			onOutputDrained: () => {
+				if (!this.#drainingOutput.delete(terminalId) || this.#destroyed) return;
+				void this.attach(terminalId, 'restore');
+			},
 			onInput: (data) => {
 				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
 				if (new TextEncoder().encode(data).byteLength > 64 * 1024) {
@@ -867,6 +869,7 @@ export class TerminalRegistry {
 
 	#disposeRuntime(terminalId: string): void {
 		this.#gapRecovery.delete(terminalId);
+		this.#drainingOutput.delete(terminalId);
 		this.#attachmentIds.delete(terminalId);
 		this.#runtimePromises.delete(terminalId);
 		this.#attachmentRequests.delete(terminalId);

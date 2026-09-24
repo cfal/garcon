@@ -13,7 +13,7 @@ function deferred() {
 function target(settlement = Promise.resolve()) {
   return {
     identity: { turnId: 'turn-1' },
-    providerTarget: null,
+    providerTarget: {},
     attempt: {
       waitUntilSettled: mock(() => settlement),
     },
@@ -43,6 +43,7 @@ describe('ControlSteerDelivery', () => {
     'STEER_TURN_CHANGED',
     'STEER_TURN_NOT_STEERABLE',
     'OPERATION_UNSUPPORTED',
+    'EXECUTION_NODE_UNAVAILABLE',
     'STEER_NOT_DELIVERED',
   ]) {
     it(`waits for exact-attempt settlement after ${code}`, async () => {
@@ -69,6 +70,20 @@ describe('ControlSteerDelivery', () => {
       expect(captured.attempt.waitUntilSettled).toHaveBeenCalledTimes(1);
     });
   }
+
+  it('waits for the captured attempt without dispatch when no provider target is available', async () => {
+    const settled = deferred();
+    const captured = { ...target(settled.promise), providerTarget: null };
+    const deliver = mock(async () => undefined);
+    const steering = new ControlSteerDelivery(deliver);
+    const delivery = steering.toCapturedTarget(
+      'chat-1', 'control', 'view-1', captured, new AbortController().signal,
+    );
+    expect(captured.attempt.waitUntilSettled).toHaveBeenCalledTimes(1);
+    expect(deliver).not.toHaveBeenCalled();
+    settled.resolve();
+    await expect(delivery).resolves.toBe('definitive-non-delivery');
+  });
 
   for (const code of ['STEER_OUTCOME_UNKNOWN', 'STEER_PROVIDER_REJECTED']) {
     it(`does not authorize fallback after ${code}`, async () => {

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { gitRpcFixture } from './git-rpc-fixture.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
-  test(`GitHub queries and large results run on the node with ${dialer} dialing`, async () => {
+  test(`GitHub queries enforce the inline result limit with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);
     const originalPath = process.env.PATH;
     try {
@@ -16,7 +16,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await fs.symlink(process.execPath, path.join(bin, 'bun'));
       await fs.symlink(Bun.which('git')!, path.join(bin, 'git'));
       process.env.PATH = bin;
-      const config = { label: 'synthetic-node', bodyBytes: 17 * 1024 * 1024, commentsFail: true };
+      const config = { label: 'synthetic-node', bodyBytes: 1024 * 1024, commentsFail: true };
       await fs.writeFile(path.join(fixture.root, 'gh-fixture.json'), JSON.stringify(config));
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify(config));
       const gh = await fixture.node.getGhService();
@@ -28,6 +28,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(detail.body.length).toBe(config.bodyBytes);
       expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
       expect(detail.threads).toEqual([]);
+      await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({ ...config, bodyBytes: 4 * 1024 * 1024 }));
+      await expect(gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 })).rejects.toMatchObject({ code: 'GIT_RESULT_TOO_LARGE' });
       expect(fixture.node.availability).toBe('ready');
       await fs.rm(path.join(bin, 'gh'));
       expect(await gh.getStatus()).toMatchObject({ available: false, reason: 'gh_missing' });

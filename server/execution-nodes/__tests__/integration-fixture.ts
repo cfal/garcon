@@ -12,7 +12,7 @@ import {
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import type { AgentRuntimeExecution, AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
+import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import { AgentRpc } from '../rpc.js';
 import { RemoteExecutionNode } from '../remote.js';
 import { WebSocketLink } from '../websocket-link.js';
@@ -28,16 +28,16 @@ export function integrationFixture(projectBasePath = '/test-project', nodeId = '
   const nativePublishers: AgentRuntimePublisher[] = [];
   const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0 };
   const hooks = {
-    start: async () => {},
+    start: async (_request: AgentRuntimeStartRequest) => {},
     stop: async () => {},
     query: async (_request: AgentSingleQueryRequest) => 'query result',
     history: async function* (_signal: AbortSignal): AsyncGenerator<readonly AgentImportedTranscriptRow[]> { yield []; },
   };
   const runtime: AgentRuntimeExecution = {
-    async start(_request, publish) {
+    async start(request, publish) {
       calls.start++;
       nativePublishers.push(publish);
-      await hooks.start();
+      await hooks.start(request);
       return { agentSessionId: 'test-session', nativeSession: null, nativeSeedReceipt: null };
     },
     async resume(_request, publish) { calls.resume++; nativePublishers.push(publish); },
@@ -102,13 +102,12 @@ export async function remoteFixture(
 ) {
   const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-  const generations: ReturnType<typeof integrationFixture>[] = [];
+  const fixture = integrationFixture(projectBasePath);
+  const generations = [fixture];
   const scopes: ReturnType<typeof serveAgentNode>[] = [];
   configure(controller, worker);
   worker.onSession((session) => {
-    const fixture = integrationFixture(projectBasePath);
-    generations.push(fixture);
-    scopes.push(serveAgentNode(fixture.node, new AgentRpc(session), 50));
+    scopes.push(serveAgentNode(fixture.node, new AgentRpc(session)));
   });
   const connected = RemoteExecutionNode.connect(controller);
   if (dialer === 'controller') controller.dial(worker.listen());
@@ -119,6 +118,7 @@ export async function remoteFixture(
     async dispose() {
       await node.dispose(); await worker.dispose();
       await Promise.all(scopes.map((scope) => scope.dispose()));
+      await fixture.node.dispose();
     },
   };
 }
@@ -127,8 +127,9 @@ export function outgoingFault(link: WebSocketLink) {
   const fault = { inject: (_encoded: string): 'drop' | 'disconnect' | null => null };
   link.onSession((session) => {
     const attach = session.attach.bind(session);
-    session.attach = (socket, received) => attach({
+    session.attach = (socket) => attach({
       close: () => socket.close(),
+      canSend: (bytes) => socket.canSend?.(bytes) !== false,
       send(encoded) {
         const action = fault.inject(encoded);
         if (action === 'drop') return;
@@ -138,7 +139,7 @@ export function outgoingFault(link: WebSocketLink) {
         }
         socket.send(encoded);
       },
-    }, received);
+    });
   });
   return fault;
 }

@@ -119,12 +119,6 @@ export interface ClassifiedGitError {
   details?: unknown;
 }
 
-export interface CreateGitServiceOptions {
-  agents: GitAgentRunner;
-  classifyGitError(error: unknown): ClassifiedGitError;
-  assertProjectPathAllowed?(projectPath: string): Promise<string>;
-}
-
 export interface CommitMessageFileOptions extends ProjectOptions, CommitMessageOptions {
   files: string[];
   agentId: AgentId;
@@ -152,9 +146,9 @@ export type GitQuickSummaryOptions = LocalGitOptions<SharedGit.GitQuickSummaryOp
 export type StageSelectionOptions = LocalGitOptions<SharedGit.StageSelectionOptions> & GitStageProvenance;
 export type StageHunkOptions = LocalGitOptions<SharedGit.StageHunkOptions> & GitStageProvenance;
 export interface GitStageProvenance {
-  documentId?: string;
-  bodyFingerprint?: string;
-  patchDigest?: string;
+  documentId: string;
+  bodyFingerprint: string;
+  patchDigest: string;
 }
 export type ConflictDetailsOptions = LocalGitOptions<SharedGit.ConflictDetailsOptions>;
 export type ConflictAcceptOptions = LocalGitOptions<SharedGit.ConflictAcceptOptions>;
@@ -170,8 +164,6 @@ export type StagePathsOptions = LocalGitOptions<SharedGit.StagePathsOptions>;
 export type RevertCommitOptions = LocalGitOptions<SharedGit.RevertCommitOptions>;
 export type MutableTreeNode = Omit<TreeNode, 'children'> & { children?: TreeMap | TreeNode[] };
 export type TreeMap = Map<string, MutableTreeNode>;
-export type GitOperations = { [K in SharedGit.GitMethod]: (options: LocalGitOptions<SharedGit.GitRequests[K]> & GitStageProvenance) => Promise<SharedGit.GitResults[K]> };
-export interface GitService extends GitOperations {
-  generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<CommitMessageGenerationResult>;
-  toHttpError(error: unknown): Response;
-}
+export type GitOperationOptions<K extends SharedGit.GitMethod> = LocalGitOptions<SharedGit.GitRequests[K]>
+  & (K extends 'stageSelection' | 'stageHunk' ? GitStageProvenance : unknown);
+export type GitOperations = { [K in SharedGit.GitMethod]: (options: GitOperationOptions<K>) => Promise<SharedGit.GitResults[K]> };

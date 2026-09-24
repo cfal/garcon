@@ -69,7 +69,7 @@ function setup(options: { realTransport?: boolean } = {}) {
 	nodes.applySnapshot([node('local'), node(remoteId)]);
 	const list = vi.fn(async (nodeId = 'local') => inventory([terminal(nodeId)]));
 	const create = vi.fn(async () => ({ success: true as const, terminal: terminal(remoteId, 2) }));
-	const write = vi.fn();
+	const write = vi.fn(() => true);
 	const dispose = vi.fn();
 	const renderer = {
 		write,

@@ -6,6 +6,11 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
+	import Plug from '@lucide/svelte/icons/plug';
+	import Unplug from '@lucide/svelte/icons/unplug';
+	import Users from '@lucide/svelte/icons/users';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import { terminalContextName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
@@ -50,6 +55,15 @@
 	const session = $derived(terminals.sessions[terminalId] ?? null);
 	const nodeId = $derived(terminals.nodeIdFor(terminalId));
 	const hostLabel = $derived(terminals.nodeLabel(nodeId));
+	const AttachmentIcon = $derived(
+		{
+			connecting: RefreshCw,
+			attached: Plug,
+			detached: Unplug,
+			'taken-over': Users,
+			unavailable: CircleAlert,
+		}[session?.attachmentState ?? 'detached'],
+	);
 	const sessionLabels = $derived.by(() => {
 		if (!session) return null;
 		const name = terminals.displayName(session.metadata);
@@ -277,7 +291,10 @@
 						{@const placement = placementLabel(item.metadata.terminalId)}
 						<option value={item.metadata.terminalId}>
 							{m.terminal_session_status({
-								name: terminals.displayName(item.metadata),
+								name: terminalContextName(
+									item.metadata,
+									terminals.nodeLabel(terminals.nodeIdFor(item.metadata.terminalId)),
+								),
 								status: item.metadata.processStatus,
 							})}{placement ? ` - ${placement}` : ''}
 						</option>
@@ -290,9 +307,15 @@
 					>
 						{sessionLabels?.initialDirectory}
 					</span>
-					<span class="terminal-context shrink-0 text-[11px] text-muted-foreground"
-						>{attachmentLabel(session.attachmentState)}</span
+					<span
+						role="status"
+						aria-label={attachmentLabel(session.attachmentState)}
+						title={attachmentLabel(session.attachmentState)}
+						class="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
 					>
+						<AttachmentIcon class="h-4 w-4" />
+						<span class="terminal-context">{attachmentLabel(session.attachmentState)}</span>
+					</span>
 				{/if}
 			</div>
 			<TerminalCreateAction
@@ -331,10 +354,11 @@
 	{#if !session}
 		<div class="grid min-h-0 flex-1 place-items-center p-6 text-center">
 			<div class="max-w-sm text-sm text-muted-foreground">
-				<p>{terminals.listError ?? m.terminal_unavailable()}</p>
+				<p>{terminals.nodeInventories[nodeId]?.error ?? m.terminal_unavailable()}</p>
 				<button
 					class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent hover:text-foreground"
-					onclick={() => void terminals.list()}>{m.common_retry()}</button
+					onclick={() => void terminals.list(nodeId).catch(() => undefined)}
+					>{m.common_retry()}</button
 				>
 			</div>
 		</div>

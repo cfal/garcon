@@ -77,7 +77,20 @@ export class AgentRpc {
     if (!this.#retired && this.transport.connected) this.transport.send(JSON.stringify({ type: 'terminal-detach', request } satisfies RpcFrame));
   }
   publish(frame: AgentProducerFrame): void {
-    if (!this.#retired) this.transport.send(JSON.stringify(frame));
+    if (this.#retired) return;
+    let payload = JSON.stringify(frame);
+    if (!this.transport.channel.fitsFrame(payload)) {
+      payload = JSON.stringify({
+        type: 'producer', notification: {
+          binding: frame.notification.binding,
+          event: { type: 'publication-failed', error: {
+            code: 'OUTCOME_UNKNOWN',
+            message: 'Provider output exceeds the execution-node message size limit. Native history may contain additional output.',
+          } },
+        },
+      } satisfies AgentProducerFrame);
+    }
+    this.transport.send(payload);
   }
 
   async call<K extends keyof AgentRpcMethods>(
@@ -86,6 +99,13 @@ export class AgentRpc {
     if (this.#retired || options?.signal?.aborted || !this.transport.connected) throw new AgentCallError('not-dispatched', 'Execution node is unavailable');
     if (this.#pending.size >= 256) throw new AgentCallError('not-dispatched', 'Execution-node request budget exhausted');
     const id = crypto.randomUUID();
+    const payload = JSON.stringify({ type: 'request', id, integrationId, method, request });
+    if (!this.transport.channel.fitsFrame(payload)) {
+      throw new AgentCallError('not-dispatched', 'Execution-node request exceeds the message size limit');
+    }
+    if (!this.transport.channel.canAdmit(payload)) {
+      throw new AgentCallError('not-dispatched', 'Execution-node message queue budget exhausted');
+    }
     const result = Promise.withResolvers<unknown>();
     const cancel = () => {
       const pending = this.#pending.get(id);
@@ -101,7 +121,7 @@ export class AgentRpc {
     const cleanup = () => { clearTimeout(timer); options?.signal?.removeEventListener('abort', cancel); };
     this.#pending.set(id, { ...result, cleanup });
     try {
-      this.transport.send(JSON.stringify({ type: 'request', id, integrationId, method, request }));
+      this.transport.send(payload);
     } catch (error) {
       cleanup(); this.#pending.delete(id);
       result.reject(new AgentCallError('unknown', error instanceof Error ? error.message : 'Execution-node send failed'));
@@ -138,9 +158,9 @@ export class AgentRpc {
     if (frame.type !== 'request' || typeof frame.integrationId !== 'string' || typeof frame.method !== 'string') {
       throw new Error('Invalid execution-node RPC request');
     }
-    if (this.#incoming.has(frame.id)) throw new Error('Duplicate RPC ID escaped transport deduplication');
+    if (this.#incoming.has(frame.id)) throw new Error('Duplicate RPC request ID');
     if (this.#incoming.size >= 256) {
-      this.transport.send(JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError('not-dispatched', 'Execution-node request budget exhausted')) } satisfies RpcFrame));
+      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError('not-dispatched', 'Execution-node request budget exhausted')) });
       return;
     }
     const controller = new AbortController();
@@ -152,10 +172,20 @@ export class AgentRpc {
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
       return handler(frame, controller.signal);
     }).then((value) => {
-      if (current()) this.transport.send(JSON.stringify({ type: 'result', id: frame.id, value } satisfies RpcFrame));
+      if (current()) this.#reply({ type: 'result', id: frame.id, value });
     }, (error) => {
-      if (current()) this.transport.send(JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame));
+      if (current()) this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
     }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
+  }
+
+  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>): void {
+    let payload = JSON.stringify(frame);
+    if (!this.transport.channel.fitsFrame(payload)) {
+      payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
+        new AgentCallError('unknown', 'Execution-node reply exceeds the message size limit'),
+      ) } satisfies RpcFrame);
+    }
+    this.transport.send(payload);
   }
 }
 

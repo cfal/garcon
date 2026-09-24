@@ -37,6 +37,8 @@
 		attachmentState?: TerminalClientSession['attachmentState'];
 		createError?: Error | null;
 		closeError?: Error | null;
+		nodeError?: string | null;
+		onList?: (nodeId?: string) => void;
 	}
 
 	let {
@@ -59,6 +61,8 @@
 		attachmentState = 'attached',
 		createError = null,
 		closeError = null,
+		nodeError = null,
+		onList = () => {},
 	}: Props = $props();
 	const localSettings = createLocalSettingsStore();
 	function sessionFor(
@@ -126,8 +130,11 @@
 		get orderedSessions() {
 			return Object.values(this.sessions);
 		},
-		listStatus: 'ready',
-		listError: null,
+		get nodeInventories() {
+			return {
+				local: { status: nodeError ? ('failed' as const) : ('ready' as const), error: nodeError },
+			};
+		},
 		nodeLabel: () => 'Local',
 		nodeIdFor: () => 'local',
 		displayName: terminalDisplayName,
@@ -142,7 +149,9 @@
 		rename: async (selectedTerminalId: string, title: string | null) => {
 			onRename(selectedTerminalId, title);
 		},
-		list: () => Promise.resolve(),
+		list: async (nodeId?: string) => {
+			onList(nodeId);
+		},
 	} satisfies TerminalSurfaceRegistryPort;
 	const workspace = {
 		layout,

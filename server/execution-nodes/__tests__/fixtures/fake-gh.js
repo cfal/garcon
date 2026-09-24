@@ -14,5 +14,5 @@ else if (command === 'api') {
   console.log(JSON.stringify([{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'synthetic comment' }]));
 } else if (action === 'list') console.log(JSON.stringify([pr]));
 else if (action === 'view') console.log(JSON.stringify(pr));
-else if (action === 'diff') console.log('diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed');
+else if (action === 'diff') console.log(config.diff ?? 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed');
 else process.exit(1);

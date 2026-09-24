@@ -7,8 +7,8 @@ import { ApiProviderAccess } from '../access.js';
 import { ApiProviderStore } from '../store.js';
 import { ApiProviderEndpointResolver } from '../endpoint-resolver.js';
 import { ApiProviderService } from '../service.js';
-import { AgentCallError } from '@garcon/server-agent-interface';
 import { AtomicJsonWriteError } from '../../lib/json-file-store.js';
+import { DomainError } from '../../lib/domain-error.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
@@ -46,8 +46,9 @@ test('explicit grants include Local, inherit all endpoints, and persist independ
   expect(assignments.snapshot().revision).toBe(revision);
   expect(access.resolveCredential(remote, reference).value).toBe('synthetic-key');
   expect(() => access.resolveCredential(other, reference)).toThrow('unavailable');
-  try { access.resolveCredential(other, { ...reference, nodeId: remote } as typeof reference); }
-  catch (error) { expect(error).toBeInstanceOf(AgentCallError); expect(error).toMatchObject({ code: 'API_PROVIDER_UNAVAILABLE', outcome: 'rejected' }); }
+  expect(() => access.resolveCredential(other, { ...reference, nodeId: remote } as typeof reference)).toThrow(
+    expect.objectContaining({ code: 'API_PROVIDER_UNAVAILABLE', outcome: 'rejected' }),
+  );
   await assignments.unassign(remote, provider.id);
   expect(access.resolveCredential('local', reference).value).toBe('synthetic-key');
   const reopened = new ApiProviderAssignmentStore(root, () => () => {});
@@ -75,6 +76,50 @@ test('metadata revision, assignment and provider/endpoint identity are checked a
   await assignments.unassign(remote, provider.id);
   expect(() => access.resolveCredential(remote, { ...reference, revision: 3 })).toThrow('unavailable');
   expect(resolver.describePrevious({ model: 'synthetic-model', apiProviderId: provider.id, modelEndpointId: reference.endpointId }).isLocal).toBe(false);
+});
+
+test.each(['profile-write-unknown', 'assignment-write-unknown'] as const)(
+  'provider storage failure omits endpoint models without authorizing their use: %s', async (failureMode) => {
+    const { root, store, assignments, access, provider, reference } = await fixture();
+    await access.assign(remote, provider.id);
+    const resolver = new ApiProviderEndpointResolver((node) => access.list(node), () => ['openai-compatible']);
+    const service = new ApiProviderService({ store, access, isApiProviderReferenced: () => false, discoverModels: async () => ({ success: true }) });
+    const input = { nodeId: remote, agentId: 'test', model: 'synthetic-model', apiProviderId: provider.id, modelEndpointId: reference.endpointId };
+    const selection = resolver.resolveSelection(input);
+    expect(resolver.getModelOptions('test', remote)).toHaveLength(1);
+    {
+      const open = fs.open;
+      const failure = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        if (path === root && flags === 'r') throw new Error('Synthetic sync failure');
+        return open(path, flags, mode);
+      });
+      try {
+        await expect(failureMode === 'profile-write-unknown'
+          ? store.updateApiProvider(provider.id, { label: 'Updated profile' })
+          : assignments.unassign(remote, provider.id)).rejects.toThrow('Synthetic sync failure');
+      } finally { failure.mockRestore(); }
+    }
+    expect(resolver.getModelOptions('test', remote)).toEqual([]);
+    expect(resolver.getModelOptions('test', 'local')).toEqual([]);
+    expect(service.getCatalog(remote)).toEqual([]);
+    const unavailable = expect.objectContaining({ code: 'API_PROVIDER_STORAGE_UNAVAILABLE' });
+    expect(() => service.management()).toThrow(unavailable);
+    expect(() => access.list(remote)).toThrow(unavailable);
+    expect(() => resolver.resolveSelection(input)).toThrow(unavailable);
+    expect(() => resolver.modelSupportsImages(input)).toThrow(unavailable);
+    expect(() => resolver.resolveEndpointReference(selection)).toThrow(unavailable);
+    expect(() => access.resolveCredential(remote, reference)).toThrow(
+      expect.objectContaining({ code: 'API_PROVIDER_STORAGE_UNAVAILABLE', outcome: 'rejected' }),
+    );
+    expect(resolver.resolveSelection({ nodeId: remote, agentId: 'test', model: 'native-model' })).toMatchObject({ model: 'native-model', apiProviderId: null });
+  },
+);
+
+test('catalog listing does not suppress node or unexpected provider errors', () => {
+  for (const error of [new DomainError('EXECUTION_NODE_NOT_FOUND', 'Missing node', 404), new Error('Unexpected failure')]) {
+    const resolver = new ApiProviderEndpointResolver(() => { throw error; });
+    expect(() => resolver.getModelOptions('test', remote)).toThrow(error);
+  }
 });
 
 test('migration grants only the legacy seed once, never newer profiles or nodes', async () => {
@@ -145,14 +190,12 @@ test('create distinguishes an uncertain assignment from a definite unassigned pr
   } finally { failure.mockRestore(); }
 });
 
-test('independent controller processes serialize shared profile writes and reload before use', async () => {
-  const { root, store } = await fixture();
-  const script = `import {ApiProviderStore} from ${JSON.stringify(join(import.meta.dir, '../store.ts'))}; const store = new ApiProviderStore(process.argv[1]); await store.init(); await store.createApiProvider(JSON.parse(process.argv[2]));`;
-  const launch = (label: string) => Bun.spawn([process.execPath, '-e', script, join(root, 'api-providers.json'), JSON.stringify({ ...input, label })], { stdout: 'pipe', stderr: 'pipe' });
-  const first = launch('First account');
-  const second = launch('Second account');
-  expect(await first.exited).toBe(0);
-  expect(await second.exited).toBe(0);
+test('one controller serializes concurrent profile mutations', async () => {
+  const { store } = await fixture();
+  const first = store.createApiProvider({ ...input, label: 'First account' });
+  const second = store.createApiProvider({ ...input, label: 'Second account' });
+  await first;
+  await second;
   expect(store.list().map((entry) => entry.label).sort()).toEqual(['First account', 'Second account', 'Synthetic profile']);
 });
 
@@ -170,16 +213,6 @@ test.each([false, true])('profile deletion fails closed on uncertain persistence
     expect(() => access.resolveCredential(remote, reference)).toThrow('durability');
     expect(() => store.referenceWrites.retain([provider.id])).toThrow('durability');
   } else expect(access.resolveCredential(remote, reference).value).toBe('synthetic-key');
-});
-
-test('another controller rotation is observed at credential release without waiting for the watcher', async () => {
-  const { root, store, provider, access, reference } = await fixture();
-  await access.assign(remote, provider.id);
-  const second = new ApiProviderStore(join(root, 'api-providers.json'));
-  await second.init();
-  await second.updateApiProvider(provider.id, { revision: provider.revision, endpoint: { apiKey: 'new-account-key' } });
-  expect(() => access.resolveCredential(remote, reference)).toThrow('configuration changed');
-  expect(store.getApiProvider(provider.id)?.revision).toBe(2);
 });
 
 test.each(['openai-compatible', 'anthropic-messages'] as const)('long labels generate readable bounded %s identities', async (protocol) => {
@@ -204,22 +237,3 @@ test('missing historical model classification cannot authorize switching a local
   await store.updateApiProvider(provider.id, { endpoint: { defaultModel: 'replacement', models: [{ value: 'replacement', label: 'Replacement' }] } });
   expect(() => resolver.describePrevious(selection)).toThrow('classification is unknown');
 });
-
-test('a process that loses the shared profile lock exits before its paused write can overwrite rotation', async () => {
-  const { root, provider, store } = await fixture();
-  const script = `import { promises as fs } from 'node:fs'; import {ApiProviderStore} from ${JSON.stringify(join(import.meta.dir, '../store.ts'))};
-    const store = new ApiProviderStore(process.argv[1]); await store.init();
-    const rename = fs.rename; fs.rename = async (...args) => { console.log('paused'); await Bun.sleep(12000); return rename(...args); };
-    await store.updateApiProvider(process.argv[2], { revision: 1, endpoint: { apiKey: 'stale-key' } });`;
-  const child = Bun.spawn([process.execPath, '-e', script, join(root, 'api-providers.json'), provider.id], { stdout: 'pipe', stderr: 'pipe' });
-  try {
-    const reader = child.stdout.getReader();
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain('paused');
-    reader.releaseLock();
-    await fs.rm(join(root, '.api-providers.lock'), { recursive: true });
-    await store.updateApiProvider(provider.id, { revision: 1, endpoint: { apiKey: 'rotated-key' } });
-    expect(await child.exited).not.toBe(0);
-    expect(await new Response(child.stderr).text()).toContain('ECOMPROMISED');
-    expect(store.getApiProvider(provider.id)).toMatchObject({ revision: 2, endpoints: [expect.objectContaining({ apiKey: 'rotated-key' })] });
-  } finally { if (child.exitCode === null) { child.kill(); await child.exited; } }
-}, 15_000);

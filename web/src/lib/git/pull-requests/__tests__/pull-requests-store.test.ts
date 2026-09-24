@@ -180,6 +180,75 @@ describe('PullRequestsStore', () => {
 		}
 	});
 
+	it('refreshes selected detail when replacement project resolution finishes before GitHub capability', async () => {
+		const nodes = new ExecutionNodesStore();
+		const remote = {
+			...remoteExecutionNode,
+			machineServices: { files: true, git: true, gh: true, terminals: true },
+		};
+		nodes.applySnapshot([localExecutionNode, remote]);
+		const capabilities = new GhCapabilityStore(nodes);
+		const resolution = new ProjectResolutionStore(
+			async (target) => ({
+				target,
+				resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+			}),
+			undefined,
+			nodes,
+		);
+		const available = { available: true, authenticated: true, reason: 'authenticated' } as const;
+		const capability = deferred<Awaited<ReturnType<typeof getGhStatus>>>();
+		vi.mocked(getGhStatus).mockResolvedValue(available);
+		getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
+		getPullRequestMock
+			.mockResolvedValueOnce({ ...detail(3), body: 'Original instance' })
+			.mockResolvedValueOnce({ ...detail(3), body: 'Replacement instance' });
+		const store = new PullRequestsStore({
+			ghCapability: capabilities,
+			projectSelection: {
+				nodes,
+				projectResolution: resolution,
+				projectBasePath: (nodeId) => nodes.get(nodeId)?.projectBasePath ?? null,
+			},
+		});
+		try {
+			store.projectSelection.selectResolvedProject({ nodeId: remote.id, projectPath: '/worker' });
+			flushSync();
+			store.setPresentationVisible(true);
+			flushSync();
+			await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
+			await store.select(3);
+			expect(store.detail?.body).toBe('Original instance');
+
+			vi.mocked(getGhStatus).mockReturnValueOnce(capability.promise);
+			const previousChecks = vi.mocked(getGhStatus).mock.calls.length;
+			nodes.applySnapshot([localExecutionNode, { ...remote, instanceId: 'replacement-instance' }]);
+			flushSync();
+			await vi.waitFor(() => {
+				expect(getGhStatus).toHaveBeenCalledTimes(previousChecks + 1);
+				expect(store.projectIdentityPending).toBe(false);
+			});
+			expect(store.capabilityState).toBe('pending');
+			expect(store.selectedNumber).toBe(3);
+			expect(getPullRequestMock).toHaveBeenCalledOnce();
+
+			capability.resolve(available);
+			await vi.waitFor(() => expect(store.detail?.body).toBe('Replacement instance'));
+			expect(getPullRequestsMock).toHaveBeenCalledTimes(2);
+			expect(getPullRequestMock).toHaveBeenCalledTimes(2);
+			expect(getPullRequestMock).toHaveBeenLastCalledWith(
+				{ nodeId: remote.id, projectPath: '/worker' },
+				3,
+				expect.anything(),
+			);
+		} finally {
+			capability.resolve(available);
+			store.dispose();
+			capabilities.destroy();
+			resolution.destroy();
+		}
+	});
+
 	it('loads the list when a project is set', async () => {
 		getPullRequestsMock.mockResolvedValue({
 			pulls: [summary(1), summary(2)],

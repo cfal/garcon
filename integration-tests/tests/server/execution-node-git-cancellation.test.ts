@@ -38,7 +38,7 @@ setInterval(() => {}, 1000);
       if (snapshot.status !== 'ready') throw new Error('Expected repository');
       const indexBefore = await readFile(join(project, '.git/index'));
       const controller = new AbortController();
-      const pending = fetch(`${fixture.garcon.baseUrl}/api/v1/git/review-documents/files`, {
+      const pending = fixture.client.fetch(`/api/v1/git/review-documents/files`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
         body: JSON.stringify({ ...target, files: ['new.txt'], purpose: 'visible', document: {
           nodeId: client.nodeId, instanceId: snapshot.instanceId, documentId: snapshot.reviewSummary.documentId,

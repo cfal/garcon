@@ -462,11 +462,11 @@ describe('scheduled prompt scheduler', () => {
         scheduledPrompt: { ...definition, target: { ...definition.target, nodeId: undefined } },
       }).catch((error) => error);
       await entered.promise;
-      expect(store.referencesNode(nodeId)).toBe(false);
+      expect(store.get(id).target.nodeId).toBeUndefined();
       expect(() => references.assertNoWrites(nodeId)).toThrow('A reference to this node is being saved');
       release.resolve();
       expect(await updating).toMatchObject({ message: 'Synthetic registration failure' });
-      expect(store.referencesNode(nodeId)).toBe(true);
+      expect(store.get(id).target.nodeId).toBe(nodeId);
       const reopened = new ScheduledPromptStore(dir, references.retain);
       await reopened.init();
       expect(reopened.get(id).target.nodeId).toBe(nodeId);

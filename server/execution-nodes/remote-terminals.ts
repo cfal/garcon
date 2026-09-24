@@ -69,13 +69,6 @@ export class RemoteExecutionTerminalService implements ExecutionTerminalService 
       if (attachment.peer === peer && attachment.authority.key === authority.key) this.#detach(id);
     }
   }
-  detachTerminal(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string): void {
-    for (const [id, attachment] of this.#attachments) {
-      if (attachment.peer === peer && attachment.authority.key === authority.key && attachment.terminalId === terminalId) {
-        this.#detach(id);
-      }
-    }
-  }
   receive(frame: TerminalNotification, rpc: AgentRpc): void {
     const attachment = this.#attachments.get(frame.attachmentId);
     if (!attachment || attachment.rpc !== rpc) return;

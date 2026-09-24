@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ExecutionSettingsPatchResponse } from '$shared/chat-command-contracts';
+import type { ResolvedModelSelection } from '$shared/start-selection';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import {
 	ConversationSettingsController,
@@ -89,8 +90,8 @@ function createHarness() {
 		getModelForSelection: vi.fn<
 			ConversationSettingsControllerOptions['modelCatalog']['getModelForSelection']
 		>(() => ({ value: 'opus', label: 'Opus' })),
-		selectionFor: vi.fn<ConversationSettingsControllerOptions['modelCatalog']['selectionFor']>(
-			() => ({
+		selectionFor: vi.fn(
+			(): ResolvedModelSelection => ({
 				model: 'opus',
 				apiProviderId: null,
 				modelEndpointId: null,

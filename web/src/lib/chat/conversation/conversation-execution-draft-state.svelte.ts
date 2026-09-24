@@ -1,21 +1,9 @@
 import type { AgentHandoffRequest, AgentHandoffTarget } from '$shared/chat-command-contracts';
-import { effectiveNodeId, parseNodeId } from '$shared/execution-nodes';
-import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from '$shared/agent-integration';
+import { effectiveNodeId } from '$shared/execution-nodes';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
-import {
-	normalizePermissionMode,
-	normalizeThinkingMode,
-	type PermissionMode,
-	type ThinkingMode,
-} from '$shared/chat-modes';
+import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
 import { cloneAgentSettings } from '$shared/agent-settings';
-import { isRecord } from '$shared/json';
-import {
-	chatExecutionDraftStorageKey,
-	getLocalStorageItem,
-	removeLocalStorageItem,
-	setLocalStorageItem,
-} from '$lib/utils/local-persistence.js';
 
 export interface ConversationExecutionSelection extends AgentHandoffTarget {
 	agentId: string;
@@ -48,76 +36,124 @@ export interface ConversationExecutionDraftStateOptions {
 
 export class ConversationExecutionDraftState {
 	selection = $state<ConversationExecutionSelection | null>(null);
+	#hasStagedSelection = $state(false);
+	#chatId: string | null = null;
+	#observedDurableSelection: ConversationExecutionSelection | null = null;
+	#location: 'chat' | 'destination' = 'chat';
 
 	readonly isHandoffPending = $derived.by(() => {
 		const durable = this.options.durableSelection;
 		return (
-			this.options.activeChatId !== null
-			&& this.selection !== null
-			&& durable !== null
-			&& !sameExecutionOwner(this.selection, durable)
+			this.#hasStagedSelection &&
+			this.options.activeChatId === this.#chatId &&
+			this.selection !== null &&
+			durable !== null &&
+			!sameExecutionOwner(this.selection, durable)
 		);
 	});
 
 	constructor(private readonly options: ConversationExecutionDraftStateOptions) {}
 
-	activate(chatId: string): ConversationExecutionSelection | null {
-		const durable = this.options.durableSelection;
-		if (!durable || this.options.activeChatId !== chatId) {
-			this.selection = null;
-			return null;
-		}
-		const stored = parseStoredSelection(getLocalStorageItem(chatExecutionDraftStorageKey(chatId)));
-		if (!stored || sameExecutionOwner(stored, durable)) {
-			removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
-			this.selection = cloneSelection(durable);
-			return this.selection;
-		}
-		this.selection = stored;
+	activate(chatId: string | null): ConversationExecutionSelection | null {
+		const durable =
+			chatId && this.options.activeChatId === chatId ? this.options.durableSelection : null;
+		this.#chatId = chatId;
+		this.#hasStagedSelection = false;
+		this.#location = 'chat';
+		this.selection = durable ? cloneSelection(durable) : null;
+		this.#observedDurableSelection = this.selection;
 		return this.selection;
 	}
 
+	reconcileDurable(): ConversationExecutionSelection | null {
+		if (this.options.activeChatId !== this.#chatId) return null;
+		const durable = this.options.durableSelection;
+		const previous = this.#observedDurableSelection;
+		if (!durable || !previous) return null;
+		this.#observedDurableSelection = cloneSelection(durable);
+		if (this.#hasStagedSelection) {
+			if (this.selection && !sameExecutionOwner(this.selection, durable)) {
+				if (this.#location === 'destination') return null;
+				if (effectiveNodeId(this.selection.nodeId) === effectiveNodeId(durable.nodeId)) {
+					if (this.selection.projectPath === durable.projectPath) return null;
+					this.selection = { ...this.selection, projectPath: durable.projectPath };
+					return this.selection;
+				}
+			}
+		} else if (
+			sameExecutionOwner(previous, durable) &&
+			previous.projectPath === durable.projectPath
+		) {
+			return null;
+		}
+		return this.resetToDurable();
+	}
+
 	replaceSelection(selection: ConversationExecutionSelection): void {
+		const keepsDestination =
+			this.#chatId === this.options.activeChatId &&
+			this.#hasStagedSelection &&
+			this.#location === 'destination' &&
+			this.selection !== null &&
+			effectiveNodeId(selection.nodeId) === effectiveNodeId(this.selection.nodeId);
+		this.#replaceSelection(
+			selection,
+			keepsDestination ||
+				effectiveNodeId(selection.nodeId) !== effectiveNodeId(this.options.durableSelection?.nodeId)
+				? 'destination'
+				: 'chat',
+		);
+	}
+
+	replaceDestination(selection: ConversationExecutionSelection): void {
+		this.#replaceSelection(selection, 'destination');
+	}
+
+	#replaceSelection(
+		selection: ConversationExecutionSelection,
+		location: 'chat' | 'destination',
+	): void {
 		const chatId = this.options.activeChatId;
 		const durable = this.options.durableSelection;
 		if (!chatId || !durable) return;
+		this.#chatId = chatId;
+		this.#observedDurableSelection = cloneSelection(durable);
 		if (sameExecutionOwner(selection, durable)) {
 			this.resetToDurable();
 			return;
 		}
 		this.selection = cloneSelection(selection);
-		setLocalStorageItem(
-			chatExecutionDraftStorageKey(chatId),
-			JSON.stringify(this.selection),
-		);
+		this.#hasStagedSelection = true;
+		this.#location = location;
 	}
 
 	patchSelection(patch: Partial<ConversationExecutionSelection>): void {
+		this.reconcileDurable();
 		if (!this.selection || !this.isHandoffPending) return;
 		this.replaceSelection({ ...this.selection, ...patch });
 	}
 
 	resetToDurable(): ConversationExecutionSelection | null {
-		const chatId = this.options.activeChatId;
-		if (chatId) removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
-		const durable = this.options.durableSelection;
-		this.selection = durable ? cloneSelection(durable) : null;
-		return this.selection;
+		return this.activate(this.options.activeChatId);
 	}
 
 	acceptDurable(selection: ConversationExecutionSelection): void {
-		const chatId = this.options.activeChatId;
-		if (chatId) removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 		this.selection = cloneSelection(selection);
+		this.#hasStagedSelection = false;
+		this.#location = 'chat';
+		this.#observedDurableSelection = this.selection;
 	}
 
 	handoffRequest(expectedAgentOwnershipEpoch: string): AgentHandoffRequest | null {
+		this.reconcileDurable();
 		if (!this.isHandoffPending || !this.selection) return null;
 		if (!expectedAgentOwnershipEpoch.trim()) {
 			throw new Error('The selected chat has no ownership epoch for an agent handoff');
 		}
+		const target = cloneSelection(this.selection);
+		if (this.#location === 'chat') delete target.projectPath;
 		return {
-			target: cloneSelection(this.selection),
+			target,
 			expectedAgentOwnershipEpoch,
 		};
 	}
@@ -150,62 +186,8 @@ export function executionSelectionFromProjection(
 	});
 }
 
-function parseStoredSelection(raw: string | null): ConversationExecutionSelection | null {
-	if (!raw) return null;
-	let value: unknown;
-	try {
-		value = JSON.parse(raw);
-	} catch {
-		return null;
-	}
-	if (!isRecord(value)) return null;
-	const agentId = nonEmptyString(value.agentId);
-	const nodeId = parseNodeId(value.nodeId);
-	const model = nonEmptyString(value.model);
-	const apiProviderId = nullableString(value.apiProviderId);
-	const modelEndpointId = nullableString(value.modelEndpointId);
-	const modelProtocol = nullableProtocol(value.modelProtocol);
-	const agentSettings = parseAgentSettingsEnvelope(value.agentSettings);
-	if (
-		!agentId
-		|| !nodeId
-		|| (value.projectPath !== undefined && !nonEmptyString(value.projectPath))
-		|| !model
-		|| apiProviderId === undefined
-		|| modelEndpointId === undefined
-		|| modelProtocol === undefined
-		|| !agentSettings
-		|| agentSettings.ownerId !== agentId
-	) return null;
-	if (modelEndpointId !== null && apiProviderId === null) return null;
-	return {
-		agentId,
-		nodeId,
-		...(typeof value.projectPath === 'string' ? { projectPath: value.projectPath } : {}),
-		model,
-		apiProviderId,
-		modelEndpointId,
-		modelProtocol,
-		permissionMode: normalizePermissionMode(value.permissionMode),
-		thinkingMode: normalizeThinkingMode(value.thinkingMode),
-		agentSettings,
-	};
-}
-
 function sameExecutionOwner(left: AgentHandoffTarget, right: AgentHandoffTarget): boolean {
-	return left.agentId === right.agentId && effectiveNodeId(left.nodeId) === effectiveNodeId(right.nodeId);
-}
-
-function nonEmptyString(value: unknown): string | null {
-	return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function nullableString(value: unknown): string | null | undefined {
-	return value === null || typeof value === 'string' ? value : undefined;
-}
-
-function nullableProtocol(value: unknown): ApiProtocol | null | undefined {
-	return value === null || value === 'anthropic-messages' || value === 'openai-compatible'
-		? value
-		: undefined;
+	return (
+		left.agentId === right.agentId && effectiveNodeId(left.nodeId) === effectiveNodeId(right.nodeId)
+	);
 }

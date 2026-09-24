@@ -652,6 +652,26 @@ describe('git API contract', () => {
 		expect(body.mode).toBe('stage');
 	});
 
+	it.each([
+		{ status: 413, errorCode: 'GIT_REQUEST_TOO_LARGE' },
+		{ status: 409, errorCode: 'GIT_LOCKED' },
+	])('gitStagePaths preserves $errorCode without splitting or retrying the selection', async ({ status, errorCode }) => {
+		fetchMock.mockImplementationOnce(() => jsonResponse({ error: 'Rejected', errorCode }, status));
+		await expect(
+			gitStagePaths({ nodeId: scope.nodeId, projectPath: '/project' }, ['first', 'second'], 'stage'),
+		).rejects.toMatchObject({ status, errorCode });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).paths).toEqual(['first', 'second']);
+	});
+
+	it('gitStagePaths keeps a lost mutation confirmation uncertain without retrying', async () => {
+		fetchMock.mockRejectedValueOnce(new TypeError('connection lost'));
+		await expect(
+			gitStagePaths({ nodeId: scope.nodeId, projectPath: '/project' }, ['file'], 'stage'),
+		).rejects.toMatchObject({ errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),

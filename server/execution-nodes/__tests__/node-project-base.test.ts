@@ -43,13 +43,6 @@ for (const dialer of ['controller', 'worker'] as const) {
       const inventory = node.inventory;
       let info = await node.getInfo();
 
-      base = '/';
-      const reconnected = nextAvailability(node, 'ready');
-      controller.disconnect(); worker.disconnect();
-      await reconnected;
-      expect(await node.getInfo()).toEqual(info);
-      expect(generations).toHaveLength(1);
-
       for (const nextBase of ['/', '/workspace/narrow']) {
         base = nextBase;
         entered = Promise.withResolvers<void>();

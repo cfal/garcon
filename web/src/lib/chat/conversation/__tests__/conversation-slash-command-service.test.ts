@@ -103,6 +103,8 @@ function createServerEntry(id: string) {
 	};
 }
 
+type SlashCommandModelCatalog = ReturnType<ConversationSlashCommandDeps['modelCatalogForNode']>;
+
 function createDeps(chat = createChat()) {
 	const cursor = { transcriptViewId: 'view-1', lastOrdinal: 9 };
 	let inputText = 'original command';
@@ -190,6 +192,19 @@ function createDeps(chat = createChat()) {
 		upsertServerChat: vi.fn(),
 		setSelectedChatId: vi.fn(),
 	};
+	const modelCatalog = {
+		selectionFor: vi.fn<SlashCommandModelCatalog['selectionFor']>(
+			(_agentId, model) => ({
+				model,
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			}),
+		),
+		supportsFork: vi.fn(() => false),
+		supportsForkWhileRunning: vi.fn(() => false),
+		supportsSteering: vi.fn(() => false),
+	};
 	const deps = {
 		sessions,
 		chatState: {
@@ -213,26 +228,14 @@ function createDeps(chat = createChat()) {
 			beginTurn: vi.fn(),
 			setCurrentChatId: vi.fn(),
 		},
-		modelCatalog: {
-			selectionFor: vi.fn(
-				(_agentId, model): ReturnType<ConversationSlashCommandDeps['modelCatalog']['selectionFor']> => ({
-					model,
-					apiProviderId: null,
-					modelEndpointId: null,
-					modelProtocol: null,
-				}),
-			),
-			supportsFork: vi.fn(() => false),
-			supportsForkWhileRunning: vi.fn(() => false),
-			supportsSteering: vi.fn(() => false),
-		},
+		modelCatalogForNode: vi.fn((_nodeId: string) => modelCatalog),
 		navigation: { navigateToChat: vi.fn() },
 		refetchTranscript: vi.fn().mockResolvedValue(undefined),
 		confirmHandoffFork: vi.fn().mockResolvedValue(true),
 		scrollToBottom: vi.fn(),
 	} satisfies ConversationSlashCommandDeps;
 	return {
-		deps,
+		deps: { ...deps, modelCatalog },
 		composerState,
 		appendLocalNotice,
 		appendLocalNoticeForChat,
@@ -1046,6 +1049,39 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('resolves fork capabilities and models from the target chat node rather than the selected chat', async () => {
+		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const chat = createChat({ nodeId });
+		const { deps } = createDeps(chat);
+		deps.sessions.selectedChatId = 'another-chat';
+		const remoteCatalog = {
+			...deps.modelCatalog,
+			supportsFork: vi.fn(() => true),
+			selectionFor: vi.fn<SlashCommandModelCatalog['selectionFor']>(() => ({
+				model: 'remote-model', apiProviderId: 'remote-provider',
+				modelEndpointId: 'remote-endpoint', modelProtocol: 'openai-compatible',
+			})),
+		};
+		deps.modelCatalogForNode.mockImplementation(id => id === nodeId ? remoteCatalog : deps.modelCatalog);
+		mockForkRunChat.mockResolvedValueOnce({
+			success: true, commandType: 'fork-run', clientRequestId: 'request-1', chatId: 'chat-2',
+			turnId: 'turn-1', status: 'accepted', acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text: '/fork Continue remotely', images: [],
+			ownsComposer: false, handoffPending: false,
+		});
+		expect(result.kind).toBe('handled');
+		if (result.kind !== 'handled') throw new Error('Fork was not handled');
+		expect(await result.outcome).toBe('accepted');
+		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
+			model: 'remote-model', apiProviderId: 'remote-provider', modelEndpointId: 'remote-endpoint',
+		}));
+		expect(deps.modelCatalog.supportsFork).not.toHaveBeenCalled();
+		expect(deps.modelCatalog.selectionFor).not.toHaveBeenCalled();
 	});
 
 	it('preserves stale endpoint routing when a fork model is absent from the catalog', async () => {

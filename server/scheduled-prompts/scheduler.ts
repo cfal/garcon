@@ -149,10 +149,6 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     this.on('invalidated', callback);
   }
 
-  referencesNode(nodeId: string): boolean {
-    return this.deps.store.referencesNode(nodeId);
-  }
-
   async start(now = new Date()): Promise<void> {
     await this.deps.store.init();
     await this.#lock.runExclusive(SCHEDULER_LOCK, async () => {

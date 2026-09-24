@@ -85,7 +85,7 @@ export class WorkspaceDomainBindings {
 				const currentProject = deps.workspaceContext.currentProject;
 				if (!currentProject) return;
 				const nodeId = effectiveNodeId(currentProject.nodeId);
-				const version = gitProjectInvalidations.version(nodeId, currentProject.effectiveProjectKey);
+				const version = gitProjectInvalidations.version(nodeId);
 				const key = JSON.stringify([nodeId, currentProject.effectiveProjectKey, version]);
 				if (version === 0 || key === lastCommitInvalidationKey) return;
 				lastCommitInvalidationKey = key;

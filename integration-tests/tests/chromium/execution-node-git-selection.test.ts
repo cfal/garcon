@@ -49,6 +49,7 @@ test('Local-only Files and Git hide node selection and allow Git browsing withou
 test('independent Git folder and node selection survives chat changes and owns Commit and PR requests', async () => {
   await withChromiumFixture('git-independent-node-selection', async ({ page, integration, assertNoBrowserErrors }, phase) => {
     const { client, dirs, executionDirs, directAgents } = integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
     await initializeFixtureRepository(dirs.project);
     await initializeFixtureRepository(executionDirs.project);
     await writeFile(join(dirs.project, 'example.txt'), 'Local project change\n');

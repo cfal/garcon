@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	GitTargetSessionController,
 	type GitTargetChangeReason,
+	type GitTargetSessionDeps,
 } from '$lib/git/targets/git-target-session.svelte.js';
+import { GitProjectInvalidationStore } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import {
 	GitBranchSelectorState,
 	type GitBranchSelectorStateOptions,
@@ -46,7 +48,7 @@ function deferred<T>() {
 function createSession(options: {
 	kind?: 'git' | 'git-history' | 'git-compare' | 'commit';
 	canChangeTarget?: () => boolean;
-	invalidationVersion?: (effectiveProjectKey: string) => number;
+	invalidationVersion?: GitTargetSessionDeps['invalidationVersion'];
 	runMutation?: GitBranchSelectorStateOptions['runMutation'];
 	afterCheckout?: (projectPath: string) => void | Promise<void>;
 }) {
@@ -483,21 +485,102 @@ describe('GitTargetSessionController', () => {
 		expect(session.branches.currentBranch).toBe('feature');
 	});
 
+	it.each([
+		{ nodeId: 'local', projectPath: '/other' },
+		{ nodeId: 'remote', projectPath: '/repo' },
+	])('retains handled invalidations when returning from $nodeId:$projectPath', async (other) => {
+		const invalidations = new GitProjectInvalidationStore();
+		const localVersion = invalidations.markChanged('local');
+		const otherVersion =
+			other.nodeId === 'local' ? localVersion : invalidations.markChanged(other.nodeId);
+		const { session, changes } = createSession({
+			invalidationVersion: (nodeId) => invalidations.version(nodeId),
+		});
+		setProject(session, '/repo');
+		session.setPresentationVisible(true);
+		await session.activate();
+		await expect(session.refreshForInvalidation('/repo', localVersion)).resolves.toBe(true);
+		setProject(session, other.projectPath, other.projectPath, other.nodeId);
+		await session.activate();
+		await expect(session.refreshForInvalidation(other.projectPath, otherVersion)).resolves.toBe(
+			true,
+		);
+
+		for (let visit = 0; visit < 3; visit++) {
+			setProject(session, '/repo');
+			await session.activate();
+			await expect(session.refreshForInvalidation('/repo', localVersion)).resolves.toBe(false);
+			setProject(session, other.projectPath, other.projectPath, other.nodeId);
+			await session.activate();
+			await expect(session.refreshForInvalidation(other.projectPath, otherVersion)).resolves.toBe(
+				false,
+			);
+		}
+		expect(changes.filter((change) => change.reason === 'invalidation')).toHaveLength(2);
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(10);
+		const nextVersion = invalidations.markChanged(other.nodeId);
+		await expect(session.refreshForInvalidation(other.projectPath, nextVersion)).resolves.toBe(
+			true,
+		);
+		session.dispose();
+	});
+
+	it('bounds retained invalidations to the recent target cache', async () => {
+		const { session } = createSession({});
+		for (let index = 0; index < 9; index++) {
+			setProject(session, `/repo-${index}`);
+			session.setPresentationVisible(true);
+			await session.activate();
+			await expect(session.refreshForInvalidation(`/repo-${index}`, 1)).resolves.toBe(true);
+		}
+		setProject(session, '/repo-1');
+		await session.activate();
+		await expect(session.refreshForInvalidation('/repo-1', 1)).resolves.toBe(false);
+		setProject(session, '/repo-0');
+		await session.activate();
+		await expect(session.refreshForInvalidation('/repo-0', 1)).resolves.toBe(true);
+		session.dispose();
+	});
+
+	it('keeps same-path pending invalidations separate across nodes', async () => {
+		const local = deferred<{ targets: GitTargetCandidate[] }>();
+		const remote = deferred<{ targets: GitTargetCandidate[] }>();
+		const { session, changes } = createSession({});
+		setProject(session, '/repo');
+		session.setPresentationVisible(true);
+		await session.activate();
+		api.getGitTargetCandidates.mockReturnValueOnce(local.promise);
+		const localRefresh = session.refreshForInvalidation('/repo', 1);
+		setProject(session, '/repo', '/repo', 'remote');
+		await session.activate();
+		api.getGitTargetCandidates.mockReturnValueOnce(remote.promise);
+		const remoteRefresh = session.refreshForInvalidation('/repo', 1);
+		local.resolve({ targets: [candidate('/repo')] });
+		await expect(localRefresh).resolves.toBe(false);
+		await expect(session.refreshForInvalidation('/repo', 1)).resolves.toBe(false);
+		remote.resolve({ targets: [candidate('/repo')] });
+		await expect(remoteRefresh).resolves.toBe(true);
+		expect(changes.filter((change) => change.reason === 'invalidation')).toHaveLength(1);
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(4);
+		session.dispose();
+	});
+
 	it('coalesces its branch invalidation into the direct checkout reconciliation', async () => {
-		let invalidationVersion = 0;
+		const invalidations = new GitProjectInvalidationStore();
+		invalidations.markChanged('remote');
 		const context: { session?: GitTargetSessionController } = {};
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
-				_nodeId: string,
+				nodeId: string,
 				_projectPath: string,
 				effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,
 			) => {
 				const result = await execute();
 				if (result.success) {
-					invalidationVersion += 1;
-					await context.session?.refreshForInvalidation(effectiveProjectKey, invalidationVersion);
+					const version = invalidations.markChanged(nodeId);
+					await context.session?.refreshForInvalidation(effectiveProjectKey, version);
 				}
 				return result;
 			},
@@ -507,7 +590,7 @@ describe('GitTargetSessionController', () => {
 		});
 		const created = createSession({
 			runMutation,
-			invalidationVersion: () => invalidationVersion,
+			invalidationVersion: (nodeId) => invalidations.version(nodeId),
 		});
 		context.session = created.session;
 		setProject(created.session, '/chat', 'chat');
@@ -515,13 +598,44 @@ describe('GitTargetSessionController', () => {
 		await created.session.activate();
 
 		await expect(created.session.switchBranch('feature', 'local-branch')).resolves.toBe(true);
-		await expect(created.session.refreshForInvalidation('chat', invalidationVersion)).resolves.toBe(
-			false,
-		);
+		await expect(
+			created.session.refreshForInvalidation('chat', invalidations.version('local')),
+		).resolves.toBe(false);
 
 		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
 		expect(created.changes.filter((change) => change.reason === 'checkout')).toHaveLength(1);
 		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(0);
+	});
+
+	it('retains invalidations arriving after checkout while its reconciliation is pending', async () => {
+		const invalidations = new GitProjectInvalidationStore();
+		const entered = deferred<void>();
+		const release = deferred<void>();
+		const { session, changes } = createSession({
+			invalidationVersion: (nodeId) => invalidations.version(nodeId),
+			runMutation: async (_surface, nodeId, _projectPath, _key, execute) => {
+				const result = await execute();
+				if (result.success) invalidations.markChanged(nodeId);
+				return result;
+			},
+			afterCheckout: async () => {
+				entered.resolve();
+				await release.promise;
+			},
+		});
+		setProject(session, '/repo');
+		session.setPresentationVisible(true);
+		await session.activate();
+		const switching = session.switchBranch('feature', 'local-branch');
+		await entered.promise;
+		const version = invalidations.markChanged('local');
+		await expect(session.refreshForInvalidation('/repo', version)).resolves.toBe(false);
+		release.resolve();
+		await expect(switching).resolves.toBe(true);
+		expect(changes.map((change) => change.reason)).toEqual(['project', 'checkout', 'invalidation']);
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(3);
+		await expect(session.refreshForInvalidation('/repo', version)).resolves.toBe(false);
+		session.dispose();
 	});
 
 	it('replays checkout invalidation after project availability interrupts reconciliation', async () => {

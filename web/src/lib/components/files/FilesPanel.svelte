@@ -3,6 +3,7 @@
 	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
 	import type { Snippet } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
+	import { effectiveNodeId } from '$shared/execution-nodes';
 	import {
 		getFileSessions,
 		getNotifications,
@@ -78,6 +79,12 @@
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		}
 	}
+
+	function recoveredFileLabel(draft: FileDraft, path: string): string {
+		return effectiveNodeId(draft.nodeId) === 'local'
+			? path
+			: `${nodes.label(draft.nodeId)}: ${path}`;
+	}
 </script>
 
 {#snippet nodeCrumb()}
@@ -139,17 +146,24 @@
 					<button
 						type="button"
 						class="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
-						title={draft.canonicalFileRootPath + '/' + draft.normalizedRelativePath}
+						title={recoveredFileLabel(
+							draft,
+							draft.canonicalFileRootPath + '/' + draft.normalizedRelativePath,
+						)}
 						onclick={() => void openRecoveredFile(draft)}
 					>
 						<FileText class="size-4 shrink-0 text-muted-foreground" />
-						<span class="min-w-0 break-all">{draft.normalizedRelativePath}</span>
+						<span class="min-w-0 break-all"
+							>{recoveredFileLabel(draft, draft.normalizedRelativePath)}</span
+						>
 					</button>
 					<Button
 						variant="ghost"
 						size="icon-sm"
 						onclick={() => files.exportDraft(draft.documentId)}
-						aria-label={m.file_recovery_export_draft({ fileName: draft.normalizedRelativePath })}
+						aria-label={m.file_recovery_export_draft({
+							fileName: recoveredFileLabel(draft, draft.normalizedRelativePath),
+						})}
 						title={m.file_session_export_local_copy()}
 					>
 						<Download class="size-4" />

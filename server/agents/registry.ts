@@ -470,7 +470,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       ?? { state: 'idle', running: false };
   }
   async getAgentAuthStatus(agentId: string, nodeId?: string | null): Promise<unknown | null> {
-    const auth = this.#directory.require(agentId, nodeId).auth;
+    const auth = this.#directory.list(nodeId).find(integration => integration.descriptor.id === agentId)?.auth;
     return auth ? auth.status(new AbortController().signal) : null;
   }
   async getAgentAuthStatusMap(nodeId?: string | null): Promise<Record<string, unknown>> {

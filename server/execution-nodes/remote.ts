@@ -71,11 +71,6 @@ export class RemoteExecutionNode implements ExecutionNode {
         for (const integration of this.#integrations.values()) integration.retire();
         this.#setAvailability('offline');
       });
-      transport.onAvailability((connected) => {
-        if (this.#current?.rpc !== rpc || this.#availability === 'disposed') return;
-        if (!connected) this.#terminals.disconnect();
-        this.#setAvailability(connected ? 'ready' : 'reconnecting');
-      });
       void this.#install(transport, rpc).catch((error: unknown) => {
         if (this.#candidate === transport && this.#availability !== 'disposed') {
           this.reportError(error instanceof NodeConfigurationError ? error.message
@@ -166,7 +161,7 @@ export class RemoteExecutionNode implements ExecutionNode {
   async #install(transport: SessionTransport, rpc: AgentRpc): Promise<void> {
     await transport.ready;
     const { info, integrations } = await rpc.call('', 'node.describe', null);
-    if (info.nodeId !== this.id || transport.nodeId !== this.id) throw new NodeConfigurationError('Execution-node identity mismatch');
+    if (info.nodeId !== this.id || transport.nodeId !== this.id) throw new NodeConfigurationError(`Execution-node identity mismatch: worker serves ${info.nodeId}; restart the worker to serve ${this.id}`);
     if (typeof info.projectBasePath !== 'string' || !info.projectBasePath) throw new NodeConfigurationError('Execution-node project base is missing');
     if (!info.services || (['files', 'git', 'gh', 'terminals'] as const).some(key => typeof info.services[key] !== 'boolean')) throw new NodeConfigurationError('Execution-node machine capabilities are invalid');
     const manifests = new Map<string, IntegrationManifest>();

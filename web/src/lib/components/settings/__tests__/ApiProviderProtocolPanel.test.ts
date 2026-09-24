@@ -35,6 +35,19 @@ describe('ApiProviderProtocolPanel', () => {
 	});
 
 	it.each([
+		{ hasApiKey: true, label: 'Key configured' },
+		{ hasApiKey: false, label: 'No key' },
+	])('shows $label for a saved profile', ({ hasApiKey, label }) => {
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible', title: 'OpenAI Providers', description: '', addLabel: 'Add provider',
+			apiProviderCatalog: [{
+				...workerProfile, endpoints: [{ ...workerProfile.endpoints[0], hasApiKey }],
+			}],
+		});
+		expect(screen.getByText(label)).toBeTruthy();
+	});
+
+	it.each([
 		{
 			name: 'prefers a ready assigned node over an earlier offline assignment',
 			nodes: [localExecutionNode, offlineWorker, secondWorker],
@@ -99,6 +112,49 @@ describe('ApiProviderProtocolPanel', () => {
 		await fireEvent.change(host, { target: { value: remoteExecutionNode.id } });
 		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(false);
 	});
+
+	it('keeps create, duplicate, and edit requests independent across dialog openings', async () => {
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible',
+			title: 'OpenAI Providers',
+			description: '',
+			addLabel: 'Add provider',
+			nodes: [localExecutionNode, remoteExecutionNode],
+			assignments: { [remoteExecutionNode.id]: [workerProfile.id] },
+			apiProviderCatalog: [workerProfile],
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add Ollama' }));
+		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Ollama');
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe('local');
+		await fireEvent.input(screen.getByLabelText('API key or token'), { target: { value: 'synthetic-draft-key' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Duplicate Worker endpoint' }));
+		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Worker endpoint copy');
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe(remoteExecutionNode.id);
+		expect(screen.getByLabelText<HTMLInputElement>('API key or token').value).toBe('');
+		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
+		await fireEvent.input(screen.getByLabelText('API key or token'), { target: { value: 'synthetic-copy-key' } });
+		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(false);
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
+		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Worker endpoint');
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Test from' }).value).toBe(remoteExecutionNode.id);
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add custom provider..' }));
+		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('');
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe('local');
+		expect(screen.getByLabelText<HTMLTextAreaElement>('Models').value).toBe('');
+	});
+
 	it('restores a failed unassignment and retries revocation on the next click', async () => {
 		const unassign = vi.fn(async () => {
 			throw new Error('Assignment write failed');

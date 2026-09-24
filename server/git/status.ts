@@ -50,21 +50,7 @@ const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
 const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
-// Network commands run within the HTTP idle budget minus a margin, so a slow
-// remote surfaces a git error before the idle timeout drops the response.
-// The budget only tightens the runner's 30s default; it never loosens it.
-const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
 const NETWORK_GIT_DEFAULT_TIMEOUT_MS = 30_000;
-
-export function resolveNetworkGitTimeoutMs(idleSeconds: number): number {
-  // A disabled budget (0) must not tighten anything; without this guard it
-  // would clamp every network command to the 1s floor.
-  if (idleSeconds <= 0) return NETWORK_GIT_DEFAULT_TIMEOUT_MS;
-  return Math.min(
-    NETWORK_GIT_DEFAULT_TIMEOUT_MS,
-    Math.max(1_000, idleSeconds * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
-  );
-}
 
 function networkGitOptions(): GitCommandOptions {
   return {

@@ -21,16 +21,20 @@ export interface TerminalSurfaceRuntimePort {
 
 export interface TerminalSurfaceRegistryPort extends Pick<
 	TerminalRegistry,
-	'hosts' | 'hasRemoteHosts' | 'canCreate' | 'nodeIdFor' | 'displayName' | 'nodeLabel'
+	| 'hosts'
+	| 'hasRemoteHosts'
+	| 'canCreate'
+	| 'nodeIdFor'
+	| 'displayName'
+	| 'nodeLabel'
+	| 'nodeInventories'
 > {
 	readonly sessions: Readonly<Record<string, TerminalClientSession>>;
 	readonly orderedSessions: readonly TerminalClientSession[];
-	readonly listStatus: 'idle' | 'loading' | 'ready' | 'failed';
-	readonly listError: string | null;
 	ensureRuntime(terminalId: string): Promise<TerminalSurfaceRuntimePort>;
 	reattach(terminalId: string): void;
 	rename(terminalId: string, title: string | null): Promise<void>;
-	list(): Promise<void>;
+	list(nodeId?: string): Promise<void>;
 }
 
 export interface TerminalSurfaceWorkspacePort {

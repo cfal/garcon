@@ -6,6 +6,47 @@ import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 describe('Lightpanda on-demand project resolution', () => {
+  test('a rejected remote send refreshes the composer project on its own node', async () => {
+    await withE2eFixture('remote-unavailable-project-submit', async fixture => {
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { showQuickCommitTray: false });
+      const { client, directAgents, executionDirs } = fixture.integration;
+      const projectPath = join(executionDirs.project, 'removed-after-open');
+      await mkdir(projectPath);
+      const chatId = fixture.integration.newChatId();
+      const started = await client.startDirectChat({ chatId, projectPath, content: 'Synthetic remote project', agent: directAgents.openAi });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(390, 844);
+      await app.openChat(chatId);
+      await fixture.waitForSpaWebSocket();
+      await app.waitForButton('Execution node: Integration worker');
+      const resolutionRequests: URL[] = [];
+      fixture.page.on('request', request => {
+        const url = new URL(request.url());
+        if (url.pathname === '/api/v1/projects/resolve') resolutionRequests.push(url);
+      });
+      await rm(projectPath, { recursive: true });
+      await app.sendComposer('Synthetic rejected send');
+      await fixture.page.waitForFunction(() =>
+        document.querySelector('[data-composer-shell] [data-project-availability-notice]')?.textContent?.includes('Project folder unavailable'), { timeout: 20_000 });
+      expect(resolutionRequests.length).toBeGreaterThan(0);
+      expect(resolutionRequests.every(url => url.searchParams.get('nodeId') === client.nodeId)).toBe(true);
+      expect(await fixture.page.$eval('[data-composer] textarea', element => (element as HTMLTextAreaElement).value)).toBe('Synthetic rejected send');
+      await mkdir(projectPath);
+      await fixture.page.$eval('[data-composer-shell] [data-project-availability-notice]', element => {
+        const retry = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Retry');
+        if (!retry) throw new Error('Project retry is unavailable');
+        retry.click();
+      });
+      await fixture.page.waitForFunction(() =>
+        !document.querySelector('[data-composer-shell] [data-project-availability-notice]'));
+      await app.sendComposer('Synthetic retry after repair');
+      await app.waitForAssistantMessageContaining('Synthetic retry after repair');
+      expect((await client.getChatSnapshot(chatId)).chat.nodeId).toBe(client.nodeId);
+      expect(fixture.browserErrors.filter(message => !message.includes('409'))).toEqual([]);
+    }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+  }, 60_000);
+
   test('keeps chat history and drafts quiet until a project surface is presented', async () => {
     await withE2eFixture('on-demand-project-resolution', async (fixture) => {
       await fixture.page.evaluateOnNewDocument(seedLocalSettings, { showQuickCommitTray: false });

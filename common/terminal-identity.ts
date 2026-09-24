@@ -21,9 +21,3 @@ export function parseTerminalReference(value: unknown): TerminalReference | null
   return isExecutionNodeId(nodeId) && UUID.test(terminalRuntimeId!) && UUID.test(sessionId!)
     ? { nodeId, terminalRuntimeId: terminalRuntimeId!, sessionId: sessionId! } : null;
 }
-
-export function terminalNodeId(value: string): string {
-  const reference = parseTerminalReference(value);
-  if (!reference) throw new Error('Invalid terminal reference');
-  return reference.nodeId;
-}

@@ -111,7 +111,7 @@
 		<div class="relative">
 			<div class="flex flex-wrap gap-2 @container/project-target">
 				<ExecutionNodeSelector {nodes} nodeId={startup.nodeId} service="agents" presentation="field"
-					class="w-full @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
+					class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
 					onSelect={(nodeId) => startup.selectNode(nodeId)} />
 				<div class="relative min-w-0 flex-1">
 					<input

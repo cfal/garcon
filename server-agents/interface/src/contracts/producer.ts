@@ -127,7 +127,9 @@ export interface AgentProducerSink {
 
 export interface AgentProducerNotification {
   readonly binding: AgentProducerBinding;
-  readonly event: AgentProducerEvent | { readonly type: 'started'; readonly runId: string };
+  readonly event: AgentProducerEvent
+    | { readonly type: 'started'; readonly runId: string }
+    | { readonly type: 'publication-failed'; readonly error: AgentRunFailureDetail };
 }
 
 export interface AgentProducers {
@@ -136,7 +138,11 @@ export interface AgentProducers {
     readonly binding: AgentProducerBinding;
     readonly chatId: string;
   }, options?: NodeCallOptions): Promise<void>;
+  // Closes the binding and best-effort aborts active work, never a completed operation.
+  // A start still pending at closure rejects with STALE_RESOURCE.
   close(binding: AgentProducerBinding, options?: NodeCallOptions): Promise<void>;
+  // Drops publication and denies permissions without aborting native work.
+  detach(binding: AgentProducerBinding): void;
   // Listeners are process-local; remote adapters dispatch the fixed event channel here.
   subscribe(listener: (notification: AgentProducerNotification) => void): () => void;
 }

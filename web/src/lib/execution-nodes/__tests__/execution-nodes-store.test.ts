@@ -81,10 +81,9 @@ describe('ExecutionNodesStore', () => {
 		expect(nodes.isReady(remoteExecutionNode.id)).toBe(true);
 	});
 
-	it('distinguishes disabled, waiting, reconnecting, and offline states', () => {
+	it('distinguishes disabled, waiting, and offline states', () => {
 		expect(executionNodeStatus({ ...remoteExecutionNode, enabled: false })).toBe('Disabled');
 		expect(executionNodeStatus({ ...remoteExecutionNode, availability: 'offline' })).toBe('Waiting for connection');
-		expect(executionNodeStatus({ ...remoteExecutionNode, availability: 'reconnecting' })).toBe('Reconnecting');
 		expect(executionNodeStatus({ ...remoteExecutionNode, direction: 'controller-connects', availability: 'offline' })).toBe('Offline');
 	});
 });

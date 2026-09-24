@@ -75,6 +75,72 @@ test('edits remote files and retains offline buffers without touching controller
   }, undefined, { executionBackend: 'remote-node-dials', projectRoots: 'separate' });
 }, 180_000);
 
+test('distinguishes and recovers same-path drafts on Local and a worker', async () => {
+  await withChromiumFixture('execution-node-draft-labels', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { client, dirs, directAgents } = integration;
+    await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
+    const filename = 'same-path-draft.txt';
+    await writeFile(join(dirs.project, filename), 'Synthetic saved content');
+    page.on('dialog', (dialog) => void dialog.accept());
+    const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
+    const source = surface.locator('.cm-content');
+    const contents: string[] = [];
+    for (const nodeId of ['local', client.nodeId]) {
+      const chatId = integration.newChatId();
+      const started = await client.startChat({
+        ...client.directStartRequest({ chatId, content: 'Synthetic draft recovery fixture', projectPath: dirs.project, agent: directAgents.openAi }),
+        nodeId,
+      });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await page.locator('[data-file-tree-entry-text]').getByText(filename, { exact: true }).click();
+      await browserExpect(source).toHaveText('Synthetic saved content');
+      await source.press('Control+a');
+      const content = nodeId === 'local' ? 'Synthetic Local draft' : 'Synthetic worker draft';
+      contents.push(content);
+      await page.keyboard.insertText(content);
+      await browserExpect.poll(() => page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+        const request = indexedDB.open('garcon-file-drafts-v1');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction('drafts', 'readonly');
+          const read = transaction.objectStore('drafts').getAll();
+          transaction.oncomplete = () => {
+            database.close();
+            resolve(read.result.map((draft: { content: string }) => draft.content).sort());
+          };
+          transaction.onabort = () => { database.close(); reject(transaction.error); };
+        };
+      }))).toEqual([...contents].sort());
+    }
+
+    await page.reload();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('button', { name: 'Files', exact: true }).click();
+    const recovered = page.getByRole('region', { name: 'Recovered files' });
+    await browserExpect(recovered.getByRole('button', { name: filename, exact: true })).toBeVisible();
+    const workerLabel = `Integration worker: ${filename}`;
+    await browserExpect(recovered.getByRole('button', { name: workerLabel, exact: true })).toHaveAttribute('title', `Integration worker: ${join(dirs.project, filename)}`);
+    for (const [label, content] of [[filename, contents[0]], [workerLabel, contents[1]]]) {
+      const downloaded = page.waitForEvent('download');
+      await recovered.getByRole('button', { name: `Export draft for ${label}`, exact: true }).click();
+      expect(await readFile((await (await downloaded).path())!, 'utf8')).toBe(content);
+    }
+    const screenshot = new URL('../../artifacts/chromium/file-recovery-node-labels.png', import.meta.url);
+    await mkdir(new URL('.', screenshot), { recursive: true });
+    await page.screenshot({ path: screenshot.pathname });
+
+    const readRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/v1/files/text' && request.method() === 'GET');
+    await recovered.getByRole('button', { name: workerLabel, exact: true }).click();
+    await page.getByRole('dialog', { name: 'Recover local changes?', exact: true }).getByRole('button', { name: 'Resume draft', exact: true }).click();
+    expect(new URL((await readRequest).url()).searchParams.get('nodeId')).toBe(client.nodeId);
+    await browserExpect(source).toHaveText(contents[1]);
+    expect(await readFile(join(dirs.project, filename), 'utf8')).toBe('Synthetic saved content');
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-controller-dials' });
+}, 180_000);
+
 test('switches file nodes from breadcrumbs without changing chat ownership and reveals complete paths', async () => {
   await withChromiumFixture('execution-node-file-breadcrumbs', async ({ page, integration, browserErrors }) => {
     const { client, executionDirs, dirs, directAgents } = integration;

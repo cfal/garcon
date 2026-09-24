@@ -49,6 +49,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-node-dials'] 
   test(`Git views, staging, file links and reconnect remain node-scoped (${executionBackend})`, async () => {
     await withE2eFixture(`execution-node-git-${executionBackend}`, async fixture => {
       const { client, dirs, executionDirs, directAgents } = fixture.integration;
+      await client.put(`/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
       await initializeFixtureRepository(dirs.project);
       await initializeFixtureRepository(executionDirs.project);
       await writeFile(join(dirs.project, 'example.txt'), 'Controller-only change\n');

@@ -2475,6 +2475,38 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('returns typed project-path refusals without retiring the active session', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    const runtime = createRuntime();
+    const request = {
+      chatId: 'chat-1',
+      agentSessionId: 'expected-session',
+      previousProjectPath: '/tmp',
+      nextProjectPath: '/next',
+      nativePath: '/config/projects/tmp/expected-session.jsonl',
+    };
+
+    try {
+      const start = runtime.startClaudeCliSession(startOptions());
+      await waitForWrittenUserMessage(fake);
+      await expect(runtime.prepareClaudeProjectPathUpdate({ ...request, chatId: 'other-chat' }))
+        .rejects.toMatchObject({ code: 'SESSION_BUSY', message: 'Chat ID mismatch' });
+      await expect(runtime.prepareClaudeProjectPathUpdate(request))
+        .rejects.toMatchObject({ code: 'SESSION_BUSY', message: 'Cannot update project path while Claude is running' });
+      expect(fake.proc.stdin.end).not.toHaveBeenCalled();
+
+      await enqueueResult(fake);
+      await start;
+      await expect(runtime.prepareClaudeProjectPathUpdate(request)).resolves.toBeUndefined();
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('waits for the idle Claude process to exit before preparing a path update', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

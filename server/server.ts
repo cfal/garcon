@@ -2,8 +2,8 @@
 // This is the single place where dependencies are resolved.
 
 import path from 'path';
-import { initializeServerConfig } from './config.js';
-import { wrapRoutes } from './lib/http-route.js';
+import { getConfigDir, initializeServerConfig } from './config.js';
+import { wrapRoutes, serverShuttingDownResponse } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
 import { jsonError } from './lib/http-error.js';
@@ -24,17 +24,13 @@ import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
-import {
-  ChatExecutionCoordinator,
-} from './chat-execution/chat-execution-coordinator.js';
+import { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
 import { queueDrainOptions } from './chats/chat-execution-options.js';
 import { TerminalController } from './terminals/controller.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
-import {
-  publishWebSocketPayload,
-} from './ws/transport.js';
+import { publishWebSocketPayload } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
@@ -121,7 +117,7 @@ import createAllRoutes from './routes/index.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import { createLogger, type Logger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
-import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
+import { acquireControllerLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
   advertisedServerUrl,
   createServerRuntimeState,
@@ -185,7 +181,7 @@ export async function startServer(): Promise<void> {
     if (process.env.GARCON_AGENT_EXECUTION_NODE_CONFIG) {
       throw new Error('GARCON_AGENT_EXECUTION_NODE_CONFIG is no longer supported. Add execution nodes in the app and use a fresh workspace for experimental remote-only chats.');
     }
-    workspaceLease = await acquireWorkspaceLease(config.workspaceDir, {
+    workspaceLease = await acquireControllerLease(getConfigDir(), config.workspaceDir, {
       onCompromised(error) {
         logger.error('Workspace lease was compromised:', errorMessage(error));
         process.kill(process.pid, 'SIGTERM');
@@ -699,6 +695,7 @@ export async function startServer(): Promise<void> {
     eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         executionNodes,
+        ownershipJournal: agentOwnership,
         projectBasePath,
         server: {
           publish(topic, payload) {
@@ -807,6 +804,7 @@ export async function startServer(): Promise<void> {
     const bindAddress = config.bindAddress;
     const authDisabled = config.authDisabled;
     const executionSockets = createNoiseServer({ maxConnections: 64, maxPendingHandshakes: 16 });
+    let shuttingDown = false;
 
     const serveOptions = {
       port: listenPort,
@@ -814,7 +812,7 @@ export async function startServer(): Promise<void> {
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
-      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability }),
+      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, isShuttingDown: () => shuttingDown }),
       error(error) {
         if (error instanceof MalformedJsonError) {
           return malformedJsonResponse();
@@ -823,6 +821,7 @@ export async function startServer(): Promise<void> {
         return jsonError('Internal server error', 500);
       },
       async fetch(request, server) {
+        if (shuttingDown) return serverShuttingDownResponse();
         const url = new URL(request.url);
 
         if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
@@ -840,6 +839,7 @@ export async function startServer(): Promise<void> {
           const claims = authDisabled
             ? null
             : await verifyAuthTokenClaims(token);
+          if (shuttingDown) return serverShuttingDownResponse();
           const principal: ServerPrincipal | null = authDisabled
             ? LOCAL_SERVER_PRINCIPAL
             : claims
@@ -909,10 +909,10 @@ export async function startServer(): Promise<void> {
     }
 
     // Graceful shutdown: flush pending writes and clean up timers.
-    let shuttingDown = false;
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
+      primaryDelivery.close();
       agentCommands.shutdown();
       carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');

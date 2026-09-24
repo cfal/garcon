@@ -27,7 +27,7 @@ const integration = {
     abort: async () => false,
     runningSessions: async () => [],
   },
-  producers: { scope, bind: async () => {}, close: async () => {}, subscribe: () => () => {} },
+  producers: { scope, bind: async () => {}, close: async () => {}, detach: () => {}, subscribe: () => () => {} },
   permissions: { respond: async () => {} },
   legacyHistoryImport: null,
   nativeHistoryImport: null,

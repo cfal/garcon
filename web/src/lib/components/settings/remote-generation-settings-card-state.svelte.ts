@@ -26,10 +26,7 @@ import type {
 import type { ResolvedModelSelection } from '$shared/start-selection';
 
 export type GenerationSettingsKey =
-	| 'chatTitle'
-	| 'agentSwitchCompaction'
-	| 'commitMessage'
-	| 'promptRefinement';
+	'chatTitle' | 'agentSwitchCompaction' | 'commitMessage' | 'promptRefinement';
 
 // Keys whose card owns an on/off switch above the model selector.
 const TOGGLEABLE_KEYS = new Set<GenerationSettingsKey>(['chatTitle', 'agentSwitchCompaction']);
@@ -45,7 +42,11 @@ export interface RemoteGenerationSettingsModelCatalog {
 		model: string,
 		modelEndpointId?: string | null,
 	): ResolvedModelSelection | null;
-	selectionValueFor(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): string;
+	selectionValueFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): string;
 }
 
 interface RemoteGenerationSettingsCardOptions {
@@ -55,9 +56,7 @@ interface RemoteGenerationSettingsCardOptions {
 	get enabledLabel(): string | undefined;
 }
 
-export type GenerationPromptSaveResult =
-	| { ok: true }
-	| { ok: false; message: string };
+export type GenerationPromptSaveResult = { ok: true } | { ok: false; message: string };
 
 interface ConfigurationTestResult {
 	configurationKey: string;
@@ -102,39 +101,67 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	get effectiveSelection(): GenerationSelectionUiSettings {
-		const effective = this.options.remoteSettings.snapshot?.uiEffective;
-		if (this.options.settingsKey === 'chatTitle') return effective?.chatTitle ?? {};
-		if (this.options.settingsKey === 'agentSwitchCompaction') {
-			return effective?.agentSwitchCompaction ?? {};
-		}
-		if (this.options.settingsKey === 'commitMessage') return effective?.commitMessage ?? {};
-		return effective?.promptRefinement ?? {};
+		const snapshot = this.options.remoteSettings.snapshot;
+		return (
+			snapshot?.uiEffective[this.options.settingsKey] ??
+			snapshot?.ui[this.options.settingsKey] ??
+			{}
+		);
 	}
 
 	get enabled(): boolean {
 		if (!this.hasEnabledSwitch) return true;
-		const effective = this.options.remoteSettings.snapshot?.uiEffective;
+		const snapshot = this.options.remoteSettings.snapshot;
 		return this.options.settingsKey === 'agentSwitchCompaction'
-			? effective?.agentSwitchCompaction?.enabled === true
-			: effective?.chatTitle?.enabled !== false;
+			? (snapshot?.uiEffective.agentSwitchCompaction ?? snapshot?.ui.agentSwitchCompaction)
+					?.enabled === true
+			: (snapshot?.uiEffective.chatTitle ?? snapshot?.ui.chatTitle)?.enabled !== false;
 	}
 
-	get nodeId(): string { return effectiveNodeId(this.selectionOverride?.nodeId ?? this.effectiveSelection.nodeId); }
+	get nodeId(): string {
+		return effectiveNodeId(this.selectionOverride?.nodeId ?? this.effectiveSelection.nodeId);
+	}
 
 	get isAuto(): boolean {
 		const saved = this.options.remoteSettings.snapshot?.ui[this.options.settingsKey];
-		return !this.selectionOverride && !saved?.nodeId && !saved?.agentId && !saved?.model;
+		return !this.selectionOverride && saved?.nodeId == null && !saved?.agentId && !saved?.model;
+	}
+
+	get selectionUnavailable(): boolean {
+		const snapshot = this.options.remoteSettings.snapshot;
+		const saved = snapshot?.ui[this.options.settingsKey];
+		return Boolean(
+			saved &&
+			(saved.nodeId != null || saved.agentId || saved.model) &&
+			!snapshot?.uiEffective[this.options.settingsKey],
+		);
 	}
 
 	async persistAuto(): Promise<void> {
-		const saved: GenerationSelectionUiSettings = { ...this.options.remoteSettings.snapshot?.ui[this.options.settingsKey] };
-		for (const key of ['nodeId', 'agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol', 'thinkingMode'] as const) delete saved[key];
-		if (await this.#saveUiSettings({ [this.options.settingsKey]: saved })) this.selectionOverride = null;
+		const saved: GenerationSelectionUiSettings = {
+			...this.options.remoteSettings.snapshot?.ui[this.options.settingsKey],
+		};
+		for (const key of [
+			'nodeId',
+			'agentId',
+			'model',
+			'apiProviderId',
+			'modelEndpointId',
+			'modelProtocol',
+			'thinkingMode',
+		] as const)
+			delete saved[key];
+		if (await this.#saveUiSettings({ [this.options.settingsKey]: saved }))
+			this.selectionOverride = null;
 	}
 
 	get contextWindowTokens(): AgentSwitchContextWindowTokens {
-		return this.options.remoteSettings.snapshot?.uiEffective.agentSwitchCompaction
-			?.contextWindowTokens ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS;
+		return (
+			(
+				this.options.remoteSettings.snapshot?.uiEffective.agentSwitchCompaction ??
+				this.persistedCompactionSettings
+			).contextWindowTokens ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS
+		);
 	}
 
 	get provider(): SessionAgentId {
@@ -150,7 +177,9 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	get modelEndpointId(): string | null {
-		return this.selectionOverride?.modelEndpointId ?? this.effectiveSelection.modelEndpointId ?? null;
+		return (
+			this.selectionOverride?.modelEndpointId ?? this.effectiveSelection.modelEndpointId ?? null
+		);
 	}
 
 	get modelProtocol(): ApiProtocol | null {
@@ -233,8 +262,13 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	get directoryPrefixEnabled(): boolean {
-		return this.options.settingsKey === 'commitMessage'
-			&& this.options.remoteSettings.snapshot?.uiEffective?.commitMessage?.useCommonDirPrefix === true;
+		return (
+			this.options.settingsKey === 'commitMessage' &&
+			(
+				this.options.remoteSettings.snapshot?.uiEffective?.commitMessage ??
+				this.persistedCommitMessageSettings
+			).useCommonDirPrefix === true
+		);
 	}
 
 	get customPrompt(): string {
@@ -247,25 +281,27 @@ export class RemoteGenerationSettingsCardState {
 		return '';
 	}
 
-	#selectionSettings(
-		overrides: GenerationSelectionUiSettings = {},
-	): GenerationSelectionUiSettings {
+	#selectionSettings(overrides: GenerationSelectionUiSettings = {}): GenerationSelectionUiSettings {
 		if (this.isAuto && Object.keys(overrides).length === 0) return {};
+		if (
+			!this.selectionOverride &&
+			Object.keys(overrides).length === 0 &&
+			!this.options.remoteSettings.snapshot?.uiEffective[this.options.settingsKey]
+		) {
+			return { ...this.options.remoteSettings.snapshot?.ui[this.options.settingsKey] };
+		}
 		const nextProvider =
-			typeof overrides.agentId === 'string'
-				? (overrides.agentId as SessionAgentId)
-				: this.provider;
+			typeof overrides.agentId === 'string' ? (overrides.agentId as SessionAgentId) : this.provider;
 		const nextModelValue = typeof overrides.model === 'string' ? overrides.model : this.modelValue;
 		const nextEndpointId =
-			overrides.modelEndpointId !== undefined
-				? overrides.modelEndpointId
-				: this.modelEndpointId;
+			overrides.modelEndpointId !== undefined ? overrides.modelEndpointId : this.modelEndpointId;
 		const selection = this.options.modelCatalog.selectionFor(
 			nextProvider,
 			nextModelValue,
 			nextEndpointId,
 		) ?? {
-			model: typeof overrides.model === 'string' ? overrides.model : (this.rawModel || nextModelValue),
+			model:
+				typeof overrides.model === 'string' ? overrides.model : this.rawModel || nextModelValue,
 			apiProviderId:
 				overrides.apiProviderId !== undefined ? overrides.apiProviderId : this.apiProviderId,
 			modelEndpointId: nextEndpointId,
@@ -432,10 +468,7 @@ export class RemoteGenerationSettingsCardState {
 		this.testError = null;
 		this.testResult = null;
 		try {
-			const result = await testGenerationModel(
-				this.options.settingsKey,
-				testedConfigurationKey,
-			);
+			const result = await testGenerationModel(this.options.settingsKey, testedConfigurationKey);
 			if (token !== this.#testRequestToken) return;
 			this.testResult = {
 				configurationKey: testedConfigurationKey,

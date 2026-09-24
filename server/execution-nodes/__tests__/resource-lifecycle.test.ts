@@ -25,7 +25,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const lost = Promise.withResolvers<void>();
       fault.inject = (encoded) => {
         const packet = JSON.parse(encoded);
-        if (packet.kind === 'message' && JSON.parse(packet.body).type === 'result') { lost.resolve(); return 'disconnect'; }
+        if (packet.type === 'result') { lost.resolve(); return 'disconnect'; }
         return null;
       };
       const cancellation = new AbortController();
@@ -79,7 +79,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
-  test(`buffered events snapshot provider-owned messages before replay (${dialer} dials)`, async () => {
+  test(`publication snapshots provider-owned messages before delivery (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     try {
       const integration = await fixture.node.getAgentIntegration('test');
@@ -89,7 +89,6 @@ for (const dialer of ['controller', 'worker'] as const) {
       integration.producers.subscribe(({ event }) => {
         if (event.type === 'rows' && event.rows[0]?.message.type === 'assistant-message') received.resolve(event.rows[0].message.content);
       });
-      fixture.controller.disconnect(); fixture.worker.disconnect();
       const message = new AssistantMessage('2026-01-01T00:00:00Z', 'original');
       fixture.generations[0]!.nativePublishers[0]!({ type: 'rows', rows: [{ message }] });
       message.content = 'mutated after emission';

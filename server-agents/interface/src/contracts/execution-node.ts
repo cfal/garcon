@@ -30,7 +30,7 @@ export interface ExecutionProjectService {
   }, options?: NodeCallOptions): Promise<string>;
 }
 
-export type NodeAvailability = 'ready' | 'reconnecting' | 'offline' | 'disposed';
+export type NodeAvailability = 'ready' | 'offline' | 'disposed';
 
 export interface ExecutionNodeInfo {
   readonly nodeId: string;

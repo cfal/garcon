@@ -26,6 +26,27 @@ export class SteerInputDelivery {
   constructor(private readonly options: SteerInputDeliveryOptions) {}
 
   async captureTarget(chatId: string): Promise<CapturedSteerTarget | null> {
+    const captured = this.#captureAttempt(chatId);
+    if (!captured) return null;
+    return Object.freeze({
+      ...captured,
+      providerTarget: await this.options.turnRunner.captureSteerTarget(chatId),
+    });
+  }
+
+  async captureControlTarget(chatId: string): Promise<CapturedSteerTarget | null> {
+    const captured = this.#captureAttempt(chatId);
+    if (!captured) return null;
+    let providerTarget: CapturedSteerTarget['providerTarget'] = null;
+    try {
+      providerTarget = await this.options.turnRunner.captureSteerTarget(chatId);
+    } catch {
+      // Capture cannot deliver input; fallback still waits for this exact attempt.
+    }
+    return Object.freeze({ ...captured, providerTarget });
+  }
+
+  #captureAttempt(chatId: string): Omit<CapturedSteerTarget, 'providerTarget'> | null {
     const attempt = this.options.ownership.attempt(chatId);
     const identity = attempt?.identity();
     if (!attempt || attempt.isSettled || !identity?.turnId) return null;
@@ -33,7 +54,6 @@ export class SteerInputDelivery {
     return Object.freeze({
       attempt,
       identity: Object.freeze({ ...identity, turnId: identity.turnId }),
-      providerTarget: await this.options.turnRunner.captureSteerTarget(chatId),
     });
   }
 
@@ -109,9 +129,10 @@ export class SteerInputDelivery {
       throw new SteerDeliveryError(new Error(result.message), result.outcome);
     } catch (error) {
       if (error instanceof DomainError) throw error;
-      throw new SteerDeliveryError(error, error instanceof AgentCallError
-        ? error.outcome === 'unknown' ? 'unknown' : 'not-sent'
-        : deliveryPrepared ? 'unknown' : 'not-sent');
+      const uncertain = error instanceof AgentCallError
+        ? error.outcome === 'unknown'
+        : deliveryPrepared;
+      throw new SteerDeliveryError(error, uncertain ? 'unknown' : 'not-sent');
     }
   }
 

@@ -37,10 +37,7 @@ export function createAgentProjectPathUpdates(
         value = await prepare({ ...request, signal: options?.signal ?? new AbortController().signal });
       } catch (error) {
         preparations.delete(ref);
-        if ((error instanceof AgentCallError && error.outcome !== 'unknown')
-          || (error instanceof AgentIntegrationError && error.code === 'PROJECT_PATH_DESTINATION_REJECTED')) {
-          blockedChats.delete(chatId);
-        }
+        if (isDefinitiveRefusal(error)) blockedChats.delete(chatId);
         throw error;
       }
       if (!value) {
@@ -69,4 +66,19 @@ export function createAgentProjectPathUpdates(
       blockedChats.delete(preparation.chatId);
     },
   };
+}
+
+function isDefinitiveRefusal(error: unknown): boolean {
+  if (error instanceof AgentCallError) return error.outcome !== 'unknown';
+  if (!(error instanceof AgentIntegrationError)) return false;
+  switch (error.code) {
+    case 'SESSION_BUSY':
+    case 'SESSION_NOT_FOUND':
+    case 'OPERATION_UNSUPPORTED':
+    case 'TRANSCRIPT_UNAVAILABLE':
+    case 'PROJECT_PATH_DESTINATION_REJECTED':
+      return true;
+    default:
+      return false;
+  }
 }

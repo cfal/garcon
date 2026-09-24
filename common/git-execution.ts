@@ -43,9 +43,7 @@ export function isGitMutation(method: GitMethod): boolean {
 
 export const GIT_OPERATION_TIMEOUT_MS = 30_000;
 export const GH_DETAIL_TIMEOUT_MS = 60_000;
-export const GIT_RESULT_CHUNK_BYTES = 256 * 1024;
-export const GIT_MAX_RESULT_BYTES = 32 * 1024 * 1024;
-export const GIT_MAX_RETAINED_RESULT_BYTES = 64 * 1024 * 1024;
+export const GIT_MAX_RESULT_BYTES = 4 * 1024 * 1024;
 export const GIT_MAX_CONCURRENT_QUERIES = 8;
-export const GIT_MAX_RETAINED_RESULTS = 8;
-export const GIT_MAX_REQUEST_BYTES = 256 * 1024;
+export const GIT_MAX_REQUEST_BYTES = 4 * 1024 * 1024;
+export const GIT_MAX_REQUEST_PATHS = 100_000;

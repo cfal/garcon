@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { ApiError } from '$lib/api/client.js';
+import { saveText } from '$lib/api/files.js';
+import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { createGhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
@@ -57,6 +59,12 @@ vi.mock('$lib/api/files.js', async (importOriginal) => {
 			content: '',
 			path: `/workspace/${filePath}`,
 			revision: `v1:${filePath}`,
+		})),
+		saveText: vi.fn<typeof actual.saveText>(async ({ projectPath, filePath }) => ({
+			success: true,
+			path: `${projectPath}/${filePath}`,
+			message: 'saved',
+			revision: 'v1:saved',
 		})),
 	};
 });
@@ -153,9 +161,62 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings?.destroy();
 		rootLocalSettings = null;
 		projectResolutionApiMocks.resolveProject.mockReset();
+		vi.mocked(saveText).mockClear();
+		gitProjectInvalidations.pruneNodes(new Set());
 		vi.restoreAllMocks();
 		vi.useRealTimers();
 	});
+
+	it.each([
+		{ root: '/workspace', relativePath: 'notes/todo.md', outcome: 'saved' },
+		{ root: '/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'saved' },
+		{ root: '/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'unknown' },
+		{ root: '/', relativePath: 'repo-b/src/file.ts', outcome: 'saved' },
+		{ root: 'C:/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'saved' },
+	])(
+		'refreshes all visible Git projects on the saved file host: $root/$relativePath ($outcome)',
+		async ({ root, relativePath, outcome }) => {
+			rootLocalSettings = createLocalSettingsStore();
+			({ services } = assembleWorkspaceServices(rootLocalSettings));
+			const nodeId = '22222222-2222-4222-8222-222222222222';
+			const session = new FileSession(
+				{ nodeId, canonicalFileRootPath: root, normalizedRelativePath: relativePath },
+				'file-save',
+			);
+			session.loadedRevision = 'v1:loaded';
+			session.document.applyUserEdit('changed');
+			vi.spyOn(services.files, 'get').mockReturnValue(session);
+			const repoA = `${root === '/' ? '' : root}/repo-a`;
+			const repoB = `${root === '/' ? '' : root}/repo-b`;
+			const projects = [
+				{ nodeId, projectPath: repoA, isProcessing: false },
+				{ nodeId, projectPath: repoB, isProcessing: false },
+				{ nodeId: 'local', projectPath: repoB, isProcessing: false },
+			];
+			services.gitQuickSummary.visibleProjects = projects;
+			const refresh = vi
+				.spyOn(services.gitQuickSummary, 'scheduleRefreshFor')
+				.mockReturnValue(undefined);
+			if (outcome === 'unknown') {
+				vi.mocked(saveText).mockRejectedValueOnce(
+					new ApiError(502, 'Save unconfirmed', 'FILE_SAVE_OUTCOME_UNKNOWN'),
+				);
+			}
+
+			await expect(services.files.save(session.id)).resolves.toBe(outcome === 'saved');
+			expect(saveText).toHaveBeenCalledOnce();
+			expect(saveText).toHaveBeenCalledWith(
+				expect.objectContaining({ nodeId, filePath: relativePath }),
+				expect.anything(),
+			);
+			expect(gitProjectInvalidations.version(nodeId)).toBeGreaterThan(0);
+			expect(gitProjectInvalidations.version('local')).toBe(0);
+			expect(refresh.mock.calls).toEqual([
+				[projects[0], 'invalidation', 100],
+				[projects[1], 'invalidation', 100],
+			]);
+		},
+	);
 
 	it.each(['known', 'back', 'forward'] as const)(
 		'opens %s file locations in the command context window',

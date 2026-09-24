@@ -4,32 +4,22 @@ import type { ProjectInspector } from '../../common/project-resolution.js';
 import { effectiveNodeId } from '../../common/execution-nodes.js';
 import { isRecord } from '../../common/json.js';
 import { FILE_REVISION_HEADER, parseSaveTextRequest, type ReadTextResponse } from '../../common/file-contracts.js';
-import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
 import type { IChatRegistry } from '../chats/store.js';
-import { LocalExecutionFilesService, type FilesServiceOptions } from '../files/service.js';
-import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 import { DomainError, ValidationDomainError } from '../lib/domain-error.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { resolveProjectPathFromUrl } from './project-path-resolver.js';
-import { assertLocalMachineNode, executionNodeIdFromUrl } from './node-target.js';
+import { executionNodeIdFromUrl } from './node-target.js';
 import { createFileAttachmentRoutes } from './file-attachments.js';
 
 interface FilesRouteDependencies {
-  readonly files?: (nodeId: string) => Promise<ExecutionFilesService>;
-  readonly inspectProject?: ProjectInspector;
-  readonly resolveSaveTarget?: FilesServiceOptions['resolveSaveTarget'];
-  readonly readDirectory?: FilesServiceOptions['readDirectory'];
+  readonly files: (nodeId: string) => Promise<ExecutionFilesService>;
+  readonly inspectProject: ProjectInspector;
 }
 
-export default function createFilesRoutes(registry: IChatRegistry, dependencies: FilesRouteDependencies = {}): RouteMap {
-  const local = new LocalExecutionFilesService({
-    nodeId: 'local', projectBasePath: getProjectBasePath(), homeDirectory: getHomeDirectoryPath(),
-    resolveSaveTarget: dependencies.resolveSaveTarget, readDirectory: dependencies.readDirectory,
-  });
-  const files = dependencies.files ?? (async (nodeId: string) => { assertLocalMachineNode(nodeId); return local; });
-  const inspect = dependencies.inspectProject ?? (async (projectPath, nodeId) => { assertLocalMachineNode(nodeId); return inspectProjectDirectory(projectPath); });
+export default function createFilesRoutes(registry: IChatRegistry, dependencies: FilesRouteDependencies): RouteMap {
+  const { files, inspectProject: inspect } = dependencies;
 
   async function project(url: URL) {
     const chatId = url.searchParams.get('chatId');

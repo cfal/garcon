@@ -13,6 +13,11 @@ import {
 } from '$lib/files/persistence/file-draft-repository.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import {
+	localExecutionNode,
+	remoteExecutionNode,
+} from '$lib/execution-nodes/__tests__/fixtures.js';
 
 afterEach(cleanup);
 
@@ -57,6 +62,26 @@ describe('FilesPanel', () => {
 				content: 'local text',
 				savedAt: 1,
 			});
+			const remoteDraftId = fileDraftKey(
+				'user',
+				'deployment',
+				'/workspace',
+				'draft.txt',
+				remoteExecutionNode.id,
+			);
+			await repository.putDraft({
+				schemaVersion: 1,
+				userNamespace: 'user',
+				deploymentId: 'deployment',
+				documentId: remoteDraftId,
+				nodeId: remoteExecutionNode.id,
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'draft.txt',
+				content: 'remote text',
+				savedAt: 2,
+			});
+			const executionNodes = new ExecutionNodesStore();
+			executionNodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
 			const fileSessions = new FileSessionRegistry({
 				getIsMobile: () => presentation === 'mobile',
 				getDefaultPlacement: () => ({ type: 'dialog' }),
@@ -74,7 +99,7 @@ describe('FilesPanel', () => {
 				createCommit: () => new CommitController(gitSurfaceDeps),
 				createPullRequests: () => new PullRequestsStore(),
 			});
-			setFilesPanelTestContext({ fileSessions, singletonSurfaces, notifications });
+			setFilesPanelTestContext({ fileSessions, singletonSurfaces, notifications, executionNodes });
 			try {
 				render(FilesPanelTestHost, { presentation, focusFileSession, projectState });
 				expect(Object.keys(fileSessions.sessions)).toHaveLength(0);
@@ -101,6 +126,20 @@ describe('FilesPanel', () => {
 				});
 				await fireEvent.click(screen.getByRole('button', { name: 'Export draft for draft.txt' }));
 				expect(exportDraft).toHaveBeenCalledWith(draftId);
+				const remoteDraft = screen.getByRole('button', { name: 'Worker: draft.txt' });
+				expect(remoteDraft.getAttribute('title')).toBe('Worker: /workspace/draft.txt');
+				await fireEvent.click(remoteDraft);
+				expect(open).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						nodeId: remoteExecutionNode.id,
+						fileRootPath: '/workspace',
+						relativePath: 'draft.txt',
+					}),
+				);
+				await fireEvent.click(
+					screen.getByRole('button', { name: 'Export draft for Worker: draft.txt' }),
+				);
+				expect(exportDraft).toHaveBeenLastCalledWith(remoteDraftId);
 				await fileSessions.clearRecovery();
 				await waitFor(() =>
 					expect(screen.queryByRole('region', { name: 'Recovered files' })).toBeNull(),

@@ -68,7 +68,7 @@
 		if (!presentationVisible) return;
 		const key = controller.target.effectiveProjectKey;
 		if (!key) return;
-		const version = gitProjectInvalidations.version(controller.target.nodeId, key);
+		const version = gitProjectInvalidations.version(controller.target.nodeId);
 		untrack(() => void controller.refreshForInvalidation(key, version));
 	});
 

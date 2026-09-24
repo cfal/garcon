@@ -10,6 +10,7 @@ import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
+import type { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import type { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
 import type { ShareStore } from './chats/share-store.js';
@@ -65,6 +66,7 @@ interface ChatSearchEventIndex {
 
 export interface ServerEventWiringDeps {
   executionNodes: Pick<ExecutionNodeManager, 'onAvailabilityChanged' | 'onChanged' | 'list'>;
+  ownershipJournal: Pick<AgentOwnershipJournal, 'retryProviderCleanup'>;
   server: WebSocketPublisher;
   agentRegistry: AgentRegistry;
   chatRegistry: ChatRegistry;
@@ -106,6 +108,7 @@ export interface ServerEventWiring {
 
 export function wireServerEvents({
   executionNodes,
+  ownershipJournal,
   projectBasePath,
   server,
   agentRegistry,
@@ -637,17 +640,26 @@ export function wireServerEvents({
   queue.onTurnSettled((chatId, turn) => {
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
+  const retryProviderCleanup = (nodeId: string) => {
+    void ownershipJournal.retryProviderCleanup(nodeId).catch((error) => {
+      logger.warn('Execution-node native cleanup failed', { nodeId, error });
+    });
+  };
   executionNodes.onChanged(() => broadcast(new ExecutionNodesChangedMessage(executionNodes.list())));
   executionNodes.onAvailabilityChanged((nodeId, availability) => {
     if (availability === 'offline') agentRegistry.executionSessionLost(nodeId);
     if (availability === 'ready') {
       logger.info('Execution node ready', { nodeId });
+      retryProviderCleanup(nodeId);
       for (const chatId of chatRegistry.listChatIds()) {
         if (effectiveNodeId(chatRegistry.getChat(chatId)?.nodeId) !== nodeId) continue;
         void queue.triggerDrain(chatId).catch((error) => logger.warn('Execution-node queue drain failed', error));
       }
     }
   });
+  for (const node of executionNodes.list()) {
+    if (node.availability === 'ready') retryProviderCleanup(node.id);
+  }
 
   return {
     notifyAgentHandoff,

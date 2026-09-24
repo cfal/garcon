@@ -26,7 +26,7 @@ test('node deletion confirmation and unavailable chat remain usable on desktop a
     await browserExpect(page.getByRole('listbox')).toHaveCount(0);
     await composer.evaluate(element => element.setAttribute('data-retained-composer', 'true'));
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Execution Nodes', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Edit Integration worker', exact: true }).click();
     await page.getByRole('button', { name: 'Delete node', exact: true }).click();
     const dialog = page.getByRole('dialog');

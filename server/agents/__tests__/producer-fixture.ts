@@ -14,6 +14,7 @@ export function createProducerFixture() {
     scope,
     async bind({ binding }) { bindings.add(binding.id); },
     async close(binding) { bindings.delete(binding.id); },
+    detach(binding) { bindings.delete(binding.id); },
     subscribe(listener) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };

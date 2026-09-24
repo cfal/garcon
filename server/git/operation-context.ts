@@ -25,7 +25,7 @@ export async function withGitOperation<T>(root: string, options: (NodeCallOption
   const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
   const current: GitOperation = { root, signal, deadline: performance.now() + timeoutMs, pending: new Set(), closed: false, outputTruncated: false, mutationDispatched: false };
   try {
-    return await operations.run(current, async () => {
+    const result = await operations.run(current, async () => {
       signal.throwIfAborted();
       try { return await operation(signal); }
       catch (error) {
@@ -36,6 +36,8 @@ export async function withGitOperation<T>(root: string, options: (NodeCallOption
       }
       finally { await settleGitProcesses(); }
     });
+    if (!options?.mutation) signal.throwIfAborted();
+    return result;
   } finally { clearTimeout(timer); }
 }
 

@@ -51,7 +51,9 @@
 	};
 	const cardState: RemoteGenerationSettingsCardState = new RemoteGenerationSettingsCardState({
 		remoteSettings,
-		get modelCatalog() { return modelCatalog.forNode(cardState.nodeId); },
+		get modelCatalog() {
+			return modelCatalog.forNode(cardState.nodeId);
+		},
 		get settingsKey() {
 			return settingsKey;
 		},
@@ -104,13 +106,10 @@
 		</div>
 	{/if}
 
-	{#if cardState.enabled}
-		{#if settingsKey === 'agentSwitchCompaction'}
+	{#if cardState.enabled || cardState.selectionUnavailable}
+		{#if cardState.enabled && settingsKey === 'agentSwitchCompaction'}
 			<div class="flex flex-wrap items-center justify-between gap-3 py-2">
-				<label
-					for="agent-switch-context-window"
-					class="text-sm font-medium text-foreground"
-				>
+				<label for="agent-switch-context-window" class="text-sm font-medium text-foreground">
 					{m.settings_agent_switch_compaction_context_window()}
 				</label>
 				<select
@@ -130,7 +129,13 @@
 		<div class="flex flex-col items-start justify-between gap-3 pb-1 pt-2 sm:flex-row">
 			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
 			<div class="flex min-w-0 max-w-full flex-col items-start sm:items-end">
-				<Button variant={cardState.isAuto ? 'secondary' : 'ghost'} size="sm" aria-pressed={cardState.isAuto} disabled={cardState.isSaving} onclick={() => cardState.persistAuto()}>Auto (Local)</Button>
+				<Button
+					variant={cardState.isAuto ? 'secondary' : 'ghost'}
+					size="sm"
+					aria-pressed={cardState.isAuto}
+					disabled={cardState.isSaving}
+					onclick={() => cardState.persistAuto()}>Auto (Local)</Button
+				>
 				<SettingsModelSelector
 					value={cardState.selectorValue}
 					mode={selectorMode}

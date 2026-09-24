@@ -13,9 +13,11 @@ import type { JsonBody } from './route-helpers.js';
 export function validateGitHttpFields(method: GitMethod, input: unknown, extra: readonly string[] = []): void {
   const fields: readonly string[] = ['nodeId', 'project', ...GIT_REQUEST_FIELDS[method], ...extra,
     ...(method === 'checkout' ? ['branch'] : []), ...(method === 'getRefs' ? ['direction'] : [])];
-  if (!isRecord(input) || Object.keys(input).some(key => !fields.includes(key))
-    || Buffer.byteLength(JSON.stringify(input)) > GIT_MAX_REQUEST_BYTES) {
+  if (!isRecord(input) || Object.keys(input).some(key => !fields.includes(key))) {
     throw new GitServiceError('GIT_INVALID_INPUT', `Invalid Git ${method} request fields`);
+  }
+  if (Buffer.byteLength(JSON.stringify(input)) > GIT_MAX_REQUEST_BYTES) {
+    throw new GitServiceError('GIT_REQUEST_TOO_LARGE', 'Git request is too large. Select fewer paths.');
   }
   executionNodeIdFromValue(input.nodeId);
   for (const key of ['force', 'detach', 'includeUntracked']) {

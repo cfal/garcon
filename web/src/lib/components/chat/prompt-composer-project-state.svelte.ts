@@ -49,7 +49,10 @@ export class PromptComposerProjectState {
 		const chat = this.deps.selectedChat;
 		if (!chat?.projectPath) return null;
 		const execution = this.deps.executionTarget;
-		if (execution && execution.nodeId !== (chat.nodeId ?? 'local')) {
+		if (
+			execution &&
+			(execution.nodeId !== (chat.nodeId ?? 'local') || execution.projectPath !== chat.projectPath)
+		) {
 			return { kind: 'path', ...execution };
 		}
 		return chat.status === 'draft'
