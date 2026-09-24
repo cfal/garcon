@@ -76,7 +76,7 @@ export function markRouteNoStore<T extends RouteHandler>(handler: T): T {
   return handler;
 }
 
-async function invokeRouteHandler(
+export async function invokeRawRouteHandler(
   handler: RouteHandler,
   req: Request,
   server: unknown,
@@ -85,13 +85,23 @@ async function invokeRouteHandler(
   const url = new URL(req.url);
   try {
     const response = (await handler(req, url, server, context)) || new Response('Not found', { status: 404 });
-    return compressHttpResponse(req, response);
+    return response;
   } catch (error) {
     if (error instanceof MalformedJsonError) {
-      return compressHttpResponse(req, malformedJsonResponse());
+      return malformedJsonResponse();
     }
     throw error;
   }
+}
+
+async function invokeRouteHandler(handler: RouteHandler, req: Request, server: unknown, context: HttpRouteContext): Promise<Response> {
+  return compressHttpResponse(req, await invokeRawRouteHandler(handler, req, server, context));
+}
+
+export function unhandledRouteErrorResponse(error: unknown): Response {
+  if (error instanceof MalformedJsonError) return malformedJsonResponse();
+  logger.error('Unhandled route error:', error as Error);
+  return jsonError('Internal server error', 500);
 }
 
 // Wraps one route handler with URL parsing and JWT auth enforcement.

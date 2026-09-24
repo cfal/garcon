@@ -3,10 +3,8 @@
 
 import path from 'path';
 import { getConfigDir, initializeServerConfig } from './config.js';
-import { wrapRoutes, serverShuttingDownResponse } from './lib/http-route.js';
-import { malformedJsonResponse } from './lib/json-route.js';
-import { MalformedJsonError } from './lib/http-request.js';
-import { jsonError } from './lib/http-error.js';
+import { wrapRoutes, serverShuttingDownResponse, unhandledRouteErrorResponse } from './lib/http-route.js';
+import { ControllerCliDispatcher } from './execution-nodes/cli-dispatcher.js';
 import { verifyAuthTokenClaims } from './auth/token.js';
 import {
   getWebSocketAuthToken,
@@ -807,6 +805,8 @@ export async function startServer(): Promise<void> {
     const authDisabled = config.authDisabled;
     const executionSockets = createNoiseServer({ maxConnections: 64, maxPendingHandshakes: 16 });
     let shuttingDown = false;
+    executionNodes.setCliDispatcher(new ControllerCliDispatcher({ routes, serverInstanceId: runtimeState.identity.instanceId,
+      workspaceName: config.workspaceName, isShuttingDown: () => shuttingDown }));
 
     const serveOptions = {
       port: listenPort,
@@ -815,13 +815,7 @@ export async function startServer(): Promise<void> {
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
       routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
-      error(error) {
-        if (error instanceof MalformedJsonError) {
-          return malformedJsonResponse();
-        }
-        logger.error('server: route error:', error);
-        return jsonError('Internal server error', 500);
-      },
+      error: unhandledRouteErrorResponse,
       async fetch(request, server) {
         if (shuttingDown) return serverShuttingDownResponse();
         const url = new URL(request.url);

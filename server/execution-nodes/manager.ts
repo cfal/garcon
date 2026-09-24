@@ -13,6 +13,7 @@ import { InProcessExecutionNode } from './in-process.js';
 import { RemoteExecutionNode, type RemoteNodeInventory } from './remote.js';
 import { WebSocketLink } from './websocket-link.js';
 import { ExecutionNodeReferenceWrites } from './reference-writes.js';
+import type { ControllerCliDispatcher } from './cli-dispatcher.js';
 
 type LocalNodeOptions = ConstructorParameters<typeof InProcessExecutionNode>[0];
 
@@ -26,6 +27,7 @@ interface ManagedRemote {
   info: ExecutionNodeInfo | null;
   error: ExecutionNodeSnapshot['lastError'];
   preparation: object | null;
+  cliLease: AbortController;
 }
 
 export class ExecutionNodeManager {
@@ -43,6 +45,7 @@ export class ExecutionNodeManager {
   #mutations: Promise<unknown> = Promise.resolve();
   #disposed = false;
   #quiescing = false;
+  #cliDispatcher: ControllerCliDispatcher | null = null;
   #guards = { assertIdle: (_id: string) => {}, assertRemovable: (_id: string) => {} };
 
   private constructor(
@@ -69,6 +72,8 @@ export class ExecutionNodeManager {
   setGuards(guards: { assertIdle(nodeId: string): void; assertRemovable(nodeId: string): void }): void {
     this.#guards = guards;
   }
+
+  setCliDispatcher(dispatcher: ControllerCliDispatcher): void { this.#cliDispatcher = dispatcher; }
 
   isReady(nodeId: string): boolean {
     if (this.#disposed || this.#changing.has(nodeId)) return false;
@@ -160,6 +165,7 @@ export class ExecutionNodeManager {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    for (const entry of this.#remotes.values()) entry.cliLease.abort();
     await this.#mutations.catch(() => undefined);
     await Promise.allSettled([...this.#remotes.values()].map((entry) => entry.node?.dispose()));
     this.#remotes.clear();
@@ -170,7 +176,7 @@ export class ExecutionNodeManager {
 
   quiesce(): void {
     this.#quiescing = true;
-    for (const entry of this.#remotes.values()) entry.link?.quiesce();
+    for (const entry of this.#remotes.values()) { entry.cliLease.abort(); entry.link?.quiesce(); }
   }
 
   #mutate<T>(nodeId: string | null, operation: () => Promise<T>): Promise<T> {
@@ -202,7 +208,15 @@ export class ExecutionNodeManager {
     const previous = new Map(this.#remotes);
     for (const [id, entry] of this.#remotes) {
       const next = nodes.find((node) => node.id === id);
-      if (next && sameConnector(entry.config, next)) { entry.config = next; continue; }
+      if (next && sameConnector(entry.config, next)) {
+        if (next.allowControllerCli !== entry.config.allowControllerCli) {
+          entry.cliLease.abort();
+          entry.cliLease = new AbortController();
+        }
+        entry.config = next;
+        continue;
+      }
+      entry.cliLease.abort();
       this.#remotes.delete(id);
       await entry.node?.dispose();
       this.#publishAvailability(id, 'offline');
@@ -212,7 +226,7 @@ export class ExecutionNodeManager {
       const known = previous.get(config.id);
       const entry: ManagedRemote = { config, node: null, link: null, integrations: null,
         knownIntegrations: known?.knownIntegrations ?? null, inventory: known?.inventory ?? null,
-        info: known?.info ?? null, error: null, preparation: null };
+        info: known?.info ?? null, error: null, preparation: null, cliLease: new AbortController() };
       this.#remotes.set(config.id, entry);
       if (!config.enabled) continue;
       const reportError = (message: string) => {
@@ -225,12 +239,31 @@ export class ExecutionNodeManager {
       entry.link = link;
       link.onError(reportError);
       entry.node = new RemoteExecutionNode(config.id, link, (rpc) => rpc.handle(async (call, signal) => {
+        if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
+          const lease = entry.cliLease;
+          const assertCurrent = () => {
+            if (!this.#current(entry) || this.#quiescing || entry.link?.current !== rpc.transport || !this.isReady(config.id)) {
+              throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI connection is unavailable', 503, true);
+            }
+            if (call.integrationId !== '' || !entry.config.allowControllerCli || lease.signal.aborted || entry.cliLease !== lease) {
+              throw new DomainError('CLI_ACCESS_DENIED', 'Workspace CLI access is not enabled for this execution node', 403);
+            }
+          };
+          assertCurrent();
+          if (!this.#cliDispatcher) throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI is initializing', 503, true);
+          const access = { nodeId: config.id, rpc, signal: AbortSignal.any([signal, lease.signal]), assertCurrent };
+          if (call.method === 'controllerCli.describe') {
+            if (call.request !== null) throw new DomainError('VALIDATION_FAILED', 'Invalid CLI context request', 400);
+            return this.#cliDispatcher.describe(access);
+          }
+          return this.#cliDispatcher.request(call.request, access);
+        }
         if (call.method !== 'credentials.resolve' || !this.#current(entry)
           || !this.options.integrations.some((integration) => integration.integrationId === call.integrationId)) {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
         }
         return this.options.resolveCredential({ nodeId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
-      }), reportError, entry.inventory);
+      }, (call, bytes) => this.#cliDispatcher?.admitReply(call, rpc, bytes)), reportError, entry.inventory);
       entry.node.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
         if (value === 'ready') {

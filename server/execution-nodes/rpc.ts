@@ -36,6 +36,7 @@ export class AgentRpc {
   readonly #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
   readonly #incoming = new Map<string, AbortController>();
   #handler: ((request: AgentRpcRequest, signal: AbortSignal) => Promise<unknown>) | null = null;
+  #admitReply: ((request: AgentRpcRequest, bytes: number) => void) | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
   #terminal: ((frame: TerminalNotification) => void) | null = null;
   #terminalDetach: ((request: AgentRpcMethods['terminals.detach']['request']) => Promise<unknown>) | null = null;
@@ -52,6 +53,7 @@ export class AgentRpc {
     this.#retired = true;
     this.#unsubscribe();
     this.#handler = null;
+    this.#admitReply = null;
     this.#producer = null;
     this.#terminal = null;
     this.#terminalDetach = null;
@@ -64,7 +66,10 @@ export class AgentRpc {
     this.#incoming.clear();
   }
 
-  handle(handler: (request: AgentRpcRequest, signal: AbortSignal) => Promise<unknown>): void { this.#handler = handler; }
+  handle(
+    handler: (request: AgentRpcRequest, signal: AbortSignal) => Promise<unknown>,
+    admitReply?: (request: AgentRpcRequest, bytes: number) => void,
+  ): void { this.#handler = handler; this.#admitReply = admitReply ?? null; }
   onProducer(handler: (frame: AgentProducerFrame) => void): void { this.#producer = handler; }
   onTerminal(handler: (frame: TerminalNotification) => void): void { this.#terminal = handler; }
   publishTerminal(frame: TerminalNotification): boolean {
@@ -180,14 +185,18 @@ export class AgentRpc {
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
       return handler(frame, controller.signal);
     }).then((value) => {
-      if (current()) this.#reply({ type: 'result', id: frame.id, value });
+      if (current()) this.#reply({ type: 'result', id: frame.id, value }, frame);
     }, (error) => {
       if (current()) this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
     }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
   }
 
-  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>): void {
+  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>, request?: AgentRpcRequest): void {
     let payload = JSON.stringify(frame);
+    if (request) {
+      try { this.#admitReply?.(request, Buffer.byteLength(payload)); }
+      catch (error) { payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame); }
+    }
     if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {
       payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
         new AgentCallError('unknown', 'Execution-node reply exceeds the message or queue budget'),

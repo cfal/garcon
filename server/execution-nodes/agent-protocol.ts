@@ -2,6 +2,7 @@ import type { AgentDescriptor, AgentSettingDescriptor, AgentSettingsEnvelope } f
 import type { FileRpcMethods } from './file-protocol.js';
 import type { GitRpcMethods } from './git-protocol.js';
 import type { TerminalRpcMethods } from './terminal-protocol.js';
+import type { CliRpcMethods } from './cli-protocol.js';
 import type {
   AgentIntegration,
   AgentHost,
@@ -44,7 +45,7 @@ export interface IntegrationManifest {
 
 export type HistoryReaderRef = AgentResourceRef<'history-reader'>;
 
-export interface AgentRpcMethods extends FileRpcMethods, TerminalRpcMethods, GitRpcMethods {
+export interface AgentRpcMethods extends FileRpcMethods, TerminalRpcMethods, GitRpcMethods, CliRpcMethods {
   'node.describe': Call<null, { readonly info: ExecutionNodeInfo; readonly integrations: readonly IntegrationManifest[] }>;
   'apiProviders.discoverModels': Call<Parameters<ExecutionNode['discoverApiProviderModels']>[0], Awaited<ReturnType<ExecutionNode['discoverApiProviderModels']>>>;
   'projects.inspect': Call<Parameters<ExecutionProjectService['inspect']>[0], Awaited<ReturnType<ExecutionProjectService['inspect']>>>;

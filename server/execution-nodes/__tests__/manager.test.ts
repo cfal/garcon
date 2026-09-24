@@ -13,6 +13,7 @@ import { DomainError } from '../../lib/domain-error.js';
 import { createServerSocketHandlers, type WsConnectionData } from '../../ws/server-sockets.js';
 import { PrimarySocketDelivery } from '../../ws/primary-delivery.js';
 import { WebSocketAdmissionController } from '../../lib/websocket-capacity.js';
+import { ControllerCliDispatcher } from '../cli-dispatcher.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -61,6 +62,51 @@ function worker(secret: string, projectPath: string, configure: (fixture: Return
   });
   return link;
 }
+
+test('reverse CLI dispatch checks initialization, node grant, revocation lease and quiescence on the live link', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'CLI worker', direction: 'node-connects' });
+  const { url } = sharedListener(manager);
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, allowInsecureDevelopment: true });
+  cleanups.push(() => link.dispose());
+  const connected = Promise.withResolvers<AgentRpc>();
+  link.onSession((transport) => {
+    const rpc = new AgentRpc(transport);
+    const serving = serveAgentNode(integrationFixture(root, transport.nodeId).node, rpc);
+    cleanups.push(() => serving.dispose());
+    connected.resolve(rpc);
+  });
+  link.dial(url(config.id));
+  const rpc = await connected.promise;
+  await waitReady(manager, config.id);
+  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+  await manager.update(config.id, { allowControllerCli: true });
+  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let calls = 0;
+  manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: 'workspace',
+    isShuttingDown: () => false, routes: { '/api/v1/chats/run': { POST: async () => {
+      calls++; entered.resolve(); await release.promise; return Response.json({ confirmed: true });
+    } } } }));
+  const request = { expectedServerInstanceId: 'controller', http: { operation: 'POST /api/v1/chats/run' as const, query: [], body: {} } };
+  try {
+    expect(await rpc.call('', 'controllerCli.describe', null)).toMatchObject({ defaultNodeId: config.id });
+    await expect(rpc.call('forged-provider', 'controllerCli.request', request)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    const pending = rpc.call('', 'controllerCli.request', request);
+    const result = Promise.allSettled([pending]);
+    await entered.promise;
+    await manager.update(config.id, { allowControllerCli: false });
+    await manager.update(config.id, { allowControllerCli: true });
+    release.resolve();
+    expect(await result).toMatchObject([{ status: 'rejected', reason: { code: 'CLI_OUTCOME_UNKNOWN' } }]);
+    expect(await rpc.call('', 'controllerCli.describe', null)).toMatchObject({ defaultNodeId: config.id });
+    expect(calls).toBe(1);
+    expect(link.current).toBe(rpc.transport);
+    manager.quiesce();
+    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
+  } finally { release.resolve(); }
+});
 
 function sharedListener(manager: ExecutionNodeManager, limits?: NoiseServerOptions) {
   const primary = {

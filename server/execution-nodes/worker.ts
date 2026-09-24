@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { defaultAgentIntegrations } from '../agents/default-agent-integrations.js';
 import { AgentRpc } from './rpc.js';
@@ -6,6 +5,7 @@ import { serveAgentNode } from './agent-worker.js';
 import { InProcessExecutionNode } from './in-process.js';
 import { WebSocketLink } from './websocket-link.js';
 import { TerminalRuntime } from '../terminals/node-service.js';
+import { startCliGateway } from './cli-gateway.js';
 
 export interface ExecutionWorkerOptions {
   readonly secret: string;
@@ -24,13 +24,16 @@ export async function runExecutionWorker(
 ): Promise<void> {
   delete process.env.GARCON_AGENT_EXECUTION_NODE_CONFIG;
   delete process.env.GARCON_WORKSPACE_DIR;
-  process.env.GARCON_WORKSPACE = 'execution-node-unavailable';
-  process.env.GARCON_CONFIG_DIR = join(options.workspaceDir, 'cli-unavailable');
+  delete process.env.GARCON_WORKSPACE;
+  delete process.env.GARCON_CONFIG_DIR;
+  delete process.env.GARCON_CLI_RUNTIME;
   const link = new WebSocketLink({ role: 'worker', secret: options.secret,
     allowInsecureDevelopment: options.allowInsecureDevelopment, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveAgentNode> | null = null;
   let node: InProcessExecutionNode | null = null;
   let currentRpc: AgentRpc | null = null;
+  const gateway = await startCliGateway({ workspaceDir: options.workspaceDir, runtimeId: link.runtimeId, currentRpc: () => currentRpc });
+  process.env.GARCON_CLI_RUNTIME = gateway.runtimeFile;
   const terminals = new TerminalRuntime({ projectBasePath: options.projectBasePath, terminalRuntimeId: link.runtimeId });
   const stopped = Promise.withResolvers<void>();
   let stopping = false;
@@ -38,6 +41,7 @@ export async function runExecutionWorker(
     if (stopping) return;
     stopping = true;
     try {
+      await gateway.dispose();
       await link.dispose();
       await serving?.dispose();
       await node?.dispose();
@@ -52,6 +56,10 @@ export async function runExecutionWorker(
     lastError = message;
   });
   link.onSession((transport) => {
+    if (node && transport.nodeId !== node.id) {
+      transport.close(new Error('The retained worker belongs to a different execution node'));
+      return;
+    }
     void serving?.dispose();
     const rpc = new AgentRpc(transport);
     currentRpc = rpc;

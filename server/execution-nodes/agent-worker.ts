@@ -82,6 +82,9 @@ export function serveAgentNode(node: ExecutionNode, rpc: AgentRpc) {
     await ready;
     if (disposed || signal.aborted) throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
     if (call.method === 'node.describe') return { info, integrations: [...integrations.values()].map(manifest) };
+    if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
+      throw new AgentCallError('rejected', 'CLI dispatch is controller-owned');
+    }
     if (isGitRpcMethod(call.method)) {
       if (call.integrationId !== '') throw new AgentCallError('rejected', 'Git operations are node services');
       return required(gitWorker).handle(call as GitRpcRequest, signal);
