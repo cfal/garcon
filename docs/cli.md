@@ -29,24 +29,38 @@ Common options and environment variables:
 
 Run `bun run help` for the complete server option list.
 
+Explicit flags take precedence over environment variables; nonempty environment values take precedence over defaults. The controller, execution node, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`. Relative roots are resolved from the process's working directory. Workspace options configure controller storage only, not CLI discovery or execution-node storage.
+
 ## Execution Node Connections
 
 Add nodes from the Execution Nodes dialog. For a node that connects to the controller, pass the complete generated URL as one quoted argument:
 
 ```bash
 bun server/main.ts execution-node --connect 'wss://controller.example.com/execution-node/NODE_ID#secret=SECRET' \
-  --workspace-dir "$HOME/.garcon/execution-node" --project-base-dir /path/to/repos
+  --config-dir "$HOME/.garcon" --project-base-dir /path/to/repos
 ```
 
 For a controller that connects to a worker, start its listener and paste the printed connection URL into the dialog:
 
 ```bash
 bun server/main.ts execution-node --listen 19781 --bind-address 0.0.0.0 \
-  --allow-insecure-development --workspace-dir "$HOME/.garcon/execution-node" \
+  --allow-insecure-development --config-dir "$HOME/.garcon" \
   --project-base-dir /path/to/repos
 ```
 
-Replace `0.0.0.0` in the printed URL with a reachable hostname or IP. `--advertise-url wss://worker.example.com/execution-node` advertises an external TLS proxy; it does not enable TLS on the listener. Keep raw listeners on trusted private networks or behind access-controlled proxies. Worker state directories must not be shared with another running worker or controller.
+Replace `0.0.0.0` in the printed URL with a reachable hostname or IP. `--advertise-url wss://worker.example.com/execution-node` advertises an external TLS proxy; it does not enable TLS on the listener. Keep raw listeners on trusted private networks or behind access-controlled proxies.
+
+One controller and one execution node may run simultaneously under the same config root. Each role holds its own lease; two controllers or two workers cannot share the same role's storage. Controller workspace data and worker data stay separate, so switching roles does not overwrite either. Worker credentials and provider data live under `<config-dir>/execution-node`; this directory is reserved for execution-node storage, not a controller workspace. Use separate roots for independent workers. Existing default worker storage is unchanged. Replace an old `--workspace-dir /root/execution-node` with `--config-dir /root`, not `--config-dir /root/execution-node`. For a custom data directory, move its contents under the new root's `execution-node` directory while the worker is stopped.
+
+Enable **Allow workspace CLI access** for the node in the controller's editor. Then an ordinary shell on that worker can use the same root, without a runtime UUID:
+
+```bash
+GARCON_CONFIG_DIR="$HOME/.garcon" bun cli/main.ts list agents
+# Explicit flags override the environment:
+bun cli/main.ts --config-dir "$HOME/.garcon" --runtime execution-node list agents
+```
+
+Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=execution-node`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
 
 Every execution-node connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
 
@@ -103,7 +117,7 @@ bun cli/main.ts ticket history G-42 --before-sequence 300 --limit 20
 
 List/comment continuations require the returned collection revision; refresh from the first page if it changed. Immutable activity history needs no revision fence. `--include-description false --comment-limit 0` reads only metadata and links. Responses never silently truncate authored bodies.
 
-Every mutation prints its generated request ID and expected store ID to stderr **before** submission. Creates also print the resolved project. If confirmation is lost, reuse the same arguments/body with the printed `--request-id`, `--expected-store-id`, and explicit create `--project`. The server returns the original committed result, even after later edits or restart. That result confirms the operation; use `read` for current state. A changed payload under the same identity conflicts. A replacement ticket database has a different store ID and rejects stale requests. The CLI never automatically resubmits mutations or stores stdin for recovery.
+Every mutation prints its generated request ID, expected store ID, and resolved retry command prefix to stderr **before** submission. Creates also print the resolved project. If confirmation is lost, use that connection prefix with the same ticket operation and body, replacing or adding the printed `--request-id`, `--expected-store-id`, and inferred create `--project`. The prefix includes the config root and selected runtime role, never `auto`. Replace old connection options rather than appending duplicates. Retrying through Local instead of the original execution node is a different authority and does not deduplicate. The server returns the original committed result, even after later edits or restart. That result confirms the operation; use `read` for current state. A changed payload under the same identity conflicts. A replacement ticket database has a different store ID and rejects stale requests. The CLI never automatically resubmits mutations or stores stdin for recovery.
 
 `--stdin` supplies create descriptions, comment bodies, or closing comments as strict UTF-8 up to 48 KiB; it is mutually exclusive with the corresponding inline flag. Encoded requests must fit 64 KiB, so escape-heavy text may require a smaller body. `--json` emits only the typed response on stdout; progress/retry hints stay on stderr. Human output renders terminal control sequences visibly; JSON remains lossless while escaping terminal controls. Exit 0 means confirmed success, 2 means invalid CLI input, and 3 means a domain/transport failure. An interrupted command exits 130 and may already have committed.
 
@@ -113,7 +127,7 @@ Start a visible chat and wait for its accepted turn:
 
 ```bash
 bun cli/main.ts \
-  --workspace default \
+  --runtime controller \
   start \
   --cwd /path/to/project \
   --agent codex \
@@ -135,14 +149,14 @@ turn id: 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
 Resume the same agent session without repeating its saved selection:
 
 ```bash
-bun cli/main.ts --workspace default resume 1785337200123456 \
+bun cli/main.ts --runtime controller resume 1785337200123456 \
   "Address the review findings."
 ```
 
 Start a chat without waiting for its turn to settle:
 
 ```bash
-bun cli/main.ts --workspace default start-async \
+bun cli/main.ts --runtime controller start-async \
   --cwd /path/to/project \
   --agent codex \
   --model gpt-5.4 \
@@ -180,7 +194,7 @@ match defaults only from its own creation context.
 
 ```bash
 bun cli/main.ts \
-  --workspace default \
+  --runtime controller \
   start \
   --cwd /path/to/project \
   --parent 1785337200123456 \
@@ -199,17 +213,17 @@ Interrupting the terminal detaches the CLI without stopping work in Garcon.
 Create a whole-chat fork at the source chat's current transcript watermark:
 
 ```bash
-bun cli/main.ts --workspace default fork 1785337200123456
+bun cli/main.ts --runtime controller fork 1785337200123456
 ```
 
 Add a prompt to atomically create the fork and start its first turn. This is one
 server operation, not a fork followed by a separately admitted resume:
 
 ```bash
-bun cli/main.ts --workspace default fork 1785337200123456 \
+bun cli/main.ts --runtime controller fork 1785337200123456 \
   "Continue the investigation in a separate chat."
 
-bun cli/main.ts --workspace default fork-async 1785337200123456 \
+bun cli/main.ts --runtime controller fork-async 1785337200123456 \
   --json "Run the independent review."
 ```
 
@@ -263,7 +277,7 @@ Start, resume, and `resume-async` messages can add a visual header with `--messa
 Presentation distinguishes the ordinary user message in Garcon and is not included in the prompt sent to the agent. `--collapsible` starts the message body collapsed.
 
 ```bash
-bun cli/main.ts --workspace default resume 1785337200123456 \
+bun cli/main.ts --runtime controller resume 1785337200123456 \
   --message-title "Deployment constraint" \
   --color 0ea5e9,7dd3fc \
   --collapsible \
@@ -277,8 +291,8 @@ Restart, replay, shares, and frozen forks preserve CLI presentation. Explicit na
 List the complete chat metadata snapshot, optionally using the same filter language as the sidebar:
 
 ```bash
-bun cli/main.ts --workspace default chats --json
-bun cli/main.ts --workspace default chats \
+bun cli/main.ts --runtime controller chats --json
+bun cli/main.ts --runtime controller chats \
   --filter 'project:/garcon tag:cli is:!archived' \
   --limit 50 --offset 0
 ```
@@ -303,10 +317,10 @@ advance that activity field.
 Search normalized transcript content and join each hit to chat metadata:
 
 ```bash
-bun cli/main.ts --workspace default transcript-search enable
-bun cli/main.ts --workspace default transcript-search rebuild --json
-bun cli/main.ts --workspace default transcript-search status --json
-bun cli/main.ts --workspace default search '"version bump"' \
+bun cli/main.ts --runtime controller transcript-search enable
+bun cli/main.ts --runtime controller transcript-search rebuild --json
+bun cli/main.ts --runtime controller transcript-search status --json
+bun cli/main.ts --runtime controller search '"version bump"' \
   --filter 'project:/garcon agent:codex' \
   --sort relevance --limit 20 --offset 0 --snippets 3 --json
 ```
@@ -358,10 +372,10 @@ queries exit as argument failures.
 Read bounded context around a search ordinal while pinning the transcript view:
 
 ```bash
-bun cli/main.ts --workspace default read 1785337200123456 84 \
+bun cli/main.ts --runtime controller read 1785337200123456 84 \
   -B 5 -A 5 --transcript-view-id view-1
 
-bun cli/main.ts --workspace default read 1785337200123456 84 \
+bun cli/main.ts --runtime controller read 1785337200123456 84 \
   --before-context 3 --after-context 8 --include tools --json
 ```
 
@@ -394,7 +408,7 @@ categories are included. Use `export` for the complete archival transcript.
 Reattach to an accepted turn without submitting its prompt again:
 
 ```bash
-bun cli/main.ts --workspace default wait 1785337200123456 \
+bun cli/main.ts --runtime controller wait 1785337200123456 \
   --turn 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
 ```
 
@@ -403,8 +417,8 @@ bun cli/main.ts --workspace default wait 1785337200123456 \
 Inspect current chat-level progress when no retained turn handle is available:
 
 ```bash
-bun cli/main.ts --workspace default status 1785337200123456
-bun cli/main.ts --workspace default status 1785337200123456 \
+bun cli/main.ts --runtime controller status 1785337200123456
+bun cli/main.ts --runtime controller status 1785337200123456 \
   --messages 20 --json
 ```
 
@@ -423,7 +437,7 @@ Status is a one-shot, non-transactional observation. Use `wait` with the exact a
 Submit an exact pending permission decision using every fence shown by status:
 
 ```bash
-bun cli/main.ts --workspace default permission-decision 1785337200123456 \
+bun cli/main.ts --runtime controller permission-decision 1785337200123456 \
   permission-occurrence-id allow \
   --run run-id --server-instance server-instance-id --json
 ```
@@ -431,7 +445,7 @@ bun cli/main.ts --workspace default permission-decision 1785337200123456 \
 Answer a structured question with the exact IDs shown by `status`:
 
 ```bash
-bun cli/main.ts --workspace default permission-answer 1785337200123456 \
+bun cli/main.ts --runtime controller permission-answer 1785337200123456 \
   permission-occurrence-id \
   --answers '[{"questionId":"question-id","selectedOptionIds":["option-id"]}]' \
   --run run-id --server-instance server-instance-id --json
@@ -478,8 +492,8 @@ Concurrent metadata writers use last-writer-wins semantics.
 Export the complete transcript at one pinned ledger watermark as Markdown or XML:
 
 ```bash
-bun cli/main.ts --workspace default export 1785337200123456
-bun cli/main.ts --workspace default export 1785337200123456 \
+bun cli/main.ts --runtime controller export 1785337200123456
+bun cli/main.ts --runtime controller export 1785337200123456 \
   --format xml --exclude tools --exclude reasoning \
   --output transcript.xml
 ```
@@ -507,7 +521,7 @@ Export reads Garcon's authoritative ledger through the running authenticated ser
 Create a bounded XML projection for whole-chat summarization:
 
 ```bash
-bun cli/main.ts --workspace default handoff 1785337200123456 \
+bun cli/main.ts --runtime controller handoff 1785337200123456 \
   --context-window-size 131072 --output handoff.xml
 ```
 
@@ -524,14 +538,14 @@ Use a handoff artifact for comprehensive high-level synthesis. Use complete XML 
 `resume-async` submits to an existing chat and returns as soon as Garcon accepts it. The turn stays visible and stoppable in the SPA and inherits the target chat's saved execution settings.
 
 ```bash
-bun cli/main.ts --workspace default resume-async 1785337200123456 \
+bun cli/main.ts --runtime controller resume-async 1785337200123456 \
   "Implement the reviewed changes and run the focused tests."
 ```
 
 If the target is busy, the command exits `3` without queueing or steering. Pass `--allow-steer` to deliver into the active turn instead. `--allow-steer` never queues:
 
 ```bash
-bun cli/main.ts --workspace default resume-async 1785337200123456 \
+bun cli/main.ts --runtime controller resume-async 1785337200123456 \
   --allow-steer \
   --message-title "New blocker" \
   --message-style error \
@@ -559,7 +573,7 @@ CLI exit codes:
 `add-row` appends a durable presentation-only row without submitting agent work. It is excluded from model context and transcript search.
 
 ```bash
-bun cli/main.ts --workspace default add-row 1785337200123456 \
+bun cli/main.ts --runtime controller add-row 1785337200123456 \
   --color 7c3aed,c4b5fd \
   --markdown \
   --collapsible \
@@ -575,7 +589,7 @@ a duplicate.
 `stop` interrupts the active turn through the same command as the SPA Stop button:
 
 ```bash
-bun cli/main.ts --workspace default stop 1785337200123456
+bun cli/main.ts --runtime controller stop 1785337200123456
 ```
 
 `stop --json` emits one versioned envelope with the chat-scoped stop receipt,
@@ -586,6 +600,28 @@ If queued messages exist, stopping pauses the queue. Resume it in Garcon before 
 
 ## Connection Rules
 
-Discovery requires a server using a named workspace. Servers launched with `--workspace-dir` are intentionally undiscoverable. `--server` asserts the workspace descriptor's exact URL but cannot redirect credentials to another listener.
+The CLI uses two connection settings:
+
+- `--config-dir <directory>` / `GARCON_CONFIG_DIR`, default `~/.garcon`.
+- `--runtime auto|controller|execution-node` / `GARCON_RUNTIME`, default `auto`.
+
+For each setting, an explicit flag wins over its environment variable. Empty environment values are unset. `--workspace`, `--workspace-dir`, and their environment variables belong to controller configuration only. The CLI learns the active controller's workspace from the authenticated API; it does not select a workspace directory. `--runtime-file` and `GARCON_CLI_RUNTIME` are removed. `--server` remains an optional assertion that must exactly match the selected runtime's URL, not a way to redirect credentials.
+
+When upgrading, restart controllers and workers to publish the new fixed runtime files. Replace CLI workspace or runtime-file selectors with the intended config root and role. Flags now override environment variables, unlike earlier releases: review launch scripts that set both to different values before restarting, because the selected storage root will change.
+
+Startup atomically publishes a private JSON file containing the actual bound address/port, a random per-process bearer token, instance identity, and `startedAt` timestamp:
+
+```text
+<config-dir>/runtime.json                 controller
+<config-dir>/execution-node/runtime.json  execution node
+```
+
+These are runtime metadata, not configuration. Named and explicit-directory controllers both publish at the root, so `--port 0` works without giving the CLI a port or workspace. After taking its lease, each process clears its role's predecessor file before initialization, publishes fresh metadata when listening, and removes only its own instance on clean shutdown. Crashes can leave stale files; discovery never deletes them.
+
+`auto` reads only these two locations. With one file, it selects that role. With both, it compares `startedAt` (not filesystem modification time), chooses the newer runtime, and prints a warning on **stderr** naming the selection and how to select a role explicitly. Equal timestamps choose the controller. Malformed or insecure files are errors, not candidates to silently skip. With neither file, the CLI reports that no runtime is available under the selected root. Explicit `controller` or `execution-node` selection reads only that role's file and does not warn about the other role.
+
+Timestamps express preference, not liveness. After selection, the CLI verifies the endpoint's identity with a capability-free HMAC challenge before sending its bearer token, then fetches authenticated controller context. A stale file, failed verification, denied gateway, or disconnected controller fails the command; it never triggers fallback to the other role or rereads a replacement during discovery. Selection and controller identity remain fixed throughout the invocation, including retries. Starting another role can change the target of a later `auto` invocation. An explicit role prevents switching roles, but still selects whichever process currently holds that role, potentially with a different controller workspace after restart. Warnings never contaminate JSON stdout.
+
+Controllers export their resolved `GARCON_CONFIG_DIR` and `GARCON_RUNTIME=controller` to terminals and provider subprocesses. Workers export the same root setting and `GARCON_RUNTIME=execution-node`. Explicit CLI flags can override either value. Nested controllers and workers install their own role before spawning children. Generated follow-up commands and ticket retry prefixes carry the resolved root and explicit role, preserving their origin across separate invocations.
 
 Run `bun cli/main.ts --help` for the complete command and option reference.

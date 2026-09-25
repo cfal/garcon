@@ -130,17 +130,17 @@ The CLI drives ordinary visible Garcon chats through an already-running server. 
 
 ```bash
 # Start detached work with explicit lineage.
-bun cli/main.ts --workspace default start-async --cwd /path/to/project \
+bun cli/main.ts --runtime controller start-async --cwd /path/to/project \
   --parent 1785337200123456 --agent codex --model gpt-5.4 \
   --permissions acceptEdits "Implement the validation and run focused tests."
 
 # Find prior work, then read exact context around a durable transcript row.
-bun cli/main.ts --workspace default search '"version bump"' --json
-bun cli/main.ts --workspace default read 1785337200123456 84 -B 5 -A 5
+bun cli/main.ts --runtime controller search '"version bump"' --json
+bun cli/main.ts --runtime controller read 1785337200123456 84 -B 5 -A 5
 
 # Inspect or steer work without creating a hidden session.
-bun cli/main.ts --workspace default status 1785337200123456 --messages 20
-bun cli/main.ts --workspace default resume-async 1785337200123456 \
+bun cli/main.ts --runtime controller status 1785337200123456 --messages 20
+bun cli/main.ts --runtime controller resume-async 1785337200123456 \
   --allow-steer "Address the review finding and rerun the tests."
 ```
 
