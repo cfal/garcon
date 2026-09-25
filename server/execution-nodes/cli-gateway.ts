@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { lstat, mkdir, rm } from 'node:fs/promises';
-import { cliGatewayRuntimeDirectory, cliGatewayRuntimeFile } from '../../common/cli-runtime-paths.js';
+import { mkdir } from 'node:fs/promises';
+import { cliGatewayRuntimeFile } from '../../common/cli-runtime-paths.js';
 import { createServer, type IncomingMessage } from 'node:http';
 import { once } from 'node:events';
 import { AgentCallError } from '@garcon/server-agent-interface';
@@ -9,8 +9,7 @@ import type { JsonValue } from '../../common/json.js';
 import { DomainError } from '../lib/domain-error.js';
 import { getTokenFromRequest } from '../lib/http-request.js';
 import { jsonError } from '../lib/http-error.js';
-import { createServerRuntimeState } from '../lib/server-runtime.js';
-import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { createServerRuntimeState, publishRuntimeDescriptor, removeServerRuntime } from '../lib/server-runtime.js';
 import { createRuntimeRoutes } from '../routes/runtime.js';
 import { CliAdmission } from './cli-admission.js';
 import { CLI_REQUEST_BYTES, cliOperation, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from './cli-protocol.js';
@@ -58,7 +57,6 @@ async function readBody(request: IncomingMessage): Promise<JsonValue | null> {
 
 export async function startCliGateway(options: {
   readonly dataDir: string;
-  readonly runtimeId: string;
   readonly currentRpc: () => AgentRpc | null;
 }): Promise<{ readonly runtimeFile: string; readonly descriptor: CliGatewayDescriptor; dispose(): Promise<void> }> {
   const runtime = createServerRuntimeState(options.dataDir);
@@ -151,30 +149,24 @@ export async function startCliGateway(options: {
     server.closeAllConnections();
     await closed;
   };
-  const runDir = cliGatewayRuntimeDirectory(options.dataDir);
-  const runtimeFile = cliGatewayRuntimeFile(options.dataDir, options.runtimeId);
+  const runtimeFile = cliGatewayRuntimeFile(options.dataDir);
   const { workspaceDir: _workspaceDir, ...identity } = runtime.identity;
   const descriptor: CliGatewayDescriptor = { ...identity, kind: 'execution-node-cli', pid: process.pid,
     baseUrl: `http://127.0.0.1:${address.port}`, localCapability: runtime.localCapability };
   let publishing = false;
   try {
-    await mkdir(runDir, { recursive: true, mode: 0o700 });
-    const metadata = await lstat(runDir);
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()
-      || process.platform !== 'win32' && ((metadata.mode & 0o077) !== 0 || metadata.uid !== process.getuid?.())) {
-      throw new Error('CLI runtime directory must be private to the worker OS account');
-    }
+    await mkdir(options.dataDir, { recursive: true, mode: 0o700 });
     publishing = true;
-    await writeJsonFileAtomic(runtimeFile, descriptor, { mode: 0o600 });
+    await publishRuntimeDescriptor(runtimeFile, descriptor);
   } catch (error) {
     await stop();
-    if (publishing) await rm(runtimeFile, { force: true }).catch(() => {});
+    if (publishing) await removeServerRuntime(runtimeFile, descriptor.instanceId).catch(() => {});
     throw error;
   }
   return { runtimeFile, descriptor, async dispose() {
     if (stopped) return;
     stopped = true;
     await stop();
-    await rm(runtimeFile, { force: true });
+    await removeServerRuntime(runtimeFile, descriptor.instanceId);
   } };
 }

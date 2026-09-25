@@ -10,7 +10,7 @@ const CHAT_ID = '1785337200123456';
 const roots: string[] = [];
 const baseCommand: ExportCliCommand = {
   kind: 'export',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   chatId: CHAT_ID,
   format: 'markdown',

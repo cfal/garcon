@@ -82,7 +82,7 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
           expect(transcript).toContain(final);
           for (const json of [false, true]) {
             const child = Bun.spawn(['bun', 'cli/main.ts', '--config-dir', fixture.dirs.config,
-              '--workspace', 'final-response',
+              '--runtime', 'controller',
               'wait', chatId, '--turn', accepted.turnId, ...(json ? ['--json'] : [])], {
               cwd: fileURLToPath(new URL('../../../', import.meta.url)), stdout: 'pipe', stderr: 'pipe',
               env: cliEnvironment(),

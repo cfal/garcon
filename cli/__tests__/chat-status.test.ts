@@ -20,7 +20,7 @@ const CHAT_ID = '1785337200123456';
 const TIMESTAMP = '2026-08-04T12:00:00.000Z';
 const command: StatusCliCommand = {
   kind: 'status',
-  workspace: 'work',
+  runtime: 'controller',
   configDir: '/config',
   chatId: CHAT_ID,
   messageLimit: 10,
@@ -164,7 +164,7 @@ describe('chat status', () => {
     expect(value).not.toContain('transcript:');
   });
 
-  test.each([undefined, '/private/runtime.json'])('renders usable permission controls for runtime %s', (runtimeFile) => {
+  test.each(['controller', 'execution-node'] as const)('renders usable permission controls for runtime %s', (runtime) => {
     const permissionOccurrenceId = 'permission-occurrence-1';
     const value = formatChatStatus(snapshot({
       messageLimit: 0,
@@ -186,7 +186,7 @@ describe('chat status', () => {
           ),
         }],
       },
-    }), { ...command, runtimeFile });
+    }), { ...command, runtime });
 
     expect(value).toContain('pending permissions: 1');
     expect(value).toContain(`permission occurrence: ${permissionOccurrenceId}`);
@@ -197,13 +197,8 @@ describe('chat status', () => {
       `permission-decision '${CHAT_ID}' '${permissionOccurrenceId}' allow --run 'run-1' --server-instance 'instance-1'`,
     );
     expect(value).not.toContain('transcript:');
-    if (runtimeFile) {
-      expect(value).toContain(`garcon-cli --runtime-file '${runtimeFile}' permission-decision`);
-      expect(value).not.toContain('--config-dir');
-      expect(value).not.toContain('--workspace');
-    } else {
-      expect(value).toContain("garcon-cli --workspace 'work' --config-dir '/config' permission-decision");
-    }
+    expect(value).toContain(`garcon-cli --config-dir '/config' --runtime '${runtime}' permission-decision`);
+    expect(value).not.toContain('--workspace');
   });
 
   test('renders a typed answer template for structured permission requests', () => {
@@ -461,7 +456,7 @@ describe('chat status', () => {
     expect(JSON.stringify(value)).toBe(before);
   });
 
-  test.each([undefined, '/private/runtime.json'])('does not invent a workspace for a missing chat: runtime=%s', async (runtimeFile) => {
+  test.each(['controller', 'execution-node'] as const)('does not invent a workspace for a missing chat: runtime=%s', async (runtime) => {
     const client: ChatStatusClient = {
       async getChatSnapshot() {
         throw new GarconHttpError(
@@ -474,7 +469,7 @@ describe('chat status', () => {
       },
     };
 
-    await expect(runChatStatus({ ...command, runtimeFile }, client, output()))
-      .rejects.toThrow(runtimeFile ? 'Session not found (HTTP 404, SESSION_NOT_FOUND)' : 'Garcon workspace "work"');
+    await expect(runChatStatus({ ...command, runtime }, client, output()))
+      .rejects.toThrow('Session not found (HTTP 404, SESSION_NOT_FOUND)');
   });
 });

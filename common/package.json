@@ -39,6 +39,7 @@
     "./client-chat-id": "./client-chat-id.ts",
     "./cli-presentation": "./cli-presentation.ts",
     "./cli-runtime-paths": "./cli-runtime-paths.ts",
+    "./config-dir": "./config-dir.ts",
     "./execution-defaults": "./execution-defaults.ts",
     "./execution-nodes": "./execution-nodes.ts",
     "./file-contracts": "./file-contracts.ts",

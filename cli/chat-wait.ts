@@ -1,6 +1,4 @@
 import type { WaitCliCommand } from './args.js';
-import { CliError } from './errors.js';
-import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import {
   pollExistingTurnReceipt,
@@ -16,32 +14,13 @@ export async function runChatWait(
   signal?: AbortSignal,
   dependencies: ReceiptPollerDependencies = {},
 ): Promise<void> {
-  let receipt;
-  try {
-    receipt = await pollExistingTurnReceipt(
-      client,
-      command.chatId,
-      command.turnId,
-      signal,
-      dependencies,
-    );
-  } catch (error) {
-    if (
-      error instanceof CliError
-      && error.cause instanceof GarconHttpError
-      && error.cause.errorCode === 'TURN_RECEIPT_NOT_FOUND'
-      && !command.runtimeFile
-      && command.workspace !== undefined
-    ) {
-      throw new CliError(
-        error.phase,
-        `${error.message} in Garcon workspace "${command.workspace}"`,
-        error.exitCode,
-        { cause: error.cause },
-      );
-    }
-    throw error;
-  }
+  const receipt = await pollExistingTurnReceipt(
+    client,
+    command.chatId,
+    command.turnId,
+    signal,
+    dependencies,
+  );
 
   if (command.json) {
     output.result(JSON.stringify(receipt, null, 2));

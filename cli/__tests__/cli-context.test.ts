@@ -36,15 +36,15 @@ describe('CLI endpoint context', () => {
     await client.lookupNativeSession({ nativeSessionId: 'native' });
     await client.getTicketProjectDefault('/worker/project');
   });
-  test('pins inherited runtime, ignores ambient selectors, and accepts workspace only as an assertion', () => {
-    const env = { GARCON_CLI_RUNTIME: '/private/runtime.json', GARCON_WORKSPACE: 'wrong', GARCON_CONFIG_DIR: '/wrong' };
-    expect(parseCliArgs(['list', 'agents', '--workspace', 'right'], env)).toMatchObject({
-      runtimeFile: '/private/runtime.json', expectedWorkspace: 'right', workspace: 'right',
-    });
-    expect(() => parseCliArgs(['chats', '--runtime-file', '/other'], env)).toThrow('conflicts');
-    expect(() => parseCliArgs(['chats', '--config-dir', '/other'], env)).toThrow('--config-dir conflicts with GARCON_CLI_RUNTIME');
-    expect(() => parseCliArgs(['chats', '--config-dir', '/other', '--runtime-file', '/private/runtime.json'], {})).toThrow('with a runtime file');
-    expect(parseCliArgs(['chats', '--runtime-file', '/private/runtime.json'], env)).toMatchObject({ runtimeFile: '/private/runtime.json' });
+  test('inherits the parent root and role but explicit flags can override either', () => {
+    const env = { GARCON_RUNTIME: 'execution-node', GARCON_CONFIG_DIR: '/parent' };
+    expect(parseCliArgs(['list', 'agents'], env)).toMatchObject({ configDir: '/parent', runtime: 'execution-node' });
+    expect(parseCliArgs(['chats', '--config-dir', '/other'], env)).toMatchObject({ configDir: '/other', runtime: 'execution-node' });
+    expect(parseCliArgs(['chats', '--runtime', 'auto'], env)).toMatchObject({ configDir: '/parent', runtime: 'auto' });
+    expect(parseCliArgs(['chats', '--runtime', 'controller', '--config-dir', '/other'], env)).toMatchObject({ configDir: '/other', runtime: 'controller' });
+    expect(parseCliArgs(['chats'], { HOME: '/home/test', GARCON_CONFIG_DIR: '', GARCON_RUNTIME: '' })).toMatchObject({ configDir: '/home/test/.garcon', runtime: 'auto' });
+    expect(() => parseCliArgs(['chats'], { GARCON_RUNTIME: 'invalid' })).toThrow('must be auto');
+    expect(parseCliArgs(['chats', '--runtime', 'controller'], { GARCON_RUNTIME: 'invalid' })).toMatchObject({ runtime: 'controller' });
   });
 
   test('a stable endpoint proof cannot hide controller restart', async () => {

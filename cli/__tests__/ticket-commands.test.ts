@@ -31,7 +31,7 @@ function harness(handle: (url: URL, body: unknown) => Response | Promise<Respons
     fetch: fetcher, output: createCliOutput({ write: (text) => stdout.push(text) }, { write: (text) => stderr.push(text) }),
     discoverRuntime: async () => ({ baseUrl: 'http://localhost:8080', instanceId: 'synthetic-instance',
       endpointInstanceId: 'synthetic-instance', defaultNodeId: 'local', workspaceName: 'default',
-      localCapability: 'synthetic-capability', workspaceDir: '/workspace', selector: { workspace: 'default' } }), ...extra,
+      localCapability: 'synthetic-capability', workspaceDir: '/workspace', selector: { runtime: 'controller' } }), ...extra,
   });
   return { run, calls, stdout, stderr };
 }

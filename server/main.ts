@@ -40,8 +40,9 @@ Environment Variables:
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:
-  Environment variables take precedence over CLI options where both are available.
-  Server and PTY/agent subprocesses inherit the current process environment.
+  CLI options take precedence over environment variables, then defaults apply.
+  PTY/agent subprocesses inherit the resolved config root and GARCON_RUNTIME=controller.
+  Workspace settings configure controller storage, not garcon-cli discovery.
 `;
   process.stdout.write(helpText);
 }

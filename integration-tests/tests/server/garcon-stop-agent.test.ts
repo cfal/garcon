@@ -39,7 +39,7 @@ for (const creation of ['markup', 'cli'] as const) for (const remove of [false, 
       let child: string;
       if (creation === 'cli') {
         const processRun = Bun.spawn([process.execPath, 'cli/main.ts', '--config-dir', fixture.dirs.config,
-          '--workspace', WORKSPACE, 'start-async', '--cwd', fixture.dirs.project, '--agent', agent.agentId,
+          '--runtime', 'controller', 'start-async', '--cwd', fixture.dirs.project, '--agent', agent.agentId,
           '--provider', agent.provider.providerId, '--endpoint', agent.provider.endpointId,
           '--model', agent.provider.model, '--parent', parent, 'Synthetic child task.'], {
           cwd: fileURLToPath(new URL('../../../', import.meta.url)),

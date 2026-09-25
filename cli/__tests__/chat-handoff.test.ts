@@ -11,7 +11,7 @@ const DOCUMENT = '<handoff-artifact/>\n';
 const roots: string[] = [];
 const baseCommand: HandoffCliCommand = {
   kind: 'handoff',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   chatId: CHAT_ID,
   contextWindowTokens: 131_072,

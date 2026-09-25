@@ -11,7 +11,7 @@ import type { CliOutput } from '../output.js';
 
 const command: PermissionDecisionCliCommand = {
   kind: 'permission-decision',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   chatId: '1785337200123456',
   permissionOccurrenceId: 'permission-1',

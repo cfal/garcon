@@ -2,13 +2,7 @@ import type { CliConnectionOptions } from './args.js';
 import { shellQuote } from './shell-quote.js';
 
 export function connectionOptionEntries(connection: CliConnectionOptions): [string, string][] {
-  const entries: [string, string][] = connection.runtimeFile
-    ? [['--runtime-file', connection.runtimeFile]]
-    : [['--config-dir', connection.configDir]];
-  if (!connection.runtimeFile && connection.workspace !== undefined) entries.unshift(['--workspace', connection.workspace]);
-  if (connection.runtimeFile && connection.expectedWorkspace !== undefined) {
-    entries.push(['--workspace', connection.expectedWorkspace]);
-  }
+  const entries: [string, string][] = [['--config-dir', connection.configDir], ['--runtime', connection.runtime]];
   if (connection.serverUrl !== undefined) entries.push(['--server', connection.serverUrl]);
   return entries;
 }

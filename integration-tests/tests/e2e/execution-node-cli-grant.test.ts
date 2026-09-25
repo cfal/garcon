@@ -1,6 +1,4 @@
 import { expect, test } from 'bun:test';
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import type { ExecutionNodeSnapshot } from '../../../common/execution-nodes.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
@@ -12,9 +10,7 @@ test('node editor grants and revokes workspace CLI access without replacing the 
     const snapshot = async () => (await fixture.integration.client.get<{ nodes: ExecutionNodeSnapshot[] }>('/api/v1/execution-nodes'))
       .nodes.find((node) => node.id === nodeId)!;
     const before = await snapshot();
-    const directory = join(fixture.integration.executionDirs.workspace, 'run');
-    const filename = (await readdir(directory)).find((name) => name.startsWith('cli-') && name.endsWith('.json'))!;
-    const discover = () => discoverRuntime({ runtimeFile: join(directory, filename), configDir: '/missing', workspace: 'unused' });
+    const discover = () => discoverRuntime({ configDir: fixture.integration.executionDirs.config, runtime: 'execution-node' });
     await expect(discover()).rejects.toThrow('HTTP 403');
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();

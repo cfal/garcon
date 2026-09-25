@@ -16,7 +16,7 @@ async function runCli(fixture: IntegrationFixture, arguments_: readonly string[]
       process.execPath,
       'cli/main.ts',
       '--config-dir', fixture.dirs.config,
-      '--workspace', WORKSPACE,
+      '--runtime', 'controller',
       '--server', fixture.garcon.baseUrl,
       ...arguments_,
     ],

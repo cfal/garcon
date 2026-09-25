@@ -2,10 +2,8 @@ import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import crypto from 'node:crypto';
 import net from 'node:net';
-import path from 'node:path';
-import { cliGatewayRuntimeDirectory, executionNodeDataDirectory, isCliGatewayRuntimeFilename } from '@garcon/common/cli-runtime-paths';
+import { cliRuntimeFile, type RuntimeKind, type RuntimeSelection } from '@garcon/common/cli-runtime-paths';
 import {
-  SERVER_RUNTIME_FILENAME,
   ServerRuntimeContractError,
   parseCliRuntimeDescriptor,
   parseCliContext,
@@ -13,13 +11,9 @@ import {
   runtimeProofPayload,
   type CliRuntimeDescriptor,
 } from '@garcon/common/server-runtime';
-import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
-import { connectionCommandPrefix } from './connection-options.js';
-import type { CliConnectionOptions } from './args.js';
 
 const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
-const DESCRIPTOR_RECHECK_DELAY_MS = 50;
 
 export interface RuntimeConnection {
   baseUrl: string;
@@ -33,20 +27,18 @@ export interface RuntimeConnection {
 
 export interface RuntimeDiscoveryOptions {
   configDir: string;
-  workspace?: string;
+  runtime?: RuntimeSelection;
   serverUrl?: string;
-  runtimeFile?: string;
-  expectedWorkspace?: string;
   signal?: AbortSignal;
 }
 
 export interface DiscoveredRuntime extends RuntimeConnection {
-  selector: Pick<CliConnectionOptions, 'workspace' | 'runtimeFile'>;
+  selector: { runtime: RuntimeKind };
 }
 
 export interface RuntimeDiscoveryDependencies {
   fetch?: typeof fetch;
-  delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+  warn?: (message: string) => void;
 }
 
 function isLoopbackHostname(hostname: string): boolean {
@@ -77,71 +69,52 @@ export function parseLoopbackServerUrl(value: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
-async function canonicalWorkspace(configDir: string, workspace: string): Promise<string> {
-  try {
-    const canonicalConfigDir = await fsPromises.realpath(configDir);
-    const namedWorkspace = path.resolve(canonicalConfigDir, `workspace-${workspace}`);
-    if (path.dirname(namedWorkspace) !== canonicalConfigDir) {
-      throw new Error('workspace is not a direct child of the config directory');
-    }
-    const canonicalWorkspaceDir = await fsPromises.realpath(namedWorkspace);
-    if (path.dirname(canonicalWorkspaceDir) !== canonicalConfigDir) {
-      throw new Error('workspace directory must resolve to a direct child of the config directory');
-    }
-    return canonicalWorkspaceDir;
-  } catch (error) {
-    throw new CliError(
-      'discovery',
-      `named workspace "${workspace}" is unavailable below ${configDir}`,
-      3,
-      { cause: error },
-    );
-  }
-}
-
-async function readRuntimeDescriptor(descriptorPath: string, workspaceDir: string | null): Promise<CliRuntimeDescriptor> {
+async function readRuntimeDescriptor(descriptorPath: string, runtime: RuntimeKind): Promise<CliRuntimeDescriptor> {
   let handle: fsPromises.FileHandle | undefined;
+  const invalid = (reason: string) => new CliError('discovery', `runtime file ${descriptorPath}: ${reason}`, 3);
   try {
     if (process.platform === 'win32') {
       const linkStat = await fsPromises.lstat(descriptorPath);
-      if (linkStat.isSymbolicLink()) throw new Error('runtime descriptor must not be a symbolic link');
+      if (linkStat.isSymbolicLink()) throw invalid('must not be a symbolic link');
     }
-    const noFollow = process.platform === 'win32' ? 0 : fs.constants.O_NOFOLLOW;
+    const noFollow = process.platform === 'win32' ? 0 : fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK;
     handle = await fsPromises.open(descriptorPath, fs.constants.O_RDONLY | noFollow);
     const descriptorStat = await handle.stat();
-    if (!descriptorStat.isFile()) throw new Error('runtime descriptor must be a regular file');
-    if (descriptorStat.size > 16_384) throw new Error('runtime descriptor is too large');
+    if (!descriptorStat.isFile()) throw invalid('must be a regular file');
+    if (descriptorStat.size > 16_384) throw invalid('exceeds the 16 KiB limit');
     if (process.platform !== 'win32' && (descriptorStat.mode & 0o077) !== 0) {
-      throw new Error('runtime descriptor must be readable only by its owner');
+      throw invalid('must be readable only by its owner');
     }
     if (
       process.platform !== 'win32'
       && typeof process.getuid === 'function'
       && descriptorStat.uid !== process.getuid()
     ) {
-      throw new Error('runtime descriptor must be owned by the current user');
+      throw invalid('must be owned by the current user');
     }
     const raw = JSON.parse(await handle.readFile('utf8')) as unknown;
     const descriptor = parseCliRuntimeDescriptor(raw);
-    if (workspaceDir !== null && (!('workspaceDir' in descriptor) || descriptor.workspaceDir !== workspaceDir)) {
-      throw new Error('runtime descriptor belongs to a different workspace');
+    if (('kind' in descriptor ? 'execution-node' : 'controller') !== runtime) {
+      throw invalid(`does not describe a ${runtime} runtime`);
     }
     return descriptor;
   } catch (error) {
+    if (error instanceof CliError) throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw invalid('must not be a symbolic link');
     if (
       error instanceof ServerRuntimeContractError
       && error.message === 'unsupported runtime schema version'
     ) {
       throw new CliError(
         'discovery',
-        'runtime descriptor schema is unsupported; upgrade Garcon and garcon-cli together',
+        `runtime file ${descriptorPath}: schema is unsupported; upgrade Garcon and garcon-cli together`,
         3,
         { cause: error },
       );
     }
     throw new CliError(
       'discovery',
-      `cannot read a secure runtime descriptor at ${descriptorPath}`,
+      `cannot read a valid runtime file at ${descriptorPath}`,
       3,
       { cause: error },
     );
@@ -201,17 +174,24 @@ export async function discoverRuntime(
   dependencies: RuntimeDiscoveryDependencies = {},
 ): Promise<DiscoveredRuntime> {
   options.signal?.throwIfAborted();
-  let endpoint: VerifiedEndpoint;
-  if (options.runtimeFile) {
-    endpoint = await verifyEndpoint({ descriptorPath: options.runtimeFile, workspaceDir: null }, options, dependencies);
-  } else if (options.workspace !== undefined) {
-    const workspaceDir = await canonicalWorkspace(options.configDir, options.workspace);
-    endpoint = await verifyEndpoint({ descriptorPath: path.join(workspaceDir, SERVER_RUNTIME_FILENAME),
-      workspaceDir, workspace: options.workspace }, options, dependencies);
-  } else {
-    endpoint = await discoverEndpoint(options, dependencies);
+  const candidate = await selectRuntime(options, dependencies);
+  try {
+    return await connectRuntime(candidate, options, dependencies);
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    const detail = error instanceof CliError ? error.message : 'could not retrieve a valid CLI context';
+    const guidance = candidate.alternative
+      ? `Use --runtime ${candidate.alternative} only if you intend to switch roles`
+      : 'Check that the selected runtime is running and available; restart it if it has exited';
+    throw new CliError(error instanceof CliError ? error.phase : 'discovery',
+      `${candidate.runtime} runtime at ${candidate.descriptorPath}: ${detail}. No fallback was attempted. ${guidance}`,
+      3, { cause: error });
   }
-  const { candidate, descriptor, baseUrl } = endpoint;
+}
+
+async function connectRuntime(candidate: RuntimeCandidate, options: RuntimeDiscoveryOptions, dependencies: RuntimeDiscoveryDependencies): Promise<DiscoveredRuntime> {
+  const endpoint = await verifyEndpoint(candidate, options, dependencies);
+  const { descriptor, baseUrl } = endpoint;
   assertServerUrl(options.serverUrl, baseUrl);
   const fetchFn = dependencies.fetch ?? fetch;
   const response = await fetchFn(`${baseUrl}/api/v1/cli/context`, {
@@ -221,9 +201,6 @@ export async function discoverRuntime(
   });
   if (!response.ok) throw new CliError('discovery', `CLI context unavailable (HTTP ${response.status})`, 3);
   const context = parseCliContext(await response.json());
-  if (options.expectedWorkspace !== undefined && options.expectedWorkspace !== context.workspaceName) {
-    throw new CliError('discovery', '--workspace does not match the authenticated CLI context', 3);
-  }
   if ('workspaceDir' in descriptor && context.serverInstanceId !== descriptor.instanceId) {
     throw new CliError('discovery', 'controller changed during discovery; start a new CLI invocation', 3);
   }
@@ -234,22 +211,19 @@ export async function discoverRuntime(
     defaultNodeId: context.defaultNodeId,
     workspaceName: context.workspaceName,
     localCapability: descriptor.localCapability,
-    workspaceDir: candidate.workspaceDir,
-    selector: candidate.workspace === undefined
-      ? { runtimeFile: candidate.descriptorPath }
-      : { workspace: candidate.workspace },
+    workspaceDir: 'workspaceDir' in descriptor ? descriptor.workspaceDir : null,
+    selector: { runtime: candidate.runtime },
   };
 }
 
 interface RuntimeCandidate {
   descriptorPath: string;
-  workspaceDir: string | null;
-  workspace?: string;
-  gateway?: boolean;
+  runtime: RuntimeKind;
+  descriptor: CliRuntimeDescriptor;
+  alternative?: RuntimeKind;
 }
 
 interface VerifiedEndpoint {
-  candidate: RuntimeCandidate;
   descriptor: CliRuntimeDescriptor;
   baseUrl: string;
 }
@@ -266,102 +240,49 @@ async function verifyEndpoint(
   dependencies: RuntimeDiscoveryDependencies,
 ): Promise<VerifiedEndpoint> {
   const fetchFn = dependencies.fetch ?? fetch;
-  const wait = dependencies.delay ?? abortableDelay;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    options.signal?.throwIfAborted();
-    const descriptor = await readRuntimeDescriptor(candidate.descriptorPath, candidate.workspaceDir);
-    if (candidate.gateway && !('kind' in descriptor)) {
-      throw new CliError('discovery', 'worker runtime descriptor must identify an execution-node gateway', 3);
-    }
-    const baseUrl = parseLoopbackServerUrl(descriptor.baseUrl);
-    assertServerUrl(options.serverUrl, baseUrl);
-    const verified = await probeRuntime(
-      baseUrl,
-      descriptor.instanceId,
-      descriptor.localCapability,
-      fetchFn,
-      options.signal,
-    );
-    if (verified) return { candidate, descriptor, baseUrl };
-    if (attempt === 0) await wait(DESCRIPTOR_RECHECK_DELAY_MS, options.signal);
-  }
+  options.signal?.throwIfAborted();
+  const descriptor = candidate.descriptor;
+  const baseUrl = parseLoopbackServerUrl(descriptor.baseUrl);
+  assertServerUrl(options.serverUrl, baseUrl);
+  const verified = await probeRuntime(baseUrl, descriptor.instanceId, descriptor.localCapability, fetchFn, options.signal);
+  if (verified) return { descriptor, baseUrl };
 
   throw new CliError(
     'runtime verification',
-    'the selected server does not match the runtime descriptor',
+    `the selected ${candidate.runtime} does not match ${candidate.descriptorPath}; restart that runtime or select another role explicitly`,
     3,
   );
 }
 
-// Non-directory `workspace-*` entries such as backups surface as ENOTDIR and hold no endpoint.
-const ABSENT_ENDPOINT_CODES = ['ENOENT', 'ENOTDIR', 'ECONNREFUSED', 'ConnectionRefused'];
-
-interface CandidateOutcome {
-  candidate: RuntimeCandidate;
-  endpoint?: VerifiedEndpoint;
-  error?: unknown;
-}
-
-function hasErrorCode(error: unknown, codes: readonly string[]): boolean {
-  if (!error || typeof error !== 'object') return false;
-  if ('code' in error && typeof error.code === 'string' && codes.includes(error.code)) return true;
-  return error instanceof Error && error.cause !== error && hasErrorCode(error.cause, codes);
-}
-
-async function directoryEntries(directory: string): Promise<string[]> {
-  try { return (await fsPromises.readdir(directory)).sort(); }
-  catch (error) {
-    if (hasErrorCode(error, ['ENOENT', 'ENOTDIR'])) return [];
-    throw new CliError('discovery', `cannot inspect runtime directory ${directory}`, 3, { cause: error });
-  }
-}
-
-// Unresolvable workspace entries are kept as failed outcomes so they still block selection.
-async function runtimeCandidates(configDir: string): Promise<CandidateOutcome[]> {
-  const outcomes: CandidateOutcome[] = [];
-  const seen = new Set<string>();
-  for (const name of await directoryEntries(configDir)) {
-    if (!name.startsWith('workspace-') || name === 'workspace-') continue;
-    const workspace = name.slice('workspace-'.length);
+async function selectRuntime(options: RuntimeDiscoveryOptions, dependencies: RuntimeDiscoveryDependencies): Promise<RuntimeCandidate> {
+  const selection = options.runtime ?? 'auto';
+  const kinds: RuntimeKind[] = selection === 'auto' ? ['controller', 'execution-node'] : [selection];
+  const candidates: RuntimeCandidate[] = [];
+  const errors: unknown[] = [];
+  for (const runtime of kinds) {
+    options.signal?.throwIfAborted();
+    const descriptorPath = cliRuntimeFile(options.configDir, runtime);
     try {
-      const workspaceDir = await canonicalWorkspace(configDir, workspace);
-      if (seen.has(workspaceDir)) continue;
-      seen.add(workspaceDir);
-      outcomes.push({ candidate: { descriptorPath: path.join(workspaceDir, SERVER_RUNTIME_FILENAME), workspaceDir, workspace } });
+      const descriptor = await readRuntimeDescriptor(descriptorPath, runtime);
+      parseLoopbackServerUrl(descriptor.baseUrl);
+      candidates.push({ runtime, descriptorPath, descriptor });
     } catch (error) {
-      if (hasErrorCode(error, ABSENT_ENDPOINT_CODES)) continue;
-      outcomes.push({ candidate: { descriptorPath: path.join(configDir, name, SERVER_RUNTIME_FILENAME), workspaceDir: null, workspace }, error });
+      if (error instanceof CliError && (error.cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') continue;
+      errors.push(error);
     }
   }
-  const directory = cliGatewayRuntimeDirectory(executionNodeDataDirectory(configDir));
-  for (const name of await directoryEntries(directory)) {
-    if (isCliGatewayRuntimeFilename(name)) outcomes.push({ candidate: { descriptorPath: path.join(directory, name), workspaceDir: null, gateway: true } });
+  if (candidates.length === 0 && errors.length === 0) {
+    throw new CliError('discovery', `no ${selection === 'auto' ? 'Garcon' : selection} runtime file under ${options.configDir}; start that runtime first`, 3);
   }
-  return outcomes;
-}
-
-async function discoverEndpoint(options: RuntimeDiscoveryOptions, dependencies: RuntimeDiscoveryDependencies): Promise<VerifiedEndpoint> {
-  const outcomes: CandidateOutcome[] = [];
-  for (const scanned of await runtimeCandidates(options.configDir)) {
-    if (scanned.error !== undefined) {
-      outcomes.push(scanned);
-      continue;
-    }
-    try {
-      outcomes.push({ candidate: scanned.candidate, endpoint: await verifyEndpoint(scanned.candidate, { signal: options.signal }, dependencies) });
-    } catch (error) {
-      options.signal?.throwIfAborted();
-      if (!hasErrorCode(error, ABSENT_ENDPOINT_CODES)) outcomes.push({ candidate: scanned.candidate, error });
-    }
+  const warn = dependencies.warn ?? ((message: string) => { process.stderr.write(`${message}\n`); });
+  if (errors.length > 0) {
+    if (candidates.length + errors.length > 1) warn('warning: both runtime files exist; automatic selection failed. Use --runtime controller or --runtime execution-node to select explicitly.');
+    throw errors[0];
   }
-  if (outcomes.length === 1 && outcomes[0]!.endpoint) return outcomes[0]!.endpoint!;
-  if (outcomes.length === 0) throw new CliError('discovery', `no running Garcon endpoint below ${options.configDir}`, 3);
-  const alternatives = outcomes.map(({ candidate, error }) => {
-    const selector = candidate.workspace === undefined ? { runtimeFile: candidate.descriptorPath } : { workspace: candidate.workspace };
-    // Only top-level messages are shown; they carry paths and HTTP status, never the capability.
-    const status = error === undefined ? 'running'
-      : `unverified at ${candidate.descriptorPath}: ${error instanceof CliError ? error.message : 'unexpected failure'}`;
-    return `  ${connectionCommandPrefix({ configDir: options.configDir, ...selector }).join(' ')} (${status})`;
-  });
-  throw new CliError('discovery', `cannot select a unique verified Garcon endpoint; use one of these command prefixes:\n${alternatives.join('\n')}`, 3);
+  const chosen = candidates.reduce((selected, candidate) => Date.parse(candidate.descriptor.startedAt) > Date.parse(selected.descriptor.startedAt) ? candidate : selected);
+  if (candidates.length > 1) {
+    warn(`warning: both runtime files exist; selected ${chosen.runtime} (startedAt ${new Date(chosen.descriptor.startedAt).toISOString()}). Use --runtime controller or --runtime execution-node to select explicitly.`);
+  }
+  const alternative = candidates.find((candidate) => candidate !== chosen)?.runtime;
+  return { ...chosen, ...(alternative ? { alternative } : {}) };
 }

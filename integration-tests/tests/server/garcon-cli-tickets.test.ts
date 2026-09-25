@@ -11,7 +11,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 async function runCli(fixture: IntegrationFixture, args: readonly string[], body?: string) {
   const child = Bun.spawn({ cmd: [process.execPath, 'cli/main.ts', '--config-dir', fixture.dirs.config,
-    '--workspace', 'integration', '--server', fixture.garcon.baseUrl, 'ticket', ...args], cwd: REPO_ROOT,
+    '--runtime', 'controller', '--server', fixture.garcon.baseUrl, 'ticket', ...args], cwd: REPO_ROOT,
     env: cliEnvironment(),
     stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
   if (body !== undefined) child.stdin.write(body);

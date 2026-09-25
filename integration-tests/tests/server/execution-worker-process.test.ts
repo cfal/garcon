@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ExecutionNodeProcess } from '../../support/execution-backend.js';
@@ -84,9 +84,7 @@ test('re-adding a running worker under a new node identity requires restarting t
           reverseCalls.push(call.method);
           return { serverInstanceId: 'synthetic-controller', defaultNodeId: nodeId, workspaceName: null };
         });
-        const runDirectory = join(directories.workspace, 'run');
-        const descriptor = (await readdir(runDirectory)).find((name) => name.startsWith('cli-') && name.endsWith('.json'))!;
-        await expect(discoverRuntime({ runtimeFile: join(runDirectory, descriptor), configDir: '/missing', workspace: 'unused' }))
+        await expect(discoverRuntime({ configDir: directories.config, runtime: 'execution-node' }))
           .rejects.toThrow('HTTP 503');
         expect(reverseCalls).toEqual([]);
         const description = await rpc.call('', 'node.describe', null);

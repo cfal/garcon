@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { cliGatewayRuntimeFile, executionNodeDataDirectory } from '@garcon/common/cli-runtime-paths';
+import { cliRuntimeFile, type RuntimeKind } from '@garcon/common/cli-runtime-paths';
 import { runtimeProofPayload, type CliRuntimeDescriptor } from '@garcon/common/server-runtime';
 import { parseCliArgs } from '../args.js';
 import { discoverRuntime } from '../discovery.js';
@@ -18,15 +18,13 @@ async function fixture() {
   roots.push(configDir);
   const endpoints = new Map<string, CliRuntimeDescriptor>();
   const calls: { url: URL; authorization: string | null }[] = [];
-  async function add(workspace?: string) {
-    const instanceId = crypto.randomUUID();
-    const workspaceDir = workspace === undefined ? null : path.join(configDir, `workspace-${workspace}`);
-    const runtimeFile = workspaceDir === null ? cliGatewayRuntimeFile(executionNodeDataDirectory(configDir), instanceId)
-      : path.join(workspaceDir, 'server-runtime.json');
+  const warnings: string[] = [];
+  async function add(kind: RuntimeKind, startedAt = '2026-01-01T00:00:00.000Z') {
+    const runtimeFile = cliRuntimeFile(configDir, kind);
     const descriptor: CliRuntimeDescriptor = {
-      schemaVersion: 1, instanceId, startedAt: '2026-01-01T00:00:00.000Z', pid: process.pid,
+      schemaVersion: 1, instanceId: crypto.randomUUID(), startedAt, pid: process.pid,
       baseUrl: `http://127.0.0.1:${8000 + endpoints.size}`, localCapability: `garcon_local_${crypto.randomBytes(32).toString('base64url')}`,
-      ...(workspaceDir === null ? { kind: 'execution-node-cli' as const } : { workspaceDir }),
+      ...(kind === 'execution-node' ? { kind: 'execution-node-cli' as const } : { workspaceDir: '/controller/workspace' }),
     };
     await mkdir(path.dirname(runtimeFile), { recursive: true, mode: 0o700 });
     await writeFile(runtimeFile, JSON.stringify(descriptor), { mode: 0o600 });
@@ -42,129 +40,137 @@ async function fixture() {
     return Response.json({ schemaVersion: 1, instanceId: descriptor.instanceId, proof: crypto.createHmac('sha256', descriptor.localCapability)
       .update(runtimeProofPayload(descriptor.instanceId, url.searchParams.get('challenge')!)).digest('base64url') });
   }, { preconnect() {} }) satisfies typeof fetch;
-  return { configDir, add, calls, fetch: fetcher };
+  return { configDir, add, calls, warnings, dependencies: { fetch: fetcher, warn: (message: string) => warnings.push(message) } };
 }
 
-test('root-only discovery selects a worker without an implicit default workspace', async () => {
+test.each(['controller', 'execution-node'] as const)('auto selects the sole %s and sends its capability only after proof', async (runtime) => {
   const f = await fixture();
-  const worker = await f.add();
-  for (const command of [parseCliArgs(['list', 'agents'], { GARCON_CONFIG_DIR: f.configDir }),
-    parseCliArgs(['--config-dir', f.configDir, 'list', 'agents'], {})]) {
-    if (command.kind !== 'list') throw new Error('Expected list command');
-    expect(command.workspace).toBeUndefined();
-    const connection = await discoverRuntime(command, { fetch: f.fetch });
-    expect(connection.selector).toEqual({ runtimeFile: worker.runtimeFile });
-    expect(connection.defaultNodeId).not.toBe('local');
-  }
-  expect(f.calls.map((call) => call.authorization)).toEqual([null, `Bearer ${worker.descriptor.localCapability}`, null, `Bearer ${worker.descriptor.localCapability}`]);
+  const endpoint = await f.add(runtime);
+  const command = parseCliArgs(['--config-dir', f.configDir, 'list', 'agents'], {});
+  if (command.kind !== 'list') throw new Error('Expected list command');
+  expect(command.runtime).toBe('auto');
+  const connection = await discoverRuntime(command, f.dependencies);
+  expect(connection.selector).toEqual({ runtime });
+  expect(connection.endpointInstanceId).toBe(endpoint.descriptor.instanceId);
+  expect(f.calls.map((call) => call.authorization)).toEqual([null, `Bearer ${endpoint.descriptor.localCapability}`]);
+  expect(f.warnings).toEqual([]);
 });
 
-test('controller and worker are distinct candidates even when they share a workspace', async () => {
+test.each(['controller', 'execution-node'] as const)('auto prefers the newer %s start, not file mtime, and warns without credentials', async (runtime) => {
   const f = await fixture();
-  const controller = await f.add('default');
-  const worker = await f.add();
-  await expect(discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).rejects.toThrow('unique verified');
-  expect(f.calls.every((call) => call.authorization === null)).toBe(true);
-  expect((await discoverRuntime({ configDir: f.configDir, workspace: 'default' }, { fetch: f.fetch })).selector).toEqual({ workspace: 'default' });
-  expect((await discoverRuntime({ configDir: f.configDir, runtimeFile: worker.runtimeFile }, { fetch: f.fetch })).endpointInstanceId).toBe(worker.descriptor.instanceId);
-  await expect(discoverRuntime({ configDir: f.configDir, serverUrl: controller.descriptor.baseUrl }, { fetch: f.fetch })).rejects.toThrow('unique verified');
+  const older = await f.add(runtime === 'controller' ? 'execution-node' : 'controller');
+  const newer = await f.add(runtime, '2026-02-01T00:00:00.000Z');
+  await utimes(newer.runtimeFile, new Date(0), new Date(0));
+  const connection = await discoverRuntime({ configDir: f.configDir }, f.dependencies);
+  expect(connection.selector).toEqual({ runtime });
+  expect(f.calls.every((call) => call.url.origin === newer.descriptor.baseUrl)).toBe(true);
+  expect(f.warnings).toHaveLength(1);
+  expect(f.warnings[0]).toContain(`both runtime files exist; selected ${runtime}`);
+  expect(f.warnings[0]).toContain('--runtime controller or --runtime execution-node');
+  expect(f.warnings[0]).not.toContain(newer.descriptor.localCapability);
+  expect(f.warnings[0]).not.toContain(older.descriptor.localCapability);
 });
 
-test('multiple workers require exact selectors without disclosing capabilities', async () => {
+test('equal start timestamps select controller deterministically', async () => {
   const f = await fixture();
-  const first = await f.add();
-  const second = await f.add();
-  let message = '';
-  try { await discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch }); }
-  catch (error) { message = (error as Error).message; }
-  expect(message).toContain(`garcon-cli --runtime-file '${first.runtimeFile}'`);
-  expect(message).toContain(`garcon-cli --runtime-file '${second.runtimeFile}'`);
-  expect(message).not.toContain('--config-dir');
-  expect(message).not.toContain(first.descriptor.localCapability);
-  expect(message).not.toContain(second.descriptor.localCapability);
-  expect(f.calls.every((call) => call.authorization === null)).toBe(true);
+  await f.add('execution-node');
+  await f.add('controller');
+  expect((await discoverRuntime({ configDir: f.configDir }, f.dependencies)).selector.runtime).toBe('controller');
 });
 
-test('refused and vanished descriptors are skipped but atomic temporary files are never probed', async () => {
+test.each(['controller', 'execution-node'] as const)('explicit %s selection ignores newer and malformed files for the other role', async (runtime) => {
   const f = await fixture();
-  const dead = await f.add();
-  const live = await f.add('work');
-  await writeFile(`${dead.runtimeFile}.tmp`, 'not a descriptor');
-  const fetcher: typeof fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).startsWith(dead.descriptor.baseUrl)) throw Object.assign(new Error('refused'), { code: 'ConnectionRefused' });
-    return f.fetch(input, init);
-  }, { preconnect() {} });
-  expect((await discoverRuntime({ configDir: f.configDir }, { fetch: fetcher })).endpointInstanceId).toBe(live.descriptor.instanceId);
-  await rm(dead.runtimeFile);
-  expect((await discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).selector).toEqual({ workspace: 'work' });
+  await f.add(runtime);
+  const other = await f.add(runtime === 'controller' ? 'execution-node' : 'controller', '2026-02-01T00:00:00Z');
+  await writeFile(other.runtimeFile, 'invalid json');
+  expect((await discoverRuntime({ configDir: f.configDir, runtime }, f.dependencies)).selector).toEqual({ runtime });
+  expect(f.warnings).toEqual([]);
+  await rm(cliRuntimeFile(f.configDir, runtime));
+  await expect(discoverRuntime({ configDir: f.configDir, runtime }, f.dependencies)).rejects.toThrow(`no ${runtime} runtime file`);
 });
 
-test.each(['timeout', 'reset', 'busy', 'proof', 'schema', 'permissions'])('unresolved %s blocks selecting another endpoint', async (failure) => {
+test.each(['refused', 'timeout', 'reset', 'busy', 'proof', 'context'])('selected %s failure never falls back to the older runtime', async (failure) => {
   const f = await fixture();
-  const suspect = await f.add();
-  await f.add('work');
-  if (failure === 'permissions' && process.platform === 'win32') return;
+  const older = await f.add('controller');
+  const selected = await f.add('execution-node', '2026-02-01T00:00:00Z');
+  const attempted: string[] = [];
+  const fetcher = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+    attempted.push(String(input));
+    if (failure === 'refused') throw Object.assign(new Error('refused'), { code: 'ConnectionRefused' });
+    if (failure === 'timeout') throw new DOMException('timed out', 'TimeoutError');
+    if (failure === 'reset') throw Object.assign(new Error('reset'), { code: 'ECONNRESET' });
+    if (failure === 'busy' || failure === 'context' && String(input).endsWith('/cli/context')) return new Response('', { status: 503 });
+    if (failure === 'proof') return Response.json({ schemaVersion: 1, instanceId: older.descriptor.instanceId, proof: Buffer.alloc(32).toString('base64url') });
+    return f.dependencies.fetch(input, init);
+  }, { preconnect() {} }) satisfies typeof fetch;
+  await expect(discoverRuntime({ configDir: f.configDir }, { ...f.dependencies, fetch: fetcher })).rejects.toThrow();
+  expect(attempted.length).toBeGreaterThan(0);
+  expect(attempted.every((url) => url.startsWith(selected.descriptor.baseUrl))).toBe(true);
+  expect(f.warnings).toHaveLength(1);
+  expect(await Bun.file(selected.runtimeFile).exists()).toBe(true);
+});
+
+test.each(['schema', 'permissions', 'json', 'timestamp', 'kind', 'symlink'])('invalid %s metadata blocks auto without leaking the capability', async (failure) => {
+  if ((failure === 'permissions' || failure === 'symlink') && process.platform === 'win32') return;
+  const f = await fixture();
+  const suspect = await f.add('execution-node');
+  await f.add('controller', '2026-02-01T00:00:00Z');
   if (failure === 'permissions') await chmod(suspect.runtimeFile, 0o644);
   if (failure === 'schema') await writeFile(suspect.runtimeFile, JSON.stringify({ ...suspect.descriptor, schemaVersion: 2 }));
-  const fetcher = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).startsWith(suspect.descriptor.baseUrl)) {
-      if (failure === 'timeout') throw new DOMException('timed out', 'TimeoutError');
-      if (failure === 'reset') throw Object.assign(new Error('reset'), { code: 'ECONNRESET' });
-      if (failure === 'busy') return Response.json({ errorCode: 'CLI_SERVICE_BUSY' }, { status: 503 });
-      if (failure === 'proof') return Response.json({ schemaVersion: 1, instanceId: suspect.descriptor.instanceId, proof: Buffer.alloc(32).toString('base64url') });
-    }
-    return f.fetch(input, init);
-  }, { preconnect() {} }) satisfies typeof fetch;
-  const error = await discoverRuntime({ configDir: f.configDir }, { fetch: fetcher, delay: async () => {} }).catch((caught: unknown) => caught);
-  expect((error as Error).message).toContain(`(unverified at ${suspect.runtimeFile}: `);
-  expect((error as Error).message).not.toContain(suspect.descriptor.localCapability);
-  expect(f.calls.every((call) => call.authorization === null)).toBe(true);
+  if (failure === 'timestamp') await writeFile(suspect.runtimeFile, JSON.stringify({ ...suspect.descriptor, startedAt: 'not a timestamp' }));
+  if (failure === 'kind') await writeFile(suspect.runtimeFile, JSON.stringify({ ...suspect.descriptor, kind: undefined, workspaceDir: '/other' }));
+  if (failure === 'json') await writeFile(suspect.runtimeFile, `{"${suspect.descriptor.localCapability}`);
+  if (failure === 'symlink') {
+    await writeFile(`${suspect.runtimeFile}.real`, JSON.stringify(suspect.descriptor), { mode: 0o600 });
+    await rm(suspect.runtimeFile);
+    await symlink(`${suspect.runtimeFile}.real`, suspect.runtimeFile);
+  }
+  const error = await discoverRuntime({ configDir: f.configDir }, f.dependencies).catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(Error);
+  expect(String(error)).toContain(suspect.runtimeFile);
+  expect(String(error)).not.toContain(suspect.descriptor.localCapability);
+  expect(f.calls).toEqual([]);
+  expect(f.warnings).toHaveLength(1);
 });
 
-test('non-directory workspace entries are ignored and unresolvable aliases block with a reason', async () => {
+test('ignores workspace descriptors and temporary files; --server is an assertion, not a selector', async () => {
   const f = await fixture();
-  await f.add('work');
-  await writeFile(path.join(f.configDir, 'workspace-version.json'), '{}');
-  await writeFile(path.join(f.configDir, 'workspace-default.tar'), '');
-  expect((await discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).selector).toEqual({ workspace: 'work' });
-  if (process.platform === 'win32') return;
-  const outside = await mkdtemp(path.join(path.dirname(f.configDir), 'cli-outside-'));
-  roots.push(outside);
-  await symlink(outside, path.join(f.configDir, 'workspace-outside'));
-  const descriptorPath = path.join(f.configDir, 'workspace-outside', 'server-runtime.json');
-  await expect(discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).rejects.toThrow(
-    `--workspace 'outside' --config-dir '${f.configDir}' (unverified at ${descriptorPath}: named workspace "outside" is unavailable`);
+  await mkdir(path.join(f.configDir, 'workspace-default'));
+  await writeFile(path.join(f.configDir, 'workspace-default', 'runtime.json'), 'ignored');
+  await writeFile(path.join(f.configDir, '.runtime.json.tmp'), 'ignored');
+  await expect(discoverRuntime({ configDir: f.configDir }, f.dependencies)).rejects.toThrow('no Garcon runtime file');
+  const controller = await f.add('controller');
+  await f.add('execution-node', '2026-02-01T00:00:00Z');
+  await expect(discoverRuntime({ configDir: f.configDir, serverUrl: controller.descriptor.baseUrl }, f.dependencies)).rejects.toThrow('must exactly match');
+  expect(f.calls).toEqual([]);
 });
 
-test.each([403, 503])('unique gateway context HTTP %s never falls back', async (status) => {
+test('discovery cancellation propagates without selecting another runtime', async () => {
   const f = await fixture();
-  await f.add();
-  const fetcher = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith('/cli/context')
-    ? Response.json({ errorCode: 'CLI_ACCESS_DENIED' }, { status }) : f.fetch(input, init), { preconnect() {} }) satisfies typeof fetch;
-  await expect(discoverRuntime({ configDir: f.configDir }, { fetch: fetcher })).rejects.toThrow(`HTTP ${status}`);
-  await expect(discoverRuntime({ configDir: f.configDir, workspace: 'missing' }, { fetch: f.fetch })).rejects.toThrow('named workspace');
-  await expect(discoverRuntime({ configDir: f.configDir, runtimeFile: path.join(f.configDir, 'missing.json') }, { fetch: f.fetch })).rejects.toThrow('secure runtime descriptor');
-});
-
-test('automatic discovery deduplicates canonical workspace aliases without following descriptor symlinks', async () => {
-  if (process.platform === 'win32') return;
-  const f = await fixture();
-  const controller = await f.add('work');
-  await symlink('workspace-work', path.join(f.configDir, 'workspace-alias'));
-  expect((await discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).selector).toEqual({ workspace: 'alias' });
-  expect(f.calls).toHaveLength(2);
-  const original = `${controller.runtimeFile}.original`;
-  await writeFile(original, JSON.stringify(controller.descriptor), { mode: 0o600 });
-  await rm(controller.runtimeFile);
-  await symlink(original, controller.runtimeFile);
-  await expect(discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).rejects.toThrow('unverified');
-});
-
-test('discovery propagates cancellation and reports an empty root without falling back', async () => {
-  const f = await fixture();
-  await expect(discoverRuntime({ configDir: f.configDir }, { fetch: f.fetch })).rejects.toThrow('no running Garcon endpoint');
-  await f.add();
+  await f.add('execution-node');
   const abort = new AbortController();
   const fetcher = Object.assign(async () => { abort.abort(new Error('cancelled')); throw abort.signal.reason; }, { preconnect() {} }) satisfies typeof fetch;
-  await expect(discoverRuntime({ configDir: f.configDir, signal: abort.signal }, { fetch: fetcher })).rejects.toThrow('cancelled');
+  await expect(discoverRuntime({ configDir: f.configDir, signal: abort.signal }, { ...f.dependencies, fetch: fetcher })).rejects.toThrow('cancelled');
+});
+
+test.each([
+  { runtime: 'auto' as const, both: false, suggestOther: false },
+  { runtime: 'auto' as const, both: true, suggestOther: true },
+  { runtime: 'execution-node' as const, both: false, suggestOther: false },
+  { runtime: 'execution-node' as const, both: true, suggestOther: false },
+])('failed discovery suggests another role only after auto found it: %j', async ({ runtime, both, suggestOther }) => {
+  const f = await fixture();
+  if (both) await f.add('controller');
+  const selected = await f.add('execution-node', '2026-02-01T00:00:00Z');
+  const fetcher = Object.assign(async () => { throw new Error('refused'); }, { preconnect() {} }) satisfies typeof fetch;
+  const error = await discoverRuntime({ configDir: f.configDir, runtime }, { ...f.dependencies, fetch: fetcher })
+    .catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(Error);
+  expect(String(error)).toContain(`execution-node runtime at ${selected.runtimeFile}`);
+  expect(String(error)).toContain('No fallback was attempted');
+  if (suggestOther) expect(String(error)).toContain('--runtime controller only if you intend to switch roles');
+  else {
+    expect(String(error)).not.toContain('--runtime controller');
+    expect(String(error)).toContain('restart it if it has exited');
+  }
 });

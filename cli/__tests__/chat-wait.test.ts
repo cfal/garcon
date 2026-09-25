@@ -11,7 +11,7 @@ const CHAT_ID = '1785337200123456';
 const TIMESTAMP = '2026-08-04T12:00:00.000Z';
 const command: WaitCliCommand = {
   kind: 'wait',
-  workspace: 'work',
+  runtime: 'controller',
   configDir: '/config',
   chatId: CHAT_ID,
   turnId: 'turn-1',
@@ -108,7 +108,7 @@ describe('runChatWait', () => {
     expect(capture.results).toEqual([JSON.stringify(failed, null, 2)]);
   });
 
-  test.each([undefined, '/private/runtime.json'])('does not invent a workspace for a missing receipt: runtime=%s', async (runtimeFile) => {
+  test.each(['controller', 'execution-node'] as const)('does not invent a workspace for a missing receipt: runtime=%s', async (runtime) => {
     const client: ReceiptClient = {
       async getTurnReceipt() {
         throw new GarconHttpError(
@@ -123,11 +123,11 @@ describe('runChatWait', () => {
     };
 
     try {
-      await runChatWait({ ...command, runtimeFile }, client, output());
+      await runChatWait({ ...command, runtime }, client, output());
       throw new Error('Expected missing receipt');
     } catch (error) {
       expect(error).toBeInstanceOf(CliError);
-      expect((error as Error).message.includes('Garcon workspace "work"')).toBe(!runtimeFile);
+      expect((error as Error).message).not.toContain('Garcon workspace');
     }
   });
 });

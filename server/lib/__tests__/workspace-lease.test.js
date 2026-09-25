@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { acquireControllerLease, acquireWorkspaceLease, WorkspaceInUseError } from '../workspace-lease.js';
@@ -17,6 +17,38 @@ async function temporaryDirectory(label) {
 }
 
 describe('workspace lease', () => {
+  it('allows one worker alongside one controller but not a second worker, including aliases', async () => {
+    const config = await temporaryDirectory('garcon-role-leases-');
+    const data = path.join(config, 'execution-node');
+    const controller = await acquireControllerLease(config, path.join(config, 'workspace-default'), { retries: 0 });
+    const worker = await acquireWorkspaceLease(data, { retries: 0 });
+    try {
+      await expect(acquireWorkspaceLease(data, { retries: 0 })).rejects.toThrow('already in use');
+      if (process.platform !== 'win32') {
+        const alias = path.join(config, 'alias');
+        await symlink(data, alias, 'dir');
+        await expect(acquireWorkspaceLease(alias, { retries: 0 })).rejects.toThrow('already in use');
+      }
+    } finally { await worker.release(); await controller.release(); }
+  });
+
+  it('rejects controller workspaces in reserved worker storage even when the worker is stopped', async () => {
+    const config = await temporaryDirectory('garcon-reserved-worker-');
+    const data = path.join(config, 'execution-node');
+    await mkdir(data);
+    const paths = [data, path.join(data, 'nested')];
+    if (process.platform !== 'win32') {
+      const alias = path.join(config, 'workspace-alias');
+      await symlink(data, alias, 'dir');
+      paths.push(alias);
+    }
+    for (const workspace of paths) {
+      await expect(acquireControllerLease(config, workspace, { retries: 0 })).rejects.toThrow('reserved for worker storage');
+      const recovered = await acquireWorkspaceLease(config, { retries: 0 });
+      await recovered.release();
+    }
+  });
+
   it('one controller owns the config directory even with distinct workspaces', async () => {
     const root = await temporaryDirectory('garcon-controller-lease-');
     const config = path.join(root, 'config');

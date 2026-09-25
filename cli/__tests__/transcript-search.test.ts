@@ -74,7 +74,7 @@ function command(
 ): TranscriptSearchCliCommand {
   return {
     kind: 'transcript-search',
-    workspace: 'default',
+    runtime: 'controller',
     configDir: '/config',
     action,
     json,

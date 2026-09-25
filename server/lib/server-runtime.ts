@@ -7,10 +7,11 @@ import {
   SERVER_RUNTIME_FILENAME,
   SERVER_RUNTIME_SCHEMA_VERSION,
   isRuntimeProbeChallenge,
-  parseServerRuntimeDescriptor,
+  parseCliRuntimeDescriptor,
   runtimeProofPayload,
   type ServerRuntimeDescriptor,
   type ServerRuntimeIdentity,
+  type CliRuntimeDescriptor,
 } from '@garcon/common/server-runtime';
 
 export interface ServerRuntimeState {
@@ -28,13 +29,6 @@ export function createServerRuntimeState(workspaceDir: string): ServerRuntimeSta
     },
     localCapability: `${LOCAL_CAPABILITY_PREFIX}${crypto.randomBytes(32).toString('base64url')}`,
   };
-}
-
-// Unnamed controllers publish no descriptor; their children get a pin that never
-// resolves rather than discovering another endpoint below the config root.
-export function childCliRuntimeFile(state: ServerRuntimeState, workspaceName: string | null): string {
-  const { workspaceDir, instanceId } = state.identity;
-  return path.join(workspaceDir, workspaceName === null ? `.cli-unavailable-${instanceId}.json` : SERVER_RUNTIME_FILENAME);
 }
 
 export function createServerRuntimeProof(
@@ -74,6 +68,7 @@ export function logServerReady(
 export async function publishServerRuntime(
   state: ServerRuntimeState,
   baseUrl: string,
+  configDir: string,
 ): Promise<{ descriptor: ServerRuntimeDescriptor; filePath: string }> {
   const workspaceDir = await fs.realpath(state.identity.workspaceDir);
   const descriptor: ServerRuntimeDescriptor = {
@@ -83,35 +78,36 @@ export async function publishServerRuntime(
     baseUrl,
     localCapability: state.localCapability,
   };
-  const filePath = path.join(workspaceDir, SERVER_RUNTIME_FILENAME);
+  const filePath = path.join(configDir, SERVER_RUNTIME_FILENAME);
+  await publishRuntimeDescriptor(filePath, descriptor);
+  return { descriptor, filePath };
+}
+
+export async function publishRuntimeDescriptor(filePath: string, descriptor: CliRuntimeDescriptor): Promise<void> {
   const tempPath = path.join(
-    workspaceDir,
-    `.${SERVER_RUNTIME_FILENAME}.${process.pid}.${crypto.randomUUID()}.tmp`,
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
   );
   const handle = await fs.open(tempPath, 'wx', 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(descriptor, null, 2)}\n`, { encoding: 'utf8' });
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
+    try {
+      await handle.writeFile(`${JSON.stringify(descriptor, null, 2)}\n`, { encoding: 'utf8' });
+      await handle.sync();
+    } finally { await handle.close(); }
     await fs.rename(tempPath, filePath);
-    if (process.platform !== 'win32') await fs.chmod(filePath, 0o600);
   } catch (error) {
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
-  return { descriptor, filePath };
 }
 
 export async function removeServerRuntime(
   filePath: string,
   expectedInstanceId: string,
 ): Promise<boolean> {
-  let descriptor: ServerRuntimeDescriptor;
+  let descriptor: CliRuntimeDescriptor;
   try {
-    descriptor = parseServerRuntimeDescriptor(JSON.parse(await fs.readFile(filePath, 'utf8')));
+    descriptor = parseCliRuntimeDescriptor(JSON.parse(await fs.readFile(filePath, 'utf8')));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     return false;

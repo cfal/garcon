@@ -19,7 +19,7 @@ import { CHAT_ID, OTHER_CHAT_ID, TS, chat, chatList } from './chat-research-fixt
 
 const command: SearchCliCommand = {
   kind: 'search',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   query: '"version bump"',
   filter: '',
@@ -116,14 +116,13 @@ describe('chat search', () => {
     expect(result.interpretedQuery.clauses[0]?.kind).toBe('phrase');
     expect(JSON.parse(formatChatSearchResult(result, true, command))).toEqual(result);
     expect(formatChatSearchResult(result, false, command)).toContain(
-      `garcon-cli --workspace 'default' --config-dir '/config' read '${CHAT_ID}' '84' --transcript-view-id 'view-1' --include 'reasoning'`,
+      `garcon-cli --config-dir '/config' --runtime 'controller' read '${CHAT_ID}' '84' --transcript-view-id 'view-1' --include 'reasoning'`,
     );
   });
 
   test('preserves and shell-quotes connection selection in read commands', () => {
     const connectedCommand: SearchCliCommand = {
       ...command,
-      workspace: "research'archive",
       configDir: "/config/with space/it's",
       serverUrl: 'https://garcon.example.test:8443',
     };
@@ -134,7 +133,7 @@ describe('chat search', () => {
       1,
     );
     expect(formatChatSearchResult(result, false, connectedCommand)).toContain(
-      `garcon-cli --workspace 'research'"'"'archive' --config-dir '/config/with space/it'"'"'s' --server 'https://garcon.example.test:8443' read '${CHAT_ID}' '84' --transcript-view-id 'view-1' --include 'reasoning'`,
+      `garcon-cli --config-dir '/config/with space/it'"'"'s' --runtime 'controller' --server 'https://garcon.example.test:8443' read '${CHAT_ID}' '84' --transcript-view-id 'view-1' --include 'reasoning'`,
     );
   });
 
@@ -170,17 +169,17 @@ describe('chat search', () => {
     }
   });
 
-  test('generated read commands retain the worker runtime and explicit workspace assertion', () => {
-    const connection = { ...command, runtimeFile: '/private/runtime.json', expectedWorkspace: 'remote' };
+  test('generated read commands retain the worker root and runtime role', () => {
+    const connection = { ...command, runtime: 'execution-node' as const };
     const result = buildChatSearchResult(connection, chatList([chat()]), response(), 1);
     const hit = result.results[0]!;
     const args = buildSearchReadCommandArguments(connection, hit, hit.snippets[0]!);
-    expect(args).not.toContain('--config-dir');
-    expect(parseCliArgs(args, { GARCON_CLI_RUNTIME: connection.runtimeFile })).toMatchObject({
-      kind: 'read', runtimeFile: connection.runtimeFile, expectedWorkspace: 'remote',
+    expect(args).toContain('--config-dir');
+    expect(parseCliArgs(args, { GARCON_RUNTIME: 'controller' })).toMatchObject({
+      kind: 'read', runtime: 'execution-node', configDir: '/config',
     });
     expect(formatChatSearchResult(result, false, connection)).toContain(
-      "garcon-cli --runtime-file '/private/runtime.json' --workspace 'remote' read",
+      "garcon-cli --config-dir '/config' --runtime 'execution-node' read",
     );
   });
 
@@ -331,7 +330,6 @@ describe('chat search', () => {
     const output = { result() {}, diagnostic() {} } as CliOutput;
     const connectedCommand: SearchCliCommand = {
       ...command,
-      workspace: "research'archive",
       configDir: "/config/with space/it's",
       serverUrl: 'https://garcon.example.test:8443',
     };
@@ -349,8 +347,7 @@ describe('chat search', () => {
     }, output)).rejects.toMatchObject({
       exitCode: 2,
       message: expect.stringContaining(
-        `garcon-cli --workspace 'research'"'"'archive' `
-          + `--config-dir '/config/with space/it'"'"'s' `
+        `garcon-cli --config-dir '/config/with space/it'"'"'s' --runtime 'controller' `
           + `--server 'https://garcon.example.test:8443' transcript-search enable`,
       ),
     } satisfies Partial<CliError>);

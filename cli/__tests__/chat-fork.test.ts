@@ -56,7 +56,7 @@ function chat(id = TARGET_CHAT_ID): ChatListEntry {
 
 const command: ForkCliCommand = {
   kind: 'fork',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   sourceChatId: SOURCE_CHAT_ID,
   allowHandoffFork: true,

@@ -142,12 +142,10 @@ async function connectedClient<T extends CliConnectionOptions>(
   const discover = options.discoverRuntime ?? discoverRuntime;
   const connection = await discover({
     configDir: command.configDir,
-    workspace: command.workspace,
+    runtime: command.runtime,
     serverUrl: command.serverUrl,
-    runtimeFile: command.runtimeFile,
-    expectedWorkspace: command.expectedWorkspace,
     signal: options.signal,
-  }, { fetch: options.fetch });
+  }, { fetch: options.fetch, warn: (message) => (options.output ?? createCliOutput()).diagnostic(message) });
   return { command: { ...command, ...connection.selector }, client: new GarconClient({ ...connection, fetch: options.fetch }) };
 }
 

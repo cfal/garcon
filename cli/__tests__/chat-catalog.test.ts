@@ -11,7 +11,7 @@ import { CHAT_ID, OTHER_CHAT_ID, TS, chat, chatList } from './chat-research-fixt
 
 const command: ChatsCliCommand = {
   kind: 'chats',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   filter: 'project:/garcon tag:cli',
   limit: 1,

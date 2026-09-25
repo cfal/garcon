@@ -54,6 +54,7 @@ export interface IntegrationDirectories {
 export interface IntegrationFixtureOptions {
   executionBackend?: ExecutionBackend;
   projectRoots?: 'shared' | 'separate';
+  sharedConfigRoot?: boolean;
   chatTitleEnabled?: boolean;
   chatTitleAgent?: keyof DirectTestAgents;
   forbiddenPersistedValues?: readonly string[];
@@ -248,11 +249,12 @@ export class IntegrationFixture {
     };
     await Promise.all(Object.values(dirs).map((directory) => mkdir(directory, { recursive: true })));
     const backendKind = options.executionBackend ?? executionBackend();
+    const workerConfigDir = options.sharedConfigRoot ? configDir : join(root, 'worker-config');
     const executionDirs: IntegrationDirectories = backendKind === 'in-process' ? dirs : {
       ...dirs,
       project: options.projectRoots === 'separate' ? join(root, 'worker-project') : dirs.project,
-      config: join(root, 'worker-config'),
-      workspace: join(root, 'worker-config', 'execution-node'),
+      config: workerConfigDir,
+      workspace: join(workerConfigDir, 'execution-node'),
       home: join(root, 'worker-home'),
     };
     await Promise.all(Object.values(executionDirs).map((directory) => mkdir(directory, { recursive: true })));

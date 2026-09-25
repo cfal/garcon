@@ -24,7 +24,7 @@ async function runCli(
       process.execPath,
       'cli/main.ts',
       '--config-dir', fixture.dirs.config,
-      '--workspace', WORKSPACE,
+      '--runtime', 'controller',
       '--server', fixture.garcon.baseUrl,
       ...arguments_,
     ],
@@ -215,8 +215,8 @@ describe('garcon-cli chat research', () => {
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain([
         'garcon-cli',
-        '--workspace', `'${WORKSPACE}'`,
         '--config-dir', `'${fixture.dirs.config}'`,
+        '--runtime', "'controller'",
         '--server', `'${fixture.garcon.baseUrl}'`,
         'transcript-search',
         'enable',

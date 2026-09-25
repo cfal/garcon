@@ -2,6 +2,8 @@
 // This is the single place where dependencies are resolved.
 
 import path from 'path';
+import { rm } from 'node:fs/promises';
+import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
 import { getConfigDir, initializeServerConfig } from './config.js';
 import { wrapRoutes, serverShuttingDownResponse, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './execution-nodes/cli-dispatcher.js';
@@ -118,7 +120,6 @@ import { errorMessage } from './lib/errors.js';
 import { acquireControllerLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
   advertisedServerUrl,
-  childCliRuntimeFile,
   createServerRuntimeState,
   logServerReady,
   publishServerRuntime,
@@ -187,6 +188,7 @@ export async function startServer(): Promise<void> {
       },
     });
     const workspaceDir = workspaceLease.workspaceDir;
+    await rm(cliRuntimeFile(config.configDir, 'controller'), { force: true });
     if (config.rollbackCarryOverMigration) {
       const result = await rollbackLegacyCarryOverMigration(workspaceDir);
       logger.info(`Carryover migration rollback ${result}. The server was not started.`);
@@ -200,8 +202,11 @@ export async function startServer(): Promise<void> {
     // which the ladder would never hand to its callback.
     await resumeInterruptedCarryOverRollback(workspaceDir);
     const runtimeState = createServerRuntimeState(workspaceDir);
-    // Terminal and agent children inherit this pin so explicit selectors cannot retarget them silently.
-    process.env.GARCON_CLI_RUNTIME = childCliRuntimeFile(runtimeState, config.workspaceName);
+    delete process.env.GARCON_CLI_RUNTIME;
+    delete process.env.GARCON_WORKSPACE;
+    delete process.env.GARCON_WORKSPACE_DIR;
+    process.env.GARCON_CONFIG_DIR = config.configDir;
+    process.env.GARCON_RUNTIME = 'controller';
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
       const result = await migrateWorkspaceChatIds(workspaceDir);
@@ -892,18 +897,16 @@ export async function startServer(): Promise<void> {
     const server = Bun.serve<WsConnectionData>(serveOptions);
     const actualPort = server.port ?? listenPort;
     const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
-    let runtimeFilePath: string | null = null;
-    if (config.workspaceName !== null) {
-      try {
-        const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl);
-        runtimeFilePath = publishedRuntime.filePath;
-        logger.info(
-          `Published workspace ${config.workspaceName} runtime at ${runtimeFilePath} (${runtimeBaseUrl})`,
-        );
-      } catch (error) {
-        await server.stop(true);
-        throw error;
-      }
+    let runtimeFilePath: string;
+    try {
+      const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl, config.configDir);
+      runtimeFilePath = publishedRuntime.filePath;
+      logger.info(
+        `Published controller runtime at ${runtimeFilePath} (${runtimeBaseUrl})`,
+      );
+    } catch (error) {
+      await server.stop(true);
+      throw error;
     }
 
     // Graceful shutdown: flush pending writes and clean up timers.
@@ -966,13 +969,11 @@ export async function startServer(): Promise<void> {
         executionSockets.close();
         await server.stop(true);
         tickets.close();
-        if (runtimeFilePath) {
-          try {
-            await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);
-          } catch (err) {
-            cleanupFailed = true;
-            logger.warn('server: runtime descriptor cleanup error:', errorMessage(err));
-          }
+        try {
+          await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);
+        } catch (err) {
+          cleanupFailed = true;
+          logger.warn('server: runtime descriptor cleanup error:', errorMessage(err));
         }
         try {
           await workspaceLease?.release();

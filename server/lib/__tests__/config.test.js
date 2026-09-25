@@ -15,8 +15,13 @@ const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
 const originalHome = process.env.HOME;
+const configEnvironment = Object.fromEntries(['GARCON_CONFIG_DIR', 'GARCON_WORKSPACE', 'GARCON_WORKSPACE_DIR', 'GARCON_PROJECT_BASE_DIR', 'GARCON_BIND_ADDRESS'].map((key) => [key, process.env[key]]));
 
 afterEach(() => {
+  for (const [key, value] of Object.entries(configEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   resetServerConfigForTests();
   process.argv = [...originalArgv];
   if (originalPort === undefined) {
@@ -47,6 +52,29 @@ afterEach(() => {
 });
 
 describe('getPort', () => {
+  it('rejects duplicate value flags and conflicting explicit workspace selectors', () => {
+    process.argv = [...originalArgv, '--config-dir', '/first', '--config-dir=/second'];
+    expect(() => initializeServerConfig()).toThrow('Option may be specified only once: --config-dir');
+    process.argv = [...originalArgv, '--workspace', 'named', '--workspace-dir', '/explicit'];
+    expect(() => initializeServerConfig()).toThrow('Choose only one of --workspace or --workspace-dir');
+  });
+
+  it('explicit flags override every matching environment default', () => {
+    Object.assign(process.env, { GARCON_PORT: '9999', GARCON_BIND_ADDRESS: 'inherited', GARCON_CONFIG_DIR: '/inherited',
+      GARCON_WORKSPACE_DIR: '/inherited/workspace', GARCON_WORKSPACE: 'inherited', GARCON_PROJECT_BASE_DIR: '/inherited/project', GARCON_DISABLE_AUTH: 'false' });
+    process.argv = [...originalArgv, '--port', '0', '--bind-address', '0.0.0.0', '--config-dir=/explicit', '--workspace', 'work', '--project-base-dir', '/project', '--disable-auth'];
+    expect(initializeServerConfig()).toMatchObject({ port: 0, bindAddress: '0.0.0.0', configDir: '/explicit',
+      workspaceDir: '/explicit/workspace-work', workspaceName: 'work', projectBasePath: '/project', authDisabled: true });
+  });
+
+  it('explicit workspace paths override inherited names and empty roots are rejected', () => {
+    Object.assign(process.env, { GARCON_CONFIG_DIR: '/inherited', GARCON_WORKSPACE_DIR: '/inherited/workspace', GARCON_WORKSPACE: 'inherited' });
+    process.argv = [...originalArgv, '--workspace-dir', '/explicit/workspace'];
+    expect(initializeServerConfig()).toMatchObject({ workspaceDir: '/explicit/workspace', workspaceName: null });
+    process.argv = [...originalArgv, '--config-dir', ''];
+    expect(() => initializeServerConfig()).toThrow('non-empty');
+  });
+
   it('preserves env port 0 for OS-assigned binding', () => {
     process.env.GARCON_PORT = '0';
     process.argv = [...originalArgv];

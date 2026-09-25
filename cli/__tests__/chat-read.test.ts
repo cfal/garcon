@@ -25,7 +25,7 @@ import { CHAT_ID, TS } from './chat-research-fixtures.js';
 
 const command: ReadCliCommand = {
   kind: 'read',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/config',
   chatId: CHAT_ID,
   anchorOrdinal: 250,

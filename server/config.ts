@@ -4,6 +4,7 @@
 
 import path from 'path';
 import os from 'os';
+import { resolveConfigDirectory } from '@garcon/common/config-dir';
 
 const CLI_VALUE_FLAGS = {
   '--config-dir': '<directory>',
@@ -62,9 +63,13 @@ function envValue(name: string): string | null {
 }
 
 function cliValue(flag: CliValueFlag): string | null {
-  const index = process.argv.indexOf(flag);
+  const matches = process.argv.flatMap((argument, index) => argument === flag || argument.startsWith(`${flag}=`) ? [index] : []);
+  if (matches.length > 1) throw new Error(`Option may be specified only once: ${flag}`);
+  const index = matches[0] ?? -1;
   if (index === -1) return null;
-  if (index + 1 >= process.argv.length) {
+  const argument = process.argv[index]!;
+  if (argument.startsWith(`${flag}=`)) return argument.slice(flag.length + 1);
+  if (index + 1 >= process.argv.length || process.argv[index + 1]!.startsWith('--')) {
     throw new Error(
       `${flag} requires a value. Usage: ${flag} ${CLI_VALUE_FLAGS[flag]}`,
     );
@@ -132,33 +137,23 @@ function parseServerConfig(): ServerConfig {
 }
 
 function parseConfigDir(): string {
-  const envConfigDir = envValue('GARCON_CONFIG_DIR');
-  if (envConfigDir !== null) return envConfigDir;
-
-  const configDir = cliValue('--config-dir');
-  if (configDir !== null) return configDir;
-
-  return path.join(os.homedir(), '.garcon');
+  return resolveConfigDirectory(cliValue('--config-dir') ?? undefined);
 }
 
 function parseWorkspace(configDir: string): Pick<ServerConfig, 'workspaceDir' | 'workspaceName'> {
+  const explicitDirectory = cliValue('--workspace-dir');
+  const explicitName = cliValue('--workspace');
+  if (explicitDirectory !== null && explicitName !== null) {
+    throw new Error('Choose only one of --workspace or --workspace-dir.');
+  }
   const workspaceDir = nonEmptyValue(
-    envValue('GARCON_WORKSPACE_DIR') ?? cliValue('--workspace-dir'),
+    explicitDirectory ?? (explicitName === null ? envValue('GARCON_WORKSPACE_DIR') : null),
     'Invalid --workspace-dir value: must be a non-empty directory path.',
   );
-  if (workspaceDir !== null) return { workspaceDir, workspaceName: null };
+  if (workspaceDir !== null) return { workspaceDir: path.resolve(workspaceDir), workspaceName: null };
 
-  let workspaceName: string;
-  const envWorkspace = envValue('GARCON_WORKSPACE');
-  if (envWorkspace !== null) {
-    workspaceName = envWorkspace;
-  } else {
-    const cliWorkspaceName = nonEmptyValue(
-      cliValue('--workspace'),
-      'Invalid --workspace value: must be a non-empty name.',
-    );
-    workspaceName = cliWorkspaceName ?? 'default';
-  }
+  const workspaceName = nonEmptyValue(explicitName ?? envValue('GARCON_WORKSPACE'),
+    'Invalid --workspace value: must be a non-empty name.') ?? 'default';
   if (workspaceName === '.' || workspaceName === '..' || /[\\/\0]/.test(workspaceName)) {
     throw new Error('Invalid workspace name: must not contain path separators.');
   }
@@ -169,18 +164,18 @@ function parseWorkspace(configDir: string): Pick<ServerConfig, 'workspaceDir' | 
 }
 
 function parsePortConfig(): number {
-  const envPort = envValue('GARCON_PORT');
-  if (envPort !== null) return parsePort(envPort, 'GARCON_PORT');
-
   const port = cliValue('--port');
   if (port !== null) return parsePort(port, '--port');
+
+  const envPort = envValue('GARCON_PORT');
+  if (envPort !== null) return parsePort(envPort, 'GARCON_PORT');
 
   return 8080;
 }
 
 function parseBindAddress(): string {
   const bindAddress = nonEmptyValue(
-    envValue('GARCON_BIND_ADDRESS') ?? cliValue('--bind-address'),
+    cliValue('--bind-address') ?? envValue('GARCON_BIND_ADDRESS'),
     'Invalid --bind-address value: must be a non-empty hostname or IP address.',
   );
   if (bindAddress !== null) return bindAddress;
@@ -190,7 +185,7 @@ function parseBindAddress(): string {
 
 function parseProjectBasePath(): string {
   const projectBaseDir = nonEmptyValue(
-    envValue('GARCON_PROJECT_BASE_DIR') ?? cliValue('--project-base-dir'),
+    cliValue('--project-base-dir') ?? envValue('GARCON_PROJECT_BASE_DIR'),
     'Invalid --project-base-dir value: must be a non-empty directory path.',
   );
   if (projectBaseDir !== null) return path.resolve(projectBaseDir);
@@ -205,13 +200,14 @@ function parseUserShell(): string {
 }
 
 function parseAuthDisabled(): boolean {
+  if (process.argv.includes('--disable-auth')) return true;
   if (
     process.env.GARCON_DISABLE_AUTH !== undefined &&
     process.env.GARCON_DISABLE_AUTH.trim() !== ''
   ) {
     return envBool('DISABLE_AUTH', false);
   }
-  return process.argv.includes('--disable-auth');
+  return false;
 }
 
 export function getConfigDir(): string {

@@ -20,7 +20,7 @@ describe('ticket terminal output', () => {
     const diagnostic = ticketRetryDiagnostic({ requestId: '11111111-1111-4111-8111-111111111111',
       expectedStoreId: '22222222-2222-4222-8222-222222222222',
       payload: { action: 'create', input: { title: 'PRIVATE TITLE', description: 'PRIVATE BODY', project } } },
-    { kind: 'explicit', connection: { configDir: '/config', workspace: 'work' }, nodeId: 'local' });
+    { kind: 'explicit', connection: { configDir: '/config', runtime: 'controller' }, nodeId: 'local' });
     expect(diagnostic).toContain('Project (explicit)');
     expect(diagnostic).not.toContain('PRIVATE');
     expect(diagnostic).not.toContain('\u202e');
@@ -30,14 +30,13 @@ describe('ticket terminal output', () => {
     expect(await process.exited).toBe(0);
   });
 
-  test.each([undefined, '/private/runtime.json'])('ticket retries separate resolved connection selectors from operation arguments: runtime=%s', async (runtimeFile) => {
-    const env = runtimeFile ? { GARCON_CLI_RUNTIME: runtimeFile } : {};
+  test.each(['controller', 'execution-node'] as const)('ticket retries separate resolved connection selectors from operation arguments: runtime=%s', async (runtime) => {
+    const env = { GARCON_RUNTIME: 'auto', GARCON_CONFIG_DIR: '/other' };
     const diagnostic = ticketRetryDiagnostic({ requestId: '11111111-1111-4111-8111-111111111111',
       expectedStoreId: '22222222-2222-4222-8222-222222222222',
       payload: { action: 'claim', ticketId: 'G-1', expectedRevision: 1 } }, {
-      kind: 'explicit', connection: { configDir: '/config', workspace: 'work', runtimeFile,
-        expectedWorkspace: runtimeFile ? 'work' : undefined, serverUrl: 'http://127.0.0.1:8080' },
-      nodeId: runtimeFile ? 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' : 'local',
+      kind: 'explicit', connection: { configDir: '/config', runtime, serverUrl: 'http://127.0.0.1:8080' },
+      nodeId: runtime === 'execution-node' ? 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' : 'local',
     });
     const prefix = /^Retry command prefix: garcon-cli (.+)$/m.exec(diagnostic)![1]!;
     const flags = diagnostic.split('replacing or adding: ')[1]!;
@@ -45,24 +44,23 @@ describe('ticket terminal output', () => {
     const retry = (await new Response(child.stdout).text()).split('\0').slice(0, -1);
     expect(await child.exited).toBe(0);
     expect(parseCliArgs(retry, env)).toMatchObject({
-      kind: 'ticket', workspace: 'work', serverUrl: 'http://127.0.0.1:8080',
+      kind: 'ticket', configDir: '/config', runtime, serverUrl: 'http://127.0.0.1:8080',
       retry: { requestId: '11111111-1111-4111-8111-111111111111', expectedStoreId: '22222222-2222-4222-8222-222222222222' },
-      ...(runtimeFile ? { runtimeFile, expectedWorkspace: 'work' } : { configDir: '/config' }),
     });
     expect(flags).not.toContain('--config-dir');
-    expect(flags).not.toContain('--runtime-file');
+    expect(flags).not.toContain('--runtime');
     expect(flags).not.toContain('--workspace');
     expect(flags).not.toContain('--server');
-    expect(diagnostic.includes('Switching to Local')).toBe(Boolean(runtimeFile));
+    expect(diagnostic.includes('Switching to Local')).toBe(runtime === 'execution-node');
   });
 
-  test('a pinned controller descriptor is not described as a delegated execution node', () => {
+  test('a controller runtime is not described as a delegated execution node', () => {
     const diagnostic = ticketRetryDiagnostic({ requestId: '11111111-1111-4111-8111-111111111111',
       expectedStoreId: '22222222-2222-4222-8222-222222222222',
       payload: { action: 'claim', ticketId: 'G-1', expectedRevision: 1 } }, {
-      kind: 'explicit', connection: { configDir: '/config', runtimeFile: '/config/workspace-work/server-runtime.json' }, nodeId: 'local',
+      kind: 'explicit', connection: { configDir: '/config', runtime: 'controller' }, nodeId: 'local',
     });
-    expect(diagnostic).toContain('--runtime-file');
+    expect(diagnostic).toContain("--runtime $'controller'");
     expect(diagnostic).not.toContain('execution node');
   });
 });

@@ -105,7 +105,7 @@ function startArguments(
   const agent = fixture.directAgents.openAi;
   return [
     '--config-dir', fixture.dirs.config,
-    '--workspace', WORKSPACE,
+    '--runtime', 'controller',
     'start',
     '--cwd', fixture.dirs.project,
     '--agent', agent.agentId,
@@ -119,7 +119,7 @@ function startArguments(
 function controlArguments(fixture: IntegrationFixture, command: string[]): string[] {
   return [
     '--config-dir', fixture.dirs.config,
-    '--workspace', WORKSPACE,
+    '--runtime', 'controller',
     ...command,
   ];
 }
@@ -171,14 +171,14 @@ describe('garcon-cli', () => {
     );
   });
 
-  test('discovers a running named workspace through a sibling symlink', async () => {
+  test('discovers the controller through a config-root alias independently of its workspace alias', async () => {
     await withIntegrationFixture('garcon-cli-workspace-symlink', async (fixture) => {
-      const alias = `${WORKSPACE}-alias`;
-      await fs.symlink(path.basename(fixture.dirs.workspace), path.join(fixture.dirs.config, `workspace-${alias}`), 'dir');
-      for (const workspace of [WORKSPACE, alias]) {
+      const alias = path.join(fixture.dirs.root, 'config-alias');
+      await fs.symlink(fixture.dirs.config, alias, 'dir');
+      for (const configDir of [fixture.dirs.config, alias]) {
         const listedAgents = await runCli([
-          '--config-dir', fixture.dirs.config,
-          '--workspace', workspace,
+          '--config-dir', configDir,
+          '--runtime', 'controller',
           'list', 'agents', '--json',
         ]);
 
@@ -202,7 +202,7 @@ describe('garcon-cli', () => {
       const agent = fixture.directAgents.openAi;
       const listedAgents = await runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'list', 'agents', '--json',
       ]);
       expect(listedAgents).toMatchObject({ exitCode: 0, stderr: '' });
@@ -212,7 +212,7 @@ describe('garcon-cli', () => {
 
       const listedModels = await runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'list', 'models',
         '--agent', agent.agentId,
         '--provider', agent.provider.providerId,
@@ -231,7 +231,7 @@ describe('garcon-cli', () => {
 
       const started = await runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'start',
         '--cwd', fixture.dirs.project,
         '--agent', agent.agentId,
@@ -263,7 +263,7 @@ describe('garcon-cli', () => {
 
       const resumed = await runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'resume', chatId!,
         '--title', 'CLI follow-up review',
         '--message-title', 'Follow-up context',
@@ -671,7 +671,7 @@ describe('garcon-cli', () => {
       const target = fixture.directAgents.anthropic;
       const started = await runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'start',
         '--cwd', fixture.dirs.project,
         '--agent', source.agentId,
@@ -690,7 +690,7 @@ describe('garcon-cli', () => {
       });
       const handoffRun = runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'resume', chatId!,
         '--agent', target.agentId,
         '--provider', target.provider.providerId,
@@ -730,7 +730,7 @@ describe('garcon-cli', () => {
       });
       const returnRun = runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'resume', chatId!,
         '--agent', source.agentId,
         '--provider', source.provider.providerId,
@@ -991,7 +991,7 @@ describe('garcon-cli', () => {
       ]));
       expect(wait.exitCode).toBe(3);
       expect(wait.stdout).toBe('');
-      expect(wait.stderr).toContain(`Garcon workspace "${WORKSPACE}"`);
+      expect(wait.stderr).toContain('the accepted turn receipt is unavailable on the verified Garcon instance');
     }, { namedWorkspace: WORKSPACE });
   }, 20_000);
 
@@ -1093,7 +1093,7 @@ describe('garcon-cli', () => {
       ]));
       expect(missing.exitCode).toBe(2);
       expect(missing.stdout).toBe('');
-      expect(missing.stderr).toContain(`Garcon workspace "${WORKSPACE}"`);
+      expect(missing.stderr).toContain('Session not found (HTTP 404, SESSION_NOT_FOUND)');
 
       const nestedProject = `${fixture.dirs.project}/removed-project`;
       await fs.mkdir(nestedProject);

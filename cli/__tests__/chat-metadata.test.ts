@@ -13,7 +13,7 @@ import {
 import type { CliOutput } from '../output.js';
 
 const CHAT_ID = '1785337200123456';
-const connection: CliConnectionOptions = { workspace: 'default', configDir: '/config' };
+const connection: CliConnectionOptions = { runtime: 'controller', configDir: '/config' };
 
 function captureOutput(): CliOutput & { readonly results: string[] } {
   const results: string[] = [];

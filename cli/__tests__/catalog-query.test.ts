@@ -124,7 +124,7 @@ function command(
   return {
     kind: 'list',
     resource,
-    workspace: 'default',
+    runtime: 'controller',
     configDir: '/config',
     json: false,
     ...options,

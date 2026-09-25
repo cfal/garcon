@@ -6,7 +6,7 @@ import type { CliOutput } from '../output.js';
 
 const command: AddRowCliCommand = {
   kind: 'add-row',
-  workspace: 'default',
+  runtime: 'controller',
   configDir: '/tmp/config',
   chatId: '1787000000000000',
   presentation: { style: 'info' },

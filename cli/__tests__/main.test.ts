@@ -18,7 +18,7 @@ const stubDiscovery = async () => ({
   workspaceName: 'default',
   localCapability: 'cap',
   workspaceDir: '/tmp/ws',
-  selector: { workspace: 'default' },
+  selector: { runtime: 'controller' },
 });
 
 function capturedOutput(): {

@@ -4,6 +4,7 @@ import { homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { readWorkerCliOptions as readOptions } from '../worker-cli.js';
 import { parseConnectionUrl } from '../connection-url.js';
+import { loadListenerSecret } from '../listener-secret.js';
 
 const roots: string[] = [];
 const readWorkerCliOptions = (args: readonly string[]) => readOptions(args, {});
@@ -24,28 +25,29 @@ test('worker config root follows controller precedence and rejects workspace sel
   expect((await readOptions(['--connect', url, '--config-dir', root], {})).configDir).toBe(root);
   expect((await readOptions(['--connect', url], { GARCON_CONFIG_DIR: root })).configDir).toBe(root);
   expect((await readOptions(['--connect', url, '--config-dir', `${root}/`], { GARCON_CONFIG_DIR: root })).configDir).toBe(root);
-  await expect(readOptions(['--connect', url, '--config-dir', '/elsewhere'], { GARCON_CONFIG_DIR: root }))
-    .rejects.toThrow(`GARCON_CONFIG_DIR (${root}) conflicts with --config-dir (/elsewhere)`);
+  expect((await readOptions(['--connect', url, '--config-dir', '/elsewhere'], { GARCON_CONFIG_DIR: root })).configDir).toBe('/elsewhere');
   expect((await readOptions(['--connect', url, '--config-dir', root], { GARCON_CONFIG_DIR: '' })).configDir).toBe(root);
   await expect(readOptions(['--connect', url, '--config-dir', ''], {})).rejects.toThrow('non-empty');
   await expect(readOptions(['--connect', url, '--workspace-dir', root], {})).rejects.toThrow('--workspace-dir is controller-only');
   await expect(readOptions(['--connect', url, '--workspace', 'default'], {})).rejects.toThrow('Invalid execution-node arguments');
 });
 
-test('listener reuses a private persisted secret while connect takes the complete URL', async () => {
+test('parsing does not open listener storage; startup reuses the private persisted secret', async () => {
   const root = await workspace();
   const args = ['--listen', '0', '--allow-insecure-development', '--config-dir', root];
   const first = await readWorkerCliOptions(args);
   expect(first.configDir).toBe(root);
   expect(first).not.toHaveProperty('workspaceDir');
   const restarted = await readWorkerCliOptions(args);
-  expect(first.secret).toBe(restarted.secret);
+  expect(first).toEqual(restarted);
+  await expect(stat(join(root, 'execution-node'))).rejects.toMatchObject({ code: 'ENOENT' });
+  const secret = await loadListenerSecret(join(root, 'execution-node'));
+  expect(await loadListenerSecret(join(root, 'execution-node'))).toBe(secret);
   expect(first.connection).toEqual({ kind: 'listen', port: 0, bindAddress: '0.0.0.0' });
   if (process.platform !== 'win32') expect((await stat(join(root, 'execution-node', 'execution-node-secret.json'))).mode & 0o777).toBe(0o600);
-  const full = `wss://example.com/execution-node/22222222-2222-4222-8222-222222222222#secret=${first.secret}`;
+  const full = `wss://example.com/execution-node/22222222-2222-4222-8222-222222222222#secret=${secret}`;
   const dialing = await readWorkerCliOptions(['--connect', full, '--config-dir', root]);
-  expect(dialing.secret).toBe(first.secret);
-  expect(dialing.connection).toEqual({ kind: 'dial', url: full.split('#')[0] });
+  expect(dialing.connection).toEqual({ kind: 'dial', url: full.split('#')[0], secret });
   expect(dialing).not.toHaveProperty('nodeId');
   expect(dialing).not.toHaveProperty('label');
   expect(dialing.allowUnverifiedTls).toBe(false);
@@ -60,7 +62,7 @@ test('listener bind address is independent of the advertised URL and rejects emp
   expect(options.connection).toEqual({ kind: 'listen', port: 0, bindAddress: '127.0.0.1' });
   expect(options.advertisedUrl).toBe('ws://worker.example.com:19781/execution-node');
   await expect(readWorkerCliOptions([...args, '--bind-address', ' '])).rejects.toThrow('non-empty hostname or IP address');
-  await expect(readWorkerCliOptions(['--connect', `ws://worker.example.com/execution-node#secret=${options.secret}`,
+  await expect(readWorkerCliOptions(['--connect', `ws://worker.example.com/execution-node#secret=${Buffer.alloc(32, 9).toString('base64url')}`,
     '--bind-address', '127.0.0.1'])).rejects.toThrow('--bind-address applies only to listeners');
 });
 

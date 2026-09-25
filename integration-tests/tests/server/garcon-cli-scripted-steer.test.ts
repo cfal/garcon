@@ -70,7 +70,7 @@ describe('scripted Codex CLI steering', () => {
 
       const steered = await runCli([
         '--config-dir', fixture.dirs.config,
-        '--workspace', WORKSPACE,
+        '--runtime', 'controller',
         'resume-async', chatId, '--allow-steer',
         '--message-title', 'Steer context',
         '--color', '0EA5E9,7dd3fc',

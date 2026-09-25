@@ -179,7 +179,7 @@ describe('runConsultation', () => {
         return loading.promise;
       },
     });
-    const pending = runConsultation({ kind: 'resume', workspace: 'default', configDir: '/config',
+    const pending = runConsultation({ kind: 'resume', runtime: 'controller', configDir: '/config',
       chatId: CHAT_ID, model: 'gpt-5.4', prompt: 'Continue', readsPromptFromStdin: false, json: false,
     }, 'Continue', testClient, output());
     await entered.promise;
@@ -191,7 +191,7 @@ describe('runConsultation', () => {
   });
   test('starts asynchronously and returns after acceptance without reading a receipt', async () => {
     const invocation: StartAsyncCliInvocation = {
-      kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
+      kind: 'start-async', runtime: 'controller', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Async review', json: false,
     };
@@ -222,7 +222,7 @@ describe('runConsultation', () => {
 
   test('preserves the accepted async handle when title update fails', async () => {
     const result = await startConsultationAsync({
-      kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
+      kind: 'start-async', runtime: 'controller', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Async review', json: false,
     }, 'Implement it', client({
@@ -240,7 +240,7 @@ describe('runConsultation', () => {
 
   test('starts a tagged write-capable chat and prints its result', async () => {
     const invocation: CliInvocation = {
-      kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
+      kind: 'start', runtime: 'controller', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Implementation review',
       parentChatId: '1785337200123455',
@@ -302,7 +302,7 @@ describe('runConsultation', () => {
       },
     });
     const invocation: CliInvocation = {
-      kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
+      kind: 'start', runtime: 'controller', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       parentChatId: '1785337200123455',
     };
@@ -339,7 +339,7 @@ describe('runConsultation', () => {
 
   test('minimal resume delegates persisted selection to atomic server admission', async () => {
     const invocation: CliInvocation = {
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
       prompt: 'Continue', readsPromptFromStdin: false,
       title: 'Follow-up review',
       userMessagePresentation: { origin: 'cli', style: 'error' },
@@ -400,7 +400,7 @@ describe('runConsultation', () => {
 
     await expect(runConsultation({
       kind: 'resume',
-      workspace: 'default',
+      runtime: 'controller',
       configDir: '/config',
       chatId: CHAT_ID,
       prompt: 'Continue',
@@ -435,7 +435,7 @@ describe('runConsultation', () => {
     });
 
     await expect(runConsultation({
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
       prompt: 'Continue', readsPromptFromStdin: false, title: 'Follow-up review',
     }, 'Continue', testClient, testOutput, undefined, {
       createId: () => 'request',
@@ -449,7 +449,7 @@ describe('runConsultation', () => {
   test('validates resume overrides against the persisted agent catalog', async () => {
     const testClient = client();
     const invocation: CliInvocation = {
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
       model: 'gpt-5.4', permissionMode: 'plan', thinkingMode: 'high',
       prompt: 'Review', readsPromptFromStdin: false,
     };
@@ -468,7 +468,7 @@ describe('runConsultation', () => {
     const testClient = client();
 
     await runConsultation({
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
       agentId: 'codex', prompt: 'Continue', readsPromptFromStdin: false,
     }, 'Continue', testClient, output(), undefined, { createId: () => 'request' });
 
@@ -485,7 +485,7 @@ describe('runConsultation', () => {
     } });
 
     await runConsultation({
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
       agentId: 'codex', prompt: 'Continue with Codex', readsPromptFromStdin: false,
     }, 'Continue with Codex', testClient, output(), undefined, { createId: () => 'request' });
 
@@ -522,7 +522,7 @@ describe('runConsultation', () => {
     const testOutput = output();
     try {
       await runConsultation({
-        kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+        kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
         prompt: 'Continue', readsPromptFromStdin: false,
       }, 'Continue', client({ async getTurnReceipt() { return failed; } }), testOutput, undefined, {
         createId: () => 'request',
@@ -542,7 +542,7 @@ describe('runConsultation', () => {
     } as AgentTurnReceipt;
 
     await expect(runConsultation({
-      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      kind: 'resume', runtime: 'controller', configDir: '/config', chatId: CHAT_ID,
       prompt: 'Continue', readsPromptFromStdin: false,
     }, 'Continue', client({ async getTurnReceipt() { return unavailable; } }), output(), undefined, {
       createId: () => 'request',

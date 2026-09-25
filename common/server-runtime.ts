@@ -1,7 +1,7 @@
 import { isExecutionNodeId } from './execution-nodes.js';
 
 export const SERVER_RUNTIME_SCHEMA_VERSION = 1 as const;
-export const SERVER_RUNTIME_FILENAME = 'server-runtime.json';
+export const SERVER_RUNTIME_FILENAME = 'runtime.json';
 export const LOCAL_CAPABILITY_PREFIX = 'garcon_local_';
 export const SERVER_RUNTIME_PROOF_CONTEXT = 'garcon-runtime-proof-v1';
 export const CLI_SERVER_INSTANCE_HEADER = 'X-Garcon-Server-Instance';

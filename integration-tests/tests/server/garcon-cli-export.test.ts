@@ -178,7 +178,7 @@ async function runCli(
       process.execPath,
       'cli/main.ts',
       '--config-dir', fixture.dirs.config,
-      '--workspace', WORKSPACE,
+      '--runtime', 'controller',
       '--server', fixture.garcon.baseUrl,
       ...arguments_,
     ],

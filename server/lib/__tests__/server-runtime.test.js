@@ -4,7 +4,6 @@ import os from 'os';
 import path from 'path';
 import {
   advertisedServerUrl,
-  childCliRuntimeFile,
   createServerRuntimeState,
   listeningServerUrl,
   logServerReady,
@@ -24,7 +23,7 @@ describe('server runtime publication', () => {
     tempDirs.push(workspaceDir);
     const state = createServerRuntimeState(workspaceDir);
 
-    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321');
+    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321', workspaceDir);
 
     expect(published.descriptor.instanceId).toBe(state.identity.instanceId);
     expect(published.descriptor.localCapability).toBe(state.localCapability);
@@ -39,7 +38,7 @@ describe('server runtime publication', () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-'));
     tempDirs.push(workspaceDir);
     const state = createServerRuntimeState(workspaceDir);
-    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321');
+    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321', workspaceDir);
     const replacement = { ...published.descriptor, instanceId: 'replacement' };
     await fs.writeFile(published.filePath, JSON.stringify(replacement), { mode: 0o600 });
 
@@ -47,16 +46,16 @@ describe('server runtime publication', () => {
     expect(JSON.parse(await fs.readFile(published.filePath, 'utf8')).instanceId).toBe('replacement');
   });
 
-  it('pins children to the published descriptor or to an unpublished per-instance path', async () => {
+  it('publishes at the config root independently of the workspace path', async () => {
     const workspaceDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-')));
     tempDirs.push(workspaceDir);
     const state = createServerRuntimeState(workspaceDir);
-    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321');
-
-    expect(childCliRuntimeFile(state, 'dev')).toBe(published.filePath);
-    const unavailable = childCliRuntimeFile(state, null);
-    expect(unavailable).toBe(path.join(workspaceDir, `.cli-unavailable-${state.identity.instanceId}.json`));
-    await expect(fs.lstat(unavailable)).rejects.toMatchObject({ code: 'ENOENT' });
+    const configDir = path.join(workspaceDir, 'config');
+    await fs.mkdir(configDir);
+    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321', configDir);
+    expect(published.filePath).toBe(path.join(configDir, 'runtime.json'));
+    expect(published.descriptor.workspaceDir).toBe(workspaceDir);
+    await expect(fs.lstat(path.join(workspaceDir, 'runtime.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('advertises wildcard listeners through loopback', () => {

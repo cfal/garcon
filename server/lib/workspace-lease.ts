@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import lockfile from 'proper-lockfile';
+import { executionNodeDataDirectory } from '../../common/cli-runtime-paths.js';
 
 export interface WorkspaceLease {
   workspaceDir: string;
@@ -35,7 +36,16 @@ export async function acquireControllerLease(
   const configLease = await acquireWorkspaceLease(configDir, options);
   try {
     await fs.mkdir(workspaceDir, { recursive: true });
-    if (await fs.realpath(workspaceDir) === configLease.workspaceDir) return configLease;
+    const canonicalWorkspaceDir = await fs.realpath(workspaceDir);
+    const workerDirectory = executionNodeDataDirectory(configLease.workspaceDir);
+    const canonicalWorkerDirectory = await fs.realpath(workerDirectory).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return workerDirectory;
+      throw error;
+    });
+    if (canonicalWorkspaceDir === canonicalWorkerDirectory || canonicalWorkspaceDir.startsWith(`${canonicalWorkerDirectory}${path.sep}`)) {
+      throw new Error('The execution-node directory is reserved for worker storage; choose a different controller workspace');
+    }
+    if (canonicalWorkspaceDir === configLease.workspaceDir) return configLease;
     const workspaceLease = await acquireWorkspaceLease(workspaceDir, options);
     return {
       workspaceDir: workspaceLease.workspaceDir,

@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, utimes } from 'node:fs/promises';
+import { join } from 'node:path';
 import { GarconProcess, isolatedEnvironment, pumpLines, type GarconProcessOptions } from './garcon-process.js';
 import { withTimeout } from './deferred.js';
 import { BoundedLog } from './bounded-log.js';
@@ -190,6 +191,8 @@ export class ExecutionBackendFixture {
   async crashAndRestartWorker(projectBasePath?: string): Promise<void> {
     if (!this.#worker || !this.#workerLaunch) throw new Error('No remote execution worker is running');
     await this.#worker.crash();
+    const expiredAt = new Date(Date.now() - 60_000);
+    await utimes(join(this.directories.workspace, '.garcon-workspace.lock'), expiredAt, expiredAt);
     this.#completedLogs.push(...this.#worker.logs);
     if (projectBasePath !== undefined) {
       this.#workerLaunch = { ...this.#workerLaunch, directories: { ...this.#workerLaunch.directories, project: projectBasePath } };
