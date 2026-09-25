@@ -94,13 +94,19 @@ Separate proving the local HTTP endpoint from selecting the controller generatio
 
 ### Local Descriptor
 
-Keep the existing named-workspace discovery path for a controller-local CLI. Add an explicit runtime-file selection for worker contexts, proposed as `--runtime-file <path>` and inherited `GARCON_CLI_RUNTIME`.
+The controller, worker, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`, with explicit flags overriding environment defaults. Workspace selectors configure only controller storage. The CLI learns the active workspace from authenticated context, including a null name for `--workspace-dir` controllers.
 
-The worker publishes `<workspaceDir>/run/cli-<runtimeId>.json` in a private directory (0700), with file mode 0600. A shared fixed filename is unsafe: multiple worker processes can use the same storage directory. Each process owns a distinct descriptor path and capability. The descriptor contains endpoint URL/identity and pid/start metadata, not a controller workspace path, bearer token, or node secret.
+Publish at two fixed paths: `<config-dir>/runtime.json` for the controller and `<config-dir>/execution-node/runtime.json` for the worker. One controller and one worker may coexist under the root. The controller holds its existing config-root and workspace leases; the worker holds the same lease type on `<config-dir>/execution-node` before opening its listener credentials or provider data. Controllers reject workspaces in their root's reserved execution-node subtree, including aliases. Garcon-owned data and endpoint capabilities are separate; native provider account homes retain their existing semantics.
 
-Reuse secure descriptor reading/writing: atomic publication, owner-only permissions, regular-file and owner checks, and no symlink following. Use a tagged descriptor schema where local-directory semantics differ. The controller, worker, and CLI ship together; an old schema or mismatched build is a clear error, not a legacy fallback.
+The CLI accepts `--runtime auto|controller|execution-node` / `GARCON_RUNTIME`, defaulting to `auto`. Explicit flags win. `auto` reads only these two files, chooses the newer numeric `startedAt` when both exist, and warns on stderr; equal timestamps select the controller. Only missing files are absent. Invalid or insecure metadata blocks automatic selection. An explicit role reads only its own file. There is no workspace scan, process UUID selector, PID check, registry, or `--runtime-file` option. See [Connection Rules](../cli.md#connection-rules) for the complete user-facing contract.
 
-Runtime-file selection is explicit, fail-closed context. An invalid, missing, disabled, or disconnected gateway never falls back to named-workspace discovery. Inherited `GARCON_CLI_RUNTIME` pins that runtime and overrides inherited workspace/config settings. Reject a different explicit runtime or `--config-dir`; require `--server` to match the descriptor. An explicit `--workspace` is an assertion against the authenticated context, not a retarget. Cleanup removes only the process-owned descriptor. A controller clears inherited `GARCON_CLI_RUNTIME` before spawning children.
+Selection uses a securely read descriptor snapshot. Verify the chosen endpoint without rereading or switching roles, then obtain authenticated controller context. A newer stale, disconnected, busy, or denied runtime fails rather than falling back to the older role. `--server` remains an exact URL assertion, never a selection filter. The start timestamp indicates preference, not liveness. A new CLI invocation may select a different process or workspace; an existing invocation retains endpoint and controller identity through recovery.
+
+Each descriptor contains the actual bound URL (including an OS-assigned port), endpoint identity, pid, `startedAt`, and a fresh endpoint-local bearer capability. A gateway descriptor never contains a controller workspace path, controller capability, or Noise secret. Publish both kinds through an exclusive 0600 temporary file and atomic rename. Existing data directories need not be 0700; do not chmod them. Retain private-file, regular-file, owner, leaf-symlink, loopback, and role/path checks. These checks assume trusted storage parents, as controller storage already does.
+
+After acquiring a role's lease, remove its predecessor's runtime file before initialization; failure to clear it is fatal. Gateway startup itself remains optional once stale metadata is absent. Shutdown closes the listener and removes only the matching instance before releasing storage ownership, even if other cleanup fails. Independent workers need separate roots.
+
+Both roles export their resolved `GARCON_CONFIG_DIR` and their own `GARCON_RUNTIME` to children, clearing obsolete runtime pins and inherited controller workspace variables. Flags can override these defaults. Generated hints and ticket retry prefixes retain the resolved root and explicit role, not `auto`; do not put selectors or capabilities into automation envelopes. A root plus role selects the current holder, not a permanent workspace or process. Existing ticket-store and permission-instance fences remain necessary.
 
 ### Two Discovery Requests
 
@@ -228,14 +234,14 @@ Catalog-dependent ordinary runs need an optional expected ownership epoch. Inclu
 
 Construct the gateway beside `TerminalRuntime` in the worker's process scope. Start it before provider or PTY children that need to inherit its descriptor location. Replace only the gateway's active session binding inside `link.onSession`; disposing a serving node must not stop the loopback listener or rotate its local capability.
 
-Inherit a stable descriptor location, not a captured controller generation or controller bearer. A long-lived shell then discovers the current controller each time it starts a new CLI. Clear inherited controller discovery variables before installing worker context. Verify inheritance through each provider's environment construction and the PTY spawn path; do not introduce provider imports into core.
+Inherit the config root and explicit role, not a captured controller generation or controller bearer. A long-lived shell then discovers its role's current process each time it starts a new CLI. Clear inherited workspace variables before installing worker context. Verify inheritance through each provider's environment construction and the PTY spawn path; do not introduce provider imports into core.
 
 Bind the gateway to the authenticated stable node relationship. A changed node identity is not an ordinary controller restart: refuse to silently repoint retained shells at that different relationship. Explicit re-enrollment is separate from reconnect. Multiple worker processes on one host have separate private descriptors, local capabilities, and gateways.
 
 | Event | Behavior |
 | --- | --- |
 | Worker starts before its controller | Gateway exists, context/application calls report unavailable, and process startup remains non-blocking. |
-| Private gateway startup fails | Warn and continue serving the execution node. Keep the process-unique runtime selector pinned to the unavailable descriptor so provider/PTY CLI calls fail closed rather than falling back to another Local workspace. |
+| Private gateway startup fails | Warn and continue serving the execution node after clearing stale metadata. Inherited `GARCON_RUNTIME=execution-node` makes provider/PTY CLI calls fail closed rather than select the controller. |
 | Any physical disconnect | Retire the RPC session and reject sent calls without confirmed replies as uncertain. Unsent calls fail definitively. No replay or resumption. |
 | Fresh connection | New requests can use its authorized backing; old calls never migrate. Keep process-owned providers, local gateway, and PTYs. |
 | Controller restarts | Existing invocations retain the old `serverInstanceId` and fail their fence. Fresh invocations discover the new instance. No execution state is recovered by this gateway. |
@@ -295,7 +301,7 @@ One shared channel still permits head-of-line delay and shared failure. Noise fr
 1. Extend shared runtime discovery/context and expected-controller fencing for direct HTTP first. Make `GarconClient` context-aware while preserving existing CLI behavior and tests.
 2. Make CLI node selection explicit for starts, catalogs, native lookup, and existing-chat operations. Keep transport selection out of command semantics.
 3. Define the typed CLI HTTP allowlist, controller dispatcher, delegated-node principal, and explicit node permission. Reuse existing handlers and error contracts; deny unregistered routes by default.
-4. Add the process-owned loopback gateway and reverse RPC adapters, including inline bounds, cancellation, session fencing, and process-unique private descriptors.
+4. Add the process-owned loopback gateway and reverse RPC adapters, including inline bounds, cancellation, session fencing, and lease-owned private descriptors.
 5. Wire provider/PTY discovery, node-editor permission, public worker startup, and deterministic cross-boundary acceptance. Remove the deliberate CLI-unavailable setup only when the new fail-closed context is installed.
 
 The implementation must not copy all routes into the worker, introduce a general process service, or add per-command remote implementations. Frontend work covers the node permission and honest ticket actor/owner presentation. Existing ticket project inference is reused.

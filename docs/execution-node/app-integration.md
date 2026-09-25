@@ -158,7 +158,7 @@ This is one active controller relationship per worker state directory. Do not ad
 ```sh
 # Proposed public CLI; SECRET denotes the generated value, not literal text.
 garcon execution-node --connect 'wss://example.com/execution-node/22222222-2222-4222-8222-222222222222#secret=SECRET' \
-  --workspace-dir "$HOME/.garcon/execution-node" \
+  --config-dir "$HOME/.garcon" \
   --project-base-dir /workspace
 ```
 
@@ -174,7 +174,7 @@ No second secret flag, controller JSON file, manually assigned node ID, or separ
 ```sh
 # Proposed local-development example. The real listener binds 0.0.0.0.
 garcon execution-node --listen 19781 --allow-insecure-development \
-  --workspace-dir "$HOME/.garcon/execution-node" \
+  --config-dir "$HOME/.garcon" \
   --project-base-dir /workspace
 
 # Printed onboarding URL, with the real generated secret in place of SECRET:
