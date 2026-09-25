@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import {
   advertisedServerUrl,
+  childCliRuntimeFile,
   createServerRuntimeState,
   listeningServerUrl,
   logServerReady,
@@ -44,6 +45,18 @@ describe('server runtime publication', () => {
 
     expect(await removeServerRuntime(published.filePath, state.identity.instanceId)).toBe(false);
     expect(JSON.parse(await fs.readFile(published.filePath, 'utf8')).instanceId).toBe('replacement');
+  });
+
+  it('pins children to the published descriptor or to an unpublished per-instance path', async () => {
+    const workspaceDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-')));
+    tempDirs.push(workspaceDir);
+    const state = createServerRuntimeState(workspaceDir);
+    const published = await publishServerRuntime(state, 'http://127.0.0.1:4321');
+
+    expect(childCliRuntimeFile(state, 'dev')).toBe(published.filePath);
+    const unavailable = childCliRuntimeFile(state, null);
+    expect(unavailable).toBe(path.join(workspaceDir, `.cli-unavailable-${state.identity.instanceId}.json`));
+    await expect(fs.lstat(unavailable)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('advertises wildcard listeners through loopback', () => {

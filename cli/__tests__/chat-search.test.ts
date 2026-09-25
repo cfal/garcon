@@ -162,7 +162,7 @@ describe('chat search', () => {
         page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
       }), 1);
       const hit = result.results[0]!;
-      const parsed = parseCliArgs(buildSearchReadCommandArguments(command, hit, hit.snippets[0]!));
+      const parsed = parseCliArgs(buildSearchReadCommandArguments(command, hit, hit.snippets[0]!), {});
       expect(parsed).toMatchObject({
         kind: 'read',
         includedCategories: expectation.includedCategories,
@@ -207,6 +207,7 @@ describe('chat search', () => {
     const hit = result.results[0]!;
     const parsed = parseCliArgs(
       buildSearchReadCommandArguments(command, hit, hit.snippets[0]!),
+      {},
     ) as ReadCliCommand;
     const entry: TranscriptMessage = { ordinal: 84, message };
     await expect(readChatWindow(parsed, {

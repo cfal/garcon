@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { messagesOfType } from '../../support/chat-assertions.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   claudeText,
   claudeToolUse,
@@ -38,12 +39,7 @@ async function runCli(
       ...arguments_,
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-      HOME: fixture.dirs.home,
-    },
+    env: cliEnvironment({ HOME: fixture.dirs.home }),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

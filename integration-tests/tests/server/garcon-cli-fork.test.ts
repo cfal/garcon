@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -20,11 +21,7 @@ async function runCli(fixture: IntegrationFixture, arguments_: readonly string[]
       ...arguments_,
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-    },
+    env: cliEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

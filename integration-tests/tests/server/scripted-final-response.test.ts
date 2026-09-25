@@ -8,6 +8,7 @@ import type { StartChatCommandRequest } from '../../../common/chat-command-contr
 import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
 import { startupPhases } from '../../support/delegated-start-progress.js';
 import { assistantContents } from '../../support/chat-assertions.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import { withIntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
 import { codexAssistantMessage, codexExecCommandCall } from '../../support/fake-codex-model.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
@@ -84,7 +85,7 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
               '--workspace', 'final-response',
               'wait', chatId, '--turn', accepted.turnId, ...(json ? ['--json'] : [])], {
               cwd: fileURLToPath(new URL('../../../', import.meta.url)), stdout: 'pipe', stderr: 'pipe',
-              env: { ...process.env, GARCON_CONFIG_DIR: '', GARCON_WORKSPACE: '' },
+              env: cliEnvironment(),
             });
             const [exitCode, stdout, stderr] = await Promise.all([child.exited,
               new Response(child.stdout).text(), new Response(child.stderr).text()]);

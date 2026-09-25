@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -182,11 +183,7 @@ async function runCli(
       ...arguments_,
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-    },
+    env: cliEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

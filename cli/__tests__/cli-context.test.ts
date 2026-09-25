@@ -42,7 +42,8 @@ describe('CLI endpoint context', () => {
       runtimeFile: '/private/runtime.json', expectedWorkspace: 'right', workspace: 'right',
     });
     expect(() => parseCliArgs(['chats', '--runtime-file', '/other'], env)).toThrow('conflicts');
-    expect(() => parseCliArgs(['chats', '--config-dir', '/other'], env)).toThrow('--config-dir');
+    expect(() => parseCliArgs(['chats', '--config-dir', '/other'], env)).toThrow('--config-dir conflicts with GARCON_CLI_RUNTIME');
+    expect(() => parseCliArgs(['chats', '--config-dir', '/other', '--runtime-file', '/private/runtime.json'], {})).toThrow('with a runtime file');
     expect(parseCliArgs(['chats', '--runtime-file', '/private/runtime.json'], env)).toMatchObject({ runtimeFile: '/private/runtime.json' });
   });
 

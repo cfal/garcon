@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -28,12 +29,7 @@ async function runCli(
       ...arguments_,
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-      HOME: fixture.dirs.home,
-    },
+    env: cliEnvironment({ HOME: fixture.dirs.home }),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

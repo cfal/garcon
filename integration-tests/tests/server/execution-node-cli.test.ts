@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverRuntime } from '../../../cli/discovery.js';
@@ -140,6 +140,38 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' } });
   }, 90_000);
 }
+
+test.each([true, false])('controller terminals cannot drift to a worker sharing their config root: named=%s', async (named) => {
+  await withIntegrationFixture('cli-controller-child-context', async (fixture) => {
+    await symlink(fixture.executionDirs.workspace, join(fixture.dirs.config, 'execution-node'), 'dir');
+    await fixture.client.patch(`/api/v1/execution-nodes/${fixture.client.nodeId}`, { allowControllerCli: true });
+    if (named) {
+      await expect(discoverRuntime({ configDir: fixture.dirs.config })).rejects.toThrow('unique verified');
+    } else {
+      expect((await discoverRuntime({ configDir: fixture.dirs.config })).defaultNodeId).toBe(fixture.client.nodeId);
+    }
+    const inventory = await fixture.client.get<TerminalListResponse>('/api/v1/terminals?nodeId=local');
+    const { terminal } = await fixture.client.post<TerminalCreateResponse>('/api/v1/terminals', {
+      nodeId: 'local', expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: 'controller-cli-shell',
+      requestedInitialWorkingDirectory: fixture.dirs.project,
+    });
+    const attachment = await attach(fixture.client, terminal.terminalId, inventory);
+    fixture.client.sendTerminal({ type: 'terminal-input', terminalId: terminal.terminalId, attachmentId: attachment, data: 'stty -echo\r' });
+    const command = `${shellQuote(process.execPath)} ${shellQuote(CLI)} ticket create --title 'Synthetic controller ticket' --project 'Synthetic project' --json`;
+    const output = await shellCommand(fixture.client, terminal.terminalId, attachment, command);
+    if (named) {
+      expect(output).toContain('"principalMode":"local"');
+      expect(output).not.toContain('"kind":"node"');
+    } else {
+      expect(output).toContain('.cli-unavailable-');
+      expect(output).not.toContain('"success":true');
+    }
+    const retarget = `${shellQuote(process.execPath)} ${shellQuote(CLI)} --config-dir ${shellQuote(fixture.executionDirs.config)} list agents --json`;
+    expect(await shellCommand(fixture.client, terminal.terminalId, attachment, retarget)).toContain('--config-dir conflicts with GARCON_CLI_RUNTIME');
+    await fixture.client.delete('/api/v1/terminals', { terminalId: terminal.terminalId, requestId: 'controller-cli-shell-end' });
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate',
+    ...(named ? { namedWorkspace: 'controller-child-context' } : {}), serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' } });
+}, 30_000);
 
 test('a real permission-approved Claude tool inherits worker CLI discovery and calls back over the same channel', async () => {
   const environment = await startScriptedClaudeTestEnvironment();

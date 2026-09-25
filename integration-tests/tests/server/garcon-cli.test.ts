@@ -10,6 +10,7 @@ import {
   userContents,
 } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -24,12 +25,7 @@ function spawnCli(arguments_: string[]) {
   return Bun.spawn({
     cmd: [process.execPath, 'cli/main.ts', ...arguments_],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-      GARCON_CLI_RUNTIME: '',
-    },
+    env: cliEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

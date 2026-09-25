@@ -118,6 +118,7 @@ import { errorMessage } from './lib/errors.js';
 import { acquireControllerLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
   advertisedServerUrl,
+  childCliRuntimeFile,
   createServerRuntimeState,
   logServerReady,
   publishServerRuntime,
@@ -199,7 +200,8 @@ export async function startServer(): Promise<void> {
     // which the ladder would never hand to its callback.
     await resumeInterruptedCarryOverRollback(workspaceDir);
     const runtimeState = createServerRuntimeState(workspaceDir);
-    delete process.env.GARCON_CLI_RUNTIME;
+    // Terminal and agent children inherit this pin so explicit selectors cannot retarget them silently.
+    process.env.GARCON_CLI_RUNTIME = childCliRuntimeFile(runtimeState, config.workspaceName);
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
       const result = await migrateWorkspaceChatIds(workspaceDir);

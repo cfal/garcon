@@ -30,6 +30,13 @@ export function createServerRuntimeState(workspaceDir: string): ServerRuntimeSta
   };
 }
 
+// Unnamed controllers publish no descriptor; their children get a pin that never
+// resolves rather than discovering another endpoint below the config root.
+export function childCliRuntimeFile(state: ServerRuntimeState, workspaceName: string | null): string {
+  const { workspaceDir, instanceId } = state.identity;
+  return path.join(workspaceDir, workspaceName === null ? `.cli-unavailable-${instanceId}.json` : SERVER_RUNTIME_FILENAME);
+}
+
 export function createServerRuntimeProof(
   state: ServerRuntimeState,
   challenge: string,

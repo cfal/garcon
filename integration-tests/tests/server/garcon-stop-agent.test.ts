@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import type { ChatMessagesMessage, ServerWsMessage } from '../../../common/ws-events.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 
 const WORKSPACE = 'stop-agent';
@@ -42,7 +43,7 @@ for (const creation of ['markup', 'cli'] as const) for (const remove of [false, 
           '--provider', agent.provider.providerId, '--endpoint', agent.provider.endpointId,
           '--model', agent.provider.model, '--parent', parent, 'Synthetic child task.'], {
           cwd: fileURLToPath(new URL('../../../', import.meta.url)),
-          env: { ...process.env, GARCON_CONFIG_DIR: '', GARCON_WORKSPACE: '' }, stdout: 'pipe', stderr: 'pipe',
+          env: cliEnvironment(), stdout: 'pipe', stderr: 'pipe',
         });
         const [code, stdout, stderr] = await Promise.all([processRun.exited,
           new Response(processRun.stdout).text(), new Response(processRun.stderr).text()]);

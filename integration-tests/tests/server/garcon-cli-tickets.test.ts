@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTicketDetail, parseTicketPage } from '../../../common/ticket-responses.js';
 import { parseTicketWriteResult } from '../../../common/ticket-records.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
@@ -11,7 +12,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 async function runCli(fixture: IntegrationFixture, args: readonly string[], body?: string) {
   const child = Bun.spawn({ cmd: [process.execPath, 'cli/main.ts', '--config-dir', fixture.dirs.config,
     '--workspace', 'integration', '--server', fixture.garcon.baseUrl, 'ticket', ...args], cwd: REPO_ROOT,
-    env: { ...process.env, GARCON_CONFIG_DIR: '', GARCON_WORKSPACE: '' },
+    env: cliEnvironment(),
     stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
   if (body !== undefined) child.stdin.write(body);
   child.stdin.end();

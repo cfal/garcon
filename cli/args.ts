@@ -1571,7 +1571,11 @@ export function parseCliArgs(
     throw argumentError('--runtime-file conflicts with GARCON_CLI_RUNTIME');
   }
   const runtimeFile = inheritedRuntime ?? explicitRuntime;
-  if (runtimeFile && explicitConfigDir) throw argumentError('--config-dir cannot be used with a runtime file');
+  if (runtimeFile && explicitConfigDir) {
+    throw argumentError(inheritedRuntime
+      ? '--config-dir conflicts with GARCON_CLI_RUNTIME; set GARCON_CLI_RUNTIME= to select another endpoint'
+      : '--config-dir cannot be used with a runtime file');
+  }
   const environmentConfigDir = runtimeFile ? undefined : resolvedEnvironmentValue(environment.GARCON_CONFIG_DIR);
   const configDir = path.resolve(
     environmentConfigDir

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { CliBodyDisclosure, CliPresentationStyle } from '../../../common/cli-presentation.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -51,11 +52,7 @@ async function runAddRow(
       content,
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-    },
+    env: cliEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -119,11 +116,7 @@ async function runStatus(fixture: IntegrationFixture, chatId: string): Promise<s
       '--messages', '200',
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-    },
+    env: cliEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

@@ -11,6 +11,7 @@ import {
   parseTranscriptExportResponse,
   type TranscriptExportResponse,
 } from '../../../common/chat-export-contracts.js';
+import { cliEnvironment } from '../../support/cli-environment.js';
 import type { ConfiguredDirectTestAgent } from '../../support/garcon-client.js';
 import {
   withIntegrationFixture,
@@ -271,11 +272,7 @@ async function runCli(
       ...arguments_,
     ],
     cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      GARCON_CONFIG_DIR: '',
-      GARCON_WORKSPACE: '',
-    },
+    env: cliEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });
