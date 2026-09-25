@@ -5,11 +5,12 @@ import { serveAgentNode } from './agent-worker.js';
 import { InProcessExecutionNode } from './in-process.js';
 import { WebSocketLink } from './websocket-link.js';
 import { TerminalRuntime } from '../terminals/node-service.js';
-import { cliGatewayRuntimeFile, startCliGateway } from './cli-gateway.js';
+import { startCliGateway } from './cli-gateway.js';
+import { cliGatewayRuntimeFile, executionNodeDataDirectory } from '../../common/cli-runtime-paths.js';
 
 export interface ExecutionWorkerOptions {
   readonly secret: string;
-  readonly workspaceDir: string;
+  readonly configDir: string;
   readonly projectBasePath: string;
   readonly allowInsecureDevelopment: boolean;
   readonly allowUnverifiedTls?: boolean;
@@ -22,6 +23,7 @@ export async function runExecutionWorker(
   options: ExecutionWorkerOptions,
   onListening: (url: string) => void = (url) => console.log(JSON.stringify({ type: 'execution-node-listening', url })),
 ): Promise<void> {
+  const dataDir = executionNodeDataDirectory(options.configDir);
   delete process.env.GARCON_AGENT_EXECUTION_NODE_CONFIG;
   delete process.env.GARCON_WORKSPACE_DIR;
   delete process.env.GARCON_WORKSPACE;
@@ -33,8 +35,8 @@ export async function runExecutionWorker(
   let node: InProcessExecutionNode | null = null;
   let currentRpc: AgentRpc | null = null;
   // A missing private descriptor must not fall back to an unrelated controller on this host.
-  process.env.GARCON_CLI_RUNTIME = cliGatewayRuntimeFile(options.workspaceDir, link.runtimeId);
-  const gateway = await startCliGateway({ workspaceDir: options.workspaceDir, runtimeId: link.runtimeId, currentRpc: () => currentRpc })
+  process.env.GARCON_CLI_RUNTIME = cliGatewayRuntimeFile(dataDir, link.runtimeId);
+  const gateway = await startCliGateway({ dataDir, runtimeId: link.runtimeId, currentRpc: () => currentRpc })
     .catch((error: unknown) => {
       console.warn(JSON.stringify({ type: 'execution-node-cli-unavailable',
         message: error instanceof Error ? error.message : 'CLI gateway could not start' }));
@@ -77,7 +79,7 @@ export async function runExecutionWorker(
     currentRpc = rpc;
     transport.onFailure(() => { if (currentRpc === rpc) currentRpc = null; });
     node ??= new InProcessExecutionNode({
-      id: transport.nodeId, workspaceDir: options.workspaceDir, projectBasePath: options.projectBasePath,
+      id: transport.nodeId, workspaceDir: dataDir, projectBasePath: options.projectBasePath,
       integrations: defaultAgentIntegrations,
       terminalRuntime: terminals,
       resolveCredential: ({ agentId, reference, signal }) => {

@@ -155,7 +155,7 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir, ap
   const worker = Bun.spawn({
     cmd: [
       executablePath, 'execution-node', '--connect', connection.href,
-      '--allow-insecure-development', '--workspace-dir', path.join(workspaceDir, 'worker'),
+      '--allow-insecure-development', '--config-dir', path.join(workspaceDir, 'worker'),
       '--project-base-dir', workspaceDir,
     ],
     env: isolatedServerEnvironment(),

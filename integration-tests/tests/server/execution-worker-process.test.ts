@@ -14,7 +14,7 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
   test(`worker harness retains exit classification after connection: ${ending}`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-worker-exit-'));
     const directories = {
-      root, workspace: join(root, 'workspace'), project: join(root, 'project'),
+      root, workspace: join(root, 'config', 'execution-node'), project: join(root, 'project'),
       home: join(root, 'home'), config: join(root, 'config'),
     };
     let controller: WebSocketLink | null = null;
@@ -52,7 +52,7 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
 test('re-adding a running worker under a new node identity requires restarting that worker', async () => {
   const root = await mkdtemp(join(tmpdir(), 'garcon-worker-identity-'));
   const directories = {
-    root, workspace: join(root, 'workspace'), project: join(root, 'project'),
+    root, workspace: join(root, 'config', 'execution-node'), project: join(root, 'project'),
     home: join(root, 'home'), config: join(root, 'config'),
   };
   const controllers: WebSocketLink[] = [];

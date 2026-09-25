@@ -252,7 +252,7 @@ export class IntegrationFixture {
       ...dirs,
       project: options.projectRoots === 'separate' ? join(root, 'worker-project') : dirs.project,
       config: join(root, 'worker-config'),
-      workspace: join(root, 'worker-workspace'),
+      workspace: join(root, 'worker-config', 'execution-node'),
       home: join(root, 'worker-home'),
     };
     await Promise.all(Object.values(executionDirs).map((directory) => mkdir(directory, { recursive: true })));

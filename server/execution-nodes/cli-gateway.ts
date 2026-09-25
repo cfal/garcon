@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { lstat, mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { cliGatewayRuntimeDirectory, cliGatewayRuntimeFile } from '../../common/cli-runtime-paths.js';
 import { createServer, type IncomingMessage } from 'node:http';
 import { once } from 'node:events';
 import { AgentCallError } from '@garcon/server-agent-interface';
@@ -56,16 +56,12 @@ async function readBody(request: IncomingMessage): Promise<JsonValue | null> {
   catch { throw new DomainError('VALIDATION_FAILED', 'Malformed JSON', 400); }
 }
 
-export function cliGatewayRuntimeFile(workspaceDir: string, runtimeId: string): string {
-  return join(workspaceDir, 'run', `cli-${runtimeId}.json`);
-}
-
 export async function startCliGateway(options: {
-  readonly workspaceDir: string;
+  readonly dataDir: string;
   readonly runtimeId: string;
   readonly currentRpc: () => AgentRpc | null;
 }): Promise<{ readonly runtimeFile: string; readonly descriptor: CliGatewayDescriptor; dispose(): Promise<void> }> {
-  const runtime = createServerRuntimeState(options.workspaceDir);
+  const runtime = createServerRuntimeState(options.dataDir);
   const proof = createRuntimeRoutes(runtime)['/api/v1/runtime']!.GET!;
   const admission = new CliAdmission();
   let stopped = false;
@@ -155,8 +151,8 @@ export async function startCliGateway(options: {
     server.closeAllConnections();
     await closed;
   };
-  const runDir = join(options.workspaceDir, 'run');
-  const runtimeFile = cliGatewayRuntimeFile(options.workspaceDir, options.runtimeId);
+  const runDir = cliGatewayRuntimeDirectory(options.dataDir);
+  const runtimeFile = cliGatewayRuntimeFile(options.dataDir, options.runtimeId);
   const { workspaceDir: _workspaceDir, ...identity } = runtime.identity;
   const descriptor: CliGatewayDescriptor = { ...identity, kind: 'execution-node-cli', pid: process.pid,
     baseUrl: `http://127.0.0.1:${address.port}`, localCapability: runtime.localCapability };

@@ -2,10 +2,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
-import { readWorkerCliOptions } from '../worker-cli.js';
+import { readWorkerCliOptions as readOptions } from '../worker-cli.js';
 import { parseConnectionUrl } from '../connection-url.js';
 
 const roots: string[] = [];
+const readWorkerCliOptions = (args: readonly string[]) => readOptions(args, {});
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 async function workspace() {
@@ -16,28 +17,45 @@ async function workspace() {
   return root;
 }
 
+test('worker config root follows controller precedence and rejects workspace selectors', async () => {
+  const root = await workspace();
+  const url = `wss://example.com/execution-node/22222222-2222-4222-8222-222222222222#secret=${Buffer.alloc(32, 9).toString('base64url')}`;
+  expect((await readOptions(['--connect', url], { HOME: root })).configDir).toBe(join(root, '.garcon'));
+  expect((await readOptions(['--connect', url, '--config-dir', root], {})).configDir).toBe(root);
+  expect((await readOptions(['--connect', url], { GARCON_CONFIG_DIR: root })).configDir).toBe(root);
+  expect((await readOptions(['--connect', url, '--config-dir', `${root}/`], { GARCON_CONFIG_DIR: root })).configDir).toBe(root);
+  await expect(readOptions(['--connect', url, '--config-dir', '/elsewhere'], { GARCON_CONFIG_DIR: root }))
+    .rejects.toThrow(`GARCON_CONFIG_DIR (${root}) conflicts with --config-dir (/elsewhere)`);
+  expect((await readOptions(['--connect', url, '--config-dir', root], { GARCON_CONFIG_DIR: '' })).configDir).toBe(root);
+  await expect(readOptions(['--connect', url, '--config-dir', ''], {})).rejects.toThrow('non-empty');
+  await expect(readOptions(['--connect', url, '--workspace-dir', root], {})).rejects.toThrow('--workspace-dir is controller-only');
+  await expect(readOptions(['--connect', url, '--workspace', 'default'], {})).rejects.toThrow('Invalid execution-node arguments');
+});
+
 test('listener reuses a private persisted secret while connect takes the complete URL', async () => {
   const root = await workspace();
-  const args = ['--listen', '0', '--allow-insecure-development', '--workspace-dir', root];
+  const args = ['--listen', '0', '--allow-insecure-development', '--config-dir', root];
   const first = await readWorkerCliOptions(args);
+  expect(first.configDir).toBe(root);
+  expect(first).not.toHaveProperty('workspaceDir');
   const restarted = await readWorkerCliOptions(args);
   expect(first.secret).toBe(restarted.secret);
   expect(first.connection).toEqual({ kind: 'listen', port: 0, bindAddress: '0.0.0.0' });
-  if (process.platform !== 'win32') expect((await stat(join(root, 'execution-node-secret.json'))).mode & 0o777).toBe(0o600);
+  if (process.platform !== 'win32') expect((await stat(join(root, 'execution-node', 'execution-node-secret.json'))).mode & 0o777).toBe(0o600);
   const full = `wss://example.com/execution-node/22222222-2222-4222-8222-222222222222#secret=${first.secret}`;
-  const dialing = await readWorkerCliOptions(['--connect', full, '--workspace-dir', root]);
+  const dialing = await readWorkerCliOptions(['--connect', full, '--config-dir', root]);
   expect(dialing.secret).toBe(first.secret);
   expect(dialing.connection).toEqual({ kind: 'dial', url: full.split('#')[0] });
   expect(dialing).not.toHaveProperty('nodeId');
   expect(dialing).not.toHaveProperty('label');
   expect(dialing.allowUnverifiedTls).toBe(false);
-  expect((await readWorkerCliOptions(['--connect', full, '--allow-unverified-tls', '--workspace-dir', root])).allowUnverifiedTls).toBe(true);
+  expect((await readWorkerCliOptions(['--connect', full, '--allow-unverified-tls', '--config-dir', root])).allowUnverifiedTls).toBe(true);
   await expect(readWorkerCliOptions([...args, '--allow-unverified-tls'])).rejects.toThrow('only to --connect');
 });
 
 test('listener bind address is independent of the advertised URL and rejects empty values or dial mode', async () => {
   const root = await workspace();
-  const args = ['--listen', '0', '--allow-insecure-development', '--workspace-dir', root];
+  const args = ['--listen', '0', '--allow-insecure-development', '--config-dir', root];
   const options = await readWorkerCliOptions([...args, '--bind-address', '127.0.0.1', '--advertise-url', 'ws://worker.example.com:19781/execution-node']);
   expect(options.connection).toEqual({ kind: 'listen', port: 0, bindAddress: '127.0.0.1' });
   expect(options.advertisedUrl).toBe('ws://worker.example.com:19781/execution-node');
@@ -56,7 +74,7 @@ test.each([
 ])('canonicalizes listener bind address %s to %s', async (input, expected) => {
   const root = await workspace();
   const options = await readWorkerCliOptions([
-    '--listen', '0', '--bind-address', input, '--allow-insecure-development', '--workspace-dir', root,
+    '--listen', '0', '--bind-address', input, '--allow-insecure-development', '--config-dir', root,
   ]);
   expect(options.connection).toEqual({ kind: 'listen', port: 0, bindAddress: expected });
 });
@@ -64,16 +82,16 @@ test.each([
 test.each(['fe80::1%eth0', '[fe80::1%eth0]'])('rejects scoped IPv6 %s before creating listener state', async (bindAddress) => {
   const root = await workspace();
   await expect(readWorkerCliOptions([
-    '--listen', '0', '--bind-address', bindAddress, '--allow-insecure-development', '--workspace-dir', root,
+    '--listen', '0', '--bind-address', bindAddress, '--allow-insecure-development', '--config-dir', root,
     '--advertise-url', 'ws://worker.example.com:19781/execution-node',
   ])).rejects.toThrow('Scoped IPv6 listener bind addresses are not supported');
-  await expect(stat(join(root, 'execution-node-secret.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(stat(join(root, 'execution-node', 'execution-node-secret.json'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
 test.each(['localhost:8080', 'http://localhost', 'user@localhost', 'localhost/path', 'localhost?query', 'localhost#fragment'])('rejects a URL or port in bind address %s', async (bindAddress) => {
   const root = await workspace();
   await expect(readWorkerCliOptions([
-    '--listen', '0', '--bind-address', bindAddress, '--allow-insecure-development', '--workspace-dir', root,
+    '--listen', '0', '--bind-address', bindAddress, '--allow-insecure-development', '--config-dir', root,
   ])).rejects.toThrow('Listener bind address must be a hostname or IP address without a port');
 });
 
@@ -90,13 +108,14 @@ test('CLI validation does not disclose connection credentials', async () => {
 test.each([undefined, '127.0.0.1', '0'])('public worker starts with bind address %s, prints onboarding URL, and shuts down without a controller', async (bindAddress) => {
   const root = await workspace();
   const advertisedUrl = bindAddress === '127.0.0.1' ? 'ws://worker.example.com:19781/execution-node' : undefined;
-  const process = Bun.spawn(['bun', 'server/main.ts', 'execution-node', '--listen', '0', '--allow-insecure-development', '--workspace-dir', root,
+  const child = Bun.spawn(['bun', 'server/main.ts', 'execution-node', '--listen', '0', '--allow-insecure-development', '--config-dir', root,
     ...(bindAddress ? ['--bind-address', bindAddress] : []),
     ...(advertisedUrl ? ['--advertise-url', advertisedUrl] : [])], {
     stdout: 'pipe', stderr: 'pipe',
+    env: { ...process.env, GARCON_CONFIG_DIR: '' },
   });
   try {
-    const reader = process.stdout.getReader();
+    const reader = child.stdout.getReader();
     const decoder = new TextDecoder();
     let output = '';
     while (!output.includes('\n')) {
@@ -122,11 +141,11 @@ test.each([undefined, '127.0.0.1', '0'])('public worker starts with bind address
         expect((await fetch(listener, { signal: AbortSignal.timeout(1000) })).status).toBe(400);
       }
     }
-    process.kill('SIGTERM');
-    expect(await process.exited).toBe(0);
+    child.kill('SIGTERM');
+    expect(await child.exited).toBe(0);
   } finally {
-    if (process.exitCode === null) process.kill('SIGTERM');
-    await process.exited;
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await child.exited;
   }
 }, 15_000);
 
@@ -135,7 +154,8 @@ test('dialing worker starts and shuts down offline without disclosing its creden
   const secret = Buffer.alloc(32, 8).toString('base64url');
   const connectionUrl = `ws://127.0.0.1:1/execution-node/22222222-2222-4222-8222-222222222222#secret=${secret}`;
   const child = Bun.spawn(['bun', 'server/main.ts', 'execution-node', '--connect', connectionUrl,
-    '--workspace-dir', root, '--allow-insecure-development'], { stdout: 'pipe', stderr: 'pipe' });
+    '--config-dir', root, '--allow-insecure-development'], { stdout: 'pipe', stderr: 'pipe',
+      env: { ...process.env, GARCON_CONFIG_DIR: '' } });
   const reader = child.stdout.getReader();
   let output = '';
   try {

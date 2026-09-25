@@ -38,6 +38,7 @@
     "./chat-view": "./chat-view.ts",
     "./client-chat-id": "./client-chat-id.ts",
     "./cli-presentation": "./cli-presentation.ts",
+    "./cli-runtime-paths": "./cli-runtime-paths.ts",
     "./execution-defaults": "./execution-defaults.ts",
     "./execution-nodes": "./execution-nodes.ts",
     "./file-contracts": "./file-contracts.ts",

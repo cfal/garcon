@@ -7,6 +7,7 @@ import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.j
 import { assertPrivateNodeFile } from './config-store.js';
 import { createNodeSecret, isNodeSecret, nodeConnectionUrl, parseConnectionUrl, validateNodeSocketUrl } from './connection-url.js';
 import type { ExecutionWorkerOptions } from './worker.js';
+import { executionNodeDataDirectory } from '../../common/cli-runtime-paths.js';
 
 export const EXECUTION_WORKER_HELP = `Garcon execution node
 
@@ -15,7 +16,8 @@ Usage:
   garcon execution-node --listen <port> [options]
 
 Options:
-  --workspace-dir <directory>  Worker-owned storage (default: ~/.garcon/execution-node).
+  --config-dir <directory>     Config root (default: GARCON_CONFIG_DIR, then ~/.garcon).
+                               A conflicting non-empty GARCON_CONFIG_DIR is rejected.
   --project-base-dir <path>    Worker project base (default: home directory).
   --bind-address <host-or-ip>  Listener bind address (default: 0.0.0.0).
   --advertise-url <url>        Listener URL printed for onboarding behind a proxy.
@@ -26,24 +28,41 @@ Options:
 The full connection URL is a credential. Shell history, process arguments,
 clipboard contents and captured startup output can expose it. Use wss: and
 an access-controlled TLS proxy outside local development. Execution traffic always
-requires Noise encryption and shared-secret authentication, including over ws:.\n`;
+requires Noise encryption and shared-secret authentication, including over ws:.
+Worker storage is <config-dir>/execution-node. Use separate config roots for
+independent workers. Workspace selectors apply only to controllers.\n`;
 
-export async function readWorkerCliOptions(args: readonly string[]): Promise<ExecutionWorkerOptions> {
+export async function readWorkerCliOptions(
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<ExecutionWorkerOptions> {
+  if (args.some((argument) => argument === '--workspace-dir' || argument.startsWith('--workspace-dir='))) {
+    throw new Error('--workspace-dir is controller-only; use --config-dir <root> for worker storage at <root>/execution-node');
+  }
   let values: {
-    connect?: string; listen?: string; 'workspace-dir'?: string; 'project-base-dir'?: string;
+    connect?: string; listen?: string; 'config-dir'?: string; 'project-base-dir'?: string;
     'bind-address'?: string; 'advertise-url'?: string; 'allow-insecure-development'?: boolean; 'allow-unverified-tls'?: boolean;
   };
   try {
     ({ values } = parseArgs({ args: [...args], strict: true, allowPositionals: false, options: {
       connect: { type: 'string' }, listen: { type: 'string' },
-      'workspace-dir': { type: 'string' }, 'project-base-dir': { type: 'string' },
+      'config-dir': { type: 'string' }, 'project-base-dir': { type: 'string' },
       'bind-address': { type: 'string' },
       'advertise-url': { type: 'string' }, 'allow-insecure-development': { type: 'boolean' },
       'allow-unverified-tls': { type: 'boolean' },
     } }));
   } catch { throw new Error('Invalid execution-node arguments; use execution-node --help'); }
   if ((values.connect === undefined) === (values.listen === undefined)) throw new Error('Choose exactly one of --connect or --listen');
-  const workspaceDir = resolve(values['workspace-dir'] ?? join(process.env.GARCON_CONFIG_DIR || join(homedir(), '.garcon'), 'execution-node'));
+  const root = environment.GARCON_CONFIG_DIR || values['config-dir'] || join(environment.HOME || homedir(), '.garcon');
+  if (!root.trim() || values['config-dir'] !== undefined && !values['config-dir'].trim()) {
+    throw new Error('--config-dir must be a non-empty directory path');
+  }
+  // Worker storage must never be shared, so an inherited root cannot silently replace an explicit one.
+  if (environment.GARCON_CONFIG_DIR && values['config-dir'] !== undefined
+    && resolve(environment.GARCON_CONFIG_DIR) !== resolve(values['config-dir'])) {
+    throw new Error(`GARCON_CONFIG_DIR (${environment.GARCON_CONFIG_DIR}) conflicts with --config-dir (${values['config-dir']}); clear one of them`);
+  }
+  const configDir = resolve(root);
   const projectBasePath = resolve(values['project-base-dir'] ?? homedir());
   const allowInsecureDevelopment = values['allow-insecure-development'] ?? false;
   if (values.connect !== undefined) {
@@ -51,7 +70,7 @@ export async function readWorkerCliOptions(args: readonly string[]): Promise<Exe
     if (values['advertise-url'] !== undefined) throw new Error('--advertise-url applies only to listeners');
     const { socketUrl, secret } = parseConnectionUrl(values.connect);
     const url = validateNodeSocketUrl(socketUrl, { direction: 'node-connects', allowInsecureDevelopment });
-    return { workspaceDir, projectBasePath, secret, allowInsecureDevelopment,
+    return { configDir, projectBasePath, secret, allowInsecureDevelopment,
       allowUnverifiedTls: url.startsWith('wss:') && values['allow-unverified-tls'] === true, connection: { kind: 'dial', url } };
   }
   if (values['allow-unverified-tls'] !== undefined) throw new Error('--allow-unverified-tls applies only to --connect');
@@ -62,7 +81,7 @@ export async function readWorkerCliOptions(args: readonly string[]): Promise<Exe
   const advertisedUrl = values['advertise-url'] === undefined ? undefined : validateNodeSocketUrl(values['advertise-url'], {
     direction: 'controller-connects', allowInsecureDevelopment, allowPlaceholder: true,
   });
-  const secretPath = join(workspaceDir, 'execution-node-secret.json');
+  const secretPath = join(executionNodeDataDirectory(configDir), 'execution-node-secret.json');
   await assertPrivateNodeFile(secretPath);
   let created = false;
   const secret = await readJsonStateFile({
@@ -74,7 +93,7 @@ export async function readWorkerCliOptions(args: readonly string[]): Promise<Exe
     },
   });
   if (created) await writeJsonFileAtomic(secretPath, { version: 1, secret }, { mode: 0o600 });
-  return { workspaceDir, projectBasePath, secret, allowInsecureDevelopment, connection: { kind: 'listen', port, bindAddress }, advertisedUrl };
+  return { configDir, projectBasePath, secret, allowInsecureDevelopment, connection: { kind: 'listen', port, bindAddress }, advertisedUrl };
 }
 
 function parseBindAddress(value: string | undefined): string {

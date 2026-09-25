@@ -27,7 +27,7 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
     cleanups.push(() => live?.close());
   };
   replace('controller');
-  const gateway = await startCliGateway({ workspaceDir: root, runtimeId: crypto.randomUUID(), currentRpc: () => live?.worker ?? null });
+  const gateway = await startCliGateway({ dataDir: root, runtimeId: crypto.randomUUID(), currentRpc: () => live?.worker ?? null });
   cleanups.push(() => gateway.dispose());
   const discover = () => discoverRuntime({ configDir: '/missing', workspace: 'ignored', runtimeFile: gateway.runtimeFile });
   const call = (path: string, init: RequestInit = {}) => fetch(`${gateway.descriptor.baseUrl}${path}`, {
@@ -47,7 +47,7 @@ test('private process-unique descriptors prove a live endpoint and never expose 
     expect((await stat(f.gateway.runtimeFile)).mode & 0o777).toBe(0o600);
     expect((await stat(join(f.root, 'run'))).mode & 0o777).toBe(0o700);
   }
-  const second = await startCliGateway({ workspaceDir: f.root, runtimeId: crypto.randomUUID(), currentRpc: () => null });
+  const second = await startCliGateway({ dataDir: f.root, runtimeId: crypto.randomUUID(), currentRpc: () => null });
   try {
     expect(second.runtimeFile).not.toBe(f.gateway.runtimeFile);
     expect(second.descriptor.localCapability).not.toBe(f.gateway.descriptor.localCapability);

@@ -63,7 +63,7 @@ export class ExecutionNodeProcess {
       cmd: [process.execPath, 'server/main.ts', 'execution-node',
         ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : ['--connect', input.connection.url]),
         ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
-        '--allow-insecure-development', '--workspace-dir', input.directories.workspace,
+        '--allow-insecure-development', '--config-dir', input.directories.config,
         '--project-base-dir', input.directories.project],
       cwd: input.repoRoot, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
