@@ -29,44 +29,44 @@ Common options and environment variables:
 
 Run `bun run help` for the complete server option list.
 
-Explicit flags take precedence over environment variables; nonempty environment values take precedence over defaults. The controller, execution node, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`. Relative roots are resolved from the process's working directory. Workspace options configure controller storage only, not CLI discovery or execution-node storage.
+Explicit flags take precedence over environment variables; nonempty environment values take precedence over defaults. The controller, executor, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`. Relative roots are resolved from the process's working directory. Workspace options configure controller storage only, not CLI discovery or executor storage.
 
-## Execution Node Connections
+## Executor Connections
 
-Add nodes from the Execution Nodes dialog. For a node that connects to the controller, pass the complete generated URL as one quoted argument:
+Add executors from the Executors dialog. For an executor that connects to the controller, pass the complete generated URL as one quoted argument:
 
 ```bash
-bun server/main.ts execution-node --connect 'wss://controller.example.com/execution-node/NODE_ID#secret=SECRET' \
+bun server/main.ts executor --connect 'wss://controller.example.com/executor/NODE_ID#secret=SECRET' \
   --config-dir "$HOME/.garcon" --project-base-dir /path/to/repos
 ```
 
 For a controller that connects to a worker, start its listener and paste the printed connection URL into the dialog:
 
 ```bash
-bun server/main.ts execution-node --listen 19781 --bind-address 0.0.0.0 \
+bun server/main.ts executor --listen 19781 --bind-address 0.0.0.0 \
   --allow-insecure-development --config-dir "$HOME/.garcon" \
   --project-base-dir /path/to/repos
 ```
 
-Replace `0.0.0.0` in the printed URL with a reachable hostname or IP. `--advertise-url wss://worker.example.com/execution-node` advertises an external TLS proxy; it does not enable TLS on the listener. Keep raw listeners on trusted private networks or behind access-controlled proxies.
+Replace `0.0.0.0` in the printed URL with a reachable hostname or IP. `--advertise-url wss://worker.example.com/executor` advertises an external TLS proxy; it does not enable TLS on the listener. Keep raw listeners on trusted private networks or behind access-controlled proxies.
 
-One controller and one execution node may run simultaneously under the same config root. Each role holds its own lease; two controllers or two workers cannot share the same role's storage. Controller workspace data and worker data stay separate, so switching roles does not overwrite either. Worker credentials and provider data live under `<config-dir>/execution-node`; this directory is reserved for execution-node storage, not a controller workspace. Use separate roots for independent workers. Existing default worker storage is unchanged. Replace an old `--workspace-dir /root/execution-node` with `--config-dir /root`, not `--config-dir /root/execution-node`. For a custom data directory, move its contents under the new root's `execution-node` directory while the worker is stopped.
+One controller and one executor may run simultaneously under the same config root. Each role holds its own lease; two controllers or two workers cannot share the same role's storage. Controller workspace data and worker data stay separate, so switching roles does not overwrite either. Worker credentials and provider data live under `<config-dir>/executor`; this directory is reserved for executor storage, not a controller workspace. Use separate roots for independent workers. Existing default worker storage is unchanged. Replace an old `--workspace-dir /root/executor` with `--config-dir /root`, not `--config-dir /root/executor`. For a custom data directory, move its contents under the new root's `executor` directory while the worker is stopped.
 
-Enable **Allow workspace CLI access** for the node in the controller's editor. Then an ordinary shell on that worker can use the same root, without a runtime UUID:
+Enable **Allow workspace CLI access** for the executor in the controller's editor. Then an ordinary shell on that worker can use the same root, without a runtime UUID:
 
 ```bash
 GARCON_CONFIG_DIR="$HOME/.garcon" bun cli/main.ts list agents
 # Explicit flags override the environment:
-bun cli/main.ts --config-dir "$HOME/.garcon" --runtime execution-node list agents
+bun cli/main.ts --config-dir "$HOME/.garcon" --runtime executor list agents
 ```
 
-Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=execution-node`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
+Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=executor`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
 
-Every execution-node connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
+Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
 
-WSS certificate verification is enabled by default. **Allow unverified TLS certificates** in an outbound node's editor, or `--allow-unverified-tls` on a dialing worker, explicitly disables only outer certificate verification. Noise still requires the shared secret. Optional certificate pinning is deferred pending [Bun issue 43635](https://github.com/oven-sh/bun/issues/43635). Non-TLS connections require the separate **Allow connection without TLS** checkbox or `--allow-insecure-development` flag. HTTP metadata and traffic timing remain visible without outer TLS; Noise protects the execution payload, not the browser UI or other HTTP routes.
+WSS certificate verification is enabled by default. **Allow unverified TLS certificates** in an outbound executor's editor, or `--allow-unverified-tls` on a dialing worker, explicitly disables only outer certificate verification. Noise still requires the shared secret. Optional certificate pinning is deferred pending [Bun issue 43635](https://github.com/oven-sh/bun/issues/43635). Non-TLS connections require the separate **Allow connection without TLS** checkbox or `--allow-insecure-development` flag. HTTP metadata and traffic timing remain visible without outer TLS; Noise protects the execution payload, not the browser UI or other HTTP routes.
 
-Connection URLs are credentials. Their `#secret` fragment is removed before dialing the execution endpoint, never sent in the upgrade's HTTP headers, query, or WebSocket subprotocol. The authenticated management API still carries full descriptors; protect browser-to-controller access with HTTPS or a trusted private network. Keep the URL private: clipboard contents, shell history, process arguments, and captured onboarding output can expose it locally. Stored listener credentials and controller node configuration require private file permissions. Use an independent random 32-byte secret for every node; human-chosen passwords are not supported. Disable a compromised node immediately, replace its credential on both endpoints, then re-enable it. Routine connection diagnostics and node-list responses omit credentials.
+Connection URLs are credentials. Their `#secret` fragment is removed before dialing the execution endpoint, never sent in the upgrade's HTTP headers, query, or WebSocket subprotocol. The authenticated management API still carries full descriptors; protect browser-to-controller access with HTTPS or a trusted private network. Keep the URL private: clipboard contents, shell history, process arguments, and captured onboarding output can expose it locally. Stored listener credentials and controller executor configuration require private file permissions. Use an independent random 32-byte secret for every executor; human-chosen passwords are not supported. Disable a compromised executor immediately, replace its credential on both endpoints, then re-enable it. Routine connection diagnostics and executor-list responses omit credentials.
 
 ## Tickets
 
@@ -117,7 +117,7 @@ bun cli/main.ts ticket history G-42 --before-sequence 300 --limit 20
 
 List/comment continuations require the returned collection revision; refresh from the first page if it changed. Immutable activity history needs no revision fence. `--include-description false --comment-limit 0` reads only metadata and links. Responses never silently truncate authored bodies.
 
-Every mutation prints its generated request ID, expected store ID, and resolved retry command prefix to stderr **before** submission. Creates also print the resolved project. If confirmation is lost, use that connection prefix with the same ticket operation and body, replacing or adding the printed `--request-id`, `--expected-store-id`, and inferred create `--project`. The prefix includes the config root and selected runtime role, never `auto`. Replace old connection options rather than appending duplicates. Retrying through Local instead of the original execution node is a different authority and does not deduplicate. The server returns the original committed result, even after later edits or restart. That result confirms the operation; use `read` for current state. A changed payload under the same identity conflicts. A replacement ticket database has a different store ID and rejects stale requests. The CLI never automatically resubmits mutations or stores stdin for recovery.
+Every mutation prints its generated request ID, expected store ID, and resolved retry command prefix to stderr **before** submission. Creates also print the resolved project. If confirmation is lost, use that connection prefix with the same ticket operation and body, replacing or adding the printed `--request-id`, `--expected-store-id`, and inferred create `--project`. The prefix includes the config root and selected runtime role, never `auto`. Replace old connection options rather than appending duplicates. Retrying through Local instead of the original executor is a different authority and does not deduplicate. The server returns the original committed result, even after later edits or restart. That result confirms the operation; use `read` for current state. A changed payload under the same identity conflicts. A replacement ticket database has a different store ID and rejects stale requests. The CLI never automatically resubmits mutations or stores stdin for recovery.
 
 `--stdin` supplies create descriptions, comment bodies, or closing comments as strict UTF-8 up to 48 KiB; it is mutually exclusive with the corresponding inline flag. Encoded requests must fit 64 KiB, so escape-heavy text may require a smaller body. `--json` emits only the typed response on stdout; progress/retry hints stay on stderr. Human output renders terminal control sequences visibly; JSON remains lossless while escaping terminal controls. Exit 0 means confirmed success, 2 means invalid CLI input, and 3 means a domain/transport failure. An interrupted command exits 130 and may already have committed.
 
@@ -603,7 +603,7 @@ If queued messages exist, stopping pauses the queue. Resume it in Garcon before 
 The CLI uses two connection settings:
 
 - `--config-dir <directory>` / `GARCON_CONFIG_DIR`, default `~/.garcon`.
-- `--runtime auto|controller|execution-node` / `GARCON_RUNTIME`, default `auto`.
+- `--runtime auto|controller|executor` / `GARCON_RUNTIME`, default `auto`.
 
 For each setting, an explicit flag wins over its environment variable. Empty environment values are unset. `--workspace`, `--workspace-dir`, and their environment variables belong to controller configuration only. The CLI learns the active controller's workspace from the authenticated API; it does not select a workspace directory. `--runtime-file` and `GARCON_CLI_RUNTIME` are removed. `--server` remains an optional assertion that must exactly match the selected runtime's URL, not a way to redirect credentials.
 
@@ -613,15 +613,15 @@ Startup atomically publishes a private JSON file containing the actual bound add
 
 ```text
 <config-dir>/runtime.json                 controller
-<config-dir>/execution-node/runtime.json  execution node
+<config-dir>/executor/runtime.json  executor
 ```
 
 These are runtime metadata, not configuration. Named and explicit-directory controllers both publish at the root, so `--port 0` works without giving the CLI a port or workspace. After taking its lease, each process clears its role's predecessor file before initialization, publishes fresh metadata when listening, and removes only its own instance on clean shutdown. Crashes can leave stale files; discovery never deletes them.
 
-`auto` reads only these two locations. With one file, it selects that role. With both, it compares `startedAt` (not filesystem modification time), chooses the newer runtime, and prints a warning on **stderr** naming the selection and how to select a role explicitly. Equal timestamps choose the controller. Malformed or insecure files are errors, not candidates to silently skip. With neither file, the CLI reports that no runtime is available under the selected root. Explicit `controller` or `execution-node` selection reads only that role's file and does not warn about the other role.
+`auto` reads only these two locations. With one file, it selects that role. With both, it compares `startedAt` (not filesystem modification time), chooses the newer runtime, and prints a warning on **stderr** naming the selection and how to select a role explicitly. Equal timestamps choose the controller. Malformed or insecure files are errors, not candidates to silently skip. With neither file, the CLI reports that no runtime is available under the selected root. Explicit `controller` or `executor` selection reads only that role's file and does not warn about the other role.
 
 Timestamps express preference, not liveness. After selection, the CLI verifies the endpoint's identity with a capability-free HMAC challenge before sending its bearer token, then fetches authenticated controller context. A stale file, failed verification, denied gateway, or disconnected controller fails the command; it never triggers fallback to the other role or rereads a replacement during discovery. Selection and controller identity remain fixed throughout the invocation, including retries. Starting another role can change the target of a later `auto` invocation. An explicit role prevents switching roles, but still selects whichever process currently holds that role, potentially with a different controller workspace after restart. Warnings never contaminate JSON stdout.
 
-Controllers export their resolved `GARCON_CONFIG_DIR` and `GARCON_RUNTIME=controller` to terminals and provider subprocesses. Workers export the same root setting and `GARCON_RUNTIME=execution-node`. Explicit CLI flags can override either value. Nested controllers and workers install their own role before spawning children. Generated follow-up commands and ticket retry prefixes carry the resolved root and explicit role, preserving their origin across separate invocations.
+Controllers export their resolved `GARCON_CONFIG_DIR` and `GARCON_RUNTIME=controller` to terminals and provider subprocesses. Workers export the same root setting and `GARCON_RUNTIME=executor`. Explicit CLI flags can override either value. Nested controllers and workers install their own role before spawning children. Generated follow-up commands and ticket retry prefixes carry the resolved root and explicit role, preserving their origin across separate invocations.
 
 Run `bun cli/main.ts --help` for the complete command and option reference.

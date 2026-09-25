@@ -1,0 +1,692 @@
+# Executors In The App
+
+Status: historical second-stage proposal, researched on 2026-09-19 against `2bf52dafc`. Subsequent implementation supersedes its transport and UI details. See [Current Transport](./transport.md), [Files](./files.md), [Git](./git.md), and [Terminals](./terminal.md) for the newer boundaries. The text below preserves the original proposal, not a current module or feature inventory.
+
+Current composer policy: pending agent, host, and destination-folder choices are
+ephemeral. Leaving a chat or reloading resets them to its saved execution owner
+and folder. Composer text and recovered file drafts retain their existing
+persistence. An explicitly confirmed destination remains selected while staying
+in that chat, until submission or cancellation.
+
+Predecessor: [Executor Interfaces](./interface.md), the historical provider-remoting design. The current [transcript-ledger-v5 design](../transcript-ledger-v5-design.md) remains authoritative for transcript ownership, interruption, handoff, and manual Reload. This document extends execution selection to multiple executors; it does not replace those lifecycle rules.
+
+## Goal
+
+Make executors usable from a normal Garcon installation without editing controller configuration files or replacing all local execution with one remote worker.
+
+A user can add an executor in the app, connect it in either direction, choose it for a chat or a one-shot query, and keep using local chats while that executor is offline. Existing chats remain local unless explicitly moved. Files, Git, and terminals on remote executors are not needed to ship this stage.
+
+The smallest useful result includes:
+
+- One built-in Local executor and multiple configured remote executors, concurrently.
+- An Executors dialog in the sidebar settings menu.
+- Copy/paste connection URLs containing everything needed to authenticate a connection.
+- A worker startup mode accepting the full connection URL as a CLI argument.
+- Background connection/reconnection, without remote readiness blocking controller or worker startup.
+- Executor selection in the shared model selector, New Chat, the chat composer, and one-shot generation settings.
+- Executor-owned project validation and `@file` expansion, using the service already implemented.
+- An optional chat `executorId`; missing/null means `local`, without migration or backfilling.
+- Cross-executor handoff using the existing controller ledger and ownership journal, with a new native session on the destination.
+
+## Scope And Complexity Budget
+
+Keep the stage-1 WebSocket/RPC, bounded replay, scoped references, and fresh-session replacement. Do not introduce another reliability algorithm, durable RPC queue, native-process retirement protocol, or automatic history recovery.
+
+The necessary new state is a controller executor configuration store and a runtime manager of those configured executors. Most remaining work is making existing single-executor lookups explicit. An `AgentIntegration` remains provider-level, shared by that provider's chats on one executor; there is no new chat-level integration object or universal disposal facade.
+
+Out of scope:
+
+- Remote file browsing/editing, Git/gh workbench, and terminals.
+- File synchronization, project-path mapping, native-session transfer, or moving running tools.
+- Automatic executor selection, load balancing, fallback execution, and scheduling across executors.
+- Worker supervision, certificate provisioning, pairing services, multi-controller worker sharing, and rolling-version compatibility.
+- Automatic Reload or reconciliation of native output after a restart.
+- Reintroducing goal behavior or strengthening best-effort cleanup into proof of termination.
+- A bridge for arbitrary `garcon-cli` processes spawned on the worker. Controller-interpreted commands from provider output continue to work; the existing worker-local CLI discovery restriction remains.
+
+Manual remote project-path entry is the deliberate interim UX. A file picker can be added later without changing executor identity, chat routing, or the project service.
+
+## Current Implementation
+
+The first stage already supports both dial directions, authenticated replay, independent runtime restarts, all shipped integration contracts, worker-owned project inspection, bounded file mentions, and single queries without a working-directory argument. The missing layer is normal app composition.
+
+| Area | Current implementation | Change needed |
+| --- | --- | --- |
+| Composition | [controller-node.ts](https://github.com/cfal/garcon/blob/2bf52dafc/server/execution-nodes/controller-node.ts) chooses one global executor using `GARCON_AGENT_EXECUTOR_CONFIG` and awaits discovery. | Always construct Local; load configured remote executors without waiting for them. |
+| Worker startup | [worker-main.ts](https://github.com/cfal/garcon/blob/2bf52dafc/server/execution-nodes/worker-main.ts) takes a private JSON configuration path and awaits readiness before installing shutdown handlers. | Public CLI connection/listener modes; persistent listener secret; startup independent of connection. |
+| Connection identity | [config.ts](https://github.com/cfal/garcon/blob/2bf52dafc/server/execution-nodes/config.ts) requires both sides to configure the same executor ID. | Controller owns the stable ID; worker receives it through authenticated hello. |
+| Listener | [websocket-link.ts](../../server/remote/transport/websocket-link.ts) owns a separate listener for each link. | Route inbound worker sockets through one controller HTTP listener. |
+| Remote facade | [remote.ts](../../server/remote/client/executor-client.ts) waits for initial readiness; replacement facades are stable. | Construct with known ID while offline; first initialization and replacement both finish before ready. |
+| Integrations | [integration-registry.ts](../../server/runtime/agents/integration-registry.ts) and [directory.ts](../../server/controller/agents/directory.ts) index by agent ID. | One registry per executor, with explicit executor-qualified lookup. |
+| Run loss | [runtime-router.ts](../../server/controller/agents/runtime-router.ts) and [server-event-wiring.ts](../../server/controller/server-event-wiring.ts) treat executor loss globally. | Fail/close only the lost executor's runs and bindings; wake only its queues. |
+| Projects | [project-service.ts](../../server/runtime/projects/project-service.ts) implements remote inspection/mentions; composition injects one global service. | Select the service by draft target or current chat binding. |
+| Chat selection | [store.ts](../../server/controller/chats/store.ts), [session-types.ts](../../server/controller/agents/session-types.ts), and [chat-list.ts](../../common/chat-list.ts) have no executor identity. | Persist optional executor ID and expose effective identity to clients. |
+| Handoff | [agent-handoff-service.ts](../../server/controller/agents/agent-handoff-service.ts) changes agent within the single executor. | Compare `(executorId, agentId)` and include destination project path in the same ownership decision. |
+| Model UI | [model-selector-types.ts](../../web/src/lib/components/model-selector/model-selector-types.ts) and [model-catalog-store.svelte.ts](../../web/src/lib/agents/model-catalog-store.svelte.ts) are agent-keyed. | Add executor to values, catalog keys, requests, and recents. |
+| Generation | [generation-effective.ts](../../server/controller/settings/generation-effective.ts) selects from one global catalog. | Explicit executor selection; Auto considers only Local. |
+
+The first-stage [project integration tests](../../integration-tests/tests/server/executor-projects.test.ts) already prove worker IO with disjoint controller/worker roots. This proposal routes that existing capability, rather than adding a generic filesystem service.
+
+## Identity And Configuration
+
+### Execution Selection
+
+An execution selection contains four distinct concepts:
+
+```text
+executor -> agent integration -> optional API provider/endpoint -> model
+```
+
+For example: `Build Machine -> Codex -> configured endpoint -> chosen model`. The executor chooses the machine and provider instance. The integration chooses the adapter. The API provider/endpoint chooses credentials and network API where applicable. The model is not a replacement for any of those identities. Thinking effort, permission mode, and agent settings remain additional configuration.
+
+Use explicit fields, not encoded agent IDs such as `node:codex`:
+
+```ts
+// common/executors.ts (new)
+export const LOCAL_EXECUTOR_ID = 'local';
+export type ExecutorId = string;
+
+export function effectiveExecutorId(value: string | null | undefined): ExecutorId {
+  return value ?? LOCAL_EXECUTOR_ID;
+}
+
+export interface AgentExecutionTarget {
+  readonly executorId: ExecutorId;
+  readonly agentId: string;
+}
+```
+
+Validate stored/API IDs before calling this helper: `local` or a generated UUID, never an empty string. A valid but unconfigured remote ID is unavailable, not Local. API responses can expose explicit `local`; persistence must not backfill it.
+
+Keep identity lifetimes separate:
+
+| Identity | Owner and lifetime |
+| --- | --- |
+| `executorId` | Controller-persisted UUID identifying a configured trust relationship. `local` is reserved. |
+| Label | Controller display data; editable, not identity, never required by the worker. |
+| Link `runtimeId` | One endpoint-process lifetime, used for reconnect continuity. |
+| Serving `instanceId` | Fresh worker integration/resource generation, even when only the controller restarted. |
+| Transport `sessionId` | One logical replay session. |
+
+Resource scopes remain `{ executorId, instanceId, integrationId }`. A stable executor ID is not a native-session capability or proof that a particular machine still holds the same files.
+
+### Controller Store
+
+Add a private, workspace-scoped `executors.json`, owned by a new `ExecutorConfigStore`. Local is implicit and never stored as a remote record. Keep credentials out of the normal settings snapshot and browser persistence.
+
+```ts
+// server/controller/executors/config-store.ts (new)
+interface RemoteExecutorConfig {
+  readonly id: string;
+  readonly label: string;
+  readonly enabled: boolean;
+  readonly secret: string;
+  readonly connection:
+    | { readonly kind: 'executor-connects'; readonly advertisedUrl: string }
+    | { readonly kind: 'controller-connects'; readonly targetUrl: string };
+  readonly allowInsecureDevelopment: boolean;
+}
+
+interface ExecutorConfigFile {
+  readonly version: 1;
+  readonly executors: readonly RemoteExecutorConfig[];
+}
+```
+
+Both stored URLs are network URLs without the secret fragment. `advertisedUrl` is the editable public endpoint shown to the user, not a controller bind address. Default it to `wss://example.com/executor/<id>` when no deployment URL is configured. Do not assume a reverse proxy's external hostname is discoverable from the local listener.
+
+Generate UUIDs and independent 32-byte random secrets for app-created executors. Pasted worker URLs supply the worker's existing secret. Reject duplicate secrets within the controller store: they allow a holder to authenticate as another configured executor by selecting its path. Persist atomically with private POSIX permissions, using the repository's existing settings/storage conventions. No encryption-at-rest framework is added; the OS account is already trusted with provider credentials.
+
+A label change has no execution effect. Connection, direction, or secret edits replace only that executor's connector. Reject disruptive edits while affected chats own execution, with guidance to Stop or complete that work first. Retire any remaining in-flight non-chat RPCs as unknown; never move them to the replacement link. Disable retains the record and current chat targets. Delete forgets the connection even when saved chats, explicit generation selections, schedules, or project-scoped configuration reference it. Preserve those references as unavailable, including across restart; never fall back to Local or bind by label. Chats and controller transcripts remain readable, and an explicit handoff can select a new target. Queued inputs remain process-ephemeral and are not moved or discarded by executor removal. Active execution, in-flight reference publication, uncertain ownership decisions, and unfinished ownership/registry deletion remain temporary deletion blockers. Native cleanup for already-deleted chats can be abandoned when its executor is permanently removed. Deleting an executor does not delete its files, native sessions, or PTYs. Cosmetic recents/catalog caches can be pruned.
+
+The delete confirmation states that chats and saved settings remain unavailable and worker data is not deleted. A chat whose executor is no longer configured shows an unavailable executor and disabled execution, retains composer input, and keeps the executor selector available for explicit recovery. Re-adding the same label creates a different executor identity and does not repair existing references.
+
+Composer notices have one recovery priority: unavailable executor, then unavailable project path, then catalog loading/error. Executor unavailability suppresses folder recovery actions; a missing path on a ready executor retains its Retry/Choose folder actions instead of a competing catalog notice. Completion menus stay hidden while the executor or project is unavailable so secondary discovery errors cannot cover the recovery notice. Readiness changes invalidate executor-qualified project resolution, so reconnection rechecks the path rather than displaying an old filesystem failure. These transitions do not replace the composer or clear drafts.
+
+This is one active controller relationship per worker state directory. Do not add a worker account list, tenant selection, or worker-side executor registry.
+
+## Connection UX And URL Format
+
+### Executor Connects To Controller
+
+1. Open sidebar settings menu -> Executors -> Add Executor.
+2. Enter a label and choose **Executor connects to controller** (default).
+3. Save creates the UUID/secret and registers the inbound route immediately. The executor appears offline, waiting for a connection.
+4. The dialog displays an editable full connection URL, with a copy action. The user replaces `example.com` with the reachable controller address as needed.
+5. Pass that full URL as one CLI argument when starting the worker:
+
+```sh
+# Proposed public CLI; SECRET denotes the generated value, not literal text.
+garcon executor --connect 'wss://example.com/executor/22222222-2222-4222-8222-222222222222#secret=SECRET' \
+  --config-dir "$HOME/.garcon" \
+  --project-base-dir /workspace
+```
+
+No second secret flag, controller JSON file, manually assigned executor ID, or separate pairing request is required. The worker parses the URL, authenticates, and learns its assigned ID from the controller. Editing the advertised address does not change that ID; an already-running worker continues using its startup URL until restarted with the new one.
+
+### Controller Connects To Executor
+
+1. Start the worker in listen mode. It loads its private listener secret from its state directory, or generates and persists one on first use.
+2. The worker prints a full connection URL for onboarding.
+3. Open Executors -> Add Executor, choose **Controller connects to executor**, enter a label, and paste that URL.
+4. Saving creates a controller-owned UUID and starts a connection attempt immediately. The controller retries in the background if the executor is unavailable.
+
+```sh
+# Proposed local-development example. The real listener binds 0.0.0.0.
+garcon executor --listen 19781 --allow-insecure-development \
+  --config-dir "$HOME/.garcon" \
+  --project-base-dir /workspace
+
+# Printed onboarding URL, with the real generated secret in place of SECRET:
+# ws://0.0.0.0:19781/executor#secret=SECRET
+```
+
+`0.0.0.0` is an editable placeholder, not a remotely reachable destination. The app prompts the user to replace an unspecified address before saving. An optional `--advertise-url wss://worker.example.com/executor` lets a deployment behind TLS print a usable address; it is not certificate automation. Restarting with the same worker state directory reuses the listener secret and provider state. A dialing worker gets its credential from `--connect`; it need not save a second copy of that secret.
+
+Use one public worker mode in the existing Garcon executable, dispatched before normal controller initialization in [server/main.ts](../../server/main.ts). The equivalent source invocation is `bun server/main.ts executor ...`. Keep the existing provider build contributions in [build-exe.js](../../scripts/build-exe.js); do not invent a second distribution solely for this mode. `--connect` and `--listen` are mutually exclusive. Default worker storage to a dedicated `executor` directory under the Garcon config directory, not the controller's default workspace. Default its project base to the worker account's home directory, matching existing local path policy. Explicit worker flags override these defaults; do not accidentally inherit the controller's workspace environment. A worker state directory must not be shared with a running controller or another worker.
+
+### Secret-Bearing Descriptor, Secret-Free Network URL
+
+Use the URL fragment for the connection credential:
+
+```text
+wss://controller.example.com/executor/<executor-uuid>#secret=<base64url-32-bytes>
+wss://worker.example.com/executor#secret=<base64url-32-bytes>
+```
+
+This is a connection descriptor accepted by Garcon, not a URL to navigate to in a browser. Parse and remove the fragment before constructing a WebSocket. Continue authenticating with the existing nonce/HMAC handshake; the secret is not sent as an HTTP query parameter or WebSocket subprotocol.
+
+```ts
+// server/remote/transport/connection-url.ts (new)
+export function parseConnectionUrl(value: string): {
+  readonly socketUrl: string;
+  readonly secret: string;
+} {
+  const url = new URL(value);
+  if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.search) {
+    throw new Error('Invalid executor connection URL');
+  }
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const secret = fragment.get('secret');
+  if ([...fragment.keys()].length !== 1 || !secret || !/^[A-Za-z0-9_-]{43}$/u.test(secret)) {
+    throw new Error('Invalid executor connection credential');
+  }
+  const bytes = Buffer.from(secret, 'base64url');
+  if (bytes.length !== 32 || bytes.toString('base64url') !== secret) {
+    throw new Error('Invalid executor connection credential');
+  }
+  url.hash = '';
+  return { socketUrl: url.href, secret };
+}
+```
+
+The caller additionally validates the direction-specific pathname, UUID, and plaintext policy. Errors must never echo the original input. The app can share a browser-safe shape validator; authoritative secret decoding and persistence remain server-side.
+
+The full descriptor is a credential. Reveal it only in the explicit onboarding/detail flow, mask it by default afterward, and copy it only through an explicit action. Do not place it in executor-list payloads, status broadcasts, browser local storage, telemetry, provider child arguments/environment, or normal reconnect logs. The worker's requested one-time startup display is an intentional disclosure, distinct from routine diagnostics.
+
+CLI arguments, shell history, clipboard contents, and captured startup output can expose the secret to the operator's OS account or log tooling. Accept that tradeoff for the requested one-argument UX; state it near copy/startup help. Fragment placement avoids ordinary HTTP request logging, not all credential exposure. Require `wss:` outside explicit insecure-development mode. HMAC authenticates; it does not encrypt prompts, outputs, or provider credentials.
+
+A TLS-terminating proxy must keep its raw backend access-controlled, as in stage 1. Neither the editable hostname nor `--advertise-url` creates TLS or makes a public plaintext listener safe.
+
+## Background Connection Ownership
+
+### Authenticated Identity Assignment
+
+Make hello role-specific rather than requiring worker configuration to match a controller ID:
+
+```ts
+type EndpointIdentity =
+  | { readonly role: 'controller'; readonly executorId: string; readonly runtimeId: string }
+  | { readonly role: 'worker'; readonly runtimeId: string };
+```
+
+This is the identity portion of the existing hello, not a replacement wire protocol. Preserve version, nonce, and resume fields. The ordered HMAC transcript includes the controller's `executorId`. The worker may use the assignment only after verifying the proof. Pass the authenticated ID into the session-specific transport and construct its fresh `ExecutionRuntime` with it.
+
+The controller knows `RemoteExecutorClient.id` immediately from configuration. It verifies that `executor.describe.info.executorId` and every integration scope match. No assignment RPC is needed. A resumed session must retain its authenticated assignment; a different assignment requires a fresh logical session and fresh resource scope.
+
+### Shared Controller Listener
+
+The controller owns upgrades at `/executor/<executor-uuid>` on the normal HTTP/WS listener. Look up the UUID directly in the enabled configuration map, then hand the socket to that executor's `WebSocketLink`. Unknown/disabled IDs are rejected. The path selects a secret; it is not authentication.
+
+Split physical server ownership from per-link socket/authentication callbacks in [websocket-link.ts](../../server/remote/transport/websocket-link.ts). Keep a single-executor listener wrapper for workers. In [server.ts](../../server/controller/server.ts), use a discriminated socket-data union to route chat `/ws` and executor callbacks. Do not send worker frames into `PrimaryWsHandler` or require a browser login cookie for the worker HMAC endpoint. Executor-management HTTP routes still require normal app authentication.
+
+Captured socket data must name the exact link object. A late close/message from an old link must not look up the latest executor record and act on its replacement. Existing attached-session duplicate rejection remains; a second live worker does not silently take over a healthy executor.
+
+### Executor Manager And Readiness
+
+Add a controller-owned `ExecutorManager` in `server/controller/executors/manager.ts`. It owns configuration application, one Local executor, remote links/facades, per-executor integration registries, availability subscriptions, and cleanup. It is not an execution scheduler.
+
+```ts
+interface ExecutorDirectory {
+  requireExecutor(executorId: ExecutorId): ExecutionRuntimeApi;
+  requireIntegration(target: AgentExecutionTarget): AgentIntegration;
+  projectService(executorId: ExecutorId): Promise<ExecutionProjectService>;
+  isReady(executorId: ExecutorId): boolean;
+}
+```
+
+These are proposed controller signatures using existing interface types. `requireIntegration` returns only initialized integrations and otherwise reports typed executor unavailability. Keep `IntegrationRegistry` fixed within each executor; do not mutate one global inventory whenever a worker connects.
+
+Startup and connection ordering:
+
+```text
+load executor config -> construct Local + offline remote objects -> install routes/subscriptions
+-> start Local -> accept normal application requests
+
+independently for each enabled remote:
+wait for inbound connection OR dial immediately
+-> authenticate -> finish replay fence -> describe/validate candidate
+-> migrateOwnedStorage/start for that executor's integrations
+-> install candidate and publish ready
+```
+
+Remove the production ten-second first-connect deadline and the production factory's wait for `RemoteExecutorClient.connect()`. Keep a separate await-ready helper for bounded tests when useful. First connection and fresh-session replacement must initialize lifecycle before exposing ready; initial lifecycle cannot remain a later global startup step. Internal candidate-bound initialization must not require publishing the candidate as current first.
+
+Also audit the existing startup record migrations, `chatRegistry.reconcileSessions()`, settings reconciliation, and transcript adoption. Loading/enumerating already-normalized remote chats must not require live discovery, discard saved settings/native refs, or validate them against a local instance. Skip provider-dependent reconciliation for unavailable executors and perform it when that executor is usable. An unavailable resolver is not a definitive `null` native session. Existing controller ledgers remain readable offline; legacy genesis adoption that genuinely needs a worker reports unavailability instead of inventing an empty transcript. Controller-local ownership-journal recovery likewise must finish without waiting for a remote producer to reopen.
+
+Retain stage-1 per-socket authentication, heartbeat, replay inactivity, and resumption bounds. Change redial from 100 ms to one immediate attempt followed by fixed five-second retries. No overlapping attempts; cancel timers and sockets on disable/disposal. Authentication or initialization errors keep only that executor offline and visible with a sanitized last error. A never-connected worker can remain offline indefinitely without blocking app startup or the worker's signal handlers.
+
+After an executor's first successful description, retain its static inventory for the controller process lifetime. Offline catalogs may display known selections as unavailable, but never invent manifests or permit new execution based on cached readiness. Fresh sessions must preserve the stage-1 inventory/capability/project-base checks. Changes require controller restart, not dynamic plugin compatibility.
+
+Shutdown first quiesces admissions/dial loops, requests best-effort abort/cleanup, and then closes the shared listener. Cleanup has existing bounds and never requires proof of native process death. Mark deliberate shutdown so it does not synthesize connection-loss failures during controller disposal.
+
+## App Contracts And Dialog
+
+### Management API
+
+Add typed contracts in `common/executors.ts` and authenticated routes in `server/controller/routes/executors.ts`:
+
+| API | Purpose |
+| --- | --- |
+| `GET /api/v1/executors` | Sanitized Local + configured remote snapshots. |
+| `POST /api/v1/executors` | Create from `{ label, direction }` or `{ label, direction, connectionUrl }`; return ID and the explicit onboarding descriptor. |
+| `PATCH /api/v1/executors/:id` | Validate/persist label, enabled state, or connection edit; apply only to that connector. |
+| `GET /api/v1/executors/:id/connection` | Explicit authenticated reveal of the full descriptor; `Cache-Control: no-store`. |
+| `DELETE /api/v1/executors/:id` | Forget a remote executor; preserve saved references as unavailable. Conflict only for active execution or unfinished publication/ownership work. |
+
+Use discriminated create/update payloads so invalid direction/URL combinations cannot be accepted accidentally. Saving configuration succeeds while offline; it does not claim authentication or readiness. Return validation errors inline, unknown IDs as 404, in-use configuration edits as 409, and dispatch unavailability as 503. Local cannot be deleted or assigned a remote URL.
+
+```ts
+interface ExecutorSnapshot {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: 'local' | 'remote';
+  readonly enabled: boolean;
+  readonly direction: 'executor-connects' | 'controller-connects' | null;
+  readonly availability: 'ready' | 'reconnecting' | 'offline';
+  readonly projectBasePath: string | null;
+  readonly lastError: { readonly code: string; readonly message: string } | null;
+  readonly machineServices: {
+    readonly files: boolean;
+    readonly git: boolean;
+    readonly terminals: boolean;
+  };
+}
+
+type ExecutorsChanged = {
+  readonly type: 'executors-changed';
+  readonly executors: readonly ExecutorSnapshot[];
+};
+```
+
+Use one small full snapshot on configuration/availability transitions, not an executor event log. HTTP bootstrapping and browser reconnection fetch the current snapshot. `machineServices` describes application route availability: true for existing local services, false remotely. It must not misrepresent the still-unimplemented generic `ExecutionRuntimeApi` accessors as available on Local.
+
+### Frontend Ownership
+
+Add Executors to [SidebarControlsRow.svelte](../../web/src/lib/components/sidebar/SidebarControlsRow.svelte), using the existing shell dialog lifecycle. Keep reusable executor state in `web/src/lib/executors/`, transport in `web/src/lib/api/` and the WS adapter, and renderers in `web/src/lib/components/executors/`.
+
+The dialog is a compact list with label, Local/remote, direction, status, and edit controls. Add/edit shows a label, direction selector, connection URL input/copy action, development-transport option when applicable, and enabled toggle. Local is visible but non-removable. Show connection errors without replacing the saved configuration. Disabled, waiting, and reconnecting are presentation of configuration plus existing availability, not new execution states.
+
+Use root-owned typed context, Svelte 5 callback props/runes, semantic tokens, standard dialogs, keyboard focus restoration, and inline errors. The [official Svelte context guidance](https://svelte.dev/docs/svelte/context) recommends `createContext` and instance-owned shared state. Do not create a global singleton or remount the composer when executor status changes. Secret detail is short-lived dialog state, cleared on close, not part of the global executor store.
+
+## Executor-Qualified Routing
+
+### Chats And Persistence
+
+Add `executorId?: string | null` to `ChatRegistryEntry`, new-chat input, registry codec, execution session config, and chat projections. The existing `chats.json` format remains version 5; no migration sweep is needed for an optional field.
+
+```json
+{
+  "local-chat-example": { "agentId": "codex", "projectPath": "/workspace/app" },
+  "remote-chat-example": {
+    "executorId": "22222222-2222-4222-8222-222222222222",
+    "agentId": "codex",
+    "projectPath": "/workspace/app"
+  }
+}
+```
+
+This is a field excerpt, not a complete registry fixture. Missing/null stays a valid representation of Local. New local writes omit the field; an unrelated save must not materialize `"local"` on existing entries. Explicit movement back to Local clears the remote field. Unknown explicit remote IDs remain unavailable, never silently defaulted.
+
+`executorId` is ownership, not an ordinary mutable chat preference. Exclude it from the generic chat patch allowlist. New-chat creation or the existing ownership-transfer path is the only way to assign/change it. A direct patch must not leave an old native session attached to a new executor.
+
+Make `AgentDirectory` resolve a target, not a bare agent ID. For chat operations, derive that target from the registry, not client-supplied overrides:
+
+```ts
+const target = {
+  executorId: effectiveExecutorId(entry.executorId),
+  agentId: entry.agentId,
+};
+const integration = directory.require(target);
+```
+
+Apply this to start/resume, Stop, steering, permission responses, compaction, fork, native history/activity, project-path preparations, slash-command discovery, configuration, and native-reference release. Permission/execution resource refs already carry executor scope; reject a supplied ref for another executor rather than resolving it by agent ID.
+
+Native-session lookup/indexing must include executor plus agent plus native identity. Two workers can legitimately return the same native session ID. Keep provider-native references opaque and executor-local; controller-owned cleanup records can wrap them as `{ executorId, reference: AgentChatReference }` rather than adding routing policy inside provider adapters.
+
+### Loss, Queues, And Admission
+
+Replace global `canDispatch()` with chat-qualified availability, for example `canDispatch(chatId)`, resolving the current stored executor. This is an availability check, not another chat busy predicate. Keep existing `ownsExecution` and processing projections unchanged.
+
+Direct work must validate target readiness/project before admission. Existing queued entries wait during disconnection and are dequeued only after their current executor is ready and project inspection succeeds. Do not silently retarget or clear them. A reconnect can wake that executor's existing queue; it cannot retry an execution already dispatched with unknown outcome.
+
+Change `executionSessionLost()` to accept the affected executor and snapshot exact active `{ chatId, runId }` and leases at the offline edge, including starts without a returned handle. Fail those runs before closing their leases, as today. Clear only matching progress callbacks, pending abort markers, and handles. Use captured run/binding identities so delayed cleanup cannot fail a newly installed generation. Local and other remote runs continue untouched. Terminal-derived broadcasts still go through the existing per-chat event queue.
+
+### Catalogs, Authentication, And Settings
+
+Scope agent/model/auth APIs and every related cache by executor. Existing `/agents` and `/models` route families can accept a validated `executorId` query field for reads and a typed field for mutations; omit only for the deliberate Local default. Avoid parallel copies of all endpoints under a second API tree.
+
+Use nested maps or typed tuple keys such as `JSON.stringify([executorId, agentId])`, including server model caches, browser persisted catalogs, selector recents, auth status, configuration status, and asynchronous request results. Executor deletion prunes its caches; fresh serving generations invalidate dynamic model/auth readiness. An old request completing after selection change cannot replace the new executor's options.
+
+Fetch dynamic catalogs/auth for the selected executor, not by awaiting every configured executor for a global settings response. Executor-list snapshots use manager-owned data and never wait on worker RPC. Existing replay budgets apply per link, so aggregate retained memory grows with the number of active executors; this stage targets a small configured set, not fleet-scale discovery or buffering.
+
+Provider environment, CLI binaries, login, and native storage remain on the selected executor. API provider/endpoint definitions and credential resolution remain controller-owned, using the existing reverse credential RPC. An endpoint such as `localhost` is reached from the selected executor; do not rewrite it to the controller. Executor selection is a trust decision because prompts, attachments, resolved credentials, and output cross that boundary.
+
+### Other Entry Points
+
+Audit creation and dispatch outside the main composer:
+
+| Entry point | Executor rule |
+| --- | --- |
+| Ordinary new-chat HTTP/CLI request without executor | Local. |
+| Existing-chat send/resume/Stop/history | Stored current executor, regardless of a stale UI default. |
+| Delegated child created from a chat | Inherit source executor unless explicitly overridden; validate any destination project path there. |
+| Continuation/new-chat handoff | Explicit target or source-executor default; ledger-seeded, not native migration. |
+| Native-fidelity fork | Same executor as the source integration. A cross-executor continuation uses the existing explicit ledger/handoff path, never a silently degraded native fork. |
+| Scheduled existing-chat prompt | Resolve current stored executor at dispatch. |
+| Scheduled new chat | Persist optional executor ID with its target; missing/null remains Local. |
+| Agent-emitted creation commands | Include executor in the typed controller command contract and request fingerprint. |
+| Deletion/ownership recovery | Preserve the executor in references and comparisons; never release a same-ID native session on another executor. |
+
+Do not change all provider settings to executor-scoped preferences merely because routing is now explicit. Schema-owned per-agent chat settings can remain reusable by agent where they are already portable. Machine-sensitive discovery/auth caches and project paths cannot.
+
+## Projects Without Remote Files
+
+### Validation And Path Identity
+
+Route `ExecutionProjectService.inspect()` and `resolveFileMentions()` by selected executor. A project identity is `(executorId, portablePath)`, not the path alone. The same `/workspace/app` on two executors denotes two different projects.
+
+Extend [ProjectTarget](../../common/project-resolution.ts), response validation, and project-resolution cache keys:
+
+```ts
+type ProjectTarget =
+  | {
+      readonly kind: 'chat';
+      readonly chatId: string;
+      readonly executorId: string;
+      readonly projectPath: string;
+    }
+  | { readonly kind: 'path'; readonly executorId: string; readonly projectPath: string };
+```
+
+For a chat target, the server checks executor/path against the registry both before and after the awaited inspection. The response describes that same target. The browser discards stale results after an executor/path/chat change. Continue using executor-side realpath/base/symlink validation; never call controller `path.resolve()` on remote paths.
+
+Known missing, inaccessible, outside-base, and non-directory paths keep the existing unavailable-directory experience. A transport error is executor unavailability/503, not `not-found`. A failed inspection prevents chat admission or queued dequeue. The project disappearing after inspection remains an ordinary provider launch failure, not grounds for a filesystem transaction protocol.
+
+### New Chat And Composer
+
+The New Chat path input already supports manual editing. Add executor selection to its model selector, then select defaults and inspect against that executor. Show the advertised executor project base when known. With no successful executor description, do not guess the controller's base.
+
+For remote executors, disable directory browsing, focus-triggered browse requests, Tab directory completion, Git worktree selection, and file-mention autocomplete. Hiding a browse button alone is insufficient: [new-chat-form-state.svelte.ts](../../web/src/lib/chat/new-chat/new-chat-form-state.svelte.ts) has automatic fetch paths. Typed/pasted project paths and typed `@file` mentions remain supported. Input errors refer to the selected executor and do not trigger local fallback.
+
+Changing a draft executor invalidates path validation and shows that executor's default/last path; do not silently reuse a canonical result from another executor. Existing-chat executor changes use the handoff flow below and allow an explicit destination path. Preserve draft prompt text while resolving the target.
+
+Keep existing local paths/preferences where they are; add remote paths keyed by executor rather than migrating Local:
+
+```ts
+interface ExecutorProjectPreferences {
+  readonly defaultPath?: string;
+  readonly recentPaths: readonly string[];
+  readonly pinnedPaths: readonly string[];
+}
+
+// Add beside the current Local path preferences in workspace settings.
+interface RemoteExecutorPathPreferences {
+  readonly byExecutor: Readonly<Record<string, ExecutorProjectPreferences>>;
+}
+```
+
+Never write a `local` entry into this remote map. Executor/path keys also apply to sidebar project grouping and project-resolution caches. Labels distinguish otherwise identical paths across executors.
+
+### Remaining Project Consumers
+
+Select the same executor in `ProjectAdmission`, start/path-update resolvers, `/chats/validate-start`, slash-command discovery, snippets, preamble selection/preview, schedules, and ticket default resolution. Ticket auto-defaults remain local-only; explicit ticket projects remain available. Apply routing before invoking an existing helper, rather than allowing any helper to fall back to local IO.
+
+Add optional `executorId` to project-scoped preamble rules and their matching context. Missing/null rules mean Local, not every executor with the same path. Global preambles remain global. Mutation/preview inspection happens on the selected executor; persisted path loading remains lexical, without contacting offline executors. Existing receipts and historical preamble application rows are not rewritten.
+
+File mention ordering is unchanged: inspect and expand authored text through that executor before private provider-prefix composition; commit raw authored input; use the existing separator/sanitizer; preserve steering's existing bounded timeout behavior. Single queries still have no public cwd/project argument.
+
+### Machine Surface Gating
+
+Remove the server-wide `localMachineServices` switch. Keep current local file/Git/gh/terminal routes and local PTY services alive alongside remotes. Qualify machine requests with their target executor, or derive it from the selected chat; reject remote targets with `501 OPERATION_UNSUPPORTED` before any filesystem lookup or spawn. Keep terminal socket ownership local and reject remote terminal creation explicitly.
+
+Remote file links and project actions must show unavailable/disabled behavior, never open a controller file having the same path. Local actions remain usable even if every configured remote executor is offline. This is target gating of existing local services, not implementation of the deferred generic executor service APIs.
+
+## Shared Model Selector And One-Shot Queries
+
+Add `executorId` to `ModelSelectorValue`, `ModelSelectorChange`, and recent selections. Add executor selection alongside agent/source/model in the existing selector, with Local first and labels/status for remotes. Preserve the integration/model choice across executor changes only if it is valid on the destination; otherwise require a supported choice. Never silently execute on the old executor because discovery failed.
+
+Never-connected/offline executors remain visible in management and on existing selections. Disable new model selection until their first live catalog is available. An existing chat keeps its saved target while offline, with explicit unavailability rather than auto-selecting Local. Ordinary same-executor model changes use the existing configuration flow. Changing executor or integration on an existing chat uses ownership handoff, not a selector-only registry patch.
+
+Extend [GenerationSelectionUiSettings](../../common/settings.ts) and effective generation config with the executor:
+
+```ts
+interface GenerationSelectionUiSettings {
+  executorId?: string | null;
+  agentId?: string;
+  model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  // Existing protocol and thinking-mode fields remain.
+}
+```
+
+Apply to chat title, handoff compaction, commit-message generation, prompt refinement, and their test actions. `runSingleQuery()` resolves `(executorId, agentId)` before invoking the same existing provider request. The request itself needs no working directory or executor-routing field because it is already sent to the selected integration.
+
+**Auto always resolves using Local integrations, authentication, readiness, and models.** It does not follow the current chat or search remote executors. Choosing Auto clears explicit selection fields, including `executorId`, but preserves unrelated enable/custom-prompt/size preferences. Legacy manual selections without an executor remain local.
+
+An explicit remote selection does not fall back to Local or another worker on failure. Preserve the caller's existing non-AI failure behavior, such as a fallback title, or surface an actionable error. The one-shot model-test action must test the selected executor, including its authentication and timeout behavior. Local Git diff collection can feed an explicitly selected remote commit-message generator; that does not imply remote Git support.
+
+## Cross-Executor Handoff
+
+### What Moves
+
+The controller already owns the persistent conversation. An executor change moves the current execution binding, not the transcript or provider-native state. The destination receives the same ordinary fresh-start request and ledger-derived carryover used for a new native session.
+
+Preserve Garcon chat ID, ledger, transcript view/cursors, attachments available to the controller, and conversational carryover. Do not transfer files, tools, provider memory outside the ledger, native session IDs, or a live execution handle. Embedded old paths/tool results remain historical context, not proof the files exist on the destination. Existing carryover limits/compaction apply, with Auto compaction local.
+
+### Selection And Preconditions
+
+The composer treats `(executorId, agentId)` as the owning integration identity. Same agent on a different executor is a handoff; same executor/agent with another model remains the existing model-change flow.
+
+Use the existing per-chat reservation and idle, empty, unpaused queue requirement. Do not stop a turn or discard queued input implicitly. The destination must be ready and its integration/model/configuration valid. The dialog shows the current path as a proposed destination value, allows editing it, and validates it on the destination. Same path text is not assumed valid or equivalent across executors.
+
+Source connectivity is not required once the chat is idle and its ledger is available. Source cleanup remains best effort; no native retirement acknowledgement is required. If loss may have omitted native rows, keep the existing Reload advisory. The user can Reload before moving while the source is available; handoff freezes the currently accepted ledger prefix and does not import source history automatically.
+
+### One Durable Ownership Decision
+
+Extend the existing request/target/journal, rather than adding a remote handoff RPC:
+
+```ts
+// Additions to the existing resolved target, not a second execution config.
+interface ResolvedAgentHandoffTarget {
+  readonly executorId: string;
+  readonly projectPath: string;
+  readonly agentId: string;
+  readonly model: string;
+  // Existing endpoint, protocol, modes, and agentSettings fields remain.
+}
+
+// Extend the existing journal source fence.
+interface HandoffSourceIdentity {
+  readonly executorId: string;
+  readonly agentId: string;
+  readonly agentOwnershipEpoch: string;
+}
+```
+
+The destination project path and executor must be installed atomically with the execution config. Do not first call the old owner's project-path mutation and then switch executors: that mutates the wrong machine and creates an unnecessary compensation problem.
+
+Preserve ledger-v5 ordering:
+
+1. Acquire the existing reservation, validate the ownership epoch and idle/queue requirements, and close the outgoing controller producer lease.
+2. Resolve the destination and inspect its project. Capture the ledger watermark and plan carryover. Failure before a durable decision keeps the source authoritative and reissues its producer binding when it is usable.
+3. Verify the ledger checkpoint, then write the existing durable ownership decision with source executor, destination executor/config/path, and watermark.
+4. Roll forward the registry and `agent-switch` boundary idempotently. Clear current native refs and rotate the ownership epoch; keep the same chat and transcript view. Complete the existing pending-ownership fence before opening the destination producer.
+5. Dispatch the admitted prompt, or the next normal turn, through destination `execution.start()`. Never call destination `resume()` with a source-native reference.
+
+If destination connectivity disappears after the decision, the target remains authoritative but unavailable. Controller-local roll-forward must not require a reachable worker to install that ownership. Producer binding can be reacquired on a later explicit execution. Do not reverse the committed handoff or automatically redispatch an uncertain prompt. Existing pre-dispatch versus unknown-dispatch rules still govern the admitted run.
+
+Extend journal parsers, comparisons, request hashes, roll-forward, deletion reference routing, and prepared-carryover keys. Include destination executor and ownership generation in any prepared context whose reuse could otherwise select a same-agent result for the wrong executor. Existing records lacking executor mean Local, without a migration rewrite. Journal recovery restores ownership only; it never replays user execution.
+
+Extend the existing `agent-switch` row detail and renderer with optional `fromExecutorId`/`toExecutorId` so a same-agent cross-executor boundary is intelligible. These are controller-authored metadata, not provider transcript semantics. Existing rows imply Local; no historical rewrite or SQLite schema migration is needed for optional JSON detail. Resolve labels for display, falling back to stable IDs if a former executor was removed. Frozen projection, Reload, share/export, and carryover must preserve the boundary as they already do for agent changes.
+
+Switching back is another new native session with ledger carryover. Reusing an older source session would require tracking and reconciling multiple native histories; that is deliberately not part of this stage.
+
+## Failure And Operational Policy
+
+| Condition | Behavior |
+| --- | --- |
+| Configured executor has never connected | App and Local start; executor stays offline; no invented catalog. |
+| Authentication fails or URL is unreachable | Sanitized executor-local error and bounded retry; other executors unaffected. |
+| Brief disconnect with retained continuity | Existing same-session replay; new calls unavailable; queued work waits. |
+| Runtime restart, gap, replay exhaustion, or grace expiry | Existing fresh-session replacement; fail only affected active runs and fence their old producers. |
+| Unknown dispatched call in a surviving logical session | No automatic retry, fallback, or replacement execution. Retain existing uncertainty semantics. |
+| Executor disappears during project inspection | No admission/dequeue and no local IO; report executor unavailable. |
+| Destination fails before handoff decision | Source remains owner. |
+| Destination fails after handoff decision | Roll forward target ownership; remain unavailable or fail definite dispatch; never silently move back. |
+| Controller restarts | Read config/chats/ledgers; start queues and execution state empty; no synthetic historical terminal or recovered work. |
+| Remote native history is unavailable | Manual Reload fails without replacing the current view; readable controller transcript remains. |
+| Unknown stored executor ID | Show unavailable target; no Local fallback or deletion of the chat. |
+
+Log executor ID, connection direction, availability transitions, sanitized failure code, and serving generation where helpful. Do not add metrics infrastructure or log every retry/frame. Do not include secrets, full descriptors, prompts, or credentials in diagnostics. The existing manual transcript warning remains advisory; reconnect never invokes native Reload.
+
+## Implementation Slices
+
+Each slice should be a scoped commit with its own focused tests. Do not combine transport changes, ownership recovery, and frontend wiring into one review-sized diff.
+
+### 1. Identity And Private Configuration
+
+Add `common/executors.ts`, `server/controller/executors/config-store.ts`, and `connection-url.ts` using the types/parser above. Add optional chat/settings/schedule executor fields and serialization rules. Reject direct chat-executor patching. Wire private CRUD independently of successful connection so the API can represent offline executors.
+
+Primary files: [registry-entry-codec.ts](../../server/controller/chats/registry-entry-codec.ts), [store.ts](../../server/controller/chats/store.ts), [settings.ts](../../common/settings.ts), [chat-list.ts](../../common/chat-list.ts), and new executor routes. Test missing/null Local, remote round-trip, invalid IDs, duplicate secrets, permission checks, URL fragment stripping, credential redaction, and no local-field backfill. Add settings/executor contracts on both server and client boundaries, not unchecked JSON casts.
+
+### 2. Connection Lifecycle And Public Worker Mode
+
+Refactor link listener ownership, role-specific hello, known-ID remote construction, candidate lifecycle initialization, fixed retries, and worker startup as described above. Add manager/config subscriptions and integrate the execution socket union in `server.ts`. A connected remote becomes ready only after describe and lifecycle; the controller process can serve Local before that.
+
+Primary files: [websocket-link.ts](../../server/remote/transport/websocket-link.ts), [session-transport.ts](../../server/remote/transport/session-transport.ts), [remote.ts](../../server/remote/client/executor-client.ts), [worker-main.ts](https://github.com/cfal/garcon/blob/2bf52dafc/server/execution-nodes/worker-main.ts), [main.ts](../../server/main.ts), and [controller-node.ts](https://github.com/cfal/garcon/blob/2bf52dafc/server/execution-nodes/controller-node.ts). Test both directions, late first connection, authenticated ID assignment, two simultaneous inbound executors, stale socket callbacks, initialization failure isolation, and worker shutdown before any connection. Preserve all replay/session-replacement regressions.
+
+### 3. Runtime, Catalog, And Project Routing
+
+Replace bare integration lookups with `AgentExecutionTarget`, single inspector injection with executor-aware resolution, and global queue/loss gates with chat/executor-qualified ones. Update model/auth/configuration routes, native-reference indexes, snippets/preambles, schedules, ticket defaults, and all ordinary command entry points. Local machine routes remain available with remote-target rejection.
+
+Primary files: [registry.ts](../../server/controller/agents/registry.ts), [runtime-router.ts](../../server/controller/agents/runtime-router.ts), [catalog-service.ts](../../server/controller/agents/catalog-service.ts), [project-admission.ts](../../server/controller/projects/project-admission.ts), [project-resolution.ts](../../server/controller/routes/project-resolution.ts), [queue-drainer.ts](../../server/controller/chat-execution/queue-drainer.ts), and [server-event-wiring.ts](../../server/controller/server-event-wiring.ts). Test Local plus two workers with colliding agent/native IDs, disjoint roots, separate credentials/catalogs, one-executor loss, scoped queue wake-up, and restart with every remote offline while their saved chats/ledgers remain intact. Never use global map clear operations for one remote failure.
+
+### 4. Dialog, Selector, And Manual Project UX
+
+Add the executor domain/API/dialog and shared selector field. Route executor snapshots through the existing typed WS integration layer. Update New Chat, settings, sidebar labels/project grouping, recents, disabled remote file affordances, and executor/path stale-response checks. Keep source-of-truth state in domain owners and callbacks in components.
+
+Test adding/editing both connection types, URL copy/reveal/redaction, reconnect status, untouched Local usability, executor-aware catalogs, path errors, and keyboard/button parity. For an existing chat, wire selection to the handoff request from slice 6; do not ship a temporary direct `executorId` patch. Keep that affordance disabled until handoff is implemented.
+
+### 5. One-Shot Selection
+
+Update [generation-config-source.ts](../../server/controller/settings/generation-config-source.ts), [generation-effective.ts](../../server/controller/settings/generation-effective.ts), [generation-model-test.ts](../../server/controller/settings/generation-model-test.ts), runtime single-query lookup, and the settings selector. Auto feeds only Local maps into existing choice logic; manual selection resolves the named executor without requiring other executors to be discoverable.
+
+Test all four generation settings, explicit remote invocation, offline failure without remote-to-local fallback, Auto staying Local for a remote chat, and no working-directory argument. A remote generation test must include the existing provider-timeout-plus-transport-grace contract.
+
+### 6. Cross-Executor Ownership Handoff
+
+Extend [agent-handoff-types.ts](../../server/controller/agents/agent-handoff-types.ts), [agent-handoff-service.ts](../../server/controller/agents/agent-handoff-service.ts), [agent-ownership-journal.ts](../../server/controller/chats/agent-ownership-journal.ts), [agent-ownership-journal-format.ts](../../server/controller/chats/agent-ownership-journal-format.ts), [prepared-carryover.ts](../../server/controller/chats/prepared-carryover.ts), command contracts, and agent-switch row/projection/rendering. Add destination-path input to the existing handoff confirmation and enable composer executor changes only when this path is complete.
+
+Keep the existing checkpoint/journal decision boundary. Test same-agent cross-executor transfer, destination-path installation, both crash sides of the decision, unavailable source, late old rows, uncertain destination start, switching back, and Reload preserving executor-aware boundaries. Update the governing ledger design with this explicit ownership extension when implementing, without changing accepted restart losses.
+
+### 7. Normal-Installation Acceptance And Legacy Cleanup
+
+Adapt [execution-backend.ts](../../integration-tests/support/execution-backend.ts) to configure executors through the management API and public worker mode. Remote fixtures must explicitly choose their executor; otherwise omitted `executorId` would accidentally test Local. Preserve unexpected-worker-exit assertions and isolated storage/ports. Exercise a compiled worker and normal browser onboarding, not only direct construction of test facades.
+
+Remove the stage-1 all-or-nothing production configuration path once app routing is complete. If `GARCON_AGENT_EXECUTOR_CONFIG` is still present, fail with an actionable setup message rather than silently interpreting a previously remote-only workspace as Local. There is no automatic import/migration of experimental unqualified remote chats. Use a fresh validation workspace; adopting old remote-native bindings would require an explicit separate operation, not guessing ownership from a path.
+
+## Test Plan
+
+Proposed files below are additions unless an existing file is linked. Use synthetic content/identities and isolated worker roots. Keep test concurrency bounded; no paid providers are required for this plan.
+
+| Test file | Required cases |
+| --- | --- |
+| `common/__tests__/executors.test.js` | ID parsing, null/absent Local, unknown explicit executor not falling back, executor-qualified target/cache keys, public DTO excludes secrets. |
+| `server/remote/transport/__tests__/connection-url.test.ts` | Both descriptor paths, round-trip secret, duplicate/extra fragments, canonical 32-byte decoding, invalid protocol/userinfo/query, ws opt-in, no fragment in WebSocket URL or errors. |
+| `server/controller/executors/__tests__/config-store.test.ts` | Atomic persistence/private permissions, generated IDs/secrets, listener-secret reuse, duplicates, CRUD/reference conflicts, no Local record. |
+| `server/controller/executors/__tests__/manager.test.ts` | Local plus two late/offline executors, independent initialization/lifecycle, candidate not ready early, disabled connector cleanup, no overlapping retry loops, stale callbacks ignored. |
+| [websocket-link.test.js](../../server/remote/transport/__tests__/websocket-link.test.js) and [session-replacement.test.ts](../../server/remote/transport/__tests__/session-replacement.test.ts) | Authenticated controller ID assignment, wrong scope rejection, both directions, unchanged replay/fresh-session fencing, no re-dispatched mutation. |
+| `server/controller/chats/__tests__/executor-persistence.test.ts` | Old/missing/null field stays local without backfill; remote save/load; native ID collision by executor; generic patch cannot move ownership. |
+| `server/controller/agents/__tests__/executor-routing.test.ts` | All operation facets resolve stored executor; wrong-executor refs reject; loss snapshots isolate runs, handles, permissions, producer leases, and queues. |
+| `server/controller/agents/__tests__/cross-executor-handoff.test.ts` | Idle/queue guards, pre-decision failure, committed roll-forward with destination offline, executor/path atomic config, prepared context identity, no native resume/transfer. |
+| `server/controller/settings/__tests__/generation-executor-selection.test.ts` | Auto Local, explicit remote, no silent fallback, all four settings/test endpoints, provider owns invocation directory. |
+| `integration-tests/tests/server/executor-app.test.ts` | Normal HTTP CRUD, Local + two real worker processes, both dial directions, late startup, restart/secret reuse, executor-scoped loss, authenticated shared upgrades, saved remote chats/refs/ledgers surviving controller startup with all workers offline. |
+| [executor-projects.test.ts](../../integration-tests/tests/server/executor-projects.test.ts) | Explicit executor selection; same path text with different contents; invalid/symlink-escaped root; mentions from only selected worker; stale inspection; remote machine request rejected before local IO. |
+| `integration-tests/tests/server/cross-executor-handoff.test.ts` | Same-agent Local->remote->Local, fresh native sessions, source-offline ledger handoff, crash recovery, preserved rows/boundaries, no duplicate dispatch, no file copy. |
+| `web/src/lib/executors/__tests__/executors-store.logic.test.ts` | Sanitized snapshots, remove/prune behavior, offline selection preservation, no secret-bearing fields stored. |
+| `web/src/lib/components/executors/__tests__/ExecutorsDialog.test.ts` | Both onboarding forms, validation/loading/error/disabled states, copy/reveal, secret cleared on close, keyboard navigation, focus restoration. |
+| `web/src/lib/components/model-selector/__tests__/executor-selection.test.ts` | Executor/agent/source/model keys, stale catalog results, same model on distinct executors, Auto behavior, recents. |
+| `integration-tests/tests/e2e/executors.test.ts` | Browser onboarding with isolated worker, manual remote path, chat/send/Stop/Reload, one-shot test, remote browse disabled, Local file/terminal still work. |
+
+A representative routing assertion for the real-process fixture is:
+
+```ts
+// Fixture helpers are added in executor-app.test.ts/support.
+const { controller, workerA, workerB } = await fixture.startLocalAndTwoWorkers();
+const chatA = await controller.createChat({ executorId: workerA.executorId, projectPath: workerA.projectPath });
+const chatB = await controller.createChat({ executorId: workerB.executorId, projectPath: workerB.projectPath });
+await fixture.startHeldTurns(chatA.id, chatB.id);
+await workerA.crashExpected();
+await fixture.waitForFailedRun(chatA.id, 'OUTCOME_UNKNOWN');
+expect(await controller.isProcessing(chatB.id)).toBe(true);
+expect(workerB.observedStartCount(chatB.id)).toBe(1);
+await fixture.releaseTurn(chatB.id);
+```
+
+This sketch specifies the required observation, not an existing helper API. Implement it using the current Garcon process/client and scripted-model harness rather than provider calls mocked entirely inside core. Update contract tests for every changed HTTP/WS payload and both parser/sender paths.
+
+### Validation Commands
+
+Run focused suites per slice, then the full repository gates. Commands below are for implementation, not a requirement to rerun application suites for this documentation-only change:
+
+```sh
+bun scripts/run-test-files.js 'server/{controller/executors,remote,runtime}/**/__tests__/*.{test.js,test.ts}'
+bun run --cwd web i18n:compile
+bun run check
+bun run test
+bun run test:integration:server
+bun run test:integration:e2e
+GARCON_TEST_EXECUTION_BACKEND=in-process bun run --cwd integration-tests test:sacs
+GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials bun run --cwd integration-tests test:sacs
+GARCON_TEST_EXECUTION_BACKEND=remote-executor-dials bun run --cwd integration-tests test:sacs
+bun run build
+bun run build-exe:compile
+bun run build-exe:smoke:linux-x64
+timeout 30s bun run start --port 0 --bind-address 0.0.0.0
+```
+
+Verify the final bounded startup reaches readiness; a timeout after healthy startup is expected, a compile/startup failure is not. Use a separate workspace/port, never the user's running server. Extend executable smoke coverage to worker mode and its full-URL argument. The existing scripted roster remains Claude, Codex, OpenCode on Linux, Pi, and the three Direct integrations; conformance covers all shipped integrations, not equal live behavioral evidence. Cursor remains unit-only. No paid/live gate is claimed by passing these checks.
+
+Manual acceptance: add one inbound and one outbound executor through the dialog, restart each side independently, use Local while both are offline, create a remote chat with a typed path, verify `@file` contents, choose a remote one-shot model, move an idle chat to the other executor, and Reload explicitly. Rapidly switch Local/remote chats while queues/status change; check composer stability, focus, scroll, mobile layout, and identical click/Enter submission gates.
+
+## Rollout And Deferred Decisions
+
+No Local chat migration and no provider-native data migration. New fields are optional in persisted data, but controller, browser, and workers are upgraded together. The changed handshake is not compatible with older running peers; retire/restart them rather than negotiate multiple wire generations. Back up the validation workspace before switching from experimental stage-1 remote-only composition. Downgrade is not a safe way to interpret remote chat fields; use the matching build or restore the pre-test workspace backup.
+
+No new third-party runtime dependency is needed. The work reuses existing executor/RPC/project/handoff contracts and Svelte components. The stage-1 [prior-art and replay rationale](./interface.md#transport-and-replay) still applies; this stage changes listener ownership and routing, not receipt semantics.
+
+No blocking product question remains for this proposal. The choices deliberately made to keep it bounded are manual remote paths, fixed background retries, one controller relationship per worker, same-build peers, explicit executor selection, local Auto, fresh-session handoff, and best-effort cleanup. Public hostname/TLS deployment is operator configuration: editable advertised URLs and a clear placeholder work for this stage; automatic discovery and certificate management wait for a separate need.
+
+Revisit only when a real workflow requires remote browsing, file transfer, sharing one worker across controllers, stronger orphan fencing, or an agent-spawned remote CLI bridge. None should be smuggled into this implementation as a prerequisite for using remote chat execution.

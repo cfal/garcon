@@ -25,5 +25,5 @@ the shared Chat connection. Refreshed credentials take effect by replacing `/ws`
 Garcon negotiates `permessage-deflate` on `/ws` and requests compression for every
 server-to-browser data message, including Chat events and terminal output. Bun treats
 extension negotiation and per-message compression as separate operations, so WebSocket
-sender paths use the shared helpers in `server/ws/transport.ts` instead of calling
+sender paths use the shared helpers in `server/controller/ws/transport.ts` instead of calling
 `send` or `publish` directly. WebSocket control frames are not compressed.

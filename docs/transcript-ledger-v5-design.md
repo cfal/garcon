@@ -6,7 +6,7 @@ Status: revision 40 integrated design. Supersedes
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
-Revision 40 makes the complete provider integration an execution-node boundary.
+Revision 40 makes the complete provider integration an executor boundary.
 Core retains synchronous ledger acceptance and durable-before-visible ordering.
 Provider emission captures an instance-scoped producer binding, not a callback
 to a remote ledger. Core installs that binding's route to the exact producer
@@ -36,7 +36,7 @@ unbuffered synchronous publication and object-only capabilities describe the
 controller ledger boundary, not cross-machine delivery.
 
 Permission occurrences carry scoped response references. Native closures stay
-on the execution node and each response is single-flight. Confirmed success
+on the executor and each response is single-flight. Confirmed success
 permits a resolved row; definite non-dispatch may release a claim; uncertainty
 or an expired resource retires actionability without recording success. Targets
 are captured asynchronously against an expected Garcon run. Controller ownership
@@ -1160,7 +1160,7 @@ interface AgentProducerSink {
 ```
 
 The open sink is the controller fence. The transport binding is an ephemeral
-capability scoped to node, runtime and integration, not another ledger identity. Core
+capability scoped to executor, runtime and integration, not another ledger identity. Core
 closes the sink at in-place handoff, manual reload, chat deletion, and
 shutdown; a closed sink rejects synchronously, and core may additionally
 verify object identity against the chat's single active sink. Old-owner
@@ -1412,7 +1412,7 @@ flush, and broadcasts `ChatSessionCreatedMessage`. Opening a chat
 repairs the registry cache from the authoritative row, closing the
 commit-versus-flush crash window. There is no second value to validate
 for agreement; the V4 session-metadata registry write from `RuntimeRouter`'s
-start return path (`server/agents/runtime-router.ts`) is removed. Startup fences
+start return path (`server/controller/agents/runtime-router.ts`) is removed. Startup fences
 orphan provider processes (unchanged policy).
 
 ## 7. Inputs and Resend
@@ -1696,7 +1696,7 @@ type PermissionLifecycle =
   valid, and appends `permission-resolved` only after response succeeds.
   Ambiguous delivery retires actionability without a resolved row or retry.
 - Ledger schema version 1 intentionally keeps the stored lifecycle JSON key
-  `incarnation`. `server/ledger/codec.ts` encodes
+  `incarnation`. `server/controller/ledger/codec.ts` encodes
   `permissionOccurrenceId` as `incarnation` and decodes stored `incarnation`
   as `permissionOccurrenceId`; an old extra `requestId` is ignored. No other
   layer knows the durable spelling, no dual public field exists, and no
@@ -1774,7 +1774,7 @@ model context, carryover, or export.
   enters model context.
 - **Shares are snapshot artifacts**: publishing a share copies its
   rendering fold into the share store (the existing product behavior —
-  `server/routes/shares.ts`, `server/chats/share-store.ts`,
+  `server/controller/routes/shares.ts`, `server/controller/chats/share-store.ts`,
   `common/share-types.ts`); the share never reads the ledger again and
   is unaffected by reload or deletion of views. Share revocation policy
   is unchanged.
@@ -2173,21 +2173,21 @@ product flow reuses it is outside this design. `transcriptViewId` does
 not change; cursors remain valid; reads stay available throughout
 (12.4).
 
-Execution ownership also includes the controller-owned `nodeId`; absent/null
-means Local. An in-place cross-node handoff follows 12.1 even when the agent
-ID is unchanged. The destination project is inspected on its node before the
-decision. The decision records source/destination node, destination path and
+Execution ownership also includes the controller-owned `executorId`; absent/null
+means Local. An in-place cross-executor handoff follows 12.1 even when the agent
+ID is unchanged. The destination project is inspected on its executor before the
+decision. The decision records source/destination executor, destination path and
 execution settings; registry roll-forward installs them together, clears native
-references, and rotates the ownership epoch. Optional `fromNodeId`/`toNodeId`
+references, and rotates the ownership epoch. Optional `fromExecutorId`/`toExecutorId`
 detail on the `agent-switch` row preserves that boundary through projections
 and Reload. Existing rows imply Local; no transcript rewrite is required.
 
 The controller ledger supplies carryover to a fresh destination native session.
-Native references, running tools, and project files never move between nodes.
-A committed decision rolls forward without either node being reachable;
+Native references, running tools, and project files never move between executors.
+A committed decision rolls forward without either executor being reachable;
 execution remains unavailable until the destination is ready and an explicit
 new dispatch is admitted. Source unavailability does not prevent a ledger-based
-handoff. Prepared carryover reuse is fenced by destination node and ownership
+handoff. Prepared carryover reuse is fenced by destination executor and ownership
 epoch as well as the existing request and view identities.
 
 ### 12.2 Continuation to a new chat (`/handoff`)
@@ -2325,12 +2325,12 @@ Carried forward from V4, with the 12.1 ordering and a narrowed fence:
   records, closing the ledger connection before removing the chat
   directory. Deletion's read-blocking is its own tombstone mechanism,
   not the pending fence.
-  Permanently removing an execution-node configuration may abandon that node's
+  Permanently removing an executor configuration may abandon that executor's
   native cleanup references after registry removal; it never substitutes Local
   cleanup or skips controller ledger removal. Offline or disabled configured
-  nodes retain their cleanup records. Node removal itself preserves existing
+  executors retain their cleanup records. Executor removal itself preserves existing
   chats and ledgers as readable, unavailable targets; pending handoff decisions
-  and prepared registry deletions remain temporary node-removal blockers.
+  and prepared registry deletions remain temporary executor-removal blockers.
 - Restart: reopen ledgers (SQLite WAL recovery is normal startup
   behavior); drop all overlay state; fence orphan provider processes; no
   epoch rotation, no replay; ordinals and the view continue.
@@ -2408,8 +2408,8 @@ Implementation and regression references:
 - `server-agents/common/src/direct/{session-store,direct-chat-runtime-base,execution,native-session,openai-compatible-responses-runtime}.ts`
 - `server-agents/{direct-openai-compatible,direct-openai-responses-compatible,direct-anthropic-compatible}/src/index.ts`
 - `server-agents/common/src/direct/__tests__/{session-store.test.ts,native-session.test.ts,execution.test.ts,openai-compatible-responses-runtime.test.js}`
-- `server/agents/__tests__/architecture-boundaries.test.js` and
-  `server/ledger/__tests__/adoption-architecture.test.js`
+- `server/controller/agents/__tests__/architecture-boundaries.test.js` and
+  `server/controller/ledger/__tests__/adoption-architecture.test.js`
 - `integration-tests/tests/server/direct-native-history.test.ts` and
   `integration-tests/tests/sacs/legacy-history-adoption.test.ts`
 
@@ -2846,7 +2846,7 @@ The catalog cites this revision, but its inventory is not repeated here.
   their strongest deterministic tier. OpenCode adoption remains
   directory-scoped; directoryless discovery is a documented follow-up, not a
   runtime fallback. Static architecture tests allow Direct package imports
-  only in `server/agents/default-agent-integrations.ts` for registration and
+  only in `server/runtime/agents/default-agent-integrations.ts` for registration and
   reject Direct IDs, Direct leaf-package or
   `@garcon/server-agent-common/direct/*` imports, `DirectSessionStore` serving
   paths, or Direct-specific adoption branches throughout core. The scan still
@@ -3046,7 +3046,7 @@ Direct plan without requiring another implementation or migration.
    the exact response capability, and keeps native request IDs private. Remove
    the composite public fields and nested maps across interface, core, API,
    WebSocket, presentation, and browser. Keep schema-v1 payload JSON stable by
-   translating only in `server/ledger/codec.ts`; add an old-payload reopen
+   translating only in `server/controller/ledger/codec.ts`; add an old-payload reopen
    fixture before changing production readers.
 4. **Separate legacy migration from Reload.** Add required nullable
    `legacyHistoryImport` beside `nativeHistoryImport` on every integration.

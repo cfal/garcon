@@ -1,13 +1,13 @@
-# Execution Node Transport
+# Executor Transport
 
 Current implementation reference, 2026-09-24. This supersedes the transport
 descriptions in the historical [first-stage](./interface.md) and
 [second-stage](./app-integration.md) designs.
 
-Local remains available alongside configured remote nodes. Each remote uses
+Local remains available alongside configured remote executors. Each remote uses
 one bidirectional Noise-encrypted WebSocket, regardless of which side dials.
 The shared secret authenticates Noise and the application handshake binding
-node, runtime, build version, and the fresh connection. TLS is required
+executor, runtime, build version, and the fresh connection. TLS is required
 outside explicit development mode; Noise remains mandatory when outer TLS
 certificate verification is disabled. The default redial delay is five seconds.
 
@@ -43,14 +43,14 @@ result-transfer caches.
 
 ## Disconnected Turns
 
-One worker process owns one node ID, its integration instances, and native
-agent processes. Deleting and re-adding a controller-connects node creates a
+One worker process owns one executor ID, its integration instances, and native
+agent processes. Deleting and re-adding a controller-connects executor creates a
 new ID and requires restarting its worker. The controller rejects an identity
 mismatch rather than replacing that worker's still-running native work.
-Replacing the socket for the same node does not stop it. The controller fails
+Replacing the socket for the same executor does not stop it. The controller fails
 its active run with `OUTCOME_UNKNOWN`, closes its transcript binding, and warns:
-"Execution node disconnected mid-turn. The turn may still be running on the
-execution node. Reload from native history after it finishes to recover missing
+"Executor disconnected mid-turn. The turn may still be running on the
+executor. Reload from native history after it finishes to recover missing
 output."
 
 The worker detaches the old producer binding, drops further publication, and
@@ -74,5 +74,5 @@ Browser payload and outbound-buffer limits are enforced independently of Noise
 on the shared listener. The listener's native frame ceiling is the larger of
 the configured browser limit and Noise's 65,535-byte frame limit.
 
-Implementation: `server/execution-nodes/{websocket-link,session-socket,message-session,rpc}.ts`,
-`server/ws/{server-sockets,primary-delivery}.ts`, and `server/server.ts`.
+Implementation: `server/remote/transport/{websocket-link,session-socket,message-session,rpc}.ts`,
+`server/controller/ws/{server-sockets,primary-delivery}.ts`, and `server/controller/server.ts`.
